@@ -80,8 +80,8 @@ agentFs:
   image:
     tag: 0.9.0
   bucket: my-agent-fs-bucket
-  # Optional. When blank, the API boot seeder registers with agent-fs and
-  # stores the generated admin key in encrypted swarm_config.
+  # Optional. When blank, the API boot seeder registers a service user with
+  # agent-fs and stores the generated bootstrap key in encrypted swarm_config.
   apiKey: ""
   s3:
     existingSecret: my-agent-fs-s3-creds   # Or inline accessKeyId/secretAccessKey

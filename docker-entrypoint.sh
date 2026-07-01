@@ -401,65 +401,9 @@ if [ -n "$AGENT_ID" ]; then
 fi
 # ---- End swarm config fetch ----
 
-# ---- agent-fs registration ----
-if [ -n "$AGENT_FS_API_URL" ] && [ -n "$AGENT_ID" ]; then
-  # Wait until agent-fs is reachable. compose-template adds
-  # `depends_on: agent-fs: service_healthy` so this should be fast (<5s),
-  # but keep a short retry loop so a transient hiccup doesn't silently
-  # blackhole AGENT_FS_SHARED_ORG_ID into "" — that's the symptom we
-  # spent half a day debugging.
-  AF_HEALTH_RETRIES=0
-  AF_HEALTH_MAX=30  # ~30s @ 1s intervals
-  while [ "$AF_HEALTH_RETRIES" -lt "$AF_HEALTH_MAX" ]; do
-    if curl -sf -o /dev/null -m 2 "${AGENT_FS_API_URL}/health" 2>/dev/null; then
-      break
-    fi
-    AF_HEALTH_RETRIES=$((AF_HEALTH_RETRIES + 1))
-    sleep 1
-  done
-  if [ "$AF_HEALTH_RETRIES" -ge "$AF_HEALTH_MAX" ]; then
-    echo "[agent-fs] WARN: agent-fs at $AGENT_FS_API_URL did not become healthy after ${AF_HEALTH_MAX}s — proceeding anyway"
-  fi
-
-  if [ -z "$AGENT_FS_API_KEY" ]; then
-    echo "[agent-fs] Registering with agent-fs at $AGENT_FS_API_URL..."
-    AF_EMAIL="${AGENT_EMAIL:-${AGENT_ID}@swarm.local}"
-
-    AF_RESULT=$(curl -s -X POST "${AGENT_FS_API_URL}/auth/register" \
-      -H "Content-Type: application/json" \
-      -d "{\"email\": \"$AF_EMAIL\"}" 2>/dev/null) || true
-
-    AF_API_KEY=$(echo "$AF_RESULT" | jq -r '.apiKey // empty')
-
-    if [ -n "$AF_API_KEY" ]; then
-      echo "[agent-fs] Registered successfully, storing API key..."
-      # Store as agent-scoped secret
-      curl -s -X PUT "${MCP_URL}/api/config" \
-        -H "Authorization: Bearer ${API_KEY}" \
-        -H "Content-Type: application/json" \
-        -d "{
-          \"scope\": \"agent\",
-          \"scopeId\": \"${AGENT_ID}\",
-          \"key\": \"AGENT_FS_API_KEY\",
-          \"value\": \"${AF_API_KEY}\",
-          \"isSecret\": true,
-          \"description\": \"agent-fs API key for ${AF_EMAIL}\"
-        }" > /dev/null 2>&1 || true
-
-      export AGENT_FS_API_KEY="$AF_API_KEY"
-      echo "[agent-fs] API key stored and exported"
-    else
-      echo "[agent-fs] Registration failed or already registered: $(echo "$AF_RESULT" | jq -r '.error // .message // "unknown error"')"
-    fi
-  else
-    echo "[agent-fs] Already registered (API key present)"
-  fi
-
-  # Shared org/drive provisioning is handled by the API-side TypeScript seeder.
-  # This worker branch intentionally only keeps per-agent registration for the
-  # native agent-fs CLI identity.
-fi
-# ---- End agent-fs registration ----
+# agent-fs credentials are provisioned by the API-owned runner endpoint
+# (`POST /api/fs/agent-credentials`) so workers never need the shared bootstrap
+# key and never write credential rows directly from shell startup.
 
 # Create .mcp.json in /workspace (project-level config).
 # Skip for claude-managed: managed agents read MCP servers from the Agent

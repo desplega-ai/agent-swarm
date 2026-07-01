@@ -3,7 +3,7 @@ title: agent-fs Co-deployment
 description: Run agent-fs alongside Agent Swarm for persistent shared files, task attachments, previews, and semantic search
 ---
 
-agent-swarm uses `local-fs` by default when no agent-fs endpoint is configured. That keeps fresh installs self-contained, but files stay local to the API process. Set `AGENT_FS_API_URL` and let the boot seeder provision `AGENT_FS_API_KEY` to enable the richer provider.
+agent-swarm uses `local-fs` by default when no agent-fs endpoint is configured. That keeps fresh installs self-contained, but files stay local to the API process. Set `AGENT_FS_API_URL` and let the API boot seeder provision `API_AGENT_FS_API_KEY` plus per-agent `AGENT_FS_API_KEY` secrets to enable the richer provider.
 
 ## What Changes
 
@@ -19,7 +19,7 @@ The first-class agent-fs integration has two deliberate v1 limits:
 
 ## Docker Compose
 
-`docker-compose.local.yml` and `docker-compose.example.yml` include MinIO and agent-fs. The API waits for agent-fs, sets `AGENT_FS_API_URL=http://agent-fs:7433`, and registers an admin key on first boot when `AGENT_FS_API_KEY` is not supplied.
+`docker-compose.local.yml` and `docker-compose.example.yml` include MinIO and agent-fs. The API waits for agent-fs, sets `AGENT_FS_API_URL=http://agent-fs:7433`, and registers a service key on first boot when `API_AGENT_FS_API_KEY` is not supplied.
 
 ```bash
 docker compose -f docker-compose.local.yml up --build
@@ -38,7 +38,7 @@ S3_SECRET_ACCESS_KEY=minioadmin
 EMBEDDING_PROVIDER=local
 ```
 
-Set `AGENT_FS_API_KEY` if you want to pre-provision a stable key. Otherwise, the API seeder calls `/auth/register`, stores the generated key as an encrypted global swarm config secret, creates the shared org and drive, and persists `AGENT_FS_DEFAULT_ORG_ID` plus `AGENT_FS_DEFAULT_DRIVE_ID`.
+Set `API_AGENT_FS_API_KEY` if you want to pre-provision a stable API-owned bootstrap key. Otherwise, the API seeder calls `/auth/register`, stores the generated key as an encrypted global swarm config secret, creates the shared org and drive, and persists `AGENT_FS_DEFAULT_ORG_ID` plus `AGENT_FS_DEFAULT_DRIVE_ID`. Workers do not receive this bootstrap key; the runner asks the API to create an agent-scoped `AGENT_FS_API_KEY` for each agent.
 
 ## Helm
 
@@ -71,12 +71,12 @@ kubectl create secret generic agent-fs-s3 \
 For hosted embeddings, set `agentFs.embedding.provider` to `openai` or `gemini`, set `agentFs.embedding.model`, and provide `agentFs.embedding.apiKey` or `EMBEDDING_API_KEY` in the existing secret.
 
 ```bash
-helm template charts/agent-swarm --set agentFs.enabled=true | rg 'agent-fs|AGENT_FS_API_KEY|EMBEDDING_'
+helm template charts/agent-swarm --set agentFs.enabled=true | rg 'agent-fs|API_AGENT_FS_API_KEY|EMBEDDING_'
 ```
 
 ## Migration Note
 
-Older deployments could implicitly assume hosted `live.agent-fs.dev` behavior. The no-config default is now `local-fs`. To keep shared agent-fs behavior after upgrading, set `AGENT_FS_API_URL` and provide or let the seeder create `AGENT_FS_API_KEY`.
+Older deployments could implicitly assume hosted `live.agent-fs.dev` behavior. The no-config default is now `local-fs`. To keep shared agent-fs behavior after upgrading, set `AGENT_FS_API_URL` and provide or let the seeder create `API_AGENT_FS_API_KEY`; per-agent `AGENT_FS_API_KEY` rows are created by the runner provisioning endpoint.
 
 For production, back up both systems:
 
@@ -90,4 +90,4 @@ curl http://localhost:3013/api/fs/capabilities \
   -H "Authorization: Bearer $API_KEY"
 ```
 
-The response should show `providerId: "agent-fs"` when the provider is active. If it shows `local-fs`, check `AGENT_FS_API_URL`, the stored `AGENT_FS_API_KEY`, and the API boot logs for the provisioning seeder.
+The response should show `providerId: "agent-fs"` when the provider is active. If it shows `local-fs`, check `AGENT_FS_API_URL`, the stored `API_AGENT_FS_API_KEY`, and the API boot logs for the provisioning seeder.

@@ -222,7 +222,7 @@ function HomePageContent() {
                   <p className="text-xs text-muted-foreground truncate">
                     {agent_fs.configured
                       ? `Base URL: ${agent_fs.base_url}`
-                      : "Using local-fs. Set AGENT_FS_API_URL and AGENT_FS_API_KEY to enable agent-fs."}
+                      : "Using local-fs. Set AGENT_FS_API_URL; the API will seed agent-fs credentials."}
                   </p>
                 </div>
                 {agent_fs.configured && agent_fs.base_url ? (

@@ -20,6 +20,7 @@ import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
 const MAX_ENV_PRESENCE_KEYS = 200;
+const API_ONLY_AGENT_FS_CONFIG_KEYS = new Set(["API_AGENT_FS_API_KEY"]);
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -152,7 +153,7 @@ export async function handleConfig(
     const configs = getResolvedConfig(
       parsed.query.agentId || undefined,
       parsed.query.repoId || undefined,
-    );
+    ).filter((config) => !parsed.query.agentId || !API_ONLY_AGENT_FS_CONFIG_KEYS.has(config.key));
     const result = includeSecrets ? configs : maskSecrets(configs);
     if (includeSecrets) {
       for (const c of result) {

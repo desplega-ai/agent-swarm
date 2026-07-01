@@ -11,6 +11,7 @@ import {
 import { runSeeder } from "../be/seed";
 import {
   agentFsProvisionSeeder,
+  ensureAgentFsCredentialsForAgent,
   resetAgentFsProvisionFetchForTests,
   setAgentFsProvisionFetchForTests,
 } from "../be/seed/agent-fs-provision";
@@ -18,6 +19,7 @@ import {
 const TEST_DB_PATH = `./test-agent-fs-provision-seeder-${process.pid}.sqlite`;
 const ORIGINAL_ENV = {
   AGENT_FS_API_URL: process.env.AGENT_FS_API_URL,
+  API_AGENT_FS_API_KEY: process.env.API_AGENT_FS_API_KEY,
   AGENT_FS_API_KEY: process.env.AGENT_FS_API_KEY,
   AGENT_FS_DEFAULT_ORG_ID: process.env.AGENT_FS_DEFAULT_ORG_ID,
   AGENT_FS_SHARED_ORG_ID: process.env.AGENT_FS_SHARED_ORG_ID,
@@ -64,6 +66,18 @@ function createFetchStub(records: RequestRecord[]): typeof fetch {
     records.push({ method, path: url.pathname, body, authorization });
 
     if (url.pathname === "/auth/register" && method === "POST") {
+      if (
+        body &&
+        typeof body === "object" &&
+        "email" in body &&
+        body.email !== "admin@example.test"
+      ) {
+        return Response.json({
+          apiKey: "afs-agent-key",
+          userId: "agent-user",
+          orgId: "agent-personal-org",
+        });
+      }
       return Response.json({
         apiKey: "afs-admin-key",
         userId: "admin-user",
@@ -127,9 +141,10 @@ describe("agent-fs provisioning seeder", () => {
     expect(result.skippedUnchanged).toBe(0);
   });
 
-  test("provisions shared org/drive, stores global config, invites users and agents, then no-ops", async () => {
+  test("provisions shared org/drive, stores global config, invites users, then no-ops", async () => {
     const suffix = crypto.randomUUID().slice(0, 8);
     process.env.AGENT_FS_API_URL = "https://agent-fs.example.test/";
+    delete process.env.API_AGENT_FS_API_KEY;
     delete process.env.AGENT_FS_API_KEY;
     delete process.env.AGENT_FS_DEFAULT_ORG_ID;
     delete process.env.AGENT_FS_SHARED_ORG_ID;
@@ -147,8 +162,73 @@ describe("agent-fs provisioning seeder", () => {
       email: `operator-${suffix}@example.test`,
       role: "Operator",
     });
+    const records: RequestRecord[] = [];
+    setAgentFsProvisionFetchForTests(createFetchStub(records));
+
+    const result = await runSeeder(agentFsProvisionSeeder, { quiet: true });
+
+    expect(result.failed).toEqual([]);
+    expect(result.created).toBe(1);
+    expect(configValue("API_AGENT_FS_API_KEY")).toBe("afs-admin-key");
+    expect(getSwarmConfigs({ scope: "global", key: "API_AGENT_FS_API_KEY" })[0]?.encrypted).toBe(
+      true,
+    );
+    expect(configValue("AGENT_FS_API_KEY")).toBeUndefined();
+    expect(configValue("AGENT_FS_DEFAULT_ORG_ID")).toBe("shared-org");
+    expect(configValue("AGENT_FS_SHARED_ORG_ID")).toBe("shared-org");
+    expect(configValue("AGENT_FS_DEFAULT_DRIVE_ID")).toBe("shared-drive");
+    expect(process.env.API_AGENT_FS_API_KEY).toBe("afs-admin-key");
+
+    const register = records.find((r) => r.path === "/auth/register");
+    expect(register?.body).toEqual({ email: "admin@example.test" });
+
+    const invites = records
+      .filter((r) => r.path === "/orgs/shared-org/members/invite")
+      .map((r) => r.body)
+      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+
+    expect(invites).toEqual(
+      [
+        { email: `operator-${suffix}@example.test`, role: "editor" },
+        { email: `viewer-${suffix}@example.test`, role: "viewer" },
+      ].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    );
+
+    records.length = 0;
+    const second = await runSeeder(agentFsProvisionSeeder, { quiet: true });
+
+    expect(second.failed).toEqual([]);
+    expect(second.skippedUnchanged).toBe(1);
+    expect(records).toEqual([]);
+  });
+
+  test("provisions agent-scoped credentials through the API-owned bootstrap key", async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    process.env.AGENT_FS_API_URL = "https://agent-fs.example.test/";
+    process.env.AGENT_FS_EMAIL_DOMAIN = "agents.example.test";
+    upsertSwarmConfig({
+      scope: "global",
+      key: "API_AGENT_FS_API_KEY",
+      value: "afs-admin-key",
+      isSecret: true,
+    });
+    upsertSwarmConfig({
+      scope: "global",
+      key: "AGENT_FS_DEFAULT_ORG_ID",
+      value: "shared-org",
+    });
+    upsertSwarmConfig({
+      scope: "global",
+      key: "AGENT_FS_SHARED_ORG_ID",
+      value: "shared-org",
+    });
+    upsertSwarmConfig({
+      scope: "global",
+      key: "AGENT_FS_DEFAULT_DRIVE_ID",
+      value: "shared-drive",
+    });
     const worker = createAgent({
-      name: "Seeder Worker",
+      name: "Credential Worker",
       description: "Worker with custom agent-fs email",
       role: "worker",
       isLead: false,
@@ -162,52 +242,39 @@ describe("agent-fs provisioning seeder", () => {
       key: "AGENT_EMAIL",
       value: `custom-worker-${suffix}@example.test`,
     });
-    const fallbackWorker = createAgent({
-      name: "Fallback Worker",
-      description: "Worker without custom email",
-      role: "worker",
-      isLead: false,
-      status: "idle",
-      maxTasks: 1,
-      capabilities: [],
-    });
 
     const records: RequestRecord[] = [];
     setAgentFsProvisionFetchForTests(createFetchStub(records));
 
-    const result = await runSeeder(agentFsProvisionSeeder, { quiet: true });
+    const first = await ensureAgentFsCredentialsForAgent(worker.id);
 
-    expect(result.failed).toEqual([]);
-    expect(result.created).toBe(1);
-    expect(configValue("AGENT_FS_API_KEY")).toBe("afs-admin-key");
-    expect(getSwarmConfigs({ scope: "global", key: "AGENT_FS_API_KEY" })[0]?.encrypted).toBe(true);
-    expect(configValue("AGENT_FS_DEFAULT_ORG_ID")).toBe("shared-org");
-    expect(configValue("AGENT_FS_SHARED_ORG_ID")).toBe("shared-org");
-    expect(configValue("AGENT_FS_DEFAULT_DRIVE_ID")).toBe("shared-drive");
-    expect(process.env.AGENT_FS_API_KEY).toBe("afs-admin-key");
-
-    const register = records.find((r) => r.path === "/auth/register");
-    expect(register?.body).toEqual({ email: "admin@example.test" });
-
-    const invites = records
-      .filter((r) => r.path === "/orgs/shared-org/members/invite")
-      .map((r) => r.body)
-      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-
-    expect(invites).toEqual(
-      [
-        { email: `${fallbackWorker.id}@agents.example.test`, role: "editor" },
-        { email: `custom-worker-${suffix}@example.test`, role: "editor" },
-        { email: `operator-${suffix}@example.test`, role: "editor" },
-        { email: `viewer-${suffix}@example.test`, role: "viewer" },
-      ].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
-    );
+    expect(first).toMatchObject({
+      enabled: true,
+      created: true,
+      agentId: worker.id,
+      email: `custom-worker-${suffix}@example.test`,
+      orgId: "shared-org",
+      driveId: "shared-drive",
+    });
+    const agentKey = getSwarmConfigs({
+      scope: "agent",
+      scopeId: worker.id,
+      key: "AGENT_FS_API_KEY",
+    })[0];
+    expect(agentKey?.value).toBe("afs-agent-key");
+    expect(agentKey?.encrypted).toBe(true);
+    expect(records.find((r) => r.path === "/auth/register")?.body).toEqual({
+      email: `custom-worker-${suffix}@example.test`,
+    });
+    expect(records.find((r) => r.path === "/orgs/shared-org/members/invite")?.body).toEqual({
+      email: `custom-worker-${suffix}@example.test`,
+      role: "editor",
+    });
 
     records.length = 0;
-    const second = await runSeeder(agentFsProvisionSeeder, { quiet: true });
+    const second = await ensureAgentFsCredentialsForAgent(worker.id);
 
-    expect(second.failed).toEqual([]);
-    expect(second.skippedUnchanged).toBe(1);
+    expect(second.created).toBe(false);
     expect(records).toEqual([]);
   });
 });

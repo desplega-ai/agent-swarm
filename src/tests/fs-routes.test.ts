@@ -66,6 +66,7 @@ beforeAll(async () => {
   await rm(TEST_FS_DIR, { recursive: true, force: true });
   process.env.AGENT_FS_LOCAL_DIR = TEST_FS_DIR;
   delete process.env.AGENT_FS_API_URL;
+  delete process.env.API_AGENT_FS_API_KEY;
   delete process.env.AGENT_FS_API_KEY;
   resetFileStorageProviderForTests();
 

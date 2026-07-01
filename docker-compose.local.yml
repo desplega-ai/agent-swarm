@@ -56,7 +56,6 @@ services:
       - SERVER_HOST=0.0.0.0
       - PORT=7433
       - SERVER_PORT=7433
-      - AGENT_FS_API_KEY=${AGENT_FS_API_KEY:-}
       - S3_ENDPOINT=http://minio:9000
       - S3_PUBLIC_ENDPOINT=http://localhost:9000
       - S3_BUCKET=agentfs
@@ -93,7 +92,7 @@ services:
     environment:
       - API_KEY=${API_KEY}
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - AGENT_FS_API_KEY=${AGENT_FS_API_KEY:-}
+      - API_AGENT_FS_API_KEY=${API_AGENT_FS_API_KEY:-}
       - AGENT_FS_REGISTER_EMAIL=${AGENT_FS_REGISTER_EMAIL:-swarm-admin@agent-fs.local}
       - SLACK_DISABLE=true
       - GITHUB_DISABLE=true
@@ -135,7 +134,6 @@ services:
       - AGENT_ROLE=lead
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - AGENT_FS_API_KEY=${AGENT_FS_API_KEY:-}
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
@@ -180,7 +178,6 @@ services:
       - AGENT_ROLE=worker
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - AGENT_FS_API_KEY=${AGENT_FS_API_KEY:-}
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
@@ -229,7 +226,6 @@ services:
       - AGENT_ROLE=worker
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - AGENT_FS_API_KEY=${AGENT_FS_API_KEY:-}
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}

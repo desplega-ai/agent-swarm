@@ -120,12 +120,6 @@ Common env vars for every pool pod.
 {{- if .Values.agentFs.enabled }}
 - name: AGENT_FS_API_URL
   value: "http://{{ include "agent-swarm.fullname" . }}-agent-fs:{{ .Values.agentFs.port }}"
-- name: AGENT_FS_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "agent-swarm.agentFsSecretName" . }}
-      key: AGENT_FS_API_KEY
-      optional: true
 {{- end }}
 {{- end }}
 

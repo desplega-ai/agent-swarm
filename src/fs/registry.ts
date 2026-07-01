@@ -12,7 +12,10 @@ export function getFileStorageProvider(): FileStorageProvider {
 }
 
 export function selectProvider(): FileStorageProvider {
-  if (process.env.AGENT_FS_API_URL && process.env.AGENT_FS_API_KEY) {
+  if (
+    process.env.AGENT_FS_API_URL &&
+    (process.env.API_AGENT_FS_API_KEY || process.env.AGENT_FS_API_KEY)
+  ) {
     return new AgentFsProvider();
   }
   return new LocalFsProvider();

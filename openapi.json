@@ -3470,6 +3470,41 @@
         }
       }
     },
+    "/api/fs/agent-credentials": {
+      "post": {
+        "summary": "Ensure agent-scoped agent-fs credentials for the current agent",
+        "description": "Internal runner endpoint. The API server owns agent-fs bootstrap credentials, registers/invites the caller to the shared org when needed, and stores the generated key as an agent-scoped secret. The API key is never returned.",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Credential state"
+          },
+          "400": {
+            "description": "Missing agent id"
+          },
+          "500": {
+            "description": "Provisioning failed"
+          }
+        }
+      }
+    },
     "/api/fs/tasks/{taskId}/files": {
       "get": {
         "summary": "List task file attachments",

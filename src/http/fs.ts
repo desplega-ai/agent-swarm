@@ -8,10 +8,12 @@ import {
   getTaskById,
   insertTaskAttachment,
 } from "../be/db";
+import { ensureAgentFsCredentialsForAgent } from "../be/seed/agent-fs-provision";
 import { type FileObject, FilesError, normalizeFilesError } from "../fs/provider";
 import { getFileStorageProvider } from "../fs/registry";
 import type { TaskAttachment } from "../types";
 import { getCurrentRequestAuth, getRequestAuth } from "../utils/request-auth-context";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
 
@@ -41,6 +43,23 @@ const capabilitiesRoute = route({
     200: { description: "Active provider capabilities" },
     401: { description: "Unauthorized" },
   },
+});
+
+const ensureAgentCredentialsRoute = route({
+  method: "post",
+  path: "/api/fs/agent-credentials",
+  pattern: ["api", "fs", "agent-credentials"],
+  summary: "Ensure agent-scoped agent-fs credentials for the current agent",
+  description:
+    "Internal runner endpoint. The API server owns agent-fs bootstrap credentials, registers/invites the caller to the shared org when needed, and stores the generated key as an agent-scoped secret. The API key is never returned.",
+  tags: ["FS"],
+  body: z.object({}).optional(),
+  responses: {
+    200: { description: "Credential state" },
+    400: { description: "Missing agent id" },
+    500: { description: "Provisioning failed" },
+  },
+  auth: { apiKey: true, agentId: true },
 });
 
 const listTaskFilesRoute = route({
@@ -140,6 +159,26 @@ export async function handleFs(
   queryParams: URLSearchParams,
   myAgentId?: string,
 ): Promise<boolean> {
+  if (ensureAgentCredentialsRoute.match(req.method, pathSegments)) {
+    const parsed = await ensureAgentCredentialsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const headerAgentId = req.headers["x-agent-id"];
+    const agentId =
+      myAgentId || (Array.isArray(headerAgentId) ? headerAgentId[0] : headerAgentId) || "";
+    if (!agentId) {
+      jsonError(res, "X-Agent-ID is required", 400);
+      return true;
+    }
+    try {
+      const result = await ensureAgentFsCredentialsForAgent(agentId);
+      json(res, result);
+    } catch (error) {
+      const message = scrubSecrets(error instanceof Error ? error.message : String(error));
+      jsonError(res, `Failed to provision agent-fs credentials: ${message}`, 500);
+    }
+    return true;
+  }
+
   if (downloadTaskFileRoute.match(req.method, pathSegments)) {
     const parsed = await downloadTaskFileRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;

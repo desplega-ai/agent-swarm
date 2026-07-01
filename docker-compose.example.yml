@@ -59,7 +59,6 @@ services:
       - SERVER_HOST=0.0.0.0
       - PORT=7433
       - SERVER_PORT=7433
-      - AGENT_FS_API_KEY=${AGENT_FS_API_KEY:-}
       - S3_ENDPOINT=http://minio:9000
       - S3_PUBLIC_ENDPOINT=${AGENT_FS_S3_PUBLIC_ENDPOINT:-http://localhost:9000}
       - S3_BUCKET=agentfs
@@ -94,7 +93,7 @@ services:
     environment:
       - API_KEY=${API_KEY}
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - AGENT_FS_API_KEY=${AGENT_FS_API_KEY:-}
+      - API_AGENT_FS_API_KEY=${API_AGENT_FS_API_KEY:-}
       - AGENT_FS_REGISTER_EMAIL=${AGENT_FS_REGISTER_EMAIL:-swarm-admin@agent-fs.local}
 
       # At-rest encryption key for swarm_config isSecret=1 rows (AES-256-GCM).
@@ -170,7 +169,6 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - AGENT_FS_API_KEY=${AGENT_FS_API_KEY:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -214,7 +212,6 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - AGENT_FS_API_KEY=${AGENT_FS_API_KEY:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -258,7 +255,6 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - AGENT_FS_API_KEY=${AGENT_FS_API_KEY:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -303,7 +299,6 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - AGENT_FS_API_KEY=${AGENT_FS_API_KEY:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -353,7 +348,6 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - AGENT_FS_API_KEY=${AGENT_FS_API_KEY:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -398,7 +392,6 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - AGENT_FS_API_KEY=${AGENT_FS_API_KEY:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -443,7 +436,6 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - AGENT_FS_API_KEY=${AGENT_FS_API_KEY:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -487,7 +479,6 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
       - AGENT_FS_API_URL=http://agent-fs:7433
-      - AGENT_FS_API_KEY=${AGENT_FS_API_KEY:-}
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}

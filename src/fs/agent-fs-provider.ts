@@ -43,7 +43,8 @@ export class AgentFsProvider implements FileStorageProvider {
 
   constructor(options: AgentFsProviderOptions = {}) {
     this.apiUrl = stripTrailingSlash(options.apiUrl ?? process.env.AGENT_FS_API_URL ?? "");
-    this.apiKey = options.apiKey ?? process.env.AGENT_FS_API_KEY ?? "";
+    this.apiKey =
+      options.apiKey ?? process.env.API_AGENT_FS_API_KEY ?? process.env.AGENT_FS_API_KEY ?? "";
     this.orgId =
       options.orgId ??
       process.env.AGENT_FS_DEFAULT_ORG_ID ??
@@ -55,7 +56,7 @@ export class AgentFsProvider implements FileStorageProvider {
     if (!this.apiUrl || !this.apiKey || !this.orgId || !this.driveId) {
       throw new FilesError(
         "Provider",
-        "AGENT_FS_API_URL, AGENT_FS_API_KEY, AGENT_FS_DEFAULT_ORG_ID, and AGENT_FS_DEFAULT_DRIVE_ID are required for the agent-fs provider",
+        "AGENT_FS_API_URL, API_AGENT_FS_API_KEY or AGENT_FS_API_KEY, AGENT_FS_DEFAULT_ORG_ID, and AGENT_FS_DEFAULT_DRIVE_ID are required for the agent-fs provider",
       );
     }
   }

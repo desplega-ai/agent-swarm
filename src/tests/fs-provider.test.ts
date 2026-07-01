@@ -170,13 +170,14 @@ describe("AgentFsProvider", () => {
 describe("selectProvider", () => {
   test("defaults to local-fs without agent-fs env", () => {
     delete process.env.AGENT_FS_API_URL;
+    delete process.env.API_AGENT_FS_API_KEY;
     delete process.env.AGENT_FS_API_KEY;
     expect(selectProvider().id).toBe("local-fs");
   });
 
   test("selects agent-fs when required env is present", () => {
     process.env.AGENT_FS_API_URL = "http://agent-fs.test";
-    process.env.AGENT_FS_API_KEY = "af_test";
+    process.env.API_AGENT_FS_API_KEY = "af_test";
     process.env.AGENT_FS_DEFAULT_ORG_ID = "org-1";
     process.env.AGENT_FS_DEFAULT_DRIVE_ID = "drive-1";
     expect(selectProvider().id).toBe("agent-fs");
