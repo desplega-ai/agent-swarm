@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, upsertService } from "@/be/db";
@@ -5,6 +6,64 @@ import { createToolRegistrar } from "@/tools/utils";
 import { ServiceSchema } from "@/types";
 
 const SWARM_URL = process.env.SWARM_URL ?? "localhost";
+const ALLOWED_SCRIPT_ROOTS = ["/workspace", "/home/worker"];
+const ALLOWED_INTERPRETERS = new Set(["node", "bun", "python3"]);
+const BLOCKED_SCRIPT_BASENAMES = new Set(["bash", "sh", "dash", "zsh", "fish", "ksh"]);
+const BLOCKED_SYSTEM_EXECUTABLE_DIRS = [
+  "/bin/",
+  "/usr/bin/",
+  "/usr/local/bin/",
+  "/sbin/",
+  "/usr/sbin/",
+];
+const ARG_SHELL_METACHARACTER_PATTERN = /[;&|`\n\r]|\$\(/;
+
+function isPathWithinRoot(candidate: string, root: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function validatePathInsideAllowedRoots(value: string, fieldName: "script" | "cwd"): string {
+  if (!path.isAbsolute(value)) {
+    throw new Error(`${fieldName} must be an absolute path under /workspace/ or /home/worker/`);
+  }
+
+  const resolved = path.resolve(value);
+  if (BLOCKED_SYSTEM_EXECUTABLE_DIRS.some((dir) => resolved.startsWith(dir))) {
+    throw new Error(
+      `${fieldName} must point to a project file under /workspace/ or /home/worker/, not a system executable`,
+    );
+  }
+
+  if (fieldName === "script" && BLOCKED_SCRIPT_BASENAMES.has(path.basename(resolved))) {
+    throw new Error(`${fieldName} must not point to a shell executable`);
+  }
+
+  if (!ALLOWED_SCRIPT_ROOTS.some((root) => isPathWithinRoot(resolved, root))) {
+    throw new Error(`${fieldName} must resolve under /workspace/ or /home/worker/`);
+  }
+
+  return resolved;
+}
+
+function validateInterpreter(interpreter: string | undefined): string | undefined {
+  if (interpreter === undefined) return undefined;
+  if (!ALLOWED_INTERPRETERS.has(interpreter)) {
+    throw new Error("interpreter must be one of: node, bun, python3");
+  }
+  return interpreter;
+}
+
+function validateArgs(args: string[] | undefined): string[] | undefined {
+  if (!args) return undefined;
+  const unsafeArg = args.find((arg) => ARG_SHELL_METACHARACTER_PATTERN.test(arg));
+  if (unsafeArg !== undefined) {
+    throw new Error(
+      `args must not contain shell metacharacters (;, &, |, $(...), backticks, or newlines): ${unsafeArg}`,
+    );
+  }
+  return args;
+}
 
 export const registerRegisterServiceTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -76,17 +135,21 @@ export const registerRegisterServiceTool = (server: McpServer) => {
         const serviceName = agent.id;
         const servicePort = 3000; // Fixed port - only one service per worker
         const url = `https://${serviceName}.${SWARM_URL}`;
+        const safeScript = validatePathInsideAllowedRoots(script, "script");
+        const safeCwd = cwd ? validatePathInsideAllowedRoots(cwd, "cwd") : undefined;
+        const safeInterpreter = validateInterpreter(interpreter);
+        const safeArgs = validateArgs(args);
 
         // Upsert: create or update if exists
         const service = upsertService(requestInfo.agentId, serviceName, {
-          script,
+          script: safeScript,
           port: servicePort,
           description,
           url,
           healthCheckPath: healthCheckPath ?? "/health",
-          cwd,
-          interpreter,
-          args,
+          cwd: safeCwd,
+          interpreter: safeInterpreter,
+          args: safeArgs,
           env,
           metadata,
         });
@@ -108,6 +171,7 @@ export const registerRegisterServiceTool = (server: McpServer) => {
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
         return {
+          isError: true,
           content: [{ type: "text", text: `Failed to register service: ${message}` }],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
