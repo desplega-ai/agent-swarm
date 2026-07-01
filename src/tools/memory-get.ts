@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getMemoryStore } from "@/be/memory";
+import { canReadMemory } from "@/be/memory/access";
 import { recordRetrievals } from "@/be/memory/raters/retrieval";
 import { createToolRegistrar } from "@/tools/utils";
 import type { AgentMemorySource } from "@/types";
@@ -35,9 +36,10 @@ export const registerMemoryGetTool = (server: McpServer) => {
       }),
     },
     async ({ memoryId, intent }, requestInfo, _meta) => {
-      const memory = getMemoryStore().get(memoryId);
+      const store = getMemoryStore();
+      const memoryForAuth = store.peek(memoryId);
 
-      if (!memory) {
+      if (!memoryForAuth) {
         return {
           content: [{ type: "text", text: `Memory "${memoryId}" not found.` }],
           structuredContent: {
@@ -47,6 +49,19 @@ export const registerMemoryGetTool = (server: McpServer) => {
           },
         };
       }
+
+      if (!canReadMemory(memoryForAuth, requestInfo.agentId)) {
+        return {
+          content: [{ type: "text", text: "Not authorized" }],
+          structuredContent: {
+            yourAgentId: requestInfo.agentId,
+            success: false,
+            message: "Not authorized",
+          },
+        };
+      }
+
+      const memory = store.get(memoryId)!;
 
       if (requestInfo.sourceTaskId && requestInfo.agentId) {
         try {

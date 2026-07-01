@@ -37,6 +37,7 @@ mock.module("../be/memory", () => ({
   }),
   getMemoryStore: () => ({
     get: () => memory,
+    peek: () => memory,
     search: () => [
       {
         ...memory,

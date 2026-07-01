@@ -3,6 +3,7 @@ import { z } from "zod";
 import { chunkContent } from "../be/chunking";
 import { getDb, getTaskById } from "../be/db";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
+import { canReadMemory } from "../be/memory/access";
 import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
 import { listEdgesForAgent } from "../be/memory/edges-store";
 import { storeLinks } from "../be/memory/link-resolver";
@@ -323,6 +324,7 @@ export async function handleMemory(
       persistMemory,
       contextKey,
     } = parsed.body;
+    const memoryAgentId = agentId ?? (scope === "agent" ? myAgentId : undefined);
 
     if (source === "session_summary" && sourceTaskId) {
       const sourceTask = getTaskById(sourceTaskId);
@@ -346,12 +348,12 @@ export async function handleMemory(
     const store = getMemoryStore();
     const provider = getEmbeddingProvider();
 
-    if (sourcePath && agentId && contentChunks.length === 1) {
+    if (sourcePath && memoryAgentId && contentChunks.length === 1) {
       const existing = store
-        .list(agentId, {
+        .list(memoryAgentId, {
           scope,
           limit: 2,
-          ownerAgentId: agentId,
+          ownerAgentId: memoryAgentId,
           sourcePath,
         })
         .filter((memory) => memory.sourcePath === sourcePath);
@@ -366,7 +368,7 @@ export async function handleMemory(
         const embedding = await provider.embed(contentChunks[0]!.content);
         if (embedding) store.updateEmbedding(result.memory.id, embedding, provider.name);
         try {
-          storeLinks(result.memory.id, agentId, result.memory.content);
+          storeLinks(result.memory.id, memoryAgentId, result.memory.content);
         } catch (err) {
           console.error(
             `[memory] Link resolution failed for ${result.memory.id}:`,
@@ -379,8 +381,8 @@ export async function handleMemory(
     }
 
     // Dedup multi-chunk or ambiguous source paths via the existing lossy path.
-    if (sourcePath && agentId) {
-      store.deleteBySourcePath(sourcePath, agentId);
+    if (sourcePath && memoryAgentId) {
+      store.deleteBySourcePath(sourcePath, memoryAgentId);
     }
 
     // Derive contextKey from body or X-Context-Key header
@@ -393,7 +395,7 @@ export async function handleMemory(
     // Atomic batch insert — all chunks or none
     const memories = store.storeBatch(
       contentChunks.map((chunk) => ({
-        agentId: agentId || null,
+        agentId: memoryAgentId || null,
         content: chunk.content,
         name,
         scope,
@@ -410,10 +412,10 @@ export async function handleMemory(
     );
 
     // Resolve and store deterministic links (wikilinks, PR refs, agent-fs paths)
-    if (agentId) {
+    if (memoryAgentId) {
       for (const memory of memories) {
         try {
-          storeLinks(memory.id, agentId, memory.content);
+          storeLinks(memory.id, memoryAgentId, memory.content);
         } catch (err) {
           console.error(
             `[memory] Link resolution failed for ${memory.id}:`,
@@ -846,11 +848,19 @@ export async function handleMemory(
     const parsed = await getMemoryById.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const memory = getMemoryStore().get(parsed.params.id);
-    if (!memory) {
+    const store = getMemoryStore();
+    const memoryForAuth = store.peek(parsed.params.id);
+    if (!memoryForAuth) {
       jsonError(res, "Memory not found", 404);
       return true;
     }
+
+    if (!canReadMemory(memoryForAuth, myAgentId)) {
+      jsonError(res, "Not authorized", 403);
+      return true;
+    }
+
+    const memory = store.get(parsed.params.id)!;
 
     const { intent } = parsed.query;
     const sourceTaskIdHeader = req.headers["x-source-task-id"];
