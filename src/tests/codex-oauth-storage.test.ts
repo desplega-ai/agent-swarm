@@ -20,6 +20,14 @@ const mockCreds: CodexOAuthCredentials = {
   accountId: "acc-test-789",
 };
 
+/** Immediately grants/releases the refresh lock — for tests exercising refresh mechanics, not the lock itself. */
+function mockLockResponse(method: string): Response | null {
+  if (method === "POST")
+    return new Response(JSON.stringify({ owner: "test-owner" }), { status: 200 });
+  if (method === "DELETE") return new Response(null, { status: 204 });
+  return null;
+}
+
 // ─── codexOAuthKeyForSlot ────────────────────────────────────────────────────
 
 describe("codexOAuthKeyForSlot", () => {
@@ -423,6 +431,11 @@ describe("getValidCodexOAuth", () => {
         );
       }
 
+      if (urlStr.includes("/api/oauth/refresh-locks/")) {
+        const lockRes = mockLockResponse(method);
+        if (lockRes) return lockRes;
+      }
+
       if (method === "PUT") {
         const body = JSON.parse(init?.body as string) as Record<string, unknown>;
         putCapturedKey = body.key as string;
@@ -459,8 +472,9 @@ describe("getValidCodexOAuth", () => {
   it("returns null when refresh fails", async () => {
     const expiredCreds = { ...mockCreds, expires: Date.now() - 1000 };
 
-    globalThis.fetch = async (url: string | URL | Request) => {
+    globalThis.fetch = async (url: string | URL | Request, init?: RequestInit) => {
       const urlStr = typeof url === "string" ? url : url.toString();
+      const method = init?.method || "GET";
 
       if (urlStr.includes("config/resolved")) {
         return new Response(
@@ -469,6 +483,11 @@ describe("getValidCodexOAuth", () => {
           }),
           { status: 200 },
         );
+      }
+
+      if (urlStr.includes("/api/oauth/refresh-locks/")) {
+        const lockRes = mockLockResponse(method);
+        if (lockRes) return lockRes;
       }
 
       return new Response("Not Found", { status: 404 });

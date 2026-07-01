@@ -57,6 +57,7 @@ import { handleMcpServers } from "./mcp-servers";
 import { closeIdleMcpUserTransports, handleMcpUser } from "./mcp-user";
 import { handleMemory, startMemoryGc, stopMemoryGc } from "./memory";
 import { handleMetrics } from "./metrics";
+import { handleOAuthLocks } from "./oauth-locks";
 import { handlePageProxy } from "./page-proxy";
 import { handlePages } from "./pages";
 import { handlePagesPublic } from "./pages-public";
@@ -316,6 +317,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleMcpServers(req, res, pathSegments, queryParams),
         () => handleMcpOAuth(req, res, pathSegments, queryParams),
         () => handleMemory(req, res, pathSegments, myAgentId),
+        () => handleOAuthLocks(req, res, pathSegments, queryParams),
         () => handlePagesPublic(req, res, pathSegments, queryParams),
         () => handlePageProxy(req, res),
         () => handlePages(req, res, pathSegments, queryParams, myAgentId),

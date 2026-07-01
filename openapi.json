@@ -4794,6 +4794,108 @@
         }
       }
     },
+    "/api/oauth/refresh-locks/{key}": {
+      "post": {
+        "summary": "Acquire a cross-process OAuth refresh lock",
+        "tags": [
+          "OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9._:-]{1,200}$"
+            },
+            "required": true,
+            "name": "key",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ttlMs": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 300000
+                  }
+                },
+                "required": [
+                  "ttlMs"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Lock acquired; returns the owner token"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "409": {
+            "description": "Lock is currently held by another caller"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Release a cross-process OAuth refresh lock if still held by the given owner",
+        "tags": [
+          "OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9._:-]{1,200}$"
+            },
+            "required": true,
+            "name": "key",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "owner": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "owner"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Released (a mismatched/expired owner is a no-op, also 204)"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
     "/@swarm/api/{path}": {
       "get": {
         "summary": "Cookie-gated proxy to the swarm API (used by db-backed page iframes)",

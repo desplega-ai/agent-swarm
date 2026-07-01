@@ -21,6 +21,7 @@
     "mcp-oauth",
     "mcp-servers",
     "memory",
+    "oauth",
     "pages",
     "poll",
     "pricing",

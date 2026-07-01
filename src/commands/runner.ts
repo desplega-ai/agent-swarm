@@ -1082,7 +1082,12 @@ async function resolveCodexOAuthCredentialInfo(
 
         const slotEntry = slots.find((s) => s.slot === selectedSlot);
         if (slotEntry) {
-          await materializeCodexAuthJson(selectedSlot, slotEntry.creds);
+          // Pool slots are shared across concurrent tasks: never hand the
+          // spawned Codex CLI a refresh token it could rotate outside the
+          // `/api/oauth/refresh-locks` lock (see `credentialsToAuthJson`).
+          await materializeCodexAuthJson(selectedSlot, slotEntry.creds, {
+            includeRefreshToken: false,
+          });
           const authJson = {
             auth_mode: "chatgpt" as const,
             OPENAI_API_KEY: null,

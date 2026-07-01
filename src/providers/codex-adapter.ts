@@ -183,12 +183,30 @@ interface InstalledMcpServersResponse {
  * Returns the `auth_mode` value the spawned Codex CLI will see, or `null`
  * if no `auth.json` exists (Codex will then fall back to `OPENAI_API_KEY`).
  */
-async function resolveCodexAuthMode(
+export async function resolveCodexAuthMode(
   config: ProviderSessionConfig,
   emit: (event: ProviderEvent) => void,
+  deps: {
+    homedir?: () => string;
+    fs?: {
+      readFile: (path: string, encoding: "utf-8") => Promise<string>;
+      mkdir: (
+        path: string,
+        opts: { recursive: boolean; mode: number },
+      ) => Promise<string | undefined>;
+      writeFile: (path: string, data: string, opts: { mode: number }) => Promise<void>;
+    };
+  } = {},
 ): Promise<string | null> {
-  const fs = await import("node:fs/promises");
-  const authJsonPath = join(os.homedir(), ".codex", "auth.json");
+  const fsModule = await import("node:fs/promises");
+  const homedir = deps.homedir ?? os.homedir.bind(os);
+  const fs = deps.fs ?? {
+    readFile: (path: string, encoding: "utf-8") => fsModule.readFile(path, encoding),
+    mkdir: (path: string, opts: { recursive: boolean; mode: number }) => fsModule.mkdir(path, opts),
+    writeFile: (path: string, data: string, opts: { mode: number }) =>
+      fsModule.writeFile(path, data, opts),
+  };
+  const authJsonPath = join(homedir(), ".codex", "auth.json");
 
   const readAuthMode = async (): Promise<string | null> => {
     try {
@@ -203,20 +221,44 @@ async function resolveCodexAuthMode(
   let currentMode = await readAuthMode();
 
   // If config store creds are available and auth.json is missing or in
-  // api-key mode, try to restore/upgrade to OAuth. Don't touch a file that's
-  // already in chatgpt mode — `getValidCodexOAuth` refreshes and writes back
-  // to the config store on its own when called next time.
+  // api-key mode, try to restore/upgrade to OAuth.
+  //
+  // A defined `codexSlot` means the runner materialized auth.json for us via
+  // the pool path (`resolveCodexOAuthCredentialInfo` in runner.ts), which
+  // writes whatever was in the config store WITHOUT going through the locked
+  // refresh in `getValidCodexOAuth`. If that materialized slot is already
+  // expired, letting the spawned Codex CLI refresh straight from auth.json
+  // would refresh outside `/api/oauth/refresh-locks` entirely, re-opening the
+  // exact race the lock exists to prevent. So for pool slots we ALWAYS
+  // revalidate/refresh/rewrite through the lock here, even when auth.json is
+  // already in chatgpt mode. Non-pool (single-credential/local dev) auth.json
+  // is left untouched once it's already chatgpt mode, same as before.
+  //
   // Use the slot recorded by the runner for this task so refresh writes back
   // to the correct pool key (codex_oauth_<slot>) instead of always slot 0.
   const slot = config.codexSlot ?? 0;
-  if (config.apiUrl && config.apiKey && currentMode !== "chatgpt") {
+  const isPoolSlot = config.codexSlot !== undefined;
+  if (config.apiUrl && config.apiKey && (currentMode !== "chatgpt" || isPoolSlot)) {
     const oauthCreds = await getValidCodexOAuth(config.apiUrl, config.apiKey, slot);
     if (oauthCreds) {
       try {
-        const authJson = credentialsToAuthJson(oauthCreds);
-        await fs.mkdir(join(os.homedir(), ".codex"), { recursive: true, mode: 0o700 });
+        // For pool slots, strip the refresh token from the auth.json handed
+        // to the spawned Codex CLI so it can never rotate the shared token
+        // family outside the `/api/oauth/refresh-locks` lock. The locked
+        // `getValidCodexOAuth` above is the sole refresher; the config store
+        // retains the real refresh token. Non-pool auth.json keeps it so
+        // local dev / single-credential setups can self-refresh as before.
+        const authJson = credentialsToAuthJson(oauthCreds, {
+          includeRefreshToken: !isPoolSlot,
+        });
+        await fs.mkdir(join(homedir(), ".codex"), { recursive: true, mode: 0o700 });
         await fs.writeFile(authJsonPath, JSON.stringify(authJson, null, 2), { mode: 0o600 });
-        const verb = currentMode === null ? "Restored" : "Upgraded api-key auth.json to";
+        const verb =
+          currentMode === null
+            ? "Restored"
+            : currentMode === "chatgpt"
+              ? "Revalidated"
+              : "Upgraded api-key auth.json to";
         emit({
           type: "raw_stderr",
           content: `[codex] ${verb} OAuth credentials from config store\n`,
