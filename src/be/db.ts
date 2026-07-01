@@ -723,9 +723,15 @@ export function updateAgentCredentialState(
   ready: boolean,
   missing: string[] | null,
 ): Agent | null {
+  const prev = getAgentById(agentId);
   const status: AgentStatus = ready ? "idle" : "waiting_for_credentials";
   const missingJson = ready ? null : missing && missing.length > 0 ? JSON.stringify(missing) : null;
   const row = agentQueries.updateCredentialState().get(status, missingJson, agentId);
+  // Only clear the accumulated empty-poll count on a genuine recovery
+  // (waiting_for_credentials -> ready), so routine post-task `ready:true`
+  // reports don't clobber a legitimately accumulated count and defeat the
+  // MAX_EMPTY_POLLS polling gate.
+  if (ready && prev?.status === "waiting_for_credentials") resetEmptyPollCount(agentId);
   return row ? rowToAgent(row) : null;
 }
 

@@ -22,6 +22,7 @@ import {
   getTasksByStatus,
   getUnassignedPoolTasks,
   hasNonTerminalResumeChild,
+  MAX_EMPTY_POLLS,
   releaseStaleMentionProcessing,
   releaseStaleProcessingInbox,
   releaseStaleReviewingTasks,
@@ -621,7 +622,13 @@ function checkWorkerHealth(findings: HeartbeatFindings): void {
  */
 function autoAssignPoolTasks(findings: HeartbeatFindings): void {
   getDb().transaction(() => {
-    const idleWorkers = getIdleWorkersWithCapacity();
+    // Skip idle workers whose accumulated empty-poll count has hit the gate;
+    // assigning to them would just have them exit on their next poll. Filter on
+    // the rows already returned (emptyPollCount is populated) rather than
+    // re-querying per worker via shouldBlockPolling().
+    const idleWorkers = getIdleWorkersWithCapacity().filter(
+      (w) => (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS,
+    );
     if (idleWorkers.length === 0) return;
 
     const poolTasks = getUnassignedPoolTasks(MAX_AUTO_ASSIGN_PER_SWEEP);

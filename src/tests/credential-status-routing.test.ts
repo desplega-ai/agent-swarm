@@ -5,7 +5,9 @@ import {
   createAgent,
   getAgentById,
   getIdleWorkersWithCapacity,
+  incrementEmptyPollCount,
   initDb,
+  MAX_EMPTY_POLLS,
   updateAgentCredentialState,
 } from "../be/db";
 
@@ -134,6 +136,61 @@ describe("Phase 3 — credential status routing", () => {
     const cleared = updateAgentCredentialState(agent.id, true, ["X"]);
     expect(cleared!.status).toBe("idle");
     expect(cleared!.credentialMissing).toBeNull();
+  });
+
+  test("credential-refresh deadlock: recovery clears accumulated emptyPollCount", () => {
+    // Reproduces the wedge: a worker's credentials expire, its sessions exit and
+    // emptyPollCount climbs to MAX_EMPTY_POLLS. The agent is parked on
+    // `waiting_for_credentials`. When creds are refreshed the SAME parked session
+    // continues past awaitCredentials and reaches the poll gate WITHOUT
+    // re-registering (re-register is the only other path that resets the count).
+    // Before the fix, emptyPollCount stayed >= MAX_EMPTY_POLLS, so the gate
+    // blocked every new poll and the deadlock repeated forever.
+    const agent = createAgent({
+      name: "deadlock-recovery",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+      maxTasks: 1,
+    });
+
+    // Park the agent on waiting_for_credentials (creds expired).
+    updateAgentCredentialState(agent.id, false, ["CLAUDE_CODE_OAUTH_TOKEN"]);
+    expect(getAgentById(agent.id)!.status).toBe("waiting_for_credentials");
+
+    // Sessions exit empty until the poll gate would trip.
+    for (let i = 0; i < MAX_EMPTY_POLLS; i++) incrementEmptyPollCount(agent.id);
+    expect(getAgentById(agent.id)!.emptyPollCount).toBe(MAX_EMPTY_POLLS);
+
+    // Creds arrive: genuine waiting_for_credentials -> ready transition.
+    const recovered = updateAgentCredentialState(agent.id, true, null);
+    expect(recovered!.status).toBe("idle");
+    // The gate is cleared, so the next poll is no longer blocked.
+    expect(getAgentById(agent.id)!.emptyPollCount).toBe(0);
+  });
+
+  test("guard: routine ready=true report does NOT clobber an accumulated emptyPollCount", () => {
+    // updateAgentCredentialState is called on EVERY ready:true credential report,
+    // including routine post-task reports where the agent is already `idle`.
+    // Such a report must not reset a legitimately accumulated empty-poll count,
+    // or it would silently defeat the MAX_EMPTY_POLLS gate for idle agents.
+    const agent = createAgent({
+      name: "deadlock-guard",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+      maxTasks: 1,
+    });
+
+    // Agent is idle (never parked) and has accumulated empty polls.
+    for (let i = 0; i < MAX_EMPTY_POLLS; i++) incrementEmptyPollCount(agent.id);
+    expect(getAgentById(agent.id)!.emptyPollCount).toBe(MAX_EMPTY_POLLS);
+
+    // A routine post-task ready:true report arrives while status is already idle.
+    const updated = updateAgentCredentialState(agent.id, true, null);
+    expect(updated!.status).toBe("idle");
+    // The count must be preserved — no waiting_for_credentials -> ready transition.
+    expect(getAgentById(agent.id)!.emptyPollCount).toBe(MAX_EMPTY_POLLS);
   });
 
   test("isLead agents are not eligible (predicate also filters isLead = 0)", () => {

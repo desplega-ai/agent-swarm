@@ -12,8 +12,10 @@ import {
   getStalledInProgressTasks,
   getTaskById,
   getUnassignedPoolTasks,
+  incrementEmptyPollCount,
   initDb,
   insertActiveSession,
+  MAX_EMPTY_POLLS,
   resetOrphanedInProgressTasksForAgent,
   startTask,
   updateAgentStatus,
@@ -420,6 +422,21 @@ describe("Heartbeat Triage", () => {
 
       expect(assigned.count).toBe(1);
       expect(remaining.count).toBe(1);
+    });
+
+    test("auto-assignment skips idle workers gated by emptyPollCount, still assigns healthy ones", async () => {
+      const healthy = createAgent({ name: "healthy-idle", isLead: false, status: "idle" });
+      const gated = createAgent({ name: "gated-idle", isLead: false, status: "idle" });
+      // Push the gated worker to the poll-gate threshold.
+      for (let i = 0; i < MAX_EMPTY_POLLS; i++) incrementEmptyPollCount(gated.id);
+
+      createTaskExtended("Pool task");
+
+      const findings = await codeLevelTriage();
+      // Exactly one assignment, and it goes to the healthy worker — never the gated one.
+      expect(findings.autoAssigned.length).toBe(1);
+      expect(findings.autoAssigned[0]!.agentId).toBe(healthy.id);
+      expect(findings.autoAssigned.some((a) => a.agentId === gated.id)).toBe(false);
     });
 
     test("fixes worker with busy status but no active tasks", async () => {
