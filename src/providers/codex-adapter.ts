@@ -242,7 +242,15 @@ export async function resolveCodexAuthMode(
     const oauthCreds = await getValidCodexOAuth(config.apiUrl, config.apiKey, slot);
     if (oauthCreds) {
       try {
-        const authJson = credentialsToAuthJson(oauthCreds);
+        // For pool slots, strip the refresh token from the auth.json handed
+        // to the spawned Codex CLI so it can never rotate the shared token
+        // family outside the `/api/oauth/refresh-locks` lock. The locked
+        // `getValidCodexOAuth` above is the sole refresher; the config store
+        // retains the real refresh token. Non-pool auth.json keeps it so
+        // local dev / single-credential setups can self-refresh as before.
+        const authJson = credentialsToAuthJson(oauthCreds, {
+          includeRefreshToken: !isPoolSlot,
+        });
         await fs.mkdir(join(homedir(), ".codex"), { recursive: true, mode: 0o700 });
         await fs.writeFile(authJsonPath, JSON.stringify(authJson, null, 2), { mode: 0o600 });
         const verb =

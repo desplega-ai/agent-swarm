@@ -52,14 +52,36 @@ export function authJsonToCredentialSelection(auth: CodexAuthJson, slot = 0, tot
   };
 }
 
-export function credentialsToAuthJson(creds: CodexOAuthCredentials): CodexAuthJson {
+/**
+ * Build the `~/.codex/auth.json` payload the Codex CLI reads natively.
+ *
+ * `includeRefreshToken` (default `true`) controls whether the real refresh
+ * token is written into the file. For SHARED POOL slots we deliberately pass
+ * `false`: OpenAI rotates a Codex refresh token on every exchange and revokes
+ * the whole token family if a stale one is replayed, so a spawned Codex CLI
+ * that ever refreshes straight from `auth.json` — outside the
+ * `/api/oauth/refresh-locks` lock — can trigger that revocation whenever two
+ * tasks share a slot. Handing the CLI an empty `refresh_token` means it
+ * physically cannot rotate the family outside the lock: the config-store copy
+ * keeps the real refresh token and the locked `getValidCodexOAuth` stays the
+ * sole path that ever exchanges it. If the (freshly-refreshed) access token
+ * still expires mid-session, the CLI's refresh simply fails and the session
+ * errors out — a retryable, non-destructive outcome rather than a slot-wide
+ * family revocation. Non-pool (single-credential / local dev) auth.json keeps
+ * the refresh token so the CLI can self-refresh as before.
+ */
+export function credentialsToAuthJson(
+  creds: CodexOAuthCredentials,
+  opts: { includeRefreshToken?: boolean } = {},
+): CodexAuthJson {
+  const includeRefreshToken = opts.includeRefreshToken ?? true;
   return {
     auth_mode: "chatgpt",
     OPENAI_API_KEY: null,
     tokens: {
       id_token: creds.access,
       access_token: creds.access,
-      refresh_token: creds.refresh,
+      refresh_token: includeRefreshToken ? creds.refresh : "",
       account_id: creds.accountId,
     },
     last_refresh: new Date(creds.expires).toISOString(),

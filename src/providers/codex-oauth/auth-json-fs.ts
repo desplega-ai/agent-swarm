@@ -16,12 +16,18 @@ import type { CodexOAuthCredentials } from "./types.js";
  * parameter is unused at the FS level — the file is always `auth.json` —
  * but it is kept in the signature so callers can clearly state which pool
  * slot they are materialising (aids logging and tests).
+ *
+ * `includeRefreshToken` (default `true`) is forwarded to
+ * {@link credentialsToAuthJson}. Pool callers pass `false` so the spawned
+ * Codex CLI never receives a refresh token it could rotate outside the
+ * `/api/oauth/refresh-locks` lock (see the note there).
  */
 export async function materializeCodexAuthJson(
   _slot: number,
   creds: CodexOAuthCredentials,
   deps: {
     homedir?: () => string;
+    includeRefreshToken?: boolean;
     fs?: {
       mkdir: (
         path: string,
@@ -46,7 +52,9 @@ export async function materializeCodexAuthJson(
   const tmpPath = join(codexDir, "auth.json.tmp");
 
   await fs.mkdir(codexDir, { recursive: true, mode: 0o700 });
-  const authJson = credentialsToAuthJson(creds);
+  const authJson = credentialsToAuthJson(creds, {
+    includeRefreshToken: deps.includeRefreshToken ?? true,
+  });
   await fs.writeFile(tmpPath, JSON.stringify(authJson, null, 2), { mode: 0o600 });
   await fs.rename(tmpPath, authJsonPath);
 }
