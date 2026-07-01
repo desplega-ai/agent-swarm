@@ -2666,6 +2666,7 @@ async function spawnProviderProcess(
     taskId?: string;
     model?: string;
     modelTier?: string;
+    effort?: ReasoningEffort;
     resumeSessionId?: string;
     harnessProvider: ProviderName;
     cwd?: string;
@@ -2707,11 +2708,10 @@ async function spawnProviderProcess(
   const configModel = (freshEnv.MODEL_OVERRIDE as string | undefined) || "";
   // Reasoning/effort resolves independently of model/modelTier — no
   // resolveTaskModelSelection()-equivalent exists or is wanted for this axis
-  // (see Phase 3 of the reasoning-effort plan). Precedence: task field (if
-  // introduced later — currently always undefined) → REASONING_EFFORT_OVERRIDE
-  // → undefined.
+  // (see Phase 3 of the reasoning-effort plan). Precedence: task field →
+  // REASONING_EFFORT_OVERRIDE → undefined.
   const reasoningEffortOverride =
-    (freshEnv.REASONING_EFFORT_OVERRIDE as ReasoningEffort | undefined) || undefined;
+    opts.effort || (freshEnv.REASONING_EFFORT_OVERRIDE as ReasoningEffort | undefined) || undefined;
   const taskModelSelection = resolveTaskModelSelection({
     model: opts.model,
     modelTier: opts.modelTier,
@@ -4743,6 +4743,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               taskId: task.id,
               model: (task as { model?: string }).model,
               modelTier: (task as { modelTier?: string }).modelTier,
+              effort: (task as { effort?: ReasoningEffort }).effort,
               harnessProvider: state.harnessProvider,
               cwd: resumeCwd,
               vcsRepo: task.vcsRepo,
@@ -5081,6 +5082,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // Extract model from task data for per-task model selection
         const taskModel = (trigger.task as { model?: string } | undefined)?.model;
         const taskModelTier = (trigger.task as { modelTier?: string } | undefined)?.modelTier;
+        const taskEffort = (trigger.task as { effort?: ReasoningEffort } | undefined)?.effort;
         const taskContextKey = (trigger.task as { contextKey?: string } | undefined)?.contextKey;
 
         // Detect Slack context for conditional prompt sections
@@ -5225,6 +5227,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               taskId: trigger.taskId,
               model: taskModel,
               modelTier: taskModelTier,
+              effort: taskEffort,
               harnessProvider: state.harnessProvider,
               cwd: effectiveCwd,
               vcsRepo: taskVcsRepo,

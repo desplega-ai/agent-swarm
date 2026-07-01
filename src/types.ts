@@ -14,6 +14,17 @@ export type ModelTier = z.infer<typeof ModelTierSchema>;
 
 export const MODEL_TIERS = ModelTierSchema.options;
 
+/**
+ * Normalized reasoning/effort levels. Mirrors `REASONING_EFFORT_LEVELS` in
+ * `src/providers/reasoning-effort.ts` (the source of truth for capability
+ * resolution + per-harness translation) as a literal enum so this
+ * foundational, dependency-free module doesn't need a cross-directory import.
+ * Keep the two lists in sync — see
+ * `thoughts/taras/plans/2026-07-01-agent-reasoning-effort-runtime-control.md`.
+ */
+export const ReasoningEffortSchema = z.enum(["off", "low", "medium", "high", "xhigh"]);
+export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
+
 export const LEGACY_MODEL_TO_TIER: Record<string, ModelTier> = {
   haiku: "smol",
   sonnet: "regular",
@@ -354,6 +365,7 @@ export const AgentTaskSchema = z.object({
   // interpreted by the claiming worker's harness and never switches provider.
   model: z.string().optional(),
   modelTier: ModelTierSchema.optional(),
+  effort: ReasoningEffortSchema.optional(),
 
   // Schedule linking (optional — set when task was created by a schedule)
   scheduleId: z.uuid().optional(),
@@ -690,17 +702,6 @@ export const AgentCredStatusLiveTestSchema = z.object({
   testedAt: z.number(), // unix ms
 });
 export type AgentCredStatusLiveTest = z.infer<typeof AgentCredStatusLiveTestSchema>;
-
-/**
- * Normalized reasoning/effort levels. Mirrors `REASONING_EFFORT_LEVELS` in
- * `src/providers/reasoning-effort.ts` (the source of truth for capability
- * resolution + per-harness translation) as a literal enum so this
- * foundational, dependency-free module doesn't need a cross-directory import.
- * Keep the two lists in sync — see
- * `thoughts/taras/plans/2026-07-01-agent-reasoning-effort-runtime-control.md`.
- */
-export const ReasoningEffortSchema = z.enum(["off", "low", "medium", "high", "xhigh"]);
-export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
 
 export const AgentLatestModelSchema = z.object({
   model: z.string().min(1),
@@ -1607,6 +1608,7 @@ export type AgentTaskSummary = Pick<
   | "scheduleId"
   | "model"
   | "modelTier"
+  | "effort"
   | "provider"
   | "requestedByUserId"
   | "progress"

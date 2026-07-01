@@ -104,6 +104,14 @@ describe("Model Control - Task Creation", () => {
     expect(retrieved?.modelTier).toBe("smart");
   });
 
+  test("should store reasoning effort when creating a task", () => {
+    const task = createTaskExtended("Test task with effort", { effort: "high" });
+    expect(task.effort).toBe("high");
+
+    const retrieved = getTaskById(task.id);
+    expect(retrieved?.effort).toBe("high");
+  });
+
   test("should preserve freeform concrete model strings", () => {
     const task = createTaskExtended("Test task with freeform model", {
       model: "openrouter/anthropic/claude-sonnet-4.6",
@@ -368,10 +376,11 @@ describe("Model Control - Config MODEL_OVERRIDE Resolution", () => {
  */
 function resolveReasoningEffortOverride(
   configs: Array<{ key: string; value: string }>,
+  taskEffort?: string,
 ): string | undefined {
   const freshEnv: Record<string, string | undefined> = {};
   for (const c of configs) freshEnv[c.key] = c.value;
-  return (freshEnv.REASONING_EFFORT_OVERRIDE as string | undefined) || undefined;
+  return taskEffort || (freshEnv.REASONING_EFFORT_OVERRIDE as string | undefined) || undefined;
 }
 
 describe("Model Control - Config REASONING_EFFORT_OVERRIDE Resolution", () => {
@@ -434,6 +443,24 @@ describe("Model Control - Config REASONING_EFFORT_OVERRIDE Resolution", () => {
     expect(resolveReasoningEffortOverride(configs)).toBe("xhigh");
     expect(modelOverride?.value).toBe("haiku");
     expect(modelOverride?.scope).toBe("agent");
+  });
+
+  test("task effort overrides the agent REASONING_EFFORT_OVERRIDE fallback", () => {
+    const agent = createAgent({ name: "task-effort-agent", isLead: false, status: "idle" });
+    const task = createTaskExtended("Task effort beats agent default", {
+      agentId: agent.id,
+      effort: "low",
+    });
+
+    upsertSwarmConfig({
+      scope: "agent",
+      scopeId: agent.id,
+      key: "REASONING_EFFORT_OVERRIDE",
+      value: "high",
+    });
+
+    const configs = getResolvedConfig(agent.id);
+    expect(resolveReasoningEffortOverride(configs, task.effort)).toBe("low");
   });
 
   test("no REASONING_EFFORT_OVERRIDE anywhere resolves to undefined", () => {
@@ -526,6 +553,19 @@ describe("Model Control - Zod Validation Schema", () => {
     ).toThrow();
     expect(() =>
       taskActionInputSchema.parse({ action: "create", task: "x", modelTier: "massive" }),
+    ).toThrow();
+  });
+
+  test("task tools accept valid reasoning effort and reject invalid effort", () => {
+    expect(
+      sendTaskInputSchema.parse({ agentId: crypto.randomUUID(), task: "x", effort: "xhigh" })
+        .effort,
+    ).toBe("xhigh");
+    expect(taskActionInputSchema.parse({ action: "create", task: "x", effort: "off" }).effort).toBe(
+      "off",
+    );
+    expect(() =>
+      sendTaskInputSchema.parse({ agentId: crypto.randomUUID(), task: "x", effort: "max" }),
     ).toThrow();
   });
 

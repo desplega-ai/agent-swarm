@@ -954,6 +954,15 @@ export default function TaskDetailPage() {
             </Badge>
           ) : null;
         })()}
+        {task.effort ? (
+          <Badge
+            variant="outline"
+            className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center gap-1"
+          >
+            <Zap className="h-2.5 w-2.5" />
+            effort: {task.effort}
+          </Badge>
+        ) : null}
       </div>
       <CollapsibleDescription text={task.task} />
       <div className="flex items-center gap-2">

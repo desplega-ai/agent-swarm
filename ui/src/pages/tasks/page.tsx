@@ -5,7 +5,7 @@ import { useAgents } from "@/api/hooks/use-agents";
 import { useScheduledTasks } from "@/api/hooks/use-schedules";
 import { useTaskTemplates } from "@/api/hooks/use-task-templates";
 import { useCreateTask, useTasks } from "@/api/hooks/use-tasks";
-import type { AgentTask } from "@/api/types";
+import { type AgentTask, REASONING_EFFORT_LEVELS } from "@/api/types";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
   ignoreRowClickFromInteractives,
@@ -47,6 +47,7 @@ interface TaskFormData {
   priority: number;
   dependsOn: string[];
   modelTier: string;
+  effort: string;
 }
 
 const emptyTaskForm: TaskFormData = {
@@ -57,6 +58,7 @@ const emptyTaskForm: TaskFormData = {
   priority: 50,
   dependsOn: [],
   modelTier: "",
+  effort: "",
 };
 
 function CreateTaskDialog({
@@ -209,6 +211,25 @@ function CreateTaskDialog({
                   {MODEL_TIER_OPTIONS.map((tier) => (
                     <SelectItem key={tier.value} value={tier.value}>
                       {tier.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Reasoning Effort</Label>
+              <Select
+                value={form.effort}
+                onValueChange={(v) => setForm({ ...form, effort: v === "_none" ? "" : v })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Agent default" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Agent default</SelectItem>
+                  {REASONING_EFFORT_LEVELS.map((level) => (
+                    <SelectItem key={level} value={level}>
+                      {level}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -430,6 +451,7 @@ export default function TasksPage() {
       ...(data.priority !== 50 && { priority: data.priority }),
       ...(data.dependsOn.length > 0 && { dependsOn: data.dependsOn }),
       ...(data.modelTier && { modelTier: data.modelTier }),
+      ...(data.effort && { effort: data.effort }),
       // Phase 3: attribute the task to the current identity. `source` is left
       // unset so the server's "api" default applies.
       ...(currentUserId && { requestedByUserId: currentUserId }),

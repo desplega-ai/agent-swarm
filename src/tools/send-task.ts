@@ -20,6 +20,7 @@ import {
   AgentTaskSchema,
   FollowUpConfigSchema,
   ModelTierSchema,
+  ReasoningEffortSchema,
   splitLegacyModelAlias,
 } from "@/types";
 
@@ -70,6 +71,9 @@ export const sendTaskInputSchema = z.object({
     ),
   modelTier: ModelTierSchema.optional().describe(
     "Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim/run time using the assignee's harness/provider. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra.",
+  ),
+  effort: ReasoningEffortSchema.optional().describe(
+    "Reasoning effort for this task: 'off', 'low', 'medium', 'high', or 'xhigh'. If omitted, the assignee's REASONING_EFFORT_OVERRIDE/default applies.",
   ),
   allowDuplicate: z
     .boolean()
@@ -158,6 +162,7 @@ export async function sendTaskHandler(
     vcsRepo,
     model,
     modelTier,
+    effort,
     allowDuplicate,
     slackChannelId,
     slackThreadTs,
@@ -313,6 +318,7 @@ export async function sendTaskHandler(
         vcsRepo: effectiveVcsRepo,
         model: normalizedModel.model,
         modelTier: normalizedModel.modelTier,
+        effort,
         slackChannelId,
         slackThreadTs,
         slackUserId,
@@ -372,6 +378,7 @@ export async function sendTaskHandler(
         vcsRepo: effectiveVcsRepo,
         model: normalizedModel.model,
         modelTier: normalizedModel.modelTier,
+        effort,
         slackChannelId,
         slackThreadTs,
         slackUserId,
@@ -405,6 +412,7 @@ export async function sendTaskHandler(
       vcsRepo: effectiveVcsRepo,
       model: normalizedModel.model,
       modelTier: normalizedModel.modelTier,
+      effort,
       slackChannelId,
       slackThreadTs,
       slackUserId,

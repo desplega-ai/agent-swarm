@@ -102,6 +102,7 @@ describe("AgentTaskExecutor — workspace scoping", () => {
       vcsRepo: "org/repo",
       model: "sonnet",
       modelTier: "smart",
+      effort: "high",
       parentTaskId: "f1b14078-5df1-457d-88a2-33f1d3e621fd",
     };
     const parsed = executor.configSchema.safeParse(config);
@@ -111,6 +112,7 @@ describe("AgentTaskExecutor — workspace scoping", () => {
       expect(parsed.data.vcsRepo).toBe("org/repo");
       expect(parsed.data.model).toBe("sonnet");
       expect(parsed.data.modelTier).toBe("smart");
+      expect(parsed.data.effort).toBe("high");
       expect(parsed.data.parentTaskId).toBe("f1b14078-5df1-457d-88a2-33f1d3e621fd");
     }
   });
