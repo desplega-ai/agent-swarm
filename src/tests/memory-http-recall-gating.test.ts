@@ -36,8 +36,23 @@ mock.module("../be/memory", () => ({
     embedBatch: async (texts: string[]) => texts.map(() => new Float32Array([1, 0, 0])),
   }),
   getMemoryStore: () => ({
-    get: () => memory,
-    peek: () => memory,
+    store: (input: import("../be/memory/types").MemoryInput): import("../types").AgentMemory => {
+      const { SqliteMemoryStore } =
+        require("../be/memory/providers/sqlite-store") as typeof import("../be/memory/providers/sqlite-store");
+      return new SqliteMemoryStore().store(input);
+    },
+    get: (id: string) => {
+      if (id === memory.id) return memory;
+      const { SqliteMemoryStore } =
+        require("../be/memory/providers/sqlite-store") as typeof import("../be/memory/providers/sqlite-store");
+      return new SqliteMemoryStore().get(id);
+    },
+    peek: (id: string) => {
+      if (id === memory.id) return memory;
+      const { SqliteMemoryStore } =
+        require("../be/memory/providers/sqlite-store") as typeof import("../be/memory/providers/sqlite-store");
+      return new SqliteMemoryStore().peek(id);
+    },
     search: () => [
       {
         ...memory,
