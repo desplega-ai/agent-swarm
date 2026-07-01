@@ -39,12 +39,20 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+apt_install() {
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "Missing $*: install it in the worker image or run this setup as root before the agent drops privileges." >&2
+    exit 1
+  fi
+  apt-get update
+  apt-get install -y "$@"
+}
+
 ensure_cmd() {
   local cmd="$1"
   local pkg="${2:-$1}"
   if ! need_cmd "$cmd"; then
-    sudo apt-get update
-    sudo apt-get install -y "$pkg"
+    apt_install "$pkg"
   fi
 }
 
