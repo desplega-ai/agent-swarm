@@ -12,7 +12,7 @@ commit_per_phase: true
 ref_baseline_commit: 0a5384918c152c626e4f957964671a38c69ee455
 supersedes: thoughts/taras/plans/2026-05-27-agent-reasoning-effort-runtime-control.md
 last_updated: 2026-07-01
-last_updated_by: Claude
+last_updated_by: Claude (Phase 1 execution)
 ---
 
 # Agent Reasoning/Effort Runtime Control Implementation Plan (Refresh)
@@ -126,13 +126,13 @@ Create `src/providers/reasoning-effort.ts` exposing a normalized `ReasoningEffor
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Helper tests pass: `bun test src/tests/reasoning-effort.test.ts`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] DB boundary unchanged: `bash scripts/check-db-boundary.sh`
+- [x] Helper tests pass: `bun test src/tests/reasoning-effort.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] DB boundary unchanged: `bash scripts/check-db-boundary.sh`
 
 #### Automated QA:
-- [ ] Helper-only smoke script (one-off `bun run`) prints output for representative tuples: `(claude, claude-opus-4-8, high)`, `(codex, gpt-5.1-codex-max, xhigh)`, `(codex, gpt-5.1-codex, xhigh)`, `(pi, openrouter/google/gemini-3-flash-preview, medium)`, `(opencode, openrouter/qwen/qwen3-coder-flash, low)`. Confirm: shapes match the discriminated union; for the Codex `xhigh`-on-non-max case `applyReasoningEffort` returns `noop` AND `reasoningCapability` excludes `xhigh` from `levels`.
+- [x] Helper-only smoke script (one-off `bun run`) prints output for representative tuples: `(claude, claude-opus-4-8, high)`, `(codex, gpt-5.1-codex-max, xhigh)`, `(codex, gpt-5.1-codex, xhigh)`, `(pi, openrouter/google/gemini-3-flash-preview, medium)`, `(opencode, openrouter/qwen/qwen3-coder-flash, low)`. Confirm: shapes match the discriminated union; for the Codex `xhigh`-on-non-max case `applyReasoningEffort` returns `noop` AND `reasoningCapability` excludes `xhigh` from `levels`.
 
 #### Manual Verification:
 - [ ] Skim the override table for accuracy against the research doc's per-harness sections.

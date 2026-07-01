@@ -7,7 +7,13 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**", "!src/be/seed-scripts/catalog", "!src/be/modelsdev-cache.json", "!mockups"]
+    "includes": [
+      "**",
+      "!src/be/seed-scripts/catalog",
+      "!src/be/modelsdev-cache.json",
+      "!src/providers/modelsdev-reasoning.json",
+      "!mockups"
+    ]
   },
   "formatter": {
     "enabled": true,
