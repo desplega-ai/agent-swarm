@@ -12,7 +12,7 @@ commit_per_phase: true
 ref_baseline_commit: 0a5384918c152c626e4f957964671a38c69ee455
 supersedes: thoughts/taras/plans/2026-05-27-agent-reasoning-effort-runtime-control.md
 last_updated: 2026-07-01
-last_updated_by: Claude (Phase 3 execution)
+last_updated_by: Claude (Phase 5 execution)
 ---
 
 # Agent Reasoning/Effort Runtime Control Implementation Plan (Refresh)
@@ -372,11 +372,11 @@ Add an effort selector to `AgentRuntimeSettings` next to the model picker, with 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] UI lint + types: `cd ui && pnpm lint && pnpm exec tsc -b`
-- [ ] Backend tests still pass: `bun test`
+- [x] UI lint + types: `cd ui && pnpm lint && pnpm exec tsc -b`
+- [x] Backend tests still pass: `bun test`
 
 #### Automated QA:
-- [ ] qa-use session per swarm-local-e2e skill: open `/agents/<id>`, change harness to each of the four, set effort to each valid level, save, reload, confirm value persists. For Codex with model `gpt-5.1-codex`, confirm `xhigh` is greyed out with the documented tooltip. Capture screenshots per harness × level matrix into `thoughts/taras/qa/`.
+- [ ] qa-use session per swarm-local-e2e skill: open `/agents/<id>`, change harness to each of the four, set effort to each valid level, save, reload, confirm value persists. For Codex with model `gpt-5.1-codex`, confirm `xhigh` is greyed out with the documented tooltip. Capture screenshots per harness × level matrix into `thoughts/taras/qa/`. **Not run this phase** — background phase-agent has no browser/qa-use access. Left for the orchestrating session to run via `desplega:qa` against the linked QA Spec doc.
 
 #### Manual Verification:
 - [ ] Eyeball the segmented control in light + dark mode; confirm the grey-out tooltip is readable and the last-used value updates after a real task.

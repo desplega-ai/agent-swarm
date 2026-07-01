@@ -5,7 +5,7 @@ import { useUpdateAgentRuntime } from "@/api/hooks/use-agents";
 import { useResolvedConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
-import type { Agent } from "@/api/types";
+import { type Agent, REASONING_EFFORT_LEVELS, type ReasoningEffortLevel } from "@/api/types";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   findModelOption,
   HARNESS_LABEL,
@@ -41,6 +42,17 @@ import {
   pickDefaultModelForHarness,
 } from "@/lib/agent-runtime-models";
 import { cn } from "@/lib/utils";
+
+const REASONING_EFFORT_LABEL: Record<ReasoningEffortLevel, string> = {
+  off: "Off",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "X-High",
+};
+
+/** Unset sentinel — no `REASONING_EFFORT_OVERRIDE` (harness-native default). */
+type EffortValue = ReasoningEffortLevel | "";
 
 const RUNTIME_EDIT_MIN_VERSION = "1.77.2";
 
@@ -56,6 +68,27 @@ function configuredModel(configs: { key: string; value: string }[] | undefined):
   return configs?.find((c) => c.key === "MODEL_OVERRIDE")?.value ?? "";
 }
 
+function configuredEffort(configs: { key: string; value: string }[] | undefined): EffortValue {
+  const raw = configs?.find((c) => c.key === "REASONING_EFFORT_OVERRIDE")?.value;
+  return (REASONING_EFFORT_LEVELS as readonly string[]).includes(raw ?? "")
+    ? (raw as ReasoningEffortLevel)
+    : "";
+}
+
+/** Nearest supported level by canonical-order distance — used to make the grey-out tooltip suggest an alternative without hardcoding any model name. */
+function nearestSupportedLevel(
+  level: ReasoningEffortLevel,
+  levels: ReadonlyArray<ReasoningEffortLevel>,
+): ReasoningEffortLevel | null {
+  if (levels.length === 0) return null;
+  const idx = REASONING_EFFORT_LEVELS.indexOf(level);
+  return [...levels].sort(
+    (a, b) =>
+      Math.abs(REASONING_EFFORT_LEVELS.indexOf(a) - idx) -
+      Math.abs(REASONING_EFFORT_LEVELS.indexOf(b) - idx),
+  )[0];
+}
+
 export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   const initialHarness = isLocalHarness(agent.harnessProvider) ? agent.harnessProvider : "claude";
   const configsQuery = useResolvedConfigs({ agentId: agent.id });
@@ -67,6 +100,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   const [harness, setHarness] = useState<LocalHarnessProvider>(initialHarness);
   const [model, setModel] = useState("");
   const [customMode, setCustomMode] = useState(false);
+  const [effort, setEffort] = useState<EffortValue>("");
 
   const liveBedrockStatus = useMemo<LiveBedrockStatus | null>(
     () =>
@@ -96,7 +130,23 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     );
     setHarness(initialHarness);
     setModel(nextModel || pickDefaultModelForHarness(initialHarness, nextGroups));
+    setEffort(configuredEffort(configs));
   }, [configs, initialHarness, envPresenceQuery.data, liveBedrockStatus]);
+
+  // Clears `effort` whenever it ends up unsupported by the (possibly new)
+  // selected model, rather than silently coercing it to a supported value.
+  function clearEffortIfUnsupported(option: ModelOption | null) {
+    setEffort((current) => {
+      if (!current) return current;
+      if (option?.reasoningLevels && !option.reasoningLevels.includes(current)) return "";
+      return current;
+    });
+  }
+
+  function changeModel(nextModel: string) {
+    setModel(nextModel);
+    clearEffortIfUnsupported(findModelOption(nextModel, groups));
+  }
 
   function changeHarness(nextHarness: LocalHarnessProvider) {
     const nextGroups = modelGroupsForHarness(
@@ -106,9 +156,11 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       liveBedrockStatus,
     );
     setHarness(nextHarness);
-    if (!findModelOption(model, nextGroups)) {
-      setModel(pickDefaultModelForHarness(nextHarness, nextGroups));
-    }
+    const nextModel = findModelOption(model, nextGroups)
+      ? model
+      : pickDefaultModelForHarness(nextHarness, nextGroups);
+    if (nextModel !== model) setModel(nextModel);
+    clearEffortIfUnsupported(findModelOption(nextModel, nextGroups));
   }
 
   function save() {
@@ -119,6 +171,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         harnessProvider: harness,
         model: model.trim(),
         allowCustomModel: customMode && !modelOption,
+        reasoningEffort: effort || null,
       },
       {
         onSuccess: () => toast.success("Runtime settings updated"),
@@ -169,16 +222,26 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         <div className="min-w-[260px] flex-1 space-y-1.5">
           <Label>Model</Label>
           {customMode ? (
-            <Input value={model} onChange={(event) => setModel(event.target.value)} />
+            <Input value={model} onChange={(event) => changeModel(event.target.value)} />
           ) : (
             <ModelCombobox
               value={model}
-              onChange={setModel}
+              onChange={changeModel}
               groups={groups}
               selected={modelOption}
             />
           )}
         </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>Reasoning effort</Label>
+        <ReasoningEffortToggle
+          value={effort}
+          onChange={setEffort}
+          levels={modelOption?.reasoningLevels}
+          modelLabel={modelOption?.label ?? null}
+        />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -209,6 +272,12 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         <span>
           Last used: <code>{latestModel?.model ?? "not reported"}</code>
         </span>
+        <span>
+          Effort: <code>{effort || "unset"}</code>
+        </span>
+        <span>
+          Last effort: <code>{latestModel?.reasoningEffort ?? "not reported"}</code>
+        </span>
       </div>
 
       {modelOption?.cost ? (
@@ -224,6 +293,63 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
           . Prices from <code>models.dev</code> snapshot — verify against provider billing.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+interface ReasoningEffortToggleProps {
+  value: EffortValue;
+  onChange: (next: EffortValue) => void;
+  /** Undefined = no capability data for the selected model — don't grey out anything. */
+  levels: ReadonlyArray<ReasoningEffortLevel> | undefined;
+  modelLabel: string | null;
+}
+
+function ReasoningEffortToggle({
+  value,
+  onChange,
+  levels,
+  modelLabel,
+}: ReasoningEffortToggleProps) {
+  return (
+    <div className="inline-flex w-fit overflow-hidden rounded-md border border-border">
+      {REASONING_EFFORT_LEVELS.map((level, index) => {
+        const supported = levels ? levels.includes(level) : true;
+        const active = value === level;
+        const segment = (
+          <button
+            key={level}
+            type="button"
+            disabled={!supported}
+            onClick={() => onChange(active ? "" : level)}
+            className={cn(
+              "px-3 py-1.5 text-xs font-medium transition-colors",
+              index > 0 && "border-l border-border",
+              active
+                ? "bg-primary text-primary-foreground"
+                : "bg-transparent text-foreground hover:bg-accent",
+              !supported && "cursor-not-allowed opacity-40 hover:bg-transparent",
+            )}
+          >
+            {REASONING_EFFORT_LABEL[level]}
+          </button>
+        );
+
+        if (supported) return segment;
+
+        const suggestion = levels?.length ? nearestSupportedLevel(level, levels) : null;
+        return (
+          <Tooltip key={level}>
+            <TooltipTrigger asChild>
+              <span>{segment}</span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-64">
+              {modelLabel ?? "This model"} doesn't support "{REASONING_EFFORT_LABEL[level]}"
+              {suggestion ? ` — use "${REASONING_EFFORT_LABEL[suggestion]}" instead.` : "."}
+            </TooltipContent>
+          </Tooltip>
+        );
+      })}
     </div>
   );
 }

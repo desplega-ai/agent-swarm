@@ -1,5 +1,22 @@
-import type { ProviderName, SwarmConfig } from "@/api/types";
+import type { ProviderName, ReasoningEffortLevel, SwarmConfig } from "@/api/types";
 import modelsCache from "./modelsdev-cache.json";
+
+/**
+ * Local mirror of the value in `@/api/types` (kept type-only there). This
+ * module is imported directly (via a relative path, no bundler) by backend
+ * unit tests (`src/tests/agents-list-model-display.test.ts`,
+ * `src/tests/bedrock-model-groups.test.ts`) — every other `@/api/types`
+ * import in `ui/src/lib/` is `import type` for exactly this reason: a
+ * non-type-only import needs the `@/` alias resolved at runtime, which plain
+ * Bun module resolution (no Vite bundler) can't do.
+ */
+const REASONING_EFFORT_LEVELS: readonly ReasoningEffortLevel[] = [
+  "off",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+];
 
 export type LocalHarnessProvider = "claude" | "codex" | "pi" | "opencode";
 
@@ -11,6 +28,13 @@ export interface ModelOption {
   requiredKey: string;
   cost?: { input?: number; output?: number };
   contextWindow?: number;
+  /**
+   * Reasoning-effort levels this model supports, client-side mirror of the
+   * server's hybrid capability lookup (`src/providers/reasoning-effort.ts`).
+   * `undefined` means no capability data was found (custom/unknown model) —
+   * the effort selector should NOT grey out any segment in that case.
+   */
+  reasoningLevels?: ReadonlyArray<ReasoningEffortLevel>;
 }
 
 export type ProviderIconKey = "anthropic" | "openai" | "openrouter" | "amazon-bedrock";
@@ -31,11 +55,18 @@ export interface ModelGroup {
 
 type SnapshotProviderId = "openrouter" | "anthropic" | "openai" | "amazon-bedrock";
 
+interface CachedReasoningOption {
+  type: string;
+  values?: string[];
+}
+
 interface CachedModel {
   id: string;
   name?: string;
   cost?: { input?: number; output?: number };
   limit?: { context?: number };
+  reasoning?: boolean;
+  reasoning_options?: CachedReasoningOption[];
 }
 
 interface CachedProvider {
@@ -45,6 +76,94 @@ interface CachedProvider {
 }
 
 const CACHE = modelsCache as Record<SnapshotProviderId, CachedProvider | undefined>;
+
+// --- Reasoning-effort capability mirror ---------------------------------------
+// Client-side mirror of the resolution order in `reasoningCapability()`
+// (`src/providers/reasoning-effort.ts`, Phase 1). Kept in sync by hand — see
+// that module's doc comment for the accepted-tradeoff rationale (same
+// duplication already accepted for the harness/model registry itself).
+
+/** Shared-safe subset accepted by all four harnesses on at least their default models (see research doc). */
+const REASONING_FALLBACK_LEVELS: ReasoningEffortLevel[] = ["low", "medium", "high"];
+
+/** models.dev `reasoning_options[].type === "effort"` value → our normalized enum. `minimal`/`max` intentionally dropped. */
+const REASONING_EFFORT_VALUE_MAP: Partial<Record<string, ReasoningEffortLevel>> = {
+  none: "off",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh",
+};
+
+function levelsFromReasoningOptions(
+  options: CachedReasoningOption[] | undefined,
+): ReasoningEffortLevel[] {
+  const effortEntry = options?.find((o) => o.type === "effort");
+  if (!effortEntry?.values?.length) return [];
+  const mapped = new Set(
+    effortEntry.values
+      .map((v) => REASONING_EFFORT_VALUE_MAP[v])
+      .filter((v): v is ReasoningEffortLevel => v !== undefined),
+  );
+  return REASONING_EFFORT_LEVELS.filter((level) => mapped.has(level));
+}
+
+function hasBudgetTokensOption(model: CachedModel): boolean {
+  return Boolean(model.reasoning_options?.some((o) => o.type === "budget_tokens"));
+}
+
+/**
+ * Harness-specific quirks the cache doesn't (fully) encode — mirrors
+ * `applyHarnessOverrides()` server-side. Only fires for the literal `claude`/
+ * `codex` harness values (direct models); `pi`/`opencode` selecting an
+ * underlying Anthropic/OpenAI model never triggers these, matching the
+ * backend (its override table also keys off the harness param, not the
+ * model's provider).
+ */
+function applyReasoningHarnessOverrides(
+  harness: LocalHarnessProvider,
+  modelId: string,
+  model: CachedModel,
+  levels: ReasoningEffortLevel[],
+): ReasoningEffortLevel[] {
+  let result = levels;
+
+  if (harness === "claude" && hasBudgetTokensOption(model) && !result.includes("off")) {
+    result = ["off", ...result];
+  }
+
+  if (harness === "codex") {
+    const isCodexMax = /-codex-max$/.test(modelId);
+    const isCodexNonMax = /-codex$/.test(modelId) && !isCodexMax;
+    if (isCodexMax && !result.includes("xhigh")) {
+      result = [...result, "xhigh"];
+    }
+    if (isCodexNonMax) {
+      result = result.filter((l) => l !== "xhigh");
+    }
+  }
+
+  return REASONING_EFFORT_LEVELS.filter((level) => result.includes(level));
+}
+
+/**
+ * Client-side mirror of `reasoningCapability().levels` — returns `undefined`
+ * when there's no usable capability data (unknown model, or `reasoning:
+ * false`), which the effort selector treats as "don't grey out anything".
+ */
+function reasoningLevelsFromCache(
+  harness: LocalHarnessProvider,
+  modelId: string,
+  model: CachedModel | undefined,
+): ReadonlyArray<ReasoningEffortLevel> | undefined {
+  if (!model?.reasoning) return undefined;
+
+  let levels = levelsFromReasoningOptions(model.reasoning_options);
+  if (levels.length === 0) levels = [...REASONING_FALLBACK_LEVELS];
+  levels = applyReasoningHarnessOverrides(harness, modelId, model, levels);
+
+  return levels.length > 0 ? levels : undefined;
+}
 
 export const LOCAL_HARNESSES: LocalHarnessProvider[] = ["claude", "codex", "pi", "opencode"];
 
@@ -68,23 +187,39 @@ const OPENAI_META = {
   requiredKey: "OPENAI_API_KEY",
 };
 
+/** Builds a direct-registry `ModelOption`, populating `reasoningLevels` from the same cache snapshot the picker's `cost`/`contextWindow` already read. */
+function directModel(
+  harness: "claude" | "codex",
+  id: string,
+  label: string,
+  meta: typeof ANTHROPIC_META | typeof OPENAI_META,
+): ModelOption {
+  const snapshotProviderId: SnapshotProviderId = harness === "claude" ? "anthropic" : "openai";
+  return {
+    id,
+    label,
+    ...meta,
+    reasoningLevels: reasoningLevelsFromCache(harness, id, CACHE[snapshotProviderId]?.models[id]),
+  };
+}
+
 const DIRECT_MODELS: Record<"claude" | "codex", ModelOption[]> = {
   claude: [
-    { id: "claude-fable-5", label: "Claude Fable 5", ...ANTHROPIC_META },
-    { id: "claude-mythos-5", label: "Claude Mythos 5", ...ANTHROPIC_META },
-    { id: "claude-sonnet-5", label: "Claude Sonnet 5", ...ANTHROPIC_META },
-    { id: "claude-opus-4-8", label: "Claude Opus 4.8", ...ANTHROPIC_META },
-    { id: "claude-opus-4-7", label: "Claude Opus 4.7", ...ANTHROPIC_META },
-    { id: "claude-opus-4-6", label: "Claude Opus 4.6", ...ANTHROPIC_META },
-    { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", ...ANTHROPIC_META },
-    { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", ...ANTHROPIC_META },
+    directModel("claude", "claude-fable-5", "Claude Fable 5", ANTHROPIC_META),
+    directModel("claude", "claude-mythos-5", "Claude Mythos 5", ANTHROPIC_META),
+    directModel("claude", "claude-sonnet-5", "Claude Sonnet 5", ANTHROPIC_META),
+    directModel("claude", "claude-opus-4-8", "Claude Opus 4.8", ANTHROPIC_META),
+    directModel("claude", "claude-opus-4-7", "Claude Opus 4.7", ANTHROPIC_META),
+    directModel("claude", "claude-opus-4-6", "Claude Opus 4.6", ANTHROPIC_META),
+    directModel("claude", "claude-sonnet-4-6", "Claude Sonnet 4.6", ANTHROPIC_META),
+    directModel("claude", "claude-haiku-4-5", "Claude Haiku 4.5", ANTHROPIC_META),
   ],
   codex: [
-    { id: "gpt-5.5", label: "GPT-5.5", ...OPENAI_META },
-    { id: "gpt-5.4", label: "GPT-5.4", ...OPENAI_META },
-    { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", ...OPENAI_META },
-    { id: "gpt-5.3-codex", label: "GPT-5.3 Codex", ...OPENAI_META },
-    { id: "gpt-5.2-codex", label: "GPT-5.2 Codex", ...OPENAI_META },
+    directModel("codex", "gpt-5.5", "GPT-5.5", OPENAI_META),
+    directModel("codex", "gpt-5.4", "GPT-5.4", OPENAI_META),
+    directModel("codex", "gpt-5.4-mini", "GPT-5.4 Mini", OPENAI_META),
+    directModel("codex", "gpt-5.3-codex", "GPT-5.3 Codex", OPENAI_META),
+    directModel("codex", "gpt-5.2-codex", "GPT-5.2 Codex", OPENAI_META),
   ],
 };
 
@@ -203,6 +338,7 @@ export function modelGroupsForHarness(
         requiredKey: meta.requiredKey,
         cost: m.cost,
         contextWindow: m.limit?.context,
+        reasoningLevels: reasoningLevelsFromCache(harness, m.id, m),
       }))
       .sort((a, b) => a.label.localeCompare(b.label));
     return {
@@ -223,13 +359,17 @@ export function modelGroupsForHarness(
     let bedrockDisabledReason: string | undefined;
 
     if (liveBedrockStatus != null) {
-      // Worker has reported live models — prefer this list.
+      // Worker has reported live models — prefer this list. The live probe
+      // only reports `{id, name}`; cross-reference the static snapshot by id
+      // for reasoning capability data (best-effort — `undefined` for models
+      // the snapshot doesn't know, which the selector treats as unrestricted).
       bedrockModels = liveBedrockStatus.models.map((m) => ({
         id: `amazon-bedrock/${m.id}`,
         label: m.name,
         provider: bedrockMeta.label,
         providerId: bedrockMeta.iconKey,
         requiredKey: bedrockMeta.requiredKey,
+        reasoningLevels: reasoningLevelsFromCache("pi", m.id, bedrockCache?.models[m.id]),
       }));
       bedrockEnabled = liveBedrockStatus.ready;
       // Probe ran but failed — surface the reason instead of a silent disable.
@@ -248,6 +388,7 @@ export function modelGroupsForHarness(
           requiredKey: bedrockMeta.requiredKey,
           cost: m.cost,
           contextWindow: m.limit?.context,
+          reasoningLevels: reasoningLevelsFromCache("pi", m.id, m),
         }))
         .sort((a, b) => a.label.localeCompare(b.label));
       // Unknown auth state before first worker report — treat as not enabled.

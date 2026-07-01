@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
-import type { AgentWithTasks } from "../types";
+import type { AgentWithTasks, ReasoningEffortLevel } from "../types";
 
 export function useAgents(includeTasks = false) {
   return useQuery({
@@ -67,6 +67,7 @@ export function useUpdateAgentRuntime() {
       harnessProvider: "claude" | "codex" | "pi" | "opencode";
       model: string;
       allowCustomModel?: boolean;
+      reasoningEffort?: ReasoningEffortLevel | null;
     }) => api.updateAgentRuntime(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agents"] });

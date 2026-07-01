@@ -49,6 +49,7 @@ import type {
   PricingTokenClass,
   PromptTemplate,
   PromptTemplateHistory,
+  ReasoningEffortLevel,
   ResolveUnmappedInput,
   ScheduledTask,
   ScheduledTasksResponse,
@@ -233,6 +234,8 @@ class ApiClient {
     harnessProvider: "claude" | "codex" | "pi" | "opencode";
     model: string;
     allowCustomModel?: boolean;
+    /** `null` clears `REASONING_EFFORT_OVERRIDE`; omitted leaves it unchanged; a level sets it. */
+    reasoningEffort?: ReasoningEffortLevel | null;
   }): Promise<AgentWithTasks> {
     const url = `${this.getBaseUrl()}/api/agents/${data.id}/runtime`;
     const res = await fetch(url, {
@@ -242,6 +245,7 @@ class ApiClient {
         harness_provider: data.harnessProvider,
         model: data.model,
         allow_custom_model: data.allowCustomModel ?? false,
+        ...(data.reasoningEffort !== undefined ? { reasoning_effort: data.reasoningEffort } : {}),
       }),
     });
     if (!res.ok) {
