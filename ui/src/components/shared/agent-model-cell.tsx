@@ -1,5 +1,9 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { type AgentModelDisplay, getAgentModelPresentation } from "@/lib/agents-list-model-display";
+import {
+  type AgentModelDisplay,
+  getAgentModelPresentation,
+  reasoningEffortBadge,
+} from "@/lib/agents-list-model-display";
 import { ProviderIcon } from "./provider-icon";
 
 interface AgentModelCellProps {
@@ -15,6 +19,7 @@ export function AgentModelCell({ display }: AgentModelCellProps) {
 
   const configured = getAgentModelPresentation(display.configured);
   const lastUsed = getAgentModelPresentation(display.lastUsed);
+  const badge = reasoningEffortBadge(display.reasoningEffort);
 
   return (
     <Tooltip>
@@ -24,6 +29,9 @@ export function AgentModelCell({ display }: AgentModelCellProps) {
           <span className="min-w-0 flex-1 truncate font-medium text-foreground">
             {primary.label}
           </span>
+          {badge ? (
+            <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{badge}</span>
+          ) : null}
           {display.diverged ? (
             <span className="shrink-0 text-[11px] font-medium text-status-warning-strong">
               next task
@@ -44,6 +52,13 @@ export function AgentModelCell({ display }: AgentModelCellProps) {
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
             <dt className="opacity-60">Model ID</dt>
             <dd className="break-all font-mono">{primary.raw}</dd>
+
+            {display.reasoningEffort ? (
+              <>
+                <dt className="opacity-60">Reasoning effort</dt>
+                <dd className="font-mono">{display.reasoningEffort}</dd>
+              </>
+            ) : null}
 
             {display.diverged ? (
               <>

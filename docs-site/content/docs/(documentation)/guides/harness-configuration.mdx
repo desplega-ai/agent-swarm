@@ -97,6 +97,12 @@ Models can be set per-task via the API or per-agent via the agent profile. The s
 
 If you want provider-agnostic intent instead of a concrete model string, use `modelTier` on tasks, schedules, or workflow `agent-task` nodes. The tier values are `smol`, `regular`, `smart`, and `ultra`; the claiming worker resolves them to concrete models for its own harness/provider, and local env overrides (`MODEL_TIER_MAP`, `MODEL_TIER_<TIER>`) can adjust the mapping without changing the task payload.
 
+### Reasoning / Effort
+
+Set a per-agent reasoning/effort level with `PATCH /api/agents/{id}/runtime` (`reasoning_effort: off | low | medium | high | xhigh`), persisted as the `REASONING_EFFORT_OVERRIDE` swarm config key. Claude translates this into the `CLAUDE_CODE_EFFORT_LEVEL` env var — no CLI flag is used (`--effort` is buggy in `-p` mode). `off` on a legacy model that still exposes a numeric thinking budget instead sets `MAX_THINKING_TOKENS=0`.
+
+**Precedence**: if an operator's `additionalArgs` includes `--effort`, the CLI flag wins over `CLAUDE_CODE_EFFORT_LEVEL` — the standard "`additionalArgs` is an escape hatch" behavior, not special-cased for effort. Not every model supports every level (e.g. some Opus variants don't support `off`); the dashboard's effort selector greys out unsupported levels per selected model, and the API 400s an unsupported `(model, level)` combo.
+
 ---
 
 ## Codex
@@ -138,6 +144,12 @@ The following keys are stored in the swarm config store (via `PUT /api/config` o
 ### Model Selection
 
 The default model baked into the worker image is `gpt-5.4`. You can override it with `MODEL_OVERRIDE` if needed.
+
+### Reasoning / Effort
+
+Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh`) via `PATCH /api/agents/{id}/runtime` — Codex translates it into the `model_reasoning_effort` config field, with `off` mapping to `'none'`. `show_raw_agent_reasoning` stays pinned `false` regardless of the effort level: setting `high` costs reasoning tokens (visible in `reasoning_output_tokens` cost telemetry) but produces no visible reasoning trace in the dashboard.
+
+`*-codex` (non-`max`) models reject `xhigh`; `*-codex-max` models accept it. The API 400s an unsupported `(model, level)` combo before it's persisted.
 
 ### Codex Specifics
 
@@ -192,6 +204,10 @@ The default model is `openrouter/qwen/qwen3-coder-flash`. Set `MODEL_OVERRIDE` t
 | OpenRouter | `openrouter/qwen/qwen3-coder-flash` | Default. See [OpenRouter model catalog](https://openrouter.ai/models) |
 | Anthropic | `anthropic/claude-sonnet-4-6` | Requires `ANTHROPIC_API_KEY` |
 | OpenAI | `openai/gpt-4o` | Requires `OPENAI_API_KEY` |
+
+### Reasoning / Effort
+
+Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh`) via `PATCH /api/agents/{id}/runtime`. opencode has no single reasoning knob — the swarm translates the level into provider-keyed options in the per-task `opencode.json`: `anthropic/*` models get `thinking.budgetTokens` (an internal numeric translation, not a user-facing knob), `openrouter/*` models get `reasoning.effort`, and OpenAI-compatible models get `reasoningEffort`. `off` omits reasoning keys entirely — opencode has no explicit off switch.
 
 ### opencode Specifics
 
@@ -248,6 +264,10 @@ The prefix before the first `/` selects the provider and the matching credential
 | `openrouter/<id>` | `openrouter/moonshotai/kimi-k2.5` ([OpenRouter catalog](https://openrouter.ai/models)) | `OPENROUTER_API_KEY` |
 | `openai/<id>` | `openai/gpt-4o` | `OPENAI_API_KEY` |
 | `google/<id>` | `google/gemini-2.5-pro` | `GOOGLE_API_KEY` |
+
+### Reasoning / Effort
+
+Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh`) via `PATCH /api/agents/{id}/runtime` — pi-mono translates it directly into the `thinkingLevel` session option, a top-level sibling of `model` on `CreateAgentSessionOptions`. pi's native vocabulary already includes `off`, so no special-casing is needed there.
 
 ### pi-mono Specifics
 
@@ -443,3 +463,4 @@ Check the startup logs — the entrypoint prints `Harness Provider: <value>`. If
 - [Deployment Guide](/docs/guides/deployment) — Deploy agents to production with Docker Compose
 - [Getting Started](/docs/getting-started) — Initial setup including credential configuration
 - [Architecture Overview](/docs/architecture/overview) — How harnesses fit into the overall system
+- [Harness Providers](/docs/guides/harness-providers) — Engineering reference for the `ProviderAdapter` contract, including the reasoning/effort capability lookup and per-harness translation

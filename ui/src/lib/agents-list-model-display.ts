@@ -1,3 +1,4 @@
+import type { ReasoningEffortLevel } from "@/api/types";
 import { findKnownModel, type ProviderIconKey } from "./agent-runtime-models";
 
 export interface AgentModelDisplay {
@@ -5,6 +6,8 @@ export interface AgentModelDisplay {
   lastUsed: string | null;
   primary: string | null;
   diverged: boolean;
+  /** Last-reported reasoning/effort level (`cred_status.latestModel.reasoningEffort`). Absent when unset (harness-native default). */
+  reasoningEffort?: ReasoningEffortLevel;
 }
 
 export interface AgentModelPresentation {
@@ -12,6 +15,27 @@ export interface AgentModelPresentation {
   label: string;
   provider: string | null;
   providerId: ProviderIconKey | null;
+}
+
+/** Ordinal position of each level — used to size the `[|||]`-style badge (more bars = more effort). */
+const REASONING_EFFORT_BADGE_INDEX: Record<ReasoningEffortLevel, number> = {
+  off: 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+  xhigh: 4,
+};
+
+/**
+ * Compact ASCII badge for the agents-list Model column, e.g. `[|||]` for
+ * `high`. Bracketed pipes (not a bare repeated `.`) so it doesn't read as a
+ * data-grid truncation ellipsis. `undefined`/`"off"` render no badge — only
+ * a non-off configured level is visually distinct enough to warrant one.
+ */
+export function reasoningEffortBadge(level: ReasoningEffortLevel | undefined): string | null {
+  if (!level) return null;
+  const index = REASONING_EFFORT_BADGE_INDEX[level];
+  return index > 0 ? `[${"|".repeat(index)}]` : null;
 }
 
 function cleanModel(value: string | null | undefined): string | null {
@@ -37,6 +61,7 @@ export function getAgentModelPresentation(
 export function getAgentModelDisplay(
   configuredModel: string | null | undefined,
   lastUsedModel: string | null | undefined,
+  reasoningEffort?: ReasoningEffortLevel,
 ): AgentModelDisplay {
   const configured = cleanModel(configuredModel);
   const lastUsed = cleanModel(lastUsedModel);
@@ -47,6 +72,7 @@ export function getAgentModelDisplay(
       lastUsed,
       primary: lastUsed,
       diverged: false,
+      reasoningEffort,
     };
   }
 
@@ -56,6 +82,7 @@ export function getAgentModelDisplay(
       lastUsed,
       primary: configured,
       diverged: false,
+      reasoningEffort,
     };
   }
 
@@ -63,6 +90,7 @@ export function getAgentModelDisplay(
     configured,
     lastUsed,
     primary: configured,
+    reasoningEffort,
     diverged: true,
   };
 }

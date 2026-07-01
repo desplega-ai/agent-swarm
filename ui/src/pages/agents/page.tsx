@@ -69,6 +69,7 @@ export default function AgentsPage() {
         const display = getAgentModelDisplay(
           configuredModelByAgentId.get(agent.id),
           agent.credStatus?.latestModel?.model,
+          agent.credStatus?.latestModel?.reasoningEffort,
         );
         const primary = getAgentModelPresentation(display.primary);
         return [
@@ -87,6 +88,7 @@ export default function AgentsPage() {
         const display = getAgentModelDisplay(
           configuredModelByAgentId.get(agent.id),
           agent.credStatus?.latestModel?.model,
+          agent.credStatus?.latestModel?.reasoningEffort,
         );
         return <AgentModelCell display={display} />;
       },

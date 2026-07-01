@@ -6,13 +6,13 @@ branch: main
 repository: agent-swarm
 topic: "Agent reasoning/effort runtime control implementation plan (refresh)"
 tags: [plan, runtime-settings, harness-providers, ui, reasoning-effort]
-status: in-progress
+status: completed
 autonomy: critical
 commit_per_phase: true
 ref_baseline_commit: 0a5384918c152c626e4f957964671a38c69ee455
 supersedes: thoughts/taras/plans/2026-05-27-agent-reasoning-effort-runtime-control.md
 last_updated: 2026-07-01
-last_updated_by: Claude (Phase 5 execution)
+last_updated_by: Claude (Phase 6 execution)
 ---
 
 # Agent Reasoning/Effort Runtime Control Implementation Plan (Refresh)
@@ -435,13 +435,13 @@ Surface last-used effort in the two remaining read surfaces that already show `l
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] UI lint + types: `cd ui && pnpm lint && pnpm exec tsc -b`
-- [ ] No drift: `bun run docs:openapi && git diff --exit-code openapi.json docs-site/content/docs/api-reference/`
+- [x] UI lint + types: `cd ui && pnpm lint && pnpm exec tsc -b`
+- [x] No drift: `bun run docs:openapi && git diff --exit-code openapi.json docs-site/content/docs/api-reference/`
 
 #### Automated QA:
-- [ ] qa-use: navigate `/agents`, hover the harness cell of an agent that ran with `reasoning_effort: 'high'`, screenshot confirming the tooltip shows the effort row.
-- [ ] qa-use: navigate `/agents` list view, screenshot the Model column for an agent with `reasoning_effort: 'high'` set — confirm the `[|||]` badge renders next to the model name (not confusable with a truncation ellipsis) and the hover tooltip shows the full label.
-- [ ] Read the runbook + guide additions back to confirm they accurately describe each harness's behavior (cross-check with the research doc).
+- [ ] qa-use: navigate `/agents`, hover the harness cell of an agent that ran with `reasoning_effort: 'high'`, screenshot confirming the tooltip shows the effort row. (Skipped — no browser access in this session; also see `feedback_ui_tests_qa_use` memory: this repo's convention is Taras manual-QAs the SPA rather than automated qa-use sessions.)
+- [ ] qa-use: navigate `/agents` list view, screenshot the Model column for an agent with `reasoning_effort: 'high'` set — confirm the `[|||]` badge renders next to the model name (not confusable with a truncation ellipsis) and the hover tooltip shows the full label. (Skipped — same reason as above.)
+- [x] Read the runbook + guide additions back to confirm they accurately describe each harness's behavior (cross-checked against `thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md` and `src/providers/reasoning-effort.ts` — terminology, env var names, and gating rules all match).
 
 #### Manual Verification:
 - [ ] Skim the docs in browser preview; confirm code samples use the four normalized levels consistently.

@@ -51,6 +51,25 @@ When supported, validation happens in the `store-progress` MCP tool (see `src/to
 
 **Caveat for default-mode Devin:** `ensureTaskFinished` in `src/commands/runner.ts` writes Devin's `providerOutput` directly into `task.output` without schema validation. Callers consuming a schema'd task's output should not assume `JSON.parse(task.output)` will succeed when the task ran on default-mode Devin.
 
+## Reasoning / effort control
+
+`PATCH /api/agents/{id}/runtime` accepts an optional `reasoning_effort` field — a normalized, closed enum `off | low | medium | high | xhigh` — persisted as the agent-scoped `swarm_config` key `REASONING_EFFORT_OVERRIDE` (reloadable, same mechanism as `MODEL_OVERRIDE`). The runner resolves it independently of the model/`modelTier` axis and sets `ProviderSessionConfig.reasoningEffort`. `minimal` and `max` are intentionally out of scope for v1 (`minimal` is rejected by Codex `*-codex` models; `max` has known persistence bugs on Claude).
+
+`src/providers/reasoning-effort.ts` owns capability gating (`reasoningCapability(harness, model)`) and per-harness translation (`applyReasoningEffort(harness, model, level)`). Capability data is hybrid: the models.dev `reasoning_options` snapshot (`src/providers/modelsdev-reasoning.json`, derived from `src/be/modelsdev-cache.json` by `scripts/refresh-modelsdev-pricing.ts`) wins where present; otherwise a hand-authored `{low, medium, high}` fallback, plus a small harness-specific override table for quirks the cache doesn't encode. `PATCH /api/agents/{id}/runtime` validates the requested level against this lookup and 400s unsupported combos with `{ error, harness, model, level, allowed }`.
+
+When unset, every adapter behaves exactly as it does today — no fleet-wide default is injected.
+
+| Provider | Transport | Notes |
+|----------|-----------|-------|
+| `claude` | `CLAUDE_CODE_EFFORT_LEVEL` env var | `off` on a legacy budget_tokens-capable model sets `MAX_THINKING_TOKENS=0` instead (omits the effort env). No CLI flag — `--effort` is buggy in `-p` mode. **Precedence**: if an operator's `additionalArgs` includes `--effort`, the CLI flag wins over `CLAUDE_CODE_EFFORT_LEVEL` (Claude CLI's own precedence) — this is the existing "`additionalArgs` is an escape hatch" behavior, not special-cased. |
+| `codex` | `model_reasoning_effort` config field | `off` maps to `'none'`. `show_raw_agent_reasoning` stays pinned `false` regardless — operators setting `high` pay for reasoning tokens (visible in `reasoning_output_tokens` cost telemetry) but get no visible reasoning trace in the dashboard. `*-codex` (non-`max`) models reject `xhigh`; `*-codex-max` models accept it. |
+| `pi` | `thinkingLevel` session option | Top-level sibling of `model` on `CreateAgentSessionOptions`; native vocabulary already includes `off`. |
+| `opencode` | Provider-keyed `options` in the per-task `opencode.json` | `anthropic/*` models: `thinking.budgetTokens` (internal numeric translation — not a user-facing knob). `openrouter/*` models: `reasoning.effort`. OpenAI-compatible models: `reasoningEffort`. `off` omits reasoning keys entirely (noop) — Opencode has no explicit off switch. |
+
+The adapter's actually-applied level flows back through `ProviderResult.appliedReasoningEffort` (`null` on a capability-rejected noop) into `agents.cred_status.latestModel.reasoningEffort`, surfaced in the dashboard's runtime editor, the `HarnessCell` tooltip, and the agents-list Model column (`[|||]`-style badge, more bars = higher effort).
+
+Refs: [reasoning-effort runtime control research](../thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md).
+
 ## pi-mono + Amazon Bedrock auth
 
 ### Mode selection

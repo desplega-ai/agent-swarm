@@ -245,6 +245,23 @@ Tasks may carry an optional JSON Schema on `outputSchema` that the agent's final
 
 The primary enforcement point is the MCP `store-progress` tool: a non-conforming output fails the tool call and the agent is asked to retry. For providers that return direct `providerOutput` to the runner, `ensureTaskFinished()` now performs the same JSON-parse + schema-validation check before persisting `task.output`; if validation fails, the task is marked failed instead of silently storing invalid structured output.
 
+### Reasoning / effort control
+
+`PATCH /api/agents/{id}/runtime` accepts an optional `reasoning_effort` field — a normalized, closed enum `off | low | medium | high | xhigh` — persisted like `MODEL_OVERRIDE` as the agent-scoped `swarm_config` key `REASONING_EFFORT_OVERRIDE`. The runner resolves it independently of the model/`modelTier` axis and populates `ProviderSessionConfig.reasoningEffort`; when unset, every adapter behaves exactly as it does today (no fleet-wide default is injected). `minimal` and `max` are intentionally excluded from v1 — `minimal` is rejected by Codex `*-codex` models, and `max` has known persistence bugs on Claude.
+
+`src/providers/reasoning-effort.ts` owns capability gating (`reasoningCapability(harness, model)`) and per-harness translation (`applyReasoningEffort(harness, model, level)`, a discriminated union telling each adapter what to merge). Capability data is hybrid: the models.dev `reasoning_options` snapshot (`src/providers/modelsdev-reasoning.json`, derived from the canonical `src/be/modelsdev-cache.json`) wins where present; otherwise a hand-authored `{low, medium, high}` fallback, plus a small harness-specific override table for quirks the cache doesn't encode. The runtime route validates the requested level against this lookup and 400s unsupported combos with `{ error, harness, model, level, allowed }`.
+
+| Provider | Transport | Notes |
+|----------|-----------|-------|
+| `claude` | `CLAUDE_CODE_EFFORT_LEVEL` env var | `off` on a legacy budget_tokens-capable model sets `MAX_THINKING_TOKENS=0` instead (the effort env is omitted). No CLI flag is used — `--effort` is buggy in `-p` mode. **Precedence**: if an operator's `additionalArgs` includes `--effort`, the CLI flag wins over `CLAUDE_CODE_EFFORT_LEVEL` (Claude CLI's own precedence) — the existing "`additionalArgs` is an escape hatch" behavior, not special-cased here. |
+| `codex` | `model_reasoning_effort` config field | `off` maps to `'none'`. `show_raw_agent_reasoning` stays pinned `false` regardless of the effort level — setting `high` costs reasoning tokens (visible via `reasoning_output_tokens` cost telemetry) but produces no visible reasoning trace in the dashboard. `*-codex` (non-`max`) models reject `xhigh`; `*-codex-max` models accept it. |
+| `pi` | `thinkingLevel` session option | Top-level sibling of `model` on `CreateAgentSessionOptions`; pi's native vocabulary already includes `off`. |
+| `opencode` | Provider-keyed `options` in the per-task `opencode.json` | `anthropic/*` models: `thinking.budgetTokens` (an internal numeric translation, not a user-facing knob). `openrouter/*` models: `reasoning.effort`. OpenAI-compatible models: `reasoningEffort`. `off` omits reasoning keys entirely (a noop application) — Opencode has no explicit off switch. |
+
+Each adapter reports the level it actually applied via `ProviderResult.appliedReasoningEffort` (`null` when `applyReasoningEffort()` returned a capability-rejected noop). The runner forwards that into `agents.cred_status.latestModel.reasoningEffort`, which the dashboard surfaces in the agent runtime editor, the harness credential-status tooltip, and the agents-list Model column (a compact `[|||]`-style badge — more bars mean higher effort).
+
+See [`thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md`](https://github.com/desplega-ai/agent-swarm/blob/main/thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md) for the full cross-harness normalization derivation.
+
 ---
 
 ## 3. How a harness run fits into a task lifecycle

@@ -168,6 +168,13 @@ function CredBreakdown({
             </>
           ) : null}
 
+          {credStatus.latestModel?.reasoningEffort ? (
+            <>
+              <dt className="opacity-60">Effort</dt>
+              <dd className="font-mono">{credStatus.latestModel.reasoningEffort}</dd>
+            </>
+          ) : null}
+
           {credStatus.missing && credStatus.missing.length > 0 ? (
             <>
               <dt className="opacity-60">Missing</dt>
