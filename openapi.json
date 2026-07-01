@@ -7219,6 +7219,25 @@
                       "one_time"
                     ]
                   },
+                  "targetType": {
+                    "type": "string",
+                    "enum": [
+                      "agent-task",
+                      "workflow",
+                      "script"
+                    ]
+                  },
+                  "workflowId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "scriptName": {
+                    "type": "string"
+                  },
+                  "scriptArgs": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
                   "delayMs": {
                     "type": "integer"
                   },
@@ -7227,8 +7246,7 @@
                   }
                 },
                 "required": [
-                  "name",
-                  "taskTemplate"
+                  "name"
                 ]
               }
             }
@@ -7288,6 +7306,36 @@
             },
             "required": false,
             "name": "scheduleType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "agent-task",
+                "workflow",
+                "script"
+              ]
+            },
+            "required": false,
+            "name": "targetType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "workflowId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scriptName",
             "in": "query"
           },
           {
@@ -7477,6 +7525,34 @@
                       "string",
                       "null"
                     ]
+                  },
+                  "targetType": {
+                    "type": "string",
+                    "enum": [
+                      "agent-task",
+                      "workflow",
+                      "script"
+                    ]
+                  },
+                  "workflowId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uuid"
+                  },
+                  "scriptName": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "scriptArgs": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": {}
                   }
                 }
               }
@@ -10984,6 +11060,36 @@
             },
             "required": false,
             "name": "hideCompleted",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "agent-task",
+                "workflow",
+                "script"
+              ]
+            },
+            "required": false,
+            "name": "targetType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "workflowId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scriptName",
             "in": "query"
           }
         ],
