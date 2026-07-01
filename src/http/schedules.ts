@@ -6,17 +6,16 @@ import {
   createScheduledTask,
   deleteScheduledTask,
   getAgentById,
-  getDb,
   getScheduledTaskById,
   getScheduledTaskByName,
   getScheduledTasks,
+  getWorkflow,
   updateScheduledTask,
 } from "../be/db";
 import { mergeScheduleTiming, validateRecurringTiming } from "../be/schedules/validate";
-import { calculateNextRun, createStandaloneScheduleTask } from "../scheduler/scheduler";
-import { ModelTierSchema, splitLegacyModelAlias } from "../types";
-import { getExecutorRegistry } from "../workflows";
-import { handleScheduleTrigger } from "../workflows/triggers";
+import { getScript } from "../be/scripts/db";
+import { calculateNextRun, dispatchScheduleTarget } from "../scheduler/scheduler";
+import { ModelTierSchema, ScheduledTaskTargetTypeSchema, splitLegacyModelAlias } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -33,7 +32,7 @@ const createSchedule = route({
     description: z.string().optional(),
     cronExpression: z.string().optional(),
     intervalMs: z.number().int().optional(),
-    taskTemplate: z.string().min(1),
+    taskTemplate: z.string().min(1).optional(),
     taskType: z.string().optional(),
     tags: z.array(z.string()).optional(),
     priority: z.number().int().optional(),
@@ -43,6 +42,10 @@ const createSchedule = route({
     model: z.string().optional(),
     modelTier: ModelTierSchema.optional(),
     scheduleType: z.enum(["recurring", "one_time"]).optional(),
+    targetType: ScheduledTaskTargetTypeSchema.optional(),
+    workflowId: z.string().uuid().optional(),
+    scriptName: z.string().optional(),
+    scriptArgs: z.record(z.string(), z.unknown()).optional(),
     delayMs: z.number().int().optional(),
     runAt: z.string().optional(),
   }),
@@ -82,6 +85,9 @@ const listSchedules = route({
       .transform((v) => (v === undefined ? undefined : v === "true")),
     name: z.string().optional(),
     scheduleType: z.enum(["recurring", "one_time"]).optional(),
+    targetType: ScheduledTaskTargetTypeSchema.optional(),
+    workflowId: z.string().uuid().optional(),
+    scriptName: z.string().optional(),
     hideCompleted: z
       .enum(["true", "false"])
       .optional()
@@ -129,6 +135,10 @@ const updateSchedule = route({
     model: z.string().optional(),
     modelTier: ModelTierSchema.nullable().optional(),
     nextRunAt: z.string().nullable().optional(),
+    targetType: ScheduledTaskTargetTypeSchema.optional(),
+    workflowId: z.string().uuid().nullable().optional(),
+    scriptName: z.string().nullable().optional(),
+    scriptArgs: z.record(z.string(), z.unknown()).nullable().optional(),
   }),
   responses: {
     200: { description: "Schedule updated" },
@@ -167,6 +177,9 @@ export async function handleSchedules(
       enabled: parsed.query.enabled,
       name: parsed.query.name,
       scheduleType: parsed.query.scheduleType,
+      targetType: parsed.query.targetType,
+      workflowId: parsed.query.workflowId,
+      scriptName: parsed.query.scriptName,
       hideCompleted: parsed.query.hideCompleted,
     };
     // List responses default to slim (no full `taskTemplate`); `?fields=full` restores it.
@@ -241,6 +254,32 @@ export async function handleSchedules(
       }
     }
 
+    const targetType = body.targetType ?? "agent-task";
+    if (targetType === "agent-task" && !body.taskTemplate) {
+      jsonError(res, "taskTemplate is required when targetType is 'agent-task'.", 400);
+      return true;
+    }
+    if (targetType === "workflow") {
+      if (!body.workflowId) {
+        jsonError(res, "workflowId is required when targetType is 'workflow'.", 400);
+        return true;
+      }
+      if (!getWorkflow(body.workflowId)) {
+        jsonError(res, `Workflow not found: ${body.workflowId}`, 400);
+        return true;
+      }
+    }
+    if (targetType === "script") {
+      if (!body.scriptName) {
+        jsonError(res, "scriptName is required when targetType is 'script'.", 400);
+        return true;
+      }
+      if (!getScript({ name: body.scriptName, scope: "global" })) {
+        jsonError(res, `Script not found: ${body.scriptName}`, 400);
+        return true;
+      }
+    }
+
     try {
       let nextRunAt: string | undefined;
       if (body.enabled === false) {
@@ -274,6 +313,10 @@ export async function handleSchedules(
         timezone: body.timezone,
         ...splitLegacyModelAlias({ model: body.model, modelTier: body.modelTier }),
         scheduleType: body.scheduleType,
+        targetType: body.targetType,
+        workflowId: body.workflowId,
+        scriptName: body.scriptName,
+        scriptArgs: body.scriptArgs,
         createdBy: resolveHttpAuditUserId(req, myAgentId) ?? undefined,
       });
 
@@ -300,65 +343,27 @@ export async function handleSchedules(
     }
 
     try {
-      // Check if any workflows are linked to this schedule
-      let registry: ReturnType<typeof getExecutorRegistry> | null = null;
-      try {
-        registry = getExecutorRegistry();
-      } catch {
-        // Workflow engine not initialized — skip workflow check
-      }
+      const { workflowRunIds, task } = await dispatchScheduleTarget(schedule, ["manual-run"]);
 
-      if (registry) {
-        const runIds = await handleScheduleTrigger(schedule.id, schedule, registry);
-        if (runIds.length > 0) {
-          // Workflows triggered — update schedule state and return
-          const now = new Date().toISOString();
-          if (schedule.scheduleType === "one_time") {
-            updateScheduledTask(schedule.id, {
-              lastRunAt: now,
-              nextRunAt: null,
-              enabled: false,
-              lastUpdatedAt: now,
-            });
-          } else {
-            updateScheduledTask(schedule.id, {
-              lastRunAt: now,
-              lastUpdatedAt: now,
-            });
-          }
-          const updatedSchedule = getScheduledTaskById(parsed.params.id);
-          json(res, { schedule: updatedSchedule, workflowRunIds: runIds });
-          return true;
-        }
-      }
-
-      // No workflows linked — create standalone task (existing behavior)
       const now = new Date().toISOString();
-
-      const task = getDb().transaction(() => {
-        const createdTask = createStandaloneScheduleTask(schedule, ["manual-run"]);
-
-        if (schedule.scheduleType === "one_time") {
-          updateScheduledTask(schedule.id, {
-            lastRunAt: now,
-            nextRunAt: null,
-            enabled: false,
-            lastUpdatedAt: now,
-          });
-        } else {
-          updateScheduledTask(schedule.id, {
-            lastRunAt: now,
-            lastUpdatedAt: now,
-          });
-        }
-
-        return createdTask;
-      })();
+      if (schedule.scheduleType === "one_time") {
+        updateScheduledTask(schedule.id, {
+          lastRunAt: now,
+          nextRunAt: null,
+          enabled: false,
+          lastUpdatedAt: now,
+        });
+      } else {
+        updateScheduledTask(schedule.id, {
+          lastRunAt: now,
+          lastUpdatedAt: now,
+        });
+      }
 
       const updatedSchedule = getScheduledTaskById(parsed.params.id);
-      json(res, { schedule: updatedSchedule, task });
-    } catch (_error) {
-      jsonError(res, "Failed to run schedule", 500);
+      json(res, { schedule: updatedSchedule, workflowRunIds, task });
+    } catch (error) {
+      jsonError(res, error instanceof Error ? error.message : "Failed to run schedule", 500);
     }
     return true;
   }
@@ -433,6 +438,42 @@ export async function handleSchedules(
       const agent = getAgentById(parsed.body.targetAgentId);
       if (!agent) {
         jsonError(res, "Target agent not found", 400);
+        return true;
+      }
+    }
+
+    // Cross-field targetType validation — merge patch over existing, then
+    // check the target-specific field is present and (for workflow/script)
+    // resolves to a real row.
+    const mergedTargetType = parsed.body.targetType ?? existing.targetType;
+    const mergedTaskTemplate =
+      parsed.body.taskTemplate !== undefined ? parsed.body.taskTemplate : existing.taskTemplate;
+    const mergedWorkflowId =
+      parsed.body.workflowId !== undefined ? parsed.body.workflowId : existing.workflowId;
+    const mergedScriptName =
+      parsed.body.scriptName !== undefined ? parsed.body.scriptName : existing.scriptName;
+
+    if (mergedTargetType === "agent-task" && !mergedTaskTemplate) {
+      jsonError(res, "taskTemplate is required when targetType is 'agent-task'.", 400);
+      return true;
+    }
+    if (mergedTargetType === "workflow") {
+      if (!mergedWorkflowId) {
+        jsonError(res, "workflowId is required when targetType is 'workflow'.", 400);
+        return true;
+      }
+      if (!getWorkflow(mergedWorkflowId)) {
+        jsonError(res, `Workflow not found: ${mergedWorkflowId}`, 400);
+        return true;
+      }
+    }
+    if (mergedTargetType === "script") {
+      if (!mergedScriptName) {
+        jsonError(res, "scriptName is required when targetType is 'script'.", 400);
+        return true;
+      }
+      if (!getScript({ name: mergedScriptName, scope: "global" })) {
+        jsonError(res, `Script not found: ${mergedScriptName}`, 400);
         return true;
       }
     }

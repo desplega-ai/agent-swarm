@@ -580,10 +580,16 @@ class ApiClient {
   async fetchScheduledTasks(filters?: {
     enabled?: boolean;
     name?: string;
+    targetType?: ScheduledTask["targetType"];
+    workflowId?: string;
+    scriptName?: string;
   }): Promise<ScheduledTasksResponse> {
     const params = new URLSearchParams();
     if (filters?.enabled !== undefined) params.set("enabled", String(filters.enabled));
     if (filters?.name) params.set("name", filters.name);
+    if (filters?.targetType) params.set("targetType", filters.targetType);
+    if (filters?.workflowId) params.set("workflowId", filters.workflowId);
+    if (filters?.scriptName) params.set("scriptName", filters.scriptName);
     const queryString = params.toString();
     const url = `${this.getBaseUrl()}/api/scheduled-tasks${queryString ? `?${queryString}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
@@ -600,7 +606,11 @@ class ApiClient {
 
   async createSchedule(data: {
     name: string;
-    taskTemplate: string;
+    taskTemplate?: string;
+    targetType?: ScheduledTask["targetType"];
+    workflowId?: string;
+    scriptName?: string;
+    scriptArgs?: Record<string, unknown>;
     cronExpression?: string;
     intervalMs?: number;
     description?: string;

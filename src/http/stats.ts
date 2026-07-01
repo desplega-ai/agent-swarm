@@ -82,6 +82,9 @@ const listScheduledTasks = route({
     name: z.string().optional(),
     scheduleType: z.enum(["recurring", "one_time"]).optional(),
     hideCompleted: z.enum(["true", "false"]).optional(),
+    targetType: z.enum(["agent-task", "workflow", "script"]).optional(),
+    workflowId: z.string().uuid().optional(),
+    scriptName: z.string().optional(),
   }),
   responses: {
     200: { description: "Scheduled tasks list" },
@@ -178,6 +181,9 @@ export async function handleStats(
         parsed.query.hideCompleted !== undefined
           ? parsed.query.hideCompleted !== "false"
           : undefined,
+      targetType: parsed.query.targetType,
+      workflowId: parsed.query.workflowId,
+      scriptName: parsed.query.scriptName,
     });
     json(res, { scheduledTasks });
     return true;

@@ -4,7 +4,13 @@ import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useCreateSchedule, useScheduledTasks, useUpdateSchedule } from "@/api/hooks/use-schedules";
-import type { ScheduledTask } from "@/api/types";
+import type { ScheduledTask, ScheduledTaskTargetType } from "@/api/types";
+import {
+  EMPTY_SCHEDULE_TARGET,
+  isScheduleTargetInvalid,
+  ScheduleTargetFields,
+  type ScheduleTargetFormValue,
+} from "@/components/schedules/schedule-target-fields";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,16 +33,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { MODEL_TIER_OPTIONS, modelTierLabel } from "@/lib/model-tiers";
 import { describeCron, formatInterval } from "@/lib/schedule-format";
 import { formatSmartTime, formatUTCTime } from "@/lib/utils";
 
-interface ScheduleFormData {
+interface ScheduleFormData extends ScheduleTargetFormValue {
   name: string;
-  taskTemplate: string;
   scheduleType: "cron" | "interval";
   cronExpression: string;
   intervalMinutes: number;
@@ -53,7 +57,7 @@ interface ScheduleFormData {
 
 const emptyScheduleForm: ScheduleFormData = {
   name: "",
-  taskTemplate: "",
+  ...EMPTY_SCHEDULE_TARGET,
   scheduleType: "cron",
   cronExpression: "",
   intervalMinutes: 60,
@@ -109,16 +113,7 @@ function ScheduleDialog({
                 required
               />
             </div>
-            <div className="space-y-2">
-              <Label>Task Template *</Label>
-              <Textarea
-                placeholder="Task description template..."
-                value={form.taskTemplate}
-                onChange={(e) => setForm({ ...form, taskTemplate: e.target.value })}
-                required
-                rows={3}
-              />
-            </div>
+            <ScheduleTargetFields value={form} onChange={(next) => setForm({ ...form, ...next })} />
             <div className="space-y-2">
               <Label>Schedule Type</Label>
               <div className="flex gap-2">
@@ -282,7 +277,7 @@ function ScheduleDialog({
             <Button
               type="submit"
               className="bg-primary hover:bg-primary/90"
-              disabled={!form.name.trim() || !form.taskTemplate.trim()}
+              disabled={!form.name.trim() || isScheduleTargetInvalid(form)}
             >
               {editData ? "Update" : "Create"}
             </Button>
@@ -310,7 +305,13 @@ export default function SchedulesPage() {
       .filter(Boolean);
     createSchedule.mutate({
       name: data.name,
-      taskTemplate: data.taskTemplate,
+      targetType: data.targetType,
+      ...(data.targetType === "agent-task" && { taskTemplate: data.taskTemplate }),
+      ...(data.targetType === "workflow" && { workflowId: data.workflowId }),
+      ...(data.targetType === "script" && {
+        scriptName: data.scriptName,
+        scriptArgs: data.scriptArgsText.trim() ? JSON.parse(data.scriptArgsText) : undefined,
+      }),
       ...(data.scheduleType === "cron"
         ? { cronExpression: data.cronExpression }
         : { intervalMs: data.intervalMinutes * 60 * 1000 }),
@@ -367,6 +368,20 @@ export default function SchedulesPage() {
             }`}
           >
             {params.value === "one_time" ? "One-time" : "Recurring"}
+          </Badge>
+        ),
+      },
+      {
+        field: "targetType",
+        headerName: "Target",
+        width: 110,
+        cellRenderer: (params: { value?: ScheduledTaskTargetType }) => (
+          <Badge variant="outline" size="tag">
+            {params.value === "workflow"
+              ? "Workflow"
+              : params.value === "script"
+                ? "Script"
+                : "Agent Task"}
           </Badge>
         ),
       },

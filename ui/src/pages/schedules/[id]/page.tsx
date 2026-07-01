@@ -8,8 +8,16 @@ import {
   useScheduledTask,
   useUpdateSchedule,
 } from "@/api/hooks/use-schedules";
+import { useScripts } from "@/api/hooks/use-scripts";
 import { useTasks } from "@/api/hooks/use-tasks";
-import type { AgentTask } from "@/api/types";
+import { useWorkflows } from "@/api/hooks/use-workflows";
+import type { AgentTask, ScheduledTask } from "@/api/types";
+import {
+  EMPTY_SCHEDULE_TARGET,
+  isScheduleTargetInvalid,
+  ScheduleTargetFields,
+  type ScheduleTargetFormValue,
+} from "@/components/schedules/schedule-target-fields";
 import {
   ignoreRowClickFromInteractives,
   TasksColumnsMenu,
@@ -58,7 +66,6 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import { MODEL_TIER_OPTIONS, modelTierLabel } from "@/lib/model-tiers";
 import { describeCron, formatInterval } from "@/lib/schedule-format";
 import { formatSmartTime, formatUTCTime } from "@/lib/utils";
@@ -114,6 +121,8 @@ export default function ScheduleDetailPage() {
   const navigate = useNavigate();
   const { data: schedule, isLoading } = useScheduledTask(id!);
   const { data: agents } = useAgents();
+  const { data: workflows } = useWorkflows();
+  const { data: scripts } = useScripts({ scope: "global" });
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
   const runNow = useRunScheduleNow();
@@ -131,6 +140,15 @@ export default function ScheduleDetailPage() {
     });
     return m;
   }, [agents]);
+
+  const linkedWorkflow = useMemo(
+    () => workflows?.find((w) => w.id === schedule?.workflowId),
+    [workflows, schedule?.workflowId],
+  );
+  const linkedScript = useMemo(
+    () => scripts?.find((s) => s.name === schedule?.scriptName),
+    [scripts, schedule?.scriptName],
+  );
 
   if (isLoading) {
     return (
@@ -178,6 +196,13 @@ export default function ScheduleDetailPage() {
           }`}
         >
           {schedule.scheduleType === "one_time" ? "One-time" : "Recurring"}
+        </Badge>
+        <Badge variant="outline" size="tag">
+          {schedule.targetType === "workflow"
+            ? "Workflow"
+            : schedule.targetType === "script"
+              ? "Script"
+              : "Agent Task"}
         </Badge>
         {schedule.taskType && (
           <Badge variant="outline" size="tag">
@@ -361,16 +386,50 @@ export default function ScheduleDetailPage() {
                 </Card>
               </div>
 
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm text-muted-foreground">Task Template</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed rounded-md bg-muted p-3 text-muted-foreground">
-                    {schedule.taskTemplate}
-                  </pre>
-                </CardContent>
-              </Card>
+              {schedule.targetType === "workflow" ? (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm text-muted-foreground">Linked Workflow</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {schedule.workflowId ? (
+                      <Link
+                        to={`/workflows/${schedule.workflowId}`}
+                        className="text-sm text-primary hover:underline"
+                      >
+                        {linkedWorkflow?.name ?? `${schedule.workflowId.slice(0, 8)}…`}
+                      </Link>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No workflow linked.</p>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : schedule.targetType === "script" ? (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm text-muted-foreground">Linked Script</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <p className="text-sm font-mono">{schedule.scriptName ?? "—"}</p>
+                    {schedule.scriptArgs && Object.keys(schedule.scriptArgs).length > 0 && (
+                      <pre className="whitespace-pre-wrap text-xs font-mono leading-relaxed rounded-md bg-muted p-3 text-muted-foreground">
+                        {JSON.stringify(schedule.scriptArgs, null, 2)}
+                      </pre>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm text-muted-foreground">Task Template</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed rounded-md bg-muted p-3 text-muted-foreground">
+                      {schedule.taskTemplate}
+                    </pre>
+                  </CardContent>
+                </Card>
+              )}
             </TabsContent>
 
             <TabsContent value="tasks">{id && <ScheduleTasks scheduleId={id} />}</TabsContent>
@@ -405,11 +464,27 @@ export default function ScheduleDetailPage() {
               <QuickStat label="Created" value={formatSmartTime(schedule.createdAt)} />
             </QuickStats>
 
-            {schedule.targetAgentId && (
+            {(schedule.targetAgentId || schedule.workflowId || schedule.scriptName) && (
               <Relationships>
-                <Relationship label="Target Agent" to={`/agents/${schedule.targetAgentId}`}>
-                  {agentMap.get(schedule.targetAgentId) ?? `${schedule.targetAgentId.slice(0, 8)}…`}
-                </Relationship>
+                {schedule.targetAgentId && (
+                  <Relationship label="Target Agent" to={`/agents/${schedule.targetAgentId}`}>
+                    {agentMap.get(schedule.targetAgentId) ??
+                      `${schedule.targetAgentId.slice(0, 8)}…`}
+                  </Relationship>
+                )}
+                {schedule.workflowId && (
+                  <Relationship label="Workflow" to={`/workflows/${schedule.workflowId}`}>
+                    {linkedWorkflow?.name ?? `${schedule.workflowId.slice(0, 8)}…`}
+                  </Relationship>
+                )}
+                {schedule.scriptName && (
+                  <Relationship
+                    label="Script"
+                    to={linkedScript ? `/scripts/${linkedScript.id}` : "#"}
+                  >
+                    {schedule.scriptName}
+                  </Relationship>
+                )}
               </Relationships>
             )}
           </DetailPageRail>
@@ -464,27 +539,22 @@ function EditScheduleDialog({
   onOpenChange,
   onSubmit,
 }: {
-  schedule: {
-    name: string;
-    taskTemplate: string;
-    cronExpression?: string;
-    intervalMs?: number;
-    description?: string;
-    taskType?: string;
-    tags: string[];
-    priority: number;
-    targetAgentId?: string;
-    timezone: string;
-    model?: string;
-    modelTier?: string;
-  };
+  schedule: ScheduledTask;
   agents: { id: string; name: string; isLead?: boolean }[] | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (data: Record<string, unknown>) => void;
 }) {
   const [name, setName] = useState(schedule.name);
-  const [taskTemplate, setTaskTemplate] = useState(schedule.taskTemplate);
+  const [target, setTarget] = useState<ScheduleTargetFormValue>({
+    targetType: schedule.targetType ?? "agent-task",
+    taskTemplate: schedule.taskTemplate ?? EMPTY_SCHEDULE_TARGET.taskTemplate,
+    workflowId: schedule.workflowId ?? EMPTY_SCHEDULE_TARGET.workflowId,
+    scriptName: schedule.scriptName ?? EMPTY_SCHEDULE_TARGET.scriptName,
+    scriptArgsText: schedule.scriptArgs
+      ? JSON.stringify(schedule.scriptArgs, null, 2)
+      : EMPTY_SCHEDULE_TARGET.scriptArgsText,
+  });
   const [cronExpression, setCronExpression] = useState(schedule.cronExpression ?? "");
   const [intervalMinutes, setIntervalMinutes] = useState(
     schedule.intervalMs ? schedule.intervalMs / 60000 : 60,
@@ -509,7 +579,14 @@ function EditScheduleDialog({
       .filter(Boolean);
     onSubmit({
       name,
-      taskTemplate,
+      targetType: target.targetType,
+      taskTemplate: target.targetType === "agent-task" ? target.taskTemplate : null,
+      workflowId: target.targetType === "workflow" ? target.workflowId : null,
+      scriptName: target.targetType === "script" ? target.scriptName : null,
+      scriptArgs:
+        target.targetType === "script" && target.scriptArgsText.trim()
+          ? JSON.parse(target.scriptArgsText)
+          : null,
       ...(scheduleType === "cron"
         ? { cronExpression, intervalMs: null }
         : { intervalMs: intervalMinutes * 60000, cronExpression: null }),
@@ -537,15 +614,7 @@ function EditScheduleDialog({
               <Label>Name *</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} required />
             </div>
-            <div className="space-y-2">
-              <Label>Task Template *</Label>
-              <Textarea
-                value={taskTemplate}
-                onChange={(e) => setTaskTemplate(e.target.value)}
-                required
-                rows={3}
-              />
-            </div>
+            <ScheduleTargetFields value={target} onChange={setTarget} />
             <div className="space-y-2">
               <Label>Schedule Type</Label>
               <div className="flex gap-2">
@@ -678,7 +747,7 @@ function EditScheduleDialog({
             <Button
               type="submit"
               className="bg-primary hover:bg-primary/90"
-              disabled={!name.trim() || !taskTemplate.trim()}
+              disabled={!name.trim() || isScheduleTargetInvalid(target)}
             >
               Update
             </Button>
