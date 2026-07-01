@@ -1612,7 +1612,7 @@ describe("AgentMail Webhooks (disabled)", () => {
 });
 
 describe("AgentMail Webhooks (with filters)", () => {
-  const AGENTMAIL_PORT = 19877;
+  const AGENTMAIL_PORT = 19877 + 8; // avoid colliding with page-proxy route tests
   const AGENTMAIL_DB = `/tmp/test-agentmail-${Date.now()}.sqlite`;
   const AGENTMAIL_BASE = `http://localhost:${AGENTMAIL_PORT}`;
   const WEBHOOK_SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"; // test-only secret

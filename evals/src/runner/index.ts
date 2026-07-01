@@ -7,6 +7,7 @@ import {
   insertAttempt,
   insertJudgment,
   listAttempts,
+  listRuns,
   listUnfinishedAttempts,
   setRunStatus,
   updateAttempt,
@@ -501,6 +502,41 @@ export async function killRunStacks(runId: string): Promise<void> {
 export async function killAllActiveStacks(): Promise<void> {
   const runIds = [...activeStacksByRun.keys()];
   await Promise.allSettled(runIds.map((id) => killRunStacks(id)));
+}
+
+type RunSandboxSweeper = typeof sweepRunSandboxes;
+type RunnerLog = (msg: string) => void;
+
+/**
+ * A fresh server process has an empty active-runs map. Any DB row still marked
+ * running at boot is therefore orphaned by a previous process and must not stay
+ * permanently un-cancellable.
+ */
+export async function reconcileOrphanedRuns(
+  db: Client,
+  log: RunnerLog = (msg) => console.log(msg),
+  sweep: RunSandboxSweeper = sweepRunSandboxes,
+): Promise<number> {
+  const orphanedRuns = (await listRuns(db)).filter((run) => run.status === "running");
+  for (const run of orphanedRuns) {
+    const swept = await sweep(run.id, log);
+    await setRunStatus(db, run.id, "failed");
+    log(
+      `run ${run.id} was left "running" by a previous process (orphaned) - swept ${swept} sandbox(es), marked failed. POST /api/runs/${run.id}/resume to continue it.`,
+    );
+  }
+  return orphanedRuns.length;
+}
+
+export async function forceCancelInactiveRun(
+  db: Client,
+  runId: string,
+  log: RunnerLog = (msg) => console.log(msg),
+  sweep: RunSandboxSweeper = sweepRunSandboxes,
+): Promise<number> {
+  const swept = await sweep(runId, log);
+  await setRunStatus(db, runId, "cancelled");
+  return swept;
 }
 
 export function attemptId(

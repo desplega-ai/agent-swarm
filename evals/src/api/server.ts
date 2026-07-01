@@ -20,7 +20,13 @@ import { getJudgeLive } from "../judge/live-registry.ts";
 import { getAttemptProgress } from "../live/attempt-progress.ts";
 import { loadRegistry, serializeConfig, serializeScenario } from "../registry.ts";
 import { summarizeRun } from "../results.ts";
-import { executeRun, killAllActiveStacks, killRunStacks } from "../runner/index.ts";
+import {
+  executeRun,
+  forceCancelInactiveRun,
+  killAllActiveStacks,
+  killRunStacks,
+  reconcileOrphanedRuns,
+} from "../runner/index.ts";
 import { type SessionLogRow, SwarmClient } from "../swarm/client.ts";
 import { cleanVersion } from "../swarm/version.ts";
 import {
@@ -63,6 +69,7 @@ interface RawSessionLogLine {
 
 /** Attempt statuses for which a live sandbox may still be producing logs. */
 const LIVE_ATTEMPT_STATUSES = new Set(["pending", "running", "judging"]);
+const TERMINAL_RUN_STATUSES = new Set(["done", "failed", "cancelled"]);
 
 const LIVE_FETCH_TIMEOUT_MS = 8_000;
 
@@ -497,9 +504,21 @@ function warnIfApiOpen(): void {
   console.warn("WARNING: EVALS_API_KEY is unset; /api/* is open. Set it before deployment.");
 }
 
-export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801)) {
+export async function startServer(
+  port = Number(process.env.EVALS_PORT ?? 4801),
+  opts: {
+    reconcileOrphanedRuns?: typeof reconcileOrphanedRuns;
+    forceCancelInactiveRun?: typeof forceCancelInactiveRun;
+  } = {},
+) {
   await initDb();
   const db = getDb();
+  const reconcile = opts.reconcileOrphanedRuns ?? reconcileOrphanedRuns;
+  const forceCancel = opts.forceCancelInactiveRun ?? forceCancelInactiveRun;
+  const reconciled = await reconcile(db, (msg) => console.log(`[orphan-reconcile] ${msg}`));
+  if (reconciled > 0) {
+    console.log(`[orphan-reconcile] reconciled ${reconciled} orphaned run(s)`);
+  }
   warnIfApiOpen();
 
   const server = Bun.serve({
@@ -598,7 +617,13 @@ export async function startServer(port = Number(process.env.EVALS_PORT ?? 4801))
           const run = await getRun(db, req.params.id);
           if (!run) return json({ error: "run not found" }, 404);
           const controller = activeRuns.get(run.id);
-          if (!controller) return json({ error: "run is not executing in this server" }, 409);
+          if (!controller) {
+            if (TERMINAL_RUN_STATUSES.has(run.status)) {
+              return json({ error: `run is already ${run.status}` }, 409);
+            }
+            const swept = await forceCancel(db, run.id, (msg) => console.log(`[${run.id}] ${msg}`));
+            return json({ runId: run.id, cancelled: true, forced: true, swept }, 202);
+          }
           controller.abort();
           await killRunStacks(run.id);
           return json({ runId: run.id, cancelled: true }, 202);

@@ -48,6 +48,7 @@ import {
   closeIdleMcpTransports,
   DEFAULT_MCP_TRANSPORT_IDLE_TIMEOUT_MS,
   handleMcp,
+  type McpSessionAgents,
   type McpTransportActivity,
 } from "./mcp";
 import { handleMcpBridge } from "./mcp-bridge";
@@ -104,6 +105,7 @@ const apiKey = getApiKey();
 const globalState = globalThis as typeof globalThis & {
   __httpServer?: Server<typeof IncomingMessage, typeof ServerResponse>;
   __transports?: Record<string, StreamableHTTPServerTransport>;
+  __mcpSessionAgents?: McpSessionAgents;
   __transportsUser?: Record<string, StreamableHTTPServerTransport>;
   __sessionUsers?: Record<string, string>;
   __transportActivity?: McpTransportActivity;
@@ -149,6 +151,9 @@ function startApiGcInterval() {
     const closedOwnerTransports = closeIdleMcpTransports(transports, transportActivity, {
       idleTimeoutMs: MCP_TRANSPORT_IDLE_TIMEOUT_MS,
       label: "MCP",
+      onClose: (id) => {
+        delete mcpSessionAgents[id];
+      },
     });
     const closedUserTransports = closeIdleMcpUserTransports(
       transportsUser,
@@ -174,6 +179,7 @@ if (globalState.__httpServer) {
 }
 
 const transports: Record<string, StreamableHTTPServerTransport> = globalState.__transports ?? {};
+const mcpSessionAgents: McpSessionAgents = globalState.__mcpSessionAgents ?? {};
 const transportsUser: Record<string, StreamableHTTPServerTransport> =
   globalState.__transportsUser ?? {};
 const sessionUsers: Record<string, string> = globalState.__sessionUsers ?? {};
@@ -320,7 +326,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleSessions(req, res, pathSegments, queryParams),
         () => handleInboxState(req, res, pathSegments, queryParams),
         () => handleTaskTemplates(req, res, pathSegments, queryParams),
-        () => handleMcp(req, res, transports, transportActivity),
+        () => handleMcp(req, res, transports, transportActivity, mcpSessionAgents),
         () => handleMcpUser(req, res, transportsUser, sessionUsers, transportActivityUser),
       ];
 
@@ -362,6 +368,7 @@ const httpServer = createHttpServer(async (req, res) => {
 globalState.__httpServer = httpServer;
 globalState.__transports = transports;
 globalState.__transportsUser = transportsUser;
+globalState.__mcpSessionAgents = mcpSessionAgents;
 globalState.__sessionUsers = sessionUsers;
 globalState.__transportActivity = transportActivity;
 globalState.__transportActivityUser = transportActivityUser;
@@ -411,6 +418,7 @@ async function shutdown() {
     console.log(`[HTTP] Closing transport ${id}`);
     transport.close();
     delete transports[id];
+    delete mcpSessionAgents[id];
     delete transportActivity[id];
   }
 

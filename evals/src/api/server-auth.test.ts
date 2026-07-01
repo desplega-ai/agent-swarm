@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { resetDbForTests } from "../db/client.ts";
+import { getDb, resetDbForTests } from "../db/client.ts";
+import { createRun, getRun, setRunStatus } from "../db/queries.ts";
 import { addActiveRunForTests, resetActiveRunsForTests, startServer } from "./server.ts";
 
 const ENV_KEYS = [
@@ -89,6 +90,41 @@ describe("evals API auth and run cap", () => {
       expect(body.error).toContain("max concurrent eval runs reached");
       expect(body.activeRuns).toBe(1);
       expect(body.maxConcurrentRuns).toBe(1);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("POST /api/runs/:id/cancel force-cancels an inactive running run", async () => {
+    const server = await startServer(0, {
+      forceCancelInactiveRun: async (db, runId) => {
+        await setRunStatus(db, runId, "cancelled");
+        return 3;
+      },
+    });
+    try {
+      const db = getDb();
+      await createRun(db, {
+        id: "run-orphaned",
+        scenarioIds: ["scenario-a"],
+        configIds: ["config-a"],
+        attemptsPerCell: 1,
+        concurrency: 1,
+      });
+      await setRunStatus(db, "run-orphaned", "running");
+
+      const res = await fetch(`${baseUrl(server)}/api/runs/run-orphaned/cancel`, {
+        method: "POST",
+      });
+
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({
+        runId: "run-orphaned",
+        cancelled: true,
+        forced: true,
+        swept: 3,
+      });
+      expect((await getRun(db, "run-orphaned"))?.status).toBe("cancelled");
     } finally {
       server.stop(true);
     }
