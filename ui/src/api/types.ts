@@ -732,13 +732,15 @@ export interface AgentUsageSummary {
   sessionCount: number;
 }
 
+export type ScheduledTaskTargetType = "agent-task" | "workflow" | "script";
+
 export interface ScheduledTask {
   id: string;
   name: string;
   description?: string;
   cronExpression?: string;
   intervalMs?: number;
-  taskTemplate: string;
+  taskTemplate?: string;
   taskType?: string;
   tags: string[];
   priority: number;
@@ -751,6 +753,10 @@ export interface ScheduledTask {
   model?: string;
   modelTier?: ModelTier;
   scheduleType?: "recurring" | "one_time";
+  targetType?: ScheduledTaskTargetType;
+  workflowId?: string;
+  scriptName?: string;
+  scriptArgs?: Record<string, unknown>;
   createdAt: string;
   lastUpdatedAt: string;
 }

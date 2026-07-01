@@ -1031,6 +1031,9 @@ export type SwarmEvent = z.infer<typeof SwarmEventSchema>;
 // Scheduled Task Types
 // ============================================================================
 
+export const ScheduledTaskTargetTypeSchema = z.enum(["agent-task", "workflow", "script"]);
+export type ScheduledTaskTargetType = z.infer<typeof ScheduledTaskTargetTypeSchema>;
+
 export const ScheduledTaskSchema = z
   .object({
     id: z.uuid(),
@@ -1038,7 +1041,7 @@ export const ScheduledTaskSchema = z
     description: z.string().optional(),
     cronExpression: z.string().optional(),
     intervalMs: z.number().int().positive().optional(),
-    taskTemplate: z.string().min(1),
+    taskTemplate: z.string().optional(),
     taskType: z.string().max(50).optional(),
     tags: z.array(z.string()).default([]),
     priority: z.number().int().min(0).max(100).default(50),
@@ -1054,6 +1057,10 @@ export const ScheduledTaskSchema = z
     model: z.string().optional(),
     modelTier: ModelTierSchema.optional(),
     scheduleType: z.enum(["recurring", "one_time"]).default("recurring"),
+    targetType: ScheduledTaskTargetTypeSchema.default("agent-task"),
+    workflowId: z.uuid().optional(),
+    scriptName: z.string().optional(),
+    scriptArgs: z.record(z.string(), z.unknown()).optional(),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
     createdBy: z.string().optional(),
@@ -1066,6 +1073,23 @@ export const ScheduledTaskSchema = z
     },
     {
       message: "Either cronExpression or intervalMs must be provided for recurring schedules",
+    },
+  )
+  .refine(
+    (data) => {
+      switch (data.targetType) {
+        case "agent-task":
+          return !!data.taskTemplate;
+        case "workflow":
+          return !!data.workflowId;
+        case "script":
+          return !!data.scriptName;
+        default:
+          return true;
+      }
+    },
+    {
+      message: "Target-type specific field is required (taskTemplate, workflowId, or scriptName)",
     },
   );
 

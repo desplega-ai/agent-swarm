@@ -6,18 +6,39 @@ import {
   getAgentById,
   getScheduledTaskById,
   getScheduledTaskByName,
+  getWorkflow,
   updateScheduledTask,
 } from "@/be/db";
 import { mergeScheduleTiming, validateRecurringTiming } from "@/be/schedules/validate";
+import { getScript } from "@/be/scripts/db";
 import { calculateNextRun } from "@/scheduler";
 import { createToolRegistrar } from "@/tools/utils";
-import { ModelTierSchema, splitLegacyModelAlias } from "../../types";
+import { ModelTierSchema, ScheduledTaskTargetTypeSchema, splitLegacyModelAlias } from "../../types";
 
 export const updateScheduleInputSchema = z.object({
   scheduleId: z.string().uuid().optional().describe("Schedule ID to update"),
   name: z.string().optional().describe("Schedule name to update (alternative to ID)"),
   newName: z.string().min(1).max(100).optional().describe("New name for the schedule"),
   taskTemplate: z.string().min(1).optional().describe("New task template"),
+  targetType: ScheduledTaskTargetTypeSchema.optional().describe(
+    "Change the execution target: 'agent-task', 'workflow', or 'script'.",
+  ),
+  workflowId: z
+    .string()
+    .uuid()
+    .nullable()
+    .optional()
+    .describe("New workflow ID (required when targetType is 'workflow'; null to clear)"),
+  scriptName: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("New catalog script name (required when targetType is 'script'; null to clear)"),
+  scriptArgs: z
+    .record(z.string(), z.unknown())
+    .nullable()
+    .optional()
+    .describe("New JSON args for the script target (null to clear)"),
   cronExpression: z.string().nullable().optional().describe("New cron expression (null to clear)"),
   intervalMs: z
     .number()
@@ -64,7 +85,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
             description: z.string().optional(),
             cronExpression: z.string().optional(),
             intervalMs: z.number().optional(),
-            taskTemplate: z.string(),
+            taskTemplate: z.string().optional(),
             taskType: z.string().optional(),
             tags: z.array(z.string()),
             priority: z.number(),
@@ -77,6 +98,10 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
             model: z.string().optional(),
             modelTier: ModelTierSchema.optional(),
             scheduleType: z.string(),
+            targetType: ScheduledTaskTargetTypeSchema.optional(),
+            workflowId: z.string().optional(),
+            scriptName: z.string().optional(),
+            scriptArgs: z.record(z.string(), z.unknown()).optional(),
             createdAt: z.string(),
             lastUpdatedAt: z.string(),
           })
@@ -89,6 +114,10 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         name,
         newName,
         taskTemplate,
+        targetType,
+        workflowId,
+        scriptName,
+        scriptArgs,
         cronExpression,
         intervalMs,
         description,
@@ -204,12 +233,62 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         }
       }
 
+      // Cross-field targetType validation — merge patch over existing
+      const mergedTargetType = targetType ?? schedule.targetType;
+      const mergedTaskTemplate = taskTemplate !== undefined ? taskTemplate : schedule.taskTemplate;
+      const mergedWorkflowId = workflowId !== undefined ? workflowId : schedule.workflowId;
+      const mergedScriptName = scriptName !== undefined ? scriptName : schedule.scriptName;
+
+      if (mergedTargetType === "agent-task" && !mergedTaskTemplate) {
+        const message = "taskTemplate is required when targetType is 'agent-task'.";
+        return {
+          content: [{ type: "text", text: message }],
+          structuredContent: { success: false, message },
+        };
+      }
+      if (mergedTargetType === "workflow") {
+        if (!mergedWorkflowId) {
+          const message = "workflowId is required when targetType is 'workflow'.";
+          return {
+            content: [{ type: "text", text: message }],
+            structuredContent: { success: false, message },
+          };
+        }
+        if (!getWorkflow(mergedWorkflowId)) {
+          const message = `Workflow not found: ${mergedWorkflowId}`;
+          return {
+            content: [{ type: "text", text: message }],
+            structuredContent: { success: false, message },
+          };
+        }
+      }
+      if (mergedTargetType === "script") {
+        if (!mergedScriptName) {
+          const message = "scriptName is required when targetType is 'script'.";
+          return {
+            content: [{ type: "text", text: message }],
+            structuredContent: { success: false, message },
+          };
+        }
+        if (!getScript({ name: mergedScriptName, scope: "global" })) {
+          const message = `Script not found: ${mergedScriptName}`;
+          return {
+            content: [{ type: "text", text: message }],
+            structuredContent: { success: false, message },
+          };
+        }
+      }
+
       try {
         // Build update data
         const updateData: Parameters<typeof updateScheduledTask>[1] = {};
 
         if (newName !== undefined) updateData.name = newName;
         if (taskTemplate !== undefined) updateData.taskTemplate = taskTemplate;
+        if (targetType !== undefined) updateData.targetType = targetType;
+        if (workflowId !== undefined) updateData.workflowId = workflowId;
+        if (scriptName !== undefined) updateData.scriptName = scriptName;
+        if (scriptArgs !== undefined) updateData.scriptArgs = scriptArgs;
         if (cronExpression !== undefined) updateData.cronExpression = cronExpression;
         if (intervalMs !== undefined) updateData.intervalMs = intervalMs;
         if (description !== undefined) updateData.description = description;

@@ -2,14 +2,41 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CronExpressionParser } from "cron-parser";
 import * as z from "zod";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
-import { createScheduledTask, getAgentById, getScheduledTaskByName } from "@/be/db";
+import { createScheduledTask, getAgentById, getScheduledTaskByName, getWorkflow } from "@/be/db";
+import { getScript } from "@/be/scripts/db";
 import { calculateNextRun } from "@/scheduler";
 import { createToolRegistrar } from "@/tools/utils";
-import { ModelTierSchema, splitLegacyModelAlias } from "../../types";
+import { ModelTierSchema, ScheduledTaskTargetTypeSchema, splitLegacyModelAlias } from "../../types";
 
 export const createScheduleInputSchema = z.object({
   name: z.string().min(1).max(100).describe("Unique name for the schedule (e.g., 'daily-cleanup')"),
-  taskTemplate: z.string().min(1).describe("The task description that will be created each time"),
+  taskTemplate: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "The task description that will be created each time. Required when targetType is 'agent-task' (the default).",
+    ),
+  targetType: ScheduledTaskTargetTypeSchema.default("agent-task")
+    .optional()
+    .describe(
+      "Execution target: 'agent-task' (default, creates an agent task from taskTemplate), " +
+        "'workflow' (directly triggers a workflow run, no agent in the loop), or " +
+        "'script' (directly runs a catalog script, no agent in the loop).",
+    ),
+  workflowId: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("Workflow ID to trigger. Required when targetType is 'workflow'."),
+  scriptName: z
+    .string()
+    .optional()
+    .describe("Catalog script name (global scope). Required when targetType is 'script'."),
+  scriptArgs: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe("JSON args passed to the script. Used when targetType is 'script'."),
   scheduleType: z
     .enum(["recurring", "one_time"])
     .default("recurring")
@@ -91,7 +118,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
             description: z.string().optional(),
             cronExpression: z.string().optional(),
             intervalMs: z.number().optional(),
-            taskTemplate: z.string(),
+            taskTemplate: z.string().optional(),
             taskType: z.string().optional(),
             tags: z.array(z.string()),
             priority: z.number(),
@@ -104,6 +131,10 @@ export const registerCreateScheduleTool = (server: McpServer) => {
             model: z.string().optional(),
             modelTier: ModelTierSchema.optional(),
             scheduleType: z.string(),
+            targetType: ScheduledTaskTargetTypeSchema.optional(),
+            workflowId: z.string().optional(),
+            scriptName: z.string().optional(),
+            scriptArgs: z.record(z.string(), z.unknown()).optional(),
             createdAt: z.string(),
             lastUpdatedAt: z.string(),
           })
@@ -114,6 +145,10 @@ export const registerCreateScheduleTool = (server: McpServer) => {
       {
         name,
         taskTemplate,
+        targetType,
+        workflowId,
+        scriptName,
+        scriptArgs,
         scheduleType,
         cronExpression,
         intervalMs,
@@ -269,6 +304,48 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         }
       }
 
+      // Cross-field targetType validation
+      const resolvedTargetType = targetType ?? "agent-task";
+      if (resolvedTargetType === "agent-task" && !taskTemplate) {
+        const message = "taskTemplate is required when targetType is 'agent-task'.";
+        return {
+          content: [{ type: "text", text: message }],
+          structuredContent: { success: false, message },
+        };
+      }
+      if (resolvedTargetType === "workflow") {
+        if (!workflowId) {
+          const message = "workflowId is required when targetType is 'workflow'.";
+          return {
+            content: [{ type: "text", text: message }],
+            structuredContent: { success: false, message },
+          };
+        }
+        if (!getWorkflow(workflowId)) {
+          const message = `Workflow not found: ${workflowId}`;
+          return {
+            content: [{ type: "text", text: message }],
+            structuredContent: { success: false, message },
+          };
+        }
+      }
+      if (resolvedTargetType === "script") {
+        if (!scriptName) {
+          const message = "scriptName is required when targetType is 'script'.";
+          return {
+            content: [{ type: "text", text: message }],
+            structuredContent: { success: false, message },
+          };
+        }
+        if (!getScript({ name: scriptName, scope: "global" })) {
+          const message = `Script not found: ${scriptName}`;
+          return {
+            content: [{ type: "text", text: message }],
+            structuredContent: { success: false, message },
+          };
+        }
+      }
+
       try {
         const normalizedModel = splitLegacyModelAlias({ model, modelTier });
         // Calculate initial nextRunAt
@@ -292,6 +369,10 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         const schedule = createScheduledTask({
           name,
           taskTemplate,
+          targetType,
+          workflowId,
+          scriptName,
+          scriptArgs,
           cronExpression,
           intervalMs,
           description,

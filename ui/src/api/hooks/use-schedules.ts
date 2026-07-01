@@ -5,6 +5,9 @@ import type { ScheduledTask } from "../types";
 export interface ScheduledTaskFilters {
   enabled?: boolean;
   name?: string;
+  targetType?: ScheduledTask["targetType"];
+  workflowId?: string;
+  scriptName?: string;
 }
 
 export function useScheduledTasks(filters?: ScheduledTaskFilters) {
@@ -28,7 +31,11 @@ export function useCreateSchedule() {
   return useMutation({
     mutationFn: (data: {
       name: string;
-      taskTemplate: string;
+      taskTemplate?: string;
+      targetType?: ScheduledTask["targetType"];
+      workflowId?: string;
+      scriptName?: string;
+      scriptArgs?: Record<string, unknown>;
       cronExpression?: string;
       intervalMs?: number;
       description?: string;

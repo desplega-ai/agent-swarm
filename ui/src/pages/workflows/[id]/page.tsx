@@ -18,9 +18,10 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api, TriggerSchemaApiError } from "@/api/client";
+import { useScheduledTasks } from "@/api/hooks/use-schedules";
 import {
   useDeleteWorkflow,
   useExecutorType,
@@ -1124,6 +1125,37 @@ function TopBarTriggerButton({
  * the trigger schema. Webhook triggers reuse the existing badge/modal so the
  * URL + HMAC secret remain copy-able.
  */
+/**
+ * Forward link: schedules with `targetType='workflow'` that natively target
+ * this workflow. Complements the reverse link shown above (this workflow's
+ * own `triggers[].scheduleId` bindings, which a schedule doesn't know about).
+ */
+function LinkedSchedulesSection({ workflowId }: { workflowId: string }) {
+  const { data: schedules } = useScheduledTasks({ targetType: "workflow", workflowId });
+
+  if (!schedules || schedules.length === 0) return null;
+
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-semibold">Linked Schedules ({schedules.length})</h3>
+      <div className="space-y-2">
+        {schedules.map((s) => (
+          <Link
+            key={s.id}
+            to={`/schedules/${s.id}`}
+            className="flex items-center justify-between gap-2 rounded-lg border bg-card p-3 text-sm hover:bg-accent/50 transition-colors"
+          >
+            <span className="font-medium">{s.name}</span>
+            <span className="text-xs text-muted-foreground">
+              {s.nextRunAt ? `next: ${formatSmartTime(s.nextRunAt)}` : s.enabled ? "—" : "disabled"}
+            </span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function TriggersDetailPanel({
   workflowId,
   triggers,
@@ -1154,6 +1186,8 @@ function TriggersDetailPanel({
             </div>
           )}
         </section>
+
+        <LinkedSchedulesSection workflowId={workflowId} />
 
         {cooldown != null && (
           <section className="space-y-2">

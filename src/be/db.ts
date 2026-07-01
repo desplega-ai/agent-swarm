@@ -5440,7 +5440,7 @@ type ScheduledTaskRow = {
   description: string | null;
   cronExpression: string | null;
   intervalMs: number | null;
-  taskTemplate: string;
+  taskTemplate: string | null;
   taskType: string | null;
   tags: string | null;
   priority: number;
@@ -5456,6 +5456,10 @@ type ScheduledTaskRow = {
   model: string | null;
   modelTier: string | null;
   scheduleType: string;
+  targetType: string;
+  workflowId: string | null;
+  scriptName: string | null;
+  scriptArgs: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   created_by: string | null;
@@ -5484,7 +5488,7 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     description: row.description ?? undefined,
     cronExpression: row.cronExpression ?? undefined,
     intervalMs: row.intervalMs ?? undefined,
-    taskTemplate: row.taskTemplate,
+    taskTemplate: row.taskTemplate ?? undefined,
     taskType: row.taskType ?? undefined,
     tags: row.tags ? JSON.parse(row.tags) : [],
     priority: row.priority,
@@ -5500,6 +5504,10 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     model: row.model ?? undefined,
     modelTier: parseModelTier(row.modelTier) ?? undefined,
     scheduleType: row.scheduleType as "recurring" | "one_time",
+    targetType: row.targetType as "agent-task" | "workflow" | "script",
+    workflowId: row.workflowId ?? undefined,
+    scriptName: row.scriptName ?? undefined,
+    scriptArgs: row.scriptArgs ? JSON.parse(row.scriptArgs) : undefined,
     createdAt: normalizeDateRequired(row.createdAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
     createdBy: row.created_by ?? undefined,
@@ -5512,6 +5520,9 @@ export interface ScheduledTaskFilters {
   name?: string;
   scheduleType?: "recurring" | "one_time";
   hideCompleted?: boolean;
+  targetType?: "agent-task" | "workflow" | "script";
+  workflowId?: string;
+  scriptName?: string;
 }
 
 /**
@@ -5554,6 +5565,21 @@ export function getScheduledTasks(
     params.push(filters.scheduleType);
   }
 
+  if (filters?.targetType) {
+    query += " AND targetType = ?";
+    params.push(filters.targetType);
+  }
+
+  if (filters?.workflowId) {
+    query += " AND workflowId = ?";
+    params.push(filters.workflowId);
+  }
+
+  if (filters?.scriptName) {
+    query += " AND scriptName = ?";
+    params.push(filters.scriptName);
+  }
+
   if (filters?.hideCompleted !== false) {
     query += " AND NOT (scheduleType = 'one_time' AND enabled = 0)";
   }
@@ -5585,7 +5611,7 @@ export interface CreateScheduledTaskData {
   description?: string;
   cronExpression?: string;
   intervalMs?: number;
-  taskTemplate: string;
+  taskTemplate?: string;
   taskType?: string;
   tags?: string[];
   priority?: number;
@@ -5597,6 +5623,10 @@ export interface CreateScheduledTaskData {
   model?: string;
   modelTier?: ModelTier;
   scheduleType?: "recurring" | "one_time";
+  targetType?: "agent-task" | "workflow" | "script";
+  workflowId?: string;
+  scriptName?: string;
+  scriptArgs?: Record<string, unknown>;
   createdBy?: string;
 }
 
@@ -5609,9 +5639,10 @@ export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTas
       `INSERT INTO scheduled_tasks (
         id, name, description, cronExpression, intervalMs, taskTemplate,
         taskType, tags, priority, targetAgentId, enabled, nextRunAt,
-        createdByAgentId, timezone, model, modelTier, scheduleType, createdAt, lastUpdatedAt,
+        createdByAgentId, timezone, model, modelTier, scheduleType, targetType,
+        workflowId, scriptName, scriptArgs, createdAt, lastUpdatedAt,
         created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -5619,7 +5650,7 @@ export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTas
       data.description ?? null,
       data.cronExpression ?? null,
       data.intervalMs ?? null,
-      data.taskTemplate,
+      data.taskTemplate ?? null,
       data.taskType ?? null,
       JSON.stringify(data.tags ?? []),
       data.priority ?? 50,
@@ -5631,6 +5662,10 @@ export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTas
       data.model ?? null,
       data.modelTier ?? null,
       data.scheduleType ?? "recurring",
+      data.targetType ?? "agent-task",
+      data.workflowId ?? null,
+      data.scriptName ?? null,
+      data.scriptArgs !== undefined ? JSON.stringify(data.scriptArgs) : "{}",
       now,
       now,
       data.createdBy ?? null,
@@ -5661,6 +5696,10 @@ export interface UpdateScheduledTaskData {
   model?: string | null;
   modelTier?: ModelTier | null;
   scheduleType?: "recurring" | "one_time";
+  targetType?: "agent-task" | "workflow" | "script";
+  workflowId?: string | null;
+  scriptName?: string | null;
+  scriptArgs?: Record<string, unknown> | null;
   lastUpdatedAt?: string;
   updatedBy?: string;
 }
@@ -5747,6 +5786,22 @@ export function updateScheduledTask(
   if (data.scheduleType !== undefined) {
     updates.push("scheduleType = ?");
     params.push(data.scheduleType);
+  }
+  if (data.targetType !== undefined) {
+    updates.push("targetType = ?");
+    params.push(data.targetType);
+  }
+  if (data.workflowId !== undefined) {
+    updates.push("workflowId = ?");
+    params.push(data.workflowId);
+  }
+  if (data.scriptName !== undefined) {
+    updates.push("scriptName = ?");
+    params.push(data.scriptName);
+  }
+  if (data.scriptArgs !== undefined) {
+    updates.push("scriptArgs = ?");
+    params.push(data.scriptArgs === null ? null : JSON.stringify(data.scriptArgs));
   }
   if (data.updatedBy !== undefined) {
     updates.push("updated_by = ?");

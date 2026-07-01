@@ -793,10 +793,26 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `yourAgentId` | `string` | No | - | - |
-| `success` | `boolean` | Yes | - | - |
-| `message` | `string` | Yes | - | - |
-| `schedule` | `object` | No | - | - |
+| `name` | `string` | Yes | - | Unique name for the schedule (e.g., 'daily-cleanup') |
+| `taskTemplate` | `string` | No | - | The task description that will be created each time. Required when targetType is 'agent-task' (the default). |
+| `targetType` | `agent-task \| workflow \| script` | No | `"agent-task"` | Execution target: 'agent-task' (default, creates an agent task from taskTemplate), 'workflow' (directly triggers a workflow run, no agent in the loop), or 'script' (directly runs a catalog script, no agent in the loop). |
+| `workflowId` | `string` | No | - | Workflow ID to trigger. Required when targetType is 'workflow'. |
+| `scriptName` | `string` | No | - | Catalog script name (global scope). Required when targetType is 'script'. |
+| `scriptArgs` | `object` | No | - | JSON args passed to the script. Used when targetType is 'script'. |
+| `scheduleType` | `recurring \| one_time` | No | `"recurring"` | Schedule type: 'recurring' (default) or 'one_time' |
+| `cronExpression` | `string` | No | - | Cron expression for recurring schedules (e.g., '0 9 * * *') |
+| `intervalMs` | `number` | No | - | Interval in milliseconds for recurring schedules (e.g., 3600000 for hourly) |
+| `delayMs` | `number` | No | - | Delay in milliseconds for one-time schedules (e.g., 1800000 for 30 min) |
+| `runAt` | `string` | No | - | ISO datetime for one-time schedules (e.g., '2026-03-06T15:00:00Z') |
+| `description` | `string` | No | - | Human-readable description of the schedule |
+| `taskType` | `string` | No | - | Task type (e.g., 'maintenance', 'report') |
+| `tags` | `array` | No | - | Tags to apply to created tasks |
+| `priority` | `number` | No | `50` | Task priority 0-100 (default: 50) |
+| `targetAgentId` | `string` | No | - | Agent to assign tasks to (omit for task pool) |
+| `timezone` | `string` | No | `"UTC"` | Timezone for cron schedules |
+| `enabled` | `boolean` | No | `true` | Whether the schedule is enabled (default: true) |
+| `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Interpreted by each assignee's harness/provider and does not switch providers. Prefer modelTier for portable intent. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for tasks created by this schedule. Resolved by each assignee's harness/provider at run time. |
 
 ### update-schedule
 
@@ -806,10 +822,25 @@ Update an existing scheduled task. Any registered agent can update schedules.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `yourAgentId` | `string` | No | - | - |
-| `success` | `boolean` | Yes | - | - |
-| `message` | `string` | Yes | - | - |
-| `schedule` | `object` | No | - | - |
+| `scheduleId` | `string` | No | - | Schedule ID to update |
+| `name` | `string` | No | - | Schedule name to update (alternative to ID) |
+| `newName` | `string` | No | - | New name for the schedule |
+| `taskTemplate` | `string` | No | - | New task template |
+| `targetType` | `agent-task \| workflow \| script` | No | - | Change the execution target: 'agent-task', 'workflow', or 'script'. |
+| `workflowId` | `string` | No | - | New workflow ID (required when targetType is 'workflow'; null to clear) |
+| `scriptName` | `string` | No | - | New catalog script name (required when targetType is 'script'; null to clear) |
+| `scriptArgs` | `object` | No | - | New JSON args for the script target (null to clear) |
+| `cronExpression` | `string` | No | - | New cron expression (null to clear) |
+| `intervalMs` | `number` | No | - | New interval in milliseconds (null to clear) |
+| `description` | `string` | No | - | New description |
+| `taskType` | `string` | No | - | New task type |
+| `tags` | `array` | No | - | New tags |
+| `priority` | `number` | No | - | New priority |
+| `targetAgentId` | `string` | No | - | New target agent ID |
+| `timezone` | `string` | No | - | New timezone |
+| `enabled` | `boolean` | No | - | Enable or disable the schedule |
+| `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. |
+| `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for tasks created by this schedule. Set to null to clear. |
 
 ### delete-schedule
 

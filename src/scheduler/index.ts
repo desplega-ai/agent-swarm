@@ -1,1 +1,8 @@
-export { calculateNextRun, runScheduleNow, startScheduler, stopScheduler } from "./scheduler";
+export {
+  calculateNextRun,
+  type DispatchScheduleResult,
+  dispatchScheduleTarget,
+  runScheduleNow,
+  startScheduler,
+  stopScheduler,
+} from "./scheduler";

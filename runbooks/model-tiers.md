@@ -54,6 +54,10 @@ Concrete freeform model strings stay concrete. When both `model` and `modelTier`
 
 ## Claim-time resolution
 
+`model`/`modelTier` only apply to schedules with `targetType: 'agent-task'` (the
+default) — a `workflow`- or `script`-targeted schedule triggers directly with no
+agent in the loop, so these fields are ignored for those targets.
+
 Tasks, schedules, and workflow `agent-task` nodes store both optional fields:
 
 - `model`: concrete provider/harness-specific override.

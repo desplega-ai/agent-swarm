@@ -1,10 +1,21 @@
 import { ensure } from "@desplega.ai/business-use";
 import { CronExpressionParser } from "cron-parser";
-import { getDb, getDueScheduledTasks, getScheduledTaskById, updateScheduledTask } from "@/be/db";
+import {
+  getDb,
+  getDueScheduledTasks,
+  getScheduledTaskById,
+  getWorkflow,
+  updateScheduledTask,
+} from "@/be/db";
+import { buildScriptCredentialBindings } from "@/be/script-credential-broker";
+import { getScript } from "@/be/scripts/db";
+import { runScript } from "@/scripts-runtime/loader";
 import { scheduleContextKey } from "@/tasks/context-key";
 import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
 import { telemetry } from "@/telemetry";
 import type { AgentTask, ScheduledTask } from "@/types";
+import { getExecutorRegistry as getWorkflowExecutorRegistry } from "@/workflows";
+import { startWorkflowExecution } from "@/workflows/engine";
 import type { ExecutorRegistry } from "@/workflows/executors/registry";
 import { handleScheduleTrigger } from "@/workflows/triggers";
 
@@ -12,10 +23,29 @@ let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let isProcessing = false;
 let executorRegistry: ExecutorRegistry | null = null;
 
+/**
+ * Resolve the executor registry for schedule dispatch. Prefers the registry
+ * handed to `startScheduler()`; falls back to the workflows-module singleton
+ * so callers that don't run the scheduler poller on this node (e.g. the HTTP
+ * `/api/schedules/{id}/run` route on a non-scheduling node) can still dispatch
+ * `targetType='workflow'` schedules and check implicit workflow bindings.
+ */
+function resolveExecutorRegistry(): ExecutorRegistry | null {
+  if (executorRegistry) return executorRegistry;
+  try {
+    return getWorkflowExecutorRegistry();
+  } catch {
+    return null;
+  }
+}
+
 export function createStandaloneScheduleTask(
   schedule: ScheduledTask,
   extraTags: string[] = [],
 ): AgentTask {
+  if (!schedule.taskTemplate) {
+    throw new Error(`Schedule "${schedule.name}" has no taskTemplate (targetType=agent-task)`);
+  }
   return createTaskWithSiblingAwareness(schedule.taskTemplate, {
     creatorAgentId: schedule.createdByAgentId,
     taskType: schedule.taskType,
@@ -28,6 +58,116 @@ export function createStandaloneScheduleTask(
     source: "schedule",
     contextKey: scheduleContextKey({ scheduleId: schedule.id }),
   });
+}
+
+/**
+ * Execute a schedule's `targetType='script'` target directly via the
+ * scripts-runtime — no agent/LLM in the loop. Reuses the same `runScript()`
+ * path as the `swarm-script` workflow executor.
+ */
+async function executeScheduleScript(schedule: ScheduledTask): Promise<void> {
+  if (!schedule.scriptName) {
+    throw new Error(`Schedule "${schedule.name}" has no scriptName (targetType=script)`);
+  }
+
+  const script = getScript({ name: schedule.scriptName, scope: "global" });
+  if (!script) {
+    throw new Error(`Script '${schedule.scriptName}' not found`);
+  }
+
+  const agentId = schedule.createdByAgentId ?? "schedule";
+  const output = await runScript({
+    source: script.source,
+    args: schedule.scriptArgs ?? {},
+    fsMode: "none",
+    agentId,
+    egressSecrets: buildScriptCredentialBindings({ agentId }),
+    timeoutMs: 60_000,
+  });
+
+  if (output.exitCode !== 0 || output.error) {
+    throw new Error(
+      output.stderr ||
+        `Script '${schedule.scriptName}' exited with code ${output.exitCode}${
+          output.error ? ` (${output.error})` : ""
+        }`,
+    );
+  }
+}
+
+/**
+ * Dispatch a schedule to its configured target. Explicit switch on
+ * `targetType` — `workflow` and `script` run their target directly;
+ * `agent-task` (default) preserves the legacy implicit-workflow-binding
+ * check followed by a standalone-task fallback, so existing schedules that
+ * bind a workflow via `workflows.triggers[].scheduleId` keep working
+ * unchanged.
+ */
+export interface DispatchScheduleResult {
+  triggeredWorkflows: boolean;
+  workflowRunIds?: string[];
+  task?: AgentTask;
+}
+
+export async function dispatchScheduleTarget(
+  schedule: ScheduledTask,
+  extraTags: string[] = [],
+): Promise<DispatchScheduleResult> {
+  switch (schedule.targetType) {
+    case "workflow": {
+      if (!schedule.workflowId) {
+        throw new Error(`Schedule "${schedule.name}" has no workflowId (targetType=workflow)`);
+      }
+      const workflow = getWorkflow(schedule.workflowId);
+      if (!workflow) {
+        throw new Error(`Workflow ${schedule.workflowId} not found`);
+      }
+      if (!workflow.enabled) {
+        throw new Error(`Workflow ${schedule.workflowId} is disabled`);
+      }
+      const registry = resolveExecutorRegistry();
+      if (!registry) {
+        throw new Error("Workflow engine not initialized — cannot dispatch schedule to workflow");
+      }
+      const triggerData = {
+        scheduleId: schedule.id,
+        scheduleName: schedule.name,
+        firedAt: new Date().toISOString(),
+      };
+      const runId = await startWorkflowExecution(workflow, triggerData, registry, {
+        triggerType: "schedule",
+      });
+      console.log(
+        `[Scheduler] Schedule "${schedule.name}" → triggered workflow "${workflow.name}"`,
+      );
+      return { triggeredWorkflows: true, workflowRunIds: [runId] };
+    }
+    case "script": {
+      await executeScheduleScript(schedule);
+      return { triggeredWorkflows: false };
+    }
+    default: {
+      // Legacy path: check implicit workflow bindings, fall back to a standalone task.
+      let triggeredWorkflows = false;
+      let workflowRunIds: string[] | undefined;
+      const registry = resolveExecutorRegistry();
+      if (registry) {
+        const runIds = await handleScheduleTrigger(schedule.id, schedule, registry);
+        if (runIds.length > 0) {
+          triggeredWorkflows = true;
+          workflowRunIds = runIds;
+          console.log(
+            `[Scheduler] Schedule "${schedule.name}" → triggered ${runIds.length} workflow(s)`,
+          );
+        }
+      }
+      if (!triggeredWorkflows) {
+        const task = getDb().transaction(() => createStandaloneScheduleTask(schedule, extraTags))();
+        return { triggeredWorkflows, task };
+      }
+      return { triggeredWorkflows, workflowRunIds };
+    }
+  }
 }
 
 /**
@@ -51,23 +191,7 @@ async function recoverMissedSchedules(): Promise<void> {
 
     let triggeredWorkflows = false;
     try {
-      // Check if any workflows are linked to this schedule
-      if (executorRegistry) {
-        const runIds = await handleScheduleTrigger(schedule.id, schedule, executorRegistry);
-        if (runIds.length > 0) {
-          triggeredWorkflows = true;
-          console.log(
-            `[Scheduler] Recovered schedule "${schedule.name}" → triggered ${runIds.length} workflow(s)`,
-          );
-        }
-      }
-
-      if (!triggeredWorkflows) {
-        const tx = getDb().transaction(() => {
-          createStandaloneScheduleTask(schedule, ["recovered"]);
-        });
-        tx();
-      }
+      ({ triggeredWorkflows } = await dispatchScheduleTarget(schedule, ["recovered"]));
 
       // Update schedule state regardless of workflow/task path
       if (schedule.scheduleType === "one_time") {
@@ -156,23 +280,7 @@ function getBackoffMs(consecutiveErrors: number): number {
 async function executeSchedule(schedule: ScheduledTask): Promise<void> {
   let triggeredWorkflows = false;
   try {
-    // Check if any workflows are linked to this schedule
-    if (executorRegistry) {
-      const runIds = await handleScheduleTrigger(schedule.id, schedule, executorRegistry);
-      if (runIds.length > 0) {
-        triggeredWorkflows = true;
-        console.log(
-          `[Scheduler] Schedule "${schedule.name}" → triggered ${runIds.length} workflow(s)`,
-        );
-      }
-    }
-
-    if (!triggeredWorkflows) {
-      // No workflows linked — create standalone task (existing behavior)
-      getDb().transaction(() => {
-        createStandaloneScheduleTask(schedule);
-      })();
-    }
+    ({ triggeredWorkflows } = await dispatchScheduleTarget(schedule));
 
     // Update schedule state regardless of workflow/task path
     const now = new Date().toISOString();
@@ -347,24 +455,7 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
     throw new Error(`Schedule is disabled: ${schedule.name}`);
   }
 
-  // Check if any workflows are linked to this schedule
-  let triggeredWorkflows = false;
-  if (executorRegistry) {
-    const runIds = await handleScheduleTrigger(scheduleId, schedule, executorRegistry);
-    if (runIds.length > 0) {
-      triggeredWorkflows = true;
-      console.log(
-        `[Scheduler] Manual run of "${schedule.name}" → triggered ${runIds.length} workflow(s)`,
-      );
-    }
-  }
-
-  if (!triggeredWorkflows) {
-    // No workflows linked — create standalone task (existing behavior)
-    getDb().transaction(() => {
-      createStandaloneScheduleTask(schedule, ["manual-run"]);
-    })();
-  }
+  await dispatchScheduleTarget(schedule, ["manual-run"]);
 
   // Update schedule state
   const now = new Date().toISOString();
