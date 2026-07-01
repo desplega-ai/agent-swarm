@@ -1,0 +1,109 @@
+{
+  "$schema": "node_modules/konsistent/konsistent.schema.json",
+  "version": "v1",
+  "conventions": [
+    {
+      "name": "provider-adapter-export-shape",
+      "description": "Provider adapter files expose the shared harness adapter class + credential probe shape, and the internal-ai barrel keeps the worker-safe completion surface stable.",
+      "severity": "warning",
+      "paths": "src",
+      "must": [
+        {
+          "name": "adapter-class-contract",
+          "for": {
+            "files": "providers/{adapterId}-adapter.ts"
+          },
+          "must": {
+            "exportClasses": [
+              {
+                "name": "${adapterId.toPascalCase()}Adapter",
+                "implement": ["ProviderAdapter"]
+              }
+            ]
+          }
+        },
+        {
+          "name": "adapter-credential-probe",
+          "for": {
+            "files": "providers/{adapterId}-adapter.ts"
+          },
+          "must": {
+            "exportFunctions": ["check${adapterId.toPascalCase()}Credentials"]
+          }
+        },
+        {
+          "name": "provider-barrel-types",
+          "for": {
+            "files": "providers/index.ts"
+          },
+          "must": {
+            "exportTypes": [
+              "CostData",
+              "CredCheckOptions",
+              "CredStatus",
+              "ProviderAdapter",
+              "ProviderEvent",
+              "ProviderResult",
+              "ProviderSession",
+              "ProviderSessionConfig",
+              "ProviderTraits"
+            ],
+            "exportFunctions": ["createProviderAdapter"]
+          }
+        },
+        {
+          "name": "internal-ai-public-surface",
+          "for": {
+            "files": "utils/internal-ai/index.ts"
+          },
+          "must": {
+            "export": [
+              "DEFAULT_MODEL",
+              "completeStructured",
+              "parseModelStr",
+              "resolveCredential",
+              "resolveModelString",
+              "summarizeSession",
+              "summaryToolSchema"
+            ],
+            "exportTypes": [
+              "CompleteStructuredOptions",
+              "CredentialKind",
+              "ResolveCredentialOptions",
+              "ResolvedCredential",
+              "SummarizeSessionOptions"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "hook-handler-export-shape",
+      "description": "Claude hook events share the exported async hook dispatcher signature in src/hooks/hook.ts.",
+      "severity": "warning",
+      "paths": "src/hooks",
+      "must": [
+        {
+          "must": {
+            "haveType": "directory",
+            "haveFiles": ["hook.ts"]
+          }
+        },
+        {
+          "name": "dispatcher-signature",
+          "for": {
+            "files": "hook.ts"
+          },
+          "must": {
+            "exportFunctions": [
+              {
+                "name": "handleHook",
+                "returnValueOfType": "Promise<void>"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
