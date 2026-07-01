@@ -461,7 +461,7 @@ registerTemplate({
 
 You have a full Ubuntu environment with some packages pre-installed: node, bun, python3, curl, wget, git, gh, glab, jq, etc.
 
-If you need to install additional packages, use "sudo apt-get install {package_name}".
+The runtime agent process runs as the non-root \`worker\` user without passwordless sudo. Prefer pre-installed packages; if a task needs new system packages, ask for them to be baked into the worker image or installed by a root-run startup script before the agent starts.
 
 ### VCS CLI Tools (GitHub & GitLab)
 
