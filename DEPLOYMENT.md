@@ -269,7 +269,10 @@ The Docker worker image uses a multi-stage build:
 - **CLI tools**: GitHub CLI (`gh`), GitLab CLI (`glab`), sqlite3
 - **Agent tools**: `wts` (git worktree manager), `archil` (FUSE/R2-backed storage)
 - **Utilities**: git, git-lfs, vim, nano, jq, curl, wget, ssh, fuse3
-- **Sudo access**: Worker can install packages with `sudo apt-get install`
+- **Runtime user**: Agent processes run as the non-root `worker` user without
+  passwordless sudo. Bake additional system packages into the worker image or
+  install them from a root-run startup script before the entrypoint drops
+  privileges.
 
 **Volumes:**
 

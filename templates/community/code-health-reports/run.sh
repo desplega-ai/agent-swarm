@@ -38,24 +38,30 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+apt_install() {
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "Missing $*: install it in the worker image or run this setup as root before the agent drops privileges." >&2
+    exit 1
+  fi
+  apt-get update
+  apt-get install -y "$@"
+}
+
 ensure_java() {
   if ! need_cmd java; then
-    sudo apt-get update
-    sudo apt-get install -y default-jre-headless
+    apt_install default-jre-headless
   fi
 }
 
 ensure_node() {
   if ! need_cmd node; then
-    sudo apt-get update
-    sudo apt-get install -y nodejs
+    apt_install nodejs
   fi
 }
 
 ensure_python() {
   if ! need_cmd python3; then
-    sudo apt-get update
-    sudo apt-get install -y python3 python3-pip
+    apt_install python3 python3-pip
   fi
 }
 

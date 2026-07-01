@@ -51,7 +51,6 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     postgresql-client \
     postgresql-16 \
     postgresql-contrib-16 \
-    sudo \
     nodejs \
     gh \
     tmux \
@@ -75,12 +74,11 @@ RUN curl -fsSL https://bun.sh/install | bash
 ENV BUN_INSTALL="/root/.bun"
 ENV PATH="$BUN_INSTALL/bin:$PATH"
 
-# Create non-root user with sudo access (passwordless)
+# Create non-root user for runtime execution.
 # NOTE: Container entrypoint runs as root for FUSE mount compatibility.
 # Final exec drops to worker via gosu (Claude rejects --dangerously-skip-permissions as root).
 # Worker user retained for file ownership and Claude process execution.
-RUN useradd -m -s /bin/bash -G sudo worker \
-    && echo "worker ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+RUN useradd -m -s /bin/bash worker
 
 USER worker
 WORKDIR /home/worker
@@ -103,7 +101,11 @@ ENV PATH="/home/worker/.bun/bin:$PATH"
 
 # Install Claude CLI (pinned version — bump ARG to update)
 ARG CLAUDE_CODE_VERSION=2.1.197
-RUN sudo npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+USER root
+RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
+    npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+    && rm -rf /tmp/npm-cache /root/.npm
+USER worker
 # Verify claude binary is findable after install
 RUN which claude && claude --version
 ENV DISABLE_AUTOUPDATER=1
@@ -113,15 +115,23 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
 ARG PI_CODING_AGENT_VERSION=0.80.3
-RUN sudo npm install -g @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
-    && mkdir -p /home/worker/.pi/agent
+USER root
+RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
+    npm install -g @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
+    && rm -rf /tmp/npm-cache /root/.npm
+USER worker
+RUN mkdir -p /home/worker/.pi/agent
 ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match @openai/codex-sdk in package.json — enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
 ARG CODEX_VERSION=0.142.5
-RUN sudo npm install -g @openai/codex@${CODEX_VERSION}
+USER root
+RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
+    npm install -g @openai/codex@${CODEX_VERSION} \
+    && rm -rf /tmp/npm-cache /root/.npm
+USER worker
 RUN which codex && codex --version
 
 # The @openai/codex-sdk bundled inside the compiled agent-swarm binary cannot
@@ -165,7 +175,11 @@ ARG OPENCODE_VERSION=1.17.12
 RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash
 ENV PATH="/home/worker/.opencode/bin:$PATH"
 ARG OPENCODE_SDK_VERSION=1.17.12
-RUN sudo npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION}
+USER root
+RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
+    npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION} \
+    && rm -rf /tmp/npm-cache /root/.npm
+USER worker
 
 # Install context-mode CLI globally (context-window compression tools for all
 # harnesses). The global install puts `context-mode` on PATH (for Claude/Codex
@@ -174,7 +188,11 @@ RUN sudo npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION}
 # the CLI binary + package importability. Disable per-worker via
 # CONTEXT_MODE_DISABLED=true (read by the adapters at runtime).
 ARG CONTEXT_MODE_VERSION=1.0.151
-RUN sudo npm install -g context-mode@${CONTEXT_MODE_VERSION}
+USER root
+RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
+    npm install -g context-mode@${CONTEXT_MODE_VERSION} \
+    && rm -rf /tmp/npm-cache /root/.npm
+USER worker
 
 # Install prek for opt-in worker repo hook setup.
 COPY --from=prek /prek /usr/local/bin/prek
