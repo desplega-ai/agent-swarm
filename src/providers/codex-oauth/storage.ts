@@ -311,7 +311,25 @@ export async function getValidCodexOAuth(
       // the next caller reads the now-stale `lockedCreds.refresh` and
       // replays it, triggering exactly the family revocation this lock
       // exists to prevent. Let the error propagate instead of swallowing it.
-      await storeCodexOAuth(apiUrl, apiKey, refreshed, slot);
+      try {
+        await storeCodexOAuth(apiUrl, apiKey, refreshed, slot);
+      } catch (persistErr) {
+        // `lockedCreds.refresh` is already single-use/rotated with OpenAI —
+        // it can never be exchanged again. If we can't durably store the new
+        // `refreshed` token, quarantine the slot (delete it from the config
+        // store) so the next caller's `loadCodexOAuth` finds nothing and
+        // returns null instead of reading back and replaying the
+        // now-consumed old refresh token. Best-effort: a delete failure here
+        // leaves the corrupted state, but we still surface the original
+        // persist error so this call treats the slot as unusable.
+        await deleteCodexOAuth(apiUrl, apiKey, slot).catch((deleteErr) => {
+          console.error(
+            `[codex-oauth] Failed to quarantine slot ${slot} after persist failure (non-fatal):`,
+            deleteErr,
+          );
+        });
+        throw persistErr;
+      }
 
       return refreshed;
     } finally {

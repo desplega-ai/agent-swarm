@@ -193,16 +193,15 @@ describe("getValidCodexOAuth — concurrent pool refresh", () => {
     expect(exchangeCount).toBe(1);
   });
 
-  it("throws instead of returning in-memory credentials when persisting the refresh fails", async () => {
-    const store = {
+  it("quarantines the slot instead of leaving a replayable stale refresh token when persisting fails", async () => {
+    const store: { creds: CodexOAuthCredentials | null } = {
       creds: {
         access: "at_stale",
         refresh: "rt_gen0",
         expires: Date.now() - 1000,
         accountId: "acc-test",
-      } satisfies CodexOAuthCredentials,
+      },
     };
-
     globalThis.fetch = async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -216,7 +215,9 @@ describe("getValidCodexOAuth — concurrent pool refresh", () => {
       if (method === "GET" && urlStr.includes("/api/config/resolved")) {
         return new Response(
           JSON.stringify({
-            configs: [{ id: "cfg-1", key: "codex_oauth_0", value: JSON.stringify(store.creds) }],
+            configs: store.creds
+              ? [{ id: "cfg-1", key: "codex_oauth_0", value: JSON.stringify(store.creds) }]
+              : [],
           }),
           { status: 200 },
         );
@@ -225,16 +226,23 @@ describe("getValidCodexOAuth — concurrent pool refresh", () => {
         // Simulate a persist failure — the config store is unreachable.
         return new Response("Server Error", { status: 500 });
       }
+      if (method === "DELETE" && urlStr.includes("/api/config/cfg-1")) {
+        // The quarantine path: delete the slot from the config store so the
+        // next caller's `loadCodexOAuth` finds nothing.
+        store.creds = null;
+        return new Response(null, { status: 204 });
+      }
       throw new Error(`Unexpected fetch in test: ${method} ${urlStr}`);
     };
 
-    setFetchForTesting(
-      async () =>
-        new Response(
-          JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 3600 }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-    );
+    let exchangeCount = 0;
+    setFetchForTesting(async () => {
+      exchangeCount += 1;
+      return new Response(
+        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 3600 }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
 
     // Must reject rather than resolve with the unpersisted `refreshed`
     // credentials — silently swallowing this would leave rt_gen0 (already
@@ -243,9 +251,18 @@ describe("getValidCodexOAuth — concurrent pool refresh", () => {
     await expect(getValidCodexOAuth(MOCK_API_URL, MOCK_API_KEY, 0)).rejects.toThrow(
       "Failed to store",
     );
+    expect(exchangeCount).toBe(1);
 
-    // The stale, already-rotated refresh token must NOT still be what a
-    // subsequent caller would read back out.
-    expect(store.creds.refresh).toBe("rt_gen0");
+    // The slot must be quarantined (deleted), NOT left holding the stale,
+    // already-rotated refresh token for a subsequent caller to read back out.
+    expect(store.creds).toBeNull();
+
+    // A second caller after the persist failure must see the slot as gone —
+    // it must NOT hit /oauth/token with the old (already-consumed) refresh
+    // token, since that replay is exactly the family revocation this lock
+    // exists to prevent.
+    const second = await getValidCodexOAuth(MOCK_API_URL, MOCK_API_KEY, 0);
+    expect(second).toBeNull();
+    expect(exchangeCount).toBe(1);
   });
 });
