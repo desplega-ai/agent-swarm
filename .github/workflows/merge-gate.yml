@@ -66,10 +66,14 @@ jobs:
           }
 
           # lint + tsc:check: biome runs on src/, tsc covers src/ (scripts excluded in tsconfig).
-          LINT=$(match '^(src/|evals/|package\.json$|bun\.lock|tsconfig\.json$|biome\.json$)')
+          # bunfig.toml (linker/test config), turbo.json, member manifests (root frozen
+          # install), and the dep-graph inputs (.dependency-cruiser.cjs, plugin/) are all
+          # load-bearing for this job since the workspace migration.
+          LINT=$(match '^(src/|evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|(ui|templates-ui)/package\.json$)')
 
-          # tests: src/ + scripts that tests import + lockfile/tsconfig.
-          TEST=$(match '^(src/|scripts/|package\.json$|bun\.lock|tsconfig\.json$)')
+          # tests: src/ + scripts that tests import + lockfile/tsconfig + bunfig ([test]
+          # preload + pathIgnorePatterns) + member manifests (root frozen install).
+          TEST=$(match '^(src/|scripts/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|(ui|templates-ui|evals)/package\.json$)')
 
           # pi-skills freshness: generator inputs + outputs.
           PI_SKILLS=$(match '^(plugin/commands/|plugin/pi-skills/|plugin/build-pi-skills\.ts$)')
@@ -77,11 +81,14 @@ jobs:
           # openapi freshness: routes, types, generator, version, generated artifacts.
           OPENAPI=$(match '^(src/http/|src/types\.ts$|scripts/generate-openapi\.ts$|openapi\.json$|docs-site/content/docs/api-reference/|package\.json$)')
 
-          # docker build test: mirrors docker-and-deploy.yml paths.
-          DOCKER=$(match '^(src/|Dockerfile$|Dockerfile\.worker$|docker-entrypoint\.sh$|api-entrypoint\.sh$|package\.json$|bun\.lock|tsconfig\.json$|scripts/|templates/|plugin/|deploy/)')
+          # docker build test: mirrors docker-and-deploy.yml paths. All Dockerfiles now
+          # COPY bunfig.toml + the member manifests, .dockerignore shapes the context,
+          # and evals/ feeds the evals-service image.
+          DOCKER=$(match '^(src/|Dockerfile$|Dockerfile\.worker$|evals/|\.dockerignore$|docker-entrypoint\.sh$|api-entrypoint\.sh$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|scripts/|templates/|plugin/|deploy/|(ui|templates-ui)/package\.json$)')
 
-          # ui app lint + typecheck.
-          UI=$(match '^ui/')
+          # ui app lint + typecheck. ui's dependency tree is resolved by the ROOT
+          # bun.lock + root overrides since the workspace migration.
+          UI=$(match '^(ui/|bun\.lock|package\.json$|bunfig\.toml$)')
 
           # workflow template validation: content.md changes in templates/workflows/.
           TEMPLATES_WORKFLOWS=$(match '^(templates/workflows/|scripts/validate-template-workflows\.ts$|src/workflows/definition\.ts$|src/types\.ts$)')
@@ -250,7 +257,10 @@ jobs:
 
     strategy:
       matrix:
-        dockerfile: [Dockerfile, Dockerfile.worker]
+        # evals/Dockerfile is the standalone evals-service image (Dokploy); it installs
+        # from the ROOT workspace lockfile, so workspace changes can break it silently
+        # unless it is built here too.
+        dockerfile: [Dockerfile, Dockerfile.worker, evals/Dockerfile]
 
     steps:
       - name: Checkout repository

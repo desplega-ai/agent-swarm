@@ -22,15 +22,15 @@ module.exports = {
         "Worker-side code must not import be/db or bun:sqlite — the API server is the sole DB owner; workers talk HTTP. Same invariant as scripts/check-db-boundary.sh.",
       severity: "error",
       from: { path: WORKER_SIDE },
-      to: { path: "^src/be/db(\\.ts$|/)|^bun:sqlite$" },
+      to: { path: "^src/be/db|^bun:sqlite$" },
     },
     {
       name: "no-worker-reaches-db",
       comment:
-        "Transitive variant: no worker-side module may REACH src/be/db through any import chain (grep-based checks only see direct edges). WARN not error: three chains are intentional today because the CLI is a hybrid entrypoint that can boot the API in-process (commands/{worker,lead}.ts -> server.ts -> be/db; cli.tsx -> be/scripts/maintenance.ts -> be/db). They dissolve at the api-server extraction + apps/api|apps/cli split (Monorepo 13/14); flip this to error there.",
+        "Transitive variant: no worker-side module may REACH src/be/db* through any import chain (grep-based checks only see direct edges). WARN not error: every current violation originates from three hybrid CLI entrypoint files that can boot the API in-process (commands/{worker,lead}.ts -> server.ts -> be/db*; cli.tsx -> be/scripts/maintenance.ts -> be/db*). They dissolve at the api-server extraction + apps/api|apps/cli split (Monorepo 13/14); flip this to error there.",
       severity: "warn",
       from: { path: WORKER_SIDE },
-      to: { path: "^src/be/db(\\.ts$|/)", reachable: true },
+      to: { path: "^src/be/db", reachable: true },
     },
   ],
   options: {

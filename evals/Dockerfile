@@ -12,12 +12,18 @@ ENV EVALS_PORT=4801 \
 #
 # The eval runner imports root src/e2b helpers and the models.dev pricing
 # snapshot, so the image needs those repo-root files in addition to evals/.
-COPY evals/package.json evals/bun.lock ./evals/
-WORKDIR /app/evals
+#
+# evals is a member of the root Bun workspace: its deps are recorded ONLY in the
+# root bun.lock (there is no evals/bun.lock anymore). Install at the workspace
+# root with every member manifest present, same preamble as the root Dockerfiles;
+# the hoisted linker (bunfig.toml) puts node_modules at /app, where /app/evals
+# resolves it up the tree — no symlink shim needed.
+COPY package.json bun.lock bunfig.toml ./
+COPY ui/package.json ./ui/
+COPY templates-ui/package.json ./templates-ui/
+COPY evals/package.json ./evals/
 RUN bun install --frozen-lockfile
-RUN ln -s /app/evals/node_modules /app/node_modules
 
-WORKDIR /app
 COPY evals ./evals
 COPY src/e2b ./src/e2b
 COPY src/utils ./src/utils

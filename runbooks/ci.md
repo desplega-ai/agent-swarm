@@ -22,7 +22,7 @@ CI detects what changed and runs the matching jobs:
 
 | Job | Local equivalent | Common failure |
 |---|---|---|
-| **Lint and Type Check** | `bun run lint && bun run tsc:check && bash scripts/check-db-boundary.sh` | Worker code imported `bun:sqlite` or `src/be/db` — DB boundary violation |
+| **Lint and Type Check** | `bun run lint && bun run tsc:check && bash scripts/check-db-boundary.sh && bun run check:dep-graph` | Worker code imported `bun:sqlite` or `src/be/db` — DB boundary violation (grep + dependency-cruiser graph rules) |
 | **Run Tests** | `bun test` | New test or test that depends on undocumented setup |
 | **Pi-Skills Freshness** | `bun run build:pi-skills` (must produce zero diff in `plugin/pi-skills/`) | Edited `plugin/commands/*.md` without rebuilding |
 | **OpenAPI Spec Freshness** | `bun run docs:openapi` (must produce zero diff in `openapi.json` AND `docs-site/content/docs/api-reference/`) | Edited an HTTP route or bumped `package.json` `version` without regenerating |
@@ -48,6 +48,7 @@ bun run lint            # NOT lint:fix — CI fails on warnings, not just errors
 bun run tsc:check
 bun test
 bash scripts/check-db-boundary.sh
+bun run check:dep-graph
 
 # Drift checks (run if you touched the relevant files)
 bun run build:pi-skills && git diff --quiet plugin/pi-skills/ || echo "pi-skills drift — commit the regenerated files"

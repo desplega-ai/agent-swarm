@@ -17,6 +17,7 @@
       "src/utils/request-auth-context.ts",
       "src/utils/skill-fs-writer.ts",
       "src/utils/skills-refresh.ts",
+      "src/utils/short-id.ts",
       "src/be/date-utils.ts",
       "src/be/swarm-config-guard.ts",
       "src/be/skill-parser.ts",
@@ -73,7 +74,7 @@
   "@swarm/ai-llm": {
     "layer": 2,
     "sources": ["src/utils/internal-ai/"],
-    "notes": "Phase-3: the deferred raters hoist + types fold (cycle-break #2) is APPLIED. The 4 worker-safe rater files (llm/llm-client/llm-summarizer/types) were git-mv'd from src/be/memory/raters/ into src/utils/internal-ai/raters/ (covered by this dir entry), killing the utils->be edge. The other raters (explicit-self/implicit-citation/noop/registry/retrieval/run-server-raters/store) stay in @swarm/storage and now import the folded types/llm via @swarm/ai-llm (storage->ai-llm, downward)."
+    "notes": "Raters hoist + types fold (cycle-break #2) is NOT applied on this branch — it is parked on wip/raters-hoist-deferred and gets applied at the ai-llm extraction (Monorepo 07 / DES-653). Plan: git-mv the 4 worker-safe rater files (llm/llm-client/llm-summarizer/types) from src/be/memory/raters/ into src/utils/internal-ai/raters/ (covered by this dir entry), killing the utils->be edge; the other raters (explicit-self/implicit-citation/noop/registry/retrieval/run-server-raters/store) stay in @swarm/storage and import the folded types/llm via @swarm/ai-llm (storage->ai-llm, downward)."
   },
   "@swarm/mcp-tool": {
     "layer": 2,

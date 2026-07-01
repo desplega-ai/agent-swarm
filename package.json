@@ -54,7 +54,6 @@
     "mono:build": "turbo run build",
     "mono:test": "turbo run test",
     "mono:lint": "turbo run lint",
-    "mono:typecheck": "turbo run typecheck",
     "mono:dev": "turbo run dev",
     "prepack": "bun run build:cli",
     "tsc:check": "bun tsc --noEmit",

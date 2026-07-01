@@ -256,6 +256,7 @@ bun run lint           # NOT lint:fix — CI runs `lint` (read-only)
 bun run tsc:check
 bun test
 bash scripts/check-db-boundary.sh
+bun run check:dep-graph
 ```
 
 Drift checks — run only if you touched the trigger files, MUST commit any regenerated output:
