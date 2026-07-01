@@ -21,7 +21,12 @@ export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
     }
 
     const message = isRecord(ev.message) ? ev.message : undefined;
-    const rawContent = message?.content;
+    const rawContent =
+      message?.content ??
+      ev.content ??
+      message?.parts ??
+      ev.parts ??
+      (isRecord(ev.part) ? [ev.part] : undefined);
     const role = roleFromAnthropicEvent(ev, message);
 
     if (typeof rawContent === "string") {
@@ -66,7 +71,7 @@ export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
               tool: {
                 id: String(block.id ?? ""),
                 name: String(block.name ?? "unknown"),
-                input: block.input,
+                input: toolInputFromBlock(block),
               },
             }),
           );
@@ -299,6 +304,10 @@ export function normalizeClaudeManaged(ordered: DecodedRecord[]): NormalizedItem
 
 export function normalizeOpencode(ordered: DecodedRecord[]): NormalizedItem[] {
   const partType = new Map<string, string>();
+  const toolPartByCallId = new Map<
+    string,
+    { toolName: string; input: unknown; isError?: boolean; recIds: string[] }
+  >();
   const items: NormalizedItem[] = [];
 
   for (const d of ordered) {
@@ -308,6 +317,28 @@ export function normalizeOpencode(ordered: DecodedRecord[]): NormalizedItem[] {
     const part = props && isRecord(props.part) ? props.part : undefined;
     if (ev.type === "message.part.updated" && part?.id) {
       partType.set(String(part.id), String(part.type ?? "text"));
+    }
+    if (ev.type === "message.part.updated" && part?.type === "tool") {
+      const callId = opencodeToolCallId(part);
+      const toolName = typeof part.tool === "string" ? part.tool : "tool";
+      const state = isRecord(part.state) ? part.state : undefined;
+      if (callId) {
+        const prev = toolPartByCallId.get(callId);
+        const input = opencodeRichInput(state) ?? prev?.input;
+        const status = typeof state?.status === "string" ? state.status : undefined;
+        const isError =
+          status === "error" || state?.error != null
+            ? true
+            : status === "completed"
+              ? false
+              : prev?.isError;
+        toolPartByCallId.set(callId, {
+          toolName,
+          input,
+          isError,
+          recIds: [...(prev?.recIds ?? []), d.rec.id],
+        });
+      }
     }
   }
 
@@ -367,7 +398,7 @@ export function normalizeOpencode(ordered: DecodedRecord[]): NormalizedItem[] {
       continue;
     }
 
-    emitOpencodeEvent(items, output.d, output.event);
+    emitOpencodeEvent(items, output.d, output.event, toolPartByCallId);
   }
 
   return items;
@@ -377,6 +408,10 @@ function emitOpencodeEvent(
   items: NormalizedItem[],
   d: DecodedRecord,
   event: Record<string, unknown>,
+  toolPartByCallId: Map<
+    string,
+    { toolName: string; input: unknown; isError?: boolean; recIds: string[] }
+  >,
 ) {
   switch (event.type) {
     case "parse_error": {
@@ -384,27 +419,33 @@ function emitOpencodeEvent(
       break;
     }
     case "tool_start": {
+      const callId = String(event.toolCallId ?? "");
+      const rich = toolPartByCallId.get(callId);
       items.push(
         makeItem(d, "tool_call", {
           role: "assistant",
           tool: {
-            id: String(event.toolCallId ?? ""),
-            name: String(event.toolName ?? "tool"),
-            input: event.args,
+            id: callId,
+            name: rich?.toolName ?? String(event.toolName ?? "tool"),
+            input: hasPresentInput(rich?.input) ? rich?.input : event.args,
           },
+          coveredRecIds: rich?.recIds,
         }),
       );
       break;
     }
     case "tool_end": {
+      const callId = String(event.toolCallId ?? "");
+      const rich = toolPartByCallId.get(callId);
       items.push(
         makeItem(d, "tool_result", {
           role: "user",
           result: {
-            id: String(event.toolCallId ?? ""),
+            id: callId,
             payload: event.result,
-            isError: event.isError === true,
+            isError: rich?.isError ?? event.isError === true,
           },
+          coveredRecIds: rich?.recIds,
         }),
       );
       break;
@@ -455,6 +496,29 @@ function emitOpencodeEvent(
       break;
     }
   }
+}
+
+function toolInputFromBlock(block: Record<string, unknown>): unknown {
+  return block.input ?? block.arguments ?? block.args ?? block.parameters;
+}
+
+function hasPresentInput(input: unknown): boolean {
+  if (input === undefined || input === null) return false;
+  if (typeof input === "string") return input.trim().length > 0;
+  if (Array.isArray(input)) return input.length > 0;
+  if (isRecord(input)) return Object.keys(input).length > 0;
+  return true;
+}
+
+function opencodeToolCallId(part: Record<string, unknown>): string | null {
+  const callId = part.callID ?? part.callId ?? part.toolCallId ?? part.id;
+  return typeof callId === "string" && callId.length > 0 ? callId : null;
+}
+
+function opencodeRichInput(state: Record<string, unknown> | undefined): unknown {
+  if (!state) return undefined;
+  const input = state.input ?? state.args ?? state.arguments ?? state.parameters;
+  return hasPresentInput(input) ? input : undefined;
 }
 
 function codexToolName(item: Record<string, unknown>): string {

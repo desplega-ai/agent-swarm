@@ -3,7 +3,7 @@ import { getScenario, listScenarios } from "../api.ts";
 import { ConfigChip } from "../components/ConfigChip.tsx";
 import { type Column, DataTable } from "../components/DataTable.tsx";
 import { EntityLink } from "../components/EntityLink.tsx";
-import { fmtAgo, fmtDuration } from "../components/format.ts";
+import { fmtAgo, fmtDuration, humanizeKey } from "../components/format.ts";
 import { Markdown } from "../components/Markdown.tsx";
 import { ModelChip } from "../components/ModelChip.tsx";
 import { PrettyView } from "../components/PrettyView.tsx";
@@ -11,6 +11,7 @@ import { Spinner } from "../components/Spinner.tsx";
 import { CostBadge, StatusScore, statusGlyphInfo } from "../components/StatusBadge.tsx";
 import { InfoTip, Tooltip } from "../components/Tooltip.tsx";
 import { navigate, usePoll } from "../hooks.ts";
+import { explainCheck } from "../lib/check-descriptions.ts";
 import type { AttemptJson, ScenarioJson, WorkerSpecJson } from "../types.ts";
 import "./scenarios.css";
 
@@ -72,7 +73,7 @@ const scenarioColumns: Column<ScenarioJson>[] = [
       s.outcome.checks.length === 0 ? (
         <span className="dim">0</span>
       ) : (
-        <Tooltip text={s.outcome.checks.join("\n")}>
+        <Tooltip text={s.outcome.checks.map(checkTooltipText).join("\n\n")}>
           <span>{s.outcome.checks.length}</span>
         </Tooltip>
       ),
@@ -452,7 +453,7 @@ function FactsColumn(props: { scenario: ScenarioJson }): ReactNode {
                   d.judge
                     ? "Scored by a judge rubric"
                     : d.checks.length > 0
-                      ? `Fed by checks:\n${d.checks.join("\n")}`
+                      ? `Fed by checks:\n${d.checks.map(checkTooltipText).join("\n\n")}`
                       : "Fed by checks"
                 }
               >
@@ -475,9 +476,7 @@ function FactsColumn(props: { scenario: ScenarioJson }): ReactNode {
         <Fact label={`Gates · ${gates.length}`}>
           <div className="sc-checks">
             {gates.map((gate) => (
-              <code className="sc-check sc-gate" key={gate}>
-                {gate}
-              </code>
+              <CheckChip key={gate} name={gate} gate />
             ))}
           </div>
         </Fact>
@@ -488,9 +487,7 @@ function FactsColumn(props: { scenario: ScenarioJson }): ReactNode {
         ) : (
           <div className="sc-checks">
             {s.outcome.checks.map((check) => (
-              <code className="sc-check" key={check}>
-                {check}
-              </code>
+              <CheckChip key={check} name={check} />
             ))}
           </div>
         )}
@@ -573,6 +570,9 @@ function ProseColumn(props: { scenario: ScenarioJson }): ReactNode {
           </ClampBox>
         </ProseBlock>
       ) : null}
+      <ProseBlock title="Checks">
+        <ScenarioChecks scenario={s} />
+      </ProseBlock>
       <ProseBlock title={`Tasks · ${s.tasks.length}`}>
         <div className="sc-tasks">
           {s.tasks.map((task, i) => (
@@ -605,6 +605,68 @@ function ProseColumn(props: { scenario: ScenarioJson }): ReactNode {
           </div>
         </ProseBlock>
       ) : null}
+    </div>
+  );
+}
+
+function checkTooltipText(name: string): string {
+  const explanation = explainCheck(name);
+  return `${explanation.title}\n${explanation.verifies}`;
+}
+
+function CheckChip(props: { name: string; gate?: boolean }): ReactNode {
+  const explanation = explainCheck(props.name);
+  return (
+    <Tooltip wide text={<CheckTip name={props.name} />}>
+      <code className={props.gate ? "sc-check sc-gate" : "sc-check"}>{explanation.title}</code>
+    </Tooltip>
+  );
+}
+
+function CheckTip(props: { name: string }): ReactNode {
+  const explanation = explainCheck(props.name);
+  return (
+    <div className="tip-card">
+      <div className="tip-card-title">{explanation.title}</div>
+      <div className="tip-card-row">
+        <span className="tip-card-label">Check</span>
+        <span className="tip-card-value">
+          <code>{props.name}</code>
+        </span>
+      </div>
+      <div className="tip-card-row">
+        <span className="tip-card-label">Verifies</span>
+        <span className="tip-card-value">{explanation.verifies}</span>
+      </div>
+    </div>
+  );
+}
+
+function ScenarioChecks(props: { scenario: ScenarioJson }): ReactNode {
+  const { outcome } = props.scenario;
+  const rows: Array<{ kind: string; name: string; dimension?: string }> = [
+    ...(outcome.gates ?? []).map((name) => ({ kind: "Gate", name })),
+    ...(outcome.dimensions ?? []).flatMap((d) =>
+      d.checks.map((name) => ({ kind: "Dimension", name, dimension: d.name })),
+    ),
+  ];
+  if (rows.length === 0) return <span className="dim">No deterministic checks.</span>;
+  return (
+    <div className="sc-check-list">
+      {rows.map((row) => {
+        const explanation = explainCheck(row.name);
+        return (
+          <div className="sc-check-row" key={`${row.kind}-${row.dimension ?? ""}-${row.name}`}>
+            <div className="sc-check-row-head">
+              <span className="sc-check-kind">{row.kind}</span>
+              {row.dimension ? <span className="dim">{humanizeKey(row.dimension)}</span> : null}
+              <code>{row.name}</code>
+            </div>
+            <div className="sc-check-row-title">{explanation.title}</div>
+            <div className="sc-check-row-desc">{explanation.verifies}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }

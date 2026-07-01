@@ -284,6 +284,11 @@ a.rd-cellsum-row:hover {
   margin-bottom: 2px;
 }
 
+.rd-taskrows-source {
+  color: var(--accent);
+  cursor: default;
+}
+
 /* Seed segregation: the toggle that reveals the scenario's seeded reference-data
    tasks (kept out of the way — they are not run activity). */
 .rd-taskrows-seed-toggle {
@@ -858,6 +863,17 @@ a.rd-cellsum-row:hover {
   font-size: 13px;
   line-height: 1;
   cursor: default;
+}
+
+.rd-judgment-explain {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 /* v8.0 OutcomeSpec v2: per-judgment dimension cell + the breakdown summary band */

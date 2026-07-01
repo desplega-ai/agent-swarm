@@ -10,12 +10,19 @@ import {
 } from "react";
 import { getTranscript } from "../api.ts";
 import { CrownIcon } from "../components/CrownIcon.tsx";
-import { fmtCost, fmtDate, fmtDuration, fmtTokens } from "../components/format.ts";
+import {
+  fmtCost,
+  fmtDate,
+  fmtDuration,
+  fmtScore,
+  fmtTokens,
+  humanizeKey,
+} from "../components/format.ts";
 import { HarnessIcon } from "../components/HarnessIcon.tsx";
 import { JsonView } from "../components/JsonView.tsx";
 import { Markdown } from "../components/Markdown.tsx";
 import { Spinner } from "../components/Spinner.tsx";
-import { CostBadge, StatusBadge } from "../components/StatusBadge.tsx";
+import { CostBadge, StatusBadge, StatusScore } from "../components/StatusBadge.tsx";
 import { Tooltip } from "../components/Tooltip.tsx";
 import { usePoll } from "../hooks.ts";
 import {
@@ -196,6 +203,19 @@ export interface TranscriptTotals {
   tokens: TokenTotalsJson | null;
 }
 
+export interface TranscriptOutcome {
+  status: string;
+  score: number | null;
+  judgments: {
+    kind: "llm" | "deterministic";
+    name: string;
+    pass: boolean;
+    score: number | null;
+    reasoning: string | null;
+    dimension: string | null;
+  }[];
+}
+
 /**
  * Round-10 item 2: one resolved executing member, keyed by agentId — the
  * client-side join of AttemptTaskJson.agentId ↔ the roster (attempt.workers),
@@ -293,6 +313,8 @@ export default function Transcript(props: {
    * Null/absent (older callers) ⇒ the All pill renders exactly as before.
    */
   totals?: TranscriptTotals | null;
+  /** Attempt-level final result shown before transcript events. */
+  outcome?: TranscriptOutcome | null;
   /**
    * Round-10 item 2: agentId → executing-member attribution (computed by
    * RunDetailsPage from the roster / sandbox blob). Optional/additive:
@@ -545,6 +567,7 @@ export default function Transcript(props: {
           key={activeTask}
         />
       ) : null}
+      <AttemptOutcomeCard outcome={props.outcome ?? null} />
       {rowCount === 0 ? (
         <div className="t-empty dim">
           {activeTask === null
@@ -844,6 +867,47 @@ function AllChipCard(props: { totals: TranscriptTotals; statusLabel: string | nu
         Attempt totals — recompute-priced; may exceed Σ harness-reported task costs. Includes rows
         without a task id.
       </div>
+    </div>
+  );
+}
+
+function AttemptOutcomeCard(props: { outcome: TranscriptOutcome | null }): ReactNode {
+  const outcome = props.outcome;
+  if (outcome === null) return null;
+  const judges = outcome.judgments.filter((j) => j.kind !== "deterministic");
+  const failed = outcome.judgments.filter((j) => !j.pass);
+  const primary = failed[0] ?? judges[0] ?? outcome.judgments[0] ?? null;
+  return (
+    <div className="t-attempt-outcome">
+      <div className="t-attempt-outcome-main">
+        <span className="t-result-head">Final Outcome</span>
+        <StatusScore status={outcome.status} score={outcome.score} />
+        {judges.length > 0 ? (
+          <span className="t-outcome-judges">
+            {judges.filter((j) => j.pass).length}/{judges.length} judge verdicts passed
+          </span>
+        ) : null}
+      </div>
+      {primary !== null ? (
+        <div className="t-attempt-outcome-detail">
+          <span className={primary.pass ? "tone-green" : "tone-red"}>
+            {primary.pass ? "Passed" : "Failed"}
+          </span>{" "}
+          <span>
+            {primary.dimension !== null
+              ? humanizeKey(primary.dimension)
+              : humanizeKey(primary.name)}
+          </span>
+          {primary.score !== null ? (
+            <span className="dim"> · {fmtScore(primary.score)}</span>
+          ) : null}
+          {primary.reasoning ? <div>{primary.reasoning}</div> : null}
+        </div>
+      ) : (
+        <div className="t-attempt-outcome-detail dim">
+          No deterministic checks or judge verdicts have been recorded yet.
+        </div>
+      )}
     </div>
   );
 }

@@ -116,6 +116,49 @@
   overflow-wrap: anywhere;
 }
 
+.sc-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sc-check-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+
+.sc-check-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.sc-check-kind {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.sc-check-row-title {
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.sc-check-row-desc {
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 /* v8.0 OutcomeSpec v2 — weighted dimensions + pass/fail gates */
 .sc-dims {
   display: flex;
