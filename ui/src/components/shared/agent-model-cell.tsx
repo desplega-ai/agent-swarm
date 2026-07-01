@@ -1,9 +1,6 @@
+import { ReasoningEffortIcon } from "@/components/shared/reasoning-effort-icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  type AgentModelDisplay,
-  getAgentModelPresentation,
-  reasoningEffortBadge,
-} from "@/lib/agents-list-model-display";
+import { type AgentModelDisplay, getAgentModelPresentation } from "@/lib/agents-list-model-display";
 import { ProviderIcon } from "./provider-icon";
 
 interface AgentModelCellProps {
@@ -19,7 +16,9 @@ export function AgentModelCell({ display }: AgentModelCellProps) {
 
   const configured = getAgentModelPresentation(display.configured);
   const lastUsed = getAgentModelPresentation(display.lastUsed);
-  const badge = reasoningEffortBadge(display.reasoningEffort);
+  // "off" is a real, explicit setting but not visually distinct enough to
+  // warrant a badge next to the model name — only show one for low/medium/high/xhigh.
+  const showBadge = display.reasoningEffort && display.reasoningEffort !== "off";
 
   return (
     <Tooltip>
@@ -29,8 +28,11 @@ export function AgentModelCell({ display }: AgentModelCellProps) {
           <span className="min-w-0 flex-1 truncate font-medium text-foreground">
             {primary.label}
           </span>
-          {badge ? (
-            <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{badge}</span>
+          {showBadge ? (
+            <ReasoningEffortIcon
+              level={display.reasoningEffort}
+              className="h-3 w-3 shrink-0 text-muted-foreground"
+            />
           ) : null}
           {display.diverged ? (
             <span className="shrink-0 text-[11px] font-medium text-status-warning-strong">
@@ -56,7 +58,10 @@ export function AgentModelCell({ display }: AgentModelCellProps) {
             {display.reasoningEffort ? (
               <>
                 <dt className="opacity-60">Reasoning effort</dt>
-                <dd className="font-mono">{display.reasoningEffort}</dd>
+                <dd className="flex items-center gap-1.5 font-mono">
+                  <ReasoningEffortIcon level={display.reasoningEffort} />
+                  {display.reasoningEffort}
+                </dd>
               </>
             ) : null}
 

@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   getAgentModelDisplay,
   getAgentModelPresentation,
-  reasoningEffortBadge,
 } from "../../ui/src/lib/agents-list-model-display";
 
 describe("agents list model display", () => {
@@ -62,22 +61,10 @@ describe("agents list model display", () => {
     });
   });
 
-  // ── Phase 6 (reasoning-effort plan): compact ASCII badge ────────────────────
+  // ── Phase 6 (reasoning-effort plan) ─────────────────────────────────────────
 
   test("getAgentModelDisplay threads reasoningEffort through unchanged", () => {
     const display = getAgentModelDisplay("claude-opus-4-8", "claude-opus-4-8", "high");
     expect(display.reasoningEffort).toBe("high");
-  });
-
-  test("reasoningEffortBadge maps level to bar count", () => {
-    expect(reasoningEffortBadge("low")).toBe("[|]");
-    expect(reasoningEffortBadge("medium")).toBe("[||]");
-    expect(reasoningEffortBadge("high")).toBe("[|||]");
-    expect(reasoningEffortBadge("xhigh")).toBe("[||||]");
-  });
-
-  test("reasoningEffortBadge returns null for 'off' and undefined", () => {
-    expect(reasoningEffortBadge("off")).toBeNull();
-    expect(reasoningEffortBadge(undefined)).toBeNull();
   });
 });

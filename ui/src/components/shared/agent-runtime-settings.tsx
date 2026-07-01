@@ -1,4 +1,5 @@
 import { AlertTriangle, ArrowUpCircle, Check, ChevronsUpDown, Lock, Save } from "lucide-react";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useUpdateAgentRuntime } from "@/api/hooks/use-agents";
@@ -8,6 +9,13 @@ import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { type Agent, REASONING_EFFORT_LEVELS, type ReasoningEffortLevel } from "@/api/types";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { ProviderIcon } from "@/components/shared/provider-icon";
+import {
+  AUTO_DESCRIPTION,
+  AUTO_LABEL,
+  REASONING_EFFORT_DESCRIPTION,
+  REASONING_EFFORT_LABEL,
+  ReasoningEffortIcon,
+} from "@/components/shared/reasoning-effort-icon";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -42,14 +50,6 @@ import {
   pickDefaultModelForHarness,
 } from "@/lib/agent-runtime-models";
 import { cn } from "@/lib/utils";
-
-const REASONING_EFFORT_LABEL: Record<ReasoningEffortLevel, string> = {
-  off: "Off",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  xhigh: "X-High",
-};
 
 /** Unset sentinel — no `REASONING_EFFORT_OVERRIDE` (harness-native default). */
 type EffortValue = ReasoningEffortLevel | "";
@@ -272,11 +272,22 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         <span>
           Last used: <code>{latestModel?.model ?? "not reported"}</code>
         </span>
-        <span>
-          Effort: <code>{effort || "unset"}</code>
+        <span className="flex items-center gap-1.5">
+          Effort:{" "}
+          <ReasoningEffortIcon level={effort || undefined} className="text-muted-foreground" />{" "}
+          <code>{effort ? REASONING_EFFORT_LABEL[effort] : AUTO_LABEL}</code>
         </span>
-        <span>
-          Last effort: <code>{latestModel?.reasoningEffort ?? "not reported"}</code>
+        <span className="flex items-center gap-1.5">
+          Last effort:{" "}
+          <ReasoningEffortIcon
+            level={latestModel?.reasoningEffort}
+            className="text-muted-foreground"
+          />{" "}
+          <code>
+            {latestModel?.reasoningEffort
+              ? REASONING_EFFORT_LABEL[latestModel.reasoningEffort]
+              : "not reported"}
+          </code>
         </span>
       </div>
 
@@ -305,6 +316,54 @@ interface ReasoningEffortToggleProps {
   modelLabel: string | null;
 }
 
+function ReasoningEffortSegment({
+  active,
+  disabled,
+  onClick,
+  bordered,
+  icon,
+  label,
+  description,
+}: {
+  active: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  bordered: boolean;
+  icon: ReactNode;
+  label: string;
+  description: string;
+}) {
+  const segment = (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "flex h-9 items-center gap-1.5 px-3 text-xs font-medium transition-colors",
+        bordered && "border-l border-border",
+        active
+          ? "bg-primary text-primary-foreground"
+          : "bg-transparent text-foreground hover:bg-accent",
+        disabled && "cursor-not-allowed opacity-40 hover:bg-transparent",
+      )}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span>{segment}</span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64">
+        <span className="font-medium">{label}</span> — {description}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function ReasoningEffortToggle({
   value,
   onChange,
@@ -313,41 +372,49 @@ function ReasoningEffortToggle({
 }: ReasoningEffortToggleProps) {
   return (
     <div className="inline-flex w-fit overflow-hidden rounded-md border border-border">
-      {REASONING_EFFORT_LEVELS.map((level, index) => {
+      <ReasoningEffortSegment
+        active={value === ""}
+        disabled={false}
+        onClick={() => onChange("")}
+        bordered={false}
+        icon={<ReasoningEffortIcon level={undefined} />}
+        label={AUTO_LABEL}
+        description={AUTO_DESCRIPTION}
+      />
+      {REASONING_EFFORT_LEVELS.map((level) => {
         const supported = levels ? levels.includes(level) : true;
         const active = value === level;
-        const segment = (
-          <button
-            key={level}
-            type="button"
-            disabled={!supported}
-            onClick={() => onChange(active ? "" : level)}
-            className={cn(
-              "px-3 py-1.5 text-xs font-medium transition-colors",
-              index > 0 && "border-l border-border",
-              active
-                ? "bg-primary text-primary-foreground"
-                : "bg-transparent text-foreground hover:bg-accent",
-              !supported && "cursor-not-allowed opacity-40 hover:bg-transparent",
-            )}
-          >
-            {REASONING_EFFORT_LABEL[level]}
-          </button>
-        );
 
-        if (supported) return segment;
+        if (supported) {
+          return (
+            <ReasoningEffortSegment
+              key={level}
+              active={active}
+              disabled={false}
+              onClick={() => onChange(active ? "" : level)}
+              bordered
+              icon={<ReasoningEffortIcon level={level} />}
+              label={REASONING_EFFORT_LABEL[level]}
+              description={REASONING_EFFORT_DESCRIPTION[level]}
+            />
+          );
+        }
 
         const suggestion = levels?.length ? nearestSupportedLevel(level, levels) : null;
+        const unsupportedReason = `${modelLabel ?? "This model"} doesn't support "${REASONING_EFFORT_LABEL[level]}"${
+          suggestion ? ` — use "${REASONING_EFFORT_LABEL[suggestion]}" instead.` : "."
+        }`;
         return (
-          <Tooltip key={level}>
-            <TooltipTrigger asChild>
-              <span>{segment}</span>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-64">
-              {modelLabel ?? "This model"} doesn't support "{REASONING_EFFORT_LABEL[level]}"
-              {suggestion ? ` — use "${REASONING_EFFORT_LABEL[suggestion]}" instead.` : "."}
-            </TooltipContent>
-          </Tooltip>
+          <ReasoningEffortSegment
+            key={level}
+            active={false}
+            disabled={true}
+            onClick={() => {}}
+            bordered
+            icon={<ReasoningEffortIcon level={level} />}
+            label={REASONING_EFFORT_LABEL[level]}
+            description={unsupportedReason}
+          />
         );
       })}
     </div>

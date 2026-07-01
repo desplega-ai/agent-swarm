@@ -17,27 +17,6 @@ export interface AgentModelPresentation {
   providerId: ProviderIconKey | null;
 }
 
-/** Ordinal position of each level — used to size the `[|||]`-style badge (more bars = more effort). */
-const REASONING_EFFORT_BADGE_INDEX: Record<ReasoningEffortLevel, number> = {
-  off: 0,
-  low: 1,
-  medium: 2,
-  high: 3,
-  xhigh: 4,
-};
-
-/**
- * Compact ASCII badge for the agents-list Model column, e.g. `[|||]` for
- * `high`. Bracketed pipes (not a bare repeated `.`) so it doesn't read as a
- * data-grid truncation ellipsis. `undefined`/`"off"` render no badge — only
- * a non-off configured level is visually distinct enough to warrant one.
- */
-export function reasoningEffortBadge(level: ReasoningEffortLevel | undefined): string | null {
-  if (!level) return null;
-  const index = REASONING_EFFORT_BADGE_INDEX[level];
-  return index > 0 ? `[${"|".repeat(index)}]` : null;
-}
-
 function cleanModel(value: string | null | undefined): string | null {
   const model = value?.trim();
   return model ? model : null;

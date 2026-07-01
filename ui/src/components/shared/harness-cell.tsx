@@ -2,6 +2,7 @@ import type { AgentCredStatus, ProviderName } from "@/api/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { HarnessIcon } from "./harness-icon";
+import { ReasoningEffortIcon } from "./reasoning-effort-icon";
 
 const HARNESS_LABEL: Record<string, string> = {
   claude: "Claude",
@@ -171,7 +172,10 @@ function CredBreakdown({
           {credStatus.latestModel?.reasoningEffort ? (
             <>
               <dt className="opacity-60">Effort</dt>
-              <dd className="font-mono">{credStatus.latestModel.reasoningEffort}</dd>
+              <dd className="flex items-center gap-1.5 font-mono">
+                <ReasoningEffortIcon level={credStatus.latestModel.reasoningEffort} />
+                {credStatus.latestModel.reasoningEffort}
+              </dd>
             </>
           ) : null}
 
