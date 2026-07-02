@@ -11,8 +11,8 @@
 import { Glob } from "bun";
 import path from "node:path";
 
-const TOOLS_DIR = path.join(import.meta.dir, "../src/tools");
-const SERVER_FILE = path.join(import.meta.dir, "../src/server.ts");
+const TOOLS_DIR = path.join(import.meta.dir, "../apps/swarm/src/tools");
+const SERVER_FILE = path.join(import.meta.dir, "../apps/swarm/src/server.ts");
 const OUTPUT_FILE = path.join(import.meta.dir, "../MCP.md");
 
 interface ToolCategory {

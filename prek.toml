@@ -18,8 +18,8 @@ id = "biome-lint"
 name = "Biome lint"
 language = "system"
 entry = "bun run lint"
-# CI "lint" domain: biome runs on src/ + apps/evals/; config + lockfile + tsconfig.
-files = '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|biome\.json$)'
+# CI "lint" domain: biome runs on apps/swarm/src/ + apps/evals/; config + lockfile + tsconfig.
+files = '^(apps/swarm/src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|biome\.json$)'
 pass_filenames = false
 stages = ["pre-push"]
 fail_fast = true
@@ -30,7 +30,7 @@ name = "TypeScript type check"
 language = "system"
 entry = "bun run tsc:check"
 # Same CI "lint" domain (tsc:check is bundled in the lint-and-typecheck job).
-files = '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|biome\.json$)'
+files = '^(apps/swarm/src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|biome\.json$)'
 pass_filenames = false
 stages = ["pre-push"]
 fail_fast = true

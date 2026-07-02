@@ -21,10 +21,10 @@ COPY apps/ui/package.json ./apps/ui/package.json
 COPY apps/templates-ui/package.json ./apps/templates-ui/package.json
 COPY apps/evals/package.json ./apps/evals/package.json
 RUN bun install --frozen-lockfile
-COPY src/ ./src/
+COPY apps/swarm/src/ ./apps/swarm/src/
 COPY templates/ ./templates/
 COPY tsconfig.json ./
-RUN bun build ./src/cli.tsx --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm
+RUN bun build ./apps/swarm/src/cli.tsx --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm
 
 # Stage 2: Full development environment
 FROM ubuntu:24.04

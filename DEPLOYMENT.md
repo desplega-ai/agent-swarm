@@ -258,7 +258,7 @@ chmod 666 ./work/.mcp.json
 
 The Docker worker image uses a multi-stage build:
 
-1. **Builder stage**: Compiles `src/cli.tsx` into a standalone binary
+1. **Builder stage**: Compiles `apps/swarm/src/cli.tsx` into a standalone binary
 2. **Runtime stage**: Ubuntu 24.04 with full development environment
 
 **Pre-installed tools:**
@@ -487,7 +487,7 @@ Codex workers support three auth paths:
 For Docker Compose deployments, the ChatGPT OAuth flow happens on your laptop, not inside the worker container:
 
 ```bash
-bun run src/cli.tsx codex-login --api-url https://your-swarm.example.com --api-key <api-key>
+bun run apps/swarm/src/cli.tsx codex-login --api-url https://your-swarm.example.com --api-key <api-key>
 ```
 
 That command completes the browser OAuth flow locally and stores the credential in the swarm API config store. The default behavior picks the next free pool slot (`codex_oauth_0`, `codex_oauth_1`, ...), and you can pin a specific slot with `--slot <n>` for any integer from `0` through `100`. Then restart codex workers. On boot, `docker-entrypoint.sh` enumerates the stored `codex_oauth_<slot>` entries from the API and writes the selected credential to `/home/worker/.codex/auth.json` automatically.

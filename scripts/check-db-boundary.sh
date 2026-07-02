@@ -6,7 +6,7 @@
 # API exclusively via HTTP.
 #
 # Worker-side paths:
-#   src/commands/  src/hooks/  src/providers/  src/prompts/  src/scripts-runtime/  src/cli.tsx  src/claude.ts
+#   apps/swarm/src/commands/  apps/swarm/src/hooks/  apps/swarm/src/providers/  apps/swarm/src/prompts/  apps/swarm/src/scripts-runtime/  apps/swarm/src/cli.tsx  apps/swarm/src/claude.ts
 #   plugin/opencode-plugins/  (runs inside the opencode subprocess in the worker)
 #
 # Forbidden patterns:
@@ -16,14 +16,14 @@
 set -euo pipefail
 
 WORKER_PATHS=(
-  src/commands/
-  src/hooks/
-  src/providers/
-  src/prompts/
-  src/scripts-runtime/
-  src/utils/
-  src/cli.tsx
-  src/claude.ts
+  apps/swarm/src/commands/
+  apps/swarm/src/hooks/
+  apps/swarm/src/providers/
+  apps/swarm/src/prompts/
+  apps/swarm/src/scripts-runtime/
+  apps/swarm/src/utils/
+  apps/swarm/src/cli.tsx
+  apps/swarm/src/claude.ts
   plugin/opencode-plugins/
 )
 
@@ -56,8 +56,8 @@ if [ -n "$VIOLATIONS" ]; then
   echo "Violations:"
   echo -e "$VIOLATIONS"
   echo ""
-  echo "Fix: Move DB-dependent logic to src/be/, src/http/, or src/tools/ (API-side),"
-  echo "or extract pure functions to a shared module (e.g., src/prompts/)."
+  echo "Fix: Move DB-dependent logic to apps/swarm/src/be/, apps/swarm/src/http/, or apps/swarm/src/tools/ (API-side),"
+  echo "or extract pure functions to a shared module (e.g., apps/swarm/src/prompts/)."
   exit 1
 fi
 

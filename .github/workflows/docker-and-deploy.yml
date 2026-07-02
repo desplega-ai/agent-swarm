@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "src/**"
+      - "apps/swarm/src/**"
       - "Dockerfile"
       - "Dockerfile.worker"
       - "docker-entrypoint.sh"

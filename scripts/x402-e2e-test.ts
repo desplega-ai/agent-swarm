@@ -16,7 +16,7 @@
  *   If none set, uses a hardcoded test key (viem signer).
  */
 
-import { createX402Client } from "../src/x402/client.ts";
+import { createX402Client } from "../apps/swarm/src/x402/client.ts";
 import type { Subprocess } from "bun";
 
 const TEST_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";

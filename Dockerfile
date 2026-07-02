@@ -19,7 +19,7 @@ COPY apps/evals/package.json ./apps/evals/package.json
 RUN bun install --frozen-lockfile
 
 # Copy source files
-COPY src/ ./src/
+COPY apps/swarm/src/ ./apps/swarm/src/
 COPY templates/ ./templates/
 COPY tsconfig.json ./
 
@@ -28,16 +28,16 @@ COPY tsconfig.json ./
 # spawned subprocesses — bun run /$bunfs/eval-harness.ts fails in the harness
 # subprocess. Pre-building to real .js files on disk fixes this.
 RUN mkdir -p scripts-runtime script-workflows-runtime && \
-    bun build ./src/scripts-runtime/eval-harness.ts \
+    bun build ./apps/swarm/src/scripts-runtime/eval-harness.ts \
       --target bun --no-splitting \
       --outfile ./scripts-runtime/eval-harness.bundle.js && \
-    bun build ./src/script-workflows/harness.ts \
+    bun build ./apps/swarm/src/script-workflows/harness.ts \
       --target bun --no-splitting \
       --outfile ./script-workflows-runtime/harness.bundle.js && \
-    bun build ./src/scripts-runtime/stdlib/index.ts \
+    bun build ./apps/swarm/src/scripts-runtime/stdlib/index.ts \
       --target bun --no-splitting \
       --outfile ./scripts-runtime/stdlib.bundle.js && \
-    bun build ./src/scripts-runtime/swarm-sdk.ts \
+    bun build ./apps/swarm/src/scripts-runtime/swarm-sdk.ts \
       --target bun --no-splitting \
       --outfile ./scripts-runtime/swarm-sdk.bundle.js && \
     bun build ./node_modules/zod/index.js \
@@ -61,7 +61,7 @@ RUN mkdir -p script-types/node_modules && cd node_modules && \
       | tar -xf - -C /build/script-types/node_modules
 
 # Compile HTTP server to standalone binary
-RUN bun build ./src/http.ts --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm-api
+RUN bun build ./apps/swarm/src/http.ts --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm-api
 
 # Stage 2: Minimal runtime image
 FROM debian:bookworm-slim
@@ -92,11 +92,11 @@ RUN chmod +x /usr/local/bin/agent-swarm-api
 COPY package.json ./
 
 # Copy migration SQL files (compiled binary can't read from /$bunfs virtual filesystem)
-COPY src/be/migrations/*.sql /app/migrations/
+COPY apps/swarm/src/be/migrations/*.sql /app/migrations/
 
 # Copy vendored models.dev pricing snapshot so the compiled binary can seed
 # pricing rows from a real filesystem path at runtime.
-COPY src/be/modelsdev-cache.json /app/src/be/modelsdev-cache.json
+COPY apps/swarm/src/be/modelsdev-cache.json /app/apps/swarm/src/be/modelsdev-cache.json
 
 # Copy sqlite-vec native extension on real disk. `bun build --compile` embeds JS
 # into /$bunfs/ but not native .so files, and dlopen can't load from /$bunfs/.

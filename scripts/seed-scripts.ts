@@ -16,8 +16,8 @@
  *   DATABASE_PATH=./my.sqlite bun run seed:scripts
  */
 
-import { initDb } from "../src/be/db";
-import { runAllSeeders } from "../src/be/seed";
+import { initDb } from "../apps/swarm/src/be/db";
+import { runAllSeeders } from "../apps/swarm/src/be/seed";
 
 const dbPath = process.env.DATABASE_PATH ?? "./agent-swarm-db.sqlite";
 console.log(`[seed] database: ${dbPath}`);

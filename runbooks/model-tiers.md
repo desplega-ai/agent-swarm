@@ -13,7 +13,7 @@ The supported tiers are:
 | `smart` | Higher-capability model for harder work |
 | `ultra` | Highest-capability model for rare expensive work |
 
-The canonical schema lives in `src/model-tiers.ts` as `ModelTierSchema`.
+The canonical schema lives in `apps/swarm/src/model-tiers.ts` as `ModelTierSchema`.
 
 ## Default mappings
 

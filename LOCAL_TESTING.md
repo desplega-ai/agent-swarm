@@ -17,24 +17,24 @@ Runner: `bun test` (workspace root).
 
 ```bash
 bun test                              # all unit tests
-bun test src/tests/<file>.test.ts     # one file
-bun test --watch src/tests/<file>.test.ts
+bun test apps/swarm/src/tests/<file>.test.ts     # one file
+bun test --watch apps/swarm/src/tests/<file>.test.ts
 ```
 
 Conventions:
 
 - Each test file uses an **isolated SQLite DB**: `./test-<name>.sqlite`. Call `initDb()` in `beforeAll`, `closeDb()` in `afterAll`.
-- Tests that need an HTTP surface use a **minimal `node:http` handler** — not the full `src/http.ts` server. Keeps startup cheap and isolates what's under test.
+- Tests that need an HTTP surface use a **minimal `node:http` handler** — not the full `apps/swarm/src/http.ts` server. Keeps startup cheap and isolates what's under test.
 - Use **unique test ports** per file (e.g. `13022`, `13023`) so parallel tests don't collide.
 - In `afterAll`, clean up the `.sqlite`, `-wal`, and `-shm` files — or the next run inherits stale state.
 
-Memory-system tests have their own required suite (see `src/be/memory/` changes in the root `CLAUDE.md`).
+Memory-system tests have their own required suite (see `apps/swarm/src/be/memory/` changes in the root `CLAUDE.md`).
 
 ## E2E with Docker
 
 Use the **`swarm-local-e2e` skill** — it owns the full flow (start API, build image, start lead + worker, create tasks, verify registration, check session logs, cleanup). Invoke it when:
 
-- You changed code in `src/commands/runner.ts`, `src/providers/`, task-lifecycle paths, or `docker-entrypoint.sh`.
+- You changed code in `apps/swarm/src/commands/runner.ts`, `apps/swarm/src/providers/`, task-lifecycle paths, or `docker-entrypoint.sh`.
 - You need to verify log isolation between sequential tasks on the same agent.
 - You want a visual round-trip through the dashboard.
 
@@ -77,7 +77,7 @@ kill $(lsof -ti :3013)
 
 `bash -n` is not sufficient validation for `docker-entrypoint.sh`. Run a full round-trip:
 
-1. **Verify HTTP methods/paths** in entrypoint `curl` calls against route defs in `src/http/`. Common gotcha: config API is `PUT /api/config`, not `POST`.
+1. **Verify HTTP methods/paths** in entrypoint `curl` calls against route defs in `apps/swarm/src/http/`. Common gotcha: config API is `PUT /api/config`, not `POST`.
 2. **Test idempotency**: second boot with same `AGENT_ID` should skip re-registration (check via `GET /api/agents`).
 3. **Test failure mode**: stop an external dependency (e.g. `curl` target), boot the container, verify it continues via `|| true` guards rather than crashing.
 4. **Test lead and worker paths separately**:

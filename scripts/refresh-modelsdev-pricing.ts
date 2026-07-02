@@ -14,9 +14,11 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-const CACHE_PATH = path.join(process.cwd(), "src", "be", "modelsdev-cache.json");
+const CACHE_PATH = path.join(process.cwd(), "apps", "swarm", "src", "be", "modelsdev-cache.json");
 const REASONING_SNAPSHOT_PATH = path.join(
   process.cwd(),
+  "apps",
+  "swarm",
   "src",
   "providers",
   "modelsdev-reasoning.json",

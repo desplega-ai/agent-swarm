@@ -23,7 +23,7 @@
  *
  * USAGE
  *   bun scripts/codemod-imports.ts [files...] [--dry-run] [--apply] [--package @swarm/x]
- *     (no files)        default scope: every .ts / .tsx under src/ (recursive)
+ *     (no files)        default scope: every .ts / .tsx under apps/swarm/src/ (recursive)
  *     --dry-run         print intended changes, write nothing (DEFAULT — safe)
  *     --apply           write changes to disk
  *     --package <name>  only rewrite imports TARGETING that package
@@ -87,7 +87,7 @@ function resolveModuleFile(fromAbs: string, spec: string): string | null {
   let baseDir: string;
   let rest: string;
   if (spec.startsWith("@/")) {
-    baseDir = join(ROOT, "src");
+    baseDir = join(ROOT, "apps/swarm/src");
     rest = spec.slice(2);
   } else if (spec.startsWith(".")) {
     baseDir = dirname(fromAbs);
@@ -124,7 +124,7 @@ if (fileArgs.length > 0) {
 } else {
   // Scope: src/ (incl tests) + root tooling that imports src/ (scripts/, deploy/). NOT
   // apps/ (separate packages, repointed explicitly) or packages/ (barrels — skipped below).
-  project.addSourceFilesAtPaths(["src/**/*.ts", "src/**/*.tsx", "scripts/**/*.ts", "deploy/**/*.ts"]);
+  project.addSourceFilesAtPaths(["apps/swarm/src/**/*.ts", "apps/swarm/src/**/*.tsx", "scripts/**/*.ts", "deploy/**/*.ts"]);
 }
 
 type Change = { file: string; line: number; from: string; to: string; kind: "import" | "export" | "importtype" | "dynamic" };

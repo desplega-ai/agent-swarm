@@ -35,7 +35,7 @@ let cachePromise: Promise<ModelsDevCache> | null = null;
 /** Repo-root models.dev snapshot — in-repo and offline-safe. Loaded once per process. */
 function loadCache(): Promise<ModelsDevCache> {
   if (!cachePromise) {
-    const url = new URL("../../../../src/be/modelsdev-cache.json", import.meta.url);
+    const url = new URL("../../../../apps/swarm/src/be/modelsdev-cache.json", import.meta.url);
     cachePromise = Bun.file(url).json() as Promise<ModelsDevCache>;
   }
   return cachePromise;

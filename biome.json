@@ -9,9 +9,9 @@
     "ignoreUnknown": false,
     "includes": [
       "**",
-      "!src/be/seed-scripts/catalog",
-      "!src/be/modelsdev-cache.json",
-      "!src/providers/modelsdev-reasoning.json",
+      "!apps/swarm/src/be/seed-scripts/catalog",
+      "!apps/swarm/src/be/modelsdev-cache.json",
+      "!apps/swarm/src/providers/modelsdev-reasoning.json",
       "!mockups"
     ]
   },
@@ -62,7 +62,7 @@
   },
   "overrides": [
     {
-      "includes": ["**/*.test.ts", "**/*.test.tsx", "src/tests/**"],
+      "includes": ["**/*.test.ts", "**/*.test.tsx", "apps/swarm/src/tests/**"],
       "linter": {
         "rules": {
           "suspicious": {

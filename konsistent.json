@@ -6,7 +6,7 @@
       "name": "provider-adapter-export-shape",
       "description": "Provider adapter files expose the shared harness adapter class + credential probe shape, and the internal-ai barrel keeps the worker-safe completion surface stable.",
       "severity": "warning",
-      "paths": "src",
+      "paths": "apps/swarm/src",
       "must": [
         {
           "name": "adapter-class-contract",

@@ -31,15 +31,15 @@ Build from the current checkout. This path uses the E2B CLI legacy Dockerfile
 builder, so it requires local Docker:
 
 ```bash
-bun run src/cli.tsx e2b build-template --role api
-bun run src/cli.tsx e2b build-template --role worker
+bun run apps/swarm/src/cli.tsx e2b build-template --role api
+bun run apps/swarm/src/cli.tsx e2b build-template --role worker
 ```
 
 Build from an existing registry image. This path uses the E2B Template SDK
 `fromImage()` builder and does not require local Docker:
 
 ```bash
-bun run src/cli.tsx e2b build-template \
+bun run apps/swarm/src/cli.tsx e2b build-template \
   --role worker \
   --source image \
   --image ghcr.io/desplega-ai/agent-swarm-worker:latest
@@ -58,7 +58,7 @@ Override with `--template`, `--api-template`, `--worker-template`,
 Start only a worker against a reachable API:
 
 ```bash
-bun run src/cli.tsx e2b start-worker \
+bun run apps/swarm/src/cli.tsx e2b start-worker \
   --api-url https://your-tunnel-or-api.example.com \
   --api-key "$SWARM_E2E_API_KEY" \
   --env-file .env.docker
@@ -67,7 +67,7 @@ bun run src/cli.tsx e2b start-worker \
 Start API and one worker in E2B:
 
 ```bash
-bun run src/cli.tsx e2b start-stack \
+bun run apps/swarm/src/cli.tsx e2b start-stack \
   --api-key "$SWARM_E2E_API_KEY" \
   --env-file .env.docker \
   --workers 1
@@ -88,16 +88,16 @@ Useful flags:
 Clean up:
 
 ```bash
-bun run src/cli.tsx e2b list
-bun run src/cli.tsx e2b kill <sandbox-id>
-bun run src/cli.tsx e2b delete-template <template-name>
+bun run apps/swarm/src/cli.tsx e2b list
+bun run apps/swarm/src/cli.tsx e2b kill <sandbox-id>
+bun run apps/swarm/src/cli.tsx e2b delete-template <template-name>
 ```
 
 Publish public templates:
 
 ```bash
-bun run src/cli.tsx e2b publish-template agent-swarm-api-latest
-bun run src/cli.tsx e2b publish-template agent-swarm-worker-latest
+bun run apps/swarm/src/cli.tsx e2b publish-template agent-swarm-api-latest
+bun run apps/swarm/src/cli.tsx e2b publish-template agent-swarm-worker-latest
 ```
 
 Publishing/unpublishing uses the E2B template update API and only requires
@@ -125,13 +125,13 @@ Stream a swarm's logs by slug:
 
 ```bash
 # History (last 200 lines) of the API sandbox (default --role api):
-bun run src/cli.tsx e2b swarms logs my-swarm
+bun run apps/swarm/src/cli.tsx e2b swarms logs my-swarm
 
 # A worker's log, last 500 lines:
-bun run src/cli.tsx e2b swarms logs my-swarm --role worker --tail 500
+bun run apps/swarm/src/cli.tsx e2b swarms logs my-swarm --role worker --tail 500
 
 # Follow live (Ctrl-C to stop); needs a single target sandbox:
-bun run src/cli.tsx e2b swarms logs my-swarm --role api --follow
+bun run apps/swarm/src/cli.tsx e2b swarms logs my-swarm --role api --follow
 ```
 
 - `--role api|lead|worker` selects which sandbox's tee'd log to read (default
@@ -167,7 +167,7 @@ Store `E2B_API_KEY` plus provider credentials as repository secrets, then run:
 ```yaml
 - name: Build E2B worker template
   run: |
-    bun run src/cli.tsx e2b build-template \
+    bun run apps/swarm/src/cli.tsx e2b build-template \
       --role worker \
       --source image \
       --image ghcr.io/desplega-ai/agent-swarm-worker:${{ github.sha }}
@@ -176,7 +176,7 @@ Store `E2B_API_KEY` plus provider credentials as repository secrets, then run:
 
 - name: Start E2B worker
   run: |
-    bun run src/cli.tsx e2b start-worker \
+    bun run apps/swarm/src/cli.tsx e2b start-worker \
       --api-url "${SWARM_API_URL}" \
       --api-key "${SWARM_E2E_API_KEY}" \
       --json

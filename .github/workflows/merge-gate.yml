@@ -65,33 +65,34 @@ jobs:
             fi
           }
 
-          # lint + tsc:check: biome runs on src/, tsc covers src/ (scripts excluded in tsconfig).
+          # lint + tsc:check (+ the layout guard — the dead pre-monorepo paths src/, ui/,
+          # templates-ui/, evals/ are watched so a resurrection PR always runs the guard).
           # bunfig.toml (linker/test config), turbo.json, member manifests (root frozen
           # install), and the dep-graph inputs (.dependency-cruiser.cjs, plugin/) are all
           # load-bearing for this job since the workspace migration.
-          LINT=$(match '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|apps/(ui|templates-ui)/package\.json$)')
+          LINT=$(match '^(src/|ui/|templates-ui/|evals/|apps/swarm/src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|apps/(ui|templates-ui)/package\.json$)')
 
           # tests: src/ + scripts that tests import + lockfile/tsconfig + bunfig ([test]
           # preload + pathIgnorePatterns) + member manifests (root frozen install).
-          TEST=$(match '^(src/|scripts/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/(ui|templates-ui|evals)/package\.json$)')
+          TEST=$(match '^(apps/swarm/src/|scripts/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/(ui|templates-ui|evals)/package\.json$)')
 
           # pi-skills freshness: generator inputs + outputs.
           PI_SKILLS=$(match '^(plugin/commands/|plugin/pi-skills/|plugin/build-pi-skills\.ts$)')
 
           # openapi freshness: routes, types, generator, version, generated artifacts.
-          OPENAPI=$(match '^(src/http/|src/types\.ts$|scripts/generate-openapi\.ts$|openapi\.json$|docs-site/content/docs/api-reference/|package\.json$)')
+          OPENAPI=$(match '^(apps/swarm/src/http/|apps/swarm/src/types\.ts$|scripts/generate-openapi\.ts$|openapi\.json$|docs-site/content/docs/api-reference/|package\.json$)')
 
           # docker build test: mirrors docker-and-deploy.yml paths. All Dockerfiles now
           # COPY bunfig.toml + the member manifests, .dockerignore shapes the context,
           # and apps/evals/ feeds the evals-service image.
-          DOCKER=$(match '^(src/|Dockerfile$|Dockerfile\.worker$|apps/evals/|\.dockerignore$|docker-entrypoint\.sh$|api-entrypoint\.sh$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|scripts/|templates/|plugin/|deploy/|apps/(ui|templates-ui)/package\.json$)')
+          DOCKER=$(match '^(apps/swarm/src/|Dockerfile$|Dockerfile\.worker$|apps/evals/|\.dockerignore$|docker-entrypoint\.sh$|api-entrypoint\.sh$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|scripts/|templates/|plugin/|deploy/|apps/(ui|templates-ui)/package\.json$)')
 
           # ui app lint + typecheck. ui's dependency tree is resolved by the ROOT
           # bun.lock + root overrides since the workspace migration.
           UI=$(match '^(apps/ui/|bun\.lock|package\.json$|bunfig\.toml$)')
 
           # workflow template validation: content.md changes in templates/workflows/.
-          TEMPLATES_WORKFLOWS=$(match '^(templates/workflows/|scripts/validate-template-workflows\.ts$|src/workflows/definition\.ts$|src/types\.ts$)')
+          TEMPLATES_WORKFLOWS=$(match '^(templates/workflows/|scripts/validate-template-workflows\.ts$|apps/swarm/src/workflows/definition\.ts$|apps/swarm/src/types\.ts$)')
 
           for k in LINT TEST PI_SKILLS OPENAPI DOCKER UI TEMPLATES_WORKFLOWS; do
             v=$(eval echo \$$k)
@@ -146,6 +147,9 @@ jobs:
       - name: Build evals UI
         run: bun run ui:build
         working-directory: apps/evals
+
+      - name: Check monorepo layout (no resurrected top-level dirs)
+        run: bash scripts/check-monorepo-layout.sh
 
       - name: Check worker/API DB boundary
         run: bash scripts/check-db-boundary.sh
@@ -247,7 +251,7 @@ jobs:
           echo "API reference docs are up to date."
       - name: Check for raw matchRoute usage
         run: |
-          UNREGISTERED=$(grep -rn "matchRoute(" src/http/ --include="*.ts" | grep -v "route-def.ts" | grep -v "utils.ts" || true)
+          UNREGISTERED=$(grep -rn "matchRoute(" apps/swarm/src/http/ --include="*.ts" | grep -v "route-def.ts" | grep -v "utils.ts" || true)
           if [ -n "$UNREGISTERED" ]; then
             echo "::error::Found raw matchRoute() calls. Convert to route() definitions:"
             echo "$UNREGISTERED"

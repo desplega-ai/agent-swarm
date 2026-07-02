@@ -10,7 +10,7 @@
  */
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { closeDb, getDb, getSwarmConfigById, initDb, upsertSwarmConfig } from "../src/be/db";
+import { closeDb, getDb, getSwarmConfigById, initDb, upsertSwarmConfig } from "../apps/swarm/src/be/db";
 
 const DB_PATH = "./test-fresh-encryption.sqlite";
 const KEY_PATH = join(".", ".encryption-key");

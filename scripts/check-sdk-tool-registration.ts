@@ -10,8 +10,8 @@
  * Modelled on scripts/check-db-boundary.sh.
  */
 
-import { SDK_TOOL_NAME_MAP } from "../src/scripts-runtime/sdk-allowlist";
-import { ALL_TOOLS } from "../src/tools/tool-config";
+import { SDK_TOOL_NAME_MAP } from "../apps/swarm/src/scripts-runtime/sdk-allowlist";
+import { ALL_TOOLS } from "../apps/swarm/src/tools/tool-config";
 
 // Tools intentionally NOT exposed to the scripts SDK.
 // Each entry must have a reason — reviewers will check.

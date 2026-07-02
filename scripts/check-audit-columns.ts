@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runMigrations } from "../src/be/migrations/runner";
+import { runMigrations } from "../apps/swarm/src/be/migrations/runner";
 
 const REQUIRED_AUDIT_COLUMNS = ["created_by", "updated_by"] as const;
 const WHITELIST_PATH = ".non-audit-tables";

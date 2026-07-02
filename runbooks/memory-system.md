@@ -4,19 +4,19 @@ Architecture, tests, and key files for the agent memory subsystem.
 
 ## Architecture
 
-Provider abstractions live in `src/be/memory/`:
+Provider abstractions live in `apps/swarm/src/be/memory/`:
 
 - `EmbeddingProvider` — OpenAI embeddings.
 - `MemoryStore` — SQLite + sqlite-vec for vector search.
 - Reranker scores `similarity × recency_decay × access_boost × usefulness(α, β)`.
 
-Tuning constants are env-overridable in `src/be/memory/constants.ts`.
+Tuning constants are env-overridable in `apps/swarm/src/be/memory/constants.ts`.
 
 ## Memory raters (v1.5)
 
 The v1.5 wedge adds a small framework that lets the swarm learn which memories
 are actually useful. Three independent raters write `RatingEvent`s to the
-single chokepoint `applyRating` (`src/be/memory/raters/store.ts`); each event
+single chokepoint `applyRating` (`apps/swarm/src/be/memory/raters/store.ts`); each event
 nudges a Beta-distribution posterior `(α, β)` per memory. The reranker then
 folds that posterior into the score so over time good memories rank higher
 and bad ones get demoted.
@@ -26,12 +26,12 @@ and bad ones get demoted.
 | Rater | Side | Trigger | Source string |
 |---|---|---|---|
 | `ImplicitCitationRater` | server | `store-progress` on task completion — ID-greps the task's `session_logs` for retrieved memory IDs and emits a `+0.5` for each cited memory and a `-0.25` for each retrieved-but-not-cited memory. | `implicit-citation` |
-| `LlmRater` | worker | Piggybacks the existing `claude -p` summary call in `src/hooks/hook.ts` — the prompt now asks for a `ratings[]` array (`{id, score, reasoning, referencesSource?}`) which is POSTed to `/api/memory/rate`. | `llm` |
+| `LlmRater` | worker | Piggybacks the existing `claude -p` summary call in `apps/swarm/src/hooks/hook.ts` — the prompt now asks for a `ratings[]` array (`{id, score, reasoning, referencesSource?}`) which is POSTed to `/api/memory/rate`. | `llm` |
 | `ExplicitSelfRatingRater` | worker | The `memory_rate` MCP tool — agents flag a retrieved memory as useful or misleading mid-task. Spam-guarded by a partial unique index on `(taskId, memoryId) WHERE source='explicit-self'`. | `explicit-self` |
 
 Source strings travel with each `RatingEvent` and are required by
 `applyRating` (events with an empty `event.source` are rejected — see
-`src/be/memory/raters/store.ts`'s `validate()`). Where the value comes
+`apps/swarm/src/be/memory/raters/store.ts`'s `validate()`). Where the value comes
 from depends on which path the event takes:
 
 - **Server-side raters** (`ImplicitCitationRater`) typically leave
@@ -104,7 +104,7 @@ prefix that fits — adding a new integration requires zero swarm-side code.
 Validation = non-empty + `≤ 512` chars + control-char strip + no NUL byte.
 Storage = plain `TEXT`, indexed by plain B-tree.
 
-Compare with `src/tasks/context-key.ts`, which uses a closed enum because
+Compare with `apps/swarm/src/tasks/context-key.ts`, which uses a closed enum because
 tasks are core scheduling primitives where typo'd keys silently break
 dedup. `references-source.to_id` is deliberately the opposite — telemetry
 data flows here, not control flow.
@@ -127,45 +127,45 @@ data flows here, not control flow.
 Run all four after any change to the memory subsystem:
 
 ```bash
-bun test src/tests/memory-reranker.test.ts
-bun test src/tests/memory-store.test.ts
-bun test src/tests/memory.test.ts
-bun test src/tests/memory-e2e.test.ts
+bun test apps/swarm/src/tests/memory-reranker.test.ts
+bun test apps/swarm/src/tests/memory-store.test.ts
+bun test apps/swarm/src/tests/memory.test.ts
+bun test apps/swarm/src/tests/memory-e2e.test.ts
 ```
 
 Plus the v1.5 rater suites:
 
 ```bash
-bun test src/tests/memory-rater-store.test.ts            # step-1: applyRating chokepoint
-bun test src/tests/memory-rater-implicit-citation.test.ts # step-2: ID-grep + retrieval bridge
-bun test src/tests/memory-rate-endpoint.test.ts          # step-3: POST /api/memory/rate
-bun test src/tests/memory-rater-llm.test.ts              # step-4: LlmRater piggyback
-bun test src/tests/memory-rate-tool.test.ts              # step-5: memory_rate MCP tool
-bun test src/tests/memory-edges.test.ts                  # step-6: references-source edges
-bun test src/tests/memory-rater-e2e.test.ts              # step-7: cross-cutting end-to-end
+bun test apps/swarm/src/tests/memory-rater-store.test.ts            # step-1: applyRating chokepoint
+bun test apps/swarm/src/tests/memory-rater-implicit-citation.test.ts # step-2: ID-grep + retrieval bridge
+bun test apps/swarm/src/tests/memory-rate-endpoint.test.ts          # step-3: POST /api/memory/rate
+bun test apps/swarm/src/tests/memory-rater-llm.test.ts              # step-4: LlmRater piggyback
+bun test apps/swarm/src/tests/memory-rate-tool.test.ts              # step-5: memory_rate MCP tool
+bun test apps/swarm/src/tests/memory-edges.test.ts                  # step-6: references-source edges
+bun test apps/swarm/src/tests/memory-rater-e2e.test.ts              # step-7: cross-cutting end-to-end
 ```
 
 ## Key files
 
-- `src/be/memory/types.ts` — interfaces.
-- `src/be/memory/providers/` — OpenAI embeddings + SQLite/sqlite-vec store.
-- `src/be/memory/reranker.ts` — scoring + `usefulness(α, β)` factor.
-- `src/be/memory/constants.ts` — env-overridable tuning.
-- `src/be/memory/index.ts` — singletons.
-- `src/be/memory/raters/` — rater framework (registry, store, retrieval bridge,
+- `apps/swarm/src/be/memory/types.ts` — interfaces.
+- `apps/swarm/src/be/memory/providers/` — OpenAI embeddings + SQLite/sqlite-vec store.
+- `apps/swarm/src/be/memory/reranker.ts` — scoring + `usefulness(α, β)` factor.
+- `apps/swarm/src/be/memory/constants.ts` — env-overridable tuning.
+- `apps/swarm/src/be/memory/index.ts` — singletons.
+- `apps/swarm/src/be/memory/raters/` — rater framework (registry, store, retrieval bridge,
   three rater implementations, edges store).
-- `src/prompts/memories.ts` — prompt addendum gated on `MEMORY_RATERS`
+- `apps/swarm/src/prompts/memories.ts` — prompt addendum gated on `MEMORY_RATERS`
   including `explicit-self`.
-- `src/hooks/hook.ts` — LlmRater piggyback in the summary path.
+- `apps/swarm/src/hooks/hook.ts` — LlmRater piggyback in the summary path.
 
 ## Trigger paths
 
 This runbook applies when modifying:
 
-- `src/be/memory/`
-- `src/be/embedding.ts`
-- `src/tools/memory-*.ts`
-- `src/http/memory.ts`
-- `src/tools/store-progress.ts` (memory sections)
-- `src/be/memory/raters/` (rater framework)
-- `src/prompts/memories.ts` (rater-aware prompt addendum)
+- `apps/swarm/src/be/memory/`
+- `apps/swarm/src/be/embedding.ts`
+- `apps/swarm/src/tools/memory-*.ts`
+- `apps/swarm/src/http/memory.ts`
+- `apps/swarm/src/tools/store-progress.ts` (memory sections)
+- `apps/swarm/src/be/memory/raters/` (rater framework)
+- `apps/swarm/src/prompts/memories.ts` (rater-aware prompt addendum)
