@@ -45,14 +45,14 @@ The system prompt is built from multiple layers, assembled at task start:
 
 ## Startup Scripts
 
-Each agent has a startup script (`/workspace/start-up.sh`) that runs at every container start. Agents can modify this script to install tools, configure their environment, or set up workflows — and the changes persist across restarts.
+Each agent has a startup script (`/workspace/start-up.sh`) that runs at every container start. Agents can modify this script to configure their environment or set up repo-local dependencies, and the changes persist across restarts. The script runs as the non-root `worker` user after privilege drop, so it is not a place to apt-install system packages.
 
 **Supported formats** (priority order):
 - `start-up.sh` / `start-up.bash` — Bash scripts
 - `start-up.js` — Node.js scripts
 - `start-up.ts` / `start-up.bun` — Bun/TypeScript scripts
 
-**Example: Install dependencies**
+**Example: Project-local setup**
 
 ```bash
 #!/bin/bash
@@ -62,9 +62,6 @@ echo "Installing dependencies..."
 if [ -f "package.json" ]; then
     bun install
 fi
-
-sudo apt-get update -qq
-sudo apt-get install -y -qq ripgrep
 ```
 
 ## Agent Workspace

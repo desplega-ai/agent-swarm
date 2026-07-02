@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.107.0] - 2026-07-02
+
+### Added
+- **Tasks can now carry an explicit reasoning-effort level end-to-end** (#879, #883) — operators can set per-agent defaults while `send-task` and `task-action` can also persist `effort: off | low | medium | high | xhigh` directly on created tasks.
+- **Schedules now support native execution targets** (#878) — a schedule can create an agent task, trigger a workflow directly, or launch a saved global script via `targetType`.
+
+### Changed
+- **Structural lint can now warn without blocking the rest of the quality gate** (#882) — the repo keeps the structural check visible while avoiding hard failures for warning-only findings.
+- **Worker-image harness pins refreshed again** (#868) — the weekly Docker worker bump updates the bundled Claude Code, Codex, OpenCode, and pi-family versions.
+
+### Fixed
+- **Codex credential recovery is more stable under OAuth churn and empty-poll recovery** (#880, #881) — the runner now resets the credential poll deadlock path correctly and serializes per-slot refreshes to avoid refresh-token family revocation.
+- **Memory, MCP session, and PM2 service boundaries were tightened** (#869, #870, #875) — `memory-get` now enforces ownership, owner MCP sessions reject mismatched `X-Agent-ID` headers, and `register-service` validates persisted PM2 launch metadata before saving it.
+- **Worker privilege boundaries are stricter** (#865, #866) — setup-script updates are syntax-validated and audited, they run after privilege drop, and the worker image no longer grants blanket passwordless sudo.
+
 ## [1.106.0] - 2026-07-01
 
 ### Added

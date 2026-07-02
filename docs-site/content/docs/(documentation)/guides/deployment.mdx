@@ -92,6 +92,10 @@ curl -s -H "Authorization: Bearer YOUR_API_KEY" \
 
 You should see the lead and workers listed with `status: "idle"`.
 
+### Startup-script privilege boundary
+
+Per-agent `setupScript` / `/workspace/start-up.*` hooks now run as the non-root `worker` user after the container drops privileges. Use them for project-local setup such as `bun install`, generated config, cache warmup, or repo bootstrap. If you need extra Debian/Ubuntu packages, add them to the worker image or run a root-owned bootstrap step before the entrypoint switches users.
+
 <Callout type="info">
 If you are deploying **Codex** workers with ChatGPT OAuth instead of `OPENAI_API_KEY`, follow [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth) after the API is up, then restart those workers.
 </Callout>
