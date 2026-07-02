@@ -189,7 +189,7 @@ function resolvePluginPath(): string {
   const override = process.env.OPENCODE_SWARM_PLUGIN_PATH;
   if (override) return override;
   if (existsSync(DOCKER_PLUGIN_PATH)) return DOCKER_PLUGIN_PATH;
-  return join(import.meta.dir, "../../plugin/opencode-plugins/agent-swarm.ts");
+  return join(import.meta.dir, "../../../../plugin/opencode-plugins/agent-swarm.ts");
 }
 
 // context-mode is installed globally via `npm install -g` (Dockerfile.worker),

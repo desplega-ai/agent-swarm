@@ -117,7 +117,7 @@ async function main() {
 
   // 1. Start API server
   log("Starting API server...");
-  apiProc = Bun.spawn(["bun", "run", "src/http.ts"], {
+  apiProc = Bun.spawn(["bun", "run", "apps/swarm/src/http.ts"], {
     env: {
       ...process.env,
       PORT,

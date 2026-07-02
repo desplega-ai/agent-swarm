@@ -161,8 +161,8 @@ larger, write it to `agent-fs` and stash the path in KV.
 
 ## See also
 
-- `src/be/migrations/061_kv_store.sql` — schema (`kv_entries`)
-- `src/http/kv.ts` — REST handler + namespace resolution
-- `src/tools/kv/*` — MCP tool registrars
+- `apps/swarm/src/be/migrations/061_kv_store.sql` — schema (`kv_entries`)
+- `apps/swarm/src/http/kv.ts` — REST handler + namespace resolution
+- `apps/swarm/src/tools/kv/*` — MCP tool registrars
 - `src/artifact-sdk/browser-sdk.ts` — `swarmSdk.kv` for pages
 - `plugin/skills/pages/SKILL.md` — companion skill for authed pages

@@ -514,12 +514,12 @@ jobs:
           WORKER_VERSION_TEMPLATE="agent-swarm-worker-${VERSION_SLUG}"
           WORKER_LATEST_TEMPLATE="agent-swarm-worker-latest"
 
-          bun run src/cli.tsx e2b build-template \
+          bun run apps/swarm/src/cli.tsx e2b build-template \
             --role api \
             --source image \
             --template "$API_VERSION_TEMPLATE" \
             --image "${API_IMAGE}:${VERSION}"
-          bun run src/cli.tsx e2b publish-template "$API_VERSION_TEMPLATE"
+          bun run apps/swarm/src/cli.tsx e2b publish-template "$API_VERSION_TEMPLATE"
 
           # The -latest templates MUST build from the immutable :${VERSION} ref,
           # not :latest. E2B's builder caches the fromImage base layer by image
@@ -527,26 +527,26 @@ jobs:
           # hit the cache forever and the template stays frozen at whatever
           # image was pulled on the FIRST build (this pinned the -latest
           # templates to v1.85 from 2026-05-27 until v1.97).
-          bun run src/cli.tsx e2b build-template \
+          bun run apps/swarm/src/cli.tsx e2b build-template \
             --role api \
             --source image \
             --template "$API_LATEST_TEMPLATE" \
             --image "${API_IMAGE}:${VERSION}"
-          bun run src/cli.tsx e2b publish-template "$API_LATEST_TEMPLATE"
+          bun run apps/swarm/src/cli.tsx e2b publish-template "$API_LATEST_TEMPLATE"
 
-          bun run src/cli.tsx e2b build-template \
+          bun run apps/swarm/src/cli.tsx e2b build-template \
             --role worker \
             --source image \
             --template "$WORKER_VERSION_TEMPLATE" \
             --image "${WORKER_IMAGE}:${VERSION}"
-          bun run src/cli.tsx e2b publish-template "$WORKER_VERSION_TEMPLATE"
+          bun run apps/swarm/src/cli.tsx e2b publish-template "$WORKER_VERSION_TEMPLATE"
 
-          bun run src/cli.tsx e2b build-template \
+          bun run apps/swarm/src/cli.tsx e2b build-template \
             --role worker \
             --source image \
             --template "$WORKER_LATEST_TEMPLATE" \
             --image "${WORKER_IMAGE}:${VERSION}"
-          bun run src/cli.tsx e2b publish-template "$WORKER_LATEST_TEMPLATE"
+          bun run apps/swarm/src/cli.tsx e2b publish-template "$WORKER_LATEST_TEMPLATE"
 
   create-git-tag:
     runs-on: ubuntu-latest

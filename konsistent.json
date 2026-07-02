@@ -79,9 +79,9 @@
     },
     {
       "name": "hook-handler-export-shape",
-      "description": "Claude hook events share the exported async hook dispatcher signature in src/hooks/hook.ts.",
+      "description": "Claude hook events share the exported async hook dispatcher signature in apps/swarm/src/hooks/hook.ts.",
       "severity": "warning",
-      "paths": "src/hooks",
+      "paths": "apps/swarm/src/hooks",
       "must": [
         {
           "must": {

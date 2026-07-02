@@ -183,7 +183,7 @@ process.on("SIGTERM", async () => {
 // ─── Step 0: Start API server ───────────────────────────────────────────────
 async function startApi() {
   log(`Starting API server on port ${PORT} with DB at ${DB_PATH}...`);
-  apiProc = Bun.spawn(["bun", "src/http.ts"], {
+  apiProc = Bun.spawn(["bun", "apps/swarm/src/http.ts"], {
     cwd: import.meta.dir + "/..",
     env: {
       ...process.env,

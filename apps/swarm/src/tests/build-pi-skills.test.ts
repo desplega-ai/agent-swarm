@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const PLUGIN_DIR = join(import.meta.dir, "../../plugin");
+const PLUGIN_DIR = join(import.meta.dir, "../../../../plugin");
 const COMMANDS_DIR = join(PLUGIN_DIR, "commands");
 const PI_SKILLS_DIR = join(PLUGIN_DIR, "pi-skills");
 

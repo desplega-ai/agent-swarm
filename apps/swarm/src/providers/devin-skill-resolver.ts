@@ -38,7 +38,7 @@ function defaultSkillsDir(): string {
     return process.env.DEVIN_SKILLS_DIR;
   }
   // import.meta.dir is src/providers/ — go up two levels to project root
-  return join(import.meta.dir, "..", "..", "plugin", "pi-skills");
+  return join(import.meta.dir, "..", "..", "..", "..", "plugin", "pi-skills");
 }
 
 /**

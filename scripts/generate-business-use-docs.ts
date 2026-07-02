@@ -239,15 +239,15 @@ uvx business-use-core@latest flow graph task
 
 | File | Side | Events |
 |------|------|--------|
-| \`src/http/tasks.ts\` | API | created, cancelled_pending, cancelled_in_progress, completed, failed, paused, resumed |
-| \`src/http/poll.ts\` | API | started |
-| \`src/http/agents.ts\` | API | registered, reconnected |
-| \`src/tools/store-progress.ts\` | API | completed, failed (MCP path) |
-| \`src/be/memory/raters/store.ts\` | API | memory_rated |
-| \`src/be/memory/raters/retrieval.ts\` | API | memory_retrieved |
-| \`src/http/index.ts\` | API | listen |
-| \`src/scheduler/scheduler.ts\` | API | scheduler_started |
-| \`src/commands/runner.ts\` | Worker | worker_received, worker_process_spawned, worker_process_finished |
+| \`apps/swarm/src/http/tasks.ts\` | API | created, cancelled_pending, cancelled_in_progress, completed, failed, paused, resumed |
+| \`apps/swarm/src/http/poll.ts\` | API | started |
+| \`apps/swarm/src/http/agents.ts\` | API | registered, reconnected |
+| \`apps/swarm/src/tools/store-progress.ts\` | API | completed, failed (MCP path) |
+| \`apps/swarm/src/be/memory/raters/store.ts\` | API | memory_rated |
+| \`apps/swarm/src/be/memory/raters/retrieval.ts\` | API | memory_retrieved |
+| \`apps/swarm/src/http/index.ts\` | API | listen |
+| \`apps/swarm/src/scheduler/scheduler.ts\` | API | scheduler_started |
+| \`apps/swarm/src/commands/runner.ts\` | Worker | worker_received, worker_process_spawned, worker_process_finished |
 `;
 
   const outPath = `${import.meta.dir}/../BUSINESS_USE.md`;
