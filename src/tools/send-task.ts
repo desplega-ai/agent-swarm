@@ -4,6 +4,7 @@ import * as z from "zod";
 import {
   createTaskExtended,
   findCompletedTaskInThread,
+  findExistingLinearTrackerContextWork,
   findRecentCancelledTaskInThread,
   getActiveTaskCount,
   getAgentById,
@@ -216,14 +217,29 @@ export async function sendTaskHandler(
 
   // Auto-default parentTaskId to caller's current task for tree tracking
   const effectiveParentTaskId = parentTaskId ?? sourceTaskId;
+  const effectiveParentTask = effectiveParentTaskId ? getTaskById(effectiveParentTaskId) : null;
 
   // Auto-route to parent's worker if parentTaskId is set and no explicit agentId
   let effectiveAgentId = agentId;
   if (effectiveParentTaskId && !agentId) {
-    const parentTask = getTaskById(effectiveParentTaskId);
-    if (parentTask?.agentId) {
-      effectiveAgentId = parentTask.agentId;
+    if (effectiveParentTask?.agentId) {
+      effectiveAgentId = effectiveParentTask.agentId;
     }
+  }
+
+  const existingTrackerWork = findExistingLinearTrackerContextWork(effectiveParentTask?.contextKey);
+  if (existingTrackerWork) {
+    const msg = `Skipped: Linear tracker contextKey ${effectiveParentTask?.contextKey} already has ${existingTrackerWork.reason === "active_task" ? "active task" : "linked open PR"} ${existingTrackerWork.task.id.slice(0, 8)}.`;
+    console.log(`[send-task] ${msg}`);
+    return {
+      content: [{ type: "text", text: msg }],
+      structuredContent: {
+        yourAgentId: creatorAgentId,
+        success: true,
+        message: msg,
+        task: existingTrackerWork.task,
+      },
+    };
   }
 
   // Dedup guard: check for similar recent tasks

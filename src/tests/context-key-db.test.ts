@@ -5,10 +5,11 @@ import {
   completeTask,
   createAgent,
   createTaskExtended,
+  getDb,
   getInProgressTasksByContextKey,
   initDb,
 } from "../be/db";
-import { slackContextKey } from "../tasks/context-key";
+import { linearContextKey, slackContextKey } from "../tasks/context-key";
 
 const TEST_DB_PATH = "./test-context-key-db.sqlite";
 
@@ -83,5 +84,58 @@ describe("contextKey persistence + lookup", () => {
     const child = createTaskExtended("Child", { agentId: agent.id, parentTaskId: parent.id });
 
     expect(child.contextKey).toBe(key);
+  });
+
+  test("createTaskExtended skips duplicate active Linear tracker contextKey", () => {
+    const agent = createAgent({
+      name: "ctx-key-agent-linear-active",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+
+    const key = linearContextKey({ issueIdentifier: "DES-201" });
+    const first = createTaskExtended("First Linear task", { agentId: agent.id, contextKey: key });
+    const second = createTaskExtended("Duplicate Linear task", {
+      agentId: agent.id,
+      contextKey: key,
+    });
+
+    expect(second.id).toBe(first.id);
+    const count = getDb()
+      .query("SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?")
+      .get(key) as { count: number };
+    expect(count.count).toBe(1);
+  });
+
+  test("createTaskExtended skips duplicate Linear tracker contextKey with linked PR", () => {
+    const agent = createAgent({
+      name: "ctx-key-agent-linear-pr",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+
+    const key = linearContextKey({ issueIdentifier: "DES-202" });
+    const first = createTaskExtended("Completed Linear task with PR", {
+      agentId: agent.id,
+      contextKey: key,
+      vcsProvider: "github",
+      vcsRepo: "desplega-ai/agent-swarm",
+      vcsNumber: 875,
+      vcsUrl: "https://github.com/desplega-ai/agent-swarm/pull/875",
+    });
+    completeTask(first.id, "PR opened");
+
+    const second = createTaskExtended("Duplicate Linear task after PR", {
+      agentId: agent.id,
+      contextKey: key,
+    });
+
+    expect(second.id).toBe(first.id);
+    const count = getDb()
+      .query("SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?")
+      .get(key) as { count: number };
+    expect(count.count).toBe(1);
   });
 });

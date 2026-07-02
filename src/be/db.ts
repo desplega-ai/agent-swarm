@@ -2024,6 +2024,64 @@ export function getInProgressTasksByContextKey(
     .map(rowToAgentTask);
 }
 
+export type ExistingTrackerContextWorkReason = "active_task" | "linked_open_pr";
+
+export type ExistingTrackerContextWork = {
+  task: AgentTask;
+  reason: ExistingTrackerContextWorkReason;
+};
+
+const LINEAR_TRACKER_CONTEXT_KEY_PREFIX = "task:trackers:linear:";
+
+function isLinearTrackerContextKey(contextKey: string | null | undefined): contextKey is string {
+  return !!contextKey && contextKey.startsWith(LINEAR_TRACKER_CONTEXT_KEY_PREFIX);
+}
+
+/**
+ * Return existing work for a Linear tracker key before creating another task.
+ *
+ * Active means any non-terminal task. A completed task with persisted VCS PR/MR
+ * metadata is also treated as existing work because the task can be complete
+ * while the PR is still awaiting review/merge.
+ */
+export function findExistingLinearTrackerContextWork(
+  contextKey: string | null | undefined,
+): ExistingTrackerContextWork | null {
+  if (!isLinearTrackerContextKey(contextKey)) return null;
+
+  const activeRow = getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE contextKey = ?
+       AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       ORDER BY lastUpdatedAt DESC
+       LIMIT 1`,
+    )
+    .get(contextKey);
+  if (activeRow) {
+    return { task: rowToAgentTask(activeRow), reason: "active_task" };
+  }
+
+  const linkedPrRow = getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE contextKey = ?
+       AND status = 'completed'
+       AND vcsProvider IS NOT NULL
+       AND vcsRepo IS NOT NULL
+       AND vcsNumber IS NOT NULL
+       AND vcsUrl IS NOT NULL
+       ORDER BY lastUpdatedAt DESC
+       LIMIT 1`,
+    )
+    .get(contextKey);
+  if (linkedPrRow) {
+    return { task: rowToAgentTask(linkedPrRow), reason: "linked_open_pr" };
+  }
+
+  return null;
+}
+
 export function getLatestTaskByContextKey(contextKey: string): AgentTask | null {
   if (!contextKey) return null;
   const row = getDb()
@@ -3215,6 +3273,14 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         options.followUpConfig = parent.followUpConfig;
       }
     }
+  }
+
+  const existingTrackerWork = findExistingLinearTrackerContextWork(options?.contextKey);
+  if (existingTrackerWork) {
+    console.log(
+      `[task-dedup] Skipping Linear tracker task creation for ${options?.contextKey}: ${existingTrackerWork.reason} ${existingTrackerWork.task.id.slice(0, 8)} already exists`,
+    );
+    return existingTrackerWork.task;
   }
 
   // Auto-inherit Slack metadata from the creator's source task (deterministic via sourceTaskId)

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { unlink } from "node:fs/promises";
-import { closeDb, createTaskExtended, getTaskById, initDb } from "../be/db";
+import { closeDb, createTaskExtended, getDb, getTaskById, initDb } from "../be/db";
 import { createTrackerSync, getTrackerSyncByExternalId } from "../be/db-queries/tracker";
 import {
   buildSkipMessage,
@@ -23,6 +23,7 @@ import {
   verifyLinearWebhook,
 } from "../linear/webhook";
 import { getTemplateDefinition } from "../prompts/registry";
+import { linearContextKey } from "../tasks/context-key";
 
 const TEST_DB_PATH = "./test-linear-webhook.sqlite";
 const TEST_SECRET = "test-webhook-secret-123";
@@ -240,6 +241,38 @@ describe("handleAgentSessionEvent", () => {
     const syncAfter = getTrackerSyncByExternalId("linear", "task", "issue-agent-session-001");
     expect(syncAfter).not.toBeNull();
     expect(syncAfter!.swarmId).toBe(originalSwarmId);
+  });
+
+  test("reuses active Linear contextKey task when AgentSession races before tracker_sync exists", async () => {
+    const key = linearContextKey({ issueIdentifier: "ENG-125" });
+    const originalTask = createTaskExtended("Manual dispatch already running", {
+      source: "mcp",
+      taskType: "feature",
+      contextKey: key,
+    });
+
+    const event = {
+      type: "AgentSession",
+      action: "create",
+      data: {
+        issue: {
+          id: "issue-agent-session-race-001",
+          identifier: "ENG-125",
+          title: "Race should dedup",
+          url: "https://linear.app/team/issue/ENG-125",
+        },
+      },
+    };
+
+    await handleAgentSessionEvent(event);
+
+    const sync = getTrackerSyncByExternalId("linear", "task", "issue-agent-session-race-001");
+    expect(sync).not.toBeNull();
+    expect(sync!.swarmId).toBe(originalTask.id);
+    const count = getDb()
+      .query("SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?")
+      .get(key) as { count: number };
+    expect(count.count).toBe(1);
   });
 
   test("creates follow-up task when already-tracked issue has a completed task", async () => {

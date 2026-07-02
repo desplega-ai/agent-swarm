@@ -1,4 +1,12 @@
-import { cancelTask, getAllAgents, getKv, getTaskById, incrKv, upsertKv } from "../be/db";
+import {
+  cancelTask,
+  findExistingLinearTrackerContextWork,
+  getAllAgents,
+  getKv,
+  getTaskById,
+  incrKv,
+  upsertKv,
+} from "../be/db";
 import { getOAuthTokens } from "../be/db-queries/oauth";
 import {
   createTrackerSync,
@@ -571,12 +579,45 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     return;
   }
 
+  const contextKey = linearContextKey({ issueIdentifier });
+  const existingContextWork = findExistingLinearTrackerContextWork(contextKey);
+  if (existingContextWork) {
+    console.log(
+      `[Linear Sync] Issue ${issueIdentifier} skipped — contextKey ${contextKey} already has ${existingContextWork.reason} task ${existingContextWork.task.id}`,
+    );
+    if (!existing) {
+      createTrackerSync({
+        provider: "linear",
+        entityType: "task",
+        providerEntityType: "Issue",
+        swarmId: existingContextWork.task.id,
+        externalId: issueId,
+        externalIdentifier: issueIdentifier,
+        externalUrl: issueUrl,
+        lastSyncOrigin: "external",
+        syncDirection: "inbound",
+      });
+    }
+    if (sessionId) {
+      taskSessionMap.set(existingContextWork.task.id, sessionId);
+      const refuseMsg = [
+        `This issue already has existing Agent Swarm work — task \`${existingContextWork.task.id}\` (${existingContextWork.reason}).`,
+        "",
+        "To avoid duplicating work, I'm not starting a second task for this re-assignment.",
+      ].join("\n");
+      postAgentSessionResponse(sessionId, refuseMsg).catch((err) => {
+        console.error("[Linear Sync] Failed to post contextKey dedup response:", err);
+      });
+    }
+    return;
+  }
+
   const task = createTaskWithSiblingAwareness(templateResult.text, {
     agentId: lead?.id ?? "",
     source: "linear",
     taskType: "linear-issue",
     requestedByUserId,
-    contextKey: linearContextKey({ issueIdentifier }),
+    contextKey,
   });
 
   // Delete old tracker_sync before creating new one (UNIQUE constraint)
@@ -823,12 +864,43 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     return;
   }
 
+  const contextKey = linearContextKey({ issueIdentifier });
+  const existingContextWork = findExistingLinearTrackerContextWork(contextKey);
+  if (existingContextWork) {
+    console.log(
+      `[Linear Sync] Prompted event for ${issueIdentifier} skipped — contextKey ${contextKey} already has ${existingContextWork.reason} task ${existingContextWork.task.id}`,
+    );
+    if (!existing) {
+      createTrackerSync({
+        provider: "linear",
+        entityType: "task",
+        providerEntityType: "Issue",
+        swarmId: existingContextWork.task.id,
+        externalId: issueId,
+        externalIdentifier: issueIdentifier,
+        externalUrl: issueUrl,
+        lastSyncOrigin: "external",
+        syncDirection: "inbound",
+      });
+    }
+    if (sessionId) {
+      taskSessionMap.set(existingContextWork.task.id, sessionId);
+      postAgentSessionThought(
+        sessionId,
+        "Message received, but this issue already has existing Agent Swarm work. I am not starting a duplicate task.",
+      ).catch((err) => {
+        console.error("[Linear Sync] Failed to post contextKey dedup thought:", err);
+      });
+    }
+    return;
+  }
+
   const task = createTaskWithSiblingAwareness(followupResult.text, {
     agentId: lead?.id ?? "",
     source: "linear",
     taskType: "linear-issue",
     requestedByUserId: promptedRequestedByUserId,
-    contextKey: linearContextKey({ issueIdentifier }),
+    contextKey,
   });
 
   // Repoint the existing tracker_sync to the new follow-up task (can't create a

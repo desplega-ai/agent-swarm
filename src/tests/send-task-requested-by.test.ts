@@ -7,9 +7,11 @@ import {
   createAgent,
   createTaskExtended,
   createUser,
+  getDb,
   getTaskById,
   initDb,
 } from "../be/db";
+import { linearContextKey } from "../tasks/context-key";
 import { registerSendTaskTool } from "../tools/send-task";
 
 const TEST_DB_PATH = "./test-send-task-requested-by.sqlite";
@@ -150,5 +152,29 @@ describe("send-task: requestedByUserId inheritance", () => {
     expect(s.success).toBe(true);
     const created = getTaskById(s.task!.id);
     expect(created?.requestedByUserId).toBe(userAId);
+  });
+
+  test("skips creating a child when source task already owns a Linear tracker contextKey", async () => {
+    const key = linearContextKey({ issueIdentifier: "DES-203" });
+    const parentTask = createTaskExtended("linear source task", {
+      requestedByUserId: userAId,
+      contextKey: key,
+    });
+
+    const result = await callSendTask(
+      server,
+      { task: "duplicate linear child", allowDuplicate: true },
+      LEAD_ID,
+      parentTask.id,
+    );
+
+    const s = structuredOf(result);
+    expect(s.success).toBe(true);
+    expect(s.message).toContain("Skipped: Linear tracker contextKey");
+    expect(s.task?.id).toBe(parentTask.id);
+    const count = getDb()
+      .query("SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?")
+      .get(key) as { count: number };
+    expect(count.count).toBe(1);
   });
 });
