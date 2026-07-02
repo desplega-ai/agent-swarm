@@ -112,8 +112,8 @@ beforeAll(async () => {
     } catch {}
   }
 
-  serverProc = Bun.spawn(["bun", "src/http.ts"], {
-    cwd: `${import.meta.dir}/../..`,
+  serverProc = Bun.spawn(["bun", "apps/swarm/src/http.ts"], {
+    cwd: `${import.meta.dir}/../../../..`,
     env: {
       ...process.env,
       PORT: String(TEST_PORT),

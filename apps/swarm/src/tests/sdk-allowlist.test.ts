@@ -56,7 +56,7 @@ describe("script SDK allowlist", () => {
   });
 
   test("bundled swarm-sdk.d.ts exposes only allowlisted methods", async () => {
-    const types = await Bun.file("src/scripts-runtime/types/swarm-sdk.d.ts").text();
+    const types = await Bun.file("apps/swarm/src/scripts-runtime/types/swarm-sdk.d.ts").text();
     for (const name of SDK_ALLOWLIST) {
       expect(types).toContain(`${name}(args`);
     }
@@ -81,7 +81,7 @@ describe("script SDK allowlist", () => {
   });
 
   test("bundled swarm-sdk.d.ts uses triggerData (not input) for workflow_trigger", async () => {
-    const types = await Bun.file("src/scripts-runtime/types/swarm-sdk.d.ts").text();
+    const types = await Bun.file("apps/swarm/src/scripts-runtime/types/swarm-sdk.d.ts").text();
     expect(types).toContain("workflow_trigger(args: { id: string; triggerData?");
     expect(types).not.toContain("workflow_trigger(args: { id: string; input?");
   });

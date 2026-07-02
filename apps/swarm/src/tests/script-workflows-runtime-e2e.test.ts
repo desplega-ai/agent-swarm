@@ -93,7 +93,7 @@ beforeAll(async () => {
   process.env.APP_URL = "https://app.example.test";
   delete process.env.SCRIPT_RUN_SUPERVISOR_DISABLE;
   await rm(WORKFLOW_RUNTIME_DIR, { recursive: true, force: true });
-  await Bun.$`bun build ./src/script-workflows/harness.ts --target bun --no-splitting --outfile ${WORKFLOW_RUNTIME_DIR}/harness.bundle.js`.quiet();
+  await Bun.$`bun build ./apps/swarm/src/script-workflows/harness.ts --target bun --no-splitting --outfile ${WORKFLOW_RUNTIME_DIR}/harness.bundle.js`.quiet();
   process.env.SCRIPT_WORKFLOW_RUNTIME_DIR = WORKFLOW_RUNTIME_DIR;
   refreshSecretScrubberCache();
 

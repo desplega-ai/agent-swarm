@@ -130,7 +130,7 @@ export function createIntegrationsHandler(deps: TestConnectionDeps = {}) {
         if (!agentId) missing.push("MANAGED_AGENT_ID");
         json(res, {
           ok: false,
-          error: `Missing required config: ${missing.join(", ")}. Run \`bun run src/cli.tsx claude-managed-setup\` to populate.`,
+          error: `Missing required config: ${missing.join(", ")}. Run \`bun run apps/swarm/src/cli.tsx claude-managed-setup\` to populate.`,
         });
         return true;
       }

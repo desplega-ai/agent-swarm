@@ -47,8 +47,8 @@ beforeAll(async () => {
   // signPageSession() in-process validate at the proxy.
   process.env.PAGE_SESSION_SECRET = PAGE_SECRET;
 
-  serverProc = Bun.spawn(["bun", "src/http.ts"], {
-    cwd: `${import.meta.dir}/../..`,
+  serverProc = Bun.spawn(["bun", "apps/swarm/src/http.ts"], {
+    cwd: `${import.meta.dir}/../../../..`,
     env: {
       ...process.env,
       PORT: String(TEST_PORT),

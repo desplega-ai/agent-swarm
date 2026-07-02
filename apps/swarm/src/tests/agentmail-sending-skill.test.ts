@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-const skillPath = `${import.meta.dir}/../../templates/skills/agentmail-sending/SKILL.md`;
+const skillPath = `${import.meta.dir}/../../../../templates/skills/agentmail-sending/SKILL.md`;
 const skill = await Bun.file(skillPath).text();
 const curlInboxVariable = "$" + "{INBOX}";
 const scriptApiKeyVariable = "$" + "{apiKey}";

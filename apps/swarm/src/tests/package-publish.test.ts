@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const REPO_ROOT = join(import.meta.dir, "../..");
+const REPO_ROOT = join(import.meta.dir, "../../../..");
 const tempDir = mkdtempSync(join(tmpdir(), "agent-swarm-pack-"));
 
 setDefaultTimeout(30_000);

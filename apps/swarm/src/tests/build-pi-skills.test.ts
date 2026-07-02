@@ -10,7 +10,7 @@ const PI_SKILLS_DIR = join(PLUGIN_DIR, "pi-skills");
 describe("build-pi-skills", () => {
   // Run the build script once before all tests
   const buildOutput = execSync("bun run plugin/build-pi-skills.ts", {
-    cwd: join(import.meta.dir, "../.."),
+    cwd: join(import.meta.dir, "../../../.."),
     encoding: "utf-8",
   });
 

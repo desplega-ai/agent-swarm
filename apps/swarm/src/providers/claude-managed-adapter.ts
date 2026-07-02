@@ -99,7 +99,7 @@ export function checkClaudeManagedCredentials(env: Record<string, string | undef
   return {
     ready: false,
     missing,
-    hint: "Run `bun run src/cli.tsx claude-managed-setup` once to provision MANAGED_AGENT_ID and MANAGED_ENVIRONMENT_ID, then set ANTHROPIC_API_KEY and MCP_BASE_URL (must be HTTPS-public).",
+    hint: "Run `bun run apps/swarm/src/cli.tsx claude-managed-setup` once to provision MANAGED_AGENT_ID and MANAGED_ENVIRONMENT_ID, then set ANTHROPIC_API_KEY and MCP_BASE_URL (must be HTTPS-public).",
   };
 }
 
@@ -790,7 +790,7 @@ export class ClaudeManagedAdapter implements ProviderAdapter {
     if (missing.length > 0) {
       throw new Error(
         `[claude-managed] Missing required env var(s): ${missing.join(", ")}. ` +
-          `Run \`bun run src/cli.tsx claude-managed-setup\` to create an Anthropic-side ` +
+          `Run \`bun run apps/swarm/src/cli.tsx claude-managed-setup\` to create an Anthropic-side ` +
           `agent + environment and persist their IDs to swarm_config.`,
       );
     }
