@@ -5296,6 +5296,47 @@
         }
       }
     },
+    "/api/pages/resolve": {
+      "get": {
+        "summary": "Resolve a page by slug",
+        "tags": [
+          "Pages"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "slug",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resolved page row"
+          },
+          "404": {
+            "description": "Page not found"
+          }
+        }
+      }
+    },
     "/api/pages/{id}/launch": {
       "post": {
         "summary": "Launch a page session (issues HttpOnly cookie)",
