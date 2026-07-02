@@ -12,7 +12,10 @@
  *
  * Collision handling (TS2308 under verbatimModuleSyntax):
  *   - A file whose exported names don't clash with already-emitted flat files -> `export *`.
- *   - A file that WOULD clash -> `export * as <ns>` (whole file namespaced; still importable).
+ *   - A file that WOULD clash -> `export * as <ns>` PLUS flat re-exports of its
+ *     NON-clashing names (`export { ... }` / `export type { ... }`), so codemodded
+ *     named imports keep resolving. Only genuinely-duplicated names stay
+ *     namespace-only — those need a manual, disambiguated repoint at extraction.
  *   - Default exports (not carried by `export *`) -> `export { default as <Name> }`.
  *
  * Idempotent. Re-run after editing packages.map.json:  bun scripts/generate-barrels.ts
@@ -102,17 +105,18 @@ function resolveModuleFile(fromAbs: string, spec: string): string | null {
   return null;
 }
 
-type Exports = { names: Set<string>; hasDefault: boolean };
+type Exports = { names: Set<string>; typeOnly: Set<string>; hasDefault: boolean };
 const exportCache = new Map<string, Exports>();
 function getExports(absFile: string, seen = new Set<string>()): Exports {
   const cached = exportCache.get(absFile);
   if (cached && seen.size === 0) return cached;
-  if (seen.has(absFile)) return { names: new Set(), hasDefault: false };
+  if (seen.has(absFile)) return { names: new Set(), typeOnly: new Set(), hasDefault: false };
   seen.add(absFile);
   const names = new Set<string>();
+  const typeOnly = new Set<string>(); // names that are types (interface/type alias) — flat re-exports need `export type`
   let hasDefault = false;
   const sf = project.addSourceFileAtPathIfExists(absFile);
-  if (!sf) return { names, hasDefault };
+  if (!sf) return { names, typeOnly, hasDefault };
 
   const collect = (decls: { isExported(): boolean; isDefaultExport(): boolean; getName(): string | undefined }[]) => {
     for (const d of decls) {
@@ -126,8 +130,16 @@ function getExports(absFile: string, seen = new Set<string>()): Exports {
   };
   collect(sf.getFunctions() as never);
   collect(sf.getClasses() as never);
-  for (const i of sf.getInterfaces()) if (i.isExported() && !i.isDefaultExport()) names.add(i.getName());
-  for (const t of sf.getTypeAliases()) if (t.isExported()) names.add(t.getName());
+  for (const i of sf.getInterfaces())
+    if (i.isExported() && !i.isDefaultExport()) {
+      names.add(i.getName());
+      typeOnly.add(i.getName());
+    }
+  for (const t of sf.getTypeAliases())
+    if (t.isExported()) {
+      names.add(t.getName());
+      typeOnly.add(t.getName());
+    }
   for (const e of sf.getEnums()) if (e.isExported()) names.add(e.getName());
   for (const m of sf.getModules()) if (m.isExported() && m.getName()) names.add(m.getName().replace(/['"]/g, ""));
   for (const vs of sf.getVariableStatements()) {
@@ -145,7 +157,9 @@ function getExports(absFile: string, seen = new Set<string>()): Exports {
     } else if (named.length > 0) {
       for (const ne of named) {
         const alias = ne.getAliasNode();
-        names.add((alias ?? ne.getNameNode()).getText());
+        const nm = (alias ?? ne.getNameNode()).getText();
+        names.add(nm);
+        if (ed.isTypeOnly() || ne.isTypeOnly()) typeOnly.add(nm);
       }
     } else if (mod) {
       // bare `export * from "mod"` — recurse for relative/@ targets
@@ -153,11 +167,12 @@ function getExports(absFile: string, seen = new Set<string>()): Exports {
       if (target) {
         const sub = getExports(target, seen);
         for (const n of sub.names) names.add(n);
+        for (const n of sub.typeOnly) typeOnly.add(n);
         // a re-export star does NOT carry the default through
       }
     }
   }
-  const result = { names, hasDefault };
+  const result = { names, typeOnly, hasDefault };
   if (seen.size === 1) exportCache.set(absFile, result);
   return result;
 }
@@ -202,7 +217,7 @@ function barrelFor(pkg: string): string {
   for (const rel of files) {
     const abs = join(ROOT, rel);
     const importPath = `../../${rel.replace(MODULE_EXT, "")}`;
-    const { names, hasDefault } = getExports(abs);
+    const { names, typeOnly, hasDefault } = getExports(abs);
 
     const clashes = [...names].some((n) => claimedFlat.has(n));
     if (clashes) {
@@ -213,6 +228,16 @@ function barrelFor(pkg: string): string {
       while (usedDefaultAlias.has(n)) n = ns + i++;
       usedDefaultAlias.add(n);
       lines.push(`export * as ${n} from "${importPath}";`);
+      // ALSO re-export the non-clashing names flat: the codemod rewrites named imports
+      // to the bare package root, so they must stay reachable without the namespace.
+      // Only the genuinely-duplicated names remain namespace-only (those need a manual,
+      // disambiguated repoint at extraction time anyway).
+      const flat = [...names].filter((nm) => !claimedFlat.has(nm));
+      const flatValues = flat.filter((nm) => !typeOnly.has(nm));
+      const flatTypes = flat.filter((nm) => typeOnly.has(nm));
+      if (flatValues.length > 0) lines.push(`export { ${flatValues.join(", ")} } from "${importPath}";`);
+      if (flatTypes.length > 0) lines.push(`export type { ${flatTypes.join(", ")} } from "${importPath}";`);
+      for (const nm of flat) claimedFlat.add(nm);
     } else {
       lines.push(`export * from "${importPath}";`);
       for (const nm of names) claimedFlat.add(nm);
