@@ -299,7 +299,13 @@ async function sendUpload(
     try {
       await provider.delete(scope);
     } catch (cleanupError) {
-      console.warn("[fs] upload metadata insert failed and blob cleanup failed", cleanupError);
+      console.warn(
+        scrubSecrets(
+          `[fs] upload metadata insert failed and blob cleanup failed: ${
+            cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+          }`,
+        ),
+      );
     }
     throw error;
   }

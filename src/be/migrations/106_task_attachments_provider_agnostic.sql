@@ -1,4 +1,4 @@
--- 104_task_attachments_provider_agnostic.sql
+-- 106_task_attachments_provider_agnostic.sql
 -- Generalize task attachment metadata from agent-fs-specific pointers to
 -- provider-agnostic storage references. Existing `kind` values remain stable
 -- for API compatibility; provider_id/provider_key become the lookup surface

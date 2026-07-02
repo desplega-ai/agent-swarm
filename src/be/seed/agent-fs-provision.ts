@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { scrubSecrets } from "../../utils/secret-scrubber";
 import {
   deleteSwarmConfigByKey,
   getAgentById,
@@ -32,6 +33,12 @@ type InviteTarget = {
 };
 
 type FetchLike = typeof fetch;
+
+// The provision seeder runs synchronously before the HTTP server binds its port.
+// Without a timeout, a co-deployed agent-fs that accepts the TCP connection but
+// never responds (LB mid-start, network blackhole) would hang boot forever and
+// the API would never listen — turning an optional integration into a crash-loop.
+const AGENT_FS_REQUEST_TIMEOUT_MS = 10_000;
 
 let fetchImpl: FetchLike = globalThis.fetch;
 
@@ -71,7 +78,9 @@ export const agentFsProvisionSeeder: Seeder<AgentFsSeedItem> = {
       await provisionAgentFs(item);
     } catch (error) {
       console.warn(
-        `[seed:${KIND}] skipped: ${error instanceof Error ? error.message : String(error)}`,
+        scrubSecrets(
+          `[seed:${KIND}] skipped: ${error instanceof Error ? error.message : String(error)}`,
+        ),
       );
       throw error;
     }
@@ -291,9 +300,11 @@ async function inviteToSharedOrg(
     });
   } catch (error) {
     console.warn(
-      `[seed:${KIND}] invite skipped for ${invite.email}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      scrubSecrets(
+        `[seed:${KIND}] invite skipped for ${invite.email}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      ),
     );
   }
 }
@@ -315,6 +326,7 @@ async function agentFsRequest<T = unknown>(
     method: options.method ?? "GET",
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    signal: AbortSignal.timeout(AGENT_FS_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok && !(options.allowConflict && response.status === 409)) {

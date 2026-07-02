@@ -71,10 +71,16 @@ services:
     volumes:
       - local_agent_fs:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:7433/health || exit 1"]
+      # The agent-fs image ships node/bun but no curl/wget; probe with node fetch.
+      # Generous retries: first boot downloads the local embedding model before listening.
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:7433/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\"",
+        ]
       interval: 10s
       timeout: 5s
-      retries: 12
+      retries: 30
       start_period: 10s
     restart: unless-stopped
 

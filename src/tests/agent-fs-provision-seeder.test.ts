@@ -35,6 +35,7 @@ type RequestRecord = {
   path: string;
   body: unknown;
   authorization: string | null;
+  hasSignal: boolean;
 };
 
 async function removeDbFiles(path: string): Promise<void> {
@@ -63,7 +64,13 @@ function createFetchStub(records: RequestRecord[]): typeof fetch {
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     const authorization = new Headers(init?.headers).get("authorization");
-    records.push({ method, path: url.pathname, body, authorization });
+    records.push({
+      method,
+      path: url.pathname,
+      body,
+      authorization,
+      hasSignal: init?.signal instanceof AbortSignal,
+    });
 
     if (url.pathname === "/auth/register" && method === "POST") {
       if (
@@ -181,6 +188,12 @@ describe("agent-fs provisioning seeder", () => {
 
     const register = records.find((r) => r.path === "/auth/register");
     expect(register?.body).toEqual({ email: "admin@example.test" });
+
+    // Every agent-fs request must carry an abort signal — the seeder runs before
+    // the HTTP server binds, so an un-timed request to a hung agent-fs would
+    // block boot forever (PR #850 review).
+    expect(records.length).toBeGreaterThan(0);
+    expect(records.every((r) => r.hasSignal)).toBe(true);
 
     const invites = records
       .filter((r) => r.path === "/orgs/shared-org/members/invite")
