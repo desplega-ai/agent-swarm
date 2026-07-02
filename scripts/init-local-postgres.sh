@@ -18,6 +18,12 @@
 #   LOCAL_POSTGRES_DB        — database to create        (default: app)
 set -euo pipefail
 
+if [ "$(id -u)" -ne 0 ]; then
+  echo "[init-local-postgres] ERROR: this helper must run before the worker privilege drop." >&2
+  echo "[init-local-postgres] Enable SWARM_DEP_POSTGRES_ENABLED=true or run it from global SETUP_SCRIPT, not per-agent setupScript." >&2
+  exit 1
+fi
+
 PG_VERSION=16
 PG_BINDIR="/usr/lib/postgresql/${PG_VERSION}/bin"
 PG_CLUSTER_DIR="${LOCAL_POSTGRES_DATA_DIR:-/tmp/postgres-data}"

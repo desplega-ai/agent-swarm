@@ -729,7 +729,7 @@ if [ -n "$AGENT_ID" ]; then
             if [ "$GLOBAL_EXIT_CODE" -ne 0 ]; then
                 echo ""
                 echo "ERROR: Global setup script failed with exit code $GLOBAL_EXIT_CODE"
-                if [ "${STARTUP_SCRIPT_STRICT:-true}" = "true" ]; then
+                if [ "${STARTUP_SCRIPT_STRICT:-false}" = "true" ]; then
                     echo "STARTUP_SCRIPT_STRICT=true - Exiting..."
                     exit "$GLOBAL_EXIT_CODE"
                 else
@@ -956,7 +956,7 @@ find_startup_script() {
 
 run_startup_script() {
     local role="${AGENT_ROLE:-worker}"
-    local startup_script_strict="${STARTUP_SCRIPT_STRICT:-true}"
+    local startup_script_strict="${STARTUP_SCRIPT_STRICT:-false}"
     local startup_script=""
     local exit_code=0
 
@@ -1032,13 +1032,18 @@ run_startup_script() {
 
     if [ "$exit_code" -ne 0 ]; then
         echo ""
-        echo "ERROR: Startup script failed with exit code $exit_code"
+        echo "WARNING: Startup script failed with exit code $exit_code"
+        echo "Per-agent setupScript / /workspace/start-up.* now runs as the unprivileged worker user since v1.106.0."
+        echo "This was a security fix for the setupScript privilege boundary; passwordless sudo was also removed."
+        echo "Move root-requiring steps to the global SETUP_SCRIPT config or into the worker image."
+        echo "For user-level setup, prefer worker-owned installs such as 'bun i -g' or an npm prefix under \$HOME."
+        echo "Set STARTUP_SCRIPT_STRICT=true to restore fail-fast startup-script behavior."
 
         if [ "$startup_script_strict" = "true" ]; then
             echo "STARTUP_SCRIPT_STRICT=true - Exiting..."
             exit "$exit_code"
         else
-            echo "STARTUP_SCRIPT_STRICT=false - Continuing despite error..."
+            echo "STARTUP_SCRIPT_STRICT=false - Continuing despite startup script error..."
         fi
     else
         echo "Startup script completed successfully"

@@ -94,7 +94,11 @@ You should see the lead and workers listed with `status: "idle"`.
 
 ### Startup-script privilege boundary
 
-Per-agent `setupScript` / `/workspace/start-up.*` hooks now run as the non-root `worker` user after the container drops privileges. Use them for project-local setup such as `bun install`, generated config, cache warmup, or repo bootstrap. If you need extra Debian/Ubuntu packages, add them to the worker image or run a root-owned bootstrap step before the entrypoint switches users.
+Since v1.106.0, per-agent `setupScript` / `/workspace/start-up.*` hooks run as the non-root `worker` user after the container drops privileges, and the worker image no longer grants blanket passwordless sudo. This was a security hardening change for the setup-script privilege boundary.
+
+Use per-agent setup for project-local work such as `bun install`, generated config, cache warmup, repo bootstrap, or worker-owned global installs like `bun i -g`. For npm global installs, set an npm prefix under `$HOME` before installing. Move root-requiring steps such as Debian/Ubuntu package installs, writes under `/usr/lib`, service ownership changes, or local database bootstrap into the worker image, the admin-controlled global `SETUP_SCRIPT` config, or the built-in optional service toggles.
+
+`STARTUP_SCRIPT_STRICT` defaults to `false`, so a failed per-agent startup script logs a migration warning and the worker continues booting. Set `STARTUP_SCRIPT_STRICT=true` if you want startup-script failures to stop the container.
 
 <Callout type="info">
 If you are deploying **Codex** workers with ChatGPT OAuth instead of `OPENAI_API_KEY`, follow [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth) after the API is up, then restart those workers.
@@ -413,7 +417,9 @@ Current worker-image defaults in `Dockerfile.worker`:
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
-The worker image also includes PostgreSQL 16 server binaries for local test setups. Nothing auto-starts unless you set `SWARM_DEP_POSTGRES_ENABLED=true`; in that case the entrypoint runs [`scripts/init-local-postgres.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/scripts/init-local-postgres.sh), which initializes a local cluster on `localhost:5433` by default. Override with `LOCAL_POSTGRES_DATA_DIR`, `LOCAL_POSTGRES_PORT`, `LOCAL_POSTGRES_USER`, `LOCAL_POSTGRES_PASSWORD`, and `LOCAL_POSTGRES_DB` as needed.
+The worker image also includes PostgreSQL 16 server binaries for local test setups. Nothing auto-starts unless you set `SWARM_DEP_POSTGRES_ENABLED=true`; in that case the root-stage entrypoint runs [`scripts/init-local-postgres.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/scripts/init-local-postgres.sh) before the worker privilege drop, then starts the cluster as the `worker` user on `localhost:5433` by default. Override with `LOCAL_POSTGRES_DATA_DIR`, `LOCAL_POSTGRES_PORT`, `LOCAL_POSTGRES_USER`, `LOCAL_POSTGRES_PASSWORD`, and `LOCAL_POSTGRES_DB` as needed.
+
+For local Redis, set `SWARM_DEP_REDIS_ENABLED=true`; the root-stage entrypoint runs [`scripts/init-local-redis.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/scripts/init-local-redis.sh) before privilege drop and starts `redis-server` as the `worker` user.
 
 Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
 

@@ -197,7 +197,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY` | No | `3` | How often (in turns) the context-mode MCP plugin surfaces its external-MCP guidance nudge, across Claude Code, Codex, and opencode alike |
 | `CONTEXT_PREAMBLE_MAX_TOKENS` | No | `2000` | Token budget for the universal follow-up context preamble prepended to a child task's prompt; applies across all harness providers |
 | `CONTEXT_PREAMBLE_RESUME_MAX_TOKENS` | No | `4000` | Token budget for the resume-task preamble (2x the regular budget — carries the original task brief plus a tool-call summary so the resumed agent doesn't redo completed work) |
-| `STARTUP_SCRIPT_STRICT` | No | `true` | Exit on startup script failure |
+| `STARTUP_SCRIPT_STRICT` | No | `false` | Exit on startup script failure. By default, per-agent `setupScript` failures log a v1.106.0 privilege-boundary migration warning and the worker continues booting |
 | `SHUTDOWN_TIMEOUT` | No | `30000` | Grace period (ms) before pausing tasks |
 | `MAX_CONCURRENT_TASKS` | No | `1` | Maximum parallel tasks per worker |
 | `SWARM_URL` | No | `localhost` | Base domain for service URLs |
@@ -209,7 +209,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `TEMPLATE_REGISTRY_URL` | No | `https://templates.agent-swarm.dev` | URL of the templates registry |
 | `MODEL_TIER_MAP` | No | — | JSON object overriding portable tier-to-model resolution for the current worker, for example `{\"smol\":\"gpt-5.4-mini\",\"smart\":\"gpt-5.5\"}`. Applies when a task, schedule, or workflow uses `modelTier`. |
 | `MODEL_TIER_<TIER>` | No | — | Per-tier override for `smol`, `regular`, `smart`, or `ultra` (for example `MODEL_TIER_SMART=gpt-5.5`). Wins over `MODEL_TIER_MAP`. |
-| `SWARM_DEP_POSTGRES_ENABLED` | No | `false` | Set to `true` to start the optional bundled PostgreSQL 16 cluster on worker boot (entrypoint runs `scripts/init-local-postgres.sh`). Binaries ship dormant in the worker image since `v1.93.0` |
+| `SWARM_DEP_POSTGRES_ENABLED` | No | `false` | Set to `true` to start the optional bundled PostgreSQL 16 cluster on worker boot. The root-stage entrypoint runs `scripts/init-local-postgres.sh` before privilege drop; binaries ship dormant in the worker image since `v1.93.0` |
 | `LOCAL_POSTGRES_DATA_DIR` | No | `/tmp/postgres-data` | Data directory for the optional local Postgres cluster |
 | `LOCAL_POSTGRES_PORT` | No | `5433` | Port for the optional local Postgres cluster |
 | `LOCAL_POSTGRES_USER` | No | `postgres` | Superuser name for the optional local Postgres cluster |

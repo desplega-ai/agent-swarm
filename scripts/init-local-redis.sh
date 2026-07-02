@@ -14,6 +14,12 @@
 #   LOCAL_REDIS_DATA_DIR  — data/log directory         (default: /tmp/redis-data)
 set -euo pipefail
 
+if [ "$(id -u)" -ne 0 ]; then
+  echo "[init-local-redis] ERROR: this helper must run before the worker privilege drop." >&2
+  echo "[init-local-redis] Enable SWARM_DEP_REDIS_ENABLED=true or run it from global SETUP_SCRIPT, not per-agent setupScript." >&2
+  exit 1
+fi
+
 REDIS_PORT="${LOCAL_REDIS_PORT:-6379}"
 REDIS_DATA_DIR="${LOCAL_REDIS_DATA_DIR:-/tmp/redis-data}"
 REDIS_LOG="${REDIS_DATA_DIR}/redis.log"
