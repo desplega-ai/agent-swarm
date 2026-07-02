@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   sync:
@@ -18,8 +19,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Main is protected by rulesets + merge queue, so this workflow can no longer
+      # push to main directly (GH013). It opens an auto-merge PR instead, which needs
+      # a fine-grained PAT (contents + pull-requests: write) — PRs created with the
+      # default GITHUB_TOKEN do not trigger merge-gate, so they would never merge.
+      - name: Check SYNC_PAT is configured
+        env:
+          SYNC_PAT: ${{ secrets.SYNC_PAT }}
+        run: |
+          if [ -z "$SYNC_PAT" ]; then
+            echo "::error::SYNC_PAT secret is not configured. Create a fine-grained PAT with contents:write + pull_requests:write on this repo and add it as the SYNC_PAT actions secret."
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.SYNC_PAT }}
 
       - name: Generate Pages index
         run: |
@@ -48,7 +64,9 @@ jobs:
           writeFileSync("docs/index.md", `${header}${readme}`);
           NODE
 
-      - name: Commit updated page
+      - name: Open auto-merge PR with updated page
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_PAT }}
         run: |
           if git diff --quiet -- docs/index.md; then
             echo "docs/index.md is already up to date."
@@ -57,6 +75,25 @@ jobs:
 
           git config user.name "desplega-bot"
           git config user.email "bot@desplega.ai"
+          git checkout -B bot/sync-pages-readme
           git add docs/index.md
           git commit -m "docs: sync github pages readme"
-          git push
+          git push -f origin bot/sync-pages-readme
+
+          # Reuse the open sync PR if one exists; otherwise create it. Then hand it to
+          # the merge queue once merge-gate reports (docs-only change → jobs skip fast).
+          EXISTING=$(gh pr list --head bot/sync-pages-readme --state open --json number --jq '.[0].number // empty')
+          if [ -z "$EXISTING" ]; then
+            gh pr create \
+              --title "docs: sync github pages readme" \
+              --body "Automated docs/index.md regeneration from README.md by pages-sync-readme.yml." \
+              --head bot/sync-pages-readme
+          fi
+
+          # "Allow auto-merge" is disabled repo-wide and `gh pr merge` refuses to
+          # enqueue in that state, so wait for the PR checks (docs-only → everything
+          # skips, ~2 min) and enqueue via the GraphQL mutation directly.
+          gh pr checks bot/sync-pages-readme --watch --fail-fast || true
+          PRID=$(gh pr view bot/sync-pages-readme --json id --jq .id)
+          gh api graphql -f query="mutation { enqueuePullRequest(input:{pullRequestId:\"$PRID\"}) { mergeQueueEntry { state } } }" ||
+            echo "::warning::Could not enqueue the sync PR automatically — merge it manually."
