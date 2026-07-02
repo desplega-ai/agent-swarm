@@ -311,9 +311,13 @@ function AttachmentRow({
 export function TaskAttachmentsSection({
   taskId,
   attachments,
+  className,
+  hideWhenEmpty = false,
 }: {
   taskId: string;
   attachments: TaskAttachment[] | undefined;
+  className?: string;
+  hideWhenEmpty?: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { data: capabilities } = useFsCapabilities();
@@ -333,6 +337,10 @@ export function TaskAttachmentsSection({
       if (preview.kind === "image") URL.revokeObjectURL(preview.url);
     };
   }, [preview]);
+
+  if (hideWhenEmpty && rows.length === 0 && !listQuery.isLoading) {
+    return null;
+  }
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -408,6 +416,7 @@ export function TaskAttachmentsSection({
       iconColor="text-muted-foreground"
       borderColor="border-border"
       bgColor="bg-muted/20"
+      className={className}
       defaultOpen
     >
       <div className="space-y-3">
