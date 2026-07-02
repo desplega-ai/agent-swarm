@@ -18,7 +18,7 @@ id = "biome-lint"
 name = "Biome lint"
 language = "system"
 entry = "bun run lint"
-# CI "lint" domain: biome runs on src/ + evals/; config + lockfile + tsconfig.
+# CI "lint" domain: biome runs on src/ + apps/evals/; config + lockfile + tsconfig.
 files = '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|biome\.json$)'
 pass_filenames = false
 stages = ["pre-push"]

@@ -1,6 +1,6 @@
 // Mirrors the ui tokens: shadcn Zinc (dark) + amber primary.
 // Colors converted from oklch() at render time via CSS-compatible hex/rgba.
-// Source of truth: ui/src/styles/globals.css
+// Source of truth: apps/ui/src/styles/globals.css
 export const theme = {
   // Background / foreground
   bg: "#09090b",              // oklch(0.141 0.005 285.823)

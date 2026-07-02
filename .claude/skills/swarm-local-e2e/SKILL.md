@@ -197,7 +197,7 @@ If the UI port is taken by another worktree, start on an alternate:
 cd apps/ui && bun run dev --port 5276
 ```
 
-The UI connects to the API via `VITE_API_URL` (check `ui/.env` or defaults to `http://localhost:$PORT`).
+The UI connects to the API via `VITE_API_URL` (check `apps/ui/.env` or defaults to `http://localhost:$PORT`).
 
 ### Visual verification with agent-browser / qa-use
 

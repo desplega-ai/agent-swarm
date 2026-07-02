@@ -1,8 +1,8 @@
 /**
- * Phase 4 — pure-logic tests for `ui/src/hooks/use-dismissible-card.ts`.
+ * Phase 4 — pure-logic tests for `apps/ui/src/hooks/use-dismissible-card.ts`.
  *
- * Lives in `src/tests/` (not under `ui/`) because:
- *   - `ui/` has no test runner configured (no vitest/jest).
+ * Lives in `src/tests/` (not under `apps/ui/`) because:
+ *   - `apps/ui/` has no test runner configured (no vitest/jest).
  *   - The repo-root `bun test` already wires preload + DB fixtures.
  *   - We test the pure `deriveStorageKey()` helper plus localStorage-shape
  *     semantics by stubbing `globalThis.localStorage` — no React renderer.

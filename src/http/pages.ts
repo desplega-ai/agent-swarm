@@ -216,8 +216,8 @@ const listPageActionsRoute = route({
 });
 
 /**
- * Action-param schemas duplicated from `ui/src/pages/pages/[id]/json-page-renderer.tsx`.
- * Kept here (not imported from `ui/`) because the API server must not depend on
+ * Action-param schemas duplicated from `apps/ui/src/pages/pages/[id]/json-page-renderer.tsx`.
+ * Kept here (not imported from `apps/ui/`) because the API server must not depend on
  * the SPA build. If you change one side, update the other — there's an
  * end-to-end test in step-7's qa-use scenario that exercises both action paths,
  * so drift surfaces fast in practice.

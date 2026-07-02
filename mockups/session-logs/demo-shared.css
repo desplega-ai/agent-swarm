@@ -1,6 +1,6 @@
 /* ============================================================
    Shared foundation for the session-log mockups.
-   Exact agent-swarm tokens (ui/src/styles/globals.css) + the demo
+   Exact agent-swarm tokens (apps/ui/src/styles/globals.css) + the demo
    chrome, controls, running-footer, jump pill, and prose base.
    Each option file adds only its own layout CSS on top.
    ============================================================ */

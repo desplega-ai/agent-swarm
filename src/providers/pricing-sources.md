@@ -20,7 +20,7 @@ rate by hand should also update this file.
 ## Fallback/UI catalog: vendored models.dev snapshot
 
 - **Fallback path**: `src/be/modelsdev-cache.json`
-- **UI compatibility path**: `ui/src/lib/modelsdev-cache.json` symlinks to the
+- **UI compatibility path**: `apps/ui/src/lib/modelsdev-cache.json` symlinks to the
   backend snapshot so existing UI imports keep working.
 - **Loaded by**: `src/be/modelsdev-cache.ts` → `src/be/seed-pricing.ts` →
   `seedPricingFromModelsDev()`,

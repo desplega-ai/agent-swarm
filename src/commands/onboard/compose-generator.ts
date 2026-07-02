@@ -33,7 +33,7 @@ const ENV_SENTRY_ORG = "      - SENTRY_ORG=${SENTRY_ORG}";
 /**
  * Generate a docker-compose.yml string from onboard wizard state.
  * Builds the YAML as plain strings (no YAML library) following the pattern
- * used in templates-ui/src/lib/compose-generator.ts.
+ * used in apps/templates-ui/src/lib/compose-generator.ts.
  */
 export function generateCompose(state: OnboardState): string {
   const expanded = expandServices(state.services, state.agentIds);

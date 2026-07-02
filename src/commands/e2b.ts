@@ -1218,7 +1218,7 @@ export type DashboardDeepLinkParts = {
 
 /**
  * Build the dashboard deep-link the SPA reads. The SPA expects **camelCase**
- * `apiUrl` / `apiKey` / `name` query params (see ui/src/hooks/use-config.ts) and
+ * `apiUrl` / `apiKey` / `name` query params (see apps/ui/src/hooks/use-config.ts) and
  * silently ignores snake_case — so these MUST stay camelCase.
  *
  * When `reveal` is false the `apiKey` param is replaced with a placeholder so the

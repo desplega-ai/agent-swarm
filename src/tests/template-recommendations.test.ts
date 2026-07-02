@@ -1,7 +1,7 @@
 /**
- * Phase 3 — unit tests for `ui/src/lib/template-recommendations.ts`.
+ * Phase 3 — unit tests for `apps/ui/src/lib/template-recommendations.ts`.
  *
- * Lives in `src/tests/` (not under `ui/`) because `ui/` has no test runner
+ * Lives in `src/tests/` (not under `apps/ui/`) because `apps/ui/` has no test runner
  * configured. The recommendation lib is pure logic with only a `StatusResponse`
  * type import, so the cross-tree relative import works without aliases.
  */

@@ -88,7 +88,7 @@ export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfig
 
 // ─── Auto-reload debouncer ────────────────────────────────────────────────────
 // Why this exists: the integrations dashboard saves a row at a time (no bulk
-// endpoint — see ui/src/api/hooks/use-config-api.ts useUpsertConfigsBatch),
+// endpoint — see apps/ui/src/api/hooks/use-config-api.ts useUpsertConfigsBatch),
 // so a "save" of N keys produces N upsert calls in tight succession. Reloading
 // after each one would tear Slack's socket down N times. Coalesce instead.
 let pendingReloadTimer: ReturnType<typeof setTimeout> | null = null;

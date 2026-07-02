@@ -1,7 +1,7 @@
 # Session Logs — Redesign Mockups
 
 Three redesigns of the **Task Details → Session Logs** panel
-(`ui/src/components/shared/session-log-viewer.tsx`, shown inside
+(`apps/ui/src/components/shared/session-log-viewer.tsx`, shown inside
 `task-detail-sheet.tsx`).
 
 **Start here:** open [`../index.html`](../index.html) — the router/gallery that

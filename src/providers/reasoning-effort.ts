@@ -60,7 +60,7 @@ interface SlimModelEntry {
 
 /**
  * Providers the snapshot covers — mirrors `SNAPSHOT_ORDER` +
- * `BEDROCK_SNAPSHOT_ID` in `ui/src/lib/agent-runtime-models.ts`. Direct
+ * `BEDROCK_SNAPSHOT_ID` in `apps/ui/src/lib/agent-runtime-models.ts`. Direct
  * `claude`/`codex` model strings (no provider prefix) resolve against
  * `anthropic`/`openai` respectively; `pi`/`opencode` model strings are always
  * `<providerId>/<model-id>` (see `splitProviderModel`).
