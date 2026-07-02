@@ -66,7 +66,7 @@ jobs:
           }
 
           # lint + tsc:check: biome runs on src/, tsc covers src/ (scripts excluded in tsconfig).
-          LINT=$(match '^(src/|evals/|package\.json$|bun\.lock|tsconfig\.json$|biome\.json$)')
+          LINT=$(match '^(src/|evals/|package\.json$|bun\.lock|konsistent\.json$|tsconfig\.json$|biome\.json$)')
 
           # tests: src/ + scripts that tests import + lockfile/tsconfig.
           TEST=$(match '^(src/|scripts/|package\.json$|bun\.lock|tsconfig\.json$)')
@@ -116,6 +116,12 @@ jobs:
 
       - name: Run TypeScript type check
         run: bun run tsc:check
+
+      - name: Run structural consistency lint
+        continue-on-error: true
+        env:
+          KONSISTENT_NO_UPDATE_CHECK: "true"
+        run: bun run lint:structure
 
       - name: Install evals dependencies
         run: bun install --frozen-lockfile
