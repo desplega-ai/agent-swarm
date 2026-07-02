@@ -218,14 +218,14 @@ describe("Pages versioning (PUT /api/pages/:id)", () => {
     const listRes = await fetch(`${BASE}/api/pages?limit=10&offset=0`, { headers });
     expect(listRes.status).toBe(200);
     const json = (await listRes.json()) as {
-      pages: Array<{ id: string; api_url: string; app_url: string }>;
+      pages: Array<{ id: string; slug: string; api_url: string; app_url: string }>;
       total: number;
     };
     expect(Array.isArray(json.pages)).toBe(true);
     expect(typeof json.total).toBe("number");
     for (const p of json.pages) {
       expect(p.api_url).toContain(`/p/${p.id}`);
-      expect(p.app_url).toContain(`/pages/${p.id}`);
+      expect(p.app_url).toContain(`/pages/${p.slug}`);
     }
   });
 });

@@ -1,7 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
-import { closeDb, createAgent, createScheduledTask, getScheduledTasks, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createScheduledTask,
+  getScheduledTasks,
+  initDb,
+  updateScheduledTask,
+} from "../be/db";
 import type { ScheduledTask } from "../types";
 
 const TEST_DB_PATH = "./test-scheduled-tasks-api.sqlite";
@@ -301,33 +308,32 @@ describe("Scheduled Tasks REST API", () => {
       expect(schedule.lastUpdatedAt).toBeDefined();
     });
 
-    test("should return schedules sorted by name", async () => {
-      // Create schedules with names that should sort alphabetically
-      createScheduledTask({
-        name: "zzz-last-schedule",
+    test("should return schedules sorted by last run time", async () => {
+      const older = createScheduledTask({
+        name: "older-run-schedule",
         intervalMs: 60000,
-        taskTemplate: "Last task",
+        taskTemplate: "Older task",
         enabled: true,
       });
+      updateScheduledTask(older.id, { lastRunAt: "2026-01-01T00:00:00.000Z" });
 
-      createScheduledTask({
-        name: "aaa-first-schedule",
+      const newer = createScheduledTask({
+        name: "newer-run-schedule",
         intervalMs: 60000,
-        taskTemplate: "First task",
+        taskTemplate: "Newer task",
         enabled: true,
       });
+      updateScheduledTask(newer.id, { lastRunAt: "2026-01-02T00:00:00.000Z" });
 
       const response = await fetch(`${baseUrl}/api/scheduled-tasks`);
 
       expect(response.status).toBe(200);
       const data = (await response.json()) as { scheduledTasks: ScheduledTask[] };
 
-      // Find the indices of our test schedules
-      const firstIndex = data.scheduledTasks.findIndex((s) => s.name === "aaa-first-schedule");
-      const lastIndex = data.scheduledTasks.findIndex((s) => s.name === "zzz-last-schedule");
+      const olderIndex = data.scheduledTasks.findIndex((s) => s.name === "older-run-schedule");
+      const newerIndex = data.scheduledTasks.findIndex((s) => s.name === "newer-run-schedule");
 
-      // The "aaa" schedule should come before "zzz" schedule
-      expect(firstIndex).toBeLessThan(lastIndex);
+      expect(newerIndex).toBeLessThan(olderIndex);
     });
   });
 
