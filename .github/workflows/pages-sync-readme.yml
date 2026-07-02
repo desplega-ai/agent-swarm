@@ -89,4 +89,9 @@ jobs:
               --body "Automated docs/index.md regeneration from README.md by pages-sync-readme.yml." \
               --head bot/sync-pages-readme
           fi
-          gh pr merge bot/sync-pages-readme --auto --squash
+
+          # "Allow auto-merge" is disabled repo-wide, so wait for the PR checks
+          # (docs-only → everything skips, ~2 min) and hand it to the merge queue.
+          gh pr checks bot/sync-pages-readme --watch --fail-fast || true
+          gh pr merge bot/sync-pages-readme --squash ||
+            echo "::warning::Could not enqueue the sync PR automatically — merge it manually."
