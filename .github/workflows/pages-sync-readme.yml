@@ -90,8 +90,10 @@ jobs:
               --head bot/sync-pages-readme
           fi
 
-          # "Allow auto-merge" is disabled repo-wide, so wait for the PR checks
-          # (docs-only → everything skips, ~2 min) and hand it to the merge queue.
+          # "Allow auto-merge" is disabled repo-wide and `gh pr merge` refuses to
+          # enqueue in that state, so wait for the PR checks (docs-only → everything
+          # skips, ~2 min) and enqueue via the GraphQL mutation directly.
           gh pr checks bot/sync-pages-readme --watch --fail-fast || true
-          gh pr merge bot/sync-pages-readme --squash ||
+          PRID=$(gh pr view bot/sync-pages-readme --json id --jq .id)
+          gh api graphql -f query="mutation { enqueuePullRequest(input:{pullRequestId:\"$PRID\"}) { mergeQueueEntry { state } } }" ||
             echo "::warning::Could not enqueue the sync PR automatically — merge it manually."
