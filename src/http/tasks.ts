@@ -33,6 +33,7 @@ import {
   isTerminalTaskStatus,
   ModelTierSchema,
   ProviderNameSchema,
+  ReasoningEffortSchema,
   ResumeReasonSchema,
   splitLegacyModelAlias,
 } from "../types";
@@ -94,6 +95,7 @@ const createTask = route({
     requestedByUserId: z.string().optional(),
     model: z.string().optional(),
     modelTier: ModelTierSchema.optional(),
+    effort: ReasoningEffortSchema.optional(),
   }),
   responses: {
     201: { description: "Task created" },
@@ -402,6 +404,7 @@ export async function handleTasks(
           model: parsed.body.model,
           modelTier: parsed.body.modelTier,
         }),
+        effort: parsed.body.effort,
       });
 
       ensure({

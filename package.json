@@ -61,6 +61,7 @@
     "check:dep-graph": "depcruise src plugin/opencode-plugins --config .dependency-cruiser.cjs",
     "check:api-key-boundary": "bash scripts/check-api-key-boundary.sh",
     "check:audit-columns": "bash scripts/check-audit-columns.sh",
+    "lint:structure": "konsistent check",
     "prepare-release": "bun scripts/prepare-release.ts",
     "sync-chart-version": "bun scripts/sync-chart-version.ts",
     "check-chart-version": "bun scripts/sync-chart-version.ts --check-if-package-version-changed",
@@ -113,6 +114,7 @@
     "@opencode-ai/plugin": "1.17.4",
     "@types/bun": "latest",
     "dependency-cruiser": "^18.0.0",
+    "konsistent": "1.0.0-beta.1",
     "ts-morph": "^28.0.0",
     "turbo": "^2.10.0"
   },

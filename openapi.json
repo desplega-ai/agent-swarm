@@ -11757,6 +11757,16 @@
                       "smart",
                       "ultra"
                     ]
+                  },
+                  "effort": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh"
+                    ]
                   }
                 },
                 "required": [

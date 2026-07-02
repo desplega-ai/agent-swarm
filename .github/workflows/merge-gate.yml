@@ -69,7 +69,7 @@ jobs:
           # bunfig.toml (linker/test config), turbo.json, member manifests (root frozen
           # install), and the dep-graph inputs (.dependency-cruiser.cjs, plugin/) are all
           # load-bearing for this job since the workspace migration.
-          LINT=$(match '^(src/|evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|(ui|templates-ui)/package\.json$)')
+          LINT=$(match '^(src/|evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|(ui|templates-ui)/package\.json$)')
 
           # tests: src/ + scripts that tests import + lockfile/tsconfig + bunfig ([test]
           # preload + pathIgnorePatterns) + member manifests (root frozen install).
@@ -123,6 +123,12 @@ jobs:
 
       - name: Run TypeScript type check
         run: bun run tsc:check
+
+      - name: Run structural consistency lint
+        continue-on-error: true
+        env:
+          KONSISTENT_NO_UPDATE_CHECK: "true"
+        run: bun run lint:structure
 
       # evals is now a Bun workspace member, so the root `bun install --frozen-lockfile`
       # above already installs its deps into the shared hoisted node_modules. No separate

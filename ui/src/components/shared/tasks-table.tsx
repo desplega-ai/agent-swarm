@@ -63,6 +63,7 @@ export type TasksTableColumnId =
   | "source"
   | "cost"
   | "model"
+  | "effort"
   | "agent"
   | "user"
   | "elapsed"
@@ -82,6 +83,7 @@ export const TOGGLEABLE_COLUMNS: { id: TasksTableColumnId; label: string }[] = [
   { id: "source", label: "Source" },
   { id: "cost", label: "Cost" },
   { id: "model", label: "Model" },
+  { id: "effort", label: "Effort" },
   { id: "agent", label: "Agent" },
   { id: "user", label: "Requested by" },
   { id: "elapsed", label: "Elapsed" },
@@ -215,6 +217,16 @@ function ModelCell({
       <ProviderIcon provider={known?.providerId} className="h-3.5 w-3.5" />
       <span className="truncate">{known?.label ?? value}</span>
     </span>
+  );
+}
+
+function EffortCell({ value }: { value: AgentTask["effort"] | undefined }) {
+  if (!value) return DASH;
+  return (
+    <Badge variant="outline" size="tag" className="gap-1 font-mono">
+      <Zap className="h-2.5 w-2.5 shrink-0" />
+      {value}
+    </Badge>
   );
 }
 
@@ -612,6 +624,16 @@ export function TasksTable({
         ...fixed,
         cellRenderer: (p: { data?: AgentTask }) => (
           <ModelCell model={p.data?.model} modelTier={p.data?.modelTier} />
+        ),
+      },
+      {
+        _id: "effort",
+        field: "effort",
+        headerName: "Effort",
+        width: 100,
+        ...fixed,
+        cellRenderer: (p: { value: AgentTask["effort"] | undefined }) => (
+          <EffortCell value={p.value} />
         ),
       },
       {

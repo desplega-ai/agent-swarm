@@ -31,6 +31,7 @@ import {
   AgentTaskSchema,
   BudgetRefusalCauseSchema,
   ModelTierSchema,
+  ReasoningEffortSchema,
   splitLegacyModelAlias,
 } from "@/types";
 
@@ -80,6 +81,9 @@ export const taskActionInputSchema = z.object({
     ),
   modelTier: ModelTierSchema.optional().describe(
     "Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action.",
+  ),
+  effort: ReasoningEffortSchema.optional().describe(
+    "Reasoning effort for the created task: 'off', 'low', 'medium', 'high', or 'xhigh'. Only used with 'create' action.",
   ),
 });
 
@@ -242,6 +246,7 @@ export async function taskActionHandler(
           dir,
           model: normalizedModel.model,
           modelTier: normalizedModel.modelTier,
+          effort: input.effort,
         });
         return {
           success: true,

@@ -74,6 +74,7 @@ interface CreateTaskInput {
   contextKey?: string;
   model?: string;
   modelTier?: string;
+  effort?: string;
 }
 
 interface TasksCache {
@@ -200,6 +201,7 @@ function optimisticCreatedTask(input: CreateTaskInput): TaskWithLogs {
     lastUpdatedAt: now,
     model: input.model,
     modelTier: input.modelTier as TaskWithLogs["modelTier"],
+    effort: input.effort as TaskWithLogs["effort"],
     parentTaskId: input.parentTaskId,
     requestedByUserId: input.requestedByUserId,
     contextKey: input.contextKey,

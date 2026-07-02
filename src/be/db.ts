@@ -59,6 +59,7 @@ import type {
   PromptTemplate,
   PromptTemplateHistory,
   ProviderName,
+  ReasoningEffort,
   RepoGuidelines,
   ScheduledTask,
   ScheduledTaskSummary,
@@ -104,6 +105,7 @@ import {
   isTerminalTaskStatus,
   type ModelTier,
   parseModelTier,
+  ReasoningEffortSchema,
 } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
@@ -1068,6 +1070,7 @@ type AgentTaskRow = {
   claudeSessionId: string | null;
   model: string | null;
   modelTier: string | null;
+  effort: string | null;
   scheduleId: string | null;
   workflowRunId: string | null;
   workflowRunStepId: string | null;
@@ -1159,6 +1162,9 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     claudeSessionId: row.claudeSessionId ?? undefined,
     model: row.model ?? undefined,
     modelTier: parseModelTier(row.modelTier) ?? undefined,
+    effort: ReasoningEffortSchema.safeParse(row.effort).success
+      ? (row.effort as ReasoningEffort)
+      : undefined,
     scheduleId: row.scheduleId ?? undefined,
     workflowRunId: row.workflowRunId ?? undefined,
     workflowRunStepId: row.workflowRunStepId ?? undefined,
@@ -1215,6 +1221,7 @@ function rowToAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
     scheduleId: t.scheduleId,
     model: t.model,
     modelTier: t.modelTier,
+    effort: t.effort,
     provider: t.provider,
     requestedByUserId: t.requestedByUserId,
     progress: t.progress,
@@ -3010,6 +3017,7 @@ export interface CreateTaskOptions {
   parentTaskId?: string;
   model?: string;
   modelTier?: ModelTier;
+  effort?: ReasoningEffort;
   scheduleId?: string;
   workflowRunId?: string;
   workflowRunStepId?: string;
@@ -3231,9 +3239,9 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, scheduleId,
+        mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, contextKey, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -3269,6 +3277,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.parentTaskId ?? null,
       options?.model ?? null,
       options?.modelTier ?? null,
+      options?.effort ?? null,
       options?.scheduleId ?? null,
       options?.workflowRunId ?? null,
       options?.workflowRunStepId ?? null,

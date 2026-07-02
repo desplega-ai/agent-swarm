@@ -9,6 +9,7 @@ on:
       - "scripts/**"
       - "package.json"
       - "bun.lock*"
+      - "konsistent.json"
       - "tsconfig.json"
       - "biome.json"
       - ".github/workflows/ci.yml"
@@ -36,6 +37,12 @@ jobs:
 
       - name: Run TypeScript type check
         run: bun run tsc:check
+
+      - name: Run structural consistency lint
+        continue-on-error: true
+        env:
+          KONSISTENT_NO_UPDATE_CHECK: "true"
+        run: bun run lint:structure
 
   test:
     name: Run Tests

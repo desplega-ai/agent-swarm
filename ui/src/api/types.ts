@@ -137,6 +137,7 @@ export interface AgentTask {
   progress?: string;
   model?: string;
   modelTier?: ModelTier;
+  effort?: ReasoningEffortLevel;
   scheduleId?: string;
   parentTaskId?: string;
   dir?: string;

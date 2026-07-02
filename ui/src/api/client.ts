@@ -310,6 +310,7 @@ class ApiClient {
     contextKey?: string;
     model?: string;
     modelTier?: string;
+    effort?: string;
   }): Promise<TaskWithLogs> {
     const url = `${this.getBaseUrl()}/api/tasks`;
     const res = await fetch(url, {
