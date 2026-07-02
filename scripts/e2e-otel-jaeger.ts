@@ -119,7 +119,7 @@ async function emitApiSpan(): Promise<void> {
     [
       "-e",
       `
-      const otel = await import("./src/otel.ts");
+      const otel = await import("./apps/swarm/src/otel.ts");
       await otel.initOtel("api");
       await otel.withSpan("http.server", async (span) => {
         span.setAttributes({
@@ -158,7 +158,7 @@ async function emitWorkerSpans(): Promise<void> {
     [
       "-e",
       `
-      const otel = await import("./src/otel.ts");
+      const otel = await import("./apps/swarm/src/otel.ts");
       await otel.initOtel("lead");
       await otel.withSpan("worker.poll", async (span) => {
         span.setAttribute("agentswarm.poll.result", "demo");

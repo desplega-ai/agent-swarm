@@ -24,7 +24,7 @@
 
 set -euo pipefail
 
-MIGRATIONS_DIR="src/be/migrations"
+MIGRATIONS_DIR="apps/swarm/src/be/migrations"
 
 if [ ! -d "$MIGRATIONS_DIR" ]; then
   echo "ERROR: migrations directory not found: $MIGRATIONS_DIR"

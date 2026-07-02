@@ -117,7 +117,7 @@ async function main() {
 
   // 1. Start API server
   log("Starting API server...");
-  apiProc = Bun.spawn(["bun", "run", "src/http.ts"], {
+  apiProc = Bun.spawn(["bun", "run", "apps/swarm/src/http.ts"], {
     env: {
       ...process.env,
       PORT,
@@ -204,7 +204,7 @@ async function testProvider(provider: string) {
 
   // Verify provider adapter can be instantiated
   try {
-    const { createProviderAdapter } = await import("../src/providers");
+    const { createProviderAdapter } = await import("../apps/swarm/src/providers");
     const adapter = createProviderAdapter(provider);
     if (adapter.name === provider) {
       logPass(`[${provider}] Provider adapter instantiates correctly`);

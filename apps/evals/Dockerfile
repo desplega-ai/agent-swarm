@@ -10,7 +10,7 @@ ENV EVALS_PORT=4801 \
 # Build with the repo root as context:
 #   docker build -f apps/evals/Dockerfile .
 #
-# The eval runner imports root src/e2b helpers and the models.dev pricing
+# The eval runner imports the swarm app's src/e2b helpers and the models.dev pricing
 # snapshot, so the image needs those repo-root files in addition to evals/.
 #
 # evals is a member of the root Bun workspace: its deps are recorded ONLY in the
@@ -25,9 +25,9 @@ COPY apps/evals/package.json ./apps/evals/
 RUN bun install --frozen-lockfile
 
 COPY apps/evals ./apps/evals
-COPY src/e2b ./src/e2b
-COPY src/utils ./src/utils
-COPY src/be/modelsdev-cache.json ./src/be/modelsdev-cache.json
+COPY apps/swarm/src/e2b ./apps/swarm/src/e2b
+COPY apps/swarm/src/utils ./apps/swarm/src/utils
+COPY apps/swarm/src/be/modelsdev-cache.json ./apps/swarm/src/be/modelsdev-cache.json
 
 WORKDIR /app/apps/evals
 RUN bun run ui:build

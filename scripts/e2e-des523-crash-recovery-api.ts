@@ -123,7 +123,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 await Bun.write(LOG_PATH, "");
 const logFile = Bun.file(LOG_PATH);
 const logWriter = logFile.writer();
-const proc = Bun.spawn(["bun", "--expose-gc", "src/http.ts"], {
+const proc = Bun.spawn(["bun", "--expose-gc", "apps/swarm/src/http.ts"], {
   cwd: process.cwd(),
   env: {
     ...process.env,

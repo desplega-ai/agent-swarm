@@ -18,8 +18,8 @@ id = "biome-lint"
 name = "Biome lint"
 language = "system"
 entry = "bun run lint"
-# CI "lint" domain: biome runs on src/ + apps/evals/; config + lockfile + tsconfig.
-files = '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|biome\.json$)'
+# CI "lint" domain: biome runs on apps/swarm/src/ + apps/evals/; config + lockfile + tsconfig.
+files = '^(apps/swarm/src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|biome\.json$)'
 pass_filenames = false
 stages = ["pre-push"]
 fail_fast = true
@@ -30,7 +30,7 @@ name = "TypeScript type check"
 language = "system"
 entry = "bun run tsc:check"
 # Same CI "lint" domain (tsc:check is bundled in the lint-and-typecheck job).
-files = '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|biome\.json$)'
+files = '^(apps/swarm/src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|biome\.json$)'
 pass_filenames = false
 stages = ["pre-push"]
 fail_fast = true
@@ -40,8 +40,8 @@ id = "test"
 name = "Unit tests"
 language = "system"
 entry = "bun test"
-# CI "test" domain: src/ + scripts tests import + lockfile/tsconfig.
-files = '^(src/|scripts/|package\.json$|bun\.lock|tsconfig\.json$)'
+# CI "test" domain: swarm source + scripts tests import + lockfile/tsconfig.
+files = '^(apps/swarm/src/|scripts/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$)'
 pass_filenames = false
 stages = ["pre-push"]
 
@@ -50,8 +50,8 @@ id = "db-boundary"
 name = "Worker/API DB boundary check"
 language = "system"
 entry = "bash scripts/check-db-boundary.sh"
-# Validates src/ import boundaries; also re-run if the check script itself changes.
-files = '^(src/|scripts/check-db-boundary\.sh$)'
+# Validates swarm source import boundaries; also re-run if the check script itself changes.
+files = '^(apps/swarm/src/|scripts/check-db-boundary\.sh$)'
 pass_filenames = false
 stages = ["pre-push"]
 fail_fast = true

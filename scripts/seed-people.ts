@@ -25,7 +25,7 @@
 
 import { Database } from "bun:sqlite";
 import { resolve } from "node:path";
-import { getApiKey } from "../src/utils/api-key";
+import { getApiKey } from "../apps/swarm/src/utils/api-key";
 
 // ─── CLI args ────────────────────────────────────────────────────────────────
 

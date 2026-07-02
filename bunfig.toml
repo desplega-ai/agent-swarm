@@ -15,7 +15,7 @@ linker = "hoisted"
 coverage = false
 maxConcurrency = 1
 retry = 3
-preload = ["./src/tests/preload.ts"]
+preload = ["./apps/swarm/src/tests/preload.ts"]
 # apps/evals is a SEPARATE bun package with its own deps (@libsql/client, etc.) and its
 # own CI test step (working-directory: apps/evals). Exclude it from the ROOT test run so
 # bare `bun test` at the repo root doesn't glob apps/evals/**/*.test.ts and fail to resolve

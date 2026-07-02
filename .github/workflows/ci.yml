@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "src/**"
+      - "apps/swarm/src/**"
       - "scripts/**"
       - "package.json"
       - "bun.lock*"

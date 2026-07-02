@@ -22,7 +22,7 @@ import {
 import { registerExactEvmScheme as registerServerEvmScheme } from "@x402/evm/exact/server";
 import { createPublicClient, http, parseAbi, verifyTypedData, type Address, type Hex } from "viem";
 import { baseSepolia } from "viem/chains";
-import { createX402Client } from "../src/x402/client.ts";
+import { createX402Client } from "../apps/swarm/src/x402/client.ts";
 
 // ─── Config ────────────────────────────────────────────────────────────
 const FACILITATOR_URL = "https://x402.org/facilitator";

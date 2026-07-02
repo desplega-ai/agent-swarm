@@ -8,7 +8,7 @@
  *
  * The barrel makes `import { x } from "@swarm/<pkg>"` resolve to the real code that
  * still lives under src/ (no files move in Phase 1). Re-exports use RELATIVE paths
- * (`export * from "../../src/<path>"`).
+ * (`export * from "../../apps/swarm/src/<path>"`).
  *
  * Collision handling (TS2308 under verbatimModuleSyntax):
  *   - A file whose exported names don't clash with already-emitted flat files -> `export *`.
@@ -69,7 +69,7 @@ function walk(dir: string, acc: string[] = []): string[] {
   return acc;
 }
 
-const allFiles = [...walk(join(ROOT, "src")), ...walk(join(ROOT, "templates"))];
+const allFiles = [...walk(join(ROOT, "apps/swarm/src")), ...walk(join(ROOT, "templates"))];
 
 // group owned files by package (relative posix paths)
 const byPkg: Record<string, string[]> = {};
@@ -89,7 +89,7 @@ const project = new Project({
 
 function resolveModuleFile(fromAbs: string, spec: string): string | null {
   let baseDir: string;
-  if (spec.startsWith("@/")) baseDir = join(ROOT, "src");
+  if (spec.startsWith("@/")) baseDir = join(ROOT, "apps/swarm/src");
   else if (spec.startsWith(".")) baseDir = dirname(fromAbs);
   else return null; // external
   const rest = spec.startsWith("@/") ? spec.slice(2) : spec;
@@ -222,7 +222,7 @@ function barrelFor(pkg: string): string {
     const clashes = [...names].some((n) => claimedFlat.has(n));
     if (clashes) {
       // namespace the whole file to avoid TS2308
-      let ns = pascal(rel.replace(/^src\//, "").replace(/^templates\//, "tpl/"));
+      let ns = pascal(rel.replace(/^apps\/swarm\/src\//, "").replace(/^templates\//, "tpl/"));
       let n = ns;
       let i = 2;
       while (usedDefaultAlias.has(n)) n = ns + i++;

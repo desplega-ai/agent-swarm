@@ -47,7 +47,7 @@ Recommended slim commit shape:
       "author": "Name",
       "date": "2026-06-08",
       "message": "feat: add workflow run waterfall",
-      "files": ["src/workflows/engine.ts", "apps/ui/src/pages/workflow-runs/[id]/page.tsx"]
+      "files": ["apps/swarm/src/workflows/engine.ts", "apps/ui/src/pages/workflow-runs/[id]/page.tsx"]
     }
   ],
   "commitCountTotal": 70,
@@ -118,7 +118,7 @@ Use one when you want to fail fast and self-document the contract a webhook or u
 
 ### Supported subset
 
-The validator (`src/workflows/json-schema-validator.ts`) supports a deliberately minimal JSON-Schema subset:
+The validator (`apps/swarm/src/workflows/json-schema-validator.ts`) supports a deliberately minimal JSON-Schema subset:
 
 - `type` — `"object"`, `"string"`, `"number"`, `"boolean"`, `"array"`
 - `required` — array of required property names (objects only)
@@ -144,7 +144,7 @@ Semantics: `undefined` / omitted = leave unchanged, object = set/replace, `null`
 
 ### How errors surface
 
-When a trigger payload fails validation the engine throws `TriggerSchemaError` (`src/workflows/engine.ts:31-36`) carrying the per-field validator output. Each surface formats it differently but the underlying `details: string[]` array is identical:
+When a trigger payload fails validation the engine throws `TriggerSchemaError` (`apps/swarm/src/workflows/engine.ts:31-36`) carrying the per-field validator output. Each surface formats it differently but the underlying `details: string[]` array is identical:
 
 **HTTP** — both `POST /api/workflows/{id}/trigger` and `POST /api/workflows/webhooks/{id}` return `400 Bad Request` with the frozen body shape:
 
@@ -156,7 +156,7 @@ When a trigger payload fails validation the engine throws `TriggerSchemaError` (
 }
 ```
 
-`details` is the array returned by `validateJsonSchema()` — one string per failing field, prefixed with the dotted path (e.g. `pr.number: expected type "number", got string`). The helper that writes this body lives at `src/http/utils.ts` (`triggerSchemaErrorResponse`).
+`details` is the array returned by `validateJsonSchema()` — one string per failing field, prefixed with the dotted path (e.g. `pr.number: expected type "number", got string`). The helper that writes this body lives at `apps/swarm/src/http/utils.ts` (`triggerSchemaErrorResponse`).
 
 **MCP** — `trigger-workflow` returns `success: false` with structured content alongside a human-readable bulleted message in `content[0].text`:
 
@@ -173,10 +173,10 @@ The echoed `triggerSchema` lets agents self-correct without a follow-up `get-wor
 
 ### Cross-references
 
-- Validator implementation + supported subset: `src/workflows/json-schema-validator.ts`
-- Engine throw site: `src/workflows/engine.ts:31-36` (`TriggerSchemaError` class) and `:54-60` (validation gate)
-- HTTP 400 helper: `src/http/utils.ts` (`triggerSchemaErrorResponse`)
-- MCP error formatting: `src/tools/workflows/trigger-workflow.ts` (`TriggerSchemaError` branch)
+- Validator implementation + supported subset: `apps/swarm/src/workflows/json-schema-validator.ts`
+- Engine throw site: `apps/swarm/src/workflows/engine.ts:31-36` (`TriggerSchemaError` class) and `:54-60` (validation gate)
+- HTTP 400 helper: `apps/swarm/src/http/utils.ts` (`triggerSchemaErrorResponse`)
+- MCP error formatting: `apps/swarm/src/tools/workflows/trigger-workflow.ts` (`TriggerSchemaError` branch)
 
 ## Wait nodes
 
@@ -215,7 +215,7 @@ A `wait` node pauses a workflow until either a duration elapses or a named event
 
 `scope` semantics:
 
-- `scope: run` (default): the listener requires the payload to carry `_runId` or `workflowRunId` matching this run's id. Run-scoped HTTP signals inject `_runId` automatically; built-in lifecycle events (`task.completed` and friends emitted from `src/be/db.ts`) already include `workflowRunId` in their payload, so they correlate naturally.
+- `scope: run` (default): the listener requires the payload to carry `_runId` or `workflowRunId` matching this run's id. Run-scoped HTTP signals inject `_runId` automatically; built-in lifecycle events (`task.completed` and friends emitted from `apps/swarm/src/be/db.ts`) already include `workflowRunId` in their payload, so they correlate naturally.
 - `scope: global`: skip the run-id check. Use for cross-run signals (e.g. `release.cut` broadcasts).
 
 ### Output ports
@@ -248,28 +248,28 @@ The following events are already emitted on `workflowEventBus` today and are usa
 
 | Event | Source | Payload highlights |
 |---|---|---|
-| `task.completed` / `task.failed` / `task.cancelled` | `src/be/db.ts` (around the `completeTask`/`failTask`/`cancelTask` paths) | `{ taskId, output|failureReason, agentId, workflowRunId, workflowRunStepId }` |
-| `task.created` / `task.progress` / `task.budget_refused` | `src/be/db.ts` | task-id keyed lifecycle payloads |
-| `approval.resolved` | `src/http/approval-requests.ts:183` | `{ requestId, status, responses, workflowRunId, workflowRunStepId }` |
-| `agentmail.message.received` | `src/agentmail/handlers.ts:168` | inbox/message keyed payload |
-| `github.pull_request.<action>` | `src/http/webhooks.ts:177` | full GitHub PR payload |
-| `github.issue.<action>` | `src/http/webhooks.ts:192` | GitHub issue payload |
-| `github.issue_comment.created` | `src/http/webhooks.ts:202` | comment payload |
-| `github.pull_request_review.submitted` | `src/http/webhooks.ts:211` | review payload |
-| `gitlab.merge_request.<action>` | `src/http/webhooks.ts:294` | full GitLab MR payload |
-| `gitlab.issue.<action>` | `src/http/webhooks.ts:308` | GitLab issue payload |
-| `gitlab.note.created` | `src/http/webhooks.ts:318` | note payload |
-| `gitlab.pipeline.<status>` | `src/http/webhooks.ts:327` | pipeline payload |
+| `task.completed` / `task.failed` / `task.cancelled` | `apps/swarm/src/be/db.ts` (around the `completeTask`/`failTask`/`cancelTask` paths) | `{ taskId, output|failureReason, agentId, workflowRunId, workflowRunStepId }` |
+| `task.created` / `task.progress` / `task.budget_refused` | `apps/swarm/src/be/db.ts` | task-id keyed lifecycle payloads |
+| `approval.resolved` | `apps/swarm/src/http/approval-requests.ts:183` | `{ requestId, status, responses, workflowRunId, workflowRunStepId }` |
+| `agentmail.message.received` | `apps/swarm/src/agentmail/handlers.ts:168` | inbox/message keyed payload |
+| `github.pull_request.<action>` | `apps/swarm/src/http/webhooks.ts:177` | full GitHub PR payload |
+| `github.issue.<action>` | `apps/swarm/src/http/webhooks.ts:192` | GitHub issue payload |
+| `github.issue_comment.created` | `apps/swarm/src/http/webhooks.ts:202` | comment payload |
+| `github.pull_request_review.submitted` | `apps/swarm/src/http/webhooks.ts:211` | review payload |
+| `gitlab.merge_request.<action>` | `apps/swarm/src/http/webhooks.ts:294` | full GitLab MR payload |
+| `gitlab.issue.<action>` | `apps/swarm/src/http/webhooks.ts:308` | GitLab issue payload |
+| `gitlab.note.created` | `apps/swarm/src/http/webhooks.ts:318` | note payload |
+| `gitlab.pipeline.<status>` | `apps/swarm/src/http/webhooks.ts:327` | pipeline payload |
 
-For `task.completed` specifically, the canonical payload shape lives in `src/be/db.ts` next to the emit site. Because it includes `workflowRunId`, you can use a `scope: run` wait with a filter like `{ workflowRunId: "<the run id>" }` to correlate against a specific upstream task — see "Ordering caveat" below.
+For `task.completed` specifically, the canonical payload shape lives in `apps/swarm/src/be/db.ts` next to the emit site. Because it includes `workflowRunId`, you can use a `scope: run` wait with a filter like `{ workflowRunId: "<the run id>" }` to correlate against a specific upstream task — see "Ordering caveat" below.
 
 ### What's NOT yet on the bus
 
 The following sources do **not** currently emit on `workflowEventBus`. Hooking each one in is a one-line `workflowEventBus.emit(name, payload)` follow-up in the relevant handler — tracked as separate plans:
 
-- Slack messages (`src/slack/`)
-- Linear webhooks (`src/linear/`, `src/http/trackers/linear.ts`)
-- Jira webhooks (`src/jira/`, `src/http/trackers/jira.ts`)
+- Slack messages (`apps/swarm/src/slack/`)
+- Linear webhooks (`apps/swarm/src/linear/`, `apps/swarm/src/http/trackers/linear.ts`)
+- Jira webhooks (`apps/swarm/src/jira/`, `apps/swarm/src/http/trackers/jira.ts`)
 - Sentry alerts
 - Stripe events
 - Claude-managed callbacks
@@ -351,4 +351,4 @@ Two valid patterns:
 
 ### Multi-instance limitation
 
-`workflowEventBus` is an in-process `EventEmitter` (`src/workflows/event-bus.ts`). With multiple API replicas, a signal emitted on instance A will not reach a wait paused on instance B. Single-instance only for v1; cross-instance fan-out (Redis pub/sub, etc.) is a separate plan.
+`workflowEventBus` is an in-process `EventEmitter` (`apps/swarm/src/workflows/event-bus.ts`). With multiple API replicas, a signal emitted on instance A will not reach a wait paused on instance B. Single-instance only for v1; cross-instance fan-out (Redis pub/sub, etc.) is a separate plan.

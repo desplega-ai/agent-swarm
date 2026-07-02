@@ -83,7 +83,7 @@ elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
     [ -z "$MCP_BASE_URL" ] && MISSING="$MISSING MCP_BASE_URL"
     if [ -n "$MISSING" ]; then
         echo "Warning: claude-managed provider missing:$MISSING"
-        echo "  Run \`bun run src/cli.tsx claude-managed-setup\` from your laptop to create"
+        echo "  Run \`bun run apps/swarm/src/cli.tsx claude-managed-setup\` from your laptop to create"
         echo "  the Anthropic-side agent + environment and persist their IDs to swarm_config."
         echo "  MCP_BASE_URL must be a public HTTPS URL (ngrok / Cloudflare Tunnel in dev)."
         echo "  Worker will park in credential-wait until they appear."

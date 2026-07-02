@@ -16,7 +16,7 @@
     // Path aliases
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["apps/swarm/src/*"]
     },
     "verbatimModuleSyntax": true,
     "noEmit": true,
@@ -34,11 +34,13 @@
     "noPropertyAccessFromIndexSignature": false
   },
   "exclude": [
-    "apps",
+    "apps/ui",
+    "apps/templates-ui",
+    "apps/evals",
     "node_modules",
     "dist",
     "scripts",
-    "src/tests",
+    "apps/swarm/src/tests",
     "work",
     "logs",
     "plugin",

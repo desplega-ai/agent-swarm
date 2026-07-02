@@ -78,12 +78,12 @@ The expected path is one caller obtains the provider lock, refreshes, and persis
 
 ### Token appears in logs
 
-All log/stdout/stderr egress should pass through `scrubSecrets`. HTTP request logs must redact query parameter values because OAuth callbacks carry temporary credentials in the query string. Add focused regression tests in `src/tests/secret-scrubber.test.ts` or `src/tests/http-log-scrubbing.test.ts` when expanding coverage.
+All log/stdout/stderr egress should pass through `scrubSecrets`. HTTP request logs must redact query parameter values because OAuth callbacks carry temporary credentials in the query string. Add focused regression tests in `apps/swarm/src/tests/secret-scrubber.test.ts` or `apps/swarm/src/tests/http-log-scrubbing.test.ts` when expanding coverage.
 
 ## Related code
 
-- `src/oauth/ensure-token.ts` — shared near-expiry refresh path.
-- `src/oauth/wrapper.ts` — provider token exchange and persistence call.
-- `src/be/db-queries/oauth.ts` — token CAS update and refresh lock helpers.
-- `src/tools/oauth-access-token.ts` — MCP tool for provider access tokens.
-- `src/utils/secret-scrubber.ts` — egress scrubbing and volatile access-token registration.
+- `apps/swarm/src/oauth/ensure-token.ts` — shared near-expiry refresh path.
+- `apps/swarm/src/oauth/wrapper.ts` — provider token exchange and persistence call.
+- `apps/swarm/src/be/db-queries/oauth.ts` — token CAS update and refresh lock helpers.
+- `apps/swarm/src/tools/oauth-access-token.ts` — MCP tool for provider access tokens.
+- `apps/swarm/src/utils/secret-scrubber.ts` — egress scrubbing and volatile access-token registration.

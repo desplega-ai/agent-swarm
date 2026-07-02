@@ -9,7 +9,8 @@ const PROJECT_DIR = `${SCRIPT_DIR}/..`;
 console.log("Updating agent-swarm...");
 
 // Copy project files
-await $`cp -r ${PROJECT_DIR}/src ${APP_DIR}/`;
+await $`mkdir -p ${APP_DIR}/apps/swarm`;
+await $`cp -r ${PROJECT_DIR}/apps/swarm/src ${APP_DIR}/apps/swarm/`;
 await $`cp ${PROJECT_DIR}/package.json ${PROJECT_DIR}/bun.lock ${PROJECT_DIR}/bunfig.toml ${PROJECT_DIR}/tsconfig.json ${APP_DIR}/`;
 
 // The root manifest declares Bun workspaces, so a frozen install needs every member's

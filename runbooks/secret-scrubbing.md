@@ -11,7 +11,7 @@ import { scrubSecrets } from "./utils/secret-scrubber";
 console.log(scrubSecrets(maybeContainsToken));
 ```
 
-Module: `src/utils/secret-scrubber.ts`.
+Module: `apps/swarm/src/utils/secret-scrubber.ts`.
 
 ## Cache refresh
 
@@ -28,5 +28,5 @@ It covers:
 
 ## Adding a new secret shape
 
-1. Extend `SENSITIVE_KEY_EXACT` (env-key match) or `TOKEN_REGEXES` (structural pattern) in `src/utils/secret-scrubber.ts`.
-2. Add a regression test in `src/tests/secret-scrubber.test.ts`.
+1. Extend `SENSITIVE_KEY_EXACT` (env-key match) or `TOKEN_REGEXES` (structural pattern) in `apps/swarm/src/utils/secret-scrubber.ts`.
+2. Add a regression test in `apps/swarm/src/tests/secret-scrubber.test.ts`.

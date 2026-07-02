@@ -23,8 +23,8 @@ import {
   startDetachedProcess,
   waitForAgentRegistration,
   waitForHttpOk,
-} from "../../../../src/e2b/dispatch";
-import { redactWithEnv } from "../../../../src/e2b/env";
+} from "../../../../apps/swarm/src/e2b/dispatch";
+import { redactWithEnv } from "../../../../apps/swarm/src/e2b/env";
 import { defaultMemberIdentity, type HarnessConfig, type WorkerSpec } from "../types.ts";
 import { cleanVersion } from "./version.ts";
 

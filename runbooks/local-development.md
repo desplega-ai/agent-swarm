@@ -54,14 +54,14 @@ OAuth token refresh behavior and local smoke testing: [runbooks/oauth-tokens.md]
 
 ## Codex ChatGPT OAuth
 
-Run `bun run src/cli.tsx codex-login` from your **laptop**, not inside the worker container. For a remote swarm, point `--api-url` at the public API (or SSH tunnel), then restart codex workers.
+Run `bun run apps/swarm/src/cli.tsx codex-login` from your **laptop**, not inside the worker container. For a remote swarm, point `--api-url` at the public API (or SSH tunnel), then restart codex workers.
 
 ## Claude Managed Agents
 
 `HARNESS_PROVIDER=claude-managed` runs sessions in Anthropic's managed cloud sandbox (no local CLI). One-time bootstrap from your laptop:
 
 ```bash
-bun run src/cli.tsx claude-managed-setup
+bun run apps/swarm/src/cli.tsx claude-managed-setup
 ```
 
 This creates an Anthropic-side environment + agent + skills (uploaded from `plugin/commands/*.md`) and persists the resulting IDs to `swarm_config`. Deployed workers restore these from the API at boot. Re-run with `--force` to recreate.
@@ -113,7 +113,7 @@ Branch selection is currently hardcoded to `"main"`; per-task branch overrides w
 
 ### Cost computation
 
-Managed-agents reports only token counts on `span.model_request_end`. The adapter computes USD locally using `src/providers/claude-managed-models.ts` (rates per [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing)) and adds Anthropic's `$0.08/session-hour` runtime fee, billed by wallclock duration. Both components surface on the swarm `result` event's `cost.totalCostUsd`. Unknown model strings fall back to `$0` with a single deduplicated `console.warn`.
+Managed-agents reports only token counts on `span.model_request_end`. The adapter computes USD locally using `apps/swarm/src/providers/claude-managed-models.ts` (rates per [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing)) and adds Anthropic's `$0.08/session-hour` runtime fee, billed by wallclock duration. Both components surface on the swarm `result` event's `cost.totalCostUsd`. Unknown model strings fall back to `$0` with a single deduplicated `console.warn`.
 
 ## Portless dev
 

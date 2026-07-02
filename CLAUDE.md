@@ -7,20 +7,18 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) to get set up. Start the server with `b
 ## Project map
 
 ```
-src/
-  http.ts, server.ts   # API server + MCP endpoints
-  stdio.ts             # Stdio MCP transport
-  cli.tsx              # CLI entry (Ink)
-  tools/               # MCP tool definitions
-  http/                # REST route handlers (use route() factory)
-  providers/           # Harness adapters (claude, pi, codex, devin) + OAuth flows
-  commands/            # Worker-side command implementations
-  be/
-    db.ts              # DB init + query functions (API-only)
-    migrations/        # Forward-only SQL migrations
-  prompts/             # System-prompt composition
-  github/, slack/      # Integration handlers
 apps/
+  swarm/src/           # The swarm app (API server + CLI + workers) — the pre-monorepo src/
+    http.ts, server.ts #   API server + MCP endpoints
+    stdio.ts           #   Stdio MCP transport
+    cli.tsx            #   CLI entry (Ink)
+    tools/             #   MCP tool definitions
+    http/              #   REST route handlers (use route() factory)
+    providers/         #   Harness adapters (claude, pi, codex, devin) + OAuth flows
+    commands/          #   Worker-side command implementations
+    be/                #   DB init + query functions (API-only) + forward-only SQL migrations
+    prompts/           #   System-prompt composition
+    github/, slack/    #   Integration handlers
   ui/                  # Dashboard (Vite SPA, port 5274)
   templates-ui/        # Templates registry (Next.js)
   evals/               # Eval harness: scenario x harness-config matrix on E2B (own package; see apps/evals/README.md)
@@ -31,11 +29,11 @@ runbooks/              # Operational runbooks (local dev, etc.)
 
 ## Architecture invariants
 
-The API server (`src/http.ts`, `src/server.ts`, `src/tools/`, `src/http/`) is the **sole owner** of the SQLite database. Worker-side code (`src/commands/`, `src/hooks/`, `src/providers/`, `src/prompts/`, `src/cli.tsx`, `src/claude.ts`) must **never** import from `src/be/db` or `bun:sqlite`. Workers talk to the API over HTTP using the swarm API key + `X-Agent-ID` headers. Enforced by `scripts/check-db-boundary.sh` (CI).
+The API server (`apps/swarm/src/http.ts`, `apps/swarm/src/server.ts`, `apps/swarm/src/tools/`, `apps/swarm/src/http/`) is the **sole owner** of the SQLite database. Worker-side code (`apps/swarm/src/commands/`, `apps/swarm/src/hooks/`, `apps/swarm/src/providers/`, `apps/swarm/src/prompts/`, `apps/swarm/src/cli.tsx`, `apps/swarm/src/claude.ts`) must **never** import from `apps/swarm/src/be/db` or `bun:sqlite`. Workers talk to the API over HTTP using the swarm API key + `X-Agent-ID` headers. Enforced by `scripts/check-db-boundary.sh` (CI).
 
-The swarm API key MUST be read via `getApiKey()` from `src/utils/api-key.ts` — never `process.env.API_KEY` / `process.env.AGENT_SWARM_API_KEY` directly. Precedence: `AGENT_SWARM_API_KEY` > `API_KEY`. Enforced by `scripts/check-api-key-boundary.sh` (CI).
+The swarm API key MUST be read via `getApiKey()` from `apps/swarm/src/utils/api-key.ts` — never `process.env.API_KEY` / `process.env.AGENT_SWARM_API_KEY` directly. Precedence: `AGENT_SWARM_API_KEY` > `API_KEY`. Enforced by `scripts/check-api-key-boundary.sh` (CI).
 
-System prompt and task prompt text MUST go through the prompt-template registry in `src/prompts/`; do not hardcode new prompt sections with string concatenation in runners, hooks, or providers. Add or update a registered template, then resolve it from the call site.
+System prompt and task prompt text MUST go through the prompt-template registry in `apps/swarm/src/prompts/`; do not hardcode new prompt sections with string concatenation in runners, hooks, or providers. Add or update a registered template, then resolve it from the call site.
 
 <important if="you are adding, changing, or using task/schedule/workflow model selection">
 
@@ -43,23 +41,23 @@ Prefer portable `modelTier` (`smol` / `regular` / `smart` / `ultra`) for cross-h
 
 </important>
 
-<important if="you are modifying scripts-runtime code (src/scripts-runtime/*, src/be/scripts/*, src/tools/script-*.ts, src/http/scripts.ts)">
+<important if="you are modifying scripts-runtime code (apps/swarm/src/scripts-runtime/*, apps/swarm/src/be/scripts/*, apps/swarm/src/tools/script-*.ts, apps/swarm/src/http/scripts.ts)">
 
 Architecture: API server owns the `scripts` + `script_versions` tables. Workers + the runtime invoke via HTTP. The runtime evaluates user-supplied TS in a `Bun.spawn` subprocess wrapped in `ulimit -v 524288 -t 60 -u 32 -f 65536 -n 64`, 30s AbortController, 1 MB stdout cap.
 
-Config injection: agent identity + bearer + mcpBaseUrl flow as a JSON `SwarmConfigPayload` over the subprocess **stdin** — NOT env vars. Bearer is wrapped in `Redacted<string>` inside the script; user code never unwraps. `process.env` carries only Node/Bun defaults. Loader reads the bearer via `getApiKey()` from `src/utils/api-key.ts` (never raw env).
+Config injection: agent identity + bearer + mcpBaseUrl flow as a JSON `SwarmConfigPayload` over the subprocess **stdin** — NOT env vars. Bearer is wrapped in `Redacted<string>` inside the script; user code never unwraps. `process.env` carries only Node/Bun defaults. Loader reads the bearer via `getApiKey()` from `apps/swarm/src/utils/api-key.ts` (never raw env).
 
 FS modes: `'none'` = per-run tmpdir (v1 only); `'workspace-rw'` returns 501 in v1 (worker dispatch is v2).
 
-SDK surface: derived from MCP tool registry at build time via `scripts/bundle-script-types.ts`. Curated allowlist in `src/scripts-runtime/sdk-allowlist.ts`.
+SDK surface: derived from MCP tool registry at build time via `scripts/bundle-script-types.ts`. Curated allowlist in `apps/swarm/src/scripts-runtime/sdk-allowlist.ts`.
 
 Typecheck: `script_upsert` runs `tsc --noEmit` against the generated `.d.ts`; rejects on diagnostics. Inline `script_run` skips typecheck (scratch hot path).
 
-Boundaries: `src/scripts-runtime/` is on both `check-db-boundary.sh` (no `src/be/db` imports) and `check-api-key-boundary.sh` (must use `getApiKey()`) allowlists.
+Boundaries: `apps/swarm/src/scripts-runtime/` is on both `check-db-boundary.sh` (no `apps/swarm/src/be/db` imports) and `check-api-key-boundary.sh` (must use `getApiKey()`) allowlists.
 
-Tests: `bun test src/tests/scripts-*.test.ts`. Sandbox + timeout + abort + stdin-config + env-hygiene paths are the highest-risk surfaces — keep coverage tight.
+Tests: `bun test apps/swarm/src/tests/scripts-*.test.ts`. Sandbox + timeout + abort + stdin-config + env-hygiene paths are the highest-risk surfaces — keep coverage tight.
 
-New MCP tools: when adding a tool, register it in `SDK_TOOL_NAME_MAP` (`src/scripts-runtime/sdk-allowlist.ts`) to expose it to scripts, or add it to `EXCLUDED_TOOLS` in `scripts/check-sdk-tool-registration.ts` with a reason. Enforced by CI.
+New MCP tools: when adding a tool, register it in `SDK_TOOL_NAME_MAP` (`apps/swarm/src/scripts-runtime/sdk-allowlist.ts`) to expose it to scripts, or add it to `EXCLUDED_TOOLS` in `scripts/check-sdk-tool-registration.ts` with a reason. Enforced by CI.
 
 </important>
 
@@ -74,7 +72,7 @@ New MCP tools: when adding a tool, register it in `SDK_TOOL_NAME_MAP` (`src/scri
 | `bun run dev:http` | Hot reload, portless: `https://api.swarm.localhost:1355` |
 | `bun run lint:fix` | Lint & format with Biome |
 | `bun run tsc:check` | Type check |
-| `bun test` | Run unit tests (`bun test src/tests/<file>.test.ts` for one) |
+| `bun test` | Run unit tests (`bun test apps/swarm/src/tests/<file>.test.ts` for one) |
 | `bun run pm2-{start,stop,restart,logs,status}` | All services (API 3013, UI 5274, lead 3201, worker 3202) |
 | `bun run docker:build:worker` | Build Docker worker image |
 | `bun run docs:openapi` | Regenerate `openapi.json` |
@@ -114,7 +112,7 @@ semble search "save model to disk" ./my-project --top-k 10
 Use `semble find-related` to discover code similar to a known location (pass `file_path` and `line` from a prior search result):
 
 ```bash
-semble find-related src/auth.py 42 ./my-project
+semble find-related apps/swarm/src/auth.py 42 ./my-project
 ```
 
 `path` defaults to the current directory when omitted; git URLs are accepted.
@@ -142,21 +140,21 @@ Default Gemini model: `google/gemini-3-flash-preview` (this is from OpenRouter).
 
 <important if="you are adding or modifying database schema or migrations">
 
-File-based, forward-only SQL in `src/be/migrations/NNN_descriptive_name.sql`. Runner auto-applies on startup.
+File-based, forward-only SQL in `apps/swarm/src/be/migrations/NNN_descriptive_name.sql`. Runner auto-applies on startup.
 
-Test against a fresh DB (`rm agent-swarm-db.sqlite && bun run start:http`) **and** an existing one. Never modify an applied migration — create a new one. No `down` migrations (SQLite rollbacks flake). Keep `AgentTaskSourceSchema` in `src/types.ts` in sync with SQL CHECK constraints.
+Test against a fresh DB (`rm agent-swarm-db.sqlite && bun run start:http`) **and** an existing one. Never modify an applied migration — create a new one. No `down` migrations (SQLite rollbacks flake). Keep `AgentTaskSourceSchema` in `apps/swarm/src/types.ts` in sync with SQL CHECK constraints.
 
 </important>
 
 <important if="you are adding or modifying CLI commands or CLI help text">
 
-CLI help lives in `src/cli.tsx` — plain `console.log`, not Ink. To add/modify: update `COMMAND_HELP`, add to the `commands` array in `printHelp()`, then route in the `App` switch (UI commands) or before `render()` (non-UI). Verify with `bun run src/cli.tsx help` and `bun run src/cli.tsx <command> --help`.
+CLI help lives in `apps/swarm/src/cli.tsx` — plain `console.log`, not Ink. To add/modify: update `COMMAND_HELP`, add to the `commands` array in `printHelp()`, then route in the `App` switch (UI commands) or before `render()` (non-UI). Verify with `bun run apps/swarm/src/cli.tsx help` and `bun run apps/swarm/src/cli.tsx <command> --help`.
 
 </important>
 
 <important if="you are adding or modifying HTTP API endpoints or REST routes">
 
-Always use the `route()` factory from `src/http/route-def.ts` — auto-registers in OpenAPI. Do **not** use raw `matchRoute`.
+Always use the `route()` factory from `apps/swarm/src/http/route-def.ts` — auto-registers in OpenAPI. Do **not** use raw `matchRoute`.
 
 After adding a handler: also add the import to `scripts/generate-openapi.ts`, then run `bun run docs:openapi` and commit `openapi.json`.
 
@@ -208,7 +206,7 @@ Top rules — internalize these before editing:
 
 <important if="you are writing code that logs, prints, stores, or transports sensitive values (secrets, tokens, OAuth creds, API keys, DB URLs, webhook payloads)">
 
-Any path emitting to logs, stdout/stderr, the `session_logs` table, or `/workspace/logs/*.jsonl` MUST go through `scrubSecrets` from `src/utils/secret-scrubber.ts` at the **egress** point. Never print raw env values, credential-pool entries, OAuth payloads, webhook bodies, or tool output that may embed tokens.
+Any path emitting to logs, stdout/stderr, the `session_logs` table, or `/workspace/logs/*.jsonl` MUST go through `scrubSecrets` from `apps/swarm/src/utils/secret-scrubber.ts` at the **egress** point. Never print raw env values, credential-pool entries, OAuth payloads, webhook bodies, or tool output that may embed tokens.
 
 Cache refresh, coverage rules, and how to add a new secret shape: see [runbooks/secret-scrubbing.md](./runbooks/secret-scrubbing.md).
 
@@ -219,9 +217,9 @@ Cache refresh, coverage rules, and how to add a new secret shape: see [runbooks/
 Full setup — env files, env vars, OAuth flows (Linear/Jira/Codex), portless dev, secrets encryption, curl examples, Docker Compose: see [runbooks/local-development.md](./runbooks/local-development.md).
 
 Quick reference:
-- Auth: `Authorization: Bearer ${AGENT_SWARM_API_KEY}` (preferred — falls back to legacy `API_KEY`; default `123123`). Read it in code via `getApiKey()` from `src/utils/api-key.ts` — direct `process.env.API_KEY` access is rejected by `scripts/check-api-key-boundary.sh`.
+- Auth: `Authorization: Bearer ${AGENT_SWARM_API_KEY}` (preferred — falls back to legacy `API_KEY`; default `123123`). Read it in code via `getApiKey()` from `apps/swarm/src/utils/api-key.ts` — direct `process.env.API_KEY` access is rejected by `scripts/check-api-key-boundary.sh`.
 - Server URL: `MCP_BASE_URL` (default `http://localhost:3013`).
-- Provider: `HARNESS_PROVIDER=claude|pi|codex|devin|claude-managed`. `claude-managed` runs in Anthropic's cloud sandbox — requires `ANTHROPIC_API_KEY`, `MANAGED_AGENT_ID`, `MANAGED_ENVIRONMENT_ID`, an HTTPS-public `MCP_BASE_URL`, and the one-time `bun run src/cli.tsx claude-managed-setup` step. The `apps/ui/` integrations dashboard surfaces the same config (Phase 7). See [runbooks/local-development.md § Claude Managed Agents](./runbooks/local-development.md#claude-managed-agents).
+- Provider: `HARNESS_PROVIDER=claude|pi|codex|devin|claude-managed`. `claude-managed` runs in Anthropic's cloud sandbox — requires `ANTHROPIC_API_KEY`, `MANAGED_AGENT_ID`, `MANAGED_ENVIRONMENT_ID`, an HTTPS-public `MCP_BASE_URL`, and the one-time `bun run apps/swarm/src/cli.tsx claude-managed-setup` step. The `apps/ui/` integrations dashboard surfaces the same config (Phase 7). See [runbooks/local-development.md § Claude Managed Agents](./runbooks/local-development.md#claude-managed-agents).
 - Disable integrations: `SLACK_DISABLE` / `GITHUB_DISABLE` / `JIRA_DISABLE` / `LINEAR_DISABLE=true`.
 
 </important>
@@ -271,33 +269,33 @@ Frontend (`apps/ui/`, `apps/templates-ui/`) PRs additionally require a `qa-use` 
 
 </important>
 
-<important if="you are modifying memory system code (src/be/memory/, src/be/embedding.ts, src/tools/memory-*.ts, src/http/memory.ts, or src/tools/store-progress.ts memory sections)">
+<important if="you are modifying memory system code (apps/swarm/src/be/memory/, apps/swarm/src/be/embedding.ts, apps/swarm/src/tools/memory-*.ts, apps/swarm/src/http/memory.ts, or apps/swarm/src/tools/store-progress.ts memory sections)">
 
 Architecture, key files, and full test commands: see [runbooks/memory-system.md](./runbooks/memory-system.md). Always run all four memory test files after any change.
 
 </important>
 
-<important if="you are modifying harness-provider code (src/providers/*, src/commands/runner.ts provider dispatch, src/prompts/*, docker-entrypoint.sh provider branches, or adding a new provider)">
+<important if="you are modifying harness-provider code (apps/swarm/src/providers/*, apps/swarm/src/commands/runner.ts provider dispatch, apps/swarm/src/prompts/*, docker-entrypoint.sh provider branches, or adding a new provider)">
 
 Same-PR doc-update rule + new-provider checklist: [runbooks/harness-providers.md](./runbooks/harness-providers.md). Canonical conceptual reference: [docs-site/.../guides/harness-providers.mdx](./docs-site/content/docs/(documentation)/guides/harness-providers.mdx).
 
 </important>
 
-<important if="you are modifying cost or context tracking code (src/providers/*-adapter.ts, src/utils/context-window.ts, src/be/seed-pricing.ts, src/http/session-data.ts, src/http/context.ts, or pricing/context columns in src/be/migrations/)">
+<important if="you are modifying cost or context tracking code (apps/swarm/src/providers/*-adapter.ts, apps/swarm/src/utils/context-window.ts, apps/swarm/src/be/seed-pricing.ts, apps/swarm/src/http/session-data.ts, apps/swarm/src/http/context.ts, or pricing/context columns in apps/swarm/src/be/migrations/)">
 
 Adapter emits CostData + context_usage → API recomputes USD against the seeded `pricing` table → row tagged `costSource` ('harness' / 'pricing-table' / 'unpriced') → UI badge. Unified context formula is `input + cache_read + cache_create + output` (see `computeContextUsedUnified`).
 
-Same-PR doc-update rule: update [docs-site/.../guides/cost-and-context-computation.mdx](./docs-site/content/docs/(documentation)/guides/cost-and-context-computation.mdx) AND [src/providers/pricing-sources.md](./src/providers/pricing-sources.md) when the contract changes. The pricing-table comes from `src/be/modelsdev-cache.json` (symlinked into `apps/ui/src/lib/modelsdev-cache.json` for the UI model picker); refresh via `bun run scripts/refresh-modelsdev-pricing.ts` and commit the snapshot.
+Same-PR doc-update rule: update [docs-site/.../guides/cost-and-context-computation.mdx](./docs-site/content/docs/(documentation)/guides/cost-and-context-computation.mdx) AND [apps/swarm/src/providers/pricing-sources.md](./src/providers/pricing-sources.md) when the contract changes. The pricing-table comes from `apps/swarm/src/be/modelsdev-cache.json` (symlinked into `apps/ui/src/lib/modelsdev-cache.json` for the UI model picker); refresh via `bun run scripts/refresh-modelsdev-pricing.ts` and commit the snapshot.
 
 </important>
 
 <important if="you are creating or modifying eval scenarios, rubrics, or fixtures (apps/evals/scenarios/*, apps/evals/scenarios/fixtures/*)">
 
-Full rulebook: [apps/evals/SCENARIO-AUTHORING.md](./apps/evals/SCENARIO-AUTHORING.md). Non-negotiables: **deterministic-first** (a judge is the last resort and never the tier discriminator); **never penalize MANDATORY behavior** (audit every negative check — can a correct run trip it?); **grade artifacts the MODEL controls** (child tasks, merged report — NOT config/timing-dependent system emissions); **de-risk pilot before building an axis** (prove discrimination on ONE dimension × TWO tiers, ~$4, read the dimension gap + whether its CI excludes 0). Validate with `cd apps/evals && bun src/cli.ts registry` + a rubric unit test against a synthetic JudgeContext; the deployed swarm proposes (never runs E2B itself — it costs money).
+Full rulebook: [apps/evals/SCENARIO-AUTHORING.md](./apps/evals/SCENARIO-AUTHORING.md). Non-negotiables: **deterministic-first** (a judge is the last resort and never the tier discriminator); **never penalize MANDATORY behavior** (audit every negative check — can a correct run trip it?); **grade artifacts the MODEL controls** (child tasks, merged report — NOT config/timing-dependent system emissions); **de-risk pilot before building an axis** (prove discrimination on ONE dimension × TWO tiers, ~$4, read the dimension gap + whether its CI excludes 0). Validate with `cd apps/evals && bun apps/swarm/src/cli.ts registry` + a rubric unit test against a synthetic JudgeContext; the deployed swarm proposes (never runs E2B itself — it costs money).
 
 </important>
 
-<important if="you are modifying heartbeat, crash-recovery, or task-assignment/routing logic (src/heartbeat/*, src/tasks/worker-follow-up.ts resume/remediation, the pool/claim path in src/http/poll.ts + src/be/db.ts, or any stall/liveness/reaper threshold)">
+<important if="you are modifying heartbeat, crash-recovery, or task-assignment/routing logic (apps/swarm/src/heartbeat/*, apps/swarm/src/tasks/worker-follow-up.ts resume/remediation, the pool/claim path in apps/swarm/src/http/poll.ts + apps/swarm/src/be/db.ts, or any stall/liveness/reaper threshold)">
 
 [runbooks/heartbeat-crash-recovery.md](./runbooks/heartbeat-crash-recovery.md) is the canonical flow reference — the heartbeat sweep, the stalled-task classifier, and the crash-recovery routing heuristic, with mermaid diagrams + pseudocode. It stores **only the current behavior (no history)**. Update it in the **same PR** whenever you change any of this logic so the diagrams/pseudocode stay true.
 

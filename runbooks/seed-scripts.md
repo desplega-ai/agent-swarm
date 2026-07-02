@@ -6,10 +6,10 @@ database instead of starting empty. Today that means the `scripts` catalog (the
 mechanism is generic so future kinds (workflows, schedules, skills, …) plug in
 the same way.
 
-## The generic seeder framework — `src/be/seed/`
+## The generic seeder framework — `apps/swarm/src/be/seed/`
 
 ```
-src/be/seed/
+apps/swarm/src/be/seed/
   types.ts      # Seeder interface + SeedItem + SeederResult
   runner.ts     # runSeeder / runSeeders — the harness
   state-db.ts   # seed_state accessors (getSeedState / recordSeedState)
@@ -49,10 +49,10 @@ pre-existing entity, or the first run after this framework landed), an entity is
 treated as pristine only when it is byte-identical to the source; otherwise it
 is conservatively preserved.
 
-## The scripts seeder — `src/be/seed-scripts/`
+## The scripts seeder — `apps/swarm/src/be/seed-scripts/`
 
 ```
-src/be/seed-scripts/
+apps/swarm/src/be/seed-scripts/
   index.ts            # SEED_SCRIPTS manifest + scriptsSeeder (the concrete Seeder)
   catalog/<name>.ts   # one real TypeScript file per script (the runtime source)
 ```
@@ -71,7 +71,7 @@ typecheck → signature + argsSchema extraction → upsert at `global` scope).
 
 `runAllSeeders()` runs every registered seeder. It runs in two places:
 
-- **API boot** — wired into `src/http/index.ts` next to `seedPricingFromModelsDev()`.
+- **API boot** — wired into `apps/swarm/src/http/index.ts` next to `seedPricingFromModelsDev()`.
   Every boot ensures the catalog is present; steady-state boots do no extra work.
 - **On demand** — `bun run seed:scripts` (`scripts/seed-scripts.ts`). Useful for a
   fresh dev DB, after a DB reset, or after editing a catalog entry. Honors
@@ -79,20 +79,20 @@ typecheck → signature + argsSchema extraction → upsert at `global` scope).
 
 ## Adding a script
 
-1. Add `src/be/seed-scripts/catalog/<name>.ts` — the script source. It may only
+1. Add `apps/swarm/src/be/seed-scripts/catalog/<name>.ts` — the script source. It may only
    import `zod` (and `swarm-sdk` / `stdlib` types); see the script SDK in
-   `src/be/scripts/typecheck.ts`.
-2. Text-import it in `src/be/seed-scripts/index.ts` and add a `SEED_SCRIPTS`
+   `apps/swarm/src/be/scripts/typecheck.ts`.
+2. Text-import it in `apps/swarm/src/be/seed-scripts/index.ts` and add a `SEED_SCRIPTS`
    manifest entry. Write a keyword-rich `description` + `intent` — they power
    `script-search` ranking.
-3. `bun test src/tests/seed-scripts.test.ts` typechecks every catalog script and
-   verifies seeding + versioning. `bun test src/tests/seed.test.ts` covers the
+3. `bun test apps/swarm/src/tests/seed-scripts.test.ts` typechecks every catalog script and
+   verifies seeding + versioning. `bun test apps/swarm/src/tests/seed.test.ts` covers the
    generic harness.
 
 ## Adding a new seedable kind
 
-1. Implement a `Seeder` for the kind (its own directory under `src/be/`).
-2. Add it to `SEEDERS` in `src/be/seed/registry.ts`.
+1. Implement a `Seeder` for the kind (its own directory under `apps/swarm/src/be/`).
+2. Add it to `SEEDERS` in `apps/swarm/src/be/seed/registry.ts`.
 
 No harness or boot-path changes are needed.
 

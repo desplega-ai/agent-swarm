@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { SCRIPT_DELETE_DESCRIPTION } from "../src/tools/script-delete";
-import { SCRIPT_QUERY_TYPES_DESCRIPTION } from "../src/tools/script-query-types";
-import { SCRIPT_RUN_DESCRIPTION } from "../src/tools/script-run";
-import { SCRIPT_SEARCH_DESCRIPTION } from "../src/tools/script-search";
-import { SCRIPT_UPSERT_DESCRIPTION } from "../src/tools/script-upsert";
+import { SCRIPT_DELETE_DESCRIPTION } from "../apps/swarm/src/tools/script-delete";
+import { SCRIPT_QUERY_TYPES_DESCRIPTION } from "../apps/swarm/src/tools/script-query-types";
+import { SCRIPT_RUN_DESCRIPTION } from "../apps/swarm/src/tools/script-run";
+import { SCRIPT_SEARCH_DESCRIPTION } from "../apps/swarm/src/tools/script-search";
+import { SCRIPT_UPSERT_DESCRIPTION } from "../apps/swarm/src/tools/script-upsert";
 
 const expected = new Map([
   ["script-search", SCRIPT_SEARCH_DESCRIPTION],
@@ -18,7 +18,7 @@ const expected = new Map([
 const dbPath = `/tmp/agent-swarm-mcp-stdio-smoke-${process.pid}.sqlite`;
 const transport = new StdioClientTransport({
   command: "bun",
-  args: ["src/stdio.ts"],
+  args: ["apps/swarm/src/stdio.ts"],
   env: {
     ...process.env,
     DATABASE_PATH: dbPath,

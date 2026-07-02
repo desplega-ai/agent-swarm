@@ -8,9 +8,9 @@
  * Usage: bun scripts/measure-tool-tokens.ts
  */
 
-import { closeDb, initDb } from "../src/be/db";
-import { createServer } from "../src/server";
-import { CORE_TOOLS, DEFERRED_TOOLS } from "../src/tools/tool-config";
+import { closeDb, initDb } from "../apps/swarm/src/be/db";
+import { createServer } from "../apps/swarm/src/server";
+import { CORE_TOOLS, DEFERRED_TOOLS } from "../apps/swarm/src/tools/tool-config";
 
 const DB_PATH = "./measure-tokens-temp.sqlite";
 

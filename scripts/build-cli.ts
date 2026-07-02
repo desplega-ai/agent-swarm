@@ -5,7 +5,7 @@ const outfile = "dist/cli.js";
 await rm("dist", { recursive: true, force: true });
 await mkdir("dist", { recursive: true });
 
-await Bun.$`bun build ./src/cli.tsx --target=node --format=esm --splitting --outdir=dist --entry-naming=cli.js`.quiet();
+await Bun.$`bun build ./apps/swarm/src/cli.tsx --target=node --format=esm --splitting --outdir=dist --entry-naming=cli.js`.quiet();
 
 const built = await readFile(outfile, "utf8");
 const withNodeShebang = built.replace(/^#!\/usr\/bin\/env bun/, "#!/usr/bin/env node");

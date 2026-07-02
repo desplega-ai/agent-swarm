@@ -11,7 +11,7 @@ module.exports = {
     {
       name: "swarm-api",
       script: "portless",
-      args: ["api.swarm", "bun", "src/http.ts"],
+      args: ["api.swarm", "bun", "apps/swarm/src/http.ts"],
       cwd: __dirname,
     },
     {

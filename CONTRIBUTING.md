@@ -175,7 +175,7 @@ bun run lint && bun run tsc:check
 bun test
 ```
 
-No extra environment variables are required. `src/tests/preload.ts` seeds a fixture `SECRETS_ENCRYPTION_KEY` into the process so that the `swarm_config` encryption layer boots cleanly under test.
+No extra environment variables are required. `apps/swarm/src/tests/preload.ts` seeds a fixture `SECRETS_ENCRYPTION_KEY` into the process so that the `swarm_config` encryption layer boots cleanly under test.
 
 ---
 
@@ -233,7 +233,7 @@ Full flow, what each CI job publishes, and how to verify: see [runbooks/release.
 
 ```
 agent-swarm/
-├── src/
+├── apps/swarm/src/
 │   ├── cli.tsx          # CLI entry point (Ink/React)
 │   ├── http.ts          # HTTP server entry
 │   ├── server.ts        # MCP server setup & tool registration
@@ -263,7 +263,7 @@ agent-swarm/
 
 ### 1. Create Tool File
 
-Create `src/tools/my-tool.ts`:
+Create `apps/swarm/src/tools/my-tool.ts`:
 
 ```typescript
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -305,7 +305,7 @@ export const registerMyTool = (server: McpServer) => {
 
 ### 2. Register in Server
 
-Edit `src/server.ts`:
+Edit `apps/swarm/src/server.ts`:
 
 ```typescript
 import { registerMyTool } from "./tools/my-tool";

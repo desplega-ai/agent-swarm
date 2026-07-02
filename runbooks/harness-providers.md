@@ -26,9 +26,9 @@ Operators flip a worker's provider in either of two ways:
 - `PUT /api/config` with `{ scope: "agent", scopeId: <agentId>, key: "HARNESS_PROVIDER", value: "<provider>" }`
 - `PATCH /api/agents/{id}/harness-provider` (also writes the swarm_config row + updates the `agents.harness_provider` column for dashboards)
 
-The worker reconciles within ~10s (one poll cycle). In-flight task sessions stay on the old adapter; new spawns pick up the new one. Failures during swap (invalid value, adapter init error) log and stay on the current provider — never wedge the worker. Implementation: `src/utils/harness-provider.ts` + the `lastHarnessReconcileAt` block in `src/commands/runner.ts`'s poll loop.
+The worker reconciles within ~10s (one poll cycle). In-flight task sessions stay on the old adapter; new spawns pick up the new one. Failures during swap (invalid value, adapter init error) log and stay on the current provider — never wedge the worker. Implementation: `apps/swarm/src/utils/harness-provider.ts` + the `lastHarnessReconcileAt` block in `apps/swarm/src/commands/runner.ts`'s poll loop.
 
-Invalid `HARNESS_PROVIDER` values are rejected at write time (HTTP 400 from `PUT /api/config` or the MCP `set-config` tool) — see `validateConfigValue` in `src/be/swarm-config-guard.ts`.
+Invalid `HARNESS_PROVIDER` values are rejected at write time (HTTP 400 from `PUT /api/config` or the MCP `set-config` tool) — see `validateConfigValue` in `apps/swarm/src/be/swarm-config-guard.ts`.
 
 The `docker-entrypoint.sh` swarm_config-fetch step explicitly **skips** `HARNESS_PROVIDER` when exporting config to env. Baking it would shadow swarm_config deletes with the stale value persisted in `process.env`.
 
@@ -36,7 +36,7 @@ The `docker-entrypoint.sh` swarm_config-fetch step explicitly **skips** `HARNESS
 
 ## Per-task `outputSchema` support
 
-Tasks may carry an optional JSON Schema on `outputSchema` (see `CreateTaskOptions` in `src/be/db.ts`). Enforcement depends on the harness:
+Tasks may carry an optional JSON Schema on `outputSchema` (see `CreateTaskOptions` in `apps/swarm/src/be/db.ts`). Enforcement depends on the harness:
 
 | Provider | Supported | Notes |
 |----------|-----------|-------|
@@ -47,15 +47,15 @@ Tasks may carry an optional JSON Schema on `outputSchema` (see `CreateTaskOption
 | `pi` (`pi-mono`) | Yes | Via MCP |
 | `devin` | Conditional | Only when `HAS_MCP=true`. In default mode the schema is **not** enforced — Devin's free-form output is stored as-is. |
 
-When supported, validation happens in the `store-progress` MCP tool (see `src/tools/store-progress.ts:159-190`). When the schema is missing or violated, the tool call fails and the agent is asked to retry.
+When supported, validation happens in the `store-progress` MCP tool (see `apps/swarm/src/tools/store-progress.ts:159-190`). When the schema is missing or violated, the tool call fails and the agent is asked to retry.
 
-**Caveat for default-mode Devin:** `ensureTaskFinished` in `src/commands/runner.ts` writes Devin's `providerOutput` directly into `task.output` without schema validation. Callers consuming a schema'd task's output should not assume `JSON.parse(task.output)` will succeed when the task ran on default-mode Devin.
+**Caveat for default-mode Devin:** `ensureTaskFinished` in `apps/swarm/src/commands/runner.ts` writes Devin's `providerOutput` directly into `task.output` without schema validation. Callers consuming a schema'd task's output should not assume `JSON.parse(task.output)` will succeed when the task ran on default-mode Devin.
 
 ## Reasoning / effort control
 
 `PATCH /api/agents/{id}/runtime` accepts an optional `reasoning_effort` field — a normalized, closed enum `off | low | medium | high | xhigh` — persisted as the agent-scoped `swarm_config` key `REASONING_EFFORT_OVERRIDE` (reloadable, same mechanism as `MODEL_OVERRIDE`). The runner resolves it independently of the model/`modelTier` axis and sets `ProviderSessionConfig.reasoningEffort`. `minimal` and `max` are intentionally out of scope for v1 (`minimal` is rejected by Codex `*-codex` models; `max` has known persistence bugs on Claude).
 
-`src/providers/reasoning-effort.ts` owns capability gating (`reasoningCapability(harness, model)`) and per-harness translation (`applyReasoningEffort(harness, model, level)`). Capability data is hybrid: the models.dev `reasoning_options` snapshot (`src/providers/modelsdev-reasoning.json`, derived from `src/be/modelsdev-cache.json` by `scripts/refresh-modelsdev-pricing.ts`) wins where present; otherwise a hand-authored `{low, medium, high}` fallback, plus a small harness-specific override table for quirks the cache doesn't encode. `PATCH /api/agents/{id}/runtime` validates the requested level against this lookup and 400s unsupported combos with `{ error, harness, model, level, allowed }`.
+`apps/swarm/src/providers/reasoning-effort.ts` owns capability gating (`reasoningCapability(harness, model)`) and per-harness translation (`applyReasoningEffort(harness, model, level)`). Capability data is hybrid: the models.dev `reasoning_options` snapshot (`apps/swarm/src/providers/modelsdev-reasoning.json`, derived from `apps/swarm/src/be/modelsdev-cache.json` by `scripts/refresh-modelsdev-pricing.ts`) wins where present; otherwise a hand-authored `{low, medium, high}` fallback, plus a small harness-specific override table for quirks the cache doesn't encode. `PATCH /api/agents/{id}/runtime` validates the requested level against this lookup and 400s unsupported combos with `{ error, harness, model, level, allowed }`.
 
 When unset, every adapter behaves exactly as it does today — no fleet-wide default is injected.
 
@@ -97,7 +97,7 @@ Any source the AWS SDK accepts works: `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_K
 | `BEDROCK_AUTH_MODE` | `sdk` \| `bearer` | inferred from `MODEL_OVERRIDE` prefix |
 | `AWS_REGION` | any Bedrock-enabled region | **required** — unset reports a not-ready Bedrock state (no region is fabricated) |
 
-`BEDROCK_AUTH_MODE` is a validated optional `swarm_config` key (see `src/be/swarm-config-guard.ts`) and a reloadable env key (see `src/commands/runner.ts`).
+`BEDROCK_AUTH_MODE` is a validated optional `swarm_config` key (see `apps/swarm/src/be/swarm-config-guard.ts`) and a reloadable env key (see `apps/swarm/src/commands/runner.ts`).
 
 ### Live model enumeration
 
@@ -136,12 +136,12 @@ A dedicated **AWS Bedrock** card appears in the Credentials tab for all `pi`-har
 
 ## Native session resume is deprecated (2026-05-28)
 
-The runner no longer asks any harness to resume a prior session. Follow-up continuity flows entirely through the bounded context preamble (`src/commands/context-preamble.ts`), which is rebuilt deterministically from the parent-task chain held in the API DB and survives worker-container restarts. The earlier path — `claude --resume <UUID>` / `codex.resumeThread(id)` / managed-cloud `events.list` replay — depended on an on-disk transcript that disappears on deploy/OOM/autoscaler reschedule; when it died, users perceived the agent as having forgotten the conversation.
+The runner no longer asks any harness to resume a prior session. Follow-up continuity flows entirely through the bounded context preamble (`apps/swarm/src/commands/context-preamble.ts`), which is rebuilt deterministically from the parent-task chain held in the API DB and survives worker-container restarts. The earlier path — `claude --resume <UUID>` / `codex.resumeThread(id)` / managed-cloud `events.list` replay — depended on an on-disk transcript that disappears on deploy/OOM/autoscaler reschedule; when it died, users perceived the agent as having forgotten the conversation.
 
 Concretely:
 
-- `src/commands/runner.ts` calls `resolveResumeSession(...)` and `logResumeResolution(...)` for observability only; the runner never threads `resumeSessionId` into `spawnProviderProcess`.
-- `src/commands/resume-session.ts` is reduced to an observability shim — every non-empty candidate ends up in `resolution.skipped` with reason `"native resume deprecated — using context preamble"`. `resolveResumeSession` always returns `resumeSessionId: undefined`.
+- `apps/swarm/src/commands/runner.ts` calls `resolveResumeSession(...)` and `logResumeResolution(...)` for observability only; the runner never threads `resumeSessionId` into `spawnProviderProcess`.
+- `apps/swarm/src/commands/resume-session.ts` is reduced to an observability shim — every non-empty candidate ends up in `resolution.skipped` with reason `"native resume deprecated — using context preamble"`. `resolveResumeSession` always returns `resumeSessionId: undefined`.
 - All local adapters (`claude`, `claude-managed`, `codex`) warn + ignore any stray `resumeSessionId` and spawn a fresh session. `CodexAdapter.canResume()` returns `false` unconditionally.
 - `ProviderSessionConfig.resumeSessionId` stays in the type for backwards compatibility but is marked `@deprecated`. New writes to `tasks.claudeSessionId` / `provider` / `providerMeta` continue for observability; no migration was run.
 - **Out of scope**: Devin. Its server-side continuation lives in Cognition's cloud and is immune to the container-restart bug — Devin's resume path is unchanged.
@@ -156,7 +156,7 @@ Any **observable** change must update the docs-site guide in the **same PR** as 
 - Factory dispatch logic
 - Adapter event-translation, log format, or abort semantics
 - Runner's poll→spawn→events→finish flow
-- System-prompt composition (`src/prompts/`)
+- System-prompt composition (`apps/swarm/src/prompts/`)
 - `docker-entrypoint.sh` credential restoration
 - OAuth flows
 
@@ -165,8 +165,8 @@ Internal refactors that don't change observable behavior don't need a doc update
 ## Adding a new provider
 
 1. Read the docs-site guide's "Reference implementations" section to see how `claude`, `pi`, `codex`, and `devin` are wired.
-2. Implement the `ProviderAdapter` in `src/providers/<name>/`.
-3. Wire factory dispatch in `src/commands/runner.ts`.
+2. Implement the `ProviderAdapter` in `apps/swarm/src/providers/<name>/`.
+3. Wire factory dispatch in `apps/swarm/src/commands/runner.ts`.
 4. Branch in `docker-entrypoint.sh` for credential restoration if the provider needs auth files.
 5. Update the docs-site guide:
    - Add to "Reference implementations" table.
@@ -184,7 +184,7 @@ User-facing guide: [docs-site/.../guides/claude-bridge-experimental.mdx](../docs
 
 ### Bridge toggle
 
-`SWARM_USE_CLAUDE_BRIDGE` is the supported opt-in. `true` and `1` enable it; `false`, `0`, empty, and unset disable it. The key is reloadable: it is included in `RELOADABLE_ENV_KEYS` in `src/commands/runner.ts`, and `ClaudeAdapter.createSession` resolves it from `config.env || process.env`.
+`SWARM_USE_CLAUDE_BRIDGE` is the supported opt-in. `true` and `1` enable it; `false`, `0`, empty, and unset disable it. The key is reloadable: it is included in `RELOADABLE_ENV_KEYS` in `apps/swarm/src/commands/runner.ts`, and `ClaudeAdapter.createSession` resolves it from `config.env || process.env`.
 
 Resolution order:
 
@@ -198,9 +198,9 @@ When enabled, the adapter ignores `CLAUDE_BINARY` for the effective argv and use
 |---|---|
 | `claude-bridge` | `["claude-bridge"]` |
 
-The published npm package is `@desplega.ai/claude-bridge`; version `0.1.13` is pinned in `Dockerfile.worker` under `/opt/global-deps/package.json`, with bin `claude-bridge` pointing at `src/cli.ts` and a Bun shebang. The global-deps install symlinks that bin onto `PATH`, so bridge mode does not perform a runtime `bunx` fetch.
+The published npm package is `@desplega.ai/claude-bridge`; version `0.1.13` is pinned in `Dockerfile.worker` under `/opt/global-deps/package.json`, with bin `claude-bridge` pointing at `apps/swarm/src/cli.ts` and a Bun shebang. The global-deps install symlinks that bin onto `PATH`, so bridge mode does not perform a runtime `bunx` fetch.
 
-`src/utils/internal-ai/complete-structured.ts` (the `claude -p --json-schema` fallback used when the harness can't enforce `outputSchema` directly) applies the same bridge toggle before falling back to `CLAUDE_BINARY`.
+`apps/swarm/src/utils/internal-ai/complete-structured.ts` (the `claude -p --json-schema` fallback used when the harness can't enforce `outputSchema` directly) applies the same bridge toggle before falling back to `CLAUDE_BINARY`.
 
 ### Tmux fail-fast
 
@@ -256,8 +256,8 @@ claude-bridge is an env-based alternate binary on the existing `claude` adapter,
 
 This runbook applies when modifying:
 
-- `src/providers/*`
-- `src/commands/runner.ts` (provider dispatch)
-- `src/prompts/*` (system-prompt composition)
+- `apps/swarm/src/providers/*`
+- `apps/swarm/src/commands/runner.ts` (provider dispatch)
+- `apps/swarm/src/prompts/*` (system-prompt composition)
 - `docker-entrypoint.sh` (provider branches)
 - Or adding a new provider end-to-end
