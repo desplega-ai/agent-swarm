@@ -402,13 +402,13 @@ Compare two versions of a context file. Shows a unified diff.
 
 ### register-service / unregister-service / list-services / update-service-status
 
-Manage HTTP service discovery. See [Service Discovery](/docs/concepts/services) for details.
+Manage HTTP service discovery. Registry entries are keyed by the calling agent's ID/URL, and `register-service` only accepts project-owned executables under `/workspace` or `/home/worker` with safe interpreters/args. See [Service Discovery](/docs/concepts/services) for details.
 
 ## Scheduling Tools
 
 ### create-schedule / list-schedules / update-schedule / delete-schedule / run-schedule-now
 
-Manage recurring and one-time task automation. Any registered agent can update or delete schedules. Schedules support both a concrete `model` override and a portable `modelTier` (`smol`, `regular`, `smart`, `ultra`) that is passed through to the tasks they create.
+Manage recurring and one-time task automation. Any registered agent can update or delete schedules. Schedules now support native `targetType` routing: create an agent task (`agent-task`), trigger a workflow directly, or launch a saved catalog script. Agent-task schedules also support both a concrete `model` override and a portable `modelTier` (`smol`, `regular`, `smart`, `ultra`) that is passed through to the tasks they create.
 
 **One-time schedules** (v1.36.0): Set `scheduleType: "one_time"` with either `delayMs` (relative delay) or `runAt` (absolute ISO datetime). One-time schedules auto-disable after execution. `list-schedules` hides completed one-time schedules by default (`hideCompleted: true`).
 

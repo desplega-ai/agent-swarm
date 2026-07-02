@@ -3,7 +3,7 @@ title: Scheduled Tasks
 description: Schedule recurring or one-time AI agent tasks with cron expressions and delayed execution — automate daily reports, polling, and time-driven workflows across the swarm.
 ---
 
-Agent Swarm supports both **recurring** and **one-time** schedules to automate task creation. Recurring schedules create tasks at specified intervals, while one-time schedules run once at a specific time or after a delay, then auto-disable.
+Agent Swarm supports both **recurring** and **one-time** schedules to automate work. A schedule can create an agent task (`targetType: "agent-task"`), trigger a workflow directly, or run a saved catalog script without an agent session in the loop.
 
 ## Creating a Recurring Schedule
 
@@ -12,7 +12,8 @@ create-schedule(
   name: "daily-standup",
   taskTemplate: "Generate a daily standup report summarizing yesterday's completed tasks",
   cronExpression: "0 9 * * *",
-  timezone: "America/New_York"
+  timezone: "America/New_York",
+  targetType: "agent-task"
 )
 ```
 
@@ -21,7 +22,9 @@ Or use interval-based scheduling:
 ```
 create-schedule(
   name: "health-check",
-  taskTemplate: "Check all services are healthy and report any issues",
+  scriptName: "service-health-check",
+  scriptArgs: { channel: "ops" },
+  targetType: "script",
   intervalMs: 3600000
 )
 ```
@@ -53,7 +56,11 @@ create-schedule(
 | Property | Description |
 |----------|-------------|
 | `name` | Unique name for the schedule |
-| `taskTemplate` | Task description created each time |
+| `targetType` | `agent-task` (default), `workflow`, or `script` |
+| `taskTemplate` | Task description created each time. Required for `agent-task` schedules |
+| `workflowId` | Workflow to trigger when `targetType: "workflow"` |
+| `scriptName` | Global catalog script name to run when `targetType: "script"` |
+| `scriptArgs` | JSON arguments passed to the script target |
 | `scheduleType` | `recurring` (default) or `one_time` |
 | `cronExpression` | Cron expression for recurring schedules (e.g., `0 9 * * *`) |
 | `intervalMs` | Interval in milliseconds for recurring schedules |
@@ -64,7 +71,8 @@ create-schedule(
 | `priority` | Task priority 0-100 (default: 50) |
 | `tags` | Tags applied to created tasks |
 | `taskType` | Type classification for created tasks |
-| `model` | Model for created tasks: `haiku`, `sonnet`, or `opus` (falls back to global config) |
+| `model` | Concrete model override for created agent tasks |
+| `modelTier` | Portable model intent for created agent tasks: `smol`, `regular`, `smart`, or `ultra` |
 | `enabled` | Whether the schedule is active (default: true) |
 
 ## Managing Schedules
@@ -85,6 +93,7 @@ By default, completed one-time schedules are hidden. Pass `hideCompleted: false`
 ```
 update-schedule(name: "daily-standup", cronExpression: "0 10 * * *")
 update-schedule(name: "daily-standup", enabled: false)
+update-schedule(name: "health-check", targetType: "workflow", workflowId: "<workflow-uuid>")
 ```
 
 ### Delete a Schedule
@@ -117,33 +126,32 @@ This creates a task immediately but does not affect the regular schedule timing.
 
 The MCP server runs a scheduler that polls for due schedules at a configurable interval (default: 10 seconds, set via `SCHEDULER_INTERVAL_MS`).
 
-When a schedule fires:
-- **If a workflow references this schedule** in its `triggers` array: the workflow executes instead of creating a standalone task. The schedule run returns `workflowRunIds` in this case.
-- **Otherwise**: a new task is created with the schedule's `taskTemplate` (default behavior, backward compatible).
+When a schedule fires, execution depends on `targetType`:
+- **`agent-task`** — creates a task from `taskTemplate` (the original behavior)
+- **`workflow`** — runs the referenced workflow directly and returns `workflowRunIds`
+- **`script`** — launches the named global script directly and returns `scriptRunIds`
 
-Task creation flow:
+For `agent-task` schedules:
 1. A new task is created with the schedule's `taskTemplate`
-2. The task is linked back to its schedule via a `scheduleId` field (use the `scheduleId` filter in `get-tasks` to find all tasks from a schedule)
+2. The task is linked back to its schedule via `scheduleId`
 3. If `targetAgentId` is set, the task is assigned to that agent; otherwise it goes into the unassigned pool
-4. If `model` is set, the task inherits that model setting
+4. If `model` or `modelTier` is set, the task inherits that runtime selection
 5. The schedule's `lastRunAt` is updated
 6. **One-time schedules** are automatically disabled after execution
 
-### Linking a Schedule to a Workflow
+### Direct Workflow and Script Targets
 
-To have a schedule trigger a workflow instead of creating standalone tasks, add a `schedule` trigger to the workflow referencing the schedule ID:
+Native `targetType` replaces the old "workflow trigger references a schedule" indirection for many cases:
 
 ```json
 {
   "name": "nightly-pipeline",
-  "triggers": [
-    { "type": "schedule", "config": { "scheduleId": "<schedule-uuid>" } }
-  ],
-  "definition": { ... }
+  "targetType": "workflow",
+  "workflowId": "<workflow-uuid>"
 }
 ```
 
-When the schedule fires, the workflow executes instead of creating a standalone task. Multiple workflows can reference the same schedule — all matching enabled workflows will run.
+Use `targetType: "script"` plus `scriptName` / `scriptArgs` when the scheduled work is a reusable script and does not need an interactive agent task.
 
 Any registered agent can update or delete schedules.
 

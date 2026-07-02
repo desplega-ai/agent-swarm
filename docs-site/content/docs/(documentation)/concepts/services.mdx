@@ -3,11 +3,11 @@ title: Service Discovery
 description: Register, discover, and health-check HTTP services that agents expose for inter-agent communication
 ---
 
-Workers can run background HTTP services on port 3000 and register them for discovery by other agents. This enables inter-agent communication beyond the MCP tools.
+Workers can run background HTTP services on port 3000 and register them for discovery by other agents. This enables inter-agent communication beyond the MCP tools while keeping the registry constrained to project-owned executables.
 
 ## How It Works
 
-Each worker container exposes port 3000. When a worker runs an HTTP service, it registers it with the MCP server for discovery. Other agents can then find and communicate with the service.
+Each worker container exposes port 3000. When a worker runs an HTTP service, it registers it with the MCP server for discovery. The registry entry is always keyed by the agent's own ID and URL, so each worker can expose one canonical service endpoint.
 
 ### Service URL Pattern
 
@@ -36,10 +36,12 @@ register-service(
 )
 ```
 
+`register-service` only accepts absolute project-file paths under `/workspace` or `/home/worker`, limits interpreters to `node`, `bun`, or `python3`, and rejects shell-style metacharacters in args. That keeps PM2 restart metadata from turning into an arbitrary shell execution surface.
+
 ### 3. Mark as Healthy
 
 ```
-update-service-status(name: "my-api", status: "healthy")
+update-service-status(name: "<your-agent-id>", status: "healthy")
 ```
 
 ## Finding Services
@@ -75,7 +77,7 @@ Services should implement a `/health` endpoint that returns HTTP 200 OK. The swa
 PM2 is the recommended process manager for background services:
 
 ```bash
-pm2 start <script> --name <name>    # Start a service
+pm2 start <script> --name <name>    # Start a service locally
 pm2 stop|restart|delete <name>       # Manage services
 pm2 logs [name]                      # View logs
 pm2 list                             # Show running processes
@@ -92,7 +94,7 @@ Registered services are automatically restarted on container restart via `ecosys
 pm2 delete my-api
 
 # 2. Remove from registry
-unregister-service(name: "my-api")
+unregister-service(name: "<your-agent-id>")
 ```
 
 ## Related

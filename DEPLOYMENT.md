@@ -297,7 +297,7 @@ Run custom initialization before the worker starts. Place a script at `/workspac
 - `STARTUP_SCRIPT_STRICT=true` (default) - Container exits if script fails
 - `STARTUP_SCRIPT_STRICT=false` - Logs warning and continues
 
-**Example: Install dependencies**
+**Example: Install dependencies available to the worker user**
 
 ```bash
 #!/bin/bash
@@ -307,10 +307,9 @@ echo "Installing dependencies..."
 if [ -f "package.json" ]; then
     bun install
 fi
-
-sudo apt-get update -qq
-sudo apt-get install -y -qq ripgrep
 ```
+
+Startup scripts run as the non-root `worker` user after the container drops privileges. Use them for repo-local setup (`bun install`, config files, caches, exports), not for package-manager operations. If you need additional system packages, bake them into the worker image or run a root-owned bootstrap step before the entrypoint switches users.
 
 **Example: TypeScript setup**
 
@@ -715,7 +714,7 @@ pm2 list                                           # Show running processes
 pm2 start /workspace/myapp/server.js --name my-api
 
 # 2. Register it (via MCP tool)
-# register-service name="my-api" script="/workspace/myapp/server.js"
+# register-service script="/workspace/myapp/server.js"
 
 # 3. Mark healthy when ready
 # update-service-status name="my-api" status="healthy"
@@ -723,7 +722,7 @@ pm2 start /workspace/myapp/server.js --name my-api
 
 ### Service URL Pattern
 
-`https://{service-name}.{SWARM_URL}`
+`https://{agentId}.{SWARM_URL}`
 
 ### Health Checks
 

@@ -72,7 +72,7 @@ Each worker container includes:
 - **CLI tools**: GitHub CLI (`gh`), GitLab CLI (`glab`), sqlite3
 - **Agent tools**: `wts` (git worktree manager), `agent-fs` (persistent shared filesystem)
 - **Utilities**: git, git-lfs, vim, nano, jq, curl, wget, ssh
-- **Sudo access**: Workers can install packages with `sudo apt-get install`
+- **Runtime user**: Agent processes run as the non-root `worker` user without passwordless sudo
 
 ## Data Flow
 
