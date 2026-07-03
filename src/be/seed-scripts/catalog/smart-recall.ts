@@ -15,17 +15,13 @@ export const argsSchema = z.object({
     .positive()
     .optional()
     .describe("Max results per query (default 10)"),
-  dedupThreshold: z
-    .number()
-    .optional()
-    .describe("Similarity threshold for dedup — memories above this are merged (default 0.92)"),
 });
 
 /** Multi-query fan-out memory recall with dedup and composite reranking. */
 export default async function smartRecall(args: any, ctx: any) {
   const parsed = argsSchema.safeParse(args);
   if (!parsed.success) return { error: "invalid args: " + parsed.error.message };
-  const { queries, scope = "all", limit = 10, dedupThreshold = 0.92 } = parsed.data;
+  const { queries, scope = "all", limit = 10 } = parsed.data;
 
   const allResults: any[] = [];
   for (const q of queries) {

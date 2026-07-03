@@ -6,7 +6,7 @@ tags: [plan, memory, hybrid-search, graph, measurement, DES-639, DES-637, DES-63
 status: in-progress
 autonomy: autopilot
 last_updated: 2026-07-03
-last_updated_by: Claude (phase-5 agent)
+last_updated_by: Claude (phase-6 agent)
 ---
 
 # Memory Retrieval v2 (Measurement + Graph Read Side) Implementation Plan
@@ -322,13 +322,13 @@ Two isolated cleanups: delete the dead `dedupThreshold` from smart-recall, and g
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] Suites pass: `bun test src/tests/seed-scripts.test.ts src/tests/memory.test.ts src/tests/memory-e2e.test.ts`
-- [ ] OpenAPI regenerated (search response change): `bun run docs:openapi`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] Suites pass: `bun test src/tests/seed-scripts.test.ts src/tests/memory.test.ts src/tests/memory-e2e.test.ts`
+- [x] OpenAPI regenerated (search response change): `bun run docs:openapi` (no diff — the search route's 200 response declares only a description, no schema)
 
 #### Automated QA:
-- [ ] Local: call `inject-learning` (lead capability) with `category: "best-practice"`, then `POST /api/memory/list` + `POST /api/memory/search` both show `tags: ["best-practice"]`; UI detail sheet renders the badge.
+- [x] Local: call `inject-learning` (lead capability) with `category: "best-practice"`, then `POST /api/memory/list` + `POST /api/memory/search` both show `tags: ["best-practice"]`; UI detail sheet renders the badge. (2026-07-03: fresh DB, MCP tools/call as lead → memory created; list, HTTP search (`retrievalSource: fts`, sim 1.5), AND MCP memory-search all return `tags: ["best-practice"]`. UI badge pre-exists — skipped per Taras's SPA manual-QA preference. Bonus finding: candidates already carry tags via `rowToCandidate`→`rowToAgentMemory`, incl. graph-expansion neighbors — only the response mappings dropped them.)
 
 #### Manual Verification:
 - [ ] None beyond phase review.

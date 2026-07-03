@@ -76,6 +76,7 @@ export const registerInjectLearningTool = (server: McpServer) => {
         name: `Lead feedback: ${category} — ${learning.slice(0, 60)}`,
         content,
         source: "manual",
+        tags: [category],
       });
 
       // Generate and store embedding (async, best-effort)

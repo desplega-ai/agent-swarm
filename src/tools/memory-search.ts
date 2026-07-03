@@ -56,6 +56,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
               scope: AgentMemoryScopeSchema,
               similarity: z.number().optional(),
               retrievalSource: z.enum(["vec", "fts", "hybrid", "fallback", "graph"]).optional(),
+              tags: z.array(z.string()).optional(),
               createdAt: z.string(),
               rateHint: z.string().optional(),
             }),
@@ -131,6 +132,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
           scope: r.scope,
           similarity: r.similarity,
           retrievalSource: r.retrievalSource,
+          tags: r.tags,
           createdAt: r.createdAt,
           ...(inTaskContext && NUDGE_ELIGIBLE_SOURCES.has(r.source as AgentMemorySource)
             ? { rateHint: rateHintFor(r.id) }
@@ -172,6 +174,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
         summary: r.summary,
         source: r.source,
         scope: r.scope,
+        tags: r.tags,
         createdAt: r.createdAt,
       }));
 

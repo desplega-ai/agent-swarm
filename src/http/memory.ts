@@ -553,6 +553,7 @@ export async function handleMemory(
           retrievalSource: r.retrievalSource,
           source: r.source,
           scope: r.scope,
+          tags: r.tags,
         })),
       });
     } catch (err) {
