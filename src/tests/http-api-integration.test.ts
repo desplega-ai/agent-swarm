@@ -860,6 +860,57 @@ describe("Polling", () => {
     expect(status).toBe(200);
     expect(body).toBeDefined();
   });
+
+  test("GET /api/poll — task_assigned trigger carries a slim attachments projection", async () => {
+    // Dedicated agent + task so this doesn't race other tests' fixtures for
+    // the shared worker agents.
+    const attachAgent = randomUUID();
+    const registered = await post("/api/agents", {
+      agentId: attachAgent,
+      body: { name: "AttachmentPollWorker" },
+    });
+    expect(registered.status).toBe(201);
+
+    const created = await post("/api/tasks", {
+      agentId: ids.leadAgent,
+      body: { task: "Task with an attachment", agentId: attachAgent },
+    });
+    expect(created.status).toBe(201);
+    const taskId = created.body.id as string;
+
+    // Upload via the real provider-agnostic route (same one PR #850 added) —
+    // this is the endpoint the injected fetch recipe below points at.
+    const upload = await fetch(`${BASE}/api/fs/tasks/${taskId}/files?name=IMG_1357.jpeg`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${TEST_API_KEY}`,
+        "x-agent-id": ids.leadAgent,
+        "Content-Type": "image/jpeg",
+      },
+      body: Buffer.from("fake-jpeg-bytes"),
+    });
+    expect(upload.status).toBe(201);
+    const attachment = await upload.json();
+
+    const { status, body } = await get("/api/poll", { agentId: attachAgent });
+    expect(status).toBe(200);
+    expect(body.trigger?.type).toBe("task_assigned");
+    expect(body.trigger?.taskId).toBe(taskId);
+
+    const attachments = body.trigger?.task?.attachments;
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0].id).toBe(attachment.id);
+    expect(attachments[0].name).toBe("IMG_1357.jpeg");
+    // NOTE: mimeType is whatever the provider's head() reports, which has a
+    // known pre-existing bug (local-fs infers it from the storage key rather
+    // than the upload's real Content-Type) — not asserted here, out of scope
+    // for this fix. What matters for the attachment-read fix is id/name.
+    expect(attachments[0].mimeType).toBe(attachment.mimeType);
+    // Slim projection — no need to ship the full capabilities/provider blob
+    // over every poll response.
+    expect(attachments[0]).not.toHaveProperty("capabilities");
+    expect(attachments[0]).not.toHaveProperty("providerKey");
+  });
 });
 
 // ===========================================================================
