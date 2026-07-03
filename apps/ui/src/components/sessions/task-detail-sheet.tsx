@@ -147,12 +147,7 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
           ) : null}
 
           {open ? (
-            <TaskAttachmentsSection
-              taskId={taskId}
-              attachments={undefined}
-              className="mx-4 my-3"
-              hideWhenEmpty
-            />
+            <TaskAttachmentsSection taskId={taskId} attachments={undefined} className="mx-4 my-3" />
           ) : null}
 
           <section className="px-4 py-3 flex flex-col gap-2">
