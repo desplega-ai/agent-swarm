@@ -85,6 +85,40 @@ describe("LocalFsProvider", () => {
     }
   });
 
+  test("head() returns the real upload Content-Type, not an extension guess from the storage key", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "agent-swarm-fs-"));
+    try {
+      const provider = new LocalFsProvider({ rootDir });
+      // Storage key has no extension Bun can sniff correctly from — the JPEG bytes
+      // would otherwise be mis-reported (e.g. application/octet-stream or worse).
+      const scope = { taskId: "task-1", name: "attachment-blob" };
+
+      const uploaded = await provider.upload(scope, new Blob([new Uint8Array([1, 2, 3])]), {
+        contentType: "image/jpeg",
+      });
+      expect(uploaded.contentType).toBe("image/jpeg");
+
+      const head = await provider.head(scope);
+      expect(head.contentType).toBe("image/jpeg");
+
+      // copy() must carry the stored Content-Type forward too.
+      const copied = await provider.copy(scope, { taskId: "task-1", name: "attachment-copy" });
+      expect(copied.contentType).toBe("image/jpeg");
+
+      // The sidecar metadata file must not surface as a listed file.
+      const listed = await provider.list({ taskId: "task-1" });
+      expect(listed.map((item) => item.name).sort()).toEqual([
+        "attachment-blob",
+        "attachment-copy",
+      ]);
+
+      await provider.delete(scope);
+      expect(await provider.exists(scope)).toBe(false);
+    } finally {
+      await rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
   test("signedUploadUrl throws a normalized ReadOnly error", async () => {
     const provider = new LocalFsProvider({
       rootDir: await mkdtemp(join(tmpdir(), "agent-swarm-fs-")),
