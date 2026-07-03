@@ -410,17 +410,15 @@ function resolveInviteTargets(): InviteTarget[] {
 
   for (const user of getAllUsers()) {
     if (!user.email) continue;
-    const role = isOperatorRole(user.role) ? "editor" : "viewer";
+    const role = isExplicitViewerRole(user.role) ? "viewer" : "editor";
     targets.set(user.email.toLowerCase(), { email: user.email, role });
   }
 
   return [...targets.values()].sort((a, b) => a.email.localeCompare(b.email));
 }
 
-function isOperatorRole(role: string | undefined): boolean {
-  return /\b(admin|operator|owner|lead|co[-\s]?founder|founder|ceo|cto|coo|cfo|chief|exec|president)\b/i.test(
-    role ?? "",
-  );
+function isExplicitViewerRole(role: string | undefined): boolean {
+  return /\b(viewer|read[-\s]?only|guest)\b/i.test(role ?? "");
 }
 
 function provisionHashFromCurrentState(): string {
