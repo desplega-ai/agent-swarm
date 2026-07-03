@@ -3,8 +3,10 @@ date: 2026-07-02
 author: Claude (autopilot; commissioned by Taras)
 topic: "Memory retrieval v2 — measurement readout + memory_link read side (DES-639) + ride-alongs"
 tags: [plan, memory, hybrid-search, graph, measurement, DES-639, DES-637, DES-638]
-status: ready
+status: in-progress
 autonomy: autopilot
+last_updated: 2026-07-03
+last_updated_by: Claude (phase-1 agent)
 ---
 
 # Memory Retrieval v2 (Measurement + Graph Read Side) Implementation Plan
@@ -139,14 +141,14 @@ A windowed usage-analytics endpoint that answers "is memory useful, per source a
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] New + adjacent suites pass: `bun test src/tests/memory-usefulness-endpoint.test.ts src/tests/memory-health-endpoint.test.ts src/tests/memory.test.ts`
-- [ ] Boundaries intact: `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh`
-- [ ] OpenAPI regenerated + committed (now including metrics routes): `bun run docs:openapi` then `git diff --exit-code openapi.json` is non-empty pre-commit, clean post-commit
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] New + adjacent suites pass: `bun test src/tests/memory-usefulness-endpoint.test.ts src/tests/memory-health-endpoint.test.ts src/tests/memory.test.ts`
+- [x] Boundaries intact: `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh`
+- [x] OpenAPI regenerated + committed (now including metrics routes): `bun run docs:openapi` then `git diff --exit-code openapi.json` is non-empty pre-commit, clean post-commit
 
 #### Automated QA:
-- [ ] Against a fresh local server (`rm -f agent-swarm-db.sqlite* && bun run start:http`): seed two memories via `POST /api/memory/index`, search them with `X-Source-Task-ID` set, then `curl -H "Authorization: Bearer 123123" "http://localhost:3013/api/memory/usefulness?days=7"` returns volume ≥ 2 with per-arm provenance populated.
+- [x] Against a fresh local server (`rm -f agent-swarm-db.sqlite* && bun run start:http`): seed two memories via `POST /api/memory/index`, search them with `X-Source-Task-ID` set, then `curl -H "Authorization: Bearer 123123" "http://localhost:3013/api/memory/usefulness?days=7"` returns volume ≥ 2 with per-arm provenance populated.
 
 #### Manual Verification:
 - [ ] Numbers read as plausible/self-consistent (volume ≥ ratings; rates ∈ [0,1]).

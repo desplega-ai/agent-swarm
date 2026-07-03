@@ -4940,6 +4940,58 @@
         }
       }
     },
+    "/api/memory/usefulness": {
+      "get": {
+        "summary": "Windowed memory usefulness analytics: retrieval volume, per-arm breakdown, citation rate per source, posterior movement",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 365,
+              "default": 30,
+              "description": "Analysis window in days (default 30)"
+            },
+            "required": false,
+            "description": "Analysis window in days (default 30)",
+            "name": "days",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.6,
+              "description": "Posterior-mean threshold for the aboveThreshold count (default 0.6)"
+            },
+            "required": false,
+            "description": "Posterior-mean threshold for the aboveThreshold count (default 0.6)",
+            "name": "threshold",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usefulness stats for the window"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
     "/api/memory/{id}": {
       "delete": {
         "summary": "Delete a single memory by ID (debug/admin)",
@@ -5170,6 +5222,943 @@
           },
           "400": {
             "description": "Missing memoryId or X-Agent-ID"
+          }
+        }
+      }
+    },
+    "/api/metrics/definitions": {
+      "post": {
+        "summary": "Create a metric definition",
+        "tags": [
+          "Metrics"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slug": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "definition": {
+                    "type": "object",
+                    "properties": {
+                      "version": {
+                        "type": "number",
+                        "enum": [
+                          1
+                        ]
+                      },
+                      "widgets": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "title": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "description": {
+                              "type": "string"
+                            },
+                            "query": {
+                              "type": "object",
+                              "properties": {
+                                "sql": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 10000
+                                },
+                                "params": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "maxRows": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 500
+                                }
+                              },
+                              "required": [
+                                "sql"
+                              ]
+                            },
+                            "viz": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "stat",
+                                    "table",
+                                    "bar",
+                                    "line",
+                                    "multi-bar",
+                                    "multi-line"
+                                  ]
+                                },
+                                "x": {
+                                  "type": "string"
+                                },
+                                "y": {
+                                  "type": "string"
+                                },
+                                "series": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": "string"
+                                },
+                                "columns": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "key": {
+                                        "type": "string"
+                                      },
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "format": {
+                                        "type": "string",
+                                        "enum": [
+                                          "number",
+                                          "integer",
+                                          "currency",
+                                          "percent",
+                                          "duration"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "key"
+                                    ]
+                                  }
+                                },
+                                "format": {
+                                  "type": "string",
+                                  "enum": [
+                                    "number",
+                                    "integer",
+                                    "currency",
+                                    "percent",
+                                    "duration"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "type"
+                              ]
+                            },
+                            "colSpan": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 4
+                            },
+                            "rowSpan": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 4
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "title",
+                            "query",
+                            "viz"
+                          ]
+                        },
+                        "minItems": 1,
+                        "maxItems": 24
+                      },
+                      "variables": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$"
+                            },
+                            "label": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "text",
+                                "number",
+                                "select"
+                              ],
+                              "default": "text"
+                            },
+                            "defaultValue": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "options": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "value": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "label",
+                                  "value"
+                                ]
+                              }
+                            },
+                            "optionsQuery": {
+                              "type": "object",
+                              "properties": {
+                                "sql": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 10000
+                                },
+                                "valueKey": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "labelKey": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "sql",
+                                "valueKey"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "key"
+                          ]
+                        },
+                        "maxItems": 12
+                      },
+                      "layout": {
+                        "type": "object",
+                        "properties": {
+                          "columns": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 4
+                          }
+                        }
+                      },
+                      "refreshSeconds": {
+                        "type": "integer",
+                        "minimum": 5,
+                        "maximum": 3600
+                      }
+                    },
+                    "required": [
+                      "version",
+                      "widgets"
+                    ]
+                  }
+                },
+                "required": [
+                  "title",
+                  "definition"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Metric created"
+          },
+          "400": {
+            "description": "Invalid metric definition"
+          },
+          "409": {
+            "description": "Slug already exists for this agent"
+          }
+        }
+      },
+      "get": {
+        "summary": "List metric definitions",
+        "tags": [
+          "Metrics"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "full",
+                "slim"
+              ]
+            },
+            "required": false,
+            "name": "fields",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Metric definitions"
+          }
+        }
+      }
+    },
+    "/api/metrics/definitions/{id}": {
+      "get": {
+        "summary": "Get a metric definition",
+        "tags": [
+          "Metrics"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Metric definition"
+          },
+          "404": {
+            "description": "Metric not found"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update a metric definition",
+        "tags": [
+          "Metrics"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slug": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "definition": {
+                    "type": "object",
+                    "properties": {
+                      "version": {
+                        "type": "number",
+                        "enum": [
+                          1
+                        ]
+                      },
+                      "widgets": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "title": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "description": {
+                              "type": "string"
+                            },
+                            "query": {
+                              "type": "object",
+                              "properties": {
+                                "sql": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 10000
+                                },
+                                "params": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "maxRows": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 500
+                                }
+                              },
+                              "required": [
+                                "sql"
+                              ]
+                            },
+                            "viz": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "stat",
+                                    "table",
+                                    "bar",
+                                    "line",
+                                    "multi-bar",
+                                    "multi-line"
+                                  ]
+                                },
+                                "x": {
+                                  "type": "string"
+                                },
+                                "y": {
+                                  "type": "string"
+                                },
+                                "series": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": "string"
+                                },
+                                "columns": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "key": {
+                                        "type": "string"
+                                      },
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "format": {
+                                        "type": "string",
+                                        "enum": [
+                                          "number",
+                                          "integer",
+                                          "currency",
+                                          "percent",
+                                          "duration"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "key"
+                                    ]
+                                  }
+                                },
+                                "format": {
+                                  "type": "string",
+                                  "enum": [
+                                    "number",
+                                    "integer",
+                                    "currency",
+                                    "percent",
+                                    "duration"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "type"
+                              ]
+                            },
+                            "colSpan": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 4
+                            },
+                            "rowSpan": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 4
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "title",
+                            "query",
+                            "viz"
+                          ]
+                        },
+                        "minItems": 1,
+                        "maxItems": 24
+                      },
+                      "variables": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$"
+                            },
+                            "label": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "text",
+                                "number",
+                                "select"
+                              ],
+                              "default": "text"
+                            },
+                            "defaultValue": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "options": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "value": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "label",
+                                  "value"
+                                ]
+                              }
+                            },
+                            "optionsQuery": {
+                              "type": "object",
+                              "properties": {
+                                "sql": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 10000
+                                },
+                                "valueKey": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "labelKey": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "sql",
+                                "valueKey"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "key"
+                          ]
+                        },
+                        "maxItems": 12
+                      },
+                      "layout": {
+                        "type": "object",
+                        "properties": {
+                          "columns": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 4
+                          }
+                        }
+                      },
+                      "refreshSeconds": {
+                        "type": "integer",
+                        "minimum": 5,
+                        "maximum": 3600
+                      }
+                    },
+                    "required": [
+                      "version",
+                      "widgets"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Metric updated"
+          },
+          "404": {
+            "description": "Metric not found"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a metric definition",
+        "tags": [
+          "Metrics"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Metric deleted"
+          },
+          "404": {
+            "description": "Metric not found"
+          }
+        }
+      }
+    },
+    "/api/metrics/definitions/{id}/run": {
+      "post": {
+        "summary": "Run a metric definition",
+        "tags": [
+          "Metrics"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "variables": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Metric result"
+          },
+          "400": {
+            "description": "Invalid or disallowed query"
+          },
+          "404": {
+            "description": "Metric not found"
+          }
+        }
+      }
+    },
+    "/api/metrics/definitions/{id}/versions": {
+      "get": {
+        "summary": "List metric definition versions",
+        "tags": [
+          "Metrics"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Metric version list"
+          },
+          "404": {
+            "description": "Metric not found"
+          }
+        }
+      }
+    },
+    "/api/metrics/definitions/{id}/versions/{version}": {
+      "get": {
+        "summary": "Get a metric definition version",
+        "tags": [
+          "Metrics"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "required": true,
+            "name": "version",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Metric version"
+          },
+          "404": {
+            "description": "Metric or version not found"
+          }
+        }
+      }
+    },
+    "/api/metrics/schema": {
+      "get": {
+        "summary": "Get the metric definition JSON Schema",
+        "tags": [
+          "Metrics"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Metric definition JSON Schema"
           }
         }
       }

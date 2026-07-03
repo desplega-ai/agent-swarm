@@ -16,6 +16,7 @@ import {
 } from "../be/memory/raters/types";
 import { rerank } from "../be/memory/reranker";
 import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retrieval-store";
+import { getUsefulnessStats } from "../be/memory/usefulness-stats";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
 import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { route } from "./route-def";
@@ -161,6 +162,38 @@ const memoryHealth = route({
   auth: { apiKey: true },
   responses: {
     200: { description: "Memory vector index health" },
+  },
+});
+
+// Windowed usefulness analytics — sibling of the cheap /health probe.
+// Reads memory_retrieval + memory_rating + agent_memory posteriors; plan:
+// thoughts/taras/plans/2026-07-02-memory-retrieval-v2-graph-and-measurement.md Phase 1.
+const memoryUsefulness = route({
+  method: "get",
+  path: "/api/memory/usefulness",
+  pattern: ["api", "memory", "usefulness"],
+  summary:
+    "Windowed memory usefulness analytics: retrieval volume, per-arm breakdown, citation rate per source, posterior movement",
+  tags: ["Memory"],
+  auth: { apiKey: true },
+  query: z.object({
+    days: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(365)
+      .default(30)
+      .describe("Analysis window in days (default 30)"),
+    threshold: z.coerce
+      .number()
+      .min(0)
+      .max(1)
+      .default(0.6)
+      .describe("Posterior-mean threshold for the aboveThreshold count (default 0.6)"),
+  }),
+  responses: {
+    200: { description: "Usefulness stats for the window" },
+    400: { description: "Validation error" },
   },
 });
 
@@ -687,6 +720,16 @@ export async function handleMemory(
     if (!parsed) return true;
 
     json(res, getMemoryStore().getHealth());
+    return true;
+  }
+
+  if (memoryUsefulness.match(req.method, pathSegments)) {
+    const queryParams = parseQueryParams(req.url || "");
+    const parsed = await memoryUsefulness.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const { days, threshold } = parsed.query;
+    json(res, getUsefulnessStats({ days, threshold }));
     return true;
   }
 
