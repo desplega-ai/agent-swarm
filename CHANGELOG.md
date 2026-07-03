@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **Agent-fs provisioning no longer downgrades existing shared-drive members** — founder and executive swarm roles now provision as `editor`, and the native agent-fs seeder skips current members whose role is already equal or higher instead of overwriting them with a lower invite role.
 - **Per-agent setupScript failures are non-fatal by default after the v1.106.0 privilege hardening** — `STARTUP_SCRIPT_STRICT` now defaults to `false`, so worker pods continue booting when a per-agent `/workspace/start-up.*` script still contains root-only commands. Set `STARTUP_SCRIPT_STRICT=true` to keep fail-fast behavior.
 
 ### Migration notes

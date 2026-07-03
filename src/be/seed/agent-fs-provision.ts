@@ -32,6 +32,12 @@ type InviteTarget = {
   role: Role;
 };
 
+type OrgMember = {
+  email?: string | null;
+  role?: string | null;
+  user?: { email?: string | null } | null;
+};
+
 type FetchLike = typeof fetch;
 
 // The provision seeder runs synchronously before the HTTP server binds its port.
@@ -92,8 +98,15 @@ async function provisionAgentFs(item: AgentFsSeedItem): Promise<void> {
     apiUrl: item.apiUrl,
     registerEmail: item.registerEmail,
   });
+  const currentRoles = await getCurrentOrgMemberRoles(
+    item.apiUrl,
+    shared.authHeaders,
+    shared.orgId,
+  );
 
   for (const invite of item.invites) {
+    const currentRole = currentRoles.get(invite.email.toLowerCase());
+    if (currentRole && roleRank(currentRole) >= roleRank(invite.role)) continue;
     await inviteToSharedOrg(item.apiUrl, shared.authHeaders, shared.orgId, invite);
   }
 
@@ -212,7 +225,11 @@ export async function ensureAgentFsCredentialsForAgent(agentId: string): Promise
   const apiKey = registered.apiKey ?? "";
   if (!apiKey) throw new Error(`agent-fs registration did not return an apiKey for ${agentId}`);
 
-  await inviteToSharedOrg(apiUrl, shared.authHeaders, shared.orgId, { email, role: "editor" });
+  const currentRoles = await getCurrentOrgMemberRoles(apiUrl, shared.authHeaders, shared.orgId);
+  const currentRole = currentRoles.get(email.toLowerCase());
+  if (!currentRole || roleRank(currentRole) < roleRank("editor")) {
+    await inviteToSharedOrg(apiUrl, shared.authHeaders, shared.orgId, { email, role: "editor" });
+  }
 
   upsertSwarmConfig({
     scope: "agent",
@@ -309,6 +326,36 @@ async function inviteToSharedOrg(
   }
 }
 
+async function getCurrentOrgMemberRoles(
+  apiUrl: string,
+  headers: Record<string, string>,
+  orgId: string,
+): Promise<Map<string, Role>> {
+  const response = await agentFsRequest<{ members?: OrgMember[] }>(
+    apiUrl,
+    `/orgs/${encodeURIComponent(orgId)}/members`,
+    { headers },
+  );
+  const roles = new Map<string, Role>();
+
+  for (const member of response.members ?? []) {
+    const email = (member.email ?? member.user?.email ?? "").trim().toLowerCase();
+    const role = normalizeRole(member.role);
+    if (email && role) roles.set(email, role);
+  }
+
+  return roles;
+}
+
+function normalizeRole(role: string | null | undefined): Role | null {
+  if (role === "viewer" || role === "editor" || role === "admin") return role;
+  return null;
+}
+
+function roleRank(role: Role): number {
+  return { viewer: 0, editor: 1, admin: 2 }[role];
+}
+
 async function agentFsRequest<T = unknown>(
   apiUrl: string,
   path: string,
@@ -371,7 +418,9 @@ function resolveInviteTargets(): InviteTarget[] {
 }
 
 function isOperatorRole(role: string | undefined): boolean {
-  return /\b(admin|operator|owner|lead)\b/i.test(role ?? "");
+  return /\b(admin|operator|owner|lead|co[-\s]?founder|founder|ceo|cto|coo|cfo|chief|exec|president)\b/i.test(
+    role ?? "",
+  );
 }
 
 function provisionHashFromCurrentState(): string {
