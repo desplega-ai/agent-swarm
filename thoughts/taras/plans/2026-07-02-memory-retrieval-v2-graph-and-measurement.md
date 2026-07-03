@@ -6,7 +6,7 @@ tags: [plan, memory, hybrid-search, graph, measurement, DES-639, DES-637, DES-63
 status: in-progress
 autonomy: autopilot
 last_updated: 2026-07-03
-last_updated_by: Claude (phase-2 agent)
+last_updated_by: Claude (phase-4 agent)
 ---
 
 # Memory Retrieval v2 (Measurement + Graph Read Side) Implementation Plan
@@ -246,13 +246,13 @@ Search results gain 1-hop `memory_link` neighbors — the first reader of the gr
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] Suites pass: `bun test src/tests/memory-graph-expansion.test.ts src/tests/memory-hybrid.test.ts src/tests/memory-reranker.test.ts src/tests/memory.test.ts src/tests/memory-e2e.test.ts`
-- [ ] Boundary intact: `bash scripts/check-db-boundary.sh`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] Suites pass: `bun test src/tests/memory-graph-expansion.test.ts src/tests/memory-hybrid.test.ts src/tests/memory-reranker.test.ts src/tests/memory.test.ts src/tests/memory-e2e.test.ts`
+- [x] Boundary intact: `bash scripts/check-db-boundary.sh`
 
 #### Automated QA:
-- [ ] Local walkthrough with `MEMORY_GRAPH_EXPANSION=1`: index memory A containing `[[B-name]]` wikilink + memory B with lexically/semantically distant content; `POST /api/memory/search` for A's topic returns B tagged `graph` in results; re-run with flag off ⇒ B absent. Capture both result lists.
+- [x] Local walkthrough with `MEMORY_GRAPH_EXPANSION=1`: index memory A containing `[[B-name]]` wikilink + memory B with lexically/semantically distant content; `POST /api/memory/search` for A's topic returns B tagged `graph` in results; re-run with flag off ⇒ B absent. Capture both result lists. (2026-07-03: flag on → A `fts` 1.5 + B `graph` 1.05, `memory_retrieval` rows `fts`/`graph`; flag off → A only, B absent; distractor C never surfaced.)
 
 #### Manual Verification:
 - [ ] Spot-check that graph additions don't crowd out organic hits on a handful of real queries (relevance judgment).

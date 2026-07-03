@@ -65,6 +65,13 @@ export function isHybridSearchEnabled(): boolean {
   return val === "1" || val.toLowerCase() === "true";
 }
 
+// Feature flag: expand search candidates with 1-hop memory_link graph neighbors
+// (DES-639a). Off by default; set MEMORY_GRAPH_EXPANSION=1 to enable.
+export function isGraphExpansionEnabled(): boolean {
+  const val = process.env.MEMORY_GRAPH_EXPANSION ?? "0";
+  return val === "1" || val.toLowerCase() === "true";
+}
+
 // Embedding defaults
 export const EMBEDDING_DIMENSIONS = numEnv("EMBEDDING_DIMENSIONS", 512);
 export const DEFAULT_EMBEDDING_DIMENSIONS = EMBEDDING_DIMENSIONS;

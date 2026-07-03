@@ -1,5 +1,6 @@
 import { ensure } from "@desplega.ai/business-use";
 import { getDb } from "@/be/db";
+import type { MemoryRetrievalSource } from "@/be/memory/types";
 
 /**
  * Retrieval-bridge helper — appends `memory_retrieval` audit rows so
@@ -22,7 +23,7 @@ import { getDb } from "@/be/db";
 export type RetrievalRecord = {
   memoryId: string;
   similarity: number;
-  retrievalSource?: "vec" | "fts" | "hybrid" | "fallback";
+  retrievalSource?: MemoryRetrievalSource;
 };
 
 export type RetrievalExtras = {

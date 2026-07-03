@@ -26,7 +26,7 @@ import type {
 
 const VECTOR_BYTES = EMBEDDING_DIMENSIONS * Float32Array.BYTES_PER_ELEMENT;
 
-type AgentMemoryRow = {
+export type AgentMemoryRow = {
   id: string;
   agentId: string | null;
   scope: string;
@@ -79,7 +79,7 @@ function rowToAgentMemory(row: AgentMemoryRow): AgentMemory {
   };
 }
 
-function rowToCandidate(row: AgentMemoryRow, similarity: number): MemoryCandidate {
+export function rowToCandidate(row: AgentMemoryRow, similarity: number): MemoryCandidate {
   return {
     ...rowToAgentMemory(row),
     similarity,

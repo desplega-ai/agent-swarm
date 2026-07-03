@@ -6,6 +6,7 @@ import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { canReadMemory } from "../be/memory/access";
 import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
 import { listEdgesForAgent } from "../be/memory/edges-store";
+import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
 import { storeLinks } from "../be/memory/link-resolver";
 import { recordRetrievals } from "../be/memory/raters/retrieval";
 import { applyRating, ExplicitSelfDuplicateError } from "../be/memory/raters/store";
@@ -500,7 +501,12 @@ export async function handleMemory(
         isLead: false,
         queryText: query,
       });
-      const ranked = rerank(candidates, { limit: Math.min(limit, 20) });
+      // 1-hop memory_link neighbor expansion (no-op unless MEMORY_GRAPH_EXPANSION=1).
+      const expanded = expandCandidatesWithGraph(candidates, myAgentId, {
+        scope,
+        isLead: false,
+      });
+      const ranked = rerank(expanded, { limit: Math.min(limit, 20) });
 
       // Retrieval bridge — when caller passed `X-Source-Task-ID`, record one
       // `memory_retrieval` row per returned memory so server-side raters
