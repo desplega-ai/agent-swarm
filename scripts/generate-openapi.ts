@@ -11,6 +11,7 @@ import "../src/http/ecosystem";
 
 import "../src/http/api-keys";
 import "../src/http/events";
+import "../src/http/fs";
 import "../src/http/heartbeat";
 import "../src/http/inbox-state";
 import "../src/http/integrations";

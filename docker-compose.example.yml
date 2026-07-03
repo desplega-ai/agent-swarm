@@ -17,14 +17,90 @@
 #  you may map all services to the same port (e.g. 3000:3000).
 
 services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - agent_fs_minio:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/agentfs
+      "
+
+  agent-fs:
+    image: ghcr.io/desplega-ai/agent-fs:0.9.0
+    platform: linux/amd64
+    pull_policy: always
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      - AGENT_FS_HOME=/data
+      - HOST=0.0.0.0
+      - SERVER_HOST=0.0.0.0
+      - PORT=7433
+      - SERVER_PORT=7433
+      - S3_ENDPOINT=http://minio:9000
+      - S3_PUBLIC_ENDPOINT=${AGENT_FS_S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      - S3_BUCKET=agentfs
+      - S3_ACCESS_KEY_ID=minioadmin
+      - S3_SECRET_ACCESS_KEY=minioadmin
+      - S3_REGION=us-east-1
+      - S3_PROVIDER=minio
+      - EMBEDDING_PROVIDER=${AGENT_FS_EMBEDDING_PROVIDER:-local}
+      - EMBEDDING_MODEL=${AGENT_FS_EMBEDDING_MODEL:-}
+      - EMBEDDING_API_KEY=${AGENT_FS_EMBEDDING_API_KEY:-}
+    ports:
+      - "${AGENT_FS_PORT:-7433}:7433"
+    volumes:
+      - agent_fs_data:/data
+    healthcheck:
+      # The agent-fs image ships node/bun but no curl/wget; probe with node fetch.
+      # Generous retries: first boot downloads the local embedding model before listening.
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:7433/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
   api:
     image: "ghcr.io/desplega-ai/agent-swarm:latest"
     platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
+    depends_on:
+      agent-fs:
+        condition: service_healthy
 
     environment:
       - API_KEY=${API_KEY}
+      - AGENT_FS_API_URL=http://agent-fs:7433
+      - API_AGENT_FS_API_KEY=${API_AGENT_FS_API_KEY:-}
+      - AGENT_FS_REGISTER_EMAIL=${AGENT_FS_REGISTER_EMAIL:-swarm-admin@agent-fs.local}
 
       # At-rest encryption key for swarm_config isSecret=1 rows (AES-256-GCM).
       # Preferred: mount a file and point SECRETS_ENCRYPTION_KEY_FILE at it
@@ -98,6 +174,7 @@ services:
       # - MCP_BASE_URL=${MCP_BASE_URL:-http://api:3013}
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -140,6 +217,7 @@ services:
       # - MCP_BASE_URL=${MCP_BASE_URL:-http://api:3013}
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -182,6 +260,7 @@ services:
       # - MCP_BASE_URL=${MCP_BASE_URL:-http://api:3013}
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -225,6 +304,7 @@ services:
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -273,6 +353,7 @@ services:
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -316,6 +397,7 @@ services:
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -359,6 +441,7 @@ services:
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -401,6 +484,7 @@ services:
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
 
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
       - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
@@ -583,6 +667,8 @@ secrets:
     file: ./encryption_key
 
 volumes:
+  agent_fs_minio:
+  agent_fs_data:
   swarm_api:
   swarm_logs:
   swarm_shared:

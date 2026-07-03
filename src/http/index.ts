@@ -41,6 +41,7 @@ import { handleDbQuery } from "./db-query";
 import { handleEcosystem } from "./ecosystem";
 import { handleEvents } from "./events";
 import { handleFavorites } from "./favorites";
+import { handleFs } from "./fs";
 import { handleHeartbeat } from "./heartbeat";
 import { handleInboxState } from "./inbox-state";
 import { handleIntegrations } from "./integrations";
@@ -304,6 +305,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleWorkflowEvents(req, res, pathSegments, queryParams),
         () => handleApprovalRequests(req, res, pathSegments, queryParams),
         () => handleConfig(req, res, pathSegments, queryParams),
+        () => handleFs(req, res, pathSegments, queryParams, myAgentId),
         () => handleKv(req, res, pathSegments, queryParams),
         () => handleIntegrations(req, res, pathSegments),
         () => handlePromptTemplates(req, res, pathSegments, queryParams),

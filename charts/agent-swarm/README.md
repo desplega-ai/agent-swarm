@@ -72,16 +72,23 @@ Two opt-in patterns for cross-agent file sharing:
 
 ### Option 1 — agent-fs (recommended)
 
-Deploys the [agent-fs](https://github.com/desplega-ai/agent-swarm/tree/main/agent-fs) HTTP service alongside the swarm. Provides full-text and semantic search, comments, threads, and conflict-aware writes. The upstream agents auto-detect the service and adapt their session prompts:
+Deploys the [agent-fs](https://github.com/desplega-ai/agent-fs) HTTP service alongside the swarm. Provides full-text and semantic search, comments, threads, and conflict-aware writes. When disabled, the swarm uses the built-in `local-fs` provider and files stay local to the API process.
 
 ```yaml
 agentFs:
   enabled: true
+  image:
+    tag: 0.9.0
   bucket: my-agent-fs-bucket
+  # Optional. When blank, the API boot seeder registers a service user with
+  # agent-fs and stores the generated bootstrap key in encrypted swarm_config.
+  apiKey: ""
   s3:
     existingSecret: my-agent-fs-s3-creds   # Or inline accessKeyId/secretAccessKey
     endpoint: https://s3.amazonaws.com     # Optional — for S3-compatible providers
     region: us-east-1                      # Optional
+  embedding:
+    provider: local                         # Or openai/gemini + apiKey
 ```
 
 ### Option 2 — RWX shared volume

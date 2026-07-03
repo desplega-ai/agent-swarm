@@ -2732,6 +2732,9 @@ type TaskAttachmentRow = {
   url: string | null;
   path: string | null;
   page_id: string | null;
+  provider_id: string | null;
+  provider_key: string | null;
+  capabilities: string | null;
   agent_fs_org_id: string | null;
   agent_fs_drive_id: string | null;
   mime_type: string | null;
@@ -2741,6 +2744,8 @@ type TaskAttachmentRow = {
   description: string | null;
   is_primary: number;
   created_at: string;
+  created_by: string | null;
+  updated_by: string | null;
 };
 
 function rowToTaskAttachment(row: TaskAttachmentRow): TaskAttachment {
@@ -2753,6 +2758,9 @@ function rowToTaskAttachment(row: TaskAttachmentRow): TaskAttachment {
     url: row.url ?? undefined,
     path: row.path ?? undefined,
     pageId: row.page_id ?? undefined,
+    providerId: row.provider_id ?? undefined,
+    providerKey: row.provider_key ?? undefined,
+    capabilities: parseAttachmentCapabilities(row.capabilities),
     orgId: row.agent_fs_org_id ?? undefined,
     driveId: row.agent_fs_drive_id ?? undefined,
     mimeType: row.mime_type ?? undefined,
@@ -2762,7 +2770,27 @@ function rowToTaskAttachment(row: TaskAttachmentRow): TaskAttachment {
     description: row.description ?? undefined,
     isPrimary: !!row.is_primary,
     createdAt: row.created_at,
+    createdBy: row.created_by ?? undefined,
+    updatedBy: row.updated_by ?? undefined,
   };
+}
+
+function parseAttachmentCapabilities(value: string | null): Record<string, unknown> | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function stringifyAttachmentCapabilities(
+  value: Record<string, unknown> | undefined,
+): string | null {
+  return value ? JSON.stringify(value) : null;
 }
 
 export interface InsertTaskAttachmentInput {
@@ -2773,6 +2801,9 @@ export interface InsertTaskAttachmentInput {
   url?: string;
   path?: string;
   pageId?: string;
+  providerId?: string;
+  providerKey?: string;
+  capabilities?: Record<string, unknown>;
   /** agent-fs only — paired with `driveId` to build a public live-host URL. */
   orgId?: string;
   /** agent-fs only — paired with `orgId` to build a public live-host URL. */
@@ -2783,6 +2814,8 @@ export interface InsertTaskAttachmentInput {
   intent?: string;
   description?: string;
   isPrimary?: boolean;
+  createdBy?: string;
+  updatedBy?: string;
 }
 
 /**
@@ -2843,18 +2876,25 @@ export function insertTaskAttachment(input: InsertTaskAttachmentInput): TaskAtta
         string | null,
         string | null,
         string | null,
+        string | null,
+        string | null,
+        string | null,
         number | null,
         string | null,
         string | null,
         string | null,
         number,
+        string | null,
+        string | null,
       ]
     >(
       `INSERT INTO task_attachments
          (id, task_id, agent_id, name, kind, url, path, page_id,
+          provider_id, provider_key, capabilities,
           agent_fs_org_id, agent_fs_drive_id,
-          mime_type, size_bytes, sha256, intent, description, is_primary)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          mime_type, size_bytes, sha256, intent, description, is_primary,
+          created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     )
     .get(
@@ -2866,6 +2906,9 @@ export function insertTaskAttachment(input: InsertTaskAttachmentInput): TaskAtta
       input.url ?? null,
       input.path ?? null,
       input.pageId ?? null,
+      input.providerId ?? defaultProviderId(input.kind),
+      input.providerKey ?? defaultProviderKey(input),
+      stringifyAttachmentCapabilities(input.capabilities),
       input.orgId ?? null,
       input.driveId ?? null,
       input.mimeType ?? null,
@@ -2874,12 +2917,109 @@ export function insertTaskAttachment(input: InsertTaskAttachmentInput): TaskAtta
       input.intent ?? null,
       input.description ?? null,
       input.isPrimary ? 1 : 0,
+      input.createdBy ?? null,
+      input.updatedBy ?? input.createdBy ?? null,
     );
 
   if (!row) {
     throw new Error("Failed to insert task attachment");
   }
   return rowToTaskAttachment(row);
+}
+
+function defaultProviderId(kind: TaskAttachment["kind"]): string {
+  if (kind === "agent-fs" || kind === "shared-fs") return "agent-fs";
+  return kind;
+}
+
+function defaultProviderKey(
+  input: Pick<InsertTaskAttachmentInput, "kind" | "path" | "url" | "pageId">,
+): string | null {
+  if (input.kind === "agent-fs" || input.kind === "shared-fs") return input.path ?? null;
+  if (input.kind === "url") return input.url ?? null;
+  if (input.kind === "page") return input.pageId ?? null;
+  return null;
+}
+
+export function deleteTaskAttachment(id: string): boolean {
+  const result = getDb().run("DELETE FROM task_attachments WHERE id = ?", [id]);
+  return result.changes > 0;
+}
+
+export function replaceTaskAttachment(
+  id: string,
+  input: Omit<InsertTaskAttachmentInput, "taskId">,
+): TaskAttachment | null {
+  const row = getDb()
+    .prepare<
+      TaskAttachmentRow,
+      [
+        string | null,
+        string,
+        string,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        number | null,
+        string | null,
+        string | null,
+        string | null,
+        number,
+        string | null,
+        string,
+      ]
+    >(
+      `UPDATE task_attachments
+       SET agent_id = ?,
+           name = ?,
+           kind = ?,
+           url = ?,
+           path = ?,
+           page_id = ?,
+           provider_id = ?,
+           provider_key = ?,
+           capabilities = ?,
+           agent_fs_org_id = ?,
+           agent_fs_drive_id = ?,
+           mime_type = ?,
+           size_bytes = ?,
+           sha256 = ?,
+           intent = ?,
+           description = ?,
+           is_primary = ?,
+           updated_by = ?
+       WHERE id = ?
+       RETURNING *`,
+    )
+    .get(
+      input.agentId ?? null,
+      input.name,
+      input.kind,
+      input.url ?? null,
+      input.path ?? null,
+      input.pageId ?? null,
+      input.providerId ?? defaultProviderId(input.kind),
+      input.providerKey ?? defaultProviderKey(input),
+      stringifyAttachmentCapabilities(input.capabilities),
+      input.orgId ?? null,
+      input.driveId ?? null,
+      input.mimeType ?? null,
+      input.sizeBytes ?? null,
+      input.sha256 ?? null,
+      input.intent ?? null,
+      input.description ?? null,
+      input.isPrimary ? 1 : 0,
+      input.updatedBy ?? null,
+      id,
+    );
+
+  return row ? rowToTaskAttachment(row) : null;
 }
 
 export function getTaskAttachments(taskId: string): TaskAttachment[] {

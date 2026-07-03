@@ -1,8 +1,39 @@
-import { Check, Copy, ExternalLink, Paperclip, Star } from "lucide-react";
-import { useState } from "react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Download,
+  Expand,
+  ExternalLink,
+  File,
+  FileText,
+  Image as ImageIcon,
+  Loader2,
+  Paperclip,
+  Star,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  fetchTaskAttachmentBlob,
+  useDeleteAttachment,
+  useFsCapabilities,
+  useTaskAttachments,
+  useUploadAttachment,
+} from "@/api/fs";
 import type { TaskAttachment, TaskAttachmentKind } from "@/api/types";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 /**
@@ -91,6 +122,15 @@ function KindBadge({ kind }: { kind: TaskAttachmentKind }) {
   );
 }
 
+function ProviderBadge({ providerId }: { providerId?: string }) {
+  if (!providerId) return null;
+  return (
+    <Badge variant="secondary" size="tag" className="text-muted-foreground">
+      {providerId}
+    </Badge>
+  );
+}
+
 function CopyPathButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -116,9 +156,120 @@ function CopyPathButton({ value }: { value: string }) {
   );
 }
 
-function AttachmentRow({ attachment }: { attachment: TaskAttachment }) {
+type PreviewKind = "image" | "video" | "pdf" | "text";
+
+type PreviewState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "url"; url: string; contentType: Exclude<PreviewKind, "text"> }
+  | { kind: "text"; text: string; truncated: boolean }
+  | { kind: "error"; message: string };
+
+const TEXT_EXTENSIONS = new Set([
+  "css",
+  "csv",
+  "html",
+  "js",
+  "jsx",
+  "json",
+  "log",
+  "md",
+  "mjs",
+  "ts",
+  "tsx",
+  "txt",
+  "xml",
+  "yaml",
+  "yml",
+]);
+
+function getExtension(name: string): string {
+  const match = /\.([a-z0-9]+)$/i.exec(name.trim());
+  return match?.[1]?.toLowerCase() ?? "";
+}
+
+function getPreviewKind(attachment: TaskAttachment): PreviewKind | null {
+  const mime = attachment.mimeType?.split(";")[0]?.trim().toLowerCase();
+  const extension = getExtension(attachment.name);
+
+  // The agent-fs upload route can persist the provider's JSON response content
+  // type even though the raw download route returns the actual file type.
+  // Treat only that wrapper shape as non-authoritative; otherwise MIME wins.
+  const agentFsJsonWrapper =
+    attachment.providerId === "agent-fs" && mime === "application/json" && extension !== "json";
+
+  if (mime && !agentFsJsonWrapper) {
+    if (mime.startsWith("image/")) return "image";
+    if (mime.startsWith("video/")) return "video";
+    if (mime === "application/pdf") return "pdf";
+    if (
+      mime.startsWith("text/") ||
+      mime.includes("json") ||
+      mime.includes("xml") ||
+      mime.includes("yaml") ||
+      mime.includes("csv") ||
+      mime.includes("javascript")
+    ) {
+      return "text";
+    }
+    return null;
+  }
+
+  if (["png", "jpg", "jpeg", "gif", "webp", "avif", "svg"].includes(extension)) return "image";
+  if (["mp4", "webm", "mov", "m4v"].includes(extension)) return "video";
+  if (extension === "pdf") return "pdf";
+  if (TEXT_EXTENSIONS.has(extension)) return "text";
+  return null;
+}
+
+function previewKindLabel(kind: PreviewKind): string {
+  switch (kind) {
+    case "image":
+      return "Image preview";
+    case "video":
+      return "Video preview";
+    case "pdf":
+      return "PDF preview";
+    case "text":
+      return "Text preview";
+  }
+}
+
+function PreviewIcon({ kind }: { kind: PreviewKind | null }) {
+  if (kind === "image") return <ImageIcon className="h-4 w-4 text-muted-foreground" />;
+  if (kind === "text" || kind === "pdf") {
+    return <FileText className="h-4 w-4 text-muted-foreground" />;
+  }
+  return <File className="h-4 w-4 text-muted-foreground" />;
+}
+
+function scrubPreviewText(text: string): string {
+  return text
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}/g, "$1[REDACTED]")
+    .replace(/\b([A-Z0-9_]*(?:API|TOKEN|SECRET|KEY)[A-Z0-9_]*\s*=\s*)[^\s"'`]+/gi, "$1[REDACTED]")
+    .replace(/\b(aswt_|sk-|af_)[A-Za-z0-9._-]{12,}/g, "$1[REDACTED]");
+}
+
+function AttachmentRow({
+  attachment,
+  onDownload,
+  onDelete,
+  deleting,
+  taskId,
+}: {
+  attachment: TaskAttachment;
+  onDownload: (attachment: TaskAttachment) => void;
+  onDelete: (attachment: TaskAttachment) => void;
+  deleting: boolean;
+  taskId: string;
+}) {
   const href = resolveHref(attachment);
   const descriptor = attachment.intent || attachment.description;
+  const previewKind = getPreviewKind(attachment);
+  const [expanded, setExpanded] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
+  const previewStateRef = useRef(preview.kind);
   // For agent-fs / shared-fs we show the raw path so users can at least copy
   // it; for `page` and `url` the anchor itself communicates the target.
   const pathDisplay =
@@ -128,83 +279,430 @@ function AttachmentRow({ attachment }: { attachment: TaskAttachment }) {
         ? `agent-fs:${attachment.path ?? ""}`
         : null;
 
+  useEffect(() => {
+    if (!expanded || !previewKind || previewStateRef.current !== "idle") return;
+
+    let cancelled = false;
+    setPreview({ kind: "loading" });
+    fetchTaskAttachmentBlob(taskId, attachment.id)
+      .then(async (blob) => {
+        if (cancelled) return;
+        if (previewKind === "text") {
+          const maxBytes = 512 * 1024;
+          if (blob.size > maxBytes) {
+            setPreview({
+              kind: "error",
+              message:
+                "Text preview is available for files up to 512 KB. Download the file to view it.",
+            });
+            return;
+          }
+          const text = scrubPreviewText(await blob.text());
+          setPreview({
+            kind: "text",
+            text: text.slice(0, 20_000),
+            truncated: text.length > 20_000,
+          });
+          return;
+        }
+        setPreview({ kind: "url", url: URL.createObjectURL(blob), contentType: previewKind });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setPreview({
+          kind: "error",
+          message: error instanceof Error ? error.message : "Preview failed.",
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [attachment.id, expanded, previewKind, taskId]);
+
+  useEffect(() => {
+    previewStateRef.current = preview.kind;
+  }, [preview.kind]);
+
+  useEffect(() => {
+    return () => {
+      if (preview.kind === "url") URL.revokeObjectURL(preview.url);
+    };
+  }, [preview]);
+
+  const toggleExpanded = () => {
+    if (!previewKind) return;
+    setExpanded((value) => !value);
+  };
+
   return (
-    <div className="flex items-start gap-3 py-2 border-b border-border/40 last:border-b-0">
-      <Paperclip className="h-3.5 w-3.5 text-muted-foreground mt-1 shrink-0" />
-      <div className="flex-1 min-w-0 space-y-0.5">
-        <div className="flex items-center gap-2 flex-wrap">
-          {attachment.isPrimary && (
-            <Star
-              className="h-3 w-3 text-status-active-strong shrink-0"
-              aria-label="Primary attachment"
-            />
+    <div className="rounded-md border border-border/70 bg-background">
+      <div className="flex items-start gap-3 p-3">
+        <button
+          type="button"
+          onClick={toggleExpanded}
+          disabled={!previewKind}
+          className={cn(
+            "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40",
+            previewKind && "transition-colors hover:bg-muted",
           )}
-          {href ? (
-            <a
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm font-medium text-primary hover:underline truncate"
-            >
-              {attachment.name}
-              <ExternalLink className="h-3 w-3 inline-block ml-1 -mt-0.5 text-muted-foreground" />
-            </a>
-          ) : (
-            <span className="text-sm font-medium text-foreground truncate">{attachment.name}</span>
-          )}
-          <KindBadge kind={attachment.kind} />
-        </div>
-        {descriptor && (
-          <p className="text-xs italic text-muted-foreground line-clamp-2">{descriptor}</p>
-        )}
-        {pathDisplay && (
-          <div className="flex items-center gap-1.5">
-            <code className="text-[11px] font-mono text-muted-foreground bg-muted/40 px-1.5 py-0.5 rounded truncate">
-              {pathDisplay}
-            </code>
-            <CopyPathButton value={attachment.path ?? ""} />
+          aria-label={
+            previewKind
+              ? `${expanded ? "Collapse" : "Expand"} ${attachment.name}`
+              : `${attachment.name} has no inline preview`
+          }
+        >
+          <PreviewIcon kind={previewKind} />
+        </button>
+
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-center gap-2">
+            {attachment.isPrimary && (
+              <Star
+                className="h-3 w-3 shrink-0 text-status-active-strong"
+                aria-label="Primary attachment"
+              />
+            )}
+            <span className="truncate text-sm font-medium text-foreground">{attachment.name}</span>
           </div>
-        )}
-        {(attachment.mimeType || attachment.sizeBytes != null) && (
-          <p className="text-[10px] text-muted-foreground/70 font-mono">
-            {[
-              attachment.mimeType,
-              attachment.sizeBytes != null ? formatSize(attachment.sizeBytes) : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-        )}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <KindBadge kind={attachment.kind} />
+            <ProviderBadge providerId={attachment.providerId} />
+            {previewKind ? (
+              <Badge variant="secondary" size="tag" className="text-muted-foreground">
+                {previewKindLabel(previewKind)}
+              </Badge>
+            ) : (
+              <Badge variant="outline" size="tag" className="text-muted-foreground">
+                Download only
+              </Badge>
+            )}
+          </div>
+          {descriptor && (
+            <p className="line-clamp-2 text-xs italic text-muted-foreground">{descriptor}</p>
+          )}
+          {pathDisplay && (
+            <div className="flex items-center gap-1.5">
+              <code className="truncate rounded bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                {pathDisplay}
+              </code>
+              <CopyPathButton value={attachment.path ?? ""} />
+            </div>
+          )}
+          {(attachment.mimeType || attachment.sizeBytes != null) && (
+            <p className="font-mono text-[10px] text-muted-foreground/70">
+              {[
+                attachment.mimeType,
+                attachment.sizeBytes != null ? formatSize(attachment.sizeBytes) : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          {previewKind ? (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7"
+              onClick={toggleExpanded}
+              aria-label={`${expanded ? "Collapse" : "Expand"} ${attachment.name}`}
+              title={expanded ? "Collapse" : "Expand"}
+            >
+              {expanded ? (
+                <ChevronDown className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          ) : href ? (
+            <Button type="button" size="icon" variant="ghost" className="h-7 w-7" asChild>
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`Open ${attachment.name}`}
+                title="Open"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
+            onClick={() => onDownload(attachment)}
+            aria-label={`Download ${attachment.name}`}
+            title="Download"
+          >
+            <Download className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7 text-status-error hover:text-status-error"
+            onClick={() => onDelete(attachment)}
+            disabled={deleting}
+            aria-label={`Delete ${attachment.name}`}
+            title="Delete"
+          >
+            {deleting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="h-3.5 w-3.5" />
+            )}
+          </Button>
+        </div>
       </div>
+
+      {expanded && previewKind ? (
+        <div className="border-t border-border bg-muted/20 p-3">
+          {preview.kind === "loading" ? (
+            <div className="flex h-28 items-center justify-center gap-2 rounded-md border border-dashed border-border bg-background text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Loading preview
+            </div>
+          ) : preview.kind === "error" ? (
+            <div className="rounded-md border border-border bg-background p-3 text-xs text-muted-foreground">
+              {preview.message}
+            </div>
+          ) : preview.kind === "text" ? (
+            <button
+              type="button"
+              className="block w-full rounded-md border border-border bg-background text-left transition-colors hover:border-primary/40"
+              onClick={() => setLightboxOpen(true)}
+              aria-label={`Expand ${attachment.name} preview`}
+            >
+              <pre className="max-h-48 overflow-hidden whitespace-pre-wrap p-3 text-xs leading-relaxed">
+                {preview.text}
+                {preview.truncated ? "\n\n[Preview truncated]" : ""}
+              </pre>
+            </button>
+          ) : preview.kind === "url" ? (
+            <PreviewMedia
+              name={attachment.name}
+              preview={preview}
+              compact
+              onExpand={() => setLightboxOpen(true)}
+            />
+          ) : null}
+        </div>
+      ) : null}
+
+      <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
+        <DialogContent className="max-h-[92vh] overflow-hidden p-4 sm:max-w-4xl">
+          <DialogHeader className="pr-8">
+            <DialogTitle className="truncate text-base">{attachment.name}</DialogTitle>
+            <DialogDescription>
+              {previewKind ? previewKindLabel(previewKind) : ""}
+            </DialogDescription>
+          </DialogHeader>
+          {preview.kind === "text" ? (
+            <pre className="max-h-[72vh] overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/20 p-3 text-xs leading-relaxed">
+              {preview.text}
+              {preview.truncated ? "\n\n[Preview truncated]" : ""}
+            </pre>
+          ) : preview.kind === "url" ? (
+            <PreviewMedia name={attachment.name} preview={preview} />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function PreviewMedia({
+  name,
+  preview,
+  compact = false,
+  onExpand,
+}: {
+  name: string;
+  preview: Extract<PreviewState, { kind: "url" }>;
+  compact?: boolean;
+  onExpand?: () => void;
+}) {
+  const expandButton = onExpand ? (
+    <Button
+      type="button"
+      size="icon"
+      variant="secondary"
+      className="absolute right-2 top-2 h-7 w-7 bg-background/85"
+      onClick={onExpand}
+      aria-label={`Expand ${name} preview`}
+      title="Expand"
+    >
+      <Expand className="h-3.5 w-3.5" />
+    </Button>
+  ) : null;
+
+  if (preview.contentType === "image") {
+    return (
+      <div className="relative flex justify-center rounded-md border border-border bg-background p-2">
+        <button type="button" onClick={onExpand} className="max-w-full" disabled={!onExpand}>
+          <img
+            src={preview.url}
+            alt={name}
+            className={cn(
+              "max-w-full rounded object-contain",
+              compact ? "max-h-48 sm:max-h-56" : "max-h-[72vh]",
+            )}
+          />
+        </button>
+        {expandButton}
+      </div>
+    );
+  }
+
+  if (preview.contentType === "video") {
+    return (
+      <div className="relative rounded-md border border-border bg-background p-2">
+        <video
+          src={preview.url}
+          controls
+          className={cn("w-full rounded bg-black", compact ? "max-h-56" : "max-h-[72vh]")}
+        >
+          <track kind="captions" />
+        </video>
+        {expandButton}
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative rounded-md border border-border bg-background p-2">
+      <iframe
+        src={preview.url}
+        title={name}
+        className={cn("w-full rounded border-0", compact ? "h-56" : "h-[72vh]")}
+      />
+      {expandButton}
     </div>
   );
 }
 
 /**
- * Renders the `Attachments` card on a task detail page. Returns `null` when
- * the task has no attachments so the surrounding layout collapses cleanly —
- * mirroring how `Failure Reason` / `Output` hide themselves when absent.
+ * Renders the `Attachments` card on a task detail page. The card stays visible
+ * even when empty so humans can attach input files before or during execution.
  */
 export function TaskAttachmentsSection({
+  taskId,
   attachments,
+  className,
+  hideWhenEmpty = false,
 }: {
+  taskId: string;
   attachments: TaskAttachment[] | undefined;
+  className?: string;
+  hideWhenEmpty?: boolean;
 }) {
-  if (!attachments || attachments.length === 0) return null;
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { data: capabilities } = useFsCapabilities();
+  const listQuery = useTaskAttachments(taskId, attachments);
+  const upload = useUploadAttachment(taskId);
+  const remove = useDeleteAttachment(taskId);
+
+  const rows = useMemo(
+    () => listQuery.data?.attachments ?? attachments ?? [],
+    [attachments, listQuery.data?.attachments],
+  );
+  const uploadSupported = capabilities?.providerId !== "unavailable";
+
+  if (hideWhenEmpty && rows.length === 0 && !listQuery.isLoading) {
+    return null;
+  }
+
+  if (hideWhenEmpty && rows.length === 0 && !listQuery.isLoading) {
+    return null;
+  }
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    upload.mutate({ file, intent: "input" });
+  };
+
+  const handleDownload = async (attachment: TaskAttachment) => {
+    const blob = await fetchTaskAttachmentBlob(taskId, attachment.id);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = attachment.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDelete = (attachment: TaskAttachment) => {
+    remove.mutate(attachment.id);
+  };
+
   return (
     <CollapsibleSection
       variant="card"
-      title={`Attachments (${attachments.length})`}
+      title={`Attachments (${rows.length})`}
       icon={Paperclip}
       iconColor="text-muted-foreground"
       borderColor="border-border"
       bgColor="bg-muted/20"
+      className={className}
       defaultOpen
     >
-      <div className="max-h-72 overflow-auto">
-        {attachments.map((a) => (
-          <AttachmentRow key={a.id} attachment={a} />
-        ))}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0 text-xs text-muted-foreground">
+            <span className="font-mono">{capabilities?.providerId ?? "file provider"}</span>
+            {capabilities?.capabilities.search ? " · search enabled" : " · core files"}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            aria-label="Upload attachment file"
+            className="sr-only"
+            onChange={handleFileChange}
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!uploadSupported || upload.isPending}
+          >
+            {upload.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Upload className="h-3.5 w-3.5" />
+            )}
+            Upload
+          </Button>
+        </div>
+
+        {rows.length === 0 ? (
+          <div className="rounded-md border border-dashed border-border py-6 text-center text-xs text-muted-foreground">
+            No attachments
+          </div>
+        ) : (
+          <div className="max-h-[34rem] space-y-2 overflow-auto pr-1">
+            {rows.map((a) => (
+              <AttachmentRow
+                key={a.id}
+                attachment={a}
+                onDownload={handleDownload}
+                onDelete={handleDelete}
+                deleting={remove.isPending && remove.variables === a.id}
+                taskId={taskId}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </CollapsibleSection>
   );

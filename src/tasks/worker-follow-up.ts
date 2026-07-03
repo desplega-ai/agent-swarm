@@ -11,6 +11,7 @@ import {
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { resolveTemplate } from "../prompts/resolver";
 import type { AgentTask, ResumeReason, TaskAttachment } from "../types";
+import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
 import "../tools/templates";
 
@@ -64,16 +65,7 @@ export function getNextResumeGeneration(parent: Pick<AgentTask, "tags">): number
 }
 
 function attachmentPointer(a: TaskAttachment): string {
-  switch (a.kind) {
-    case "url":
-      return a.url ?? "";
-    case "page":
-      return `page:${a.pageId ?? ""}`;
-    case "agent-fs":
-      return `agent-fs:${a.path ?? ""}`;
-    case "shared-fs":
-      return `shared-fs:${a.path ?? ""}`;
-  }
+  return taskAttachmentDisplayUrl(a);
 }
 
 function formatAttachmentsBlock(attachments: TaskAttachment[]): string {

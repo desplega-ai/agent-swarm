@@ -26,7 +26,6 @@ export const argsSchema = z.object({
     .optional()
     .describe("Backfill this many past daily points on first run (default 14; 0 to skip)"),
   publishPage: z.boolean().optional().describe("Publish an authed HTML page (default true)"),
-  writeAgentFs: z.boolean().optional().describe("Write markdown report to agent-fs (default true)"),
 });
 
 const KV_NS = "memory-eval";
@@ -202,7 +201,6 @@ export default async function memoryEval(args: any, ctx: any) {
   const usefulnessThreshold = parsed.data.usefulnessThreshold ?? 0.6;
   const backfillDays = parsed.data.backfillDays ?? 14;
   const publishPage = parsed.data.publishPage !== false;
-  const writeAgentFs = parsed.data.writeAgentFs !== false;
 
   const now = new Date().toISOString();
   const today = now.slice(0, 10);
@@ -512,19 +510,6 @@ export default async function memoryEval(args: any, ctx: any) {
   // ─── Markdown report ─────────────────────────────────────────────────
 
   const md = buildMarkdownReport(report);
-
-  if (writeAgentFs) {
-    try {
-      await ctx.swarm.agent_fs_write({
-        path: `docs/memory-eval-${today}.md`,
-        content: md,
-        message: `Memory eval report ${today}`,
-        org: "648a5f3c-35c8-4f11-8673-b89de52cd6bd",
-      });
-    } catch (_e) {
-      report.agentFsError = "agent_fs_write failed — report still available in page + return value";
-    }
-  }
 
   // ─── Publish dashboard page ──────────────────────────────────────────
 

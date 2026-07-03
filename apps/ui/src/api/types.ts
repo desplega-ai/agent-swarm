@@ -613,6 +613,9 @@ export interface TaskAttachment {
   url?: string;
   path?: string;
   pageId?: string;
+  providerId?: string;
+  providerKey?: string;
+  capabilities?: Record<string, unknown>;
   /** agent-fs only — paired with `driveId` to build a public live-host URL. */
   orgId?: string;
   /** agent-fs only — paired with `orgId` to build a public live-host URL. */
@@ -1640,6 +1643,8 @@ export interface StatusActivity {
 export interface StatusAgentFs {
   configured: boolean;
   base_url: string | null;
+  provider_id: string;
+  capabilities: Record<string, unknown>;
 }
 
 /**

@@ -13,6 +13,77 @@
 #   docker compose -f docker-compose.local.yml down
 
 services:
+  minio:
+    container_name: swarm-agent-fs-minio
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - local_agent_fs_minio:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/agentfs
+      "
+
+  agent-fs:
+    container_name: swarm-agent-fs
+    image: ghcr.io/desplega-ai/agent-fs:0.9.0
+    platform: linux/amd64
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      - AGENT_FS_HOME=/data
+      - HOST=0.0.0.0
+      - SERVER_HOST=0.0.0.0
+      - PORT=7433
+      - SERVER_PORT=7433
+      - S3_ENDPOINT=http://minio:9000
+      - S3_PUBLIC_ENDPOINT=http://localhost:9000
+      - S3_BUCKET=agentfs
+      - S3_ACCESS_KEY_ID=minioadmin
+      - S3_SECRET_ACCESS_KEY=minioadmin
+      - S3_REGION=us-east-1
+      - S3_PROVIDER=minio
+      - EMBEDDING_PROVIDER=${AGENT_FS_EMBEDDING_PROVIDER:-local}
+      - EMBEDDING_MODEL=${AGENT_FS_EMBEDDING_MODEL:-}
+      - EMBEDDING_API_KEY=${AGENT_FS_EMBEDDING_API_KEY:-}
+    ports:
+      - "7433:7433"
+    volumes:
+      - local_agent_fs:/data
+    healthcheck:
+      # The agent-fs image ships node/bun but no curl/wget; probe with node fetch.
+      # Generous retries: first boot downloads the local embedding model before listening.
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:7433/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
   api:
     container_name: swarm-api
     platform: linux/amd64
@@ -20,9 +91,15 @@ services:
       context: .
       dockerfile: Dockerfile
     stop_grace_period: 60s
+    depends_on:
+      agent-fs:
+        condition: service_healthy
 
     environment:
       - API_KEY=${API_KEY}
+      - AGENT_FS_API_URL=http://agent-fs:7433
+      - API_AGENT_FS_API_KEY=${API_AGENT_FS_API_KEY:-}
+      - AGENT_FS_REGISTER_EMAIL=${AGENT_FS_REGISTER_EMAIL:-swarm-admin@agent-fs.local}
       - SLACK_DISABLE=true
       - GITHUB_DISABLE=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
@@ -62,6 +139,7 @@ services:
       - AGENT_ID=23b94e8e-4fd3-465c-b525-1bcb050bb214
       - AGENT_ROLE=lead
       - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
@@ -105,6 +183,7 @@ services:
       - AGENT_ID=cfecf31f-d3bb-4a5b-ab29-43bc49082031
       - AGENT_ROLE=worker
       - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
@@ -152,6 +231,7 @@ services:
       - AGENT_ID=a4d5e6f7-8901-23fb-cdef-456789012cde
       - AGENT_ROLE=worker
       - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
@@ -174,6 +254,8 @@ services:
     restart: unless-stopped
 
 volumes:
+  local_agent_fs_minio:
+  local_agent_fs:
   local_logs:
   local_shared:
   local_lead:

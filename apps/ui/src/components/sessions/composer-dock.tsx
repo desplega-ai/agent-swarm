@@ -8,12 +8,19 @@
  * regardless of state.
  */
 
-import { ArrowUp } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { ArrowUp, FileText, Paperclip, X } from "lucide-react";
+import { type ChangeEvent, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
+}
 
 export interface ComposerDockProps {
   value: string;
@@ -27,8 +34,13 @@ export interface ComposerDockProps {
   disabled?: boolean;
   /** Routing label shown on the left of the action row. Defaults to "Routes to Lead". */
   routeLabel?: string;
+  /** Status label shown while submit/create/upload is pending. */
+  pendingLabel?: string;
   /** "Send" / "Start session" / etc. Used as button aria-label and tooltip. */
   sendLabel?: string;
+  attachments?: File[];
+  onAttachmentsChange?: (files: File[]) => void;
+  attachmentErrorMessage?: string | null;
   /** Focus the textarea on mount. */
   autoFocus?: boolean;
   className?: string;
@@ -44,22 +56,41 @@ export function ComposerDock({
   placeholder,
   disabled,
   routeLabel = "Routes to Lead",
+  pendingLabel = "Sending…",
   sendLabel = "Send",
+  attachments = [],
+  onAttachmentsChange,
+  attachmentErrorMessage,
   autoFocus,
   className,
 }: ComposerDockProps) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     if (autoFocus) ref.current?.focus();
   }, [autoFocus]);
 
   const canSubmit = !disabled && !isPending && value.trim().length > 0;
+  const canAttach = !disabled && !isPending && !!onAttachmentsChange;
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       if (canSubmit) onSubmit();
     }
+  };
+
+  const onFilesSelected = (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files ?? []);
+    if (selected.length > 0 && onAttachmentsChange) {
+      onAttachmentsChange([...attachments, ...selected]);
+    }
+    event.target.value = "";
+  };
+
+  const removeAttachment = (index: number) => {
+    if (!onAttachmentsChange) return;
+    onAttachmentsChange(attachments.filter((_, i) => i !== index));
   };
 
   return (
@@ -92,6 +123,49 @@ export function ComposerDock({
             "leading-snug",
           )}
         />
+        {onAttachmentsChange ? (
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="sr-only"
+            onChange={onFilesSelected}
+            disabled={!canAttach}
+            aria-label="Attach files"
+          />
+        ) : null}
+        {attachments.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5 px-3 pb-2">
+            {attachments.map((file, index) => (
+              <span
+                key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+                className={cn(
+                  "inline-flex max-w-full items-center gap-1.5 rounded-md border border-border",
+                  "bg-muted/55 px-2 py-1 text-xs text-foreground",
+                )}
+              >
+                <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
+                <span className="truncate max-w-[12rem] sm:max-w-[18rem]">{file.name}</span>
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  {formatFileSize(file.size)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(index)}
+                  disabled={isPending}
+                  className={cn(
+                    "ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm",
+                    "text-muted-foreground hover:bg-background hover:text-foreground",
+                    "disabled:pointer-events-none disabled:opacity-50",
+                  )}
+                  aria-label={`Remove ${file.name}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
         <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-0.5">
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground pl-1.5">
             <span
@@ -101,9 +175,27 @@ export function ComposerDock({
                 isPending ? "bg-primary animate-pulse" : "bg-primary/70",
               )}
             />
-            <span>{isPending ? "Sending…" : routeLabel}</span>
+            <span>{isPending ? pendingLabel : routeLabel}</span>
           </div>
           <div className="flex items-center gap-2">
+            {onAttachmentsChange ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    disabled={!canAttach}
+                    aria-label="Attach files"
+                    className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Paperclip className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Attach files</TooltipContent>
+              </Tooltip>
+            ) : null}
             <span className="text-[10px] font-mono text-muted-foreground tracking-wider hidden sm:inline">
               ⌘↵
             </span>
@@ -126,6 +218,9 @@ export function ComposerDock({
       </div>
       {isError && errorMessage ? (
         <p className="mt-2 text-xs text-status-error-strong px-1">{errorMessage}</p>
+      ) : null}
+      {attachmentErrorMessage ? (
+        <p className="mt-2 text-xs text-status-error-strong px-1">{attachmentErrorMessage}</p>
       ) : null}
     </form>
   );

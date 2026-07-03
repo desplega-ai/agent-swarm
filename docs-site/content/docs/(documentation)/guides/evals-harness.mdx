@@ -5,7 +5,7 @@ description: Run scenario × harness-config evaluation matrices against real Age
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-The `evals/` sub-project is Agent Swarm's evaluation harness. It runs a **scenario × harness-config matrix** against fresh swarm stacks in **E2B sandboxes**, captures the resulting transcripts and artifacts, and grades each attempt with deterministic checks plus optional LLM or agentic judges.
+The `apps/evals/` sub-project is Agent Swarm's evaluation harness. It runs a **scenario × harness-config matrix** against fresh swarm stacks in **E2B sandboxes**, captures the resulting transcripts and artifacts, and grades each attempt with deterministic checks plus optional LLM or agentic judges.
 
 Use it when you need a repeatable answer to questions like:
 
@@ -49,7 +49,7 @@ Results are stored in a Turso-backed libsql replica, so local runs can be resume
 ## Quick Start
 
 ```bash
-cd evals
+cd apps/evals
 bun install
 bun src/cli.ts registry
 bun src/cli.ts run --scenarios memory-seeded-recall --configs claude-haiku
@@ -59,14 +59,14 @@ bun src/cli.ts serve
 The designated smoke scenario is `memory-seeded-recall`. It is the cheapest meaningful end-to-end check because it proves real server-side memory embedding and retrieval without paying for judge-model work.
 
 <Callout type="info">
-`memory-seeded-recall` requires `EMBEDDING_API_KEY` in `evals/.env`. The old `OPENAI_API_KEY` fallback is intentionally no longer injected for seeded-memory runs.
+`memory-seeded-recall` requires `EMBEDDING_API_KEY` in `apps/evals/.env`. The old `OPENAI_API_KEY` fallback is intentionally no longer injected for seeded-memory runs.
 </Callout>
 
 ## Core Concepts
 
 ### Scenarios
 
-Scenarios live under `evals/scenarios/`. They define:
+Scenarios live under `apps/evals/scenarios/`. They define:
 
 - The worker roster (`workers` or `lead` + workers)
 - Optional seeding (`sqlDump`, `memories`, `exec`)
@@ -76,7 +76,7 @@ Scenarios live under `evals/scenarios/`. They define:
 
 ### Harness Configs
 
-Harness configs live under `evals/configs/`. They map a scenario onto a concrete provider/model environment such as Claude, pi, Codex, or opencode. Heterogeneous rosters are supported through per-member overrides.
+Harness configs live under `apps/evals/configs/`. They map a scenario onto a concrete provider/model environment such as Claude, pi, Codex, or opencode. Heterogeneous rosters are supported through per-member overrides.
 
 ### Judges
 
@@ -97,7 +97,7 @@ The agentic judge is the strongest option when transcript-only grading is too tr
 
 ## Where To Look Next
 
-- Repo source of truth: [`evals/README.md`](https://github.com/desplega-ai/agent-swarm/blob/main/evals/README.md)
+- Repo source of truth: [`apps/evals/README.md`](https://github.com/desplega-ai/agent-swarm/blob/main/apps/evals/README.md)
 - E2B runtime model: [E2B Provider Smoke Tests](/docs/guides/e2b-provider-smoke-tests)
 - Worker/provider setup: [Harness Configuration](/docs/guides/harness-configuration)
 - Provider implementation details: [Adding a Harness Provider](/docs/guides/harness-providers)

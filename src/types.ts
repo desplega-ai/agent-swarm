@@ -435,6 +435,9 @@ export type TaskAttachmentKind = z.infer<typeof TaskAttachmentKindSchema>;
 
 const attachmentCommonFields = {
   name: z.string().min(1).describe("Display name for the attachment."),
+  providerId: z.string().min(1).optional(),
+  providerKey: z.string().min(1).optional(),
+  capabilities: z.record(z.string(), z.unknown()).optional(),
   mimeType: z.string().optional(),
   sizeBytes: z.number().int().min(0).optional(),
   sha256: z.string().optional(),
@@ -493,6 +496,9 @@ export const TaskAttachmentSchema = z.object({
   url: z.string().optional(),
   path: z.string().optional(),
   pageId: z.string().optional(),
+  providerId: z.string().optional(),
+  providerKey: z.string().optional(),
+  capabilities: z.record(z.string(), z.unknown()).optional(),
   // agent-fs only — pair with `path` to build a public live-host URL.
   orgId: z.string().optional(),
   driveId: z.string().optional(),
@@ -503,6 +509,8 @@ export const TaskAttachmentSchema = z.object({
   description: z.string().optional(),
   isPrimary: z.boolean().default(false),
   createdAt: z.iso.datetime(),
+  createdBy: z.string().optional(),
+  updatedBy: z.string().optional(),
 });
 export type TaskAttachment = z.infer<typeof TaskAttachmentSchema>;
 

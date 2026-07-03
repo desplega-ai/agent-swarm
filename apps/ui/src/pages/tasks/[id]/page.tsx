@@ -845,7 +845,7 @@ export default function TaskDetailPage() {
         </CollapsibleSection>
       )}
 
-      <TaskAttachmentsSection attachments={task.attachments} />
+      <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
 
       {!isFailed && !hasOutput && !hasAttachments && (
         <div className="flex items-center justify-center py-8 text-muted-foreground">
@@ -1124,7 +1124,7 @@ export default function TaskDetailPage() {
               </CollapsibleSection>
             )}
 
-            <TaskAttachmentsSection attachments={task.attachments} />
+            <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
 
             {hasSessionLogs ? (
               <SessionLogViewer

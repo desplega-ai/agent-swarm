@@ -2,6 +2,7 @@
   "title": "Guides",
   "pages": [
     "deployment",
+    "agent-fs-co-deployment",
     "self-hosted-sso",
     "e2b-provider-smoke-tests",
     "evals-harness",

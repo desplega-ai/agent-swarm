@@ -68,6 +68,12 @@ spec:
             {{- if .Values.agentFs.enabled }}
             - name: AGENT_FS_API_URL
               value: "http://{{ include "agent-swarm.fullname" . }}-agent-fs:{{ .Values.agentFs.port }}"
+            - name: API_AGENT_FS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agent-swarm.agentFsSecretName" . }}
+                  key: API_AGENT_FS_API_KEY
+                  optional: true
             {{- end }}
           startupProbe:
             httpGet:

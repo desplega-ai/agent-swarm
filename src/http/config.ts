@@ -21,6 +21,17 @@ import { json, jsonError } from "./utils";
 
 const MAX_ENV_PRESENCE_KEYS = 200;
 
+// Config keys the API server owns for its own use and must NEVER hand out over
+// HTTP — workers/entrypoints read config to build their env, and the agent-fs
+// bootstrap admin key would let a compromised worker administer the shared org.
+// The API materializes these into its own process.env at boot via
+// getInjectableGlobalConfigs, so no HTTP consumer legitimately needs them.
+const API_ONLY_CONFIG_KEYS = new Set(["API_AGENT_FS_API_KEY"]);
+
+function stripApiOnlyKeys<T extends { key: string }>(configs: T[]): T[] {
+  return configs.filter((config) => !API_ONLY_CONFIG_KEYS.has(config.key));
+}
+
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
 const getResolvedConfigRoute = route({
@@ -149,9 +160,8 @@ export async function handleConfig(
     const parsed = await getResolvedConfigRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
-    const configs = getResolvedConfig(
-      parsed.query.agentId || undefined,
-      parsed.query.repoId || undefined,
+    const configs = stripApiOnlyKeys(
+      getResolvedConfig(parsed.query.agentId || undefined, parsed.query.repoId || undefined),
     );
     const result = includeSecrets ? configs : maskSecrets(configs);
     if (includeSecrets) {
@@ -220,10 +230,12 @@ export async function handleConfig(
     const parsed = await listConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
-    const configs = getSwarmConfigs({
-      scope: parsed.query.scope || undefined,
-      scopeId: parsed.query.scopeId || undefined,
-    });
+    const configs = stripApiOnlyKeys(
+      getSwarmConfigs({
+        scope: parsed.query.scope || undefined,
+        scopeId: parsed.query.scopeId || undefined,
+      }),
+    );
     const listResult = includeSecrets ? configs : maskSecrets(configs);
     if (includeSecrets) {
       for (const c of listResult) {

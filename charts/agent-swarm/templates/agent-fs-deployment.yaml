@@ -51,12 +51,26 @@ spec:
             - secretRef:
                 name: {{ include "agent-swarm.agentFsSecretName" . }}
           env:
+            - name: AGENT_FS_HOME
+              value: /data
             - name: HOST
+              value: "0.0.0.0"
+            - name: SERVER_HOST
               value: "0.0.0.0"
             - name: PORT
               value: {{ .Values.agentFs.port | quote }}
+            - name: SERVER_PORT
+              value: {{ .Values.agentFs.port | quote }}
             - name: S3_BUCKET
               value: {{ .Values.agentFs.bucket | quote }}
+            - name: EMBEDDING_PROVIDER
+              value: {{ .Values.agentFs.embedding.provider | quote }}
+            - name: EMBEDDING_MODEL
+              value: {{ .Values.agentFs.embedding.model | quote }}
+            {{- if .Values.agentFs.appUrl }}
+            - name: AGENT_FS_APP_URL
+              value: {{ .Values.agentFs.appUrl | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.agentFs.resources | nindent 12 }}
           volumeMounts:

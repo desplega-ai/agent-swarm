@@ -227,8 +227,14 @@ agentFs:
     registry: ghcr.io
     repository: desplega-ai/agent-fs
     pullPolicy: IfNotPresent
-    tag: 0.7.2
+    tag: 0.9.0
   port: 7433
+  # -- Optional API-owned bootstrap key for agent-fs. When blank, the swarm API
+  # boot seeder registers a service user and persists its generated key in
+  # encrypted swarm_config as API_AGENT_FS_API_KEY.
+  apiKey: ""
+  # -- Public app URL used by agent-fs when it emits browser-facing file links.
+  appUrl: ""
   # -- Bucket name for agent-fs's object storage backend.
   bucket: ""
   resources: {}
@@ -246,10 +252,19 @@ agentFs:
     accessKeyId: ""
     secretAccessKey: ""
     endpoint: ""
+    publicEndpoint: ""
     region: ""
+    provider: ""
     # -- Pre-existing Secret with keys S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY,
-    # (optional) S3_ENDPOINT, S3_REGION. When set, inline values are ignored.
+    # (optional) S3_ENDPOINT, S3_PUBLIC_ENDPOINT, S3_REGION, S3_PROVIDER,
+    # API_AGENT_FS_API_KEY, EMBEDDING_API_KEY. When set, inline values are ignored.
     existingSecret: ""
+  # Embeddings default to the agent-fs local provider. Set provider=openai or
+  # provider=gemini and supply apiKey for semantic search backed by a hosted API.
+  embedding:
+    provider: local
+    model: ""
+    apiKey: ""
 
 # Shared workspace volume — alternative to agent-fs.
 #

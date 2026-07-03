@@ -218,13 +218,11 @@ function HomePageContent() {
             <Card>
               <CardContent className="p-4 flex items-center justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium">
-                    {agent_fs.configured ? "agent-fs configured" : "agent-fs not configured"}
-                  </p>
+                  <p className="text-sm font-medium">Active provider: {agent_fs.provider_id}</p>
                   <p className="text-xs text-muted-foreground truncate">
                     {agent_fs.configured
                       ? `Base URL: ${agent_fs.base_url}`
-                      : "Set AGENT_FS_API_URL to enable shared file storage."}
+                      : "Using local-fs. Set AGENT_FS_API_URL; the API will seed agent-fs credentials."}
                   </p>
                 </div>
                 {agent_fs.configured && agent_fs.base_url ? (
