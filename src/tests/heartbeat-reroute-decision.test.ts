@@ -38,6 +38,7 @@ import {
   CRASH_RECOVERY_PIN_TAG,
   createRerouteDecisionTask,
   createResumeFollowUp,
+  GRACEFUL_SHUTDOWN_PIN_TAG,
   RESUME_GENERATION_TAG_PREFIX,
 } from "../tasks/worker-follow-up";
 import { registerSendTaskTool } from "../tools/send-task";
@@ -68,6 +69,32 @@ function seedPinnedCrash(agentName: string) {
     ],
   });
   supersedeTask(original.id, { reason: "crash", resumeTaskId: r1.id });
+  return { agent, original: getTaskById(original.id)!, r1 };
+}
+
+/**
+ * Build the graceful-shutdown equivalent: a superseded original + a pending
+ * resume R1 (generation 1) pinned to the original agent with its own provenance
+ * tag.
+ */
+function seedPinnedGracefulShutdown(agentName: string) {
+  const agent = createAgent({ name: agentName, isLead: false, status: "idle" });
+  const original = createTaskExtended("Gracefully stopped worker's original work", {
+    agentId: agent.id,
+  });
+  startTask(original.id);
+  const r1 = createTaskExtended("Resume of gracefully stopped work", {
+    agentId: agent.id,
+    parentTaskId: original.id,
+    taskType: "resume",
+    tags: [
+      "auto-resume",
+      "reason:graceful_shutdown",
+      `${RESUME_GENERATION_TAG_PREFIX}1`,
+      GRACEFUL_SHUTDOWN_PIN_TAG,
+    ],
+  });
+  supersedeTask(original.id, { reason: "shutdown", resumeTaskId: r1.id });
   return { agent, original: getTaskById(original.id)!, r1 };
 }
 
@@ -254,6 +281,28 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     expect(decisions[0]!.agentId).toBe(lead.id);
 
     // Idempotent: second sweep — R1 is no longer pending, so it is not re-escalated.
+    const second = await codeLevelTriage();
+    expect(second.escalatedReroutes.length).toBe(0);
+    expect(getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision").length).toBe(
+      1,
+    );
+  });
+
+  test("stale graceful_shutdown pin older than grace → escalated to a Lead decision", async () => {
+    const lead = createAgent({ name: "lead", isLead: true, status: "busy" });
+    const { original, r1 } = seedPinnedGracefulShutdown("coder-graceful");
+    expect(r1.tags).toContain(GRACEFUL_SHUTDOWN_PIN_TAG);
+    ageCreatedAtPastGrace(r1.id);
+
+    const findings = await codeLevelTriage();
+
+    expect(findings.escalatedReroutes.length).toBe(1);
+    expect(findings.escalatedReroutes[0]!.originalTaskId).toBe(original.id);
+    expect(getTaskById(r1.id)!.status).not.toBe("pending");
+    const decisions = getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision");
+    expect(decisions.length).toBe(1);
+    expect(decisions[0]!.agentId).toBe(lead.id);
+
     const second = await codeLevelTriage();
     expect(second.escalatedReroutes.length).toBe(0);
     expect(getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision").length).toBe(
