@@ -137,10 +137,12 @@ agent-swarm/
 │   │   └── artifact.ts  # Artifact serve/list/stop commands
 │   └── hooks/           # Claude Code hooks
 ├── templates/           # Agent templates (official + community)
-├── templates-ui/        # Templates registry (Next.js app)
+├── apps/
+│   ├── ui/              # Dashboard UI (React + AG Grid)
+│   ├── templates-ui/    # Templates registry (Next.js app)
+│   └── evals/           # E2B-backed eval harness + UI
 ├── deploy/              # Deployment scripts
 ├── scripts/             # Utility scripts
-├── ui/                  # Dashboard UI (React + AG Grid)
 ├── docker-compose.example.yml
 ├── Dockerfile           # API server image
 ├── Dockerfile.worker    # Worker image

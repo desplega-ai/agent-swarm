@@ -12,6 +12,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Migration notes
 - **v1.106.0 setupScript privilege boundary:** per-agent `setupScript` and `/workspace/start-up.*` hooks now run as the unprivileged `worker` user after the container drops privileges, and the worker image no longer includes blanket passwordless sudo (#865, #866). Move root-requiring steps such as system package installs, `/usr/lib` global npm writes, service ownership changes, or local database bootstrap into the admin-controlled global `SETUP_SCRIPT` config, into the worker image, or into the built-in optional service toggles. Keep per-agent setup user-level, for example `bun i -g` or `npm config set prefix "$HOME/.npm-global"`.
 
+## [1.108.0] - 2026-07-03
+
+### Added
+- **Dashboard sessions can now create tasks with attached files and render those attachments in the drill-down sheet** (#895, #896) — the shared composer stages uploads, persists them after task creation, and shows the same task files inside both the sessions sheet and the full task detail page.
+- **Agent-fs now has first-class provider-backed task attachment plumbing across API, worker, and dashboard flows** (#850) — shared-file provisioning, attachment resolution, and provider-backed download/delete paths now work cleanly for agent-authored files instead of only the old task-path upload layout.
+- **Cloud app favorites and page slug routes landed in the dashboard** (#887) — operators can pin preferred cloud apps and use stable page slugs for shared routes.
+
+### Changed
+- **The dashboard, templates registry, and eval harness now live under `apps/*` in the monorepo** (#892) — build, Docker, CI, and repo docs all follow the new `apps/ui`, `apps/templates-ui`, and `apps/evals` layout.
+
+### Fixed
+- **Worker startup scripts now warn instead of crashing the worker by default after privilege drop** (#891) — per-agent setup failures log migration guidance and the pod keeps booting unless `STARTUP_SCRIPT_STRICT=true`.
+- **GitHub workflow enqueues now use the GraphQL mutation path when classic auto-merge is disabled** (#890) — CI-triggered queueing stays aligned with the repo's merge-queue setup.
+- **Pages can now serve video previews under the right CSP and Linear tracker tasks avoid duplicate context-key collisions** (#888, #886) — page media embeds load correctly and Linear-triggered follow-up tasks stay scoped to the right thread context.
+
 ## [1.107.0] - 2026-07-02
 
 ### Added
