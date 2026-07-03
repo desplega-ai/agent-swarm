@@ -13,16 +13,9 @@ import {
   Paperclip,
   Star,
   Trash2,
-  Upload,
 } from "lucide-react";
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import {
-  fetchTaskAttachmentBlob,
-  useDeleteAttachment,
-  useFsCapabilities,
-  useTaskAttachments,
-  useUploadAttachment,
-} from "@/api/fs";
+import { useEffect, useMemo, useState } from "react";
+import { fetchTaskAttachmentBlob, useDeleteAttachment, useTaskAttachments } from "@/api/fs";
 import type { TaskAttachment, TaskAttachmentKind } from "@/api/types";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { Badge } from "@/components/ui/badge";
@@ -271,7 +264,6 @@ function AttachmentRow({
   const [expanded, setExpanded] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
-  const previewStateRef = useRef(preview.kind);
   // For agent-fs / shared-fs we show the raw path so users can at least copy
   // it; for `page` and `url` the anchor itself communicates the target.
   const pathDisplay =
@@ -283,11 +275,7 @@ function AttachmentRow({
 
   useEffect(() => {
     const shouldLoadPromptThumbnail = variant === "prompt" && previewKind === "image";
-    if (
-      !(expanded || shouldLoadPromptThumbnail) ||
-      !previewKind ||
-      previewStateRef.current !== "idle"
-    ) {
+    if (!(expanded || shouldLoadPromptThumbnail) || !previewKind || preview.kind !== "idle") {
       return;
     }
 
@@ -327,11 +315,7 @@ function AttachmentRow({
     return () => {
       cancelled = true;
     };
-  }, [attachment.id, expanded, previewKind, taskId, variant]);
-
-  useEffect(() => {
-    previewStateRef.current = preview.kind;
-  }, [preview.kind]);
+  }, [attachment.id, expanded, preview.kind, previewKind, taskId, variant]);
 
   useEffect(() => {
     return () => {
@@ -789,43 +773,27 @@ function PreviewMedia({
   );
 }
 
-/**
- * Renders the `Attachments` card on a task detail page. The card stays visible
- * even when empty so humans can attach input files before or during execution.
- */
+/** Renders the `Attachments` card on a task detail page when files exist. */
 export function TaskAttachmentsSection({
   taskId,
   attachments,
   className,
-  hideWhenEmpty = false,
 }: {
   taskId: string;
   attachments: TaskAttachment[] | undefined;
   className?: string;
-  hideWhenEmpty?: boolean;
 }) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const { data: capabilities } = useFsCapabilities();
   const listQuery = useTaskAttachments(taskId, attachments);
-  const upload = useUploadAttachment(taskId);
   const remove = useDeleteAttachment(taskId);
 
   const rows = useMemo(
     () => listQuery.data?.attachments ?? attachments ?? [],
     [attachments, listQuery.data?.attachments],
   );
-  const uploadSupported = capabilities?.providerId !== "unavailable";
 
-  if (hideWhenEmpty && rows.length === 0 && !listQuery.isLoading) {
+  if (rows.length === 0) {
     return null;
   }
-
-  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    upload.mutate({ file, intent: "input" });
-  };
 
   const handleDownload = async (attachment: TaskAttachment) => {
     const blob = await fetchTaskAttachmentBlob(taskId, attachment.id);
@@ -855,52 +823,18 @@ export function TaskAttachmentsSection({
       defaultOpen
     >
       <div className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 text-xs text-muted-foreground">
-            <span className="font-mono">{capabilities?.providerId ?? "file provider"}</span>
-            {capabilities?.capabilities.search ? " · search enabled" : " · core files"}
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            aria-label="Upload attachment file"
-            className="sr-only"
-            onChange={handleFileChange}
-          />
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={!uploadSupported || upload.isPending}
-          >
-            {upload.isPending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Upload className="h-3.5 w-3.5" />
-            )}
-            Upload
-          </Button>
+        <div className="max-h-[34rem] space-y-2 overflow-auto pr-1">
+          {rows.map((a) => (
+            <AttachmentRow
+              key={a.id}
+              attachment={a}
+              onDownload={handleDownload}
+              onDelete={handleDelete}
+              deleting={remove.isPending && remove.variables === a.id}
+              taskId={taskId}
+            />
+          ))}
         </div>
-
-        {rows.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border py-6 text-center text-xs text-muted-foreground">
-            No attachments
-          </div>
-        ) : (
-          <div className="max-h-[34rem] space-y-2 overflow-auto pr-1">
-            {rows.map((a) => (
-              <AttachmentRow
-                key={a.id}
-                attachment={a}
-                onDownload={handleDownload}
-                onDelete={handleDelete}
-                deleting={remove.isPending && remove.variables === a.id}
-                taskId={taskId}
-              />
-            ))}
-          </div>
-        )}
       </div>
     </CollapsibleSection>
   );
