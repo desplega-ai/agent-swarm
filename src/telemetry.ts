@@ -188,13 +188,23 @@ export function track(options: TrackOptions): void {
       actor_anonymous_id: installationId,
       properties: {
         ...(options.properties ?? {}),
-        // Cloud-cohort signal derived from MCP_BASE_URL at init time.
+        // Cloud-cohort signal. Two independent signals OR'd together:
+        // `cachedIsCloud` (MCP_BASE_URL points at a host we own, resolved at
+        // init time) catches self-host operators who point their swarm at
+        // our managed MCP endpoint; `isCloudDeployment()` (SWARM_CLOUD env
+        // var, read fresh) catches hosted Swarm Cloud deployments, whose
+        // MCP_BASE_URL is the intra-compose `http://api:3013` address and so
+        // never matches a cloud hostname on its own — SWARM_CLOUD=true is the
+        // signal those deployments actually carry (see agent-swarm-internal's
+        // .env.personalization). Growth reporting keys off this exact field
+        // (`properties_json.is_cloud` in ClickHouse), so both cohorts must
+        // resolve true here, not just in `metadata.is_cloud` below.
         // Placed at the top level of `properties_json` so ClickHouse can
         // GROUP BY without descending into nested objects. Spread LAST so
         // caller-supplied keys can never spoof the cohort classification.
         // The hostname is intentionally NOT included — telemetry must stay
         // anonymous, and the boolean is sufficient to split cloud vs self-host.
-        is_cloud: cachedIsCloud,
+        is_cloud: cachedIsCloud || isCloudDeployment(),
         is_e2b: cachedIsE2b,
         swarmVersion: pkg.version,
       },
