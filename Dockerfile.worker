@@ -108,7 +108,7 @@ RUN HOME=/home/worker BUN_INSTALL=/home/worker/.bun curl -fsSL https://bun.sh/in
 ENV PATH="/home/worker/.bun/bin:$PATH"
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.197
+ARG CLAUDE_CODE_VERSION=2.1.201
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -179,10 +179,10 @@ RUN codex plugin marketplace add mksglu/context-mode || true \
 # The installer drops the binary at ~/.opencode/bin/opencode and only modifies
 # ~/.bashrc — non-interactive shells (entrypoint, gosu drops) miss that PATH
 # update, so we extend ENV PATH explicitly.
-ARG OPENCODE_VERSION=1.17.12
+ARG OPENCODE_VERSION=1.17.13
 RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash
 ENV PATH="/home/worker/.opencode/bin:$PATH"
-ARG OPENCODE_SDK_VERSION=1.17.12
+ARG OPENCODE_SDK_VERSION=1.17.13
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION} \
