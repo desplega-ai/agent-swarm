@@ -12,6 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Migration notes
 - **v1.106.0 setupScript privilege boundary:** per-agent `setupScript` and `/workspace/start-up.*` hooks now run as the unprivileged `worker` user after the container drops privileges, and the worker image no longer includes blanket passwordless sudo (#865, #866). Move root-requiring steps such as system package installs, `/usr/lib` global npm writes, service ownership changes, or local database bootstrap into the admin-controlled global `SETUP_SCRIPT` config, into the worker image, or into the built-in optional service toggles. Keep per-agent setup user-level, for example `bun i -g` or `npm config set prefix "$HOME/.npm-global"`.
 
+## [1.109.1] - 2026-07-06
+
+### Changed
+- **Worker-image harness pins refreshed** (#909) — `Dockerfile.worker` now ships Claude Code `2.1.201`, Codex `0.142.5`, pi-coding-agent `0.80.3`, and opencode / `@opencode-ai/sdk` `1.17.13`.
+
 ## [1.109.0] - 2026-07-04
 
 ### Added
