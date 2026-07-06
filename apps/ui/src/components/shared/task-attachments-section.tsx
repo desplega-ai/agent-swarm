@@ -13,16 +13,9 @@ import {
   Paperclip,
   Star,
   Trash2,
-  Upload,
 } from "lucide-react";
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import {
-  fetchTaskAttachmentBlob,
-  useDeleteAttachment,
-  useFsCapabilities,
-  useTaskAttachments,
-  useUploadAttachment,
-} from "@/api/fs";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { fetchTaskAttachmentBlob, useDeleteAttachment, useTaskAttachments } from "@/api/fs";
 import type { TaskAttachment, TaskAttachmentKind } from "@/api/types";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { Badge } from "@/components/ui/badge";
@@ -256,12 +249,14 @@ function AttachmentRow({
   onDelete,
   deleting,
   taskId,
+  variant = "card",
 }: {
   attachment: TaskAttachment;
   onDownload: (attachment: TaskAttachment) => void;
-  onDelete: (attachment: TaskAttachment) => void;
-  deleting: boolean;
+  onDelete?: (attachment: TaskAttachment) => void;
+  deleting?: boolean;
   taskId: string;
+  variant?: "card" | "prompt";
 }) {
   const href = resolveHref(attachment);
   const descriptor = attachment.intent || attachment.description;
@@ -269,7 +264,9 @@ function AttachmentRow({
   const [expanded, setExpanded] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
-  const previewStateRef = useRef(preview.kind);
+  const previewStateRef = useRef<PreviewState["kind"]>("idle");
+  const sourceKey = `${taskId}:${attachment.id}`;
+  const previousSourceKeyRef = useRef(sourceKey);
   // For agent-fs / shared-fs we show the raw path so users can at least copy
   // it; for `page` and `url` the anchor itself communicates the target.
   const pathDisplay =
@@ -280,9 +277,26 @@ function AttachmentRow({
         : null;
 
   useEffect(() => {
-    if (!expanded || !previewKind || previewStateRef.current !== "idle") return;
+    if (previousSourceKeyRef.current === sourceKey) return;
+    previousSourceKeyRef.current = sourceKey;
+    previewStateRef.current = "idle";
+    setPreview({ kind: "idle" });
+    setExpanded(false);
+    setLightboxOpen(false);
+  }, [sourceKey]);
+
+  useEffect(() => {
+    const shouldLoadPromptThumbnail = variant === "prompt" && previewKind === "image";
+    if (
+      !(expanded || shouldLoadPromptThumbnail) ||
+      !previewKind ||
+      previewStateRef.current !== "idle"
+    ) {
+      return;
+    }
 
     let cancelled = false;
+    previewStateRef.current = "loading";
     setPreview({ kind: "loading" });
     fetchTaskAttachmentBlob(taskId, attachment.id)
       .then(async (blob) => {
@@ -290,6 +304,7 @@ function AttachmentRow({
         if (previewKind === "text") {
           const maxBytes = 512 * 1024;
           if (blob.size > maxBytes) {
+            previewStateRef.current = "error";
             setPreview({
               kind: "error",
               message:
@@ -298,6 +313,7 @@ function AttachmentRow({
             return;
           }
           const text = scrubPreviewText(await blob.text());
+          previewStateRef.current = "text";
           setPreview({
             kind: "text",
             text: text.slice(0, 20_000),
@@ -305,10 +321,12 @@ function AttachmentRow({
           });
           return;
         }
+        previewStateRef.current = "url";
         setPreview({ kind: "url", url: URL.createObjectURL(blob), contentType: previewKind });
       })
       .catch((error) => {
         if (cancelled) return;
+        previewStateRef.current = "error";
         setPreview({
           kind: "error",
           message: error instanceof Error ? error.message : "Preview failed.",
@@ -317,12 +335,11 @@ function AttachmentRow({
 
     return () => {
       cancelled = true;
+      if (previewStateRef.current === "loading") {
+        previewStateRef.current = "idle";
+      }
     };
-  }, [attachment.id, expanded, previewKind, taskId]);
-
-  useEffect(() => {
-    previewStateRef.current = preview.kind;
-  }, [preview.kind]);
+  }, [attachment.id, expanded, previewKind, taskId, variant]);
 
   useEffect(() => {
     return () => {
@@ -334,6 +351,143 @@ function AttachmentRow({
     if (!previewKind) return;
     setExpanded((value) => !value);
   };
+
+  if (variant === "prompt") {
+    const openPreview = () => {
+      if (!previewKind) {
+        onDownload(attachment);
+        return;
+      }
+      setExpanded(true);
+      setLightboxOpen(true);
+    };
+
+    if (previewKind === "image") {
+      return (
+        <>
+          <button
+            type="button"
+            onClick={openPreview}
+            className={cn(
+              "group relative h-24 w-32 overflow-hidden rounded-xl border border-border bg-muted",
+              "shadow-sm transition hover:border-primary/45 hover:shadow-md",
+              "sm:h-28 sm:w-40",
+            )}
+            aria-label={`Expand ${attachment.name} preview`}
+            title={attachment.name}
+          >
+            {preview.kind === "url" ? (
+              <img src={preview.url} alt={attachment.name} className="h-full w-full object-cover" />
+            ) : (
+              <span className="flex h-full w-full items-center justify-center text-muted-foreground">
+                {preview.kind === "loading" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ImageIcon className="h-5 w-5" />
+                )}
+              </span>
+            )}
+            <span className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-background/80 px-2 py-1 text-[10px] text-foreground opacity-0 backdrop-blur-sm transition group-hover:opacity-100">
+              <ImageIcon className="h-3 w-3 shrink-0" />
+              <span className="truncate">{attachment.name}</span>
+            </span>
+          </button>
+
+          <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
+            <DialogContent className="max-h-[92vh] overflow-hidden p-4 sm:max-w-4xl">
+              <DialogHeader className="pr-8">
+                <DialogTitle className="truncate text-base">{attachment.name}</DialogTitle>
+                <DialogDescription>{previewKindLabel(previewKind)}</DialogDescription>
+              </DialogHeader>
+              {preview.kind === "loading" ? (
+                <div className="flex h-48 items-center justify-center gap-2 rounded-md border border-dashed border-border bg-muted/20 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading preview
+                </div>
+              ) : preview.kind === "error" ? (
+                <div className="rounded-md border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+                  {preview.message}
+                </div>
+              ) : preview.kind === "url" ? (
+                <PreviewMedia name={attachment.name} preview={preview} />
+              ) : null}
+            </DialogContent>
+          </Dialog>
+        </>
+      );
+    }
+
+    const label =
+      previewKind === "video"
+        ? "Video"
+        : previewKind === "pdf"
+          ? "PDF"
+          : previewKind === "text"
+            ? "Text"
+            : attachment.mimeType?.split("/")[1]?.toUpperCase() || attachment.kind;
+
+    return (
+      <>
+        <button
+          type="button"
+          onClick={openPreview}
+          className={cn(
+            "inline-flex max-w-[15rem] items-center gap-2 rounded-xl border border-border",
+            "bg-background px-2.5 py-2 text-left text-xs shadow-sm transition",
+            "hover:border-primary/45 hover:bg-muted/30 sm:max-w-[18rem]",
+          )}
+          aria-label={
+            previewKind ? `Expand ${attachment.name} preview` : `Download ${attachment.name}`
+          }
+          title={attachment.name}
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+            <PreviewIcon kind={previewKind} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-medium text-foreground">{attachment.name}</span>
+            <span className="block truncate font-mono text-[10px] uppercase text-muted-foreground">
+              {label}
+              {attachment.sizeBytes != null ? ` · ${formatSize(attachment.sizeBytes)}` : ""}
+            </span>
+          </span>
+          {previewKind ? (
+            <Expand className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <Download className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          )}
+        </button>
+
+        <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
+          <DialogContent className="max-h-[92vh] overflow-hidden p-4 sm:max-w-4xl">
+            <DialogHeader className="pr-8">
+              <DialogTitle className="truncate text-base">{attachment.name}</DialogTitle>
+              <DialogDescription>
+                {previewKind ? previewKindLabel(previewKind) : ""}
+              </DialogDescription>
+            </DialogHeader>
+            {preview.kind === "loading" ? (
+              <div className="flex h-48 items-center justify-center gap-2 rounded-md border border-dashed border-border bg-muted/20 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading preview
+              </div>
+            ) : preview.kind === "error" ? (
+              <div className="rounded-md border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+                {preview.message}
+              </div>
+            ) : preview.kind === "text" ? (
+              <pre className="max-h-[72vh] overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/20 p-3 text-xs leading-relaxed">
+                {preview.text}
+                {preview.truncated ? "\n\n[Preview truncated]" : ""}
+              </pre>
+            ) : preview.kind === "url" ? (
+              <PreviewMedia name={attachment.name} preview={preview} />
+            ) : null}
+          </DialogContent>
+        </Dialog>
+      </>
+    );
+  }
 
   return (
     <div className="rounded-md border border-border/70 bg-background">
@@ -447,7 +601,7 @@ function AttachmentRow({
             size="icon"
             variant="ghost"
             className="h-7 w-7 text-status-error hover:text-status-error"
-            onClick={() => onDelete(attachment)}
+            onClick={() => onDelete?.(attachment)}
             disabled={deleting}
             aria-label={`Delete ${attachment.name}`}
             title="Delete"
@@ -503,7 +657,16 @@ function AttachmentRow({
               {previewKind ? previewKindLabel(previewKind) : ""}
             </DialogDescription>
           </DialogHeader>
-          {preview.kind === "text" ? (
+          {preview.kind === "loading" ? (
+            <div className="flex h-48 items-center justify-center gap-2 rounded-md border border-dashed border-border bg-muted/20 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading preview
+            </div>
+          ) : preview.kind === "error" ? (
+            <div className="rounded-md border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+              {preview.message}
+            </div>
+          ) : preview.kind === "text" ? (
             <pre className="max-h-[72vh] overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/20 p-3 text-xs leading-relaxed">
               {preview.text}
               {preview.truncated ? "\n\n[Preview truncated]" : ""}
@@ -514,6 +677,53 @@ function AttachmentRow({
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export function TaskPromptAttachments({
+  taskId,
+  attachments,
+  className,
+}: {
+  taskId: string;
+  attachments: TaskAttachment[] | undefined;
+  className?: string;
+}) {
+  const listQuery = useTaskAttachments(taskId, attachments);
+  const rows = useMemo(
+    () => listQuery.data?.attachments ?? attachments ?? [],
+    [attachments, listQuery.data?.attachments],
+  );
+
+  if (rows.length === 0) return null;
+
+  const handleDownload = async (attachment: TaskAttachment) => {
+    const blob = await fetchTaskAttachmentBlob(taskId, attachment.id);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = attachment.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <section
+      className={cn("flex max-w-full flex-wrap justify-end gap-2", className)}
+      aria-label="Prompt attachments"
+    >
+      {rows.map((a) => (
+        <AttachmentRow
+          key={a.id}
+          attachment={a}
+          onDownload={handleDownload}
+          taskId={taskId}
+          variant="prompt"
+        />
+      ))}
+    </section>
   );
 }
 
@@ -587,47 +797,27 @@ function PreviewMedia({
   );
 }
 
-/**
- * Renders the `Attachments` card on a task detail page. The card stays visible
- * even when empty so humans can attach input files before or during execution.
- */
+/** Renders the `Attachments` card on a task detail page when files exist. */
 export function TaskAttachmentsSection({
   taskId,
   attachments,
   className,
-  hideWhenEmpty = false,
 }: {
   taskId: string;
   attachments: TaskAttachment[] | undefined;
   className?: string;
-  hideWhenEmpty?: boolean;
 }) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const { data: capabilities } = useFsCapabilities();
   const listQuery = useTaskAttachments(taskId, attachments);
-  const upload = useUploadAttachment(taskId);
   const remove = useDeleteAttachment(taskId);
 
   const rows = useMemo(
     () => listQuery.data?.attachments ?? attachments ?? [],
     [attachments, listQuery.data?.attachments],
   );
-  const uploadSupported = capabilities?.providerId !== "unavailable";
 
-  if (hideWhenEmpty && rows.length === 0 && !listQuery.isLoading) {
+  if (rows.length === 0) {
     return null;
   }
-
-  if (hideWhenEmpty && rows.length === 0 && !listQuery.isLoading) {
-    return null;
-  }
-
-  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    upload.mutate({ file, intent: "input" });
-  };
 
   const handleDownload = async (attachment: TaskAttachment) => {
     const blob = await fetchTaskAttachmentBlob(taskId, attachment.id);
@@ -657,52 +847,18 @@ export function TaskAttachmentsSection({
       defaultOpen
     >
       <div className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 text-xs text-muted-foreground">
-            <span className="font-mono">{capabilities?.providerId ?? "file provider"}</span>
-            {capabilities?.capabilities.search ? " · search enabled" : " · core files"}
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            aria-label="Upload attachment file"
-            className="sr-only"
-            onChange={handleFileChange}
-          />
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={!uploadSupported || upload.isPending}
-          >
-            {upload.isPending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Upload className="h-3.5 w-3.5" />
-            )}
-            Upload
-          </Button>
+        <div className="max-h-[34rem] space-y-2 overflow-auto pr-1">
+          {rows.map((a) => (
+            <AttachmentRow
+              key={a.id}
+              attachment={a}
+              onDownload={handleDownload}
+              onDelete={handleDelete}
+              deleting={remove.isPending && remove.variables === a.id}
+              taskId={taskId}
+            />
+          ))}
         </div>
-
-        {rows.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border py-6 text-center text-xs text-muted-foreground">
-            No attachments
-          </div>
-        ) : (
-          <div className="max-h-[34rem] space-y-2 overflow-auto pr-1">
-            {rows.map((a) => (
-              <AttachmentRow
-                key={a.id}
-                attachment={a}
-                onDownload={handleDownload}
-                onDelete={handleDelete}
-                deleting={remove.isPending && remove.variables === a.id}
-                taskId={taskId}
-              />
-            ))}
-          </div>
-        )}
       </div>
     </CollapsibleSection>
   );

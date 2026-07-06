@@ -457,6 +457,29 @@ describe("initTelemetry", () => {
       expect(properties.mcp_host).toBeUndefined();
     });
 
+    test("hosted Swarm Cloud shape (intra-compose MCP_BASE_URL + SWARM_CLOUD=true) → properties.is_cloud=true", async () => {
+      // Mirrors agent-swarm-internal's Hetzner compose template: MCP_BASE_URL
+      // is the intra-compose service address (never a cloud hostname), and
+      // SWARM_CLOUD=true is seeded via .env.personalization. The hostname
+      // heuristic alone would misclassify this as self-host.
+      process.env.MCP_BASE_URL = "http://api:3013";
+      process.env.SWARM_CLOUD = "true";
+      await initTelemetry(
+        "api-server",
+        async () => "install_hosted_cloud_test",
+        async () => {},
+      );
+
+      track({ event: "server.started", properties: { port: 3013 } });
+      await new Promise((r) => setTimeout(r, 0));
+
+      const properties = (captured as { properties: Record<string, unknown> }).properties;
+      expect(properties.is_cloud).toBe(true);
+      expect(properties.mcp_host).toBeUndefined();
+
+      delete process.env.SWARM_CLOUD;
+    });
+
     test("caller properties cannot override is_cloud", async () => {
       // Defense-in-depth: even if a caller passes through user-supplied
       // values, the cohort signal shipped on every event must come from

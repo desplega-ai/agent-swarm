@@ -10,6 +10,11 @@ const packageJson = JSON.parse(
   version?: string;
 };
 
+const allowedHosts =
+  process.env.VITE_ALLOWED_HOSTS === "*"
+    ? true
+    : process.env.VITE_ALLOWED_HOSTS?.split(",").map((host) => host.trim());
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   define: {
@@ -22,6 +27,7 @@ export default defineConfig({
   },
   server: {
     port: 5274,
+    allowedHosts,
     proxy: {
       "/api": {
         target: process.env.VITE_PROXY_TARGET || "http://localhost:3013",

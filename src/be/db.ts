@@ -6923,18 +6923,18 @@ export function getStalledInProgressTasks(thresholdMinutes: number = 30): AgentT
 }
 
 /**
- * Genuine same-agent crash-recovery PINS (tagged `crash-recovery-pin`, DES-523
- * Phase 1) that are still `pending` `graceMin` minutes after creation — the
- * heartbeat reaper escalates these to a Lead reroute-decision.
+ * Genuine same-agent protected resume PINS (tagged `crash-recovery-pin` or
+ * `graceful-shutdown-pin`) that are still `pending` `graceMin` minutes after
+ * creation — the heartbeat reaper escalates these to a Lead reroute-decision.
  *
  * Three scoping clauses, each load-bearing:
- *  - `tags LIKE '%"crash-recovery-pin"%'` — restricts to resumes actually pinned
- *    to their original agent on the crash path. Without it, a *pooled* resume
- *    that `autoAssignPoolTasks` flips to `pending` earlier in the SAME sweep
- *    (keeping its old `createdAt`) would be reaped and cancelled before the
- *    assigned worker polls; it also keeps `context_limits` / `manual_supersede`
- *    pins from being escalated under a `crash_recovery` label. (Literal must
- *    match `CRASH_RECOVERY_PIN_TAG` in src/tasks/worker-follow-up.ts.)
+ *  - pin tags — restricts to resumes actually pinned to their original agent on
+ *    protected paths. Without this, a *pooled* resume that `autoAssignPoolTasks`
+ *    flips to `pending` earlier in the SAME sweep (keeping its old `createdAt`)
+ *    would be reaped and cancelled before the assigned worker polls; it also
+ *    keeps `context_limits` / `manual_supersede` pins from being escalated under
+ *    the protected-pin label. (Literals must match the pin tag constants in
+ *    src/tasks/worker-follow-up.ts.)
  *  - `status = 'pending'` — the "currently unreclaimed" discriminator: when the
  *    agent reclaims via the normal poll path, `startTask` flips the row to
  *    `in_progress` and it drops out of this set. (A reclaimed resume whose
@@ -6954,7 +6954,7 @@ export function getStalePinnedResumes(graceMin: number): AgentTask[] {
     .prepare<AgentTaskRow, [string]>(
       `SELECT * FROM agent_tasks
        WHERE taskType = 'resume' AND status = 'pending'
-         AND tags LIKE '%"crash-recovery-pin"%'
+         AND (tags LIKE '%"crash-recovery-pin"%' OR tags LIKE '%"graceful-shutdown-pin"%')
          AND createdAt < ?
        ORDER BY createdAt ASC`,
     )

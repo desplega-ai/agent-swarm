@@ -12,6 +12,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Migration notes
 - **v1.106.0 setupScript privilege boundary:** per-agent `setupScript` and `/workspace/start-up.*` hooks now run as the unprivileged `worker` user after the container drops privileges, and the worker image no longer includes blanket passwordless sudo (#865, #866). Move root-requiring steps such as system package installs, `/usr/lib` global npm writes, service ownership changes, or local database bootstrap into the admin-controlled global `SETUP_SCRIPT` config, into the worker image, or into the built-in optional service toggles. Keep per-agent setup user-level, for example `bun i -g` or `npm config set prefix "$HOME/.npm-global"`.
 
+## [1.110.0] - 2026-07-06
+
+### Changed
+- **Worker-image harness pins refreshed** (#909) — `Dockerfile.worker` now ships Claude Code `2.1.201`, Codex `0.142.5`, pi-coding-agent `0.80.3`, and opencode / `@opencode-ai/sdk` `1.17.13`.
+- **Crash-recovery resumes pin to their own agent instead of the role-blind pool** (#911) — when the heartbeat detects a crashed worker, the `resume` task is now assigned back to the original stable-ID agent and reclaimed when it restarts instead of being released to the unassigned pool. A pin that is never reclaimed within `HEARTBEAT_RESUME_PIN_GRACE_MIN` (default 10 min) is escalated to a Lead-owned `task.reroute.decision` follow-up for explicit re-delegation.
+
+## [1.109.0] - 2026-07-04
+
+### Added
+- **Dashboard task attachments now preview inline and render above session prompts** (#898, #900) — uploaded files are visible directly in the session timeline instead of being buried behind the lower attachment cards only.
+
+### Fixed
+- **Assigned workers now get a one-call attachment fetch recipe and local attachment previews keep the right MIME type** (#899) — task prompts include a direct `/api/fs/tasks/{taskId}/files/{attachmentId}/raw` download command, and `local-fs` persists the uploaded content type so inline previews render correctly.
+- **Attachment cards in the dashboard no longer show empty shells or cancel active previews as easily** (#903, #905) — empty states are hidden and the preview loader is more resilient while files stream in.
+- **Agent-fs provisioning no longer downgrades existing shared-drive members** (#904) — founder and executive swarm roles now provision as `editor`, and the native agent-fs seeder skips current members whose role is already equal or higher instead of overwriting them with a lower invite role.
+- **Hosted-install telemetry now counts Swarm Cloud deployments correctly in the `is_cloud` cohort** (#901).
+
 ## [1.108.0] - 2026-07-03
 
 ### Added
@@ -138,9 +155,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - **Memory retrieval rows now carry grouping metadata** (#780) — `memory_retrieval` records now capture a stable `retrievalId` plus per-result rank so downstream raters and analytics can group one search/get fan-out into a coherent retrieval event.
-
-### Changed
-- **Crash-recovery resumes pin to their own agent instead of the role-blind pool** (DES-523) — when the heartbeat detects a crashed worker, the `resume` task is now assigned back to the original (stable-ID) agent and reclaimed when it restarts, instead of being released to the unassigned pool where a wrong-specialization worker could grab it. A pin that is never reclaimed within `HEARTBEAT_RESUME_PIN_GRACE_MIN` (default 10 min) is escalated to a Lead-owned `task.reroute.decision` follow-up, which re-delegates the work via `send-task` with an explicit agent (never re-pooled). The crash path no longer touches the unassigned pool. Set `HEARTBEAT_PIN_CRASH_RESUME=0` to restore the previous pool-fallback behavior, or `HEARTBEAT_RESUME_PIN_GRACE_MIN=0` to disable the escalation reaper.
 
 ### Fixed
 - **Slack auto-join now preserves the info-failure fallback while still blocking external Slack Connect channels** (#790, #792) — public internal channels still auto-join on demand, but external/shared channels now return an explicit invite-required error and a `conversations.info` failure no longer disables the original join-and-retry fallback.

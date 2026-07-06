@@ -37,6 +37,12 @@ export class LocalFsProvider implements FileStorageProvider {
     }
 
     await Bun.write(target, await new Response(body).arrayBuffer());
+    // Persist the real upload Content-Type alongside the blob — `Bun.file(target).type`
+    // only guesses from the storage path's extension, which is wrong whenever the
+    // stored key doesn't carry the original filename's extension (see head()).
+    if (options.contentType) {
+      await Bun.write(this.metaPath(target), JSON.stringify({ contentType: options.contentType }));
+    }
     return this.head(scope);
   }
 
@@ -52,12 +58,16 @@ export class LocalFsProvider implements FileStorageProvider {
     const target = this.localPath(scope);
     try {
       const info = await stat(target);
+      const storedContentType = await this.readStoredContentType(target);
       return {
         providerId: this.id,
         key: providerPath(scope),
         taskId: scope.taskId,
         name: scope.name,
-        contentType: Bun.file(target).type || undefined,
+        // Prefer the Content-Type recorded at upload time; fall back to
+        // extension-based sniffing only for files that predate the sidecar
+        // metadata (or were written directly on disk without going through upload()).
+        contentType: storedContentType ?? Bun.file(target).type ?? undefined,
         sizeBytes: info.size,
         updatedAt: info.mtime.toISOString(),
       };
@@ -82,12 +92,17 @@ export class LocalFsProvider implements FileStorageProvider {
   }
 
   async delete(scope: FileScope): Promise<void> {
-    await rm(this.localPath(scope), { force: true });
+    const target = this.localPath(scope);
+    await rm(target, { force: true });
+    await rm(this.metaPath(target), { force: true });
   }
 
   async copy(source: FileScope, destination: FileScope): Promise<FileObject> {
+    const sourceHead = await this.head(source);
     const response = await this.download(source);
-    await this.upload(destination, await response.arrayBuffer());
+    await this.upload(destination, await response.arrayBuffer(), {
+      contentType: sourceHead.contentType,
+    });
     return this.head(destination);
   }
 
@@ -133,6 +148,23 @@ export class LocalFsProvider implements FileStorageProvider {
     return join(this.rootDir, providerPath(scope));
   }
 
+  private metaPath(target: string): string {
+    return `${target}.meta.json`;
+  }
+
+  private async readStoredContentType(target: string): Promise<string | undefined> {
+    try {
+      const metaFile = Bun.file(this.metaPath(target));
+      if (!(await metaFile.exists())) {
+        return undefined;
+      }
+      const meta = await metaFile.json();
+      return typeof meta?.contentType === "string" ? meta.contentType : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async walk(dir: string, visit: (path: string) => Promise<void>): Promise<void> {
     let entries: import("node:fs").Dirent<string>[];
     try {
@@ -148,7 +180,7 @@ export class LocalFsProvider implements FileStorageProvider {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) {
         await this.walk(path, visit);
-      } else if (entry.isFile()) {
+      } else if (entry.isFile() && !entry.name.endsWith(".meta.json")) {
         await visit(path);
       }
     }

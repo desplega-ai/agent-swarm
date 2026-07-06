@@ -398,6 +398,31 @@ When done, use \`store-progress\` with status: "completed" and include your outp
     expect(result.text).toBe(expected);
   });
 
+  test("task.trigger.assigned threads attachments_section between task_desc_section and output_instructions", () => {
+    const result = resolveTemplate("task.trigger.assigned", {
+      work_on_task_cmd: "/work-on-task",
+      task_id: "abc123",
+      task_desc_section: '\n\nTask: "Read the attached file"',
+      attachments_section:
+        "\n\n📎 Attachment(s) — fetch directly, no need to discover the storage path yourself:\n- IMG_1357.jpeg: `curl ...`",
+      output_instructions:
+        '\n\nWhen done, use `store-progress` with status: "completed" and include your output.',
+    });
+
+    expect(result.skipped).toBe(false);
+
+    const expected = `/work-on-task abc123
+
+Task: "Read the attached file"
+
+📎 Attachment(s) — fetch directly, no need to discover the storage path yourself:
+- IMG_1357.jpeg: \`curl ...\`
+
+When done, use \`store-progress\` with status: "completed" and include your output.`;
+
+    expect(result.text).toBe(expected);
+  });
+
   test("task.trigger.unread_mentions produces expected output", () => {
     const result = resolveTemplate("task.trigger.unread_mentions", {
       mention_count: 3,
