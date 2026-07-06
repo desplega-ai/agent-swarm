@@ -11,6 +11,16 @@ import { createToolRegistrar } from "@/tools/utils";
  */
 const WORKSPACE_DIR = "/workspace";
 
+function resolveTaskUploadThreadTs(task: ReturnType<typeof getTaskById>): string | undefined {
+  if (!task) return undefined;
+
+  if (task.slackChannelId?.startsWith("D")) {
+    return task.slackTreeRootMessageTs ?? task.slackProgressMessageTs ?? task.slackThreadTs;
+  }
+
+  return task.slackThreadTs;
+}
+
 /**
  * Resolves a file path to an absolute path and checks if it exists.
  *
@@ -203,7 +213,7 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
           };
         }
         slackChannelId = task.slackChannelId;
-        slackThreadTs = task.slackThreadTs;
+        slackThreadTs = resolveTaskUploadThreadTs(task);
       } else if (channelId) {
         // Direct channel access requires lead privileges
         if (!agent.isLead) {
