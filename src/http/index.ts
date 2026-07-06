@@ -34,6 +34,7 @@ import { handleAgentRegister, handleAgentsRest } from "./agents";
 import { handleApiKeys } from "./api-keys";
 import { handleApprovalRequests } from "./approval-requests";
 import { handleBudgets } from "./budgets";
+import { handleCodexOAuthKeepWarm } from "./codex-oauth-keep-warm";
 import { handleConfig } from "./config";
 import { handleContext } from "./context";
 import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
@@ -321,6 +322,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleMcpOAuth(req, res, pathSegments, queryParams),
         () => handleMemory(req, res, pathSegments, myAgentId),
         () => handleOAuthLocks(req, res, pathSegments, queryParams),
+        () => handleCodexOAuthKeepWarm(req, res, pathSegments),
         () => handlePagesPublic(req, res, pathSegments, queryParams),
         () => handlePageProxy(req, res),
         () => handlePages(req, res, pathSegments, queryParams, myAgentId),

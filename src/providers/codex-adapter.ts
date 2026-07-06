@@ -79,7 +79,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { type CodexAgentsMdHandle, writeCodexAgentsMd } from "./codex-agents-md";
 import { computeCodexCostUsd, getCodexContextWindow, resolveCodexModel } from "./codex-models";
 import { credentialsToAuthJson } from "./codex-oauth/auth-json.js";
-import { getValidCodexOAuth } from "./codex-oauth/storage.js";
+import { CodexOAuthRefreshError, getValidCodexOAuth } from "./codex-oauth/storage.js";
 import { resolveCodexPrompt } from "./codex-skill-resolver";
 import { createCodexSwarmEventHandler } from "./codex-swarm-events";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
@@ -240,7 +240,39 @@ export async function resolveCodexAuthMode(
   const slot = config.codexSlot ?? 0;
   const isPoolSlot = config.codexSlot !== undefined;
   if (config.apiUrl && config.apiKey && (currentMode !== "chatgpt" || isPoolSlot)) {
-    const oauthCreds = await getValidCodexOAuth(config.apiUrl, config.apiKey, slot);
+    let oauthCreds: Awaited<ReturnType<typeof getValidCodexOAuth>> = null;
+    try {
+      oauthCreds = await getValidCodexOAuth(config.apiUrl, config.apiKey, slot);
+    } catch (err) {
+      // For pool slots, a failed revalidation must NOT fall through to
+      // starting the session on the stale, refresh-token-blanked auth.json
+      // the runner materialized before this adapter ran — the spawned Codex
+      // CLI would then die ~20-40s later with a masked, unclassifiable 400
+      // ("Invalid 'refresh_token': empty string") instead of the real
+      // OpenAI error. Fail fast here with the real reason instead.
+      //
+      // Non-pool (local dev / single-credential) auth.json keeps the old
+      // graceful behavior: log and fall through to whatever auth.json /
+      // OPENAI_API_KEY already provides.
+      if (isPoolSlot) {
+        throw new Error(buildPoolRevalidationFailureReason(err, slot));
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      emit({
+        type: "raw_stderr",
+        content: `[codex] OAuth revalidation failed (non-fatal, non-pool auth): ${message}\n`,
+      });
+    }
+    if (!oauthCreds && isPoolSlot) {
+      // The runner's pool-slot resolution (`resolveCodexOAuthCredentialInfo`)
+      // only ever hands out a slot backed by a config-store entry — reaching
+      // here with nothing means the entry vanished between materialization
+      // and this revalidation (e.g. concurrent quarantine). Fail fast rather
+      // than starting on the stale auth.json the runner wrote.
+      throw new Error(
+        `[auth-error] Codex pool slot ${slot} revalidation failed: no credentials found in config store — the slot may have just been quarantined; re-run codex-login for this slot if this persists.`,
+      );
+    }
     if (oauthCreds) {
       try {
         // For pool slots, strip the refresh token from the auth.json handed
@@ -276,6 +308,30 @@ export async function resolveCodexAuthMode(
   }
 
   return currentMode;
+}
+
+/**
+ * Build the `failureReason` for a pool-slot OAuth revalidation failure
+ * (see `resolveCodexAuthMode` above).
+ *
+ * Wording matters: when the failure is a rejected refresh whose body
+ * indicates the credential is dead (invalid_grant, reused, revoked), the
+ * upstream error body is embedded verbatim so the EXISTING
+ * `codex-auth-expiry-watch` script's `DEAD_TOKEN_LIKE` patterns (which match
+ * on substrings like "refresh token was already used" / "log out and sign in
+ * again") still catch it with zero script changes. A lock-wait timeout is
+ * transient/retryable — its wording is deliberately distinct so the watch
+ * does NOT bench a slot over a temporary contention blip.
+ */
+function buildPoolRevalidationFailureReason(err: unknown, slot: number): string {
+  if (err instanceof CodexOAuthRefreshError) {
+    if (err.reason === "lock_timeout") {
+      return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: timed out waiting for the refresh lock — transient, will retry on next task.`;
+    }
+    return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: refresh rejected (${err.status ?? "unknown status"} ${err.body ?? ""}) — credential likely revoked; re-run codex-login for this slot.`;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return `[auth-error] Codex pool slot ${slot} revalidation failed: ${message}`;
 }
 
 /**
@@ -992,6 +1048,12 @@ export class CodexSession implements ProviderSession {
     }
 
     // Bad / missing / invalid API key — codexErrorInfo: "Unauthorized".
+    // Also catches the "revoked-while-valid" OAuth pool failure mode: a
+    // credential revoked server-side while its access token is still
+    // unexpired never enters `getValidCodexOAuth` (the token looks fresh, it
+    // fast-returns) — the ONLY artifact of that death mode is the spawned
+    // Codex CLI self-refreshing straight from the blanked-refresh-token
+    // auth.json and surfacing this turn-level error.
     const authPatterns = [
       "unauthorized",
       "http 401",
@@ -1001,6 +1063,8 @@ export class CodexSession implements ProviderSession {
       "missing api key",
       "no api key",
       "authentication failed",
+      "failed to refresh token",
+      "invalid 'refresh_token'",
     ];
     if (authPatterns.some((p) => normalized.includes(p))) {
       return {

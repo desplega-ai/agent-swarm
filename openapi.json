@@ -1947,6 +1947,25 @@
         }
       }
     },
+    "/api/oauth/keep-warm/codex": {
+      "post": {
+        "summary": "Locked keep-warm refresh sweep across all Codex OAuth pool slots",
+        "description": "Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots already benched by codex-auth-expiry-watch.",
+        "tags": [
+          "OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-slot keep-warm outcomes"
+          }
+        }
+      }
+    },
     "/api/config/resolved": {
       "get": {
         "summary": "Get resolved config (merged global + agent + repo scopes)",

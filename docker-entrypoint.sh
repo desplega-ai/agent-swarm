@@ -114,6 +114,15 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
     # Tries codex_oauth_0 first (post-migration 071), then legacy codex_oauth key.
     # Runner handles per-task materialization for multi-slot pools; this is only a
     # boot-time seed so the credential-wait loop sees auth.json on fresh containers.
+    #
+    # The refresh token is deliberately blanked below (matching the
+    # runner/adapter pool auth.json — see credentialsToAuthJson in
+    # auth-json.ts): this boot-seeded file is the last place a live pool
+    # refresh token could otherwise land on worker disk, and any Codex CLI
+    # run against it before the runner's first per-task overwrite
+    # (credential-wait probes, manual runs, crash loops) would self-refresh
+    # outside the /api/oauth/refresh-locks lock — an unlocked rotation that
+    # can revoke the whole token family.
     if [ ! -f "$WORKER_CODEX_HOME/auth.json" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
         CODEX_OAUTH=$(curl -sf -H "Authorization: Bearer ${API_KEY}" \
             "${MCP_BASE_URL}/api/config/resolved?includeSecrets=true" \
@@ -128,7 +137,7 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
                 mkdir -p "$WORKER_CODEX_HOME"
                 if ! echo "$CODEX_OAUTH" | jq '
                     if .auth_mode == "chatgpt" then
-                      .
+                      .tokens.refresh_token = ""
                     elif (.access and .refresh and .accountId and .expires) then
                       {
                         auth_mode: "chatgpt",
@@ -136,7 +145,7 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
                         tokens: {
                           id_token: .access,
                           access_token: .access,
-                          refresh_token: .refresh,
+                          refresh_token: "",
                           account_id: .accountId
                         },
                         last_refresh: ((.expires / 1000 | floor) | todateiso8601)

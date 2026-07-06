@@ -133,7 +133,7 @@ describe("getValidCodexOAuth — concurrent pool refresh", () => {
         JSON.stringify({
           access_token: "at_gen1",
           refresh_token: "rt_gen1",
-          expires_in: 3600,
+          expires_in: 864000,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
@@ -188,7 +188,7 @@ describe("getValidCodexOAuth — concurrent pool refresh", () => {
         JSON.stringify({
           access_token: "at_gen1",
           refresh_token: "rt_gen1",
-          expires_in: 3600,
+          expires_in: 864000,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
@@ -230,7 +230,7 @@ describe("getValidCodexOAuth — concurrent pool refresh", () => {
     setFetchForTesting(async () => {
       exchangeCount += 1;
       return new Response(
-        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 3600 }),
+        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 864000 }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     });
@@ -292,7 +292,7 @@ describe("getValidCodexOAuth — concurrent pool refresh", () => {
     setFetchForTesting(async () => {
       exchangeCount += 1;
       return new Response(
-        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 3600 }),
+        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 864000 }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     });

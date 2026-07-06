@@ -18,6 +18,7 @@ import { closeDb, getPageBySlug, getPageVersions, initDb } from "../be/db";
 import { registerCreatePageTool } from "../tools/create-page";
 
 const TEST_DB_PATH = "./test-create-page-tool.sqlite";
+const originalPublicMcpBaseUrl = process.env.PUBLIC_MCP_BASE_URL;
 
 type RegisteredTool = {
   handler: (args: unknown, extra: unknown) => Promise<unknown>;
@@ -48,12 +49,18 @@ describe("create_page MCP tool", () => {
     }
     initDb(TEST_DB_PATH);
     // The tool reads MCP_BASE_URL / APP_URL when building share URLs.
+    delete process.env.PUBLIC_MCP_BASE_URL;
     process.env.MCP_BASE_URL = "http://test-api:9999";
     process.env.APP_URL = "http://test-app:5274";
   });
 
   afterAll(async () => {
     closeDb();
+    if (originalPublicMcpBaseUrl === undefined) {
+      delete process.env.PUBLIC_MCP_BASE_URL;
+    } else {
+      process.env.PUBLIC_MCP_BASE_URL = originalPublicMcpBaseUrl;
+    }
     delete process.env.MCP_BASE_URL;
     delete process.env.APP_URL;
     for (const suffix of ["", "-wal", "-shm"]) {

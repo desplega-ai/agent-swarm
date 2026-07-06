@@ -316,6 +316,18 @@ describe("refreshAccessToken", () => {
     const result = await refreshAccessToken("rt_old");
     expect(result.type).toBe("failed");
   });
+
+  it("carries status and body text on HTTP error, for discriminated-failure callers", async () => {
+    setFetchForTesting(
+      () => new Response("invalid_grant: refresh token was already used", { status: 400 }),
+    );
+    const result = await refreshAccessToken("rt_old");
+    expect(result.type).toBe("failed");
+    if (result.type === "failed") {
+      expect(result.status).toBe(400);
+      expect(result.error).toContain("refresh token was already used");
+    }
+  });
 });
 
 describe("createAuthorizationFlow", () => {

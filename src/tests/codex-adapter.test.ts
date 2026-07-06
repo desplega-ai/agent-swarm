@@ -1700,6 +1700,33 @@ describe("CodexSession — rate-limit error preservation", () => {
     expect(resetMs).toBeGreaterThan(Date.now());
   });
 
+  test("revoked-while-valid OAuth pool failure ('Failed to refresh token') classifies as [auth-error]/authentication_failed", async () => {
+    // A credential revoked server-side while its access token is still
+    // unexpired never enters getValidCodexOAuth (the token looks fresh, it
+    // fast-returns) — the spawned Codex CLI self-refreshes straight from the
+    // pool's blanked-refresh-token auth.json and dies with this signature.
+    // This is the ONLY artifact of that death mode (see codex-oauth pool
+    // hardening plan, Phase 1.4).
+    const refreshFailMsg =
+      "Reconnecting… Failed to refresh token: 400 Bad Request - Invalid 'refresh_token': empty string";
+    const events: ThreadEvent[] = [
+      { type: "thread.started", thread_id: "thread-authfail-1" },
+      { type: "turn.started" },
+      { type: "error", message: refreshFailMsg },
+      { type: "turn.failed", error: { message: refreshFailMsg } },
+    ];
+    const sdkThrow = new Error("Codex Exec exited with code 1: Reading prompt from stdin");
+
+    const { result } = await runSessionWithThrowingThread(
+      events,
+      sdkThrow,
+      testConfig({ logFile: join(tmpLogDir, "authfail-preserve.log"), cwd: "" }),
+    );
+
+    expect(result.failureReason).toMatch(/\[auth-error\]/);
+    expect(result.isError).toBe(true);
+  });
+
   test("AbortError still settles as cancelled even when terminalError is absent (regression guard)", async () => {
     // If the session is aborted before any error event, the AbortError path
     // must still win over the terminalError preservation branch.

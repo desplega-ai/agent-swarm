@@ -164,7 +164,7 @@ describe("resolveCodexAuthMode — pool path revalidates through the lock", () =
       const params = new URLSearchParams((init?.body as string) ?? "");
       expect(params.get("refresh_token")).toBe("rt_gen0");
       return new Response(
-        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 3600 }),
+        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 864000 }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     });
@@ -226,7 +226,7 @@ describe("resolveCodexAuthMode — pool path revalidates through the lock", () =
       exchangeCount += 1;
       await new Promise((resolve) => setTimeout(resolve, 40));
       return new Response(
-        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 3600 }),
+        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 864000 }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     });
@@ -260,18 +260,18 @@ describe("resolveCodexAuthMode — pool path revalidates through the lock", () =
   });
 
   it("strips the refresh token from the pool auth.json handed to the spawned CLI even when the token is still valid (no exchange)", async () => {
-    // A pool slot whose access token is comfortably valid (1h out, well past
-    // the near-expiry skew) — `getValidCodexOAuth` returns it untouched, no
-    // `/oauth/token` exchange happens. This is exactly the case the reviewer
-    // flagged: the fast path returns the stored creds and rewrites auth.json.
-    // The guarantee is that the spawned CLI still never receives a rotatable
-    // refresh token, so it can't refresh outside the lock if the token later
-    // expires during the (up-to-1h) session.
+    // A pool slot whose access token is comfortably valid (2 days out, well
+    // past the 12h near-expiry skew) — `getValidCodexOAuth` returns it
+    // untouched, no `/oauth/token` exchange happens. This is exactly the case
+    // the reviewer flagged: the fast path returns the stored creds and
+    // rewrites auth.json. The guarantee is that the spawned CLI still never
+    // receives a rotatable refresh token, so it can't refresh outside the
+    // lock if the token later expires during the (up-to-2-day) session.
     const store = {
       creds: {
         access: "at_valid",
         refresh: "rt_valid",
-        expires: Date.now() + 60 * 60 * 1000, // 1h out — not expiring soon
+        expires: Date.now() + 2 * 24 * 60 * 60 * 1000, // 2 days out — not expiring soon
         accountId: "acc-test",
       } satisfies CodexOAuthCredentials,
     };
@@ -330,7 +330,7 @@ describe("resolveCodexAuthMode — pool path revalidates through the lock", () =
       exchangeCount += 1;
       await new Promise((resolve) => setTimeout(resolve, 40));
       return new Response(
-        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 3600 }),
+        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 864000 }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     });
@@ -402,5 +402,107 @@ describe("resolveCodexAuthMode — pool path revalidates through the lock", () =
     expect(authMode).toBe("chatgpt");
     expect(fetchCalled).toBe(false);
     expect(readCurrent()).toBe(existingAuthJson);
+  });
+
+  it("fails fast with an actionable [auth-error] instead of starting on the stale auth.json when a pool slot's refresh is rejected", async () => {
+    const store = {
+      creds: {
+        access: "at_stale",
+        refresh: "rt_revoked",
+        expires: Date.now() - 1000, // expired — forces the revalidation path
+        accountId: "acc-test",
+      } satisfies CodexOAuthCredentials,
+    };
+    installMockTransport(store);
+
+    setFetchForTesting(
+      async () => new Response("invalid_grant: refresh token was already used", { status: 400 }),
+    );
+
+    const runnerMaterialized = JSON.stringify({
+      auth_mode: "chatgpt",
+      OPENAI_API_KEY: null,
+      tokens: {
+        id_token: store.creds.access,
+        access_token: store.creds.access,
+        refresh_token: store.creds.refresh,
+        account_id: store.creds.accountId,
+      },
+      last_refresh: new Date(store.creds.expires).toISOString(),
+    });
+    const { fs, homedir, readCurrent } = fakeAuthJsonFs(runnerMaterialized);
+
+    await expect(resolveCodexAuthMode(baseConfig(0), () => {}, { homedir, fs })).rejects.toThrow(
+      /\[auth-error\] Codex pool slot 0 .*revalidation failed: refresh rejected \(400 .*credential likely revoked/,
+    );
+
+    // The upstream body must survive verbatim so the EXISTING
+    // codex-auth-expiry-watch DEAD_TOKEN_LIKE patterns still match with zero
+    // script changes.
+    try {
+      await resolveCodexAuthMode(baseConfig(0), () => {}, { homedir, fs });
+      throw new Error("expected resolveCodexAuthMode to throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toContain("refresh token was already used");
+    }
+
+    // auth.json must NOT have been rewritten as chatgpt-mode from the stale
+    // materialized creds — the session must fail fast, not start degraded.
+    expect(readCurrent()).toBe(runnerMaterialized);
+  });
+
+  it("does not fail-fast for a non-pool (codexSlot undefined) auth.json revalidation failure — logs and falls through instead", async () => {
+    globalThis.fetch = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const urlStr = typeof url === "string" ? url : url.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (urlStr.startsWith(`${MOCK_API_URL}/api/oauth/refresh-locks/`)) {
+        return originalFetch(urlStr.replace(MOCK_API_URL, lockServerOrigin), init);
+      }
+      if (method === "GET" && urlStr.includes("/api/config/resolved")) {
+        return new Response(
+          JSON.stringify({
+            configs: [
+              {
+                id: "cfg-1",
+                key: "codex_oauth_0",
+                value: JSON.stringify({
+                  access: "at_stale",
+                  refresh: "rt_bad",
+                  expires: Date.now() - 1000,
+                  accountId: "acc-test",
+                }),
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`Unexpected fetch in test: ${method} ${urlStr}`);
+    };
+    setFetchForTesting(async () => new Response("server_error", { status: 500 }));
+
+    const existingAuthJson = JSON.stringify({
+      auth_mode: "api-key",
+      OPENAI_API_KEY: "sk-local",
+    });
+    const { fs, homedir, readCurrent } = fakeAuthJsonFs(existingAuthJson);
+    const events: ProviderEvent[] = [];
+
+    const authMode = await resolveCodexAuthMode(baseConfig(undefined), (e) => events.push(e), {
+      homedir,
+      fs,
+    });
+
+    // Non-pool auth is left untouched on failure — no throw, no auth.json
+    // rewrite — the caller falls back to OPENAI_API_KEY as before.
+    expect(authMode).toBe("api-key");
+    expect(readCurrent()).toBe(existingAuthJson);
+    expect(
+      events.some((e) => e.type === "raw_stderr" && e.content.includes("revalidation failed")),
+    ).toBe(true);
   });
 });
