@@ -137,7 +137,7 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
                 mkdir -p "$WORKER_CODEX_HOME"
                 if ! echo "$CODEX_OAUTH" | jq '
                     if .auth_mode == "chatgpt" then
-                      .
+                      .tokens.refresh_token = ""
                     elif (.access and .refresh and .accountId and .expires) then
                       {
                         auth_mode: "chatgpt",
