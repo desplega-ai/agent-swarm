@@ -4,6 +4,7 @@ import "../src/http/active-sessions";
 import "../src/http/agents";
 import "../src/http/approval-requests";
 import "../src/http/budgets";
+import "../src/http/codex-oauth-keep-warm";
 import "../src/http/config";
 import "../src/http/context";
 import "../src/http/db-query";
