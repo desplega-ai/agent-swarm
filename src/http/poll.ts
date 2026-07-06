@@ -16,6 +16,7 @@ import {
   getInboxSummary,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
+  getTaskAttachments,
   getTaskById,
   getUnassignedTaskIds,
   getUserById,
@@ -88,6 +89,23 @@ let lastChannelActivityCheckAt = 0;
 
 function getRequesterNotes(notes: string | undefined): string | undefined {
   return typeof notes === "string" && notes.trim().length > 0 ? notes : undefined;
+}
+
+/**
+ * Slim attachment projection for the `task_assigned` poll trigger — just
+ * enough (id, name, mimeType, sizeBytes) for the worker to build a one-shot
+ * `/api/fs/tasks/{taskId}/files/{id}/raw` fetch recipe into the dispatch
+ * prompt, without shipping the full capabilities/provider blob over poll.
+ */
+function attachmentsForTrigger(
+  taskId: string,
+): Array<{ id: string; name: string; mimeType?: string; sizeBytes?: number }> {
+  return getTaskAttachments(taskId).map((a) => ({
+    id: a.id,
+    name: a.name,
+    mimeType: a.mimeType,
+    sizeBytes: a.sizeBytes,
+  }));
 }
 
 // ─── Cursor Commit Endpoint ─────────────────────────────────────────────────
@@ -266,7 +284,11 @@ export async function handlePoll(
               trigger: {
                 type: "task_assigned",
                 taskId: pendingTask.id,
-                task: { ...pendingTask, status: "in_progress" },
+                task: {
+                  ...pendingTask,
+                  status: "in_progress",
+                  attachments: attachmentsForTrigger(pendingTask.id),
+                },
                 ...(requestedByUser && {
                   requestedBy: {
                     name: requestedByUser.name,
@@ -381,7 +403,7 @@ export async function handlePoll(
                   trigger: {
                     type: "task_assigned",
                     taskId: claimed.id,
-                    task: claimed,
+                    task: { ...claimed, attachments: attachmentsForTrigger(claimed.id) },
                   },
                 };
               }

@@ -410,12 +410,7 @@ class ApiClient {
   }
 
   async checkHealth(): Promise<{ status: string; version: string }> {
-    const config = getConfig();
-    const baseUrl =
-      import.meta.env.DEV && config.apiUrl === "http://localhost:3013"
-        ? "http://localhost:3013"
-        : config.apiUrl;
-    const url = `${baseUrl}/health`;
+    const url = `${this.getBaseUrl()}/health`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
     return res.json();

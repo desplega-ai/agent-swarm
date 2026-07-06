@@ -86,6 +86,16 @@ describe("ClaudeSession spawn env — reasoning_effort", () => {
   let spawnSpy: ReturnType<typeof spyOn>;
   let spawnedEnvs: Array<Record<string, string> | undefined>;
 
+  // `createSession`/`ClaudeSession` fall back to `process.env` when `config.env`
+  // is omitted, and spread it wholesale into the spawned process env. Two
+  // problems follow in a credential-less sandbox: (1) `validateClaudeCredentials`
+  // throws without CLAUDE_CODE_OAUTH_TOKEN/ANTHROPIC_API_KEY, and (2) any ambient
+  // env var sharing a name with what these tests assert on (CLAUDE_CODE_EFFORT_LEVEL,
+  // MAX_THINKING_TOKENS) would leak through and pollute the `toBeUndefined()`
+  // assertions. Passing an explicit, minimal `env` sidesteps both — deterministic
+  // regardless of the ambient process env the test happens to run in.
+  const CLEAN_ENV: Record<string, string> = { CLAUDE_CODE_OAUTH_TOKEN: "test-oauth-token" };
+
   beforeEach(() => {
     spawnedEnvs = [];
     spawnSpy = spyOn(Bun, "spawn").mockImplementation(((
@@ -103,7 +113,9 @@ describe("ClaudeSession spawn env — reasoning_effort", () => {
 
   test("reasoningEffort: 'high' on claude-opus-4-8 sets CLAUDE_CODE_EFFORT_LEVEL", async () => {
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig({ model: "claude-opus-4-8", reasoningEffort: "high" }));
+    await adapter.createSession(
+      makeConfig({ model: "claude-opus-4-8", reasoningEffort: "high", env: CLEAN_ENV }),
+    );
 
     expect(spawnedEnvs).toHaveLength(1);
     expect(spawnedEnvs[0]?.CLAUDE_CODE_EFFORT_LEVEL).toBe("high");
@@ -111,7 +123,9 @@ describe("ClaudeSession spawn env — reasoning_effort", () => {
 
   test("reasoningEffort: 'off' on a legacy budget_tokens-capable model sets MAX_THINKING_TOKENS=0, no effort env", async () => {
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig({ model: "claude-opus-4-0", reasoningEffort: "off" }));
+    await adapter.createSession(
+      makeConfig({ model: "claude-opus-4-0", reasoningEffort: "off", env: CLEAN_ENV }),
+    );
 
     expect(spawnedEnvs).toHaveLength(1);
     expect(spawnedEnvs[0]?.MAX_THINKING_TOKENS).toBe("0");
@@ -120,7 +134,7 @@ describe("ClaudeSession spawn env — reasoning_effort", () => {
 
   test("undefined reasoningEffort leaves spawn env unchanged (no effort/budget keys)", async () => {
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig({ model: "claude-opus-4-8" }));
+    await adapter.createSession(makeConfig({ model: "claude-opus-4-8", env: CLEAN_ENV }));
 
     expect(spawnedEnvs).toHaveLength(1);
     expect(spawnedEnvs[0]?.CLAUDE_CODE_EFFORT_LEVEL).toBeUndefined();

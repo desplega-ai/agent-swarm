@@ -9,6 +9,8 @@
  */
 
 import { useUsers } from "@/api/hooks/use-users";
+import type { TaskAttachment } from "@/api/types";
+import { TaskPromptAttachments } from "@/components/shared/task-attachments-section";
 import { cn } from "@/lib/utils";
 
 export interface UserPromptBubbleProps {
@@ -16,6 +18,8 @@ export interface UserPromptBubbleProps {
   /** Look up the requester's display name from the users cache. */
   requestedByUserId: string | null | undefined;
   createdAt: string;
+  taskId?: string;
+  attachments?: TaskAttachment[];
   className?: string;
 }
 
@@ -23,6 +27,8 @@ export function UserPromptBubble({
   text,
   requestedByUserId,
   createdAt,
+  taskId,
+  attachments,
   className,
 }: UserPromptBubbleProps) {
   const { data: users } = useUsers();
@@ -41,6 +47,7 @@ export function UserPromptBubble({
           <span aria-hidden="true">·</span>
           <time dateTime={createdAt}>{dateLabel}</time>
         </div>
+        {taskId ? <TaskPromptAttachments taskId={taskId} attachments={attachments} /> : null}
         <div
           className={cn(
             "rounded-2xl rounded-tr-sm bg-muted px-4 py-2.5",

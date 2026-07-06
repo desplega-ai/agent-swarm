@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.107.1",
+  "version": "1.109.0",
   "description": "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants",
   "license": "MIT",
   "author": "desplega.sh <contact@desplega.sh>",
@@ -42,12 +42,20 @@
     "name": "agent-swarm"
   },
   "packageManager": "bun@1.3.11",
-  "workspaces": ["apps/ui", "apps/templates-ui", "apps/evals", "packages/*"],
+  "workspaces": [
+    "apps/ui",
+    "apps/templates-ui",
+    "apps/evals",
+    "packages/*"
+  ],
   "overrides": {
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },
-  "trustedDependencies": ["esbuild", "unrs-resolver"],
+  "trustedDependencies": [
+    "esbuild",
+    "unrs-resolver"
+  ],
   "scripts": {
     "build:pi-skills": "bun run plugin/build-pi-skills.ts",
     "build:cli": "bun run scripts/build-cli.ts",
@@ -138,7 +146,7 @@
     "@linear/sdk": "^77.0.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@openai/codex-sdk": "^0.142.5",
-    "@opencode-ai/sdk": "^1.17.12",
+    "@opencode-ai/sdk": "^1.17.13",
     "@openfort/openfort-node": "^0.9.1",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.218.0",

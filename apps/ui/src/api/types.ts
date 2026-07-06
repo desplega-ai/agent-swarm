@@ -163,6 +163,8 @@ export interface AgentTask {
   requestedByUserId?: string;
   /** Phase 1 (≥1.76.0): cross-ingress context key for the conversation/thread. */
   contextKey?: string;
+  /** Pointer-based artifacts attached to the task, when included by the API response. */
+  attachments?: TaskAttachment[];
 }
 
 export type ProviderName = "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";

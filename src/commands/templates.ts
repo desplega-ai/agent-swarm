@@ -17,11 +17,16 @@ import { registerTemplate } from "../prompts/registry";
 registerTemplate({
   eventType: "task.trigger.assigned",
   header: "",
-  defaultBody: `{{work_on_task_cmd}} {{task_id}}{{task_desc_section}}{{output_instructions}}`,
+  defaultBody: `{{work_on_task_cmd}} {{task_id}}{{task_desc_section}}{{attachments_section}}{{output_instructions}}`,
   variables: [
     { name: "work_on_task_cmd", description: "Formatted /work-on-task command" },
     { name: "task_id", description: "Task ID" },
     { name: "task_desc_section", description: "Task description section or empty string" },
+    {
+      name: "attachments_section",
+      description:
+        "Ready-to-run fetch recipe per task attachment (or empty string if none) — lets the agent download an attachment in one call instead of discovering the path/provider itself",
+    },
     {
       name: "output_instructions",
       description:

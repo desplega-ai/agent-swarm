@@ -38,6 +38,12 @@ type RequestRecord = {
   hasSignal: boolean;
 };
 
+type StubMember = {
+  email?: string;
+  role?: string;
+  user?: { email?: string };
+};
+
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
     await unlink(path + suffix).catch(() => {});
@@ -58,7 +64,10 @@ function configValue(key: string): string | undefined {
   return getSwarmConfigs({ scope: "global", key })[0]?.value;
 }
 
-function createFetchStub(records: RequestRecord[]): typeof fetch {
+function createFetchStub(
+  records: RequestRecord[],
+  options: { members?: StubMember[] } = {},
+): typeof fetch {
   return (async (input, init) => {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
@@ -111,6 +120,9 @@ function createFetchStub(records: RequestRecord[]): typeof fetch {
     if (url.pathname === "/orgs/shared-org/drives" && method === "POST") {
       return Response.json({ id: "shared-drive", name: "shared" }, { status: 201 });
     }
+    if (url.pathname === "/orgs/shared-org/members" && method === "GET") {
+      return Response.json({ members: options.members ?? [] });
+    }
     if (url.pathname === "/orgs/shared-org/members/invite" && method === "POST") {
       return Response.json({ ok: true });
     }
@@ -160,14 +172,19 @@ describe("agent-fs provisioning seeder", () => {
     process.env.AGENT_FS_EMAIL_DOMAIN = "agents.example.test";
 
     createUser({
-      name: "Viewer User",
-      email: `viewer-${suffix}@example.test`,
+      name: "Designer User",
+      email: `designer-${suffix}@example.test`,
       role: "Customer",
     });
     createUser({
       name: "Operator User",
       email: `operator-${suffix}@example.test`,
       role: "Operator",
+    });
+    createUser({
+      name: "Explicit Viewer User",
+      email: `viewer-${suffix}@example.test`,
+      role: "read-only contractor",
     });
     const records: RequestRecord[] = [];
     setAgentFsProvisionFetchForTests(createFetchStub(records));
@@ -202,6 +219,7 @@ describe("agent-fs provisioning seeder", () => {
 
     expect(invites).toEqual(
       [
+        { email: `designer-${suffix}@example.test`, role: "editor" },
         { email: `operator-${suffix}@example.test`, role: "editor" },
         { email: `viewer-${suffix}@example.test`, role: "viewer" },
       ].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
@@ -213,6 +231,189 @@ describe("agent-fs provisioning seeder", () => {
     expect(second.failed).toEqual([]);
     expect(second.skippedUnchanged).toBe(1);
     expect(records).toEqual([]);
+  });
+
+  test("classifies arbitrary non-viewer human roles as agent-fs editors", async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    process.env.AGENT_FS_API_URL = "https://agent-fs.example.test/";
+    process.env.AGENT_FS_REGISTER_EMAIL = "admin@example.test";
+    upsertSwarmConfig({
+      scope: "global",
+      key: "API_AGENT_FS_API_KEY",
+      value: "afs-admin-key",
+      isSecret: true,
+    });
+    upsertSwarmConfig({
+      scope: "global",
+      key: "AGENT_FS_DEFAULT_ORG_ID",
+      value: "shared-org",
+    });
+    upsertSwarmConfig({
+      scope: "global",
+      key: "AGENT_FS_DEFAULT_DRIVE_ID",
+      value: "shared-drive",
+    });
+
+    createUser({
+      name: "Taras Founder",
+      email: `taras-founder-${suffix}@example.test`,
+      role: "co-founder, CTO",
+    });
+    createUser({
+      name: "Eze Founder",
+      email: `eze-founder-${suffix}@example.test`,
+      role: "co-founder, CEO",
+    });
+    createUser({
+      name: "Designer Human",
+      email: `designer-${suffix}@example.test`,
+      role: "designer",
+    });
+    createUser({
+      name: "Unknown Human",
+      email: `whatever-${suffix}@example.test`,
+      role: "whatever",
+    });
+
+    const records: RequestRecord[] = [];
+    setAgentFsProvisionFetchForTests(createFetchStub(records));
+
+    const result = await runSeeder(agentFsProvisionSeeder, { quiet: true });
+
+    expect(result.failed).toEqual([]);
+    const invites = records
+      .filter((r) => r.path === "/orgs/shared-org/members/invite")
+      .map((r) => r.body);
+    expect(invites).toContainEqual({
+      email: `taras-founder-${suffix}@example.test`,
+      role: "editor",
+    });
+    expect(invites).toContainEqual({
+      email: `eze-founder-${suffix}@example.test`,
+      role: "editor",
+    });
+    expect(invites).toContainEqual({
+      email: `designer-${suffix}@example.test`,
+      role: "editor",
+    });
+    expect(invites).toContainEqual({
+      email: `whatever-${suffix}@example.test`,
+      role: "editor",
+    });
+  });
+
+  test("classifies explicitly viewer human roles as agent-fs viewers", async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    process.env.AGENT_FS_API_URL = "https://agent-fs.example.test/";
+    process.env.AGENT_FS_REGISTER_EMAIL = "admin@example.test";
+    upsertSwarmConfig({
+      scope: "global",
+      key: "API_AGENT_FS_API_KEY",
+      value: "afs-admin-key",
+      isSecret: true,
+    });
+    upsertSwarmConfig({
+      scope: "global",
+      key: "AGENT_FS_DEFAULT_ORG_ID",
+      value: "shared-org",
+    });
+    upsertSwarmConfig({
+      scope: "global",
+      key: "AGENT_FS_DEFAULT_DRIVE_ID",
+      value: "shared-drive",
+    });
+
+    createUser({
+      name: "Viewer Human",
+      email: `viewer-${suffix}@example.test`,
+      role: "Viewer",
+    });
+    createUser({
+      name: "Read Only Human",
+      email: `read-only-${suffix}@example.test`,
+      role: "read only",
+    });
+    createUser({
+      name: "Guest Human",
+      email: `guest-${suffix}@example.test`,
+      role: "guest",
+    });
+
+    const records: RequestRecord[] = [];
+    setAgentFsProvisionFetchForTests(createFetchStub(records));
+
+    const result = await runSeeder(agentFsProvisionSeeder, { quiet: true });
+
+    expect(result.failed).toEqual([]);
+    const invites = records
+      .filter((r) => r.path === "/orgs/shared-org/members/invite")
+      .map((r) => r.body);
+    expect(invites).toContainEqual({
+      email: `viewer-${suffix}@example.test`,
+      role: "viewer",
+    });
+    expect(invites).toContainEqual({
+      email: `read-only-${suffix}@example.test`,
+      role: "viewer",
+    });
+    expect(invites).toContainEqual({
+      email: `guest-${suffix}@example.test`,
+      role: "viewer",
+    });
+  });
+
+  test("does not invite existing members when provisioning would keep or lower their role", async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const existingAdmin = `existing-admin-${suffix}@example.test`;
+    const existingEditor = `existing-editor-${suffix}@example.test`;
+    const existingViewer = `existing-viewer-${suffix}@example.test`;
+    const explicitViewer = `explicit-viewer-${suffix}@example.test`;
+    process.env.AGENT_FS_API_URL = "https://agent-fs.example.test/";
+    process.env.AGENT_FS_REGISTER_EMAIL = "admin@example.test";
+    upsertSwarmConfig({
+      scope: "global",
+      key: "API_AGENT_FS_API_KEY",
+      value: "afs-admin-key",
+      isSecret: true,
+    });
+    upsertSwarmConfig({
+      scope: "global",
+      key: "AGENT_FS_DEFAULT_ORG_ID",
+      value: "shared-org",
+    });
+    upsertSwarmConfig({
+      scope: "global",
+      key: "AGENT_FS_DEFAULT_DRIVE_ID",
+      value: "shared-drive",
+    });
+
+    createUser({ name: "Existing Admin", email: existingAdmin, role: "Customer" });
+    createUser({ name: "Existing Editor", email: existingEditor, role: "Designer" });
+    createUser({ name: "Existing Viewer", email: existingViewer, role: "Whatever" });
+    createUser({ name: "Explicit Viewer", email: explicitViewer, role: "Guest" });
+
+    const records: RequestRecord[] = [];
+    setAgentFsProvisionFetchForTests(
+      createFetchStub(records, {
+        members: [
+          { email: existingAdmin, role: "admin" },
+          { user: { email: existingEditor }, role: "editor" },
+          { email: existingViewer, role: "viewer" },
+        ],
+      }),
+    );
+
+    const result = await runSeeder(agentFsProvisionSeeder, { quiet: true });
+
+    expect(result.failed).toEqual([]);
+    const inviteBodies = records
+      .filter((r) => r.path === "/orgs/shared-org/members/invite")
+      .map((r) => r.body);
+
+    expect(inviteBodies).not.toContainEqual({ email: existingAdmin, role: "editor" });
+    expect(inviteBodies).not.toContainEqual({ email: existingEditor, role: "editor" });
+    expect(inviteBodies).toContainEqual({ email: existingViewer, role: "editor" });
+    expect(inviteBodies).toContainEqual({ email: explicitViewer, role: "viewer" });
   });
 
   test("provisions agent-scoped credentials through the API-owned bootstrap key", async () => {

@@ -7,10 +7,15 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { api } from "@/api/client";
 import { useTaskTemplates } from "@/api/hooks/use-task-templates";
 import { Badge } from "@/components/ui/badge";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import {
+  formatComposeAttachmentUploadError,
+  uploadComposeAttachments,
+} from "./compose-attachment-upload";
 import { ComposerDock } from "./composer-dock";
 
 const SUGGESTIONS = [
@@ -25,6 +30,9 @@ export function NewSessionView() {
   const queryClient = useQueryClient();
   const { userId } = useCurrentUser();
   const [draft, setDraft] = useState("");
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [uploadedCount, setUploadedCount] = useState(0);
   const [searchParams, setSearchParams] = useSearchParams();
   const prefillTemplateId = searchParams.get("prefill");
   const seedText = searchParams.get("seed");
@@ -53,15 +61,34 @@ export function NewSessionView() {
   }, [prefillTemplateId, templatesQ.data, searchParams, setSearchParams]);
 
   const create = useMutation({
-    mutationFn: (input: { task: string; requestedByUserId?: string }) =>
-      api.createTask({
+    mutationFn: async (input: {
+      task: string;
+      requestedByUserId?: string;
+      attachments: File[];
+    }) => {
+      setAttachmentError(null);
+      setUploadedCount(0);
+      const created = await api.createTask({
         task: input.task,
         requestedByUserId: input.requestedByUserId,
         source: "ui",
-      }),
-    onSuccess: (created) => {
+      });
+      const uploadResult = await uploadComposeAttachments({
+        taskId: created.id,
+        files: input.attachments,
+        onUploaded: setUploadedCount,
+      });
+      return { created, uploadResult };
+    },
+    onSuccess: ({ created, uploadResult }) => {
+      const uploadError = formatComposeAttachmentUploadError(uploadResult.failed);
+      setAttachmentError(uploadError);
+      if (uploadError) toast.error(uploadError);
+      if (!uploadError) setAttachments([]);
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["task", created.id] });
+      queryClient.invalidateQueries({ queryKey: ["task", created.id, "attachments"] });
       navigate(`/sessions/${created.id}`);
     },
   });
@@ -69,8 +96,19 @@ export function NewSessionView() {
   const submit = () => {
     const trimmed = draft.trim();
     if (trimmed.length === 0 || create.isPending) return;
-    create.mutate({ task: trimmed, requestedByUserId: userId ?? undefined });
+    create.mutate({
+      task: trimmed,
+      requestedByUserId: userId ?? undefined,
+      attachments,
+    });
   };
+
+  const pendingLabel =
+    create.isPending && attachments.length > 0
+      ? uploadedCount > 0
+        ? `Uploading ${uploadedCount}/${attachments.length}…`
+        : "Creating task…"
+      : "Starting…";
 
   return (
     <>
@@ -114,11 +152,18 @@ export function NewSessionView() {
         errorMessage={
           create.error instanceof Error ? create.error.message : "Failed to create session"
         }
+        pendingLabel={pendingLabel}
         placeholder={
           userId ? "What's the goal?" : "Pick an identity in the sidebar before starting a session."
         }
         disabled={!userId}
         sendLabel="Start session"
+        attachments={attachments}
+        onAttachmentsChange={(files) => {
+          setAttachments(files);
+          setAttachmentError(null);
+        }}
+        attachmentErrorMessage={attachmentError}
         autoFocus
       />
     </>

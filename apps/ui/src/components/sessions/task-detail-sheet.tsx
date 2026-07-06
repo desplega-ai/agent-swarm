@@ -19,6 +19,7 @@ import type { AgentTask } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -143,6 +144,10 @@ export function TaskDetailSheet({ taskId, task, open, onOpenChange }: TaskDetail
                 <Streamdown>{normalizeNewlines(task.output.trim())}</Streamdown>
               </div>
             </section>
+          ) : null}
+
+          {open ? (
+            <TaskAttachmentsSection taskId={taskId} attachments={undefined} className="mx-4 my-3" />
           ) : null}
 
           <section className="px-4 py-3 flex flex-col gap-2">
