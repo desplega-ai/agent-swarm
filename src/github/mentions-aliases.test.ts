@@ -11,6 +11,7 @@ import {
   BOT_NAMES,
   detectMention,
   extractMentionContext,
+  GITHUB_BOT_NAME,
   isBotAssignee,
 } from "./mentions";
 
@@ -32,7 +33,7 @@ afterAll(() => {
 
 describe("GITHUB_BOT_ALIASES support", () => {
   test("BOT_NAMES includes primary name and aliases", () => {
-    expect(BOT_NAMES).toContain("agent-swarm-bot");
+    expect(BOT_NAMES).toContain(GITHUB_BOT_NAME.toLowerCase());
     expect(BOT_NAMES).toContain("alias1");
     expect(BOT_NAMES).toContain("alias2");
   });
@@ -49,7 +50,7 @@ describe("GITHUB_BOT_ALIASES support", () => {
   });
 
   test("detectMention still recognizes primary bot name", () => {
-    expect(detectMention("@agent-swarm-bot review")).toBe(true);
+    expect(detectMention(`@${GITHUB_BOT_NAME} review`)).toBe(true);
   });
 
   test("isBotAssignee recognizes aliases", () => {
@@ -59,7 +60,7 @@ describe("GITHUB_BOT_ALIASES support", () => {
   });
 
   test("isBotAssignee still recognizes primary bot name", () => {
-    expect(isBotAssignee("agent-swarm-bot")).toBe(true);
+    expect(isBotAssignee(GITHUB_BOT_NAME)).toBe(true);
   });
 
   test("isBotAssignee rejects unknown names", () => {

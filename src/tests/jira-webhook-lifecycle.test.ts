@@ -6,6 +6,7 @@ import { getJiraMetadata, updateJiraMetadata } from "../jira/metadata";
 
 const TEST_DB_PATH = "./test-jira-webhook-lifecycle.sqlite";
 const originalSlackAlertsChannel = process.env.SLACK_ALERTS_CHANNEL;
+const originalPublicMcpBaseUrl = process.env.PUBLIC_MCP_BASE_URL;
 
 function restoreSlackAlertsChannel(): void {
   if (originalSlackAlertsChannel === undefined) {
@@ -31,6 +32,7 @@ mock.module("../jira/client", () => ({
 beforeAll(() => {
   initDb(TEST_DB_PATH);
   process.env.JIRA_WEBHOOK_TOKEN = "test-token-32-chars-deadbeef-cafe-99";
+  delete process.env.PUBLIC_MCP_BASE_URL;
   process.env.MCP_BASE_URL = "https://test.example.com";
 
   upsertOAuthApp("jira", {
@@ -47,6 +49,11 @@ beforeAll(() => {
 afterAll(async () => {
   delete process.env.JIRA_WEBHOOK_TOKEN;
   delete process.env.MCP_BASE_URL;
+  if (originalPublicMcpBaseUrl === undefined) {
+    delete process.env.PUBLIC_MCP_BASE_URL;
+  } else {
+    process.env.PUBLIC_MCP_BASE_URL = originalPublicMcpBaseUrl;
+  }
   restoreSlackAlertsChannel();
   closeDb();
   await unlink(TEST_DB_PATH).catch(() => {});
