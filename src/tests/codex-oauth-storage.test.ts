@@ -387,7 +387,10 @@ describe("getValidCodexOAuth", () => {
               id: "cfg-1",
               key: "codex_oauth_0",
               // 2 days out — comfortably past the 12h REFRESH_SKEW_MS.
-              value: JSON.stringify({ ...mockCreds, expires: Date.now() + 2 * 24 * 60 * 60 * 1000 }),
+              value: JSON.stringify({
+                ...mockCreds,
+                expires: Date.now() + 2 * 24 * 60 * 60 * 1000,
+              }),
             },
           ],
         }),
@@ -611,7 +614,9 @@ describe("getValidCodexOAuth", () => {
       if (method === "GET" && urlStr.includes("config/resolved")) {
         return new Response(
           JSON.stringify({
-            configs: [{ id: "cfg-1", key: "codex_oauth_0", value: JSON.stringify(nearExpiryCreds) }],
+            configs: [
+              { id: "cfg-1", key: "codex_oauth_0", value: JSON.stringify(nearExpiryCreds) },
+            ],
           }),
           { status: 200 },
         );

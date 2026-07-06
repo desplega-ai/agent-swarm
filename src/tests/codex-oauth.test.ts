@@ -318,7 +318,9 @@ describe("refreshAccessToken", () => {
   });
 
   it("carries status and body text on HTTP error, for discriminated-failure callers", async () => {
-    setFetchForTesting(() => new Response("invalid_grant: refresh token was already used", { status: 400 }));
+    setFetchForTesting(
+      () => new Response("invalid_grant: refresh token was already used", { status: 400 }),
+    );
     const result = await refreshAccessToken("rt_old");
     expect(result.type).toBe("failed");
     if (result.type === "failed") {
