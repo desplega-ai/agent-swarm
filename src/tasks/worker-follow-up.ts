@@ -36,6 +36,16 @@ export const WORKER_LIVENESS_WINDOW_SECONDS = Number(
  */
 export const HEARTBEAT_PIN_CRASH_RESUME = process.env.HEARTBEAT_PIN_CRASH_RESUME !== "0";
 
+/**
+ * Rollback switch for pinning `graceful_shutdown` resumes to their original
+ * agent. ON by default: graceful shutdowns happen during deploy/SIGTERM, where
+ * the agent ID is stable and the worker normally polls again minutes later.
+ * Set `HEARTBEAT_PIN_GRACEFUL_RESUME=0` to restore the old unassigned-pool path.
+ */
+export function isGracefulResumePinEnabled(): boolean {
+  return process.env.HEARTBEAT_PIN_GRACEFUL_RESUME !== "0";
+}
+
 export const RESUME_GENERATION_TAG_PREFIX = "resume-generation:";
 
 /**
@@ -51,6 +61,13 @@ export const RESUME_GENERATION_TAG_PREFIX = "resume-generation:";
  * than imported, to avoid a worker-follow-up ↔ db import cycle — keep them in sync.
  */
 export const CRASH_RECOVERY_PIN_TAG = "crash-recovery-pin";
+
+/**
+ * Tag set ONLY on a genuine same-agent `graceful_shutdown` pin. The stale-pin
+ * reaper treats it like `CRASH_RECOVERY_PIN_TAG` while preserving which resume
+ * path produced the pin. Keep the literal in sync with `getStalePinnedResumes`.
+ */
+export const GRACEFUL_SHUTDOWN_PIN_TAG = "graceful-shutdown-pin";
 
 export function getResumeGeneration(task: Pick<AgentTask, "tags">): number {
   const tag = task.tags.find((value) => value.startsWith(RESUME_GENERATION_TAG_PREFIX));
@@ -189,20 +206,23 @@ export type CreateResumeFollowUpResult =
  * (`getActiveTaskCount < agent.maxTasks`). For `crash_recovery` the pin holds
  * regardless of `lastActivityAt` freshness — the agent ID is stable across a
  * restart and the crashed row survives intact, so a stale `lastActivityAt` at
- * the ~5-min crash-detection mark means "restarting", not "gone". Pinning keeps
- * the resume off the role-blind unassigned pool so no wrong-specialization
- * worker can grab it (DES-523). For `context_limits` / `manual_supersede` the
- * worker is alive, so `lastActivityAt` freshness is still required. The resume
- * falls back to the unassigned pool only when the agent is genuinely gone
- * (graceful close → `offline`) or its row is absent.
+ * the ~5-min crash-detection mark means "restarting", not "gone". `graceful_shutdown`
+ * follows the same pin path when `HEARTBEAT_PIN_GRACEFUL_RESUME` is enabled:
+ * deploy/SIGTERM restarts preserve the stable agent ID and the stale-pin reaper
+ * now handles the "agent never returns" case. Pinning keeps the resume off the
+ * role-blind unassigned pool so no wrong-specialization worker can grab it
+ * (DES-523). For `context_limits` / `manual_supersede` the worker is alive, so
+ * `lastActivityAt` freshness is still required. The resume falls back to the
+ * unassigned pool only when the agent is genuinely gone (graceful close →
+ * `offline`) or its row is absent.
  *
  * Gone-agent / never-reclaimed case: a pin whose agent never returns is NOT
  * re-pooled — the heartbeat's stale-resume reaper (`escalateUnreclaimedResumes`
  * in `src/heartbeat/heartbeat.ts`) escalates it to a Lead re-delegation decision
  * once `HEARTBEAT_RESUME_PIN_GRACE_MIN` lapses.
  *
- * The pin itself is gated by `HEARTBEAT_PIN_CRASH_RESUME` (default on); set it to
- * `0` to restore the pre-DES-523 pool-fallback behavior.
+ * The crash pin is gated by `HEARTBEAT_PIN_CRASH_RESUME`; the graceful shutdown
+ * pin is gated by `HEARTBEAT_PIN_GRACEFUL_RESUME`. Both default on.
  */
 export function createResumeFollowUp(args: {
   parentId: string;
@@ -218,13 +238,6 @@ export function createResumeFollowUp(args: {
 
   // Routing decision — same DB process so the read-then-create window is small.
   //
-  // For `graceful_shutdown`, force the unassigned-pool path: the parent worker
-  // is exiting and will call `closeAgent` (→ offline) moments after the
-  // supersede loop. At this check it still looks fresh + has capacity (it just
-  // terminal-transitioned), so the liveness branch would pin the resume to a
-  // dying worker — orphaning it in `pending` once the worker closes. Pool
-  // routing lets any live worker claim it.
-  //
   // For `crash_recovery`, deliberately PIN to the same (stable-ID) agent even
   // when `lastActivityAt` is stale. This REVERSES the prior "let staleness pool
   // it" behavior: crash detection only fires after STALL_THRESHOLD_NO_SESSION_MIN
@@ -237,6 +250,11 @@ export function createResumeFollowUp(args: {
   // guard. An unreclaimed pin is escalated to a Lead decision by the heartbeat
   // reaper, never silently re-pooled.
   //
+  // `graceful_shutdown` uses the same pin machinery: deploy/SIGTERM restarts
+  // preserve the stable agent ID, and the reaper now prevents an unreclaimed pin
+  // from being orphaned forever. `HEARTBEAT_PIN_GRACEFUL_RESUME=0` restores the
+  // old forced-pool path for this reason.
+  //
   // Brittleness note: this relies on a hard crash NEVER marking the agent
   // `offline` (only `POST /close` does). If future code offlines stale agents
   // before remediation, this re-opens the pool path for `crash_recovery` —
@@ -245,7 +263,7 @@ export function createResumeFollowUp(args: {
   //   - `context_limits` / `manual_supersede`: the worker is alive and
   //     responsive, so keep requiring `fresh`.
   let preferredAgentId: string | undefined;
-  if (parent.agentId && args.reason !== "graceful_shutdown") {
+  if (parent.agentId) {
     const candidate = getAgentById(parent.agentId);
     if (candidate && candidate.status !== "offline") {
       const lastActivity = candidate.lastActivityAt ? Date.parse(candidate.lastActivityAt) : 0;
@@ -255,15 +273,18 @@ export function createResumeFollowUp(args: {
       const activeCount = getActiveTaskCount(candidate.id);
       const hasCap = activeCount < (candidate.maxTasks ?? 1);
       const isCrashRecovery = args.reason === "crash_recovery" && HEARTBEAT_PIN_CRASH_RESUME;
-      // crash_recovery pins regardless of `fresh` (unless the rollback switch is
-      // off); other reasons still require it.
-      if (hasCap && (isCrashRecovery || fresh)) {
+      const isGracefulShutdown = args.reason === "graceful_shutdown";
+      const isGracefulPin = isGracefulShutdown && isGracefulResumePinEnabled();
+      const isFreshPinnedReason = !isGracefulShutdown && fresh;
+      // crash_recovery and graceful_shutdown pins ignore `fresh` when their
+      // kill-switches are on; context_limits/manual_supersede still require it.
+      if (hasCap && (isCrashRecovery || isGracefulPin || isFreshPinnedReason)) {
         preferredAgentId = candidate.id;
-      } else if (isCrashRecovery && !hasCap) {
-        // The only reason a crash_recovery pin is skipped here is capacity —
-        // surface the pool fallback instead of letting it happen silently.
+      } else if ((isCrashRecovery || isGracefulPin) && !hasCap) {
+        // Surface capacity-driven pool fallback instead of letting a protected
+        // pinned-reason skip happen silently.
         console.warn(
-          `[Heartbeat] crash_recovery resume for task ${parent.id.slice(0, 8)} NOT pinned: agent ${candidate.id.slice(0, 8)} at capacity (${activeCount}/${candidate.maxTasks ?? 1}); falling back to unassigned pool`,
+          `[Heartbeat] ${args.reason} resume for task ${parent.id.slice(0, 8)} NOT pinned: agent ${candidate.id.slice(0, 8)} at capacity (${activeCount}/${candidate.maxTasks ?? 1}); falling back to unassigned pool`,
         );
       }
     }
@@ -295,6 +316,9 @@ export function createResumeFollowUp(args: {
   // after autoAssignPoolTasks flips it to `pending`.
   if (args.reason === "crash_recovery" && preferredAgentId !== undefined) {
     tags.push(CRASH_RECOVERY_PIN_TAG);
+  }
+  if (args.reason === "graceful_shutdown" && preferredAgentId !== undefined) {
+    tags.push(GRACEFUL_SHUTDOWN_PIN_TAG);
   }
 
   // Identity-shaped fields (dir, VCS provider/repo/number/url/etc.,
