@@ -149,7 +149,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
     if (!response.ok) {
       const text = await response.text().catch(() => "");
       console.error("[codex-oauth] Token refresh failed:", response.status, text);
-      return { type: "failed" };
+      return { type: "failed", status: response.status, error: text.slice(0, 300) };
     }
 
     const json = (await response.json()) as Record<string, unknown>;

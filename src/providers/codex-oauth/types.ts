@@ -32,6 +32,6 @@ export type CodexAuthJson = {
 
 type TokenResult =
   | { type: "success"; access: string; refresh: string; expires: number }
-  | { type: "failed" };
+  | { type: "failed"; status?: number; error?: string };
 
 export type { TokenResult };
