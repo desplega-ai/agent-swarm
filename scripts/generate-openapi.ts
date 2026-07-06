@@ -18,6 +18,7 @@ import "../src/http/inbox-state";
 import "../src/http/integrations";
 import "../src/http/kv";
 import "../src/http/memory";
+import "../src/http/metrics";
 import "../src/http/oauth-locks";
 import "../src/http/page-proxy";
 import "../src/http/pages";

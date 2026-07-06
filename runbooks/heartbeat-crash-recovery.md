@@ -40,46 +40,49 @@ flowchart TD
 - An **active_session** = one worker-*run* process for a task (`active_sessions`, `UNIQUE(taskId)`), created lazily *after* the provider process spawns, heartbeated by **tool activity** (throttled ~5s; no wall-clock ping between tool calls). "No active session" is AND-gated with `lastUpdatedAt > 5m`, so it means *"no live run **and** no task progress in 5 min."* It can false-positive on a long-but-quiet live worker; the resume-generation budget (`MAX_RESUME_GENERATIONS`) bounds the blast radius.
 - Thresholds (env-overridable): `STALL_THRESHOLD_NO_SESSION_MIN=5` (`HEARTBEAT_STALL_NO_SESSION_MIN`), `STALL_THRESHOLD_STALE_HEARTBEAT_MIN=15`, `STALL_THRESHOLD_MINUTES=30`, `STALE_CLEANUP_THRESHOLD_MINUTES=30`.
 
-## 3. Crash-recovery routing heuristic (`remediateCrashedWorkerTask` → `createResumeFollowUp` → reaper)
+## 3. Protected resume routing heuristic (`remediateCrashedWorkerTask` / shutdown → `createResumeFollowUp` → reaper)
 
 ```mermaid
 flowchart TD
-  entry["remediateCrashedWorkerTask:<br/>supersedeTask(parent) → frees capacity,<br/>then createResumeFollowUp(crash_recovery)"]
-  entry --> gate{"original agent row exists,<br/>status≠offline, hasCap?<br/>(crash_recovery IGNORES the 30s fresh gate)"}
+  entry["supersedeTask(parent) → frees capacity,<br/>then createResumeFollowUp(crash_recovery<br/>or graceful_shutdown)"]
+  entry --> gate{"original agent row exists,<br/>status≠offline, hasCap?<br/>(protected reasons IGNORE the 30s fresh gate)"}
   gate -->|"yes (recoverable / restarting)"| pin["resume = PENDING, agentId = parent<br/>(reclaimed on the agent's next poll —<br/>never enters the pool)"]
-  gate -->|"no — offline (graceful close) / row gone /<br/>HEARTBEAT_PIN_CRASH_RESUME=0"| pool["resume = UNASSIGNED → pool<br/>(genuinely-gone / rollback path)"]
+  gate -->|"no — offline / row gone / at capacity /<br/>pin kill-switch=0"| pool["resume = UNASSIGNED → pool<br/>(genuinely-gone / rollback path)"]
   pin --> reap{"reaper (every sweep, in cleanupStaleResources):<br/>still PENDING after<br/>HEARTBEAT_RESUME_PIN_GRACE_MIN?"}
   reap -->|"no — agent reclaimed it"| ok["runs on the original agent"]
   reap -->|"yes — never reclaimed"| esc["atomically cancel the pin, then<br/>createRerouteDecisionTask → Lead<br/>(over generation cap → fail, no decision)"]
   esc --> lead["Lead re-delegates via send-task(agentId=…)<br/>— explicit agent, never re-pooled"]
 ```
 
-**Heuristic (current):** a `crash_recovery` resume is **pinned back to its own (stable-ID) agent**. `createResumeFollowUp` sets `agentId = parent.agentId` whenever the agent row still exists, is not `offline`, and has capacity — *regardless of the 30s `WORKER_LIVENESS_WINDOW_SECONDS` freshness*. The agent ID survives a crash, so "stale at the ~5-min detection mark" means "restarting", not "gone". The resume is `pending` and reclaimed on the agent's next poll; it **never enters the role-blind pool**, so no wrong-specialization worker can grab it (DES-523). It falls back to the pool only when the agent is genuinely gone (graceful close → `offline`) or its row is absent — or when the `HEARTBEAT_PIN_CRASH_RESUME` rollback switch is `0` (then `crash_recovery` requires `fresh`, restoring the pre-DES-523 behavior). Other reasons (`context_limits` / `manual_supersede`) still require `fresh`; `graceful_shutdown` always pools.
+**Heuristic (current):** `crash_recovery` and `graceful_shutdown` resumes are **pinned back to their own (stable-ID) agent**. `createResumeFollowUp` sets `agentId = parent.agentId` whenever the agent row still exists, is not `offline`, and has capacity — *regardless of the 30s `WORKER_LIVENESS_WINDOW_SECONDS` freshness*. The agent ID survives both crash recovery and deploy/SIGTERM graceful shutdown, so "stale" usually means "restarting", not "gone". The resume is `pending` and reclaimed on the agent's next poll; it **never enters the role-blind pool**, so no wrong-specialization worker can grab it (DES-523). It falls back to the pool only when the agent is genuinely gone (`offline`), its row is absent, capacity is full, or the reason-specific rollback switch is `0` (`HEARTBEAT_PIN_CRASH_RESUME` for crash recovery, `HEARTBEAT_PIN_GRACEFUL_RESUME` for graceful shutdown). Other reasons (`context_limits` / `manual_supersede`) still require `fresh`.
 
-A pin **never reclaimed within `HEARTBEAT_RESUME_PIN_GRACE_MIN`** (the agent that looked recoverable never returned) is escalated by the **reaper** (`escalateUnreclaimedResumes`, run inside `cleanupStaleResources` on *every* sweep, including the post-reboot sweep): it atomically cancels the still-`pending` resume (skipping if the agent reclaimed it in the gap — TOCTOU-safe) and creates a Lead-owned `task.reroute.decision` follow-up. The Lead re-delegates via `send-task` with an **explicit `agentId`** — the work is never re-pooled. A resume already at the generation cap (`MAX_RESUME_GENERATIONS`) is failed instead of escalated, bounding a flapping task. Net: the crash path touches the unassigned pool **zero times**.
+A pin **never reclaimed within `HEARTBEAT_RESUME_PIN_GRACE_MIN`** (the agent that looked recoverable never returned) is escalated by the **reaper** (`escalateUnreclaimedResumes`, run inside `cleanupStaleResources` on *every* sweep, including the post-reboot sweep): it atomically cancels the still-`pending` resume (skipping if the agent reclaimed it in the gap — TOCTOU-safe) and creates a Lead-owned `task.reroute.decision` follow-up. The Lead re-delegates via `send-task` with an **explicit `agentId`** — the work is never re-pooled. A resume already at the generation cap (`MAX_RESUME_GENERATIONS`) is failed instead of escalated, bounding a flapping task. Net: protected pinned reasons touch the unassigned pool **zero times** unless a fail-open guard or rollback switch sends them there.
 
 ### Pseudocode (current)
 
 ```text
 # detector → on Case A / B:
 supersedeTask(parent)                      # frees the agent's in_progress slot
-resume = createResumeFollowUp(parent, reason = crash_recovery):
+resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdown):
     preferredAgentId = undefined
-    if parent.agentId and reason != graceful_shutdown:
+    if parent.agentId:
         cand = getAgentById(parent.agentId)
         if cand and cand.status != "offline" and activeCount(cand) < cand.maxTasks:
             isCrash = (reason == crash_recovery) and HEARTBEAT_PIN_CRASH_RESUME
-            if isCrash or (now - cand.lastActivityAt < 30s):   # crash_recovery IGNORES the fresh gate
+            isGraceful = (reason == graceful_shutdown) and HEARTBEAT_PIN_GRACEFUL_RESUME
+            isFreshReason = (reason != graceful_shutdown) and (now - cand.lastActivityAt < 30s)
+            if isCrash or isGraceful or isFreshReason:   # protected reasons IGNORE the fresh gate
                 preferredAgentId = cand.id
     tags = [auto-resume, reason:<r>, resume-generation:<n>]
     if reason == crash_recovery and preferredAgentId: tags += [crash-recovery-pin]   # mark a GENUINE pin
+    if reason == graceful_shutdown and preferredAgentId: tags += [graceful-shutdown-pin]
     createTaskExtended(resume, agentId = preferredAgentId, tags = tags)
     #   agentId set  → status = pending  (PINNED to the original agent)
     #   agentId none → status = unassigned (pool — only genuinely-gone / rollback)
 
 # every sweep, inside cleanupStaleResources:
 escalateUnreclaimedResumes():
-    for r in getStalePinnedResumes(grace):    # tagged crash-recovery-pin, status=pending, createdAt < now-grace
+    for r in getStalePinnedResumes(grace):    # tagged crash-recovery-pin OR graceful-shutdown-pin, status=pending, createdAt < now-grace
         if getResumeGeneration(r) >= MAX_RESUME_GENERATIONS:
             failPendingResumeIfUnclaimed(r, "failed", budget_exhausted); continue   # bound flapping
         if no lead: continue                          # leave pending — nothing to escalate to
@@ -89,7 +92,7 @@ escalateUnreclaimedResumes():
             createRerouteDecisionTask(original, staleResume = r) → Lead    # Lead re-delegates via send-task(agentId=…)
 ```
 
-> The `crash-recovery-pin` tag is the reaper's scoping key: only genuine same-agent pins carry it, so a *pooled* resume that `autoAssignPoolTasks` later flips to `pending` (keeping its old `createdAt`) is never mistaken for a stale pin and reaped.
+> The `crash-recovery-pin` and `graceful-shutdown-pin` tags are the reaper's scoping keys: only genuine same-agent pins carry them, so a *pooled* resume that `autoAssignPoolTasks` later flips to `pending` (keeping its old `createdAt`) is never mistaken for a stale pin and reaped.
 
 ---
 
@@ -106,3 +109,4 @@ escalateUnreclaimedResumes():
 | Resume-generation cap | 3 | `HEARTBEAT_MAX_RESUME_GENERATIONS` |
 | Resume-pin grace, reaper (`0` = off) | 10 min | `HEARTBEAT_RESUME_PIN_GRACE_MIN` |
 | Same-agent crash pin, rollback (`0` = off) | on | `HEARTBEAT_PIN_CRASH_RESUME` |
+| Same-agent graceful-shutdown pin, rollback (`0` = off) | on | `HEARTBEAT_PIN_GRACEFUL_RESUME` |

@@ -76,7 +76,7 @@ export interface MemoryCandidate extends AgentMemory {
   beta: number;
 }
 
-export type MemoryRetrievalSource = "vec" | "fts" | "hybrid" | "fallback";
+export type MemoryRetrievalSource = "vec" | "fts" | "hybrid" | "fallback" | "graph";
 
 export interface MemorySearchOptions {
   scope?: "agent" | "swarm" | "all";

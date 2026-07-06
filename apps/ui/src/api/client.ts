@@ -1762,6 +1762,16 @@ class ApiClient {
     return res.json();
   }
 
+  async fetchMemoryUsefulness(days = 30): Promise<import("./types").MemoryUsefulnessStats | null> {
+    const url = `${this.getBaseUrl()}/api/memory/usefulness?days=${days}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    // Older API servers predate `/api/memory/usefulness`. Return null on any
+    // non-2xx so the /memory page hides the Usefulness panel instead of
+    // surfacing an error.
+    if (!res.ok) return null;
+    return res.json();
+  }
+
   // ─── Users (Phase 2 ≥1.76.0; Phase 064 step-8 ≥1.80.0) ──────────────────
 
   async listUsers(opts?: { recentEvents?: number }): Promise<User[]> {

@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
-import { storeLinks } from "@/be/memory/link-resolver";
+import { refreshLinks } from "@/be/memory/link-resolver";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentMemorySchema, AgentMemoryScopeSchema } from "@/types";
 
@@ -103,7 +103,8 @@ export const registerMemoryEditTool = (server: McpServer) => {
           const embedding = await provider.embed(result.memory.content);
           if (embedding) store.updateEmbedding(result.memory.id, embedding, provider.name);
           try {
-            storeLinks(result.memory.id, requestInfo.agentId, result.memory.content);
+            // Edit path: prune links derived from removed content (sequel links survive).
+            refreshLinks(result.memory.id, requestInfo.agentId, result.memory.content);
           } catch (err) {
             console.error(
               `[memory-edit] Link resolution failed for ${result.memory.id}:`,

@@ -43,6 +43,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `EMBEDDING_DIMENSIONS` | `512` | Vector dimensions requested from the model. Must match what the model supports. |
 | `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Optional global override for memory recency decay. When unset, recency defaults are source-aware: manual memories do not decay, `file_index` uses 180 days, `task_completion` uses 14 days, and `session_summary` uses 7 days. |
 | `MEMORY_HYBRID_SEARCH` | `0` | Set to `1` to enable hybrid memory retrieval that blends vector similarity with a full-text pass before reranking. Leave unset or `0` for vector-only search. |
+| `MEMORY_GRAPH_EXPANSION` | `0` | Set to `1` to expand search candidates with 1-hop memory-link neighbors (resolved `[[wikilink]]` targets) before reranking. Neighbors are damped (`parentRawSimilarity × strength × 0.7`), capped at 5 per search, respect the caller's scope/source/lead ACL, and carry `retrievalSource: "graph"` so `GET /api/memory/usefulness` can measure the arm's citation rate. Default off — results are byte-identical to pre-expansion behavior. |
 | `MEMORY_MIN_SIMILARITY` | `0.1` | Minimum raw cosine similarity required before a memory candidate survives reranking. Filters low-relevance noise before recency/access boosts are applied. |
 | `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier for reranking |
 | `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |

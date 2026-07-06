@@ -1,10 +1,26 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
-import { Brain, ChevronLeft, ChevronRight, FileText, Loader2, Search, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Activity,
+  BarChart3,
+  Brain,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  Loader2,
+  Quote,
+  Search,
+  Target,
+  Trash2,
+  TrendingUp,
+} from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useDeleteMemory, useMemoryList } from "@/api/hooks/use-memory";
+import { useMemoryUsefulness } from "@/api/hooks/use-memory-usefulness";
 import type { MemoryEntry, MemoryListRequest, MemoryScopeFilter, MemorySource } from "@/api/types";
+import { SharedBarChart } from "@/components/shared/charts/nivo-charts";
+import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { DataGrid } from "@/components/shared/data-grid";
 import {
   AlertDialog,
@@ -18,6 +34,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -35,6 +52,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { StatPanel } from "@/components/ui/stat-panel";
 import { readNumberParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatSmartTime } from "@/lib/utils";
 
@@ -460,6 +478,8 @@ export default function MemoryPage() {
         </div>
       </div>
 
+      <UsefulnessSection />
+
       <DataGrid
         rowData={results}
         columnDefs={columnDefs}
@@ -640,6 +660,124 @@ function DetailRow({ label, value, mono }: { label: string; value: string; mono?
     <div className="flex flex-col gap-0.5">
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className={mono ? "font-mono text-xs break-all" : "text-sm"}>{value}</div>
+    </div>
+  );
+}
+
+/**
+ * Windowed usefulness readout from `GET /api/memory/usefulness` — summary
+ * tiles (retrieval volume, overall citation rate, posterior movement) plus
+ * per-source citation-rate and per-arm retrieval charts. Hidden entirely
+ * while loading and on older API servers (the hook resolves to `null`).
+ */
+function UsefulnessSection() {
+  const { data: stats } = useMemoryUsefulness();
+
+  if (!stats) return null;
+
+  const totalRetrievals = stats.byArm.reduce((sum, arm) => sum + arm.retrievals, 0);
+  const citedRetrievals = stats.byArm.reduce((sum, arm) => sum + arm.citedRetrievals, 0);
+  const citationRate = totalRetrievals > 0 ? citedRetrievals / totalRetrievals : 0;
+
+  const armRows = stats.byArm.map((arm) => ({
+    arm: arm.retrievalSource ?? "legacy",
+    retrievals: arm.retrievals,
+    cited: arm.citedRetrievals,
+  }));
+  const sourceRows = stats.citationBySource.map((row) => ({
+    source: row.source,
+    "citation rate": row.citationRate,
+  }));
+
+  return (
+    <CollapsibleSection
+      title={`Usefulness — last ${stats.windowDays}d`}
+      icon={BarChart3}
+      defaultOpen
+      persistKey="memory-usefulness-open"
+      className="shrink-0"
+      badge={
+        <Badge variant="outline" size="tag">
+          {Math.round(citationRate * 100)}% cited
+        </Badge>
+      }
+    >
+      <div className="space-y-3 pt-1">
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <StatPanel
+            icon={Activity}
+            label={`Retrievals (${stats.volume.distinctMemories} memories, ${stats.volume.retrievalGroups} searches)`}
+            value={stats.volume.retrievals}
+            tone="info"
+          />
+          <StatPanel
+            icon={Quote}
+            label="Citation rate"
+            value={`${Math.round(citationRate * 100)}%`}
+            tone="success"
+          />
+          <StatPanel
+            icon={TrendingUp}
+            label="Posteriors moved"
+            value={`${stats.posterior.movedFromPrior} / ${stats.posterior.totalMemories}`}
+            tone="active"
+          />
+          <StatPanel
+            icon={Target}
+            label={`Above ${stats.threshold} posterior mean`}
+            value={stats.posterior.aboveThreshold}
+          />
+        </div>
+
+        <div className="grid gap-3 lg:grid-cols-2">
+          <ChartCard title="Citation rate by memory source">
+            {sourceRows.length > 0 ? (
+              <SharedBarChart
+                data={sourceRows}
+                indexBy="source"
+                keys={["citation rate"]}
+                height={190}
+                valueFormatter={(value) =>
+                  typeof value === "number" ? value.toFixed(2) : String(value)
+                }
+              />
+            ) : (
+              <ChartEmpty>No implicit-citation ratings in window</ChartEmpty>
+            )}
+          </ChartCard>
+          <ChartCard title="Retrievals by arm">
+            {armRows.length > 0 ? (
+              <SharedBarChart
+                data={armRows}
+                indexBy="arm"
+                keys={["retrievals", "cited"]}
+                height={190}
+              />
+            ) : (
+              <ChartEmpty>No retrievals in window</ChartEmpty>
+            )}
+          </ChartCard>
+        </div>
+      </div>
+    </CollapsibleSection>
+  );
+}
+
+function ChartCard({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <Card className="min-w-0 gap-2 rounded-md py-4">
+      <CardHeader className="px-4">
+        <CardTitle className="text-sm">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="px-2">{children}</CardContent>
+    </Card>
+  );
+}
+
+function ChartEmpty({ children }: { children: ReactNode }) {
+  return (
+    <div className="mx-2 flex h-[190px] items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
+      {children}
     </div>
   );
 }

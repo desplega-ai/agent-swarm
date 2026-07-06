@@ -1,7 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { storeLinks, storeSequelLink } from "../be/memory/link-resolver";
 import { applyEditMode, SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
+import { registerMemoryEditTool } from "../tools/memory-edit";
 
 const TEST_DB_PATH = "./test-memory-edit.sqlite";
 const agentId = "aaaa0000-0000-4000-8000-000000000201";
@@ -173,5 +176,97 @@ describe("memory editing", () => {
         intent: "test ambiguous",
       }),
     ).toThrow("oldString is ambiguous");
+  });
+
+  // ─── Edit-path callers prune stale links (DES-639b regression) ────────────
+  //
+  // Before Phase 5 the callers re-ran the additive storeLinks() on edit, so
+  // links derived from deleted content lingered forever. The memory-edit MCP
+  // tool is a real caller — drive it end-to-end and assert pruning.
+
+  describe("memory-edit tool prunes stale links", () => {
+    function buildTool() {
+      const server = new McpServer({ name: "memory-edit-test", version: "1.0.0" });
+      registerMemoryEditTool(server);
+      const registered = (
+        server as unknown as {
+          _registeredTools: Record<
+            string,
+            { handler: (args: unknown, extra: unknown) => Promise<unknown> }
+          >;
+        }
+      )._registeredTools;
+      const tool = registered["memory-edit"];
+      if (!tool) throw new Error("memory-edit tool not registered");
+      return tool;
+    }
+
+    function meta() {
+      return {
+        sessionId: "memory-edit-test-session",
+        requestInfo: { headers: { "x-agent-id": agentId } },
+      };
+    }
+
+    function linkRowsFor(memoryId: string) {
+      return getDb()
+        .prepare<{ linkType: string; targetId: string }, [string]>(
+          "SELECT linkType, targetId FROM memory_link WHERE from_memory_id = ? ORDER BY targetId",
+        )
+        .all(memoryId);
+    }
+
+    test("editing away a wikilink deletes its link row, keeps survivors + sequel", async () => {
+      // Ensure the embedding provider stays keyless/deterministic in tests.
+      process.env.EMBEDDING_API_KEY = "";
+      process.env.OPENAI_API_KEY = "";
+
+      const b = store.store({
+        agentId,
+        scope: "agent",
+        name: "edit-b-target",
+        content: "target B",
+        source: "manual",
+      });
+      const c = store.store({
+        agentId,
+        scope: "agent",
+        name: "edit-c-target",
+        content: "target C",
+        source: "manual",
+      });
+      const a = store.store({
+        agentId,
+        scope: "agent",
+        name: "edit-a-source",
+        content: "See [[edit-b-target]] and [[edit-c-target]].",
+        source: "manual",
+      });
+      storeLinks(a.id, agentId, a.content);
+      storeSequelLink(a.id, b.id);
+      expect(linkRowsFor(a.id)).toHaveLength(3);
+
+      const result = (await buildTool().handler(
+        {
+          memoryId: a.id,
+          mode: "replace",
+          content: "See [[edit-b-target]] only.",
+          intent: "test stale-link pruning",
+        },
+        meta(),
+      )) as { structuredContent: { success: boolean; message: string; changed?: boolean } };
+
+      // Assert on the message first — on failure it carries the tool's error
+      // (a bare success:false told us nothing when this flaked in CI).
+      expect(result.structuredContent.message).toStartWith("Memory edited to version");
+      expect(result.structuredContent.success).toBe(true);
+      expect(result.structuredContent.changed).toBe(true);
+
+      const rows = linkRowsFor(a.id);
+      expect(rows).toHaveLength(2);
+      expect(rows.filter((r) => r.linkType === "wikilink").map((r) => r.targetId)).toEqual([b.id]);
+      expect(rows.find((r) => r.linkType === "sequel")?.targetId).toBe(b.id);
+      expect(rows.some((r) => r.targetId === c.id)).toBe(false);
+    });
   });
 });

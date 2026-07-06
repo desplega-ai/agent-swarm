@@ -4,7 +4,15 @@ import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import * as realMemoryModule from "../be/memory";
 import type { AgentMemory } from "../types";
+
+// Capture the real exports BEFORE mock.module patches the registry entry —
+// plain object properties are immune to the mock's live-binding rewrite.
+const realMemoryExports = {
+  getEmbeddingProvider: realMemoryModule.getEmbeddingProvider,
+  getMemoryStore: realMemoryModule.getMemoryStore,
+};
 
 const memoryId = randomUUID();
 const agentId = randomUUID();
@@ -148,6 +156,11 @@ beforeEach(() => {
 });
 
 afterAll(async () => {
+  // bun's mock.module is process-global and never auto-restored — without
+  // this, every later test file importing @/be/memory gets a getMemoryStore
+  // stub with no edit() (broke memory-edit.test.ts on Linux CI, where the
+  // readdir-driven file order runs this file first).
+  mock.module("../be/memory", () => realMemoryExports);
   closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {

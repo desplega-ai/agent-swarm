@@ -6,7 +6,9 @@ import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { canReadMemory } from "../be/memory/access";
 import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
 import { listEdgesForAgent } from "../be/memory/edges-store";
-import { storeLinks } from "../be/memory/link-resolver";
+import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
+import { refreshLinks, storeLinks } from "../be/memory/link-resolver";
+import { getLinksForMemory, type MemoryLinksResult } from "../be/memory/links-store";
 import { recordRetrievals } from "../be/memory/raters/retrieval";
 import { applyRating, ExplicitSelfDuplicateError } from "../be/memory/raters/store";
 import {
@@ -16,6 +18,7 @@ import {
 } from "../be/memory/raters/types";
 import { rerank } from "../be/memory/reranker";
 import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retrieval-store";
+import { getUsefulnessStats } from "../be/memory/usefulness-stats";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
 import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { route } from "./route-def";
@@ -164,6 +167,38 @@ const memoryHealth = route({
   },
 });
 
+// Windowed usefulness analytics — sibling of the cheap /health probe.
+// Reads memory_retrieval + memory_rating + agent_memory posteriors; plan:
+// thoughts/taras/plans/2026-07-02-memory-retrieval-v2-graph-and-measurement.md Phase 1.
+const memoryUsefulness = route({
+  method: "get",
+  path: "/api/memory/usefulness",
+  pattern: ["api", "memory", "usefulness"],
+  summary:
+    "Windowed memory usefulness analytics: retrieval volume, per-arm breakdown, citation rate per source, posterior movement",
+  tags: ["Memory"],
+  auth: { apiKey: true },
+  query: z.object({
+    days: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(365)
+      .default(30)
+      .describe("Analysis window in days (default 30)"),
+    threshold: z.coerce
+      .number()
+      .min(0)
+      .max(1)
+      .default(0.6)
+      .describe("Posterior-mean threshold for the aboveThreshold count (default 0.6)"),
+  }),
+  responses: {
+    200: { description: "Usefulness stats for the window" },
+    400: { description: "Validation error" },
+  },
+});
+
 const deleteMemoryById = route({
   method: "delete",
   path: "/api/memory/{id}",
@@ -196,7 +231,10 @@ const getMemoryById = route({
       ),
   }),
   responses: {
-    200: { description: "Memory details" },
+    200: {
+      description:
+        "Memory details, plus `links` (outgoing memory_link rows; memory-kind targets carry `resolved` + ACL-filtered `target` metadata) and `backlinks` (inbound links from other memories, ACL-filtered)",
+    },
     404: { description: "Memory not found" },
   },
 });
@@ -368,7 +406,8 @@ export async function handleMemory(
         const embedding = await provider.embed(contentChunks[0]!.content);
         if (embedding) store.updateEmbedding(result.memory.id, embedding, provider.name);
         try {
-          storeLinks(result.memory.id, memoryAgentId, result.memory.content);
+          // Re-index of an existing memory: prune stale content-derived links.
+          refreshLinks(result.memory.id, memoryAgentId, result.memory.content);
         } catch (err) {
           console.error(
             `[memory] Link resolution failed for ${result.memory.id}:`,
@@ -467,7 +506,13 @@ export async function handleMemory(
         isLead: false,
         queryText: query,
       });
-      const ranked = rerank(candidates, { limit: Math.min(limit, 20) });
+      // 1-hop memory_link neighbor expansion (no-op unless MEMORY_GRAPH_EXPANSION=1).
+      const expanded = expandCandidatesWithGraph(candidates, myAgentId, {
+        scope,
+        source,
+        isLead: false,
+      });
+      const ranked = rerank(expanded, { limit: Math.min(limit, 20) });
 
       // Retrieval bridge — when caller passed `X-Source-Task-ID`, record one
       // `memory_retrieval` row per returned memory so server-side raters
@@ -509,6 +554,7 @@ export async function handleMemory(
           retrievalSource: r.retrievalSource,
           source: r.source,
           scope: r.scope,
+          tags: r.tags,
         })),
       });
     } catch (err) {
@@ -664,7 +710,8 @@ export async function handleMemory(
         const embedding = await provider.embed(result.memory.content);
         if (embedding) store.updateEmbedding(result.memory.id, embedding, provider.name);
         try {
-          storeLinks(result.memory.id, myAgentId, result.memory.content);
+          // Edit path: prune links derived from removed content (sequel links survive).
+          refreshLinks(result.memory.id, myAgentId, result.memory.content);
         } catch (err) {
           console.error(
             `[memory-edit] Link resolution failed for ${result.memory.id}:`,
@@ -687,6 +734,16 @@ export async function handleMemory(
     if (!parsed) return true;
 
     json(res, getMemoryStore().getHealth());
+    return true;
+  }
+
+  if (memoryUsefulness.match(req.method, pathSegments)) {
+    const queryParams = parseQueryParams(req.url || "");
+    const parsed = await memoryUsefulness.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const { days, threshold } = parsed.query;
+    json(res, getUsefulnessStats({ days, threshold }));
     return true;
   }
 
@@ -883,7 +940,17 @@ export async function handleMemory(
       }
     }
 
-    json(res, { memory });
+    // Link traversal (DES-639b) — best-effort: a graph read failure must
+    // never break memory-get. Visibility mirrors the search ACL; the HTTP
+    // surface has no lead special-casing (same as POST /api/memory/search).
+    let linkBlocks: MemoryLinksResult = { links: [], backlinks: [] };
+    try {
+      linkBlocks = getLinksForMemory(memory.id, { viewerAgentId: myAgentId });
+    } catch (err) {
+      console.error("[memory-get] link traversal failed:", (err as Error).message);
+    }
+
+    json(res, { memory, links: linkBlocks.links, backlinks: linkBlocks.backlinks });
     return true;
   }
 

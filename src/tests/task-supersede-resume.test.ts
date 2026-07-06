@@ -21,7 +21,11 @@ import {
   getTrackerSyncByExternalId,
 } from "../be/db-queries/tracker";
 import { buildResumeContextPreamble } from "../commands/context-preamble";
-import { createResumeFollowUp } from "../tasks/worker-follow-up";
+import {
+  CRASH_RECOVERY_PIN_TAG,
+  createResumeFollowUp,
+  GRACEFUL_SHUTDOWN_PIN_TAG,
+} from "../tasks/worker-follow-up";
 
 const TEST_DB_PATH = "./test-task-supersede-resume.sqlite";
 
@@ -398,15 +402,66 @@ describe("Task Supersede + Resume", () => {
       expect(afterCount).toBe(beforeCount);
     });
 
-    test("routing: graceful_shutdown ALWAYS goes to pool, even on fresh+capable worker (PR #594 review)", () => {
-      // The worker is exiting moments after this check — keeping the resume on
-      // the same agent would orphan it once `closeAgent` runs. graceful_shutdown
-      // must force the unassigned-pool path regardless of liveness.
+    test("routing: graceful_shutdown pins to original online agent with capacity and tags the pin", () => {
       const worker = freshAgent("worker-fresh-shutdown", {
         maxTasks: 5,
-        lastActivityAt: new Date().toISOString(),
+        // Stale activity proves graceful_shutdown skips the fresh-agent gate,
+        // matching crash_recovery's stable-agent-ID routing.
+        lastActivityAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
       });
       const parent = createTaskExtended("Routing graceful_shutdown", { agentId: worker.id });
+      startTask(parent.id);
+      supersedeTask(parent.id, { reason: "graceful_shutdown", resumeTaskId: null });
+
+      const result = createResumeFollowUp({
+        parentId: parent.id,
+        reason: "graceful_shutdown",
+      });
+      if (result.kind !== "created") throw new Error("expected created");
+      expect(result.task.agentId).toBe(worker.id);
+      expect(result.task.status).toBe("pending");
+      expect(result.task.tags).toContain(GRACEFUL_SHUTDOWN_PIN_TAG);
+      expect(result.task.tags).not.toContain(CRASH_RECOVERY_PIN_TAG);
+    });
+
+    test("routing: HEARTBEAT_PIN_GRACEFUL_RESUME=0 restores graceful_shutdown pool behavior", () => {
+      const previous = process.env.HEARTBEAT_PIN_GRACEFUL_RESUME;
+      process.env.HEARTBEAT_PIN_GRACEFUL_RESUME = "0";
+      try {
+        const worker = freshAgent("worker-shutdown-killswitch", {
+          maxTasks: 5,
+          lastActivityAt: new Date().toISOString(),
+        });
+        const parent = createTaskExtended("Routing graceful_shutdown kill-switch", {
+          agentId: worker.id,
+        });
+        startTask(parent.id);
+        supersedeTask(parent.id, { reason: "graceful_shutdown", resumeTaskId: null });
+
+        const result = createResumeFollowUp({
+          parentId: parent.id,
+          reason: "graceful_shutdown",
+        });
+        if (result.kind !== "created") throw new Error("expected created");
+        expect(result.task.agentId).toBeNull();
+        expect(result.task.status).toBe("unassigned");
+        expect(result.task.tags).not.toContain(GRACEFUL_SHUTDOWN_PIN_TAG);
+      } finally {
+        if (previous === undefined) {
+          delete process.env.HEARTBEAT_PIN_GRACEFUL_RESUME;
+        } else {
+          process.env.HEARTBEAT_PIN_GRACEFUL_RESUME = previous;
+        }
+      }
+    });
+
+    test("routing: graceful_shutdown at capacity → unassigned pool fail-open", () => {
+      const worker = freshAgent("worker-full-shutdown", {
+        maxTasks: 1,
+        lastActivityAt: new Date().toISOString(),
+      });
+      // Parent is still in_progress and fills the worker's single slot.
+      const parent = createTaskExtended("Routing graceful_shutdown capped", { agentId: worker.id });
       startTask(parent.id);
 
       const result = createResumeFollowUp({
@@ -416,6 +471,28 @@ describe("Task Supersede + Resume", () => {
       if (result.kind !== "created") throw new Error("expected created");
       expect(result.task.agentId).toBeNull();
       expect(result.task.status).toBe("unassigned");
+      expect(result.task.tags).not.toContain(GRACEFUL_SHUTDOWN_PIN_TAG);
+    });
+
+    test("routing: graceful_shutdown offline worker → unassigned pool fail-open", () => {
+      const worker = freshAgent("worker-offline-shutdown", {
+        maxTasks: 5,
+        lastActivityAt: new Date().toISOString(),
+      });
+      updateAgentStatus(worker.id, "offline");
+      const parent = createTaskExtended("Routing graceful_shutdown offline", {
+        agentId: worker.id,
+      });
+      startTask(parent.id);
+
+      const result = createResumeFollowUp({
+        parentId: parent.id,
+        reason: "graceful_shutdown",
+      });
+      if (result.kind !== "created") throw new Error("expected created");
+      expect(result.task.agentId).toBeNull();
+      expect(result.task.status).toBe("unassigned");
+      expect(result.task.tags).not.toContain(GRACEFUL_SHUTDOWN_PIN_TAG);
     });
 
     test("routing: fresh worker + capacity (non-shutdown) → resume pre-assigned to same worker", () => {

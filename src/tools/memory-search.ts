@@ -3,6 +3,7 @@ import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { CANDIDATE_SET_MULTIPLIER } from "@/be/memory/constants";
+import { expandCandidatesWithGraph } from "@/be/memory/graph-expansion";
 import { recordRetrievals } from "@/be/memory/raters/retrieval";
 import { rerank } from "@/be/memory/reranker";
 import { createToolRegistrar } from "@/tools/utils";
@@ -54,7 +55,8 @@ export const registerMemorySearchTool = (server: McpServer) => {
               source: AgentMemorySourceSchema,
               scope: AgentMemoryScopeSchema,
               similarity: z.number().optional(),
-              retrievalSource: z.enum(["vec", "fts", "hybrid", "fallback"]).optional(),
+              retrievalSource: z.enum(["vec", "fts", "hybrid", "fallback", "graph"]).optional(),
+              tags: z.array(z.string()).optional(),
               createdAt: z.string(),
               rateHint: z.string().optional(),
             }),
@@ -91,8 +93,14 @@ export const registerMemorySearchTool = (server: McpServer) => {
         isLead,
         queryText: query,
       });
-      if (candidates.length > 0) {
-        const ranked = rerank(candidates, { limit });
+      // 1-hop memory_link neighbor expansion (no-op unless MEMORY_GRAPH_EXPANSION=1).
+      const expanded = expandCandidatesWithGraph(candidates, requestInfo.agentId, {
+        scope: scope as "agent" | "swarm" | "all",
+        source,
+        isLead,
+      });
+      if (expanded.length > 0) {
+        const ranked = rerank(expanded, { limit });
 
         // Retrieval bridge — when called inside a task scope, log one
         // `memory_retrieval` row per returned memory so server-side raters
@@ -125,6 +133,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
           scope: r.scope,
           similarity: r.similarity,
           retrievalSource: r.retrievalSource,
+          tags: r.tags,
           createdAt: r.createdAt,
           ...(inTaskContext && NUDGE_ELIGIBLE_SOURCES.has(r.source as AgentMemorySource)
             ? { rateHint: rateHintFor(r.id) }
@@ -166,6 +175,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
         summary: r.summary,
         source: r.source,
         scope: r.scope,
+        tags: r.tags,
         createdAt: r.createdAt,
       }));
 

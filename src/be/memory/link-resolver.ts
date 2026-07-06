@@ -183,6 +183,30 @@ export function resolveWikilinksToMemoryIds(
   });
 }
 
+const INSERT_LINK_SQL = `INSERT OR IGNORE INTO memory_link
+   (id, from_memory_id, linkType, targetKind, targetId, strength, resolver, sourceText, metadata, createdAt, updatedAt)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+function insertLinkArgs(
+  memoryId: string,
+  link: ResolvedLink,
+  now: string,
+): [string, string, string, string, string, number, string, string, string | null, string, string] {
+  return [
+    crypto.randomUUID(),
+    memoryId,
+    link.linkType,
+    link.targetKind,
+    link.targetId,
+    link.strength,
+    link.resolver,
+    link.sourceText,
+    link.metadata ? JSON.stringify(link.metadata) : null,
+    now,
+    now,
+  ];
+}
+
 export function storeLinks(memoryId: string, agentId: string, content: string): void {
   const links = resolveLinks(content);
   if (links.length === 0) return;
@@ -190,27 +214,67 @@ export function storeLinks(memoryId: string, agentId: string, content: string): 
   const resolved = resolveWikilinksToMemoryIds(agentId, links);
   const db = getDb();
   const now = new Date().toISOString();
-  const insert = db.prepare(
-    `INSERT OR IGNORE INTO memory_link
-       (id, from_memory_id, linkType, targetKind, targetId, strength, resolver, sourceText, metadata, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
+  const insert = db.prepare(INSERT_LINK_SQL);
 
   db.transaction(() => {
     for (const link of resolved) {
-      insert.run(
-        crypto.randomUUID(),
-        memoryId,
-        link.linkType,
-        link.targetKind,
-        link.targetId,
-        link.strength,
-        link.resolver,
-        link.sourceText,
-        link.metadata ? JSON.stringify(link.metadata) : null,
-        now,
-        now,
-      );
+      insert.run(...insertLinkArgs(memoryId, link, now));
+    }
+  })();
+}
+
+/** The `memory_link` UNIQUE-constraint identity — the natural diff key for pruning. */
+function linkIdentity(link: {
+  linkType: string;
+  targetKind: string;
+  targetId: string;
+  sourceText: string | null;
+}): string {
+  return JSON.stringify([link.linkType, link.targetKind, link.targetId, link.sourceText ?? null]);
+}
+
+/**
+ * Re-derive content links on the EDIT/RE-INDEX paths (DES-639b).
+ *
+ * Unlike the additive `storeLinks`, this prunes: in one transaction it
+ * deletes content-derived rows (`linkType != 'sequel'`) whose UNIQUE identity
+ * (linkType, targetKind, targetId, sourceText) is absent from the new
+ * content's resolved set, then INSERT OR IGNOREs the new set. `sequel` links
+ * are preserved — they are created by `storeSequelLink` (resolver
+ * 'sequel-auto') and are not derivable from content. Fresh-store paths keep
+ * plain `storeLinks`.
+ */
+export function refreshLinks(memoryId: string, agentId: string, content: string): void {
+  const resolved = resolveWikilinksToMemoryIds(agentId, resolveLinks(content));
+  const nextIdentities = new Set(resolved.map((link) => linkIdentity(link)));
+
+  const db = getDb();
+  const now = new Date().toISOString();
+  const selectExisting = db.prepare<
+    {
+      id: string;
+      linkType: string;
+      targetKind: string;
+      targetId: string;
+      sourceText: string | null;
+    },
+    [string]
+  >(
+    `SELECT id, linkType, targetKind, targetId, sourceText
+       FROM memory_link
+      WHERE from_memory_id = ? AND linkType != 'sequel'`,
+  );
+  const deleteById = db.prepare("DELETE FROM memory_link WHERE id = ?");
+  const insert = db.prepare(INSERT_LINK_SQL);
+
+  db.transaction(() => {
+    for (const row of selectExisting.all(memoryId)) {
+      if (!nextIdentities.has(linkIdentity(row))) {
+        deleteById.run(row.id);
+      }
+    }
+    for (const link of resolved) {
+      insert.run(...insertLinkArgs(memoryId, link, now));
     }
   })();
 }

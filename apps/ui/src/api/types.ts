@@ -1598,6 +1598,56 @@ export interface MemoryListResponse {
   mode: "semantic" | "list";
 }
 
+/**
+ * Windowed usefulness analytics from `GET /api/memory/usefulness`
+ * (memory-retrieval-v2 Phase 1). Mirrors `UsefulnessStats` in
+ * `src/be/memory/usefulness-stats.ts`. Older API servers don't expose this
+ * route; the client returns `null` on any non-2xx so the /memory page hides
+ * the Usefulness panel rather than erroring.
+ */
+export interface MemoryUsefulnessStats {
+  windowDays: number;
+  threshold: number;
+  /** ISO cutoff — rows strictly newer than this are inside the window. */
+  cutoff: string;
+  volume: {
+    retrievals: number;
+    distinctMemories: number;
+    retrievalGroups: number;
+    byEventType: { search: number; get: number };
+  };
+  byArm: {
+    /** 'vec' | 'fts' | 'hybrid' | 'fallback' ('graph' after DES-639a); null = pre-provenance legacy rows. */
+    retrievalSource: string | null;
+    retrievals: number;
+    distinctMemories: number;
+    citedRetrievals: number;
+    /** citedRetrievals / retrievals — in [0, 1]. */
+    citationRate: number;
+  }[];
+  citationBySource: {
+    source: string;
+    ratings: number;
+    positive: number;
+    /** positive / ratings — a true rate in [0, 1]. */
+    citationRate: number;
+    /** AVG(signal) over the window's implicit-citation ratings — in [-1, 1]. */
+    avgSignal: number;
+  }[];
+  posterior: {
+    totalMemories: number;
+    movedFromPrior: number;
+    avgPosteriorMean: number | null;
+    avgPosteriorMeanMoved: number | null;
+    aboveThreshold: number;
+  };
+  sanity: {
+    totalRetrievalRows: number;
+    totalRatingRows: number;
+    ratingsBySource: { source: string; count: number }[];
+  };
+}
+
 // ─── /status (Phase 1: cloud personalization) ──────────────────────────────
 
 export type SetupMilestoneState = "unverified" | "configured" | "verified";

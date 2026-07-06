@@ -59,8 +59,11 @@ Before starting each task, the runner automatically searches for relevant memori
 2. An embedding is generated via the `EmbeddingProvider`
 3. Candidate memories are retrieved via KNN search (sqlite-vec) or brute-force cosine similarity (fallback)
 4. When `MEMORY_HYBRID_SEARCH=1`, reciprocal-rank fusion blends vector matches with a full-text pass before reranking; otherwise retrieval stays vector-only
-5. Candidates below the minimum similarity floor are dropped, then the survivors are **reranked** using a composite score
-5. Top matches are included in the task context as "Relevant Past Knowledge"
+5. When `MEMORY_GRAPH_EXPANSION=1`, the candidate set is expanded with 1-hop memory-link neighbors (see [Graph Expansion](#graph-expansion))
+6. Candidates below the minimum similarity floor are dropped, then the survivors are **reranked** using a composite score
+7. Top matches are included in the task context as "Relevant Past Knowledge"
+
+Every retrieval row records its provenance (`retrievalSource`: `vec`, `fts`, `hybrid`, `fallback`, or `graph`), so the [usefulness readout](#usefulness-readout) can compare how often each retrieval arm's results actually get cited.
 
 ### Reranking
 
@@ -78,6 +81,31 @@ finalScore = similarity × sourceQuality × recencyDecay × accessBoost
 
 Before reranking, candidates with raw cosine similarity below `MEMORY_MIN_SIMILARITY` (default `0.1`) are discarded as noise. The remaining candidate set is fetched at 3× the requested limit, then narrowed after reranking. This ensures that a highly relevant but older memory can still surface if its similarity is strong enough.
 
+### Graph Expansion
+
+With `MEMORY_GRAPH_EXPANSION=1` (default off), search results gain **1-hop graph neighbors**: after the store returns its candidates and before reranking, the expander follows outgoing `memory_link` rows (resolved wikilinks pointing at live memories) from each candidate and injects the linked memories as additional candidates. A memory that is lexically and semantically distant from the query can therefore still surface because a strong hit links to it — `"Auth flow gotchas, see [[deploy-checklist]]"` pulls the checklist into results for an auth query.
+
+Mechanics:
+
+- **Derived score** — `parentRawSimilarity × linkStrength × damping` (damping `0.7`), so neighbors rank below the hit that pulled them in. The parent's *pre-decay* similarity is used; the neighbor's own recency decay is applied exactly once by the reranker.
+- **Cap** — at most 5 new candidates per search, selected by the reranker's composite score (not raw similarity), so stale low-value links can't crowd out better ones.
+- **ACL + filters** — neighbors respect the caller's scope (`agent`/`swarm`/`all`), lead visibility, `source` filter, and expiry rules; expansion can never widen what a search is allowed to see.
+- **Provenance** — expanded results carry `retrievalSource: "graph"`, so the usefulness readout measures whether graph hits earn citations before the flag is enabled more widely.
+- **Fail-open** — an expansion failure never poisons search; the original candidates are returned unchanged. With the flag off, results are byte-identical to no-expansion.
+
+The flag follows the same rollout pattern as `MEMORY_HYBRID_SEARCH`: ship dark, enable per-deployment, judge with the per-arm citation data.
+
+### Usefulness Readout
+
+`GET /api/memory/usefulness` (query params `days`, `threshold`) answers "is memory useful?" from the measurement tables the raters populate:
+
+- **Volume** — retrieval rows, distinct memories, and search/get event split in the window.
+- **Per-arm breakdown** — retrievals and citation rate grouped by `retrievalSource` (search events only), so `vec`/`fts`/`hybrid`/`graph` can be compared head-to-head.
+- **Citation rate per memory-source** — how often `manual` vs `file_index` vs `task_completion` vs `session_summary` memories get cited in task evidence (`positive/ratings` in `[0,1]`, plus the signed `avgSignal` mean).
+- **Posterior movement** — how many Beta-Binomial usefulness posteriors have moved off the prior, and how many sit above `threshold`.
+
+The same data renders as the **Usefulness panel** on the dashboard's `/memory` page (summary tiles + per-source and per-arm charts).
+
 ### Manual Search
 
 Agents can search and manage memories using MCP tools:
@@ -88,15 +116,19 @@ Agents can search and manage memories using MCP tools:
 - **`memory-delete`** — Delete a memory. Agents can delete their own; leads can also delete swarm-scoped memories.
 - **`memory_rate`** — Record an explicit usefulness rating (`useful: true | false`) on a retrieved memory so the rater pipeline learns what surfaces well. Optional `referencesSource` (free-form `<source>:<identifier>`, e.g. `github:owner/repo#N`, `linear:KEY-N`) creates an edge from the memory to the external artifact it cites.
 
-### Recall Edges
+### Recall Edges & Memory Links
 
-Search and retrieval events now feed a lightweight memory graph:
+Search and retrieval events feed a lightweight memory graph:
 
 - **Intent-tagged retrieval rows** capture why a memory was searched or opened, not just that it was touched.
-- **Typed memory links** connect memories to external artifacts such as GitHub PRs, agent-fs paths, and other entity references resolved from memory content.
+- **Typed memory links** connect memories to other memories (`[[wikilinks]]` in content) and to external artifacts such as GitHub PRs, agent-fs paths, and other entity references resolved from memory content.
 - **Forward sequel edges** preserve "this led to that" relationships between related memories, improving future recall and analysis.
 
-This graph layer is additive. Core embedding search and reranking still decide which memories surface first; the edges enrich attribution and downstream tooling.
+The link graph has a full read side:
+
+- **Traversal** — `memory-get` (and `GET /api/memory/:id`) returns the memory's outgoing `links` and inbound `backlinks`, ACL-filtered: linked-memory metadata is only included when the viewer may see the target, and hidden or deleted targets are indistinguishable from unresolved wikilinks.
+- **Search expansion** — resolved memory-to-memory links power [Graph Expansion](#graph-expansion) when enabled.
+- **Self-maintenance** — editing a memory prunes links derived from removed content (re-resolving links from the new content in one transaction) while preserving `sequel` edges, so the graph tracks what memories actually say. A wikilink that pointed at a not-yet-existing memory re-resolves on the next edit once the target exists.
 
 ## Writing Memories
 
@@ -143,6 +175,7 @@ Reranking parameters are tunable via environment variables:
 |----------|---------|-------------|
 | `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Optional global override for recency half-life across all memory sources. Leave unset to use the source-aware defaults above. |
 | `MEMORY_HYBRID_SEARCH` | `0` | Enable reciprocal-rank-fusion hybrid retrieval (vector + full-text) instead of vector-only search. |
+| `MEMORY_GRAPH_EXPANSION` | `0` | Expand search candidates with 1-hop memory-link neighbors before reranking (`retrievalSource: "graph"` provenance). See [Graph Expansion](#graph-expansion). |
 | `MEMORY_MIN_SIMILARITY` | `0.1` | Minimum raw cosine similarity a candidate must meet before reranking. |
 | `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier |
 | `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |
