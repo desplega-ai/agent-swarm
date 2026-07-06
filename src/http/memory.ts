@@ -509,6 +509,7 @@ export async function handleMemory(
       // 1-hop memory_link neighbor expansion (no-op unless MEMORY_GRAPH_EXPANSION=1).
       const expanded = expandCandidatesWithGraph(candidates, myAgentId, {
         scope,
+        source,
         isLead: false,
       });
       const ranked = rerank(expanded, { limit: Math.min(limit, 20) });

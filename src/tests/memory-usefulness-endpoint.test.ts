@@ -295,12 +295,14 @@ describe("GET /api/memory/usefulness", () => {
         ratings: 2,
         positive: 2,
         citationRate: 1,
+        avgSignal: 1,
       });
       expect(bySource.task_completion).toEqual({
         source: "task_completion",
         ratings: 1,
         positive: 0,
-        citationRate: -1,
+        citationRate: 0,
+        avgSignal: -1,
       });
     });
 

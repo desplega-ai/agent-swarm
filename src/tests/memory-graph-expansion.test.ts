@@ -353,4 +353,69 @@ describe("memory graph expansion", () => {
     const defaulted = expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
     expect(defaulted).toHaveLength(6);
   });
+
+  test("source filter is preserved — off-filter neighbors are not added", () => {
+    const parent = store.store({
+      agentId,
+      scope: "agent",
+      name: "graph-srcfilter-parent",
+      content: "Parent with manual source.",
+      source: "manual",
+    });
+    const offFilterNeighbor = store.store({
+      agentId,
+      scope: "agent",
+      name: "graph-srcfilter-neighbor",
+      content: "Neighbor with task_completion source.",
+      source: "task_completion",
+    });
+    insertLink(parent.id, offFilterNeighbor.id);
+
+    const candidates = [asCandidate(parent, 0.8, { retrievalSource: "vec" })];
+
+    // A source-filtered search must not gain off-filter rows via the graph.
+    const filtered = expandCandidatesWithGraph(candidates, agentId, {
+      scope: "all",
+      source: "manual",
+    });
+    expect(filtered.some((c) => c.id === offFilterNeighbor.id)).toBe(false);
+
+    // Without the filter the neighbor is reachable.
+    const unfiltered = expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
+    expect(unfiltered.some((c) => c.id === offFilterNeighbor.id)).toBe(true);
+  });
+
+  test("neighbor score derives from the parent's raw (pre-decay) similarity", () => {
+    const parent = store.store({
+      agentId,
+      scope: "agent",
+      name: "graph-rawsim-parent",
+      content: "Parent whose search similarity already embeds recency decay.",
+      source: "manual",
+    });
+    const neighbor = store.store({
+      agentId,
+      scope: "agent",
+      name: "graph-rawsim-neighbor",
+      content: "Neighbor for the raw-similarity derivation test.",
+      source: "manual",
+    });
+    insertLink(parent.id, neighbor.id, { strength: 1.0 });
+
+    // fts/hybrid arms ship similarity = rawSimilarity × parentDecay with
+    // recencyDecayApplied: true. The neighbor must derive from the RAW value —
+    // otherwise the parent's decay and the neighbor's own rerank decay stack.
+    const candidates = [
+      asCandidate(parent, 0.5, {
+        rawSimilarity: 1.0,
+        recencyDecayApplied: true,
+        retrievalSource: "fts",
+      }),
+    ];
+    const expanded = expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
+    const added = expanded.find((c) => c.id === neighbor.id);
+    expect(added).toBeDefined();
+    expect(added!.similarity).toBeCloseTo(1.0 * 1.0 * 0.7, 6);
+    expect(added!.recencyDecayApplied).toBe(false);
+  });
 });

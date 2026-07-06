@@ -1629,8 +1629,10 @@ export interface MemoryUsefulnessStats {
     source: string;
     ratings: number;
     positive: number;
-    /** AVG(signal) over the window's implicit-citation ratings — in [-1, 1]. */
+    /** positive / ratings — a true rate in [0, 1]. */
     citationRate: number;
+    /** AVG(signal) over the window's implicit-citation ratings — in [-1, 1]. */
+    avgSignal: number;
   }[];
   posterior: {
     totalMemories: number;

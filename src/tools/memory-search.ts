@@ -96,6 +96,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
       // 1-hop memory_link neighbor expansion (no-op unless MEMORY_GRAPH_EXPANSION=1).
       const expanded = expandCandidatesWithGraph(candidates, requestInfo.agentId, {
         scope: scope as "agent" | "swarm" | "all",
+        source,
         isLead,
       });
       if (expanded.length > 0) {

@@ -48,8 +48,10 @@ export interface UsefulnessSourceCitation {
   ratings: number;
   /** Ratings with signal > 0 (memory was cited in task evidence). */
   positive: number;
-  /** AVG(signal) over the window's implicit-citation ratings — in [-1, 1]. */
+  /** positive / ratings — a true rate in [0, 1] (implicit-citation signals are ±1). */
   citationRate: number;
+  /** AVG(signal) over the window's implicit-citation ratings — in [-1, 1]. */
+  avgSignal: number;
 }
 
 export interface UsefulnessPosteriorStats {
@@ -161,14 +163,14 @@ export function getUsefulnessStats(options: UsefulnessStatsOptions = {}): Useful
         source: string;
         ratings: number;
         positive: number | null;
-        citationRate: number | null;
+        avgSignal: number | null;
       },
       [string]
     >(
       `SELECT am.source                                       AS source,
               COUNT(*)                                        AS ratings,
               SUM(CASE WHEN mr.signal > 0 THEN 1 ELSE 0 END)  AS positive,
-              AVG(mr.signal)                                  AS citationRate
+              AVG(mr.signal)                                  AS avgSignal
          FROM memory_rating mr
          JOIN agent_memory am ON am.id = mr.memoryId
         WHERE mr.source = 'implicit-citation'
@@ -235,7 +237,8 @@ export function getUsefulnessStats(options: UsefulnessStatsOptions = {}): Useful
       source: row.source,
       ratings: row.ratings,
       positive: row.positive ?? 0,
-      citationRate: row.citationRate ?? 0,
+      citationRate: row.ratings > 0 ? (row.positive ?? 0) / row.ratings : 0,
+      avgSignal: row.avgSignal ?? 0,
     })),
     posterior: {
       totalMemories: posteriorRow.totalMemories,

@@ -19,6 +19,7 @@
  * Plan: thoughts/taras/plans/2026-07-02-memory-retrieval-v2-graph-and-measurement.md Phase 4
  */
 import { getDb } from "@/be/db";
+import type { AgentMemorySource } from "@/types";
 import { isGraphExpansionEnabled } from "./constants";
 import { type AgentMemoryRow, rowToCandidate } from "./providers/sqlite-store";
 import type { MemoryCandidate } from "./types";
@@ -30,6 +31,8 @@ export interface GraphExpansionOptions {
   damping?: number;
   /** Scope the search ran with — neighbor visibility mirrors the search ACL. Default "all". */
   scope?: "agent" | "swarm" | "all";
+  /** Source filter the search ran with — expansion must not add off-filter rows. */
+  source?: AgentMemorySource;
   isLead?: boolean;
 }
 
@@ -71,7 +74,7 @@ export function expandCandidatesWithGraph(
   options: GraphExpansionOptions = {},
 ): MemoryCandidate[] {
   if (!isGraphExpansionEnabled()) return candidates;
-  const { cap = 5, damping = 0.7, scope = "all", isLead = false } = options;
+  const { cap = 5, damping = 0.7, scope = "all", source, isLead = false } = options;
   if (candidates.length === 0 || cap <= 0) return candidates;
 
   const parentById = new Map(candidates.map((c) => [c.id, c]));
@@ -87,6 +90,10 @@ export function expandCandidatesWithGraph(
   ];
   const params: (string | number)[] = [...parentIds];
   addNeighborScopeConditions(conditions, params, agentId, scope, isLead);
+  if (source) {
+    conditions.push("m.source = ?");
+    params.push(source);
+  }
 
   let rows: NeighborRow[];
   try {
@@ -111,14 +118,18 @@ export function expandCandidatesWithGraph(
     const parent = parentById.get(row.fromMemoryId);
     if (!parent) continue;
     const strength = typeof row.linkStrength === "number" ? row.linkStrength : 1.0;
-    const similarity = parent.similarity * strength * damping;
+    // Derive from the parent's RAW (pre-decay) similarity — fts/hybrid arms
+    // ship `similarity` with the parent's recency decay already applied, and
+    // rerank() will apply the NEIGHBOR's own decay to this candidate. Using
+    // the decayed value would stack two decay factors on one score.
+    const parentBase = parent.rawSimilarity ?? parent.similarity;
+    const similarity = parentBase * strength * damping;
     const existing = neighbors.get(row.id);
     if (existing && existing.similarity >= similarity) continue;
     neighbors.set(row.id, {
       ...rowToCandidate(row, similarity),
       retrievalSource: "graph",
-      // The parent's similarity may already embed recency decay (fts/hybrid
-      // arms); the neighbor's OWN decay is applied exactly once by rerank().
+      // The neighbor's own decay is applied exactly once by rerank().
       recencyDecayApplied: false,
     });
   }

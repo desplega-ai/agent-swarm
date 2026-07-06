@@ -288,6 +288,10 @@ describe("memory_link DB surface", () => {
     const forOther = getLinksForMemory(a.id, { viewerAgentId: agentY }).links;
     expect(forOther[0]?.resolved).toBe(false);
     expect(forOther[0]?.target).toBeUndefined();
+    // The resolved UUID must be redacted to the unresolved-row form (the
+    // wikilink name) so private memory ids don't leak.
+    expect(forOther[0]?.targetId).toBe("x-private");
+    expect(forOther[0]?.targetId).not.toBe(priv.id);
 
     // Leads see all.
     const forLead = getLinksForMemory(a.id, { viewerAgentId: agentY, isLead: true }).links;

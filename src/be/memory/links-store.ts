@@ -91,6 +91,12 @@ type BacklinkRow = {
   fromScope: string;
 };
 
+/** Hidden-target redaction: `[[Name]]` sourceText → `Name` (the unresolved-row form); anything else → "". */
+function redactedTargetId(sourceText: string | null): string {
+  const wikilink = /^\[\[(.+)\]\]$/.exec(sourceText ?? "");
+  return wikilink?.[1] ?? "";
+}
+
 export function getLinksForMemory(
   memoryId: string,
   options: GetLinksOptions = {},
@@ -117,25 +123,49 @@ export function getLinksForMemory(
     .all(memoryId);
 
   const links: MemoryLinkView[] = outgoing.map((row) => {
+    if (row.targetKind !== "memory") {
+      return {
+        id: row.id,
+        linkType: row.linkType,
+        targetKind: row.targetKind,
+        targetId: row.targetId,
+        strength: row.strength,
+        resolver: row.resolver,
+        sourceText: row.sourceText,
+        createdAt: row.createdAt,
+        resolved: true,
+      };
+    }
+    const live = row.targetMemoryId !== null;
+    const visible =
+      live &&
+      (isLead || row.targetScope === "swarm" || (row.targetAgentId ?? "") === viewerAgentId);
+    // Redact targetId for live-but-ACL-hidden targets: exposing the resolved
+    // UUID would leak private memory ids AND let a viewer tell a hidden target
+    // apart from an unresolved wikilink. Redact to the wikilink NAME (derived
+    // from sourceText, verbatim content of the from-memory the viewer already
+    // reads) — the exact form an unresolved row stores in targetId. Unresolved
+    // and dangling rows keep their stored value.
     const base: MemoryLinkView = {
       id: row.id,
       linkType: row.linkType,
       targetKind: row.targetKind,
-      targetId: row.targetId,
+      targetId: visible || !live ? row.targetId : redactedTargetId(row.sourceText),
       strength: row.strength,
       resolver: row.resolver,
       sourceText: row.sourceText,
       createdAt: row.createdAt,
-      resolved: row.targetKind !== "memory",
+      resolved: false,
     };
-    if (row.targetKind !== "memory" || row.targetMemoryId === null) return base;
-    const visible =
-      isLead || row.targetScope === "swarm" || (row.targetAgentId ?? "") === viewerAgentId;
     if (!visible) return base;
     return {
       ...base,
       resolved: true,
-      target: { id: row.targetMemoryId, name: row.targetName ?? "", scope: row.targetScope ?? "" },
+      target: {
+        id: row.targetMemoryId as string,
+        name: row.targetName ?? "",
+        scope: row.targetScope ?? "",
+      },
     };
   });
 

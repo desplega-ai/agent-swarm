@@ -254,8 +254,11 @@ describe("memory editing", () => {
           intent: "test stale-link pruning",
         },
         meta(),
-      )) as { structuredContent: { success: boolean; changed?: boolean } };
+      )) as { structuredContent: { success: boolean; message: string; changed?: boolean } };
 
+      // Assert on the message first — on failure it carries the tool's error
+      // (a bare success:false told us nothing when this flaked in CI).
+      expect(result.structuredContent.message).toStartWith("Memory edited to version");
       expect(result.structuredContent.success).toBe(true);
       expect(result.structuredContent.changed).toBe(true);
 
