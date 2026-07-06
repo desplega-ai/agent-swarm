@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { resetFetchForTesting, setFetchForTesting } from "../providers/codex-oauth/flow.js";
 import {
+  CodexOAuthRefreshError,
   codexOAuthKeyForSlot,
   deleteCodexOAuth,
   getValidCodexOAuth,
@@ -385,7 +386,8 @@ describe("getValidCodexOAuth", () => {
             {
               id: "cfg-1",
               key: "codex_oauth_0",
-              value: JSON.stringify({ ...mockCreds, expires: Date.now() + 3600000 }),
+              // 2 days out — comfortably past the 12h REFRESH_SKEW_MS.
+              value: JSON.stringify({ ...mockCreds, expires: Date.now() + 2 * 24 * 60 * 60 * 1000 }),
             },
           ],
         }),
@@ -398,7 +400,11 @@ describe("getValidCodexOAuth", () => {
   });
 
   it("reads from correct slot when slot 1 requested", async () => {
-    const slot1Creds = { ...mockCreds, access: "at_slot1", expires: Date.now() + 3600000 };
+    const slot1Creds = {
+      ...mockCreds,
+      access: "at_slot1",
+      expires: Date.now() + 2 * 24 * 60 * 60 * 1000,
+    };
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
@@ -469,7 +475,7 @@ describe("getValidCodexOAuth", () => {
     expect(result).toBeNull();
   });
 
-  it("returns null when refresh fails", async () => {
+  it("throws CodexOAuthRefreshError (not a silent null) when refresh is rejected", async () => {
     const expiredCreds = { ...mockCreds, expires: Date.now() - 1000 };
 
     globalThis.fetch = async (url: string | URL | Request, init?: RequestInit) => {
@@ -493,9 +499,141 @@ describe("getValidCodexOAuth", () => {
       return new Response("Not Found", { status: 404 });
     };
 
-    setFetchForTesting(() => new Response("Unauthorized", { status: 401 }));
+    setFetchForTesting(() => new Response("invalid_grant", { status: 401 }));
 
-    const result = await getValidCodexOAuth(MOCK_API_URL, MOCK_API_KEY);
-    expect(result).toBeNull();
+    let caught: unknown;
+    try {
+      await getValidCodexOAuth(MOCK_API_URL, MOCK_API_KEY);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(CodexOAuthRefreshError);
+    const err = caught as CodexOAuthRefreshError;
+    expect(err.reason).toBe("refresh_rejected");
+    expect(err.status).toBe(401);
+    expect(err.body).toBe("invalid_grant");
+    expect(err.slot).toBe(0);
+  });
+
+  it("treats a token older than maxAgeMs as needing refresh even though it isn't near expiry", async () => {
+    // Issued ~9 days ago (expires derived as issuedAt + 10d TTL): comfortably
+    // past the default 5min-turned-12h REFRESH_SKEW_MS, but well past a
+    // keep-warm maxAgeMs of 7 days.
+    const nineDaysAgo = Date.now() - 9 * 24 * 60 * 60 * 1000;
+    const staleByAgeCreds = {
+      ...mockCreds,
+      expires: nineDaysAgo + 10 * 24 * 60 * 60 * 1000,
+    };
+    let putCapturedKey = "";
+
+    globalThis.fetch = async (url: string | URL | Request, init?: RequestInit) => {
+      const urlStr = typeof url === "string" ? url : url.toString();
+      const method = init?.method || "GET";
+
+      if (method === "GET" && urlStr.includes("config/resolved")) {
+        return new Response(
+          JSON.stringify({
+            configs: [
+              { id: "cfg-1", key: "codex_oauth_0", value: JSON.stringify(staleByAgeCreds) },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (urlStr.includes("/api/oauth/refresh-locks/")) {
+        const lockRes = mockLockResponse(method);
+        if (lockRes) return lockRes;
+      }
+      if (method === "PUT") {
+        const body = JSON.parse(init?.body as string) as Record<string, unknown>;
+        putCapturedKey = body.key as string;
+        return new Response(JSON.stringify({ id: "cfg-1" }), { status: 200 });
+      }
+      return new Response("Not Found", { status: 404 });
+    };
+
+    setFetchForTesting(
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: "at_keepwarm_refreshed",
+            refresh_token: "rt_keepwarm_refreshed",
+            expires_in: 3600,
+          }),
+          { status: 200 },
+        ),
+    );
+
+    const result = await getValidCodexOAuth(MOCK_API_URL, MOCK_API_KEY, 0, {
+      maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+    });
+    expect(result?.access).toBe("at_keepwarm_refreshed");
+    expect(putCapturedKey).toBe("codex_oauth_0");
+  });
+
+  it("does NOT refresh a token within maxAgeMs when opts is omitted (default behavior unchanged)", async () => {
+    const nineDaysAgo = Date.now() - 9 * 24 * 60 * 60 * 1000;
+    const staleByAgeCreds = {
+      ...mockCreds,
+      expires: nineDaysAgo + 10 * 24 * 60 * 60 * 1000,
+    };
+
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          configs: [{ id: "cfg-1", key: "codex_oauth_0", value: JSON.stringify(staleByAgeCreds) }],
+        }),
+        { status: 200 },
+      );
+    setFetchForTesting(async () => {
+      throw new Error("no refresh should happen without opts.maxAgeMs");
+    });
+
+    const result = await getValidCodexOAuth(MOCK_API_URL, MOCK_API_KEY, 0);
+    expect(result?.access).toBe(mockCreds.access);
+  });
+
+  it("refreshes a token that a zero-skew (pi-ai-equivalent) check would still call valid — ordering invariant (Risk R4)", async () => {
+    // Ordering invariant: pi-ai's own refresh check uses zero skew
+    // (`Date.now() >= expires`). Widening REFRESH_SKEW_MS must never make
+    // this function refresh LATER than that — otherwise pi-ai could observe
+    // a token this function hasn't refreshed yet and race an unlocked
+    // refresh outside `/api/oauth/refresh-locks`.
+    const almostExpired = Date.now() + 60 * 1000; // 1 min out — a zero-skew check says "not expired yet"
+    expect(Date.now() >= almostExpired).toBe(false); // sanity: pi-ai would treat this as still valid
+
+    const nearExpiryCreds = { ...mockCreds, expires: almostExpired };
+    let exchanged = false;
+
+    globalThis.fetch = async (url: string | URL | Request, init?: RequestInit) => {
+      const urlStr = typeof url === "string" ? url : url.toString();
+      const method = init?.method || "GET";
+      if (method === "GET" && urlStr.includes("config/resolved")) {
+        return new Response(
+          JSON.stringify({
+            configs: [{ id: "cfg-1", key: "codex_oauth_0", value: JSON.stringify(nearExpiryCreds) }],
+          }),
+          { status: 200 },
+        );
+      }
+      if (urlStr.includes("/api/oauth/refresh-locks/")) {
+        const lockRes = mockLockResponse(method);
+        if (lockRes) return lockRes;
+      }
+      if (method === "PUT") return new Response(JSON.stringify({ id: "cfg-1" }), { status: 200 });
+      return new Response("Not Found", { status: 404 });
+    };
+    setFetchForTesting(async () => {
+      exchanged = true;
+      return new Response(
+        JSON.stringify({ access_token: "at_new", refresh_token: "rt_new", expires_in: 3600 }),
+        { status: 200 },
+      );
+    });
+
+    await getValidCodexOAuth(MOCK_API_URL, MOCK_API_KEY, 0);
+    // getValidCodexOAuth (12h skew) already refreshed a token a zero-skew
+    // check would still call valid — it wins the race by construction.
+    expect(exchanged).toBe(true);
   });
 });

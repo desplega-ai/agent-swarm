@@ -164,7 +164,7 @@ describe("resolveCodexAuthMode — pool path revalidates through the lock", () =
       const params = new URLSearchParams((init?.body as string) ?? "");
       expect(params.get("refresh_token")).toBe("rt_gen0");
       return new Response(
-        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 3600 }),
+        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 864000 }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     });
@@ -226,7 +226,7 @@ describe("resolveCodexAuthMode — pool path revalidates through the lock", () =
       exchangeCount += 1;
       await new Promise((resolve) => setTimeout(resolve, 40));
       return new Response(
-        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 3600 }),
+        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 864000 }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     });
@@ -260,18 +260,18 @@ describe("resolveCodexAuthMode — pool path revalidates through the lock", () =
   });
 
   it("strips the refresh token from the pool auth.json handed to the spawned CLI even when the token is still valid (no exchange)", async () => {
-    // A pool slot whose access token is comfortably valid (1h out, well past
-    // the near-expiry skew) — `getValidCodexOAuth` returns it untouched, no
-    // `/oauth/token` exchange happens. This is exactly the case the reviewer
-    // flagged: the fast path returns the stored creds and rewrites auth.json.
-    // The guarantee is that the spawned CLI still never receives a rotatable
-    // refresh token, so it can't refresh outside the lock if the token later
-    // expires during the (up-to-1h) session.
+    // A pool slot whose access token is comfortably valid (2 days out, well
+    // past the 12h near-expiry skew) — `getValidCodexOAuth` returns it
+    // untouched, no `/oauth/token` exchange happens. This is exactly the case
+    // the reviewer flagged: the fast path returns the stored creds and
+    // rewrites auth.json. The guarantee is that the spawned CLI still never
+    // receives a rotatable refresh token, so it can't refresh outside the
+    // lock if the token later expires during the (up-to-2-day) session.
     const store = {
       creds: {
         access: "at_valid",
         refresh: "rt_valid",
-        expires: Date.now() + 60 * 60 * 1000, // 1h out — not expiring soon
+        expires: Date.now() + 2 * 24 * 60 * 60 * 1000, // 2 days out — not expiring soon
         accountId: "acc-test",
       } satisfies CodexOAuthCredentials,
     };
@@ -330,7 +330,7 @@ describe("resolveCodexAuthMode — pool path revalidates through the lock", () =
       exchangeCount += 1;
       await new Promise((resolve) => setTimeout(resolve, 40));
       return new Response(
-        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 3600 }),
+        JSON.stringify({ access_token: "at_gen1", refresh_token: "rt_gen1", expires_in: 864000 }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     });
