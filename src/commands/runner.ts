@@ -196,9 +196,111 @@ async function listSwarmAutostashes(clonePath: string, role: string): Promise<Sw
   }
 }
 
+/**
+ * Continuation task types that must NEVER take the destructive hard-reset path,
+ * even though they are not `taskType === "resume"`. Each of these ingress paths
+ * creates a NEW task that CONTINUES/cooperates with existing work — often on the
+ * same worker/reused clone — rather than starting genuinely fresh coding work:
+ *  - "follow-up" / "reroute-decision": lead-owned continuations created by
+ *    src/tasks/worker-follow-up.ts after a task completes/fails or needs
+ *    re-delegation; they inherit the parent's vcsRepo/branch context via
+ *    createTaskExtended's parentTaskId inheritance (src/be/db.ts).
+ *  - "agentmail-reply": AgentMail follow-up on an EXISTING thread
+ *    (src/agentmail/handlers.ts) — always carries `parentTaskId` pointing at
+ *    the task it's continuing (as opposed to "agentmail-message", which fires
+ *    only when no existing task was found for the thread).
+ *  - "github-comment" / "github-review" / "gitlab-comment" / "gitlab-ci":
+ *    tracker feedback on an ALREADY-OPEN PR/MR (review comments, review
+ *    verdicts, CI failures) — the point is to keep working on the existing
+ *    feature branch, not reset back to the default branch.
+ */
+const CONTINUATION_TASK_TYPES = new Set([
+  "resume",
+  "follow-up",
+  "reroute-decision",
+  "agentmail-reply",
+  "github-comment",
+  "github-review",
+  "gitlab-comment",
+  "gitlab-ci",
+]);
+
+/**
+ * Task statuses under which a task may have already mutated the shared clone
+ * (checked out a feature branch, left uncommitted/unpushed work) — or could
+ * still be doing so concurrently, e.g. with `maxTasks > 1` on the same worker.
+ * Mirrors the ACTIVE_TASK_STATUSES / getInProgressTasksByContextKey status
+ * sets already used server-side (src/agentmail/handlers.ts, src/be/db.ts) for
+ * the same "is this task still doing live work" question.
+ */
+const ACTIVE_PARENT_STATUSES = new Set<string>(["pending", "in_progress", "offered", "paused"]);
+
+/**
+ * A task is a "first kickoff" (safe to hard-reset the base branch) only when it
+ * is BOTH (a) not an explicit continuation task-type and (b) not parent-linked
+ * to a still-active task.
+ *
+ * `parentTaskId` alone is NOT a resume signal — send-task/trackers set it on
+ * ~every dispatched child task (verified 395/395 real coding tasks carried one;
+ * 0 were typed "resume"), so gating on its mere presence made the reset a no-op
+ * in production (see git history on this function). But the *opposite*
+ * over-correction — treating every non-"resume" task as a safe root kickoff —
+ * is also wrong: several ingress paths create parent-linked NON-resume tasks
+ * specifically to CONTINUE existing work, often on the same worker/reused
+ * clone:
+ *  - Slack follow-ups (src/slack/handlers.ts) wire `parentTaskId:
+ *    latestTask?.id` with NO distinguishing taskType at all.
+ *  - Sibling-awareness (src/tasks/sibling-awareness.ts, applied to every
+ *    ingress via createTaskWithSiblingAwareness) wires `parentTaskId` to an
+ *    in-progress same-agent sibling for session continuity — again with no
+ *    reserved taskType.
+ *  - AgentMail replies, tracker comments/reviews/CI events — see
+ *    CONTINUATION_TASK_TYPES.
+ * Since the first two carry no reserved taskType, a taskType denylist alone
+ * cannot catch them — we ALSO check whether `parentTaskId` currently points at
+ * a still-active task (ACTIVE_PARENT_STATUSES). If so, that parent/sibling may
+ * hold a checked-out feature branch or unpushed/uncommitted work in the SAME
+ * shared clone (especially with `maxTasks > 1`), so a hard reset there would
+ * destroy it — take the non-destructive merge path instead.
+ *
+ * `fetchParentTaskStatus` is injected so this stays a pure, unit-testable
+ * function; the real call site fetches `GET /api/tasks/{id}` (same pattern as
+ * fetchProviderSessionInfo below).
+ */
+export async function isFirstKickoffTask(
+  task?: { taskType?: string; parentTaskId?: string } | null,
+  fetchParentTaskStatus?: (parentTaskId: string) => Promise<string | null | undefined>,
+): Promise<boolean> {
+  if (task?.taskType && CONTINUATION_TASK_TYPES.has(task.taskType)) return false;
+  if (task?.parentTaskId && fetchParentTaskStatus) {
+    const parentStatus = await fetchParentTaskStatus(task.parentTaskId);
+    if (parentStatus && ACTIVE_PARENT_STATUSES.has(parentStatus)) return false;
+  }
+  return true;
+}
+
+/** Fetch a task's current status by id. Returns null on any failure (not-found, network, etc). */
+async function fetchTaskStatus(
+  apiUrl: string,
+  apiKey: string,
+  taskId: string,
+): Promise<string | null> {
+  const headers: Record<string, string> = {};
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  try {
+    const response = await fetch(`${apiUrl}/api/tasks/${taskId}`, { headers });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { status?: string };
+    return data.status ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function refreshExistingRepoForTask(
   repoConfig: { name: string; clonePath: string; defaultBranch: string },
   role: string,
+  isFirstKickoff: boolean,
 ): Promise<string | null> {
   const { name, clonePath, defaultBranch } = repoConfig;
   const statusResult =
@@ -219,13 +321,36 @@ async function refreshExistingRepoForTask(
     }
   }
 
+  const fetchSpec = `${defaultBranch}:refs/remotes/origin/${defaultBranch}`;
+  const remoteRef = `refs/remotes/origin/${defaultBranch}`;
+
   try {
-    console.log(`[${role}] Refreshing ${name} from origin/${defaultBranch}...`);
-    const fetchSpec = `${defaultBranch}:refs/remotes/origin/${defaultBranch}`;
-    const remoteRef = `refs/remotes/origin/${defaultBranch}`;
     await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} fetch origin ${fetchSpec}`.quiet();
-    await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} merge --no-edit --no-stat ${remoteRef}`.quiet();
-    console.log(`[${role}] Refreshed ${name}`);
+
+    // First-kickoff guarantee (see call sites): the clone is REUSED task-to-task,
+    // so a leftover feature branch from a prior task can still be checked out here.
+    // On a genuine first kickoff (no parentTaskId / not a resume) we force the base
+    // branch back to a clean, current state before the caller creates a work branch
+    // off it — otherwise a diverged leftover branch would abort the merge below and
+    // leave the repo stale (only a warning was emitted). Resumes and follow-up/child
+    // tasks (which may legitimately still have that feature branch checked out with
+    // in-progress work) must NEVER take this path — merge is the safe default there.
+    if (isFirstKickoff) {
+      console.log(`[${role}] First kickoff for ${name} — resetting to ${remoteRef}...`);
+      try {
+        await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} checkout ${defaultBranch}`.quiet();
+      } catch {
+        // Local branch may be missing (e.g. deleted by a prior task) — recreate it
+        // tracking the remote instead of failing the whole refresh.
+        await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} checkout -B ${defaultBranch} ${remoteRef}`.quiet();
+      }
+      await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} reset --hard ${remoteRef}`.quiet();
+      console.log(`[${role}] Reset ${name} to ${remoteRef}`);
+    } else {
+      console.log(`[${role}] Refreshing ${name} from ${remoteRef}...`);
+      await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} merge --no-edit --no-stat ${remoteRef}`.quiet();
+      console.log(`[${role}] Refreshed ${name}`);
+    }
     return null;
   } catch (err) {
     const errorMsg = scrubSecrets((err as Error).message);
@@ -278,6 +403,13 @@ export async function ensureRepoForTask(
     hooks?: { enabled: boolean } | null;
   },
   role: string,
+  /**
+   * True only for a genuine first kickoff (a brand-new task, not a resume and
+   * not a follow-up/child task continuing prior work). Defaults to false —
+   * when in doubt, do NOT force-reset the base branch, since the clone is
+   * reused task-to-task and may hold another task's in-progress branch.
+   */
+  isFirstKickoff = false,
 ): Promise<{
   clonePath: string;
   claudeMd: string | null;
@@ -308,7 +440,11 @@ export async function ensureRepoForTask(
       console.log(`[${role}] Cloned ${name}`);
     } else {
       console.log(`[${role}] Repo ${name} already cloned at ${clonePath}`);
-      warning = await refreshExistingRepoForTask({ name, clonePath, defaultBranch }, role);
+      warning = await refreshExistingRepoForTask(
+        { name, clonePath, defaultBranch },
+        role,
+        isFirstKickoff,
+      );
     }
 
     await installRepoHooksForTask(repoConfig, role);
@@ -4794,7 +4930,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             clonePath: `/workspace/personal/repos/${task.vcsRepo.split("/").pop() || task.vcsRepo}`,
             defaultBranch: "main",
           };
-          const repoContext = await ensureRepoForTask(effectiveConfig, role);
+          // This is the paused-task-resume-after-restart path — never a first
+          // kickoff, so never force-reset the base branch here.
+          const repoContext = await ensureRepoForTask(effectiveConfig, role, false);
           if (repoContext?.clonePath) {
             resumeCwd = repoContext.clonePath;
           }
@@ -5187,7 +5325,15 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             clonePath: `/workspace/personal/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
             defaultBranch: "main",
           };
-          const repoResult = await ensureRepoForTask(effectiveConfig, role);
+          // First kickoff = a genuinely new root task: not a continuation
+          // task-type, and not parent-linked to a still-active task (Slack
+          // follow-ups / sibling-awareness wire parentTaskId with no
+          // reserved taskType). See isFirstKickoffTask() for the full
+          // reasoning and CONTINUATION_TASK_TYPES for the denylist.
+          const isFirstKickoff = await isFirstKickoffTask(taskObj, (parentTaskId) =>
+            fetchTaskStatus(apiUrl, apiKey, parentTaskId),
+          );
+          const repoResult = await ensureRepoForTask(effectiveConfig, role, isFirstKickoff);
           currentRepoContext = {
             ...repoResult,
             guidelines: repoConfig?.guidelines ?? null,

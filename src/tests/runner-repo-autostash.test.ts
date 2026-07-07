@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ensureRepoForTask } from "../commands/runner";
+import { ensureRepoForTask, isFirstKickoffTask } from "../commands/runner";
 
 const execFileAsync = promisify(execFile);
 
@@ -144,5 +144,172 @@ describe("ensureRepoForTask auto-stash refresh", () => {
     expect(await readFile(join(clonePath, "local.txt"), "utf8")).toBe("local commit\n");
     expect(await readFile(join(clonePath, "remote.txt"), "utf8")).toBe("remote commit\n");
     expect((await git(clonePath, ["status", "--porcelain"])).trim()).toBe("");
+  });
+
+  test("first kickoff hard-resets a leftover feature branch back to origin/default", async () => {
+    const remotePath = join(tempRoot, "remote.git");
+    const upstreamPath = join(tempRoot, "upstream");
+    const clonePath = join(tempRoot, "clone");
+
+    await gitRaw(["init", "--bare", remotePath]);
+    await mkdir(upstreamPath);
+    await git(upstreamPath, ["init", "-b", "main"]);
+    await configureIdentity(upstreamPath);
+    await writeFile(join(upstreamPath, "README.md"), "initial\n");
+    await commitAll(upstreamPath, "initial commit");
+    await git(upstreamPath, ["remote", "add", "origin", remotePath]);
+    await git(upstreamPath, ["push", "-u", "origin", "main"]);
+
+    await gitRaw(["clone", "--branch", "main", remotePath, clonePath]);
+    await configureIdentity(clonePath);
+
+    // Simulate a prior task leaving a diverged feature branch checked out —
+    // this is the scenario that used to abort the merge and strand the repo.
+    await git(clonePath, ["checkout", "-b", "leftover-feature"]);
+    await writeFile(join(clonePath, "feature.txt"), "leftover work\n");
+    await commitAll(clonePath, "leftover feature commit");
+
+    await writeFile(join(upstreamPath, "remote.txt"), "remote commit\n");
+    await commitAll(upstreamPath, "remote commit");
+    await git(upstreamPath, ["push", "origin", "main"]);
+
+    const result = await withCleanGitEnv(() =>
+      ensureRepoForTask(
+        { url: remotePath, name: "repo", clonePath, defaultBranch: "main" },
+        "test",
+        true,
+      ),
+    );
+
+    expect(result.warning).toBeNull();
+    expect((await git(clonePath, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()).toBe("main");
+    expect((await git(clonePath, ["rev-parse", "HEAD"])).trim()).toBe(
+      (await git(upstreamPath, ["rev-parse", "HEAD"])).trim(),
+    );
+    expect(await readFile(join(clonePath, "remote.txt"), "utf8")).toBe("remote commit\n");
+    expect((await git(clonePath, ["status", "--porcelain"])).trim()).toBe("");
+  });
+
+  test("resume/continuation (isFirstKickoff=false) leaves a leftover feature branch checked out", async () => {
+    const remotePath = join(tempRoot, "remote.git");
+    const upstreamPath = join(tempRoot, "upstream");
+    const clonePath = join(tempRoot, "clone");
+
+    await gitRaw(["init", "--bare", remotePath]);
+    await mkdir(upstreamPath);
+    await git(upstreamPath, ["init", "-b", "main"]);
+    await configureIdentity(upstreamPath);
+    await writeFile(join(upstreamPath, "README.md"), "initial\n");
+    await commitAll(upstreamPath, "initial commit");
+    await git(upstreamPath, ["remote", "add", "origin", remotePath]);
+    await git(upstreamPath, ["push", "-u", "origin", "main"]);
+
+    await gitRaw(["clone", "--branch", "main", remotePath, clonePath]);
+    await configureIdentity(clonePath);
+
+    await git(clonePath, ["checkout", "-b", "in-progress-feature"]);
+    await writeFile(join(clonePath, "feature.txt"), "in-progress work\n");
+    await commitAll(clonePath, "in-progress feature commit");
+
+    const result = await withCleanGitEnv(() =>
+      ensureRepoForTask(
+        { url: remotePath, name: "repo", clonePath, defaultBranch: "main" },
+        "test",
+        false,
+      ),
+    );
+
+    expect(result.warning).toBeNull();
+    expect((await git(clonePath, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()).toBe(
+      "in-progress-feature",
+    );
+    expect(await readFile(join(clonePath, "feature.txt"), "utf8")).toBe("in-progress work\n");
+  });
+});
+
+describe("isFirstKickoffTask", () => {
+  test("a feature task with a parentTaskId but an inactive/unknown parent is still a first kickoff", async () => {
+    expect(
+      await isFirstKickoffTask({ parentTaskId: "parent-1", taskType: "feature" }, async () => null),
+    ).toBe(true);
+  });
+
+  test("a pr-fix task with a parentTaskId but an inactive/unknown parent is still a first kickoff", async () => {
+    expect(
+      await isFirstKickoffTask({ parentTaskId: "parent-1", taskType: "pr-fix" }, async () => null),
+    ).toBe(true);
+  });
+
+  test("a parentTaskId with no status-checker at all is still a first kickoff (taskType alone decides)", async () => {
+    expect(await isFirstKickoffTask({ parentTaskId: "parent-1", taskType: "feature" })).toBe(true);
+  });
+
+  test("an explicit resume task is never a first kickoff", async () => {
+    expect(await isFirstKickoffTask({ taskType: "resume" })).toBe(false);
+  });
+
+  test("a brand-new top-level task with no fields at all is a first kickoff", async () => {
+    expect(await isFirstKickoffTask({})).toBe(true);
+  });
+
+  test("undefined/null task is a first kickoff (safe default)", async () => {
+    expect(await isFirstKickoffTask(undefined)).toBe(true);
+    expect(await isFirstKickoffTask(null)).toBe(true);
+  });
+
+  test("known continuation task types are never a first kickoff, regardless of parent status", async () => {
+    const continuationTypes = [
+      "follow-up",
+      "reroute-decision",
+      "agentmail-reply",
+      "github-comment",
+      "github-review",
+      "gitlab-comment",
+      "gitlab-ci",
+    ];
+    for (const taskType of continuationTypes) {
+      expect(
+        await isFirstKickoffTask({ parentTaskId: "parent-1", taskType }, async () => null),
+      ).toBe(false);
+    }
+  });
+
+  test("a genuinely new root task type (e.g. agentmail-message, no reserved taskType) stays a first kickoff", async () => {
+    expect(await isFirstKickoffTask({ taskType: "agentmail-message" }, async () => null)).toBe(
+      true,
+    );
+  });
+
+  // Regression: a parent-linked NON-resume follow-up (Slack follow-ups and
+  // sibling-awareness both wire parentTaskId with no reserved taskType at
+  // all) must NOT take the hard-reset path when the parent it's continuing
+  // is still active — e.g. an in-progress sibling on the same worker with
+  // maxTasks > 1, or a paused task that may resume onto the same clone.
+  test("a Slack-style follow-up (no distinguishing taskType) with an in-progress parent is NOT a first kickoff", async () => {
+    const fetchParentTaskStatus = async (parentTaskId: string) => {
+      expect(parentTaskId).toBe("active-parent-1");
+      return "in_progress";
+    };
+    expect(
+      await isFirstKickoffTask({ parentTaskId: "active-parent-1" }, fetchParentTaskStatus),
+    ).toBe(false);
+  });
+
+  test("a sibling-awareness-linked task with a paused parent is NOT a first kickoff", async () => {
+    expect(
+      await isFirstKickoffTask(
+        { parentTaskId: "paused-parent-1", taskType: "github-pr" },
+        async () => "paused",
+      ),
+    ).toBe(false);
+  });
+
+  test("a parent-linked task whose parent already completed IS a first kickoff", async () => {
+    expect(
+      await isFirstKickoffTask(
+        { parentTaskId: "done-parent-1", taskType: "feature" },
+        async () => "completed",
+      ),
+    ).toBe(true);
   });
 });
