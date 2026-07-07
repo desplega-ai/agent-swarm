@@ -196,6 +196,20 @@ async function listSwarmAutostashes(clonePath: string, role: string): Promise<Sw
   }
 }
 
+/**
+ * A task is a "first kickoff" (safe to hard-reset the base branch) unless it is an
+ * explicit resume. `parentTaskId` is NOT a resume signal — send-task/trackers set it
+ * on ~every dispatched child task (verified 395/395 real coding tasks carried one; 0
+ * were typed "resume"). Native session-resume is deprecated (fresh session + context
+ * preamble, see the parentTaskId handling in the main task-processing loop), so only
+ * `taskType === "resume"` (created by supersedeTaskViaAPI on crash/cap recovery) may
+ * still hold locally-committed-but-unpushed work on the checked-out branch that a hard
+ * reset would strand.
+ */
+export function isFirstKickoffTask(task?: { taskType?: string } | null): boolean {
+  return task?.taskType !== "resume";
+}
+
 async function refreshExistingRepoForTask(
   repoConfig: { name: string; clonePath: string; defaultBranch: string },
   role: string,
@@ -5224,13 +5238,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             clonePath: `/workspace/personal/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
             defaultBranch: "main",
           };
-          // First kickoff = a genuinely new top-level task: no parentTaskId at
-          // all. A task with a parentTaskId is either an explicit resume
-          // (taskType "resume") or a follow-up/child task continuing prior
-          // work on an existing branch/PR — both must keep the clone's
-          // checked-out branch untouched, so only the no-parentTaskId case
-          // forces the base branch back to a clean origin/<default> state.
-          const isFirstKickoff = !taskObj?.parentTaskId;
+          // First kickoff = anything that isn't an explicit resume. parentTaskId is
+          // NOT a resume signal — trackers/send-task set it on ~every dispatched
+          // child task, so gating on it here would make the reset a no-op in
+          // production. See isFirstKickoffTask() for the full reasoning.
+          const isFirstKickoff = isFirstKickoffTask(taskObj);
           const repoResult = await ensureRepoForTask(effectiveConfig, role, isFirstKickoff);
           currentRepoContext = {
             ...repoResult,

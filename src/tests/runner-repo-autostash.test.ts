@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ensureRepoForTask } from "../commands/runner";
+import { ensureRepoForTask, isFirstKickoffTask } from "../commands/runner";
 
 const execFileAsync = promisify(execFile);
 
@@ -224,5 +224,28 @@ describe("ensureRepoForTask auto-stash refresh", () => {
       "in-progress-feature",
     );
     expect(await readFile(join(clonePath, "feature.txt"), "utf8")).toBe("in-progress work\n");
+  });
+});
+
+describe("isFirstKickoffTask", () => {
+  test("a follow-up/child task with a parentTaskId is still a first kickoff", () => {
+    expect(isFirstKickoffTask({ parentTaskId: "parent-1", taskType: "feature" })).toBe(true);
+  });
+
+  test("a pr-fix task with a parentTaskId is still a first kickoff", () => {
+    expect(isFirstKickoffTask({ parentTaskId: "parent-1", taskType: "pr-fix" })).toBe(true);
+  });
+
+  test("an explicit resume task is never a first kickoff", () => {
+    expect(isFirstKickoffTask({ taskType: "resume" })).toBe(false);
+  });
+
+  test("a brand-new top-level task with no fields at all is a first kickoff", () => {
+    expect(isFirstKickoffTask({})).toBe(true);
+  });
+
+  test("undefined/null task is a first kickoff (safe default)", () => {
+    expect(isFirstKickoffTask(undefined)).toBe(true);
+    expect(isFirstKickoffTask(null)).toBe(true);
   });
 });
