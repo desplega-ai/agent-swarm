@@ -137,6 +137,8 @@ export interface SwarmSdk {
   slack_startThread(args: { channelId: string; message: string }): Promise<unknown>;
   slack_uploadFile(args: Record<string, unknown>): Promise<unknown>;
   slack_downloadFile(args: { url: string }): Promise<unknown>;
+  slack_delete(args: { channelId: string; messageTs: string }): Promise<unknown>;
+  slack_update(args: { channelId: string; messageTs: string; message: string }): Promise<unknown>;
 
   // --- write: messaging (internal) ---
   message_post(args: { channel?: string; content: string; to?: string }): Promise<unknown>;
