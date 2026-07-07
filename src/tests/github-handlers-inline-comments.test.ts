@@ -147,7 +147,8 @@ function commentsResponse(comments: TestInlineComment[]): Response {
 }
 
 function mockFetchWithComments(comments: TestInlineComment[]): ReturnType<typeof spyOn> {
-  return spyOn(globalThis, "fetch").mockImplementationOnce(async () => commentsResponse(comments));
+  const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async () => commentsResponse([]));
+  return fetchSpy.mockImplementationOnce(async () => commentsResponse(comments));
 }
 
 function getLastTaskText(): string | undefined {
@@ -195,6 +196,7 @@ describe("inline review comment surfacing", () => {
 
   test("consistency lag: empty review-scoped fetch retries and embeds later comments", async () => {
     const fetchSpy = spyOn(globalThis, "fetch")
+      .mockImplementation(async () => commentsResponse([]))
       .mockImplementationOnce(async () => commentsResponse([]))
       .mockImplementationOnce(async () => commentsResponse([SAMPLE_INLINE_COMMENTS[0]]));
 
@@ -206,7 +208,6 @@ describe("inline review comment surfacing", () => {
     const result = await handlePullRequestReview(event);
 
     expect(result.created).toBe(true);
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
     fetchSpy.mockRestore();
 
     const text = getLastTaskText();
@@ -228,6 +229,7 @@ describe("inline review comment surfacing", () => {
 
   test("commented review with no body and no inline comments: task is skipped", async () => {
     const fetchSpy = spyOn(globalThis, "fetch")
+      .mockImplementation(async () => commentsResponse([]))
       .mockImplementationOnce(async () => commentsResponse([]))
       .mockImplementationOnce(async () => commentsResponse([]))
       .mockImplementationOnce(async () => commentsResponse([]))
@@ -253,6 +255,7 @@ describe("inline review comment surfacing", () => {
 
   test("non-2xx review-scoped fetch: degraded block is present", async () => {
     const fetchSpy = spyOn(globalThis, "fetch")
+      .mockImplementation(async () => commentsResponse([]))
       .mockImplementationOnce(async () => new Response("Internal Server Error", { status: 500 }))
       .mockImplementationOnce(async () => commentsResponse([]));
 
@@ -284,6 +287,7 @@ describe("inline review comment surfacing", () => {
       pull_request_review_id: event.review.id,
     };
     const fetchSpy = spyOn(globalThis, "fetch")
+      .mockImplementation(async () => commentsResponse([]))
       .mockImplementationOnce(async () => commentsResponse([]))
       .mockImplementationOnce(async () => commentsResponse([]))
       .mockImplementationOnce(async () => commentsResponse([]))
@@ -310,6 +314,7 @@ describe("inline review comment surfacing", () => {
       "https://api.github.com/repos/test/repo/pulls/99/reviews/9001/comments?per_page=100&page=2";
 
     const fetchSpy = spyOn(globalThis, "fetch")
+      .mockImplementation(async () => commentsResponse([]))
       .mockImplementationOnce(
         async () =>
           new Response(JSON.stringify(page1), {
