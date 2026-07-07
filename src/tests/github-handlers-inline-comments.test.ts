@@ -4,13 +4,17 @@
  * Covers:
  * - CHANGES_REQUESTED review with inline comments → task description includes them
  * - commented-no-body-with-inline-comments → task is created (not skipped)
- * - commented-no-body-no-inline-comments → task is skipped (existing behavior preserved)
- * - commented-no-body-no-installation → graceful fallback, task is skipped
+ * - commented-no-body-no-inline-comments with trusted fetch → task is skipped
+ * - degraded fetch/no installation → task is created with a loud manual-fetch block
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, getDb, initDb } from "../be/db";
-import { handleComment, handlePullRequestReview } from "../github/handlers";
+import {
+  handleComment,
+  handlePullRequestReview,
+  setReviewCommentsRetryDelayForTests,
+} from "../github/handlers";
 import { GITHUB_BOT_NAME } from "../github/mentions";
 import type { CommentEvent, PullRequestReviewEvent } from "../github/types";
 import { getTemplateDefinition } from "../prompts/registry";
@@ -55,6 +59,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  setReviewCommentsRetryDelayForTests();
   closeDb();
   await unlink(TEST_DB_PATH).catch(() => {});
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
@@ -63,6 +68,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await ensureTemplatesRegistered();
+  setReviewCommentsRetryDelayForTests(() => {});
   getDb().prepare("DELETE FROM agent_tasks").run();
 });
 
@@ -71,6 +77,16 @@ beforeEach(async () => {
 const BASE_REPO = { full_name: "test/repo", html_url: "https://github.com/test/repo" };
 
 let reviewIdCounter = 9000;
+
+type TestInlineComment = {
+  id: number;
+  path: string;
+  line: number | null;
+  body: string;
+  html_url: string;
+  diff_hunk: string;
+  pull_request_review_id?: number | null;
+};
 
 function makeReviewEvent(opts: {
   state: "changes_requested" | "commented";
@@ -104,7 +120,7 @@ function makeReviewEvent(opts: {
   };
 }
 
-const SAMPLE_INLINE_COMMENTS = [
+const SAMPLE_INLINE_COMMENTS: TestInlineComment[] = [
   {
     id: 1001,
     path: "src/domain_tables.go",
@@ -123,15 +139,16 @@ const SAMPLE_INLINE_COMMENTS = [
   },
 ];
 
-function mockFetchWithComments(
-  comments: typeof SAMPLE_INLINE_COMMENTS | [],
-): ReturnType<typeof spyOn> {
+function commentsResponse(comments: TestInlineComment[]): Response {
+  return new Response(JSON.stringify(comments), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function mockFetchWithComments(comments: TestInlineComment[]): ReturnType<typeof spyOn> {
   return spyOn(globalThis, "fetch").mockImplementationOnce(
-    async () =>
-      new Response(JSON.stringify(comments), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+    async () => commentsResponse(comments),
   );
 }
 
@@ -142,10 +159,19 @@ function getLastTaskText(): string | undefined {
   return row?.task;
 }
 
+function expectDegradedBlock(text: string | undefined): void {
+  expect(text).toContain("## ⚠️ Inline comments could NOT be auto-fetched");
+  expect(text).toContain(
+    'gh api "repos/test/repo/pulls/99/comments?per_page=100" --jq \'.[] | {id,path,line,body}\'',
+  );
+  expect(text).toContain("Do NOT dispatch off the review body alone");
+  expect(text).toContain("Address EVERY inline comment");
+}
+
 // ── Tests ──
 
 describe("inline review comment surfacing", () => {
-  test("CHANGES_REQUESTED review with inline comments: task includes path:line and bodies", async () => {
+  test("happy path: CHANGES_REQUESTED review with inline comments includes path:line and bodies", async () => {
     const fetchSpy = mockFetchWithComments(SAMPLE_INLINE_COMMENTS);
 
     const event = makeReviewEvent({
@@ -166,6 +192,29 @@ describe("inline review comment surfacing", () => {
     expect(text).toContain("Why is this hardcoded?");
     expect(text).toContain("Inline review comments");
     expect(text).toContain("reply to and resolve each inline review thread");
+    expect(text).not.toContain("Inline comments could NOT be auto-fetched");
+  });
+
+  test("consistency lag: empty review-scoped fetch retries and embeds later comments", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch")
+      .mockImplementationOnce(async () => commentsResponse([]))
+      .mockImplementationOnce(async () => commentsResponse([SAMPLE_INLINE_COMMENTS[0]]));
+
+    const event = makeReviewEvent({
+      state: "changes_requested",
+      body: "Please handle the line note",
+      installationId: 123,
+    });
+    const result = await handlePullRequestReview(event);
+
+    expect(result.created).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    fetchSpy.mockRestore();
+
+    const text = getLastTaskText();
+    expect(text).toContain("src/domain_tables.go:77");
+    expect(text).toContain("This logic looks wrong");
+    expect(text).not.toContain("Inline comments could NOT be auto-fetched");
   });
 
   test("commented review with no body but with inline comments: task is created, not skipped", async () => {
@@ -180,26 +229,34 @@ describe("inline review comment surfacing", () => {
   });
 
   test("commented review with no body and no inline comments: task is skipped", async () => {
-    const fetchSpy = mockFetchWithComments([]);
+    const fetchSpy = spyOn(globalThis, "fetch")
+      .mockImplementationOnce(async () => commentsResponse([]))
+      .mockImplementationOnce(async () => commentsResponse([]))
+      .mockImplementationOnce(async () => commentsResponse([]))
+      .mockImplementationOnce(async () => commentsResponse([]))
+      .mockImplementationOnce(async () => commentsResponse([]));
 
     const event = makeReviewEvent({ state: "commented", body: null, installationId: 123 });
     const result = await handlePullRequestReview(event);
 
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
     fetchSpy.mockRestore();
 
     expect(result.created).toBe(false);
   });
 
-  test("commented review with no body and no installation: graceful fallback, task is skipped", async () => {
+  test("commented review with no body and no installation: degraded task is created", async () => {
     const event = makeReviewEvent({ state: "commented", body: null });
     const result = await handlePullRequestReview(event);
-    expect(result.created).toBe(false);
+
+    expect(result.created).toBe(true);
+    expectDegradedBlock(getLastTaskText());
   });
 
-  test("review comments fetch failure: task still created (graceful degradation)", async () => {
-    const fetchSpy = spyOn(globalThis, "fetch").mockImplementationOnce(
-      async () => new Response("Internal Server Error", { status: 500 }),
-    );
+  test("non-2xx review-scoped fetch: degraded block is present", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch")
+      .mockImplementationOnce(async () => new Response("Internal Server Error", { status: 500 }))
+      .mockImplementationOnce(async () => commentsResponse([]));
 
     const event = makeReviewEvent({
       state: "changes_requested",
@@ -214,8 +271,38 @@ describe("inline review comment surfacing", () => {
     expect(result.created).toBe(true);
     const text = getLastTaskText();
     expect(text).toContain("Needs work");
-    // No inline comments section when fetch failed
-    expect(text).not.toContain("Inline review comments");
+    expectDegradedBlock(text);
+    expect(text).not.toContain("Inline review comments (");
+  });
+
+  test("PR-level fallback embeds a review comment missed by review-scoped fetch", async () => {
+    const event = makeReviewEvent({
+      state: "changes_requested",
+      body: "Review-scoped path missed this",
+      installationId: 123,
+    });
+    const fallbackComment = {
+      ...SAMPLE_INLINE_COMMENTS[1],
+      pull_request_review_id: event.review.id,
+    };
+    const fetchSpy = spyOn(globalThis, "fetch")
+      .mockImplementationOnce(async () => commentsResponse([]))
+      .mockImplementationOnce(async () => commentsResponse([]))
+      .mockImplementationOnce(async () => commentsResponse([]))
+      .mockImplementationOnce(async () => commentsResponse([]))
+      .mockImplementationOnce(async () => commentsResponse([fallbackComment]));
+
+    const result = await handlePullRequestReview(event);
+
+    fetchSpy.mockRestore();
+
+    expect(result.created).toBe(true);
+    const text = getLastTaskText();
+    expect(text).toContain("config/table-renderers.json:7");
+    expect(text).toContain("Why is this hardcoded?");
+    expect(text).toContain("Inline review comments (1)");
+    expect(text).toContain("Address EVERY inline comment");
+    expect(text).not.toContain("Inline comments could NOT be auto-fetched");
   });
 
   test("pagination: two-page review comment response surfaces all comments from both pages", async () => {
