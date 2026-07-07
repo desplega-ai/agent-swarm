@@ -167,17 +167,18 @@ The heartbeat system automatically detects and recovers stalled tasks — tasks 
 
 Stalled task detection uses the heartbeat's code-level triage: if a task has been `in_progress` for longer than expected without progress updates and its assigned worker is offline, the heartbeat can reassign or fail the task as appropriate.
 
-### Crash Recovery — Same-Agent Pin + Lead Fallback
+### Crash Recovery & Graceful Resume — Same-Agent Pin + Lead Fallback
 
-When the heartbeat classifies a task as crashed (its worker has gone unresponsive), the recovery `resume` task is **pinned back to the original agent** instead of being released to the role-blind unassigned pool. Agent IDs are stable across a restart and the crashed agent's row survives, so the resume is reclaimed when that same agent comes back — and no wrong-specialization worker can pick it up in the meantime.
+When the heartbeat classifies a task as crashed (its worker has gone unresponsive), or when a worker is paused during graceful shutdown and needs a follow-up resume, the recovery task is **pinned back to the original agent** instead of being released to the role-blind unassigned pool. Agent IDs are stable across a restart and the original agent row survives, so the resume is reclaimed when that same agent comes back — and no wrong-specialization worker can pick it up in the meantime.
 
 If the agent never returns, the resume stays `pending`. After `HEARTBEAT_RESUME_PIN_GRACE_MIN` (default ~10 minutes, measured from crash detection) a heartbeat reaper concludes the agent is gone and escalates: it creates a Lead-owned `task.reroute.decision` follow-up. The Lead then re-delegates the work to an explicitly chosen agent via `send-task` — the work is never returned to the pool. A resume that has already been retried up to `HEARTBEAT_MAX_RESUME_GENERATIONS` times is failed instead of escalated, to bound a flapping task.
 
 <Callout type="info">
-  Two environment variables gate this behavior:
+  Three environment variables gate this behavior:
 
   - `HEARTBEAT_RESUME_PIN_GRACE_MIN` (default `10`) — minutes a pinned resume waits to be reclaimed before the reaper escalates it to the Lead. Set to `0` to disable the reaper.
   - `HEARTBEAT_PIN_CRASH_RESUME` (default on) — set to `0` to restore the previous behavior, where crash-recovery resumes fall back to the unassigned pool instead of pinning to their original agent.
+  - `HEARTBEAT_PIN_GRACEFUL_RESUME` (default on) — set to `0` to restore the previous behavior for graceful-shutdown resumes, sending them back through the pool instead of pinning them to the original agent.
 </Callout>
 
 ## Related

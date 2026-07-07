@@ -119,7 +119,7 @@ Codex checks credentials in this order:
 |--------|--------|-------|
 | **OpenAI API key** | `OPENAI_API_KEY` | Standard API billing |
 | **Auth file** | `~/.codex/auth.json` | Native Codex CLI auth file |
-| **ChatGPT OAuth via config store** | `codex_oauth` | Restored automatically at worker boot |
+| **ChatGPT OAuth via config store** | `codex_oauth_<slot>` | Restored automatically at worker boot |
 
 For ChatGPT OAuth setup, see [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth).
 
@@ -370,7 +370,9 @@ Codex workers support a **database-backed** multi-credential pool stored as `cod
 Key properties:
 
 - **Rate-limit-aware selection**: the runner queries `/api/keys/available?keyType=CODEX_OAUTH` before each task spawn and picks from non-rate-limited slots only. When a task hits a rate limit, the slot is marked unavailable: workspace-credits-exhausted errors use a **2-hour** cooldown (tunable via `CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS`); other unparseable rate-limit errors fall back to ~5 minutes. See [Provider Auth: Codex OAuth — Workspace credits exhausted](/docs/guides/provider-auth/codex-oauth#workspace-credits-exhausted).
+- **Locked refresh + keep-warm**: task-time revalidation and `POST /api/oauth/keep-warm/codex` share the same refresh-lock path, so rarely-used slots can still refresh on a roughly weekly cadence without racing the runner.
 - **Token-refresh write-back**: refreshed OAuth tokens are written back to the same `codex_oauth_<slot>` key the task started with. Other slots are never touched.
+- **Fail-fast auth errors**: a rejected slot refresh now stops the task with the upstream auth failure instead of silently falling back to a stale pool auth file.
 - **Backwards compatible**: single-credential deploys work unchanged. The boot entrypoint seeds `codex_oauth_0` from the legacy `codex_oauth` key on first run.
 - **Global scope**: no per-agent or per-task affinity — any worker can pick any slot.
 
