@@ -19,7 +19,7 @@ This is useful when:
 
 - you already use Codex locally with ChatGPT OAuth
 - you do not want to distribute `OPENAI_API_KEY` to every worker
-- you want one shared Codex OAuth credential per swarm
+- you want a shared Codex OAuth pool per swarm instead of per-worker credentials
 
 <Callout type="warn">
 `codex_oauth` is currently stored at **global swarm scope**. One successful login applies to all Codex workers that can reach that same swarm API and database.
@@ -272,9 +272,19 @@ Single-credential deploys keep working unchanged:
 - The Docker entrypoint seeds `codex_oauth_0` from the legacy `codex_oauth` config key at boot (if `codex_oauth_0` does not yet exist). Workers never see the legacy key name at runtime.
 - If only one slot is provisioned, the pool still runs correctly — slot 0 is always selected and the availability filter is a no-op.
 
+### Pool health & keep-warm
+
+The pool now has one locked refresh path for both task-time revalidation and background hygiene:
+
+- **Fail-fast refresh rejection** — if OpenAI rejects a slot refresh (revoked credential, invalid refresh token, lock-wait timeout), Codex workers fail with an actionable auth error that includes the upstream status/body instead of silently launching on a stale pooled `auth.json`.
+- **Worker-disk auth files stay refresh-token-blanked** — boot-seeded and per-task `~/.codex/auth.json` materialization both strip live pool refresh tokens, so a stray local Codex process cannot rotate a shared token family outside the refresh lock.
+- **Locked keep-warm sweep** — `POST /api/oauth/keep-warm/codex` enumerates all `codex_oauth_*` slots and refreshes any slot older than roughly 7 days through the same locked `getValidCodexOAuth(...)` path. Benched slots (`codex-auth-watch`) are skipped automatically.
+
+This keeps rarely-used slots healthy without reintroducing the pre-lock refresh race.
+
 ### Known limitations
 
-**`refresh_token_reused` errors in multi-credential pools.** When two runners independently pick the same slot at the same moment and the stored token is expired, both will call the OAuth refresh endpoint concurrently. The second call fails with a `refresh_token_reused` / 401 error because OpenAI's token rotation invalidates the previous refresh token on first use. `materializeCodexAuthJson` is atomic at the filesystem level, but token refresh is not distributed-locked across workers. The random slot selection in `availableIndices` reduces collision probability as pool size grows — the simplest mitigation is to provision more slots so the odds of two workers landing on the same expired slot simultaneously are negligible. A distributed lock for token refresh would fully eliminate this race; that is tracked as a separate follow-up.
+- **Global pool only** — slot selection is swarm-global. There is still no per-worker or per-agent slot affinity by design; if you need strict credential isolation, use separate swarms or `OPENAI_API_KEY`.
 
 ### Verification
 

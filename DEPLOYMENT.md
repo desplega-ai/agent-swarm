@@ -294,7 +294,7 @@ Run custom initialization before the worker starts. Place a script at `/workspac
 2. File extension (`.ts` -> bun, `.js` -> node, `.sh` -> bash)
 
 **Error handling:**
-- `STARTUP_SCRIPT_STRICT=true` (default) - Container exits if script fails
+- `STARTUP_SCRIPT_STRICT=true` - Container exits if script fails
 - `STARTUP_SCRIPT_STRICT=false` - Logs warning and continues
 
 **Example: Install dependencies available to the worker user**
@@ -444,7 +444,7 @@ When a worker starts, it:
 | `YOLO` | No | Continue on errors (default: `false`) |
 | `SYSTEM_PROMPT` | No | Custom system prompt text |
 | `SYSTEM_PROMPT_FILE` | No | Path to system prompt file |
-| `STARTUP_SCRIPT_STRICT` | No | Exit on startup script failure (default: `true`) |
+| `STARTUP_SCRIPT_STRICT` | No | Exit on startup script failure (default: `false`) |
 | `SHUTDOWN_TIMEOUT` | No | Grace period in ms before pausing tasks (default: `30000`) |
 | `MAX_CONCURRENT_TASKS` | No | Maximum parallel tasks per worker (default: `1`) |
 | `SWARM_URL` | No | Base domain for service URLs (default: `localhost`) |
@@ -491,6 +491,8 @@ bun run src/cli.tsx codex-login --api-url https://your-swarm.example.com --api-k
 ```
 
 That command completes the browser OAuth flow locally and stores the credential in the swarm API config store. The default behavior picks the next free pool slot (`codex_oauth_0`, `codex_oauth_1`, ...), and you can pin a specific slot with `--slot <n>` for any integer from `0` through `100`. Then restart codex workers. On boot, `docker-entrypoint.sh` enumerates the stored `codex_oauth_<slot>` entries from the API and writes the selected credential to `/home/worker/.codex/auth.json` automatically.
+
+Pool health is coordinated centrally. Task-time revalidation and the locked `POST /api/oauth/keep-warm/codex` sweep use the same refresh-lock path, so rarely-used slots can still refresh on a roughly weekly cadence without racing the runner. If OpenAI rejects a refresh, the worker now fails fast with the upstream auth error instead of silently starting Codex on a stale pool auth file.
 
 Worker requirements for this path:
 

@@ -12,6 +12,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Migration notes
 - **v1.106.0 setupScript privilege boundary:** per-agent `setupScript` and `/workspace/start-up.*` hooks now run as the unprivileged `worker` user after the container drops privileges, and the worker image no longer includes blanket passwordless sudo (#865, #866). Move root-requiring steps such as system package installs, `/usr/lib` global npm writes, service ownership changes, or local database bootstrap into the admin-controlled global `SETUP_SCRIPT` config, into the worker image, or into the built-in optional service toggles. Keep per-agent setup user-level, for example `bun i -g` or `npm config set prefix "$HOME/.npm-global"`.
 
+## [1.111.0] - 2026-07-07
+
+### Added
+- **Memory retrieval v2 is now operator-visible end to end** (#894, #915) — search can expand through linked memories, `memory-get` exposes links/backlinks, tagged memories and retrieval-source usefulness data flow through the APIs, and the dashboard memory panel now explains those metrics with clearer charts/tooltips.
+- **Graceful-shutdown resumes now use the same same-agent pinning model as crash recovery** (#911) — paused work is reclaimed by the original stable-ID worker after restart, with a reaper escalation path to a Lead reroute decision when the agent never comes back.
+- **Codex OAuth pool health is now actively hardened** (#914) — locked keep-warm refreshes can sweep all `codex_oauth_*` slots, refresh rejections surface actionable upstream auth errors, and boot-seeded worker auth files no longer carry live pool refresh tokens.
+
+### Changed
+- **The legacy GitHub Pages README mirror was removed** (#913) — the deleted `docs/` site and sync workflow no longer shadow `docs.agent-swarm.dev`, which is now the only maintained public docs surface.
+
+### Fixed
+- **Slack DM file uploads now reply into the visible DM tree** (#912) — task-scoped `slack-upload-file` uses the user-facing DM root when present instead of a hidden progress-message thread, while channel uploads stay attached to the original Slack thread.
+
 ## [1.110.0] - 2026-07-06
 
 ### Changed

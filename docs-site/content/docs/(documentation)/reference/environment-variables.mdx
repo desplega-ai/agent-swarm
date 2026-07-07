@@ -69,7 +69,8 @@ Complete reference for all environment variables used by Agent Swarm.
 | `HEARTBEAT_MAX_AUTO_ASSIGN` | `5` | Max pool tasks to auto-assign per sweep |
 | `HEARTBEAT_MAX_RESUME_GENERATIONS` | `3` | Max crash-recovery resume generations for a task before it is failed for Lead triage instead of resumed again |
 | `HEARTBEAT_PIN_CRASH_RESUME` | `true` (on) | Rollback kill-switch for pinning `crash_recovery` resumes back to their original agent. Set to `0` to restore the pre-pin behavior requiring the `WORKER_LIVENESS_WINDOW_SECONDS` freshness check |
-| `HEARTBEAT_RESUME_PIN_GRACE_MIN` | `10` | Grace window (minutes) a same-agent-pinned crash-recovery resume waits before the reaper escalates it to a Lead re-delegation decision. Set to `0` to disable the reaper |
+| `HEARTBEAT_PIN_GRACEFUL_RESUME` | `true` (on) | Rollback kill-switch for pinning `graceful_shutdown` resumes back to their original agent. Set to `0` to restore the old pool-based follow-up path |
+| `HEARTBEAT_RESUME_PIN_GRACE_MIN` | `10` | Grace window (minutes) a same-agent-pinned crash-recovery or graceful-shutdown resume waits before the reaper escalates it to a Lead re-delegation decision. Set to `0` to disable the reaper |
 | `WORKER_LIVENESS_WINDOW_SECONDS` | `30` | Seconds within which a worker's last-activity timestamp must be fresh to be treated as "online" for resume pre-assignment / same-agent crash-pin freshness checks |
 
 <Callout type="warn">
