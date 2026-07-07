@@ -103,12 +103,14 @@ import {
   registerSkillUninstallTool,
   registerSkillUpdateTool,
 } from "./tools/skills";
+import { registerSlackDeleteTool } from "./tools/slack-delete";
 import { registerSlackDownloadFileTool } from "./tools/slack-download-file";
 import { registerSlackListChannelsTool } from "./tools/slack-list-channels";
 import { registerSlackPostTool } from "./tools/slack-post";
 import { registerSlackReadTool } from "./tools/slack-read";
 import { registerSlackReplyTool } from "./tools/slack-reply";
 import { registerSlackStartThreadTool } from "./tools/slack-start-thread";
+import { registerSlackUpdateTool } from "./tools/slack-update";
 import { registerSlackUploadFileTool } from "./tools/slack-upload-file";
 import { registerStoreProgressTool } from "./tools/store-progress";
 // Swarm config tools
@@ -256,6 +258,8 @@ export function createServer() {
   registerSlackListChannelsTool(server);
   registerSlackUploadFileTool(server);
   registerSlackDownloadFileTool(server);
+  registerSlackDeleteTool(server);
+  registerSlackUpdateTool(server);
 
   // AgentMail integration tool (always registered, self-service inbox mapping)
   registerRegisterAgentmailInboxTool(server);

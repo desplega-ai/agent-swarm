@@ -178,3 +178,28 @@ export function extractSlackMessageText(msg: SlackMessageLike): string {
   }
   return bodyText || topText;
 }
+
+/**
+ * Normalize a Slack message timestamp into the dotted API form
+ * (1783411554.596189) that chat.delete/chat.update require.
+ *
+ * Accepts, in order of preference:
+ *   - the dotted API form            → "1783411554.596189"  (returned unchanged)
+ *   - the 'p' deep-link form         → "p1783411554596189"  (dot re-inserted)
+ *   - the bare digit run             → "1783411554596189"
+ *   - a full Slack permalink URL     → ".../archives/C.../p1783411554596189?thread_ts=..."
+ *
+ * The Lead can pass whatever handle it holds; this makes delete/edit reliable
+ * without the caller pre-cleaning the input.
+ */
+export function parseSlackTs(input: string): string {
+  const trimmed = input.trim();
+  if (/^\d{6,}\.\d{1,}$/.test(trimmed)) return trimmed; // already dotted
+
+  // Extract the p-form / bare digit run from anywhere in the string,
+  // including a full permalink URL (…/archives/C…/p1783411554596189?…).
+  const m = trimmed.match(/p?(\d{10})(\d{6})(?:\D|$)/);
+  if (m) return `${m[1]}.${m[2]}`;
+
+  return trimmed; // fall through; Slack rejects a bad ts with a clear error we map below
+}

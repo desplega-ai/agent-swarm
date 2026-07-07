@@ -24,6 +24,7 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
         message: z.string(),
         channelId: z.string().optional(),
         ts: z.string().optional(),
+        messageTs: z.string().optional(),
       }),
     },
     async ({ channelId, message }, requestInfo, _meta) => {
@@ -112,6 +113,7 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
             message: "Thread started successfully.",
             channelId: resolvedChannelId,
             ts,
+            messageTs: ts,
           },
         };
       } catch (error) {
