@@ -107,6 +107,7 @@ describe("Tool Annotations & Classification", () => {
       "delete-config",
       "delete-workflow",
       "unregister-service",
+      "slack-delete",
     ];
 
     for (const name of expectedDestructive) {
@@ -163,6 +164,8 @@ describe("Tool Annotations & Classification", () => {
       "slack-upload-file",
       "slack-download-file",
       "slack-list-channels",
+      "slack-delete",
+      "slack-update",
     ];
 
     for (const name of slackTools) {

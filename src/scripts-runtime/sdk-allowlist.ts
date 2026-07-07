@@ -67,6 +67,8 @@ export const SDK_TOOL_NAME_MAP = {
   slack_startThread: "slack-start-thread", // external: sends to Slack
   slack_uploadFile: "slack-upload-file", // external: sends to Slack
   slack_downloadFile: "slack-download-file",
+  slack_delete: "slack-delete", // external: mutates Slack, destructive
+  slack_update: "slack-update", // external: mutates Slack
 
   // ── messaging (internal) ──
   message_read: "read-messages",
