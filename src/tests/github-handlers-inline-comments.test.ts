@@ -147,9 +147,7 @@ function commentsResponse(comments: TestInlineComment[]): Response {
 }
 
 function mockFetchWithComments(comments: TestInlineComment[]): ReturnType<typeof spyOn> {
-  return spyOn(globalThis, "fetch").mockImplementationOnce(
-    async () => commentsResponse(comments),
-  );
+  return spyOn(globalThis, "fetch").mockImplementationOnce(async () => commentsResponse(comments));
 }
 
 function getLastTaskText(): string | undefined {
@@ -162,7 +160,7 @@ function getLastTaskText(): string | undefined {
 function expectDegradedBlock(text: string | undefined): void {
   expect(text).toContain("## ⚠️ Inline comments could NOT be auto-fetched");
   expect(text).toContain(
-    'gh api "repos/test/repo/pulls/99/comments?per_page=100" --jq \'.[] | {id,path,line,body}\'',
+    "gh api \"repos/test/repo/pulls/99/comments?per_page=100\" --jq '.[] | {id,path,line,body}'",
   );
   expect(text).toContain("Do NOT dispatch off the review body alone");
   expect(text).toContain("Address EVERY inline comment");

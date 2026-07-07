@@ -1010,8 +1010,7 @@ async function fetchReviewScopedComments(
   reviewId: number,
   headers: Record<string, string>,
 ): Promise<FetchReviewCommentsResult> {
-  const url =
-    `https://api.github.com/repos/${repo}/pulls/${prNumber}/reviews/${reviewId}/comments?per_page=100`;
+  const url = `https://api.github.com/repos/${repo}/pulls/${prNumber}/reviews/${reviewId}/comments?per_page=100`;
 
   let result = await fetchPaginatedReviewComments(url, headers);
   if (result.degraded || result.comments.length > 0) {
@@ -1177,9 +1176,10 @@ export async function handlePullRequestReview(
       : review.state === "changes_requested"
         ? "💡 Suggested: Address the requested changes and update the PR"
         : "💡 Suggested: Review the feedback and respond if needed";
-  const reviewSuggestions = hasInlineComments || degraded
-    ? `${baseReviewSuggestion}\n💬 Address EVERY inline comment. After pushing fixes, reply to and resolve each inline review thread on GitHub so the reviewer sees visible confirmation.`
-    : baseReviewSuggestion;
+  const reviewSuggestions =
+    hasInlineComments || degraded
+      ? `${baseReviewSuggestion}\n💬 Address EVERY inline comment. After pushing fixes, reply to and resolve each inline review thread on GitHub so the reviewer sees visible confirmation.`
+      : baseReviewSuggestion;
 
   const result = resolveTemplate(
     "github.pull_request.review_submitted",
