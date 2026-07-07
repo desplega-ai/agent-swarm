@@ -4,14 +4,10 @@ Use swarm scripts when direct tool calls would create repetitive work, flood the
 
 ## Decision Rubric
 
-| Situation | Use |
-|---|---|
-| 1-10 SDK calls, result fits in context | Direct tool call |
-| 10+ items or bulk fan-out SDK operations | Script |
-| Heavy fetch, parse, transform, or aggregation | Script or context-mode |
-| Single expensive web fetch | `ctx_fetch_and_index` |
-| Multi-agent parallel work | Workflow |
-| Logic needed across sessions or agents | Named script |
+The canonical "when to use scripts vs. tool calls vs. workflows" rubric lives in
+the default system prompt template `system.agent.script_guidance`, which is
+included directly or through `system.agent.context_mode` for local providers.
+Use that table as the source of truth; this skill adds examples and gotchas.
 
 ## Loading Script Tools
 
@@ -53,7 +49,9 @@ Keep logs useful but compact. The value returned from `main` is what comes back 
 
 ## Named Script Pattern
 
-Use `script-upsert` when the same logic is likely to be reused by another task or agent. Give the script a searchable name, a concrete description, and an intent that explains when to choose it.
+Use `script-upsert` only when the same logic is likely to be reused by another task or agent at least twice in the future. For one-offs, use inline `script-run` and keep the returned value compact. Below the ~10-call threshold, prefer direct tool calls unless the payload is unusually large.
+
+Give named scripts a searchable name, a concrete description, and an intent that explains when to choose it.
 
 Good named scripts:
 

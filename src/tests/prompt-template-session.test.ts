@@ -54,7 +54,7 @@ describe("Session templates — registration", () => {
     await ensureTemplatesRegistered();
   });
 
-  test("all 15 system templates are registered", () => {
+  test("all 16 system templates are registered", () => {
     const systemTemplates = [
       "system.agent.role",
       "system.agent.register",
@@ -66,6 +66,7 @@ describe("Session templates — registration", () => {
       "system.agent.agent_fs",
       "system.agent.self_awareness",
       "system.agent.context_mode",
+      "system.agent.script_guidance",
       "system.agent.seed_scripts",
 
       "system.agent.system",
@@ -91,12 +92,12 @@ describe("Session templates — registration", () => {
     }
   });
 
-  test("total of 21 session/system templates registered", () => {
+  test("total of 22 session/system templates registered", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    // 21 = the original 19 + `system.session.worker.pi` + `system.agent.seed_scripts`.
-    // The pi composite omits script nudges because pi workers do not have MCP.
-    expect(sessionSystem.length).toBe(21);
+    // 22 = the original 19 + `system.session.worker.pi` + `system.agent.seed_scripts`
+    // + the canonical `system.agent.script_guidance` block shared with pi.
+    expect(sessionSystem.length).toBe(22);
   });
 });
 
@@ -186,6 +187,15 @@ describe("Session templates — individual resolution", () => {
     const result = resolveTemplate("system.agent.context_mode", {});
     expect(result.text).toContain("context-mode");
     expect(result.text).toContain("batch_execute");
+    expect(result.text).toContain("Agent Scripts");
+  });
+
+  test("system.agent.script_guidance contains script decision rubric", () => {
+    const result = resolveTemplate("system.agent.script_guidance", {});
+    expect(result.text).toContain("Decision rubric");
+    expect(result.text).toContain("workflow-triage");
+    expect(result.text).toContain("90-95% less context");
+    expect(result.text).toContain("at least twice");
   });
 
   test("system.agent.seed_scripts points agents at task-start scripts", () => {
@@ -397,5 +407,8 @@ describe("Session templates — getBasePrompt integration", () => {
 
     expect(result).not.toContain("Pre-built Seed Scripts");
     expect(result).not.toContain("task-context-gathering");
+    expect(result).toContain("Agent Scripts");
+    expect(result).toContain("workflow-triage");
+    expect(result).not.toContain("batch_execute");
   });
 });

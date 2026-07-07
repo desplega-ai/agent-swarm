@@ -398,7 +398,16 @@ registerTemplate({
 ### Context Window Management
 
 You have access to the \`context-mode\` MCP tools (\`batch_execute\`, \`execute\`, \`execute_file\`, \`search\`, \`fetch_and_index\`, \`index\`) which compress tool output to save context window space. For data-heavy operations (web fetches, large file reads, CLI output processing), prefer these over raw Bash/WebFetch to avoid flooding your context window with raw output.
+{{@template[system.agent.script_guidance]}}
+`,
+  variables: [],
+  category: "system",
+});
 
+registerTemplate({
+  eventType: "system.agent.script_guidance",
+  header: "",
+  defaultBody: `
 ### Agent Scripts — for bulk, repetitive, or data-heavy work
 
 Use **scripts** (\`script-upsert\` + \`script-run\`) when a task involves repetitive SDK calls, large data processing, or deterministic multi-step pipelines. Scripts run out-of-process and return only their final result.
@@ -413,6 +422,10 @@ Use **scripts** (\`script-upsert\` + \`script-run\`) when a task involves repeti
 | Single expensive web fetch | \`ctx_fetch_and_index\` (context-mode) |
 | Multi-agent fan-out, parallel work, deterministic pipeline | **Workflow** |
 | One-off bash/TS with no reuse needed | \`code-mode run\` (Bash) |
+
+Worked example: \`workflow-triage\` collapsed 26+ MCP-equivalent operations into one ~4.3k-token result in ~13s — roughly 90-95% less context than sequential tool-call payloads.
+
+Use a named script only when the logic is likely to be invoked at least twice in the future. For true one-offs, use inline \`script-run\`; below the ~10-call threshold, prefer direct tool calls unless the payload is unusually large.
 
 The 5 script tools (\`script-search\`, \`script-run\`, \`script-upsert\`, \`script-delete\`, \`script-query-types\`) are deferred tools. Call ToolSearch to load \`script-upsert\`, \`script-run\`, and \`script-query-types\` before using them.
 
@@ -679,12 +692,12 @@ registerTemplate({
   category: "session",
 });
 
-// Pi-specific worker composite. Identical to `system.session.worker` except it
-// OMITS the `system.agent.context_mode` block — pi has no context-mode MCP
-// wiring yet (deferred to DES-514), so advertising the `ctx_*` tools to pi
-// workers would point at phantom tools. `getBasePrompt` selects this composite
-// when `provider === 'pi'`; all other local providers (claude, codex, opencode)
-// keep the context_mode block via `system.session.worker`.
+// Pi-specific worker composite. Pi still omits the `system.agent.context_mode`
+// block because it has no context-mode MCP wiring yet, but DES-514 requires the
+// provider to receive the canonical script-selection guidance.
+// `getBasePrompt` selects this composite when `provider === 'pi'`; all other
+// local providers (claude, codex, opencode) keep the context_mode block via
+// `system.session.worker`.
 registerTemplate({
   eventType: "system.session.worker.pi",
   header: "",
@@ -694,6 +707,7 @@ registerTemplate({
 {{@template[system.agent.worker]}}
 {{@template[system.agent.filesystem]}}
 {{@template[system.agent.self_awareness]}}
+{{@template[system.agent.script_guidance]}}
 
 {{@template[system.agent.system]}}
 {{@template[system.agent.share_urls]}}

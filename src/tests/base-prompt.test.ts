@@ -646,20 +646,23 @@ describe("getBasePrompt — local providers unaffected", () => {
 // The context_mode block advertises the `ctx_*` MCP tools. It is included for
 // local providers that have context-mode wired into their per-session config
 // (claude, codex, opencode) and excluded for `pi`, which has no context-mode
-// wiring yet (deferred to DES-514). Remote-provider exclusion is covered by the
-// "remote provider excluded sections" suite above.
+// wiring yet. DES-514 still requires pi to receive the separate script guidance.
+// Remote-provider exclusion is covered by the "remote provider excluded
+// sections" suite above.
 // ---------------------------------------------------------------------------
 const localTraits: ProviderTraits = { hasMcp: true, hasLocalEnvironment: true };
 
 describe("getBasePrompt — context-mode provider gating", () => {
-  test("excludes context-mode block for pi provider", async () => {
+  test("excludes context-mode tools but keeps script guidance for pi provider", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
       traits: localTraits,
       provider: "pi",
     });
     expect(result).not.toContain("Context Window Management");
-    expect(result).not.toContain("context-mode");
+    expect(result).not.toContain("batch_execute");
+    expect(result).toContain("Agent Scripts");
+    expect(result).toContain("workflow-triage");
   });
 
   for (const provider of ["claude", "codex", "opencode"] as const) {
