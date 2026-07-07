@@ -4,9 +4,9 @@ author: Claude
 planner: Claude
 topic: "DES-445 RBAC increment 3 — role engine (per-user, union, deny-deferred)"
 tags: [plan, rbac, auth, security, des-445]
-status: draft
+status: in_progress
 autonomy: autopilot
-last_updated: 2026-07-07
+last_updated: 2026-07-08
 last_updated_by: Claude
 related_design: thoughts/taras/plans/2026-07-07-des-445-rbac-user-policy-admission-model.md
 related_plan: thoughts/taras/plans/2026-07-07-des-445-rbac-slice1-can-audit.md
@@ -152,15 +152,15 @@ Notes: no `CHECK` on `role_permissions.verb` (the verb registry lives in TS and 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Fresh DB boots clean: `rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm && timeout 15 bun run start:http; test $? -eq 124` (server starts, no migration error in output)
-- [ ] Existing DB upgrades clean: re-run `timeout 15 bun run start:http` against the DB produced above (109 already applied → runner skips it, no error)
-- [ ] Schema + seeds present: `sqlite3 agent-swarm-db.sqlite "SELECT name FROM roles ORDER BY name;"` prints `admin` and `requester`; `sqlite3 agent-swarm-db.sqlite "SELECT count(*) FROM role_permissions WHERE roleId='rbac-role-requester';"` prints `4`
-- [ ] Trigger works: `sqlite3 agent-swarm-db.sqlite "INSERT INTO users (id, name) VALUES ('trig-test-user','Trig Test'); SELECT roleId FROM principal_roles WHERE principalId='trig-test-user';"` prints `rbac-role-admin`
-- [ ] Full suite untouched: `bun test`
-- [ ] `bun run lint` passes
+- [x] Fresh DB boots clean: `rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm && timeout 15 bun run start:http; test $? -eq 124` (server starts, no migration error in output)
+- [x] Existing DB upgrades clean: re-run `timeout 15 bun run start:http` against the DB produced above (109 already applied → runner skips it, no error)
+- [x] Schema + seeds present: `sqlite3 agent-swarm-db.sqlite "SELECT name FROM roles ORDER BY name;"` prints `admin` and `requester`; `sqlite3 agent-swarm-db.sqlite "SELECT count(*) FROM role_permissions WHERE roleId='rbac-role-requester';"` prints `4`
+- [x] Trigger works: `sqlite3 agent-swarm-db.sqlite "INSERT INTO users (id, name) VALUES ('trig-test-user','Trig Test'); SELECT roleId FROM principal_roles WHERE principalId='trig-test-user';"` prints `rbac-role-admin`
+- [x] Full suite untouched: `bun test` (5920 pass / 0 fail / 7 skipped)
+- [x] `bun run lint` passes
 
 #### Automated QA:
-- [ ] Agent verifies backfill on a DB that had pre-existing users: create 2 users via `POST /api/users` on a fresh DB, stop the server, confirm `sqlite3 agent-swarm-db.sqlite "SELECT count(*) FROM principal_roles WHERE roleId='rbac-role-admin';"` equals the user count (trigger path), and confirm `_migrations` contains version 109
+- [x] Agent verifies backfill on a DB that had pre-existing users: create 2 users via `POST /api/users` on a fresh DB, stop the server, confirm `sqlite3 agent-swarm-db.sqlite "SELECT count(*) FROM principal_roles WHERE roleId='rbac-role-admin';"` equals the user count (trigger path), and confirm `_migrations` contains version 109
 
 #### Manual Verification:
 - [ ] None — schema-only phase, fully machine-checkable
