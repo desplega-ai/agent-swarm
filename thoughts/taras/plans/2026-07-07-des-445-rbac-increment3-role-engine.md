@@ -264,13 +264,13 @@ if (auth.kind === "user" && isRbacEnabled()) {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] New suite passes: `bun test src/tests/rbac-admission.test.ts`
-- [ ] **No-op acceptance (the increment's acceptance criterion)**: `RBAC_ENABLED=true bun test src/tests/rbac-charact-http.test.ts src/tests/rbac-charact-misc-tools.test.ts src/tests/rbac-charact-skills.test.ts src/tests/rbac-charact-slack.test.ts src/tests/rbac-engine.test.ts src/tests/rbac-audit.test.ts src/tests/user-token-rest-auth.test.ts` — all green. `user-token-rest-auth.test.ts` and `rbac-charact-http.test.ts` are the strongest witnesses: both drive non-GET requests with `aswt_` bearers through the real `handleCore` and expect 201 — they pass only if the trigger-attached default role truly bypasses admission. (The wire suite is deliberately excluded here: the Phase-3 helper pin overrides a shell-level flag in subprocesses; wire-surface flag-ON proof is Phase 4's `rbac-admission-e2e` no-op leg.)
-- [ ] Default-off regression: `bun test` (flag unset)
-- [ ] `bun run tsc:check` && `bun run lint` && `bun run check:rbac-coverage` && `bash scripts/check-db-boundary.sh`
+- [x] New suite passes: `bun test src/tests/rbac-admission.test.ts` (8 pass / 0 fail)
+- [x] **No-op acceptance (the increment's acceptance criterion)**: `RBAC_ENABLED=true bun test src/tests/rbac-charact-http.test.ts src/tests/rbac-charact-misc-tools.test.ts src/tests/rbac-charact-skills.test.ts src/tests/rbac-charact-slack.test.ts src/tests/rbac-engine.test.ts src/tests/rbac-audit.test.ts src/tests/user-token-rest-auth.test.ts` — all green. `user-token-rest-auth.test.ts` and `rbac-charact-http.test.ts` are the strongest witnesses: both drive non-GET requests with `aswt_` bearers through the real `handleCore` and expect 201 — they pass only if the trigger-attached default role truly bypasses admission. (The wire suite is deliberately excluded here: the Phase-3 helper pin overrides a shell-level flag in subprocesses; wire-surface flag-ON proof is Phase 4's `rbac-admission-e2e` no-op leg.)
+- [x] Default-off regression: `bun test` (flag unset) — 5939 pass / 0 fail / 7 skipped
+- [x] `bun run tsc:check` && `bun run lint` && `bun run check:rbac-coverage` && `bash scripts/check-db-boundary.sh`
 
 #### Automated QA:
-- [ ] Agent runs a live curl walkthrough against `RBAC_ENABLED=true bun run start:http`: create user + mint token (`POST /api/users`, `POST /api/users/{id}/mcp-tokens`), verify `POST /api/tasks` with the `aswt_` bearer succeeds (default admin ⇒ no-op), narrow the user to `requester` via `sqlite3`, verify the same `POST /api/tasks` now returns 403 with the `{ error }` body, `GET /api/tasks` still 200, and a `permission_audit` row exists with `resourceType='http-route'` and a deny decision
+- [x] Agent runs a live curl walkthrough against `RBAC_ENABLED=true bun run start:http`: create user + mint token (`POST /api/users`, `POST /api/users/{id}/mcp-tokens`), verify `POST /api/tasks` with the `aswt_` bearer succeeds (default admin ⇒ no-op), narrow the user to `requester` via `sqlite3`, verify the same `POST /api/tasks` now returns 403 with the `{ error }` body, `GET /api/tasks` still 200, and a `permission_audit` row exists with `resourceType='http-route'` and a deny decision
 
 #### Manual Verification:
 - [ ] None — behavior is fully exercised by the suites and the QA walkthrough

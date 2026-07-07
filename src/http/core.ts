@@ -10,17 +10,20 @@ import {
   shouldBlockPolling,
   updateAgentStatus,
 } from "../be/db";
+import { enqueueAdmissionRow } from "../be/rbac-audit";
+import { getUserGrant } from "../be/rbac-roles";
 import { initGitHub, resetGitHub } from "../github";
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
+import { decideAdmission, isRbacEnabled } from "../rbac";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { resolveHttpRequestAuth } from "./auth";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
-import { isPublicRoute } from "./route-def";
-import { agentWithCapacity, getPathSegments, parseQueryParams } from "./utils";
+import { findRoute, isPublicRoute } from "./route-def";
+import { agentWithCapacity, getPathSegments, jsonError, parseQueryParams } from "./utils";
 
 /**
  * Load global swarm_config entries into process.env.
@@ -243,12 +246,13 @@ export async function handleCore(
   // either the global swarm key or an active user-bound `aswt_` token.
   const pathSegments = getPathSegments(req.url || "");
   const isUserMcpRoute = req.url === "/mcp-user";
+  let auth = null as ReturnType<typeof resolveHttpRequestAuth>;
   // `/mcp-user` runs its own `aswt_`-token auth in `handleMcpUser`; the swarm
   // API key must not gate it.
   if (isUserMcpRoute || isPublicRoute(req.method, pathSegments)) {
     setRequestAuth(req, null);
   } else {
-    const auth = resolveHttpRequestAuth(req, apiKey);
+    auth = resolveHttpRequestAuth(req, apiKey);
 
     if (!auth) {
       setRequestAuth(req, null);
@@ -257,6 +261,29 @@ export async function handleCore(
       return true;
     }
     setRequestAuth(req, auth);
+  }
+
+  if (auth?.kind === "user" && isRbacEnabled()) {
+    const grant = getUserGrant(auth.userId);
+    if (!grant.grantsAll) {
+      const def = findRoute(req.method, pathSegments);
+      const decision = decideAdmission({
+        method: req.method ?? "",
+        rbac: def?.rbac,
+        routeKnown: def !== undefined,
+        grant,
+      });
+      enqueueAdmissionRow({
+        userId: auth.userId,
+        decision,
+        method: req.method,
+        route: def?.path ?? pathSegments.join("/"),
+      });
+      if (!decision.allow) {
+        jsonError(res, `Forbidden: ${decision.reason}`, 403);
+        return true;
+      }
+    }
   }
 
   // POST /internal/reload-config — re-read swarm_config into process.env and re-init integrations
