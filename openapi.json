@@ -3468,6 +3468,100 @@
         }
       }
     },
+    "/api/favorites": {
+      "get": {
+        "summary": "List favorites for the authenticated user",
+        "tags": [
+          "Favorites"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "page",
+                "workflow",
+                "schedule"
+              ]
+            },
+            "required": false,
+            "name": "itemType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "itemIds",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Favorite rows and favorite item ids"
+          },
+          "401": {
+            "description": "No authenticated user context"
+          }
+        }
+      },
+      "put": {
+        "summary": "Set favorite state for an item",
+        "tags": [
+          "Favorites"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "itemType": {
+                    "type": "string",
+                    "enum": [
+                      "page",
+                      "workflow",
+                      "schedule"
+                    ]
+                  },
+                  "itemId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "favorite": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "itemType",
+                  "itemId",
+                  "favorite"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Favorite state"
+          },
+          "401": {
+            "description": "No authenticated user context"
+          }
+        }
+      }
+    },
     "/api/fs/capabilities": {
       "get": {
         "summary": "Get active file-storage provider capabilities",
