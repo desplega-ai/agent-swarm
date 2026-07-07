@@ -944,6 +944,12 @@ interface ReviewInlineComment {
   body: string;
   html_url: string;
   diff_hunk: string;
+  pull_request_review_id?: number | null;
+}
+
+interface FetchReviewCommentsResult {
+  comments: ReviewInlineComment[];
+  degraded: boolean;
 }
 
 function parseNextPageLink(linkHeader: string | null): string | null {
@@ -952,30 +958,38 @@ function parseNextPageLink(linkHeader: string | null): string | null {
   return match ? (match[1] ?? null) : null;
 }
 
-async function fetchReviewComments(
-  repo: string,
-  prNumber: number,
-  reviewId: number,
-  installationId: number,
-): Promise<ReviewInlineComment[]> {
-  const token = await getInstallationToken(installationId);
-  if (!token) {
-    return [];
-  }
-  const headers = {
+const REVIEW_COMMENTS_EMPTY_RETRY_DELAYS_MS = [1_500, 3_000, 3_000];
+const defaultReviewCommentsRetryDelay = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+let reviewCommentsRetryDelay: (ms: number) => Promise<void> | void =
+  defaultReviewCommentsRetryDelay;
+
+export function setReviewCommentsRetryDelayForTests(
+  delay?: (ms: number) => Promise<void> | void,
+): void {
+  reviewCommentsRetryDelay = delay ?? defaultReviewCommentsRetryDelay;
+}
+
+function buildReviewCommentsHeaders(token: string): Record<string, string> {
+  return {
     Accept: "application/vnd.github+json",
     Authorization: `Bearer ${token}`,
     "X-GitHub-Api-Version": "2022-11-28",
   };
+}
+
+async function fetchPaginatedReviewComments(
+  initialUrl: string,
+  headers: Record<string, string>,
+): Promise<FetchReviewCommentsResult> {
   const allComments: ReviewInlineComment[] = [];
-  let url: string | null =
-    `https://api.github.com/repos/${repo}/pulls/${prNumber}/reviews/${reviewId}/comments?per_page=100`;
+  let url: string | null = initialUrl;
   try {
     while (url) {
       const response = await fetch(url, { headers });
       if (!response.ok) {
         console.error(`[GitHub] Failed to fetch review inline comments: ${response.status}`);
-        return allComments;
+        return { comments: allComments, degraded: true };
       }
       const page = (await response.json()) as ReviewInlineComment[];
       if (Array.isArray(page)) {
@@ -983,11 +997,92 @@ async function fetchReviewComments(
       }
       url = parseNextPageLink(response.headers.get("link"));
     }
-    return allComments;
+    return { comments: allComments, degraded: false };
   } catch (error) {
     console.error("[GitHub] Error fetching review inline comments:", error);
-    return allComments;
+    return { comments: allComments, degraded: true };
   }
+}
+
+async function fetchReviewScopedComments(
+  repo: string,
+  prNumber: number,
+  reviewId: number,
+  headers: Record<string, string>,
+): Promise<FetchReviewCommentsResult> {
+  const url = `https://api.github.com/repos/${repo}/pulls/${prNumber}/reviews/${reviewId}/comments?per_page=100`;
+
+  let result = await fetchPaginatedReviewComments(url, headers);
+  if (result.degraded || result.comments.length > 0) {
+    return result;
+  }
+
+  for (const delayMs of REVIEW_COMMENTS_EMPTY_RETRY_DELAYS_MS) {
+    await reviewCommentsRetryDelay(delayMs);
+    result = await fetchPaginatedReviewComments(url, headers);
+    if (result.degraded || result.comments.length > 0) {
+      return result;
+    }
+  }
+
+  return result;
+}
+
+async function fetchPrLevelReviewComments(
+  repo: string,
+  prNumber: number,
+  reviewId: number,
+  headers: Record<string, string>,
+): Promise<FetchReviewCommentsResult> {
+  const url = `https://api.github.com/repos/${repo}/pulls/${prNumber}/comments?per_page=100`;
+  const result = await fetchPaginatedReviewComments(url, headers);
+  return {
+    comments: result.comments.filter((comment) => comment.pull_request_review_id === reviewId),
+    degraded: result.degraded,
+  };
+}
+
+function dedupeReviewComments(comments: ReviewInlineComment[]): ReviewInlineComment[] {
+  const byId = new Map<number, ReviewInlineComment>();
+  for (const comment of comments) {
+    if (!byId.has(comment.id)) {
+      byId.set(comment.id, comment);
+    }
+  }
+  return [...byId.values()];
+}
+
+async function fetchReviewComments(
+  repo: string,
+  prNumber: number,
+  reviewId: number,
+  installationId: number,
+): Promise<FetchReviewCommentsResult> {
+  const token = await getInstallationToken(installationId);
+  if (!token) {
+    return { comments: [], degraded: true };
+  }
+
+  const headers = buildReviewCommentsHeaders(token);
+  const scopedResult = await fetchReviewScopedComments(repo, prNumber, reviewId, headers);
+  if (!scopedResult.degraded && scopedResult.comments.length > 0) {
+    return scopedResult;
+  }
+
+  const fallbackResult = await fetchPrLevelReviewComments(repo, prNumber, reviewId, headers);
+  const mergedComments = dedupeReviewComments([
+    ...scopedResult.comments,
+    ...fallbackResult.comments,
+  ]);
+
+  if (fallbackResult.comments.length > 0) {
+    return { comments: mergedComments, degraded: false };
+  }
+
+  return {
+    comments: mergedComments,
+    degraded: scopedResult.degraded || fallbackResult.degraded,
+  };
 }
 
 function buildInlineCommentsSection(comments: ReviewInlineComment[]): string {
@@ -998,6 +1093,13 @@ function buildInlineCommentsSection(comments: ReviewInlineComment[]): string {
     return `- **${loc}**${hunk}\n  > ${c.body}`;
   });
   return `\n\n## Inline review comments (${comments.length})\n\n${items.join("\n\n")}`;
+}
+
+function buildInlineCommentsDegradedSection(repo: string, prNumber: number): string {
+  return `\n\n## ⚠️ Inline comments could NOT be auto-fetched
+The automatic inline-comment fetch failed or was unverifiable while the reviewer submitted this review. Inline comments ARE the change requests. BEFORE scoping or dispatching this task you MUST fetch them yourself:
+\`gh api "repos/${repo}/pulls/${prNumber}/comments?per_page=100" --jq '.[] | {id,path,line,body}'\`
+Reply to and resolve EVERY unresolved inline thread. Do NOT dispatch off the review body alone.`;
 }
 
 /**
@@ -1033,15 +1135,13 @@ export async function handlePullRequestReview(
     return { created: false };
   }
 
-  // Fetch inline comments now so we can decide whether to skip and include them in the task.
-  // Returns [] when no installation credentials are available (graceful degradation).
-  const inlineComments = installation?.id
+  const { comments: inlineComments, degraded } = installation?.id
     ? await fetchReviewComments(repository.full_name, pr.number, review.id, installation.id)
-    : [];
+    : { comments: [], degraded: true };
 
   // Skip "commented" reviews only when there is neither an overall body nor any inline
   // comments — a body-less review with inline comments carries real reviewer feedback.
-  if (review.state === "commented" && !review.body && inlineComments.length === 0) {
+  if (review.state === "commented" && !review.body && inlineComments.length === 0 && !degraded) {
     return { created: false };
   }
 
@@ -1062,7 +1162,9 @@ export async function handlePullRequestReview(
 
   // Build task description
   const reviewBodySection = review.body ? `\n\nReview Comment:\n${review.body}` : "";
-  const inlineCommentsSection = buildInlineCommentsSection(inlineComments);
+  const inlineCommentsSection =
+    buildInlineCommentsSection(inlineComments) +
+    (degraded ? buildInlineCommentsDegradedSection(repository.full_name, pr.number) : "");
   const relatedTaskSection = existingTask
     ? `Related task: ${existingTask.id}\n🔀 Consider routing to the same agent working on the related task.\n`
     : "";
@@ -1074,9 +1176,10 @@ export async function handlePullRequestReview(
       : review.state === "changes_requested"
         ? "💡 Suggested: Address the requested changes and update the PR"
         : "💡 Suggested: Review the feedback and respond if needed";
-  const reviewSuggestions = hasInlineComments
-    ? `${baseReviewSuggestion}\n💬 Address EVERY inline comment. After pushing fixes, reply to and resolve each inline review thread on GitHub so the reviewer sees visible confirmation.`
-    : baseReviewSuggestion;
+  const reviewSuggestions =
+    hasInlineComments || degraded
+      ? `${baseReviewSuggestion}\n💬 Address EVERY inline comment. After pushing fixes, reply to and resolve each inline review thread on GitHub so the reviewer sees visible confirmation.`
+      : baseReviewSuggestion;
 
   const result = resolveTemplate(
     "github.pull_request.review_submitted",

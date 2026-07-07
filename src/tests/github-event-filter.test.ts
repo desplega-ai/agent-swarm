@@ -183,7 +183,7 @@ describe("suppressed cascade events", () => {
     expect(result.created).toBe(false);
   });
 
-  test("pull_request_review.submitted with empty commented review is ignored", async () => {
+  test("pull_request_review.submitted with empty commented review is created when inline comments are unverifiable", async () => {
     const event: PullRequestReviewEvent = {
       action: "submitted",
       review: {
@@ -207,7 +207,8 @@ describe("suppressed cascade events", () => {
       sender: { login: "reviewer" },
     };
     const result = await handlePullRequestReview(event);
-    expect(result.created).toBe(false);
+    expect(result.created).toBe(true);
+    expect(result.taskId).toBeDefined();
   });
 
   test("check_run.completed with failure returns created: false", async () => {
