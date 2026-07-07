@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getMcpServerById, installMcpServer } from "@/be/db";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerMcpServerInstallTool = (server: McpServer) => {
@@ -38,7 +39,17 @@ export const registerMcpServerInstallTool = (server: McpServer) => {
       // Cross-agent install requires lead
       if (targetAgentId !== requestInfo.agentId) {
         const agent = getAgentById(requestInfo.agentId);
-        if (!agent?.isLead) {
+        const decision = can({
+          principal: {
+            kind: "agent",
+            agentId: requestInfo.agentId,
+            isLead: agent?.isLead ?? false,
+          },
+          verb: "mcp-server.install.any",
+          resource: { kind: "agent", agentId: targetAgentId },
+          source: "mcp",
+        });
+        if (!decision.allow) {
           return {
             content: [
               {

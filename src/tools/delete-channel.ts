@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { deleteChannel, getAgentById, getChannelById, getChannelByName } from "@/be/db";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 const GENERAL_CHANNEL_ID = "00000000-0000-4000-8000-000000000001";
@@ -45,7 +46,17 @@ export const registerDeleteChannelTool = (server: McpServer) => {
 
       // Check authorization: must be lead agent
       const callingAgent = getAgentById(requestInfo.agentId);
-      if (!callingAgent?.isLead) {
+      const decision = can({
+        principal: {
+          kind: "agent",
+          agentId: requestInfo.agentId,
+          isLead: callingAgent?.isLead ?? false,
+        },
+        verb: "channel.delete",
+        resource: { kind: "none" },
+        source: "mcp",
+      });
+      if (!decision.allow) {
         return {
           content: [
             { type: "text", text: "Not authorized. Only the lead agent can delete channels." },

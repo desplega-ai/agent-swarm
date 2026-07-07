@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getInboxMessageById, getTaskById } from "@/be/db";
+import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { MAX_FILE_SIZE, uploadFile } from "@/slack/files";
 import { createToolRegistrar } from "@/tools/utils";
@@ -216,7 +217,13 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
         slackThreadTs = resolveTaskUploadThreadTs(task);
       } else if (channelId) {
         // Direct channel access requires lead privileges
-        if (!agent.isLead) {
+        const decision = can({
+          principal: { kind: "agent", agentId: agent.id, isLead: agent.isLead },
+          verb: "integration.slack.upload",
+          resource: { kind: "none" },
+          source: "mcp",
+        });
+        if (!decision.allow) {
           return {
             content: [{ type: "text", text: "Direct channel access requires lead privileges." }],
             structuredContent: {

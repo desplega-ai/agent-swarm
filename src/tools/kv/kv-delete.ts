@@ -1,25 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { deleteKv, getAgentById } from "@/be/db";
+import { deleteKv } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { KvKeySchema, KvNamespaceSchema } from "@/types";
+import { kvWriteAuthError } from "./kv-write-auth";
 import { resolveNamespace } from "./resolve-namespace";
-
-function authError(namespace: string, info: { agentId: string | undefined }): string | null {
-  if (namespace.startsWith("task:page:")) {
-    return "task:page:* writes require a page-proxy request, not an MCP call";
-  }
-  if (namespace.startsWith("task:agent:")) {
-    const target = namespace.slice("task:agent:".length);
-    if (info.agentId && target === info.agentId) return null;
-    if (info.agentId) {
-      const agent = getAgentById(info.agentId);
-      if (agent?.isLead) return null;
-    }
-    return "writes to another agent's namespace require lead";
-  }
-  return null;
-}
 
 export const registerKvDeleteTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -54,7 +39,7 @@ export const registerKvDeleteTool = (server: McpServer) => {
           },
         };
       }
-      const authErr = authError(resolved.namespace, { agentId: requestInfo.agentId });
+      const authErr = kvWriteAuthError(resolved.namespace, { agentId: requestInfo.agentId });
       if (authErr) {
         return {
           content: [{ type: "text", text: authErr }],

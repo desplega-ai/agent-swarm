@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getMemoryStore } from "@/be/memory";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerMemoryDeleteTool = (server: McpServer) => {
@@ -49,11 +50,18 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
       }
 
       // Permission check: own memories or lead can delete swarm-scoped
-      const isOwner = memory.agentId === requestInfo.agentId;
       const agent = getAgentById(requestInfo.agentId);
-      const isLeadDeletingSwarm = agent?.isLead && memory.scope === "swarm";
-
-      if (!isOwner && !isLeadDeletingSwarm) {
+      const decision = can({
+        principal: {
+          kind: "agent",
+          agentId: requestInfo.agentId,
+          isLead: agent?.isLead ?? false,
+        },
+        verb: "memory.delete.any",
+        resource: { kind: "owned", ownerAgentId: memory.agentId, scope: memory.scope },
+        source: "mcp",
+      });
+      if (!decision.allow) {
         return {
           content: [{ type: "text", text: "You don't have permission to delete this memory." }],
           structuredContent: {

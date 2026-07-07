@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { createMcpServer, getAgentById, installMcpServer } from "@/be/db";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerMcpServerCreateTool = (server: McpServer) => {
@@ -85,7 +86,17 @@ export const registerMcpServerCreateTool = (server: McpServer) => {
         const scope = args.scope ?? "agent";
         if (scope === "swarm" || scope === "global") {
           const agent = getAgentById(requestInfo.agentId);
-          if (!agent?.isLead) {
+          const decision = can({
+            principal: {
+              kind: "agent",
+              agentId: requestInfo.agentId,
+              isLead: agent?.isLead ?? false,
+            },
+            verb: "mcp-server.create.swarm",
+            resource: { kind: "none" },
+            source: "mcp",
+          });
+          if (!decision.allow) {
             return {
               content: [
                 {

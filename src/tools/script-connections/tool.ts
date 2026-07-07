@@ -7,6 +7,7 @@ import {
   upsertCredentialBinding,
   upsertScriptConnection,
 } from "@/be/script-connections";
+import { can } from "@/rbac";
 import { placeholderForConfigKey } from "@/scripts-runtime/credential-broker";
 import { createToolRegistrar } from "@/tools/utils";
 
@@ -60,7 +61,17 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
       }
 
       const agent = getAgentById(requestInfo.agentId);
-      if (!agent?.isLead) {
+      const decision = can({
+        principal: {
+          kind: "agent",
+          agentId: requestInfo.agentId,
+          isLead: agent?.isLead ?? false,
+        },
+        verb: "script-connection.manage",
+        resource: { kind: "none" },
+        source: "mcp",
+      });
+      if (!decision.allow) {
         return {
           content: [{ type: "text", text: "Only the lead can manage script connections." }],
           structuredContent: {

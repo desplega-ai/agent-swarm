@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getSkillById, installSkill } from "@/be/db";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerSkillInstallTool = (server: McpServer) => {
@@ -37,7 +38,17 @@ export const registerSkillInstallTool = (server: McpServer) => {
       // If installing for another agent, must be lead
       if (targetAgentId !== requestInfo.agentId) {
         const agent = getAgentById(requestInfo.agentId);
-        if (!agent?.isLead) {
+        const decision = can({
+          principal: {
+            kind: "agent",
+            agentId: requestInfo.agentId,
+            isLead: agent?.isLead ?? false,
+          },
+          verb: "skill.install.any",
+          resource: { kind: "agent", agentId: targetAgentId },
+          source: "mcp",
+        });
+        if (!decision.allow) {
           return {
             content: [{ type: "text", text: "Only leads can install skills for other agents." }],
             structuredContent: {

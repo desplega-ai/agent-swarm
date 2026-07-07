@@ -7,6 +7,7 @@ import {
   validateConfigValue,
 } from "@/be/swarm-config-guard";
 import { scheduleIntegrationsReload } from "@/http/core";
+import { can } from "@/rbac";
 import { CREDENTIAL_BINDINGS_CONFIG_KEY } from "@/scripts-runtime/credential-broker";
 import { createToolRegistrar } from "@/tools/utils";
 import { SwarmConfigSchema, SwarmConfigScopeSchema } from "@/types";
@@ -97,7 +98,17 @@ export const registerSetConfigTool = (server: McpServer) => {
 
         if (key.toUpperCase() === CREDENTIAL_BINDINGS_CONFIG_KEY) {
           const agent = getAgentById(requestInfo.agentId);
-          if (!agent?.isLead) {
+          const decision = can({
+            principal: {
+              kind: "agent",
+              agentId: requestInfo.agentId,
+              isLead: agent?.isLead ?? false,
+            },
+            verb: "config.credential-bindings.write",
+            resource: { kind: "none" },
+            source: "mcp",
+          });
+          if (!decision.allow) {
             const message =
               "Only the lead can manage SCRIPT_CREDENTIAL_BINDINGS. Use the credential-bindings tool.";
             return {

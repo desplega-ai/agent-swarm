@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getMcpServerById, updateMcpServer } from "@/be/db";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerMcpServerUpdateTool = (server: McpServer) => {
@@ -59,7 +60,17 @@ export const registerMcpServerUpdateTool = (server: McpServer) => {
 
         // Only owner or lead can update
         const agent = getAgentById(requestInfo.agentId);
-        if (existing.ownerAgentId !== requestInfo.agentId && !agent?.isLead) {
+        const decision = can({
+          principal: {
+            kind: "agent",
+            agentId: requestInfo.agentId,
+            isLead: agent?.isLead ?? false,
+          },
+          verb: "mcp-server.update.any",
+          resource: { kind: "owned", ownerAgentId: existing.ownerAgentId },
+          source: "mcp",
+        });
+        if (!decision.allow) {
           return {
             content: [
               { type: "text", text: "Only the owning agent or lead can update this MCP server." },

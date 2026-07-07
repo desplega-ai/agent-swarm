@@ -7,6 +7,7 @@ import {
   listRelationalCredentialBindings,
   upsertCredentialBinding,
 } from "@/be/script-connections";
+import { can } from "@/rbac";
 import {
   CredentialBindingSchema,
   placeholderForConfigKey,
@@ -57,7 +58,17 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
       }
 
       const agent = getAgentById(requestInfo.agentId);
-      if (!agent?.isLead) {
+      const decision = can({
+        principal: {
+          kind: "agent",
+          agentId: requestInfo.agentId,
+          isLead: agent?.isLead ?? false,
+        },
+        verb: "credential-binding.manage",
+        resource: { kind: "none" },
+        source: "mcp",
+      });
+      if (!decision.allow) {
         return {
           content: [{ type: "text", text: "Only the lead can manage credential bindings." }],
           structuredContent: {

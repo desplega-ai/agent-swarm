@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
+import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { parseSlackTs } from "@/slack/message-text";
 import { createToolRegistrar } from "@/tools/utils";
@@ -44,7 +45,13 @@ export const registerSlackDeleteTool = (server: McpServer) => {
         };
       }
 
-      if (!agent.isLead) {
+      const decision = can({
+        principal: { kind: "agent", agentId: agent.id, isLead: agent.isLead },
+        verb: "integration.slack.delete",
+        resource: { kind: "none" },
+        source: "mcp",
+      });
+      if (!decision.allow) {
         return {
           content: [{ type: "text", text: "Deleting Slack messages requires lead privileges." }],
           structuredContent: {

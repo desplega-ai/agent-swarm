@@ -15,6 +15,7 @@ import {
   recordIdentityEvent,
   unlinkIdentity,
 } from "@/be/users";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 /**
@@ -86,7 +87,17 @@ export const registerManageUserTool = (server: McpServer) => {
     },
     async (input, requestInfo) => {
       const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
-      if (!callerAgent?.isLead) {
+      const decision = can({
+        principal: {
+          kind: "agent",
+          agentId: requestInfo.agentId ?? "",
+          isLead: callerAgent?.isLead ?? false,
+        },
+        verb: "user.manage",
+        resource: { kind: "none" },
+        source: "mcp",
+      });
+      if (!decision.allow || !callerAgent) {
         return {
           content: [
             { type: "text" as const, text: "Only the lead agent can manage user profiles." },

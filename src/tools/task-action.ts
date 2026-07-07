@@ -175,7 +175,7 @@ export async function taskActionHandler(
         return { success: false, message: `Task "${taskId}" not found.` };
       }
 
-      const ownershipError = assertOwnsTask(ctx, existingTask);
+      const ownershipError = assertOwnsTask(ctx, existingTask, "task.action.own");
       if (ownershipError) return ownershipError;
 
       if (action === "to_backlog") {

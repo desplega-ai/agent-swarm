@@ -1,30 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getAgentById, upsertKv } from "@/be/db";
+import { upsertKv } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { KvEntrySchema, KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "@/types";
+import { kvWriteAuthError } from "./kv-write-auth";
 import { resolveNamespace } from "./resolve-namespace";
 
 // 2 MiB cap — mirrors the HTTP enforcement.
 const MAX_KV_BODY_BYTES = 2 * 1024 * 1024;
-
-function authError(namespace: string, info: { agentId: string | undefined }): string | null {
-  if (namespace.startsWith("task:page:")) {
-    // MCP requests don't carry an X-Page-Id; page writes must go through the
-    // browser SDK + page proxy.
-    return "task:page:* writes require a page-proxy request, not an MCP call";
-  }
-  if (namespace.startsWith("task:agent:")) {
-    const target = namespace.slice("task:agent:".length);
-    if (info.agentId && target === info.agentId) return null;
-    if (info.agentId) {
-      const agent = getAgentById(info.agentId);
-      if (agent?.isLead) return null;
-    }
-    return "writes to another agent's namespace require lead";
-  }
-  return null;
-}
 
 export const registerKvSetTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -76,7 +59,7 @@ export const registerKvSetTool = (server: McpServer) => {
         };
       }
 
-      const authErr = authError(resolved.namespace, { agentId: requestInfo.agentId });
+      const authErr = kvWriteAuthError(resolved.namespace, { agentId: requestInfo.agentId });
       if (authErr) {
         return {
           content: [{ type: "text", text: authErr }],

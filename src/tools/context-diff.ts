@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getContextVersion } from "@/be/db";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 async function computeDiff(oldContent: string, newContent: string): Promise<string> {
@@ -92,7 +93,17 @@ export const registerContextDiffTool = (server: McpServer) => {
       // Access control: agents can diff their own context, lead can diff any
       if (version.agentId !== requestInfo.agentId) {
         const callerAgent = getAgentById(requestInfo.agentId);
-        if (!callerAgent?.isLead) {
+        const decision = can({
+          principal: {
+            kind: "agent",
+            agentId: requestInfo.agentId,
+            isLead: callerAgent?.isLead ?? false,
+          },
+          verb: "agent.context.read.any",
+          resource: { kind: "agent", agentId: version.agentId },
+          source: "mcp",
+        });
+        if (!decision.allow) {
           return {
             content: [
               {

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, updateAgentName, updateAgentProfile } from "@/be/db";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 import { type Agent, AgentSchema } from "@/types";
 
@@ -172,7 +173,13 @@ export const registerUpdateProfileTool = (server: McpServer) => {
             },
           };
         }
-        if (!callingAgent.isLead) {
+        const decision = can({
+          principal: { kind: "agent", agentId: callingAgent.id, isLead: callingAgent.isLead },
+          verb: "agent.profile.update.any",
+          resource: { kind: "agent", agentId: targetAgentId },
+          source: "mcp",
+        });
+        if (!decision.allow) {
           return {
             content: [
               {

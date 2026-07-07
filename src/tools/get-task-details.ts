@@ -53,7 +53,7 @@ export async function getTaskDetailsHandler(
     };
   }
 
-  const ownershipError = assertOwnsTask(ctx, task);
+  const ownershipError = assertOwnsTask(ctx, task, "task.read.own");
   if (ownershipError) return ownershipError;
 
   const logs = getLogsByTaskIdChronological(taskId);

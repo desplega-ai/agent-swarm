@@ -9,6 +9,7 @@ import {
   type KapsoNumberMapping,
   putKapsoNumberMapping,
 } from "@/integrations/kapso/config";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 import { getPublicMcpBaseUrl } from "@/utils/constants";
 
@@ -68,7 +69,17 @@ export const registerRegisterKapsoNumberTool = (server: McpServer) => {
         // Lead-only: provisioning a number rewires inbound routing for the
         // whole swarm, so restrict it to the lead agent.
         const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
-        if (!callerAgent?.isLead) {
+        const decision = can({
+          principal: {
+            kind: "agent",
+            agentId: requestInfo.agentId ?? "",
+            isLead: callerAgent?.isLead ?? false,
+          },
+          verb: "integration.kapso.manage",
+          resource: { kind: "none" },
+          source: "mcp",
+        });
+        if (!decision.allow) {
           const msg = "Permission denied. Only the lead can register a Kapso number.";
           return {
             content: [{ type: "text", text: msg }],
@@ -171,7 +182,17 @@ export const registerUnregisterKapsoNumberTool = (server: McpServer) => {
     async ({ phoneNumberId }, requestInfo) => {
       try {
         const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
-        if (!callerAgent?.isLead) {
+        const decision = can({
+          principal: {
+            kind: "agent",
+            agentId: requestInfo.agentId ?? "",
+            isLead: callerAgent?.isLead ?? false,
+          },
+          verb: "integration.kapso.manage",
+          resource: { kind: "none" },
+          source: "mcp",
+        });
+        if (!decision.allow) {
           const msg = "Permission denied. Only the lead can unregister a Kapso number.";
           return {
             content: [{ type: "text", text: msg }],

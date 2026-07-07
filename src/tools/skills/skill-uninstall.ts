@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, uninstallSkill } from "@/be/db";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerSkillUninstallTool = (server: McpServer) => {
@@ -32,7 +33,17 @@ export const registerSkillUninstallTool = (server: McpServer) => {
 
       if (targetAgentId !== requestInfo.agentId) {
         const agent = getAgentById(requestInfo.agentId);
-        if (!agent?.isLead) {
+        const decision = can({
+          principal: {
+            kind: "agent",
+            agentId: requestInfo.agentId,
+            isLead: agent?.isLead ?? false,
+          },
+          verb: "skill.uninstall.any",
+          resource: { kind: "agent", agentId: targetAgentId },
+          source: "mcp",
+        });
+        if (!decision.allow) {
           return {
             content: [{ type: "text", text: "Only leads can uninstall skills for other agents." }],
             structuredContent: {

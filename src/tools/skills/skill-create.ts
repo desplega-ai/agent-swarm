@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { createSkill, getAgentById, installSkill } from "@/be/db";
 import { parseSkillContent } from "@/be/skill-parser";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerSkillCreateTool = (server: McpServer) => {
@@ -44,7 +45,17 @@ export const registerSkillCreateTool = (server: McpServer) => {
         // If swarm scope requested, only leads can create directly
         if (args.scope === "swarm") {
           const agent = getAgentById(requestInfo.agentId);
-          if (!agent?.isLead) {
+          const decision = can({
+            principal: {
+              kind: "agent",
+              agentId: requestInfo.agentId,
+              isLead: agent?.isLead ?? false,
+            },
+            verb: "skill.create.swarm",
+            resource: { kind: "none" },
+            source: "mcp",
+          });
+          if (!decision.allow) {
             return {
               content: [
                 {

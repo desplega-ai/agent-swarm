@@ -8,6 +8,7 @@ import {
   getTaskById,
   updateAgentStatusFromCapacity,
 } from "@/be/db";
+import { can } from "@/rbac";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
 import type { AgentTask } from "@/types";
@@ -71,8 +72,17 @@ export async function cancelTaskHandler(
       }
 
       // Verify the requester has permission (lead or task creator)
-      const canCancel = callerAgent.isLead || existingTask.creatorAgentId === ownerAgentId;
-      if (!canCancel) {
+      const decision = can({
+        principal: { kind: "agent", agentId: callerAgent.id, isLead: callerAgent.isLead },
+        verb: "task.cancel.any",
+        resource: {
+          kind: "task",
+          taskId: existingTask.id,
+          creatorAgentId: existingTask.creatorAgentId,
+        },
+        source: "mcp",
+      });
+      if (!decision.allow) {
         return {
           success: false,
           message: "Only the lead or task creator can cancel tasks.",
@@ -109,7 +119,7 @@ export async function cancelTaskHandler(
       };
     }
 
-    const ownershipError = assertOwnsTask(ctx, existingTask);
+    const ownershipError = assertOwnsTask(ctx, existingTask, "task.cancel.own");
     if (ownershipError) return ownershipError;
 
     const cancelled = cancelTask(taskId, reason);

@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
+import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { withAutoJoin } from "@/slack/channel-join";
 import { markdownToSlack } from "@/slack/responses";
@@ -43,7 +44,13 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
         };
       }
 
-      if (!agent.isLead) {
+      const decision = can({
+        principal: { kind: "agent", agentId: agent.id, isLead: agent.isLead },
+        verb: "integration.slack.thread.start",
+        resource: { kind: "none" },
+        source: "mcp",
+      });
+      if (!decision.allow) {
         return {
           content: [{ type: "text", text: "Posting to Slack channels requires lead privileges." }],
           structuredContent: {

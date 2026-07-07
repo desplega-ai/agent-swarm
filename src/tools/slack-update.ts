@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
+import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { parseSlackTs } from "@/slack/message-text";
 import { markdownToSlack } from "@/slack/responses";
@@ -47,7 +48,13 @@ export const registerSlackUpdateTool = (server: McpServer) => {
         };
       }
 
-      if (!agent.isLead) {
+      const decision = can({
+        principal: { kind: "agent", agentId: agent.id, isLead: agent.isLead },
+        verb: "integration.slack.update",
+        resource: { kind: "none" },
+        source: "mcp",
+      });
+      if (!decision.allow) {
         return {
           content: [{ type: "text", text: "Editing Slack messages requires lead privileges." }],
           structuredContent: {

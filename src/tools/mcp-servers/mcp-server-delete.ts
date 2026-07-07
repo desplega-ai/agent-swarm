@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { deleteMcpServer, getAgentById, getMcpServerById } from "@/be/db";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerMcpServerDeleteTool = (server: McpServer) => {
@@ -40,7 +41,17 @@ export const registerMcpServerDeleteTool = (server: McpServer) => {
       }
 
       const agent = getAgentById(requestInfo.agentId);
-      if (existing.ownerAgentId !== requestInfo.agentId && !agent?.isLead) {
+      const decision = can({
+        principal: {
+          kind: "agent",
+          agentId: requestInfo.agentId,
+          isLead: agent?.isLead ?? false,
+        },
+        verb: "mcp-server.delete.any",
+        resource: { kind: "owned", ownerAgentId: existing.ownerAgentId },
+        source: "mcp",
+      });
+      if (!decision.allow) {
         return {
           content: [
             { type: "text", text: "Only the owning agent or lead can delete this MCP server." },

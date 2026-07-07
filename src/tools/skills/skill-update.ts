@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getSkillById, updateSkill } from "@/be/db";
 import { parseSkillContent } from "@/be/skill-parser";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 const SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE =
@@ -67,7 +68,17 @@ export const registerSkillUpdateTool = (server: McpServer) => {
 
         // Only owner or lead can update
         const agent = getAgentById(requestInfo.agentId);
-        if (existing.ownerAgentId !== requestInfo.agentId && !agent?.isLead) {
+        const updateDecision = can({
+          principal: {
+            kind: "agent",
+            agentId: requestInfo.agentId,
+            isLead: agent?.isLead ?? false,
+          },
+          verb: "skill.update.any",
+          resource: { kind: "owned", ownerAgentId: existing.ownerAgentId },
+          source: "mcp",
+        });
+        if (!updateDecision.allow) {
           return {
             content: [
               { type: "text", text: "Only the owning agent or lead can update this skill." },
@@ -113,7 +124,19 @@ export const registerSkillUpdateTool = (server: McpServer) => {
 
         if (args.scope !== undefined && args.scope !== existing.scope) {
           // Promoting to swarm scope is the skill-approval path — only leads may do it.
-          if (args.scope === "swarm" && !agent?.isLead) {
+          if (
+            args.scope === "swarm" &&
+            !can({
+              principal: {
+                kind: "agent",
+                agentId: requestInfo.agentId,
+                isLead: agent?.isLead ?? false,
+              },
+              verb: "skill.promote.swarm",
+              resource: { kind: "owned", ownerAgentId: existing.ownerAgentId },
+              source: "mcp",
+            }).allow
+          ) {
             return {
               content: [
                 {

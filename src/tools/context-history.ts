@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getContextVersionHistory } from "@/be/db";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 import type { VersionableField } from "@/types";
 
@@ -80,7 +81,17 @@ export const registerContextHistoryTool = (server: McpServer) => {
       // Access control: agents can see their own history, lead can see any
       if (targetAgentId !== requestInfo.agentId) {
         const callerAgent = getAgentById(requestInfo.agentId);
-        if (!callerAgent?.isLead) {
+        const decision = can({
+          principal: {
+            kind: "agent",
+            agentId: requestInfo.agentId,
+            isLead: callerAgent?.isLead ?? false,
+          },
+          verb: "agent.context.read.any",
+          resource: { kind: "agent", agentId: targetAgentId },
+          source: "mcp",
+        });
+        if (!decision.allow) {
           return {
             content: [
               {

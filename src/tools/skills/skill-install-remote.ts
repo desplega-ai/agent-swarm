@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { createSkill, getAgentById } from "@/be/db";
 import { parseSkillContent } from "@/be/skill-parser";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerSkillInstallRemoteTool = (server: McpServer) => {
@@ -43,7 +44,17 @@ export const registerSkillInstallRemoteTool = (server: McpServer) => {
 
       // Only leads can install global/swarm remote skills
       const agent = getAgentById(requestInfo.agentId);
-      if (!agent?.isLead) {
+      const decision = can({
+        principal: {
+          kind: "agent",
+          agentId: requestInfo.agentId,
+          isLead: agent?.isLead ?? false,
+        },
+        verb: "skill.install.global",
+        resource: { kind: "none" },
+        source: "mcp",
+      });
+      if (!decision.allow) {
         return {
           content: [{ type: "text", text: "Only lead agents can install remote skills." }],
           structuredContent: {

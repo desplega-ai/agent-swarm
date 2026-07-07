@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { deleteSkill, getAgentById, getSkillById } from "@/be/db";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 const SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE =
@@ -43,7 +44,17 @@ export const registerSkillDeleteTool = (server: McpServer) => {
       }
 
       const agent = getAgentById(requestInfo.agentId);
-      if (existing.ownerAgentId !== requestInfo.agentId && !agent?.isLead) {
+      const decision = can({
+        principal: {
+          kind: "agent",
+          agentId: requestInfo.agentId,
+          isLead: agent?.isLead ?? false,
+        },
+        verb: "skill.delete.any",
+        resource: { kind: "owned", ownerAgentId: existing.ownerAgentId },
+        source: "mcp",
+      });
+      if (!decision.allow) {
         return {
           content: [{ type: "text", text: "Only the owning agent or lead can delete this skill." }],
           structuredContent: {

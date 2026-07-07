@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 const LearningCategoryEnum = z.enum([
@@ -45,7 +46,17 @@ export const registerInjectLearningTool = (server: McpServer) => {
 
       // Validate caller is the lead agent
       const callerAgent = getAgentById(requestInfo.agentId);
-      if (!callerAgent || !callerAgent.isLead) {
+      const decision = can({
+        principal: {
+          kind: "agent",
+          agentId: requestInfo.agentId,
+          isLead: callerAgent?.isLead ?? false,
+        },
+        verb: "memory.learning.inject",
+        resource: { kind: "agent", agentId: targetAgentId },
+        source: "mcp",
+      });
+      if (!decision.allow) {
         return {
           content: [{ type: "text", text: "Only the lead agent can inject learnings." }],
           structuredContent: {
