@@ -101,6 +101,18 @@ export const PERMISSIONS = {
     description: "Write the SCRIPT_CREDENTIAL_BINDINGS swarm-config key.",
     namespace: "config",
   },
+  "config.write.any": {
+    description: "Write any swarm-config key.",
+    namespace: "config",
+  },
+  "config.delete.any": {
+    description: "Delete any swarm-config entry.",
+    namespace: "config",
+  },
+  "config.read.secrets": {
+    description: "Read unmasked secret config values.",
+    namespace: "config",
+  },
   "skill.create.swarm": {
     description: "Create a swarm-scoped skill.",
     namespace: "skill",

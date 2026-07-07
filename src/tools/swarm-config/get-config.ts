@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getResolvedConfig, maskSecrets } from "@/be/db";
+import { getAgentById, getResolvedConfig, maskSecrets } from "@/be/db";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 import { SwarmConfigSchema } from "@/types";
 import { registerVolatileSecret } from "@/utils/secret-scrubber";
@@ -62,8 +63,32 @@ export const registerGetConfigTool = (server: McpServer) => {
           configs = configs.filter((c) => c.key === key);
         }
 
-        const result = includeSecrets ? configs : maskSecrets(configs);
+        // Reading UNMASKED secret values is lead-gated (DES-445 follow-up).
+        // Non-lead callers don't hard-fail: we force-mask and note it, so the
+        // (masked) read stays open to everyone.
+        let effectiveIncludeSecrets = includeSecrets ?? false;
+        let secretsNote = "";
         if (includeSecrets) {
+          const agent = getAgentById(requestInfo.agentId);
+          const decision = can({
+            principal: {
+              kind: "agent",
+              agentId: requestInfo.agentId,
+              isLead: agent?.isLead ?? false,
+            },
+            verb: "config.read.secrets",
+            resource: { kind: "none" },
+            source: "mcp",
+          });
+          if (!decision.allow) {
+            effectiveIncludeSecrets = false;
+            secretsNote =
+              " (secret values masked: reading unmasked secrets requires the lead agent)";
+          }
+        }
+
+        const result = effectiveIncludeSecrets ? configs : maskSecrets(configs);
+        if (effectiveIncludeSecrets) {
           for (const c of result) {
             if (c.isSecret && c.value) {
               registerVolatileSecret(c.value, `config:${c.key}`);
@@ -78,7 +103,7 @@ export const registerGetConfigTool = (server: McpServer) => {
             : result
                 .map(
                   (c) =>
-                    `- ${c.key}=${c.isSecret && !includeSecrets ? "********" : c.value} (scope: ${c.scope}${c.scopeId ? `, scopeId: ${c.scopeId}` : ""})`,
+                    `- ${c.key}=${c.isSecret && !effectiveIncludeSecrets ? "********" : c.value} (scope: ${c.scope}${c.scopeId ? `, scopeId: ${c.scopeId}` : ""})`,
                 )
                 .join("\n");
 
@@ -87,13 +112,15 @@ export const registerGetConfigTool = (server: McpServer) => {
             {
               type: "text",
               text:
-                count === 0 ? "No configs found." : `Found ${count} config(s):\n\n${configList}`,
+                count === 0
+                  ? "No configs found."
+                  : `Found ${count} config(s):\n\n${configList}${secretsNote}`,
             },
           ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: true,
-            message: count === 0 ? "No configs found." : `Found ${count} config(s).`,
+            message: count === 0 ? "No configs found." : `Found ${count} config(s).${secretsNote}`,
             configs: result,
             count,
           },

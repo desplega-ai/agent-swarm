@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
   deleteSwarmConfig,
+  getAgentById,
   getResolvedConfig,
   getSwarmConfigById,
   getSwarmConfigLookupById,
@@ -14,6 +15,8 @@ import {
   reservedKeyError,
   validateConfigValue,
 } from "../be/swarm-config-guard";
+import { can, type PermissionVerb } from "../rbac";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
 import { route } from "./route-def";
@@ -30,6 +33,54 @@ const API_ONLY_CONFIG_KEYS = new Set(["API_AGENT_FS_API_KEY"]);
 
 function stripApiOnlyKeys<T extends { key: string }>(configs: T[]): T[] {
   return configs.filter((config) => !API_ONLY_CONFIG_KEYS.has(config.key));
+}
+
+function singleHeader(req: IncomingMessage, name: string): string | undefined {
+  const raw = req.headers[name];
+  return Array.isArray(raw) ? raw[0] : raw;
+}
+
+/**
+ * Gate a config write/delete over HTTP (DES-445 follow-up).
+ *
+ * Config administration is trusted to the operator (shared swarm key) and to
+ * authenticated users — they short-circuit as allowed, matching the
+ * operator/user-before-agent ordering used by fs.ts (Appendix A row 36). This
+ * preserves every existing HTTP caller (dashboard, codex-oauth token refresh,
+ * devin playbook cache — all operate as operator). Only an agent-context
+ * principal (X-Agent-ID without operator/user request auth) is gated to lead;
+ * the real per-agent enforcement lives on the MCP set-config/delete-config
+ * tools, where the principal is always an agent.
+ *
+ * Returns true when the request may proceed; on denial it writes a 403 and
+ * returns false.
+ */
+function ensureConfigAdmin(
+  req: IncomingMessage,
+  res: ServerResponse,
+  verb: Extract<PermissionVerb, "config.write.any" | "config.delete.any">,
+): boolean {
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "operator" || auth?.kind === "user") return true;
+  const agentId = singleHeader(req, "x-agent-id");
+  const agent = agentId ? getAgentById(agentId) : undefined;
+  const decision = can({
+    principal: { kind: "agent", agentId: agentId ?? "", isLead: agent?.isLead ?? false },
+    verb,
+    resource: { kind: "none" },
+    source: "http",
+  });
+  if (!decision.allow) {
+    jsonError(
+      res,
+      verb === "config.write.any"
+        ? "Writing swarm config requires the lead agent"
+        : "Deleting swarm config requires the lead agent",
+      403,
+    );
+    return false;
+  }
+  return true;
 }
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -119,6 +170,7 @@ const upsertConfig = route({
   summary:
     "Create or update a config entry (reserved env-only keys are rejected). Global-scope writes auto-trigger an integrations reload (debounced ~250ms) so Slack/GitHub/Linear/Jira/AgentMail pick up new credentials without an explicit /api/config/reload call.",
   tags: ["Config"],
+  rbac: { permission: "config.write.any" },
   body: z.object({
     scope: z.enum(["global", "agent", "repo"]),
     scopeId: z.string().nullish(),
@@ -141,6 +193,7 @@ const deleteConfig = route({
   summary:
     "Delete a config entry by ID (including legacy reserved rows for cleanup). Global-scope deletes auto-trigger an integrations reload.",
   tags: ["Config"],
+  rbac: { permission: "config.delete.any" },
   params: z.object({ id: z.string() }),
   responses: {
     200: { description: "Config deleted" },
@@ -251,6 +304,7 @@ export async function handleConfig(
   if (upsertConfig.match(req.method, pathSegments)) {
     const parsed = await upsertConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (!ensureConfigAdmin(req, res, "config.write.any")) return true;
     const { scope, scopeId, key, value, isSecret, envPath, description } = parsed.body;
 
     if (scope === "global" && scopeId) {
@@ -303,6 +357,7 @@ export async function handleConfig(
   if (deleteConfig.match(req.method, pathSegments)) {
     const parsed = await deleteConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (!ensureConfigAdmin(req, res, "config.delete.any")) return true;
     const existing = getSwarmConfigLookupById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Config not found", 404);

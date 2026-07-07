@@ -18,6 +18,7 @@ import { CREDENTIAL_BINDINGS_CONFIG_KEY } from "../scripts-runtime/credential-br
 import { registerDeleteConfigTool } from "../tools/swarm-config/delete-config";
 import { registerListConfigTool } from "../tools/swarm-config/list-config";
 import { registerSetConfigTool } from "../tools/swarm-config/set-config";
+import { setRequestAuth } from "../utils/request-auth-context";
 
 const TEST_DB_PATH = "./test-swarm-config-reserved-keys.sqlite";
 const TEST_PORT = 13047;
@@ -77,6 +78,11 @@ function makeRequestInfo(agentId = "11111111-1111-1111-1111-111111111111") {
 // ─── Minimal HTTP test server ───────────────────────────────────────────────
 function createTestServer(): Server {
   return createHttpServer(async (req, res) => {
+    // Production requests reach handleConfig only after handleCore authenticates
+    // them and records the request-auth context. This mock bypasses handleCore,
+    // so simulate the operator (shared swarm key) auth the config write/delete
+    // RBAC gate (DES-445 follow-up) short-circuits on.
+    setRequestAuth(req, { kind: "operator", fingerprint: "test" });
     const pathSegments = getPathSegments(req.url || "");
     const queryParams = parseQueryParams(req.url || "");
     const handled = await handleConfig(req, res, pathSegments, queryParams);
@@ -94,6 +100,17 @@ describe("swarm-config reserved keys guard", () => {
 
   beforeAll(async () => {
     initDb(TEST_DB_PATH);
+
+    // set/delete/get-config are lead-gated (DES-445 follow-up). The default MCP
+    // request agent must be a lead so these reserved-key/remediation tests
+    // exercise config behavior rather than tripping the RBAC gate.
+    createAgent({
+      id: "11111111-1111-1111-1111-111111111111",
+      name: "reserved-keys-test-lead",
+      isLead: true,
+      status: "idle",
+      capabilities: [],
+    });
 
     // Register MCP tools against the mock server so we can invoke their handlers directly.
     registerSetConfigTool(mcpServer as unknown as Parameters<typeof registerSetConfigTool>[0]);

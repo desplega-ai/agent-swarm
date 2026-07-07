@@ -119,6 +119,85 @@ afterAll(async () => {
 });
 
 describe("MCP gate matrix", () => {
+  test("config: set/delete lead-gated; includeSecrets masks for non-lead (DES-445 follow-up)", async () => {
+    // set-config (non-credential key): worker denied, lead allowed.
+    const setWorker = await mcpCall(base, WORKER_A, sidA, "set-config", {
+      scope: "global",
+      key: "E2E_CONFIG_KEY",
+      value: "v1",
+    });
+    expect(setWorker.structuredContent.success).toBe(false);
+    expect(setWorker.structuredContent.message).toContain("requires the lead agent");
+    expectRow({ type: "agent", id: WORKER_A }, "config.write.any", "deny", DENY.leadOnly, "mcp");
+
+    const setLead = await mcpCall(base, LEAD, sidLead, "set-config", {
+      scope: "global",
+      key: "E2E_CONFIG_KEY",
+      value: "v1",
+    });
+    expect(setLead.structuredContent.success).toBe(true);
+    expectRow({ type: "agent", id: LEAD }, "config.write.any", "allow", null, "mcp");
+    const configId = setLead.structuredContent.config.id as string;
+
+    // delete-config: worker denied, lead allowed.
+    const delWorker = await mcpCall(base, WORKER_A, sidA, "delete-config", { id: configId });
+    expect(delWorker.structuredContent.success).toBe(false);
+    expect(delWorker.structuredContent.message).toContain("requires the lead agent");
+    expectRow({ type: "agent", id: WORKER_A }, "config.delete.any", "deny", DENY.leadOnly, "mcp");
+
+    const delLead = await mcpCall(base, LEAD, sidLead, "delete-config", { id: configId });
+    expect(delLead.structuredContent.success).toBe(true);
+    expectRow({ type: "agent", id: LEAD }, "config.delete.any", "allow", null, "mcp");
+
+    // includeSecrets read: lead sees plaintext, worker is force-masked + noted.
+    const setSecret = await mcpCall(base, LEAD, sidLead, "set-config", {
+      scope: "global",
+      key: "E2E_SECRET",
+      value: "sensitive",
+      isSecret: true,
+    });
+    expect(setSecret.structuredContent.success).toBe(true);
+    expectRow({ type: "agent", id: LEAD }, "config.write.any", "allow", null, "mcp");
+
+    const readWorker = await mcpCall(base, WORKER_A, sidA, "get-config", {
+      key: "E2E_SECRET",
+      includeSecrets: true,
+    });
+    expect(readWorker.structuredContent.success).toBe(true);
+    expect(readWorker.structuredContent.message).toContain("masked");
+    const wSecret = readWorker.structuredContent.configs.find(
+      (c: { key: string; value: string }) => c.key === "E2E_SECRET",
+    );
+    expect(wSecret?.value).not.toBe("sensitive");
+    expectRow({ type: "agent", id: WORKER_A }, "config.read.secrets", "deny", DENY.leadOnly, "mcp");
+
+    const readLead = await mcpCall(base, LEAD, sidLead, "get-config", {
+      key: "E2E_SECRET",
+      includeSecrets: true,
+    });
+    expect(readLead.structuredContent.success).toBe(true);
+    const lSecret = readLead.structuredContent.configs.find(
+      (c: { key: string; value: string }) => c.key === "E2E_SECRET",
+    );
+    expect(lSecret?.value).toBe("sensitive");
+    expectRow({ type: "agent", id: LEAD }, "config.read.secrets", "allow", null, "mcp");
+  });
+
+  test("config HTTP: operator (swarm key) still writes/deletes — blast-radius guard", async () => {
+    // The HTTP config gate short-circuits operator/user auth as allowed, so the
+    // dashboard / codex-oauth / devin flows (all operator over the swarm key)
+    // keep working. Operator short-circuits BEFORE can() → no audit row.
+    const put = await api(base, "PUT", "/api/config", {
+      agentId: LEAD,
+      body: { scope: "global", key: "E2E_HTTP_KEY", value: "h1" },
+    });
+    expect(put.status).toBe(200);
+    const id = put.body.id as string;
+
+    const del = await api(base, "DELETE", `/api/config/${id}`, { agentId: WORKER_A });
+    expect(del.status).toBe(200);
+  });
+
   test("skill-create scope=swarm is lead-only; scope=agent is ungated", async () => {
     const args = { content: skillMd("e2e-skill", "swarm skill"), scope: "swarm" };
 

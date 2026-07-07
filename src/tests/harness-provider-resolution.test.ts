@@ -25,6 +25,7 @@ import {
 import { validateConfigValue } from "../be/swarm-config-guard";
 import { handleConfig } from "../http/config";
 import { resolveHarnessProvider } from "../utils/harness-provider";
+import { setRequestAuth } from "../utils/request-auth-context";
 
 const TEST_DB_PATH = "./test-harness-provider-resolution.sqlite";
 const TEST_PORT = 13061;
@@ -41,6 +42,10 @@ async function removeDbFiles(path: string): Promise<void> {
 
 function makeTestServer(): Server {
   return createHttpServer(async (req, res) => {
+    // Simulate the operator (shared swarm key) request-auth that handleCore
+    // records in production — the config write/delete RBAC gate (DES-445
+    // follow-up) short-circuits operator/user before the agent branch.
+    setRequestAuth(req, { kind: "operator", fingerprint: "test" });
     const url = new URL(req.url ?? "/", `http://localhost:${TEST_PORT}`);
     const pathSegments = url.pathname.split("/").filter(Boolean);
     const queryParams = url.searchParams;

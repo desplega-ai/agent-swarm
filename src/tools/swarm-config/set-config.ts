@@ -120,6 +120,32 @@ export const registerSetConfigTool = (server: McpServer) => {
               },
             };
           }
+        } else {
+          // Every other swarm-config key is lead-gated (DES-445 follow-up):
+          // previously ANY agent could write arbitrary config (incl. secret
+          // values), routing around the credential-bindings gate above.
+          const agent = getAgentById(requestInfo.agentId);
+          const decision = can({
+            principal: {
+              kind: "agent",
+              agentId: requestInfo.agentId,
+              isLead: agent?.isLead ?? false,
+            },
+            verb: "config.write.any",
+            resource: { kind: "none" },
+            source: "mcp",
+          });
+          if (!decision.allow) {
+            const message = "Writing swarm config requires the lead agent.";
+            return {
+              content: [{ type: "text", text: message }],
+              structuredContent: {
+                yourAgentId: requestInfo.agentId,
+                success: false,
+                message,
+              },
+            };
+          }
         }
 
         const validationError = validateConfigValue(key, value);
