@@ -1,4 +1,5 @@
 import { getDb, getSwarmConfigs } from "@/be/db";
+import { assertUrlSafe } from "@/oauth/mcp-wrapper";
 import type {
   ScriptApiConnectionDescriptor,
   ScriptApiJsonSchema,
@@ -590,7 +591,90 @@ export function buildGeneratedArtifacts(input: {
   return { generatedTypes, generatedRuntimeJson: JSON.stringify(descriptor) };
 }
 
-export function upsertScriptConnection(data: {
+type OpenapiSpecFetchResult =
+  | {
+      status: "fetched";
+      spec: unknown;
+      specJson: string;
+      etag: string | null;
+      fetchedAt: string;
+    }
+  | {
+      status: "not_modified";
+      etag: string | null;
+      fetchedAt: string;
+    };
+
+function openapiSpecUrlOptions() {
+  const allowDevHosts = process.env.NODE_ENV !== "production";
+  return {
+    allowPrivateHosts: allowDevHosts,
+    allowInsecure: allowDevHosts,
+  };
+}
+
+function parseOpenapiSpecBody(body: string): unknown {
+  try {
+    return JSON.parse(body);
+  } catch (jsonErr) {
+    const yaml = (Bun as unknown as { YAML?: { parse(input: string): unknown } }).YAML;
+    if (!yaml) {
+      throw new Error(
+        `OpenAPI spec response was not valid JSON. JSON specs only unless Bun.YAML.parse is available: ${
+          jsonErr instanceof Error ? jsonErr.message : String(jsonErr)
+        }`,
+      );
+    }
+    try {
+      return yaml.parse(body);
+    } catch (yamlErr) {
+      throw new Error(
+        `OpenAPI spec response was neither valid JSON nor valid YAML: ${
+          yamlErr instanceof Error ? yamlErr.message : String(yamlErr)
+        }`,
+      );
+    }
+  }
+}
+
+export async function fetchOpenapiSpec(
+  url: string,
+  opts: { etag?: string | null } = {},
+): Promise<OpenapiSpecFetchResult> {
+  const parsed = assertUrlSafe(url, openapiSpecUrlOptions());
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const headers = new Headers({ Accept: "application/json" });
+    if (opts.etag) headers.set("If-None-Match", opts.etag);
+    const response = await fetch(parsed, { headers, signal: controller.signal });
+    const fetchedAt = new Date().toISOString();
+    const etag = response.headers.get("etag");
+    if (response.status === 304) {
+      return { status: "not_modified", etag, fetchedAt };
+    }
+    if (!response.ok) {
+      throw new Error(`Failed to fetch OpenAPI spec: HTTP ${response.status}`);
+    }
+    const spec = parseOpenapiSpecBody(await response.text());
+    return {
+      status: "fetched",
+      spec,
+      specJson: JSON.stringify(spec),
+      etag,
+      fetchedAt,
+    };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("Timed out fetching OpenAPI spec after 15s");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function upsertScriptConnection(data: {
   id?: string;
   slug: string;
   displayName?: string | null;
@@ -602,11 +686,14 @@ export function upsertScriptConnection(data: {
   credentialBindingId?: string | null;
   openapiSpecSourceKind?: "url" | "inline" | "agent_fs" | null;
   openapiSpecSource?: string | null;
+  openapiSpecUrl?: string | null;
   openapiSpecJson?: string | null;
+  openapiSpecEtag?: string | null;
+  openapiSpecFetchedAt?: string | null;
   mcpServerId?: string | null;
   enabled?: boolean;
   userId?: string | null;
-}): ScriptConnectionRecord {
+}): Promise<ScriptConnectionRecord> {
   const now = new Date().toISOString();
   const id = data.id ?? crypto.randomUUID();
   const scope = data.scope ?? "global";
@@ -615,10 +702,30 @@ export function upsertScriptConnection(data: {
   let generatedRuntimeJson: string | null = null;
   let generationError: string | null = null;
   let generatedAt: string | null = null;
+  let openapiSpecJson = data.openapiSpecJson ?? null;
+  let openapiSpecSourceKind =
+    data.openapiSpecSourceKind ??
+    (data.kind === "openapi" ? (data.openapiSpecUrl ? "url" : "inline") : null);
+  let openapiSpecSource = data.openapiSpecSource ?? data.openapiSpecUrl ?? null;
+  let openapiSpecEtag = data.openapiSpecEtag ?? null;
+  let openapiSpecFetchedAt = data.openapiSpecFetchedAt ?? null;
+  let openapiSpec: unknown;
 
   if (data.kind === "openapi") {
+    if (!openapiSpecJson && data.openapiSpecUrl) {
+      const fetched = await fetchOpenapiSpec(data.openapiSpecUrl);
+      if (fetched.status === "not_modified") {
+        throw new Error("OpenAPI spec URL returned 304 without an existing cached spec.");
+      }
+      openapiSpec = fetched.spec;
+      openapiSpecJson = fetched.specJson;
+      openapiSpecSourceKind = "url";
+      openapiSpecSource = data.openapiSpecUrl;
+      openapiSpecEtag = fetched.etag;
+      openapiSpecFetchedAt = fetched.fetchedAt;
+    }
     try {
-      const spec = JSON.parse(data.openapiSpecJson ?? "{}");
+      const spec = openapiSpec ?? JSON.parse(openapiSpecJson ?? "{}");
       const binding = data.credentialBindingId
         ? getCredentialBindingById(data.credentialBindingId)
         : null;
@@ -657,9 +764,11 @@ export function upsertScriptConnection(data: {
     data.baseUrl ?? null,
     JSON.stringify(data.allowedHosts ?? []),
     data.credentialBindingId ?? null,
-    data.openapiSpecSourceKind ?? (data.kind === "openapi" ? "inline" : null),
-    data.openapiSpecSource ?? null,
-    data.openapiSpecJson ?? null,
+    openapiSpecSourceKind,
+    openapiSpecSource,
+    openapiSpecJson,
+    openapiSpecEtag,
+    openapiSpecFetchedAt,
     data.mcpServerId ?? null,
     generatedTypes,
     generatedRuntimeJson,
@@ -674,7 +783,8 @@ export function upsertScriptConnection(data: {
         `UPDATE script_connections SET
           slug = ?, display_name = ?, kind = ?, scope = ?, scope_id = ?, base_url = ?,
           allowed_hosts_json = ?, credential_binding_id = ?, openapi_spec_source_kind = ?,
-          openapi_spec_source = ?, openapi_spec_json = ?, mcp_server_id = ?, generated_types = ?,
+          openapi_spec_source = ?, openapi_spec_json = ?, openapi_spec_etag = ?,
+          openapi_spec_fetched_at = ?, mcp_server_id = ?, generated_types = ?,
           generated_runtime_json = ?, generated_at = ?, generation_error = ?, enabled = ?,
           updated_at = ?, updated_by = ?, version = ?
          WHERE id = ? RETURNING *`,
@@ -692,13 +802,65 @@ export function upsertScriptConnection(data: {
       `INSERT INTO script_connections
        (id, slug, display_name, kind, scope, scope_id, base_url, allowed_hosts_json,
         credential_binding_id, openapi_spec_source_kind, openapi_spec_source, openapi_spec_json,
-        mcp_server_id, generated_types, generated_runtime_json, generated_at, generation_error,
-        enabled, created_at, updated_at, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        openapi_spec_etag, openapi_spec_fetched_at, mcp_server_id, generated_types,
+        generated_runtime_json, generated_at, generation_error, enabled, created_at, updated_at,
+        created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(id, ...params, now, now, data.userId ?? null, data.userId ?? null);
   if (!row) throw new Error("Failed to create script connection");
   return connectionFromRow(row);
+}
+
+export async function refreshScriptConnection(
+  id: string,
+  userId?: string | null,
+): Promise<ScriptConnectionRecord | null> {
+  const row = getDb()
+    .prepare<ConnectionRow, [string]>("SELECT * FROM script_connections WHERE id = ?")
+    .get(id);
+  if (!row) return null;
+  const connection = connectionFromRow(row);
+  if (connection.kind !== "openapi") {
+    throw new Error("Only OpenAPI script connections can be refreshed.");
+  }
+  if (connection.openapiSpecSourceKind !== "url" || !connection.openapiSpecSource) {
+    throw new Error("Only OpenAPI script connections registered by URL can be refreshed.");
+  }
+
+  const fetched = await fetchOpenapiSpec(connection.openapiSpecSource, {
+    etag: connection.openapiSpecEtag,
+  });
+  if (fetched.status === "not_modified") {
+    const refreshed = getDb()
+      .prepare<ConnectionRow, [string, string]>(
+        `UPDATE script_connections
+         SET openapi_spec_fetched_at = ?
+         WHERE id = ? RETURNING *`,
+      )
+      .get(fetched.fetchedAt, id);
+    return refreshed ? connectionFromRow(refreshed) : null;
+  }
+
+  return upsertScriptConnection({
+    id: connection.id,
+    slug: connection.slug,
+    displayName: connection.displayName,
+    kind: "openapi",
+    scope: connection.scope,
+    scopeId: connection.scopeId,
+    baseUrl: connection.baseUrl,
+    allowedHosts: connection.allowedHosts,
+    credentialBindingId: connection.credentialBindingId,
+    openapiSpecSourceKind: "url",
+    openapiSpecSource: connection.openapiSpecSource,
+    openapiSpecJson: fetched.specJson,
+    openapiSpecEtag: fetched.etag,
+    openapiSpecFetchedAt: fetched.fetchedAt,
+    mcpServerId: connection.mcpServerId,
+    enabled: connection.enabled,
+    userId,
+  });
 }
 
 export function setScriptConnectionEnabled(

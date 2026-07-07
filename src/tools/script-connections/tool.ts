@@ -3,6 +3,7 @@ import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import {
   listScriptConnections,
+  refreshScriptConnection,
   setScriptConnectionEnabled,
   upsertCredentialBinding,
   upsertScriptConnection,
@@ -13,8 +14,8 @@ import { createToolRegistrar } from "@/tools/utils";
 
 const scriptConnectionsInputSchema = z.object({
   action: z
-    .enum(["list", "upsert-openapi", "disable"])
-    .describe("List, create/update, or disable a script connection."),
+    .enum(["list", "upsert-openapi", "refresh", "disable"])
+    .describe("List, create/update, refresh, or disable a script connection."),
   id: z.string().uuid().optional(),
   slug: z.string().min(1).max(80).optional(),
   displayName: z.string().max(160).optional(),
@@ -26,6 +27,7 @@ const scriptConnectionsInputSchema = z.object({
   configKey: z.string().min(1).max(255).optional(),
   headerTemplate: z.string().min(1).optional(),
   queryTemplate: z.string().min(1).optional(),
+  openapiSpecUrl: z.string().url().optional(),
   openapiSpecJson: z.string().optional(),
   enabled: z.boolean().default(true).optional(),
 });
@@ -121,13 +123,72 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         };
       }
 
-      if (!args.slug || !args.baseUrl || !args.openapiSpecJson) {
+      if (args.action === "refresh") {
+        if (!args.id) {
+          return {
+            content: [{ type: "text", text: "id is required for refresh." }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: "id is required for refresh.",
+              connections: listScriptConnections({ includeDisabled: true }),
+            },
+          };
+        }
+        const refreshed = await refreshScriptConnection(args.id);
+        const connections = listScriptConnections({ includeDisabled: true });
+        if (!refreshed) {
+          return {
+            content: [{ type: "text", text: "Script connection not found." }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: "Script connection not found.",
+              connections,
+            },
+          };
+        }
         return {
-          content: [{ type: "text", text: "slug, baseUrl, and openapiSpecJson are required." }],
+          content: [{ type: "text", text: `Script connection ${refreshed.slug} refreshed.` }],
+          structuredContent: {
+            yourAgentId: requestInfo.agentId,
+            success: !refreshed.generationError,
+            message: refreshed.generationError
+              ? `Refreshed but generation failed: ${refreshed.generationError}`
+              : `Script connection ${refreshed.slug} refreshed.`,
+            connections,
+          },
+        };
+      }
+
+      if (!args.slug || !args.baseUrl || (!args.openapiSpecJson && !args.openapiSpecUrl)) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "slug, baseUrl, and either openapiSpecJson or openapiSpecUrl are required.",
+            },
+          ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
-            message: "slug, baseUrl, and openapiSpecJson are required.",
+            message: "slug, baseUrl, and either openapiSpecJson or openapiSpecUrl are required.",
+            connections: listScriptConnections({ includeDisabled: true }),
+          },
+        };
+      }
+      if (args.openapiSpecJson && args.openapiSpecUrl) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Provide either openapiSpecJson or openapiSpecUrl, not both.",
+            },
+          ],
+          structuredContent: {
+            yourAgentId: requestInfo.agentId,
+            success: false,
+            message: "Provide either openapiSpecJson or openapiSpecUrl, not both.",
             connections: listScriptConnections({ includeDisabled: true }),
           },
         };
@@ -147,7 +208,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         credentialBindingId = binding.id;
       }
 
-      const connection = upsertScriptConnection({
+      const connection = await upsertScriptConnection({
         id: args.id,
         slug: args.slug,
         displayName: args.displayName,
@@ -157,6 +218,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         baseUrl: args.baseUrl,
         allowedHosts: args.allowedHosts ?? [new URL(args.baseUrl).hostname],
         credentialBindingId,
+        openapiSpecUrl: args.openapiSpecUrl,
         openapiSpecJson: args.openapiSpecJson,
         enabled: args.enabled !== false,
       });

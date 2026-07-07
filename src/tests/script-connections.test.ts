@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createAgent, deleteSwarmConfig, getDb, upsertSwarmConfig } from "../be/db";
 import {
   getScriptApiConnectionDescriptors,
+  refreshScriptConnection,
   upsertCredentialBinding,
   upsertScriptConnection,
 } from "../be/script-connections";
@@ -109,6 +110,73 @@ const openapiSpec = JSON.stringify({
   },
 });
 
+function specWithExtraOperation(operationId: string) {
+  const spec = JSON.parse(openapiSpec) as {
+    paths: Record<string, Record<string, unknown>>;
+  };
+  spec.paths["/orgs/{org}/repos"] = {
+    get: {
+      operationId,
+      parameters: [{ name: "org", in: "path", required: true, schema: { type: "string" } }],
+      responses: {
+        "200": {
+          description: "repos",
+          content: {
+            "application/json": {
+              schema: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["name"],
+                  properties: { name: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+  return JSON.stringify(spec);
+}
+
+function serveOpenapiSpec(initialBody: string, initialEtag = '"v1"') {
+  let body = initialBody;
+  let etag = initialEtag;
+  const requests: Array<{ accept: string | null; ifNoneMatch: string | null }> = [];
+  const server = Bun.serve({
+    port: 0,
+    fetch(req) {
+      const url = new URL(req.url);
+      if (url.pathname !== "/openapi.json") {
+        return new Response("not found", { status: 404 });
+      }
+      requests.push({
+        accept: req.headers.get("accept"),
+        ifNoneMatch: req.headers.get("if-none-match"),
+      });
+      if (req.headers.get("if-none-match") === etag) {
+        return new Response(null, { status: 304, headers: { ETag: etag } });
+      }
+      return new Response(body, {
+        headers: { "Content-Type": "application/json", ETag: etag },
+      });
+    },
+  });
+  return {
+    requests,
+    url: `http://127.0.0.1:${server.port}/openapi.json`,
+    baseUrl: `http://127.0.0.1:${server.port}`,
+    setBody(nextBody: string, nextEtag: string) {
+      body = nextBody;
+      etag = nextEtag;
+    },
+    stop() {
+      server.stop(true);
+    },
+  };
+}
+
 beforeEach(() => {
   process.env.AGENT_SWARM_API_KEY = "script-connections-test-key";
   delete process.env.API_KEY;
@@ -181,14 +249,14 @@ describe("script connections", () => {
     expect(second.allowedHosts).toEqual(["new.vendor.test"]);
   });
 
-  test("OpenAPI connections generate full ctx.api method, args, and response types", () => {
+  test("OpenAPI connections generate full ctx.api method, args, and response types", async () => {
     const binding = upsertCredentialBinding({
       configKey: "TYPE_VENDOR_KEY",
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:TYPE_VENDOR_KEY]",
     });
     createdBindingIds.push(binding.id);
-    const connection = upsertScriptConnection({
+    const connection = await upsertScriptConnection({
       slug: "vendorApi",
       kind: "openapi",
       baseUrl: "https://api.vendor.test",
@@ -244,6 +312,141 @@ describe("script connections", () => {
         private: { type: "boolean" },
       },
     });
+  });
+
+  test("OpenAPI connections can be registered from a spec URL", async () => {
+    const server = serveOpenapiSpec(openapiSpec);
+    try {
+      const suffix = crypto.randomUUID().replace(/-/g, "");
+      const connection = await upsertScriptConnection({
+        slug: `urlVendor${suffix}`,
+        kind: "openapi",
+        baseUrl: server.baseUrl,
+        openapiSpecUrl: server.url,
+      });
+      createdConnectionIds.push(connection.id);
+
+      expect(connection.generationError).toBeNull();
+      expect(connection.openapiSpecSourceKind).toBe("url");
+      expect(connection.openapiSpecSource).toBe(server.url);
+      expect(connection.openapiSpecJson).toBe(JSON.stringify(JSON.parse(openapiSpec)));
+      expect(connection.openapiSpecEtag).toBe('"v1"');
+      expect(connection.openapiSpecFetchedAt).toBeString();
+      expect(server.requests).toEqual([{ accept: "application/json", ifNoneMatch: null }]);
+      expect(connection.generatedTypes).toContain("getRepo");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("refresh sends If-None-Match and only bumps fetched_at on 304", async () => {
+    const server = serveOpenapiSpec(openapiSpec);
+    try {
+      const suffix = crypto.randomUUID().replace(/-/g, "");
+      const connection = await upsertScriptConnection({
+        slug: `etagVendor${suffix}`,
+        kind: "openapi",
+        baseUrl: server.baseUrl,
+        openapiSpecUrl: server.url,
+      });
+      createdConnectionIds.push(connection.id);
+      await Bun.sleep(5);
+
+      const refreshed = await refreshScriptConnection(connection.id);
+
+      expect(refreshed).toBeDefined();
+      expect(refreshed?.version).toBe(connection.version);
+      expect(refreshed?.openapiSpecEtag).toBe('"v1"');
+      expect(refreshed?.generatedRuntimeJson).toBe(connection.generatedRuntimeJson);
+      expect(refreshed?.openapiSpecFetchedAt).not.toBe(connection.openapiSpecFetchedAt);
+      expect(server.requests).toEqual([
+        { accept: "application/json", ifNoneMatch: null },
+        { accept: "application/json", ifNoneMatch: '"v1"' },
+      ]);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("refresh updates changed URL specs and regenerates types", async () => {
+    const server = serveOpenapiSpec(openapiSpec);
+    try {
+      const suffix = crypto.randomUUID().replace(/-/g, "");
+      const connection = await upsertScriptConnection({
+        slug: `changedVendor${suffix}`,
+        kind: "openapi",
+        baseUrl: server.baseUrl,
+        openapiSpecUrl: server.url,
+      });
+      createdConnectionIds.push(connection.id);
+      expect(connection.generatedTypes).not.toContain("listOrgRepos");
+
+      server.setBody(specWithExtraOperation("listOrgRepos"), '"v2"');
+      const refreshed = await refreshScriptConnection(connection.id);
+
+      expect(refreshed?.version).toBe(connection.version + 1);
+      expect(refreshed?.openapiSpecEtag).toBe('"v2"');
+      expect(refreshed?.generationError).toBeNull();
+      expect(refreshed?.generatedTypes).toContain("listOrgRepos");
+      const descriptor = getScriptApiConnectionDescriptors().find(
+        (candidate) => candidate.slug === connection.slug,
+      );
+      expect(descriptor?.operations.some((operation) => operation.name === "listOrgRepos")).toBe(
+        true,
+      );
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("invalid fetched OpenAPI specs are stored with generation_error", async () => {
+    const invalidSpec = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "Invalid", version: "1.0.0" },
+      paths: {},
+    });
+    const server = serveOpenapiSpec(invalidSpec);
+    try {
+      const suffix = crypto.randomUUID().replace(/-/g, "");
+      const connection = await upsertScriptConnection({
+        slug: `invalidVendor${suffix}`,
+        kind: "openapi",
+        baseUrl: server.baseUrl,
+        openapiSpecUrl: server.url,
+      });
+      createdConnectionIds.push(connection.id);
+
+      expect(connection.openapiSpecSourceKind).toBe("url");
+      expect(connection.generationError).toContain("supported operations");
+      expect(connection.generatedTypes).toBeNull();
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("invalid fetched spec content is rejected before storing a connection", async () => {
+    const server = serveOpenapiSpec("{not-valid-json");
+    try {
+      const suffix = crypto.randomUUID().replace(/-/g, "");
+
+      await expect(
+        upsertScriptConnection({
+          slug: `badContentVendor${suffix}`,
+          kind: "openapi",
+          baseUrl: server.baseUrl,
+          openapiSpecUrl: server.url,
+        }),
+      ).rejects.toThrow(/valid JSON|valid YAML|JSON specs only/);
+
+      const stored = getDb()
+        .prepare<{ count: number }, [string]>(
+          "SELECT COUNT(*) AS count FROM script_connections WHERE slug = ?",
+        )
+        .get(`badContentVendor${suffix}`);
+      expect(stored?.count).toBe(0);
+    } finally {
+      server.stop();
+    }
   });
 
   test("script-connections tool registers OpenAPI connections from an agent header without FK failures", async () => {
@@ -305,6 +508,59 @@ describe("script connections", () => {
     createdBindingIds.push(bindingRow!.id);
   });
 
+  test("script-connections tool can upsert OpenAPI connections by URL and refresh them", async () => {
+    const server = serveOpenapiSpec(openapiSpec);
+    try {
+      const suffix = crypto.randomUUID().replace(/-/g, "");
+      const slug = `toolUrlVendor${suffix}`;
+      const lead = createAgent({
+        name: `script-connections-tool-url-lead-${crypto.randomUUID()}`,
+        isLead: true,
+        status: "idle",
+      });
+      const tool = scriptConnectionsTool();
+
+      const upsertResult = (await tool.handler(
+        {
+          action: "upsert-openapi",
+          slug,
+          displayName: "Tool URL Vendor",
+          baseUrl: server.baseUrl,
+          openapiSpecUrl: server.url,
+        },
+        meta(lead.id),
+      )) as {
+        structuredContent: { success: boolean; message: string };
+      };
+
+      expect(upsertResult.structuredContent.success).toBe(true);
+      const row = getDb()
+        .prepare<{ id: string }, [string]>("SELECT id FROM script_connections WHERE slug = ?")
+        .get(slug);
+      expect(row).toBeDefined();
+      createdConnectionIds.push(row!.id);
+
+      server.setBody(specWithExtraOperation("toolListOrgRepos"), '"v2"');
+      const refreshResult = (await tool.handler(
+        { action: "refresh", id: row!.id },
+        meta(lead.id),
+      )) as {
+        structuredContent: { success: boolean; message: string };
+      };
+
+      expect(refreshResult.structuredContent.success).toBe(true);
+      const refreshed = getDb()
+        .prepare<{ openapi_spec_etag: string | null; generated_types: string | null }, [string]>(
+          "SELECT openapi_spec_etag, generated_types FROM script_connections WHERE id = ?",
+        )
+        .get(row!.id);
+      expect(refreshed?.openapi_spec_etag).toBe('"v2"');
+      expect(refreshed?.generated_types).toContain("toolListOrgRepos");
+    } finally {
+      server.stop();
+    }
+  });
+
   test("ctx.api runtime emits plain fetch with credential placeholders", async () => {
     let observed: { url: string; authorization: string | null } | null = null;
     const server = Bun.serve({
@@ -323,7 +579,7 @@ describe("script connections", () => {
       headerTemplate: "Authorization: Bearer [REDACTED:RUNTIME_VENDOR_KEY]",
     });
     createdBindingIds.push(binding.id);
-    const connection = upsertScriptConnection({
+    const connection = await upsertScriptConnection({
       slug: "runtimeVendor",
       kind: "openapi",
       baseUrl: `http://127.0.0.1:${server.port}`,
