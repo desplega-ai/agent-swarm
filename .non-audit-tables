@@ -19,6 +19,7 @@ memory_retrieval
 oauth_apps
 oauth_refresh_locks
 oauth_tokens
+permission_audit
 script_embeddings
 seed_state
 session_costs

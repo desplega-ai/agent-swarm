@@ -170,14 +170,18 @@ describe("buffer + flush persistence", () => {
     expect(denyRow?.reason).toBeTruthy();
   });
 
-  test("auto-flushes at the 200-row threshold without a timer", () => {
+  test("auto-flushes at the 200-row threshold without the interval writer", async () => {
     for (let i = 0; i < 200; i++) {
       enqueueAuditRow(
         { principal: { kind: "operator" }, verb: "user.manage", source: "http" },
         { allow: true },
       );
     }
-    // No flushAuditBuffer() call — the threshold flushed synchronously.
+    // The threshold flush is deferred off the enqueue path (zero-delay
+    // timeout) so the 200th can() call never blocks on the transaction —
+    // nothing is persisted synchronously, everything lands a tick later.
+    expect(countAuditRows()).toBe(0);
+    await Bun.sleep(10);
     expect(countAuditRows()).toBe(200);
   });
 

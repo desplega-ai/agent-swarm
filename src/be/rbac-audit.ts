@@ -39,6 +39,7 @@ const DEFAULT_RETENTION_DAYS = 30;
 let buffer: AuditRow[] = [];
 let flushTimer: ReturnType<typeof setInterval> | null = null;
 let auditGcTimer: ReturnType<typeof setInterval> | null = null;
+let thresholdFlushScheduled = false;
 
 function isAuditDisabled(): boolean {
   return process.env.RBAC_AUDIT_DISABLED === "true";
@@ -94,7 +95,17 @@ export function enqueueAuditRow(check: RbacCheck, decision: RbacDecision): void 
   if (isAuditDisabled()) return;
   try {
     buffer.push(toRow(check, decision));
-    if (buffer.length >= FLUSH_MAX_ROWS) flushAuditBuffer();
+    // The threshold flush is deferred to a zero-delay timeout so the can()
+    // call that happens to be the 200th never pays for the SQLite transaction
+    // itself — audit stays fire-and-forget on the request path.
+    if (buffer.length >= FLUSH_MAX_ROWS && !thresholdFlushScheduled) {
+      thresholdFlushScheduled = true;
+      const t = setTimeout(() => {
+        thresholdFlushScheduled = false;
+        flushAuditBuffer();
+      }, 0);
+      if (typeof t.unref === "function") t.unref();
+    }
   } catch (err) {
     console.warn("[rbac-audit] enqueue failed, dropping row:", (err as Error).message);
   }
