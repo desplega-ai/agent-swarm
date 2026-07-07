@@ -6,7 +6,7 @@ topic: "DES-445 RBAC — Slice 1: central can() + audit log (increments 1+2)"
 tags: [plan, rbac, auth, security, des-445]
 status: in-progress
 last_updated: 2026-07-07
-last_updated_by: Claude (phase-2 agent)
+last_updated_by: Claude (phase-3 agent)
 related_brainstorm: thoughts/taras/brainstorms/2026-05-15-rbac-for-swarm.md
 related_research: thoughts/taras/research/2026-07-06-rbac-enforcement-surfaces.md
 ---
@@ -207,13 +207,13 @@ export type RbacCheck = { principal: RbacPrincipal; verb: PermissionVerb; resour
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Engine tests pass: `bun test src/tests/rbac-engine.test.ts`
-- [ ] Full suite: `bun test`
-- [ ] Types + lint: `bun run tsc:check && bun run lint`
-- [ ] Boundary clean (src/rbac imports no DB): `bash scripts/check-db-boundary.sh && bun run check:dep-graph`
+- [x] Engine tests pass: `bun test src/tests/rbac-engine.test.ts`
+- [x] Full suite: `bun test`
+- [x] Types + lint: `bun run tsc:check && bun run lint`
+- [x] Boundary clean (src/rbac imports no DB): `bash scripts/check-db-boundary.sh && bun run check:dep-graph`
 
 #### Automated QA:
-- [ ] Agent verifies rule-table exhaustiveness: every verb in `permissions.ts` has a `legacy-policy.ts` rule and at least one allow + one deny engine test asserting it
+- [x] Agent verifies rule-table exhaustiveness: every verb in `permissions.ts` has a `legacy-policy.ts` rule and at least one allow + one deny engine test asserting it (36 verbs = 36 policy keys = 36 registry entries; programmatic sweep over 7 principals × 5 resource fixtures confirms every verb reaches both allow and deny; every verb string appears in `rbac-engine.test.ts`)
 
 #### Manual Verification:
 - [ ] Taras reviews the verb naming + registry descriptions (they become an API contract in increment 3)
