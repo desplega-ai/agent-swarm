@@ -234,7 +234,11 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   private deleteFtsRows(ids: string[]): void {
-    if (ids.length === 0 || (!this.ftsInitialized && !this.getFtsTableSchema())) return;
+    // Always re-check the CURRENT db's schema instead of trusting
+    // ftsInitialized — the flag can outlive a DB swap (tests reinit the DB
+    // process-wide), and a stale `true` would make this DELETE throw
+    // "no such table: memory_fts". Mirrors the vec guard in purgeByIds.
+    if (ids.length === 0 || !this.getFtsTableSchema()) return;
     const db = getDb();
     const placeholders = ids.map(() => "?").join(",");
     db.prepare(`DELETE FROM memory_fts WHERE memory_id IN (${placeholders})`).run(...ids);

@@ -6,12 +6,15 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { unlink } from "node:fs/promises";
+import { rm, unlink } from "node:fs/promises";
 import type { Subprocess } from "bun";
 import { Webhook } from "svix";
 
 const TEST_PORT = 19876;
 const TEST_DB_PATH = `/tmp/test-http-integration-${Date.now()}.sqlite`;
+// Keep local-fs uploads out of the repo's ./data/fs (the provider default —
+// the attachment test was leaking data/fs/tasks/<id>/ into the worktree).
+const TEST_FS_DIR = `/tmp/test-http-integration-fs-${Date.now()}`;
 const BASE = `http://localhost:${TEST_PORT}`;
 const TEST_API_KEY = "test-http-integration-key";
 
@@ -107,6 +110,7 @@ beforeAll(async () => {
       PORT: String(TEST_PORT),
       DATABASE_PATH: TEST_DB_PATH,
       API_KEY: TEST_API_KEY,
+      AGENT_FS_LOCAL_DIR: TEST_FS_DIR,
       CAPABILITIES: "core,task-pool,messaging,profiles,services,scheduling,memory",
       // Disable optional integrations
       SLACK_BOT_TOKEN: "",
@@ -129,6 +133,9 @@ afterAll(async () => {
     } catch {}
   }
   await Bun.sleep(50);
+  try {
+    await rm(TEST_FS_DIR, { recursive: true, force: true });
+  } catch {}
   try {
     await unlink(TEST_DB_PATH);
   } catch {}
