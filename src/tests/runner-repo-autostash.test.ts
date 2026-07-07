@@ -275,9 +275,9 @@ describe("isFirstKickoffTask", () => {
   });
 
   test("a genuinely new root task type (e.g. agentmail-message, no reserved taskType) stays a first kickoff", async () => {
-    expect(
-      await isFirstKickoffTask({ taskType: "agentmail-message" }, async () => null),
-    ).toBe(true);
+    expect(await isFirstKickoffTask({ taskType: "agentmail-message" }, async () => null)).toBe(
+      true,
+    );
   });
 
   // Regression: a parent-linked NON-resume follow-up (Slack follow-ups and
