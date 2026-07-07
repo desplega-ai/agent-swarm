@@ -4,9 +4,9 @@ author: Claude
 planner: Claude
 topic: "DES-445 RBAC — Slice 1: central can() + audit log (increments 1+2)"
 tags: [plan, rbac, auth, security, des-445]
-status: in-progress
+status: completed
 last_updated: 2026-07-07
-last_updated_by: Claude (phase-5 agent)
+last_updated_by: Claude (orchestrator — whole-slice E2E passed)
 related_brainstorm: thoughts/taras/brainstorms/2026-05-15-rbac-for-swarm.md
 related_research: thoughts/taras/research/2026-07-06-rbac-enforcement-surfaces.md
 ---
@@ -327,15 +327,15 @@ Deliverable: `permission_audit` table + always-on async batched writer hung off 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Audit tests pass: `bun test src/tests/rbac-audit.test.ts`
-- [ ] Full suite: `bun test`
-- [ ] Types + lint + boundaries: `bun run tsc:check && bun run lint && bash scripts/check-db-boundary.sh && bash scripts/check-rbac-boundary.sh && bun run check:dep-graph`
-- [ ] Fresh-DB migration applies: `rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm && bun run start:http` boots clean (then Ctrl-C)
-- [ ] Existing-DB migration applies: restart `bun run start:http` against a pre-existing DB copy — runner applies 108 forward-only without error
+- [x] Audit tests pass: `bun test src/tests/rbac-audit.test.ts`
+- [x] Full suite: `bun test`
+- [x] Types + lint + boundaries: `bun run tsc:check && bun run lint && bash scripts/check-db-boundary.sh && bash scripts/check-rbac-boundary.sh && bun run check:dep-graph`
+- [x] Fresh-DB migration applies: `rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm && bun run start:http` boots clean (then Ctrl-C) — verified against a scratch `DATABASE_PATH`, 106 migrations incl. 108 applied clean
+- [x] Existing-DB migration applies: restart `bun run start:http` against a pre-existing DB copy — runner applies 108 forward-only without error (second boot applied 0 migrations, no errors)
 
 #### Automated QA:
-- [ ] With the server running, exercise a gated MCP tool as a worker (handshake per LOCAL_TESTING.md §"MCP tool testing over HTTP"), then `sqlite3 agent-swarm-db.sqlite "SELECT verb, decision, principalType, source FROM permission_audit ORDER BY ts DESC LIMIT 5;"` shows the deny row
-- [ ] Restart server with `RBAC_AUDIT_DISABLED=true`, repeat the tool call, confirm row count unchanged
+- [x] With the server running, exercise a gated MCP tool as a worker (handshake per LOCAL_TESTING.md §"MCP tool testing over HTTP"), then `sqlite3 agent-swarm-db.sqlite "SELECT verb, decision, principalType, source FROM permission_audit ORDER BY ts DESC LIMIT 5;"` shows the deny row — got `memory.learning.inject|deny|agent|mcp|requires lead agent`
+- [x] Restart server with `RBAC_AUDIT_DISABLED=true`, repeat the tool call, confirm row count unchanged — count stayed 1
 
 #### Manual Verification:
 - [ ] Taras spot-checks audit row `reason` strings for debuggability (the brainstorm's key UX win — "which permission was missing, at which layer")
