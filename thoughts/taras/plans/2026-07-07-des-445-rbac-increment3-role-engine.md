@@ -198,13 +198,13 @@ Deliverable: an API-side module exposing effective-grant resolution (union + wil
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] New suite passes: `bun test src/tests/rbac-roles.test.ts`
-- [ ] Types + lint: `bun run tsc:check` && `bun run lint`
-- [ ] Boundary intact: `bash scripts/check-db-boundary.sh` && `bun run check:dep-graph`
-- [ ] Full suite: `bun test`
+- [x] New suite passes: `bun test src/tests/rbac-roles.test.ts` (11 pass / 0 fail)
+- [x] Types + lint: `bun run tsc:check` && `bun run lint`
+- [x] Boundary intact: `bash scripts/check-db-boundary.sh` && `bun run check:dep-graph`
+- [x] Full suite: `bun test` (5931 pass / 0 fail / 7 skipped)
 
 #### Automated QA:
-- [ ] Agent boots the server (`bun run start:http`) and confirms the boot log contains the one-line RBAC seed-sync summary; then deletes a `requester` verb row via `sqlite3`, reboots, and confirms the row is restored (code-authoritative sync demonstrated end-to-end)
+- [x] Agent boots the server (`bun run start:http`) and confirms the boot log contains the one-line RBAC seed-sync summary; then deletes a `requester` verb row via `sqlite3`, reboots, and confirms the row is restored (code-authoritative sync demonstrated end-to-end)
 
 #### Manual Verification:
 - [ ] None — engine is fully unit-tested; no user-visible behavior yet

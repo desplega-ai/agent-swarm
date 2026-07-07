@@ -504,6 +504,13 @@ try {
   console.error("[startup] Failed to seed pricing rows:", err);
 }
 
+try {
+  const { ensureRbacSeedsSynced } = await import("../be/rbac-roles");
+  ensureRbacSeedsSynced();
+} catch (err) {
+  console.error("[startup] Failed to sync RBAC seed rows:", err);
+}
+
 // Seed the built-in entity catalog (scripts today; more kinds later) so
 // `script-search` & co. return useful hits from a fresh DB. Idempotent and
 // version-aware: a pristine entity updates when its source changes, a

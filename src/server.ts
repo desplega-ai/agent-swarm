@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import pkg from "../package.json";
 import { initDb } from "./be/db";
 import { startPricingRefreshLoop } from "./be/pricing-refresh";
+import { ensureRbacSeedsSynced } from "./be/rbac-roles";
 import { seedPricingFromModelsDev } from "./be/seed-pricing";
 import { registerGithubTaskReactions } from "./github/task-reactions";
 import { registerCancelTaskTool } from "./tools/cancel-task";
@@ -181,6 +182,11 @@ export function createServer() {
   // and the manual-override constants for runtime-fee / ACU pricing.
   seedPricingFromModelsDev();
   startPricingRefreshLoop();
+  try {
+    ensureRbacSeedsSynced();
+  } catch (err) {
+    console.error("[startup] Failed to sync RBAC seed rows:", err);
+  }
 
   // Subscribe API-side integrations to task-lifecycle events. Idempotent.
   // (Inverts the old be/db → github/task-reactions import; see cycle-break #4.)
