@@ -20,9 +20,10 @@ export const createScheduleInputSchema = z.object({
   targetType: ScheduledTaskTargetTypeSchema.default("agent-task")
     .optional()
     .describe(
-      "Execution target: 'agent-task' (default, creates an agent task from taskTemplate), " +
-        "'workflow' (directly triggers a workflow run, no agent in the loop), or " +
-        "'script' (directly runs a catalog script, no agent in the loop).",
+      "Execution target. Use 'workflow' + workflowId when the schedule only starts a workflow; " +
+        "use 'script' + scriptName/scriptArgs when it only runs a catalog script; " +
+        "use 'agent-task' only when a reasoning agent genuinely needs to be in the loop. " +
+        "Do not create an agent-task whose taskTemplate just tells an agent to trigger a workflow or script.",
     ),
   workflowId: z
     .string()
