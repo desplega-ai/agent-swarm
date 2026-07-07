@@ -228,24 +228,88 @@ describe("ensureRepoForTask auto-stash refresh", () => {
 });
 
 describe("isFirstKickoffTask", () => {
-  test("a follow-up/child task with a parentTaskId is still a first kickoff", () => {
-    expect(isFirstKickoffTask({ parentTaskId: "parent-1", taskType: "feature" })).toBe(true);
+  test("a feature task with a parentTaskId but an inactive/unknown parent is still a first kickoff", async () => {
+    expect(
+      await isFirstKickoffTask({ parentTaskId: "parent-1", taskType: "feature" }, async () => null),
+    ).toBe(true);
   });
 
-  test("a pr-fix task with a parentTaskId is still a first kickoff", () => {
-    expect(isFirstKickoffTask({ parentTaskId: "parent-1", taskType: "pr-fix" })).toBe(true);
+  test("a pr-fix task with a parentTaskId but an inactive/unknown parent is still a first kickoff", async () => {
+    expect(
+      await isFirstKickoffTask({ parentTaskId: "parent-1", taskType: "pr-fix" }, async () => null),
+    ).toBe(true);
   });
 
-  test("an explicit resume task is never a first kickoff", () => {
-    expect(isFirstKickoffTask({ taskType: "resume" })).toBe(false);
+  test("a parentTaskId with no status-checker at all is still a first kickoff (taskType alone decides)", async () => {
+    expect(await isFirstKickoffTask({ parentTaskId: "parent-1", taskType: "feature" })).toBe(true);
   });
 
-  test("a brand-new top-level task with no fields at all is a first kickoff", () => {
-    expect(isFirstKickoffTask({})).toBe(true);
+  test("an explicit resume task is never a first kickoff", async () => {
+    expect(await isFirstKickoffTask({ taskType: "resume" })).toBe(false);
   });
 
-  test("undefined/null task is a first kickoff (safe default)", () => {
-    expect(isFirstKickoffTask(undefined)).toBe(true);
-    expect(isFirstKickoffTask(null)).toBe(true);
+  test("a brand-new top-level task with no fields at all is a first kickoff", async () => {
+    expect(await isFirstKickoffTask({})).toBe(true);
+  });
+
+  test("undefined/null task is a first kickoff (safe default)", async () => {
+    expect(await isFirstKickoffTask(undefined)).toBe(true);
+    expect(await isFirstKickoffTask(null)).toBe(true);
+  });
+
+  test("known continuation task types are never a first kickoff, regardless of parent status", async () => {
+    const continuationTypes = [
+      "follow-up",
+      "reroute-decision",
+      "agentmail-reply",
+      "github-comment",
+      "github-review",
+      "gitlab-comment",
+      "gitlab-ci",
+    ];
+    for (const taskType of continuationTypes) {
+      expect(
+        await isFirstKickoffTask({ parentTaskId: "parent-1", taskType }, async () => null),
+      ).toBe(false);
+    }
+  });
+
+  test("a genuinely new root task type (e.g. agentmail-message, no reserved taskType) stays a first kickoff", async () => {
+    expect(
+      await isFirstKickoffTask({ taskType: "agentmail-message" }, async () => null),
+    ).toBe(true);
+  });
+
+  // Regression: a parent-linked NON-resume follow-up (Slack follow-ups and
+  // sibling-awareness both wire parentTaskId with no reserved taskType at
+  // all) must NOT take the hard-reset path when the parent it's continuing
+  // is still active — e.g. an in-progress sibling on the same worker with
+  // maxTasks > 1, or a paused task that may resume onto the same clone.
+  test("a Slack-style follow-up (no distinguishing taskType) with an in-progress parent is NOT a first kickoff", async () => {
+    const fetchParentTaskStatus = async (parentTaskId: string) => {
+      expect(parentTaskId).toBe("active-parent-1");
+      return "in_progress";
+    };
+    expect(
+      await isFirstKickoffTask({ parentTaskId: "active-parent-1" }, fetchParentTaskStatus),
+    ).toBe(false);
+  });
+
+  test("a sibling-awareness-linked task with a paused parent is NOT a first kickoff", async () => {
+    expect(
+      await isFirstKickoffTask(
+        { parentTaskId: "paused-parent-1", taskType: "github-pr" },
+        async () => "paused",
+      ),
+    ).toBe(false);
+  });
+
+  test("a parent-linked task whose parent already completed IS a first kickoff", async () => {
+    expect(
+      await isFirstKickoffTask(
+        { parentTaskId: "done-parent-1", taskType: "feature" },
+        async () => "completed",
+      ),
+    ).toBe(true);
   });
 });
