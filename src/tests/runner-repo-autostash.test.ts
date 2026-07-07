@@ -145,4 +145,84 @@ describe("ensureRepoForTask auto-stash refresh", () => {
     expect(await readFile(join(clonePath, "remote.txt"), "utf8")).toBe("remote commit\n");
     expect((await git(clonePath, ["status", "--porcelain"])).trim()).toBe("");
   });
+
+  test("first kickoff hard-resets a leftover feature branch back to origin/default", async () => {
+    const remotePath = join(tempRoot, "remote.git");
+    const upstreamPath = join(tempRoot, "upstream");
+    const clonePath = join(tempRoot, "clone");
+
+    await gitRaw(["init", "--bare", remotePath]);
+    await mkdir(upstreamPath);
+    await git(upstreamPath, ["init", "-b", "main"]);
+    await configureIdentity(upstreamPath);
+    await writeFile(join(upstreamPath, "README.md"), "initial\n");
+    await commitAll(upstreamPath, "initial commit");
+    await git(upstreamPath, ["remote", "add", "origin", remotePath]);
+    await git(upstreamPath, ["push", "-u", "origin", "main"]);
+
+    await gitRaw(["clone", "--branch", "main", remotePath, clonePath]);
+    await configureIdentity(clonePath);
+
+    // Simulate a prior task leaving a diverged feature branch checked out —
+    // this is the scenario that used to abort the merge and strand the repo.
+    await git(clonePath, ["checkout", "-b", "leftover-feature"]);
+    await writeFile(join(clonePath, "feature.txt"), "leftover work\n");
+    await commitAll(clonePath, "leftover feature commit");
+
+    await writeFile(join(upstreamPath, "remote.txt"), "remote commit\n");
+    await commitAll(upstreamPath, "remote commit");
+    await git(upstreamPath, ["push", "origin", "main"]);
+
+    const result = await withCleanGitEnv(() =>
+      ensureRepoForTask(
+        { url: remotePath, name: "repo", clonePath, defaultBranch: "main" },
+        "test",
+        true,
+      ),
+    );
+
+    expect(result.warning).toBeNull();
+    expect((await git(clonePath, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()).toBe("main");
+    expect((await git(clonePath, ["rev-parse", "HEAD"])).trim()).toBe(
+      (await git(upstreamPath, ["rev-parse", "HEAD"])).trim(),
+    );
+    expect(await readFile(join(clonePath, "remote.txt"), "utf8")).toBe("remote commit\n");
+    expect((await git(clonePath, ["status", "--porcelain"])).trim()).toBe("");
+  });
+
+  test("resume/continuation (isFirstKickoff=false) leaves a leftover feature branch checked out", async () => {
+    const remotePath = join(tempRoot, "remote.git");
+    const upstreamPath = join(tempRoot, "upstream");
+    const clonePath = join(tempRoot, "clone");
+
+    await gitRaw(["init", "--bare", remotePath]);
+    await mkdir(upstreamPath);
+    await git(upstreamPath, ["init", "-b", "main"]);
+    await configureIdentity(upstreamPath);
+    await writeFile(join(upstreamPath, "README.md"), "initial\n");
+    await commitAll(upstreamPath, "initial commit");
+    await git(upstreamPath, ["remote", "add", "origin", remotePath]);
+    await git(upstreamPath, ["push", "-u", "origin", "main"]);
+
+    await gitRaw(["clone", "--branch", "main", remotePath, clonePath]);
+    await configureIdentity(clonePath);
+
+    await git(clonePath, ["checkout", "-b", "in-progress-feature"]);
+    await writeFile(join(clonePath, "feature.txt"), "in-progress work\n");
+    await commitAll(clonePath, "in-progress feature commit");
+
+    const result = await withCleanGitEnv(() =>
+      ensureRepoForTask(
+        { url: remotePath, name: "repo", clonePath, defaultBranch: "main" },
+        "test",
+        false,
+      ),
+    );
+
+    expect(result.warning).toBeNull();
+    expect((await git(clonePath, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()).toBe(
+      "in-progress-feature",
+    );
+    expect(await readFile(join(clonePath, "feature.txt"), "utf8")).toBe("in-progress work\n");
+  });
 });

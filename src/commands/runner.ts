@@ -199,6 +199,7 @@ async function listSwarmAutostashes(clonePath: string, role: string): Promise<Sw
 async function refreshExistingRepoForTask(
   repoConfig: { name: string; clonePath: string; defaultBranch: string },
   role: string,
+  isFirstKickoff: boolean,
 ): Promise<string | null> {
   const { name, clonePath, defaultBranch } = repoConfig;
   const statusResult =
@@ -219,13 +220,36 @@ async function refreshExistingRepoForTask(
     }
   }
 
+  const fetchSpec = `${defaultBranch}:refs/remotes/origin/${defaultBranch}`;
+  const remoteRef = `refs/remotes/origin/${defaultBranch}`;
+
   try {
-    console.log(`[${role}] Refreshing ${name} from origin/${defaultBranch}...`);
-    const fetchSpec = `${defaultBranch}:refs/remotes/origin/${defaultBranch}`;
-    const remoteRef = `refs/remotes/origin/${defaultBranch}`;
     await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} fetch origin ${fetchSpec}`.quiet();
-    await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} merge --no-edit --no-stat ${remoteRef}`.quiet();
-    console.log(`[${role}] Refreshed ${name}`);
+
+    // First-kickoff guarantee (see call sites): the clone is REUSED task-to-task,
+    // so a leftover feature branch from a prior task can still be checked out here.
+    // On a genuine first kickoff (no parentTaskId / not a resume) we force the base
+    // branch back to a clean, current state before the caller creates a work branch
+    // off it — otherwise a diverged leftover branch would abort the merge below and
+    // leave the repo stale (only a warning was emitted). Resumes and follow-up/child
+    // tasks (which may legitimately still have that feature branch checked out with
+    // in-progress work) must NEVER take this path — merge is the safe default there.
+    if (isFirstKickoff) {
+      console.log(`[${role}] First kickoff for ${name} — resetting to ${remoteRef}...`);
+      try {
+        await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} checkout ${defaultBranch}`.quiet();
+      } catch {
+        // Local branch may be missing (e.g. deleted by a prior task) — recreate it
+        // tracking the remote instead of failing the whole refresh.
+        await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} checkout -B ${defaultBranch} ${remoteRef}`.quiet();
+      }
+      await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} reset --hard ${remoteRef}`.quiet();
+      console.log(`[${role}] Reset ${name} to ${remoteRef}`);
+    } else {
+      console.log(`[${role}] Refreshing ${name} from ${remoteRef}...`);
+      await Bun.$`env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX git -C ${clonePath} merge --no-edit --no-stat ${remoteRef}`.quiet();
+      console.log(`[${role}] Refreshed ${name}`);
+    }
     return null;
   } catch (err) {
     const errorMsg = scrubSecrets((err as Error).message);
@@ -278,6 +302,13 @@ export async function ensureRepoForTask(
     hooks?: { enabled: boolean } | null;
   },
   role: string,
+  /**
+   * True only for a genuine first kickoff (a brand-new task, not a resume and
+   * not a follow-up/child task continuing prior work). Defaults to false —
+   * when in doubt, do NOT force-reset the base branch, since the clone is
+   * reused task-to-task and may hold another task's in-progress branch.
+   */
+  isFirstKickoff = false,
 ): Promise<{
   clonePath: string;
   claudeMd: string | null;
@@ -308,7 +339,11 @@ export async function ensureRepoForTask(
       console.log(`[${role}] Cloned ${name}`);
     } else {
       console.log(`[${role}] Repo ${name} already cloned at ${clonePath}`);
-      warning = await refreshExistingRepoForTask({ name, clonePath, defaultBranch }, role);
+      warning = await refreshExistingRepoForTask(
+        { name, clonePath, defaultBranch },
+        role,
+        isFirstKickoff,
+      );
     }
 
     await installRepoHooksForTask(repoConfig, role);
@@ -4794,7 +4829,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             clonePath: `/workspace/personal/repos/${task.vcsRepo.split("/").pop() || task.vcsRepo}`,
             defaultBranch: "main",
           };
-          const repoContext = await ensureRepoForTask(effectiveConfig, role);
+          // This is the paused-task-resume-after-restart path — never a first
+          // kickoff, so never force-reset the base branch here.
+          const repoContext = await ensureRepoForTask(effectiveConfig, role, false);
           if (repoContext?.clonePath) {
             resumeCwd = repoContext.clonePath;
           }
@@ -5187,7 +5224,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             clonePath: `/workspace/personal/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
             defaultBranch: "main",
           };
-          const repoResult = await ensureRepoForTask(effectiveConfig, role);
+          // First kickoff = a genuinely new top-level task: no parentTaskId at
+          // all. A task with a parentTaskId is either an explicit resume
+          // (taskType "resume") or a follow-up/child task continuing prior
+          // work on an existing branch/PR — both must keep the clone's
+          // checked-out branch untouched, so only the no-parentTaskId case
+          // forces the base branch back to a clean origin/<default> state.
+          const isFirstKickoff = !taskObj?.parentTaskId;
+          const repoResult = await ensureRepoForTask(effectiveConfig, role, isFirstKickoff);
           currentRepoContext = {
             ...repoResult,
             guidelines: repoConfig?.guidelines ?? null,
