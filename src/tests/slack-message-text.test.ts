@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractSlackMessageText } from "../slack/message-text";
+import { extractSlackMessageText, parseSlackTs } from "../slack/message-text";
 
 describe("extractSlackMessageText", () => {
   test("returns top-level text when present", () => {
@@ -452,5 +452,41 @@ describe("extractSlackMessageText", () => {
       expect(() => extractSlackMessageText(msg)).not.toThrow();
       expect(extractSlackMessageText(msg)).toBe("real");
     });
+  });
+});
+
+describe("parseSlackTs", () => {
+  test("passes the dotted API form through unchanged", () => {
+    expect(parseSlackTs("1783411554.596189")).toBe("1783411554.596189");
+  });
+
+  test("converts the 'p' deep-link form back to dotted", () => {
+    expect(parseSlackTs("p1783411554596189")).toBe("1783411554.596189");
+  });
+
+  test("converts a bare digit run back to dotted", () => {
+    expect(parseSlackTs("1783411554596189")).toBe("1783411554.596189");
+  });
+
+  test("extracts the ts from a full permalink URL", () => {
+    expect(
+      parseSlackTs("https://example.slack.com/archives/C0123456789/p1783411554596189"),
+    ).toBe("1783411554.596189");
+  });
+
+  test("extracts the ts from a permalink URL with a thread_ts query param", () => {
+    expect(
+      parseSlackTs(
+        "https://example.slack.com/archives/C0123456789/p1783411554596189?thread_ts=1783411000.000100&cid=C0123456789",
+      ),
+    ).toBe("1783411554.596189");
+  });
+
+  test("trims surrounding whitespace before parsing", () => {
+    expect(parseSlackTs("  1783411554.596189  ")).toBe("1783411554.596189");
+  });
+
+  test("falls through unchanged for unrecognized input", () => {
+    expect(parseSlackTs("not-a-ts")).toBe("not-a-ts");
   });
 });
