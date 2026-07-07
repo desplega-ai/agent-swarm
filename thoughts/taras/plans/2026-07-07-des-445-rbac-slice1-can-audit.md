@@ -6,7 +6,7 @@ topic: "DES-445 RBAC — Slice 1: central can() + audit log (increments 1+2)"
 tags: [plan, rbac, auth, security, des-445]
 status: in-progress
 last_updated: 2026-07-07
-last_updated_by: Claude (phase-1 agent)
+last_updated_by: Claude (phase-2 agent)
 related_brainstorm: thoughts/taras/brainstorms/2026-05-15-rbac-for-swarm.md
 related_research: thoughts/taras/research/2026-07-06-rbac-enforcement-surfaces.md
 ---
@@ -143,12 +143,12 @@ Deliverable: deny/allow characterization coverage for the HTTP-surface gates —
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] New/extended tests pass against unmodified code: `bun test src/tests/fs-routes.test.ts && bun test src/tests/rbac-charact-http.test.ts`
-- [ ] Full suite: `bun test`
-- [ ] Types + lint: `bun run tsc:check && bun run lint`
+- [x] New/extended tests pass against unmodified code: `bun test src/tests/fs-routes.test.ts && bun test src/tests/rbac-charact-http.test.ts`
+- [x] Full suite: `bun test`
+- [x] Types + lint: `bun run tsc:check && bun run lint`
 
 #### Automated QA:
-- [ ] Agent confirms every HARD-classified HTTP site in the appendix table now maps to a test file:line (kv → `kv-http.test.ts:269-311` existing; fs + agents → new)
+- [x] Agent confirms every HARD-classified HTTP site in the appendix table now maps to a test file:line (kv → `kv-http.test.ts:269-311` existing; fs → `rbac-charact-http.test.ts` new; agents → no HARD gates found in Phase 1, bucket empty)
 
 #### Manual Verification:
 - [ ] None
@@ -439,7 +439,7 @@ Rules verified against HEAD source. "Test" = characterization coverage (new = ad
 | 33 | `src/tools/kv/kv-delete.ts:17` | own `task:agent:` namespace OR lead | `kv.write.any` | P4 | `rbac-charact-misc-tools.test.ts` (new) |
 | 34 | `src/tools/kv/kv-incr.ts:17` | own `task:agent:` namespace OR lead | `kv.write.any` | P4 | `rbac-charact-misc-tools.test.ts` (new) |
 | 35 | `src/http/kv.ts:329` (`authorizeWrite`; plumbing hits `:288,294,297,299`) | own `task:agent:` namespace OR lead → 403; `task:page:*` branch (`:318-327`) is a request-shape guard, stays inline | `kv.write.any` | P5 | `kv-http.test.ts:269-311` (pre-existing) |
-| 36 | `src/http/fs.ts:442` (`canMutateTask`) | operator OR user OR lead OR assignee OR creator → 403 | `task.fs.mutate` | P5 | Phase 2 → `rbac-charact-http.test.ts` (new) |
+| 36 | `src/http/fs.ts:442` (`canMutateTask`) | operator OR user OR lead OR assignee OR creator → 403; **ordered**: operator/user short-circuit BEFORE agent identity (operator bearer + non-owner `X-Agent-ID` is allowed), and the lead/assignee/creator/deny branches only bind when the request-auth context is unset — unreachable via `handleCore` today (Phase-2 finding) | `task.fs.mutate` | P5 | `rbac-charact-http.test.ts` (new — full decision table: pipeline operator/user cases + auth-context-unset agent branches) |
 
 Plus the **documented-but-unenforced** `src/http/scripts.ts` global write/delete gap (no `isLead` hit — that's the bug): verbs `script.global.write` / `script.global.delete`, closed in P5, tests flipped in `scripts-http.test.ts:319-345`.
 
@@ -465,7 +465,7 @@ Plus the **documented-but-unenforced** `src/http/scripts.ts` global write/delete
 
 #### Coverage summary
 
-36 HARD sites: 9 covered by pre-existing tests (rows 1, 2, 13, 18, 19, 24, 25, 32, 35), 26 covered by the new Phase-1 suites (`rbac-charact-skills.test.ts` — 10 gates incl. both mcp-server-create scopes, `rbac-charact-slack.test.ts` — 7 gates, `rbac-charact-misc-tools.test.ts` — 9 gates), 1 deferred to Phase 2 (row 36, HTTP fs).
+36 HARD sites: 9 covered by pre-existing tests (rows 1, 2, 13, 18, 19, 24, 25, 32, 35), 26 covered by the new Phase-1 suites (`rbac-charact-skills.test.ts` — 10 gates incl. both mcp-server-create scopes, `rbac-charact-slack.test.ts` — 7 gates, `rbac-charact-misc-tools.test.ts` — 9 gates), 1 covered in Phase 2 (row 36, HTTP fs → `rbac-charact-http.test.ts`). Both HARD HTTP sites now map to tests: row 35 → `kv-http.test.ts:269-311` (pre-existing), row 36 → `rbac-charact-http.test.ts` (Phase 2). `http/agents.ts` contributed no HARD sites (all three hits NON-AUTHZ, see table below), so the "other HTTP gates" bucket is empty.
 
 ### B. Increments 3–6 outline (higher altitude — separate plans)
 
