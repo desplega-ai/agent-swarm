@@ -64,8 +64,13 @@ const leadOrOwnNamespace: LegacyRule = {
   evaluate: (principal, resource) => {
     if (principal.kind !== "agent") return false;
     if (principal.isLead) return true;
+    // A blank agent id can never own a namespace — the pre-migration guards
+    // used truthiness (`if (info.agentId && ...)`), so `X-Agent-ID: ""` plus
+    // the literal namespace `task:agent:` must stay denied.
     return (
-      resource?.kind === "kv-namespace" && resource.namespace === `task:agent:${principal.agentId}`
+      principal.agentId !== "" &&
+      resource?.kind === "kv-namespace" &&
+      resource.namespace === `task:agent:${principal.agentId}`
     );
   },
 };

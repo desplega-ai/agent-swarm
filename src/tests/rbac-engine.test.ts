@@ -258,6 +258,19 @@ describe("lead-or-own-namespace verbs (kv.write.any)", () => {
     });
     expect(decision.allow).toBe(true);
   });
+
+  test("blank agent id never owns the literal `task:agent:` namespace", () => {
+    // Pre-migration guards used truthiness (`if (info.agentId && ...)`), so an
+    // empty X-Agent-ID writing to namespace "task:agent:" was denied — the
+    // template `task:agent:${""}` must not be treated as a match.
+    const decision = can({
+      principal: { kind: "agent", agentId: "", isLead: false },
+      verb: "kv.write.any",
+      resource: { kind: "kv-namespace", namespace: "task:agent:" },
+      source: "http",
+    });
+    expect(decision.allow).toBe(false);
+  });
 });
 
 describe("requester-owns-task verbs", () => {
