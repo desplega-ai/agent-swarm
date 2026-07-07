@@ -76,6 +76,14 @@ type PermissionRow = {
   verb: string;
 };
 
+type RbacRoleSummaryRow = {
+  name: string;
+  isBuiltin: number;
+  grantsAll: number;
+  verbCount: number;
+  attachedUserCount: number;
+};
+
 function roleRowToUserRole(row: UserRoleRow): UserRole {
   return {
     id: row.id,
@@ -255,4 +263,89 @@ export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): void {
       `[rbac] seed sync: roles inserted=${stats.rolesInserted}, updated=${stats.rolesUpdated}; permissions inserted=${stats.permissionsInserted}, deleted=${stats.permissionsDeleted}; trigger=ensured`,
     );
   }
+}
+
+function describeRbacFlag(): string {
+  const raw = process.env.RBAC_ENABLED;
+  if (raw === undefined) return "unset (off)";
+  return `${raw} (${raw === "true" ? "on" : "off"})`;
+}
+
+function printRolesTable(rows: RbacRoleSummaryRow[]): void {
+  const tableRows = rows.map((row) => [
+    row.name,
+    row.isBuiltin === 1 ? "yes" : "no",
+    row.grantsAll === 1 ? "yes" : "no",
+    String(row.verbCount),
+    String(row.attachedUserCount),
+  ]);
+  const headers = ["name", "builtin", "grantsAll", "verbs", "attachedUsers"];
+  const widths = headers.map((header, column) =>
+    Math.max(header.length, ...tableRows.map((row) => row[column]?.length ?? 0)),
+  );
+  const format = (row: string[]) =>
+    row.map((cell, column) => cell.padEnd(widths[column] ?? cell.length)).join("  ");
+
+  console.log("Roles:");
+  console.log(format(headers));
+  console.log(format(widths.map((width) => "-".repeat(width))));
+  for (const row of tableRows) {
+    console.log(format(row));
+  }
+}
+
+function bootstrapDefaultRoles(): number {
+  const db = getDb();
+  return db.transaction(() => {
+    const result = db
+      .prepare<null, string>(
+        `INSERT OR IGNORE INTO principal_roles (principalType, principalId, roleId)
+         SELECT 'user', u.id, ?
+         FROM users u
+         WHERE NOT EXISTS (
+           SELECT 1
+           FROM principal_roles pr
+           WHERE pr.principalType = 'user'
+             AND pr.principalId = u.id
+         )`,
+      )
+      .run(DEFAULT_ROLE_ID);
+    return result.changes;
+  })();
+}
+
+function getRbacRoleSummary(): RbacRoleSummaryRow[] {
+  return getDb()
+    .prepare<RbacRoleSummaryRow, []>(
+      `SELECT
+         r.name,
+         r.isBuiltin,
+         r.grantsAll,
+         COUNT(DISTINCT rp.verb) AS verbCount,
+         COUNT(DISTINCT CASE WHEN pr.principalType = 'user' THEN pr.principalId END)
+           AS attachedUserCount
+       FROM roles r
+       LEFT JOIN role_permissions rp ON rp.roleId = r.id
+       LEFT JOIN principal_roles pr ON pr.roleId = r.id
+       GROUP BY r.id, r.name, r.isBuiltin, r.grantsAll
+       ORDER BY r.isBuiltin DESC, r.name`,
+    )
+    .all();
+}
+
+export async function runRbacCliCommand(args: string[]): Promise<void> {
+  const subcommand = args[0];
+  if (subcommand !== "bootstrap") {
+    throw new Error(`Unknown RBAC command: ${subcommand ?? "(none)"}`);
+  }
+
+  ensureRbacSeedsSynced({ quiet: true });
+  const usersBackfilled = bootstrapDefaultRoles();
+  const roles = getRbacRoleSummary();
+
+  console.log("RBAC bootstrap complete");
+  console.log(`RBAC_ENABLED: ${describeRbacFlag()}`);
+  console.log(`Users backfilled this run: ${usersBackfilled}`);
+  console.log("");
+  printRolesTable(roles);
 }

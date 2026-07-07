@@ -310,13 +310,13 @@ Deliverable: the operator-facing `rbac bootstrap` command, a dedicated flag-ON w
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] New e2e passes: `bun test src/tests/rbac-admission-e2e.test.ts`
-- [ ] CLI help renders: `bun run src/cli.tsx help` (lists `rbac`) and `bun run src/cli.tsx rbac --help`
-- [ ] Full merge-gate mirror: `bun install --frozen-lockfile && bun run lint && bun run tsc:check && bun test && bash scripts/check-db-boundary.sh && bun run check:dep-graph && bun run check:rbac-coverage`
-- [ ] No OpenAPI drift expected (no route added/changed); confirm `git diff --exit-code openapi.json` after `bun run docs:openapi` if CI complains
+- [x] New e2e passes: `bun test src/tests/rbac-admission-e2e.test.ts` (1 pass / 14 expects)
+- [x] CLI help renders: `bun run src/cli.tsx help` (lists `rbac`) and `bun run src/cli.tsx rbac --help`
+- [x] Full merge-gate mirror: `bun install --frozen-lockfile && bun run lint && bun run tsc:check && bun test && bash scripts/check-db-boundary.sh && bun run check:dep-graph && bun run check:rbac-coverage` (5940 pass / 0 fail; dep-graph warn-only incl. expected cli.tsx→be/rbac-roles→be/db)
+- [x] No OpenAPI drift expected (no route added/changed); `git diff --exit-code openapi.json` clean
 
 #### Automated QA:
-- [ ] Agent runs `bun run src/cli.tsx rbac bootstrap` twice against a live DB where one user was stripped of all roles (via `sqlite3 DELETE`): first run reports exactly 1 user backfilled, second reports 0; summary table lists `admin` and `requester` with correct counts
+- [x] Agent runs `bun run src/cli.tsx rbac bootstrap` twice against a live DB where one user was stripped of all roles (via `sqlite3 DELETE`): first run reports exactly 1 user backfilled, second reports 0; summary table lists `admin` and `requester` with correct counts
 
 #### Manual Verification:
 - [ ] Taras reviews the `rbac bootstrap` summary output format (operator-facing UX)

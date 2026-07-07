@@ -17,6 +17,7 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 | Var | Default | Notes |
 |---|---|---|
 | `AGENT_SWARM_API_KEY` (preferred) / `API_KEY` (legacy) | `123123` | Auth header `Authorization: Bearer …`. `AGENT_SWARM_API_KEY` wins when both are set — prefer it when exporting in your shell profile so the CLI works from any cwd without colliding with other tools' `API_KEY`. |
+| `RBAC_ENABLED` | unset (off) | Set `=true` to gate REST calls authenticated with `aswt_` user tokens at HTTP admission against the user's RBAC role grants. Operator key and agent calls are unaffected. |
 | `MCP_BASE_URL` | `http://localhost:3013` | Internal/worker-facing API base the workers/UI hit |
 | `PUBLIC_MCP_BASE_URL` | falls back to `MCP_BASE_URL` | Public origin for OAuth redirect URIs + webhook URLs. No action needed locally — leave unset and it defaults to `MCP_BASE_URL`. Only relevant in split deploys where `MCP_BASE_URL` is an internal/cluster address. |
 | `APP_URL` | `http://localhost:5274` | Dashboard URL |
@@ -31,6 +32,8 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 `HARNESS_PROVIDER=devin` requires `DEVIN_API_KEY` (prefix `cog_*`) and `DEVIN_ORG_ID` (prefix `org-*`). Optional: `DEVIN_POLL_INTERVAL_MS` (default 15000), `DEVIN_ACU_COST_USD` (default 2.25), `DEVIN_MAX_ACU_LIMIT` (per-session ACU cap, sent to Devin API and shown in UI budget bar), `DEVIN_API_BASE_URL` (override for testing). Repos are configured via the task's `vcsRepo` field — no env var needed. See `.env.docker-devin.example` for a full template.
 
 `AGENT_SWARM_API_KEY` / `API_KEY` and `SECRETS_ENCRYPTION_KEY` are reserved — they cannot be stored in `swarm_config`.
+
+RBAC admission design: [DES-445 user policy/admission model](../thoughts/taras/plans/2026-07-07-des-445-rbac-user-policy-admission-model.md). The happy path does not require manual bootstrapping: migrations backfill existing users, the users-table trigger grants the default role to new users, and server boot self-heals built-in role seeds. Use `bun run src/cli.tsx rbac bootstrap` as an operator sanity tool before enabling `RBAC_ENABLED=true` on an existing deployment, after manual DB surgery or a restore that stripped user roles, and periodically if you want a drift check. It only attaches the default role to users with zero roles, so deliberately narrowed users keep their existing role set.
 
 ## Tracker integrations (Linear & Jira)
 

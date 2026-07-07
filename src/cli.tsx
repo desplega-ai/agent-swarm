@@ -269,6 +269,13 @@ const COMMAND_HELP: Record<
     options: "  -h, --help             Show this help",
     examples: `  ${binName} scripts reembed`,
   },
+  rbac: {
+    usage: `${binName} rbac bootstrap`,
+    description:
+      "RBAC role management.\nBootstraps built-in RBAC roles and attaches the default role to users with zero roles.",
+    options: "  -h, --help             Show this help",
+    examples: `  ${binName} rbac bootstrap`,
+  },
   "codex-login": {
     usage: `${binName} codex-login [options]`,
     description:
@@ -379,6 +386,7 @@ function printHelp(command?: string) {
     ["artifact", "Manage agent artifacts"],
     ["x", "Execute external command routes"],
     ["scripts", "Reusable scripts maintenance"],
+    ["rbac", "RBAC role management (bootstrap)"],
     ["docs", "Open documentation (--open to launch in browser)"],
     ["codex-login", "Authenticate Codex via ChatGPT OAuth"],
     ["claude-managed-setup", "Bootstrap Anthropic Managed Agents (agent + env + skills)"],
@@ -686,6 +694,14 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   const { runScriptsMaintenanceCommand } = await import("./be/scripts/maintenance");
   await runScriptsMaintenanceCommand(scriptsArgs);
   console.log("Scripts re-embedded.");
+} else if (args.command === "rbac") {
+  const rbacArgs = process.argv.slice(process.argv.indexOf("rbac") + 1);
+  if (args.showHelp || rbacArgs[0] !== "bootstrap") {
+    printHelp("rbac");
+    process.exit(rbacArgs[0] === "bootstrap" || args.showHelp ? 0 : 1);
+  }
+  const { runRbacCliCommand } = await import("./be/rbac-roles");
+  await runRbacCliCommand(rbacArgs);
 } else if (args.command === "codex-login") {
   const { runCodexLogin } = await import("./commands/codex-login");
   const codexLoginArgs = process.argv.slice(process.argv.indexOf("codex-login") + 1);

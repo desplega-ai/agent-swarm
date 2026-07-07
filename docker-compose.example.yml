@@ -98,6 +98,7 @@ services:
 
     environment:
       - API_KEY=${API_KEY}
+      - RBAC_ENABLED=${RBAC_ENABLED:-false}
       - AGENT_FS_API_URL=http://agent-fs:7433
       - API_AGENT_FS_API_KEY=${API_AGENT_FS_API_KEY:-}
       - AGENT_FS_REGISTER_EMAIL=${AGENT_FS_REGISTER_EMAIL:-swarm-admin@agent-fs.local}
