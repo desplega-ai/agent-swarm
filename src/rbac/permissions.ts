@@ -97,6 +97,10 @@ export const PERMISSIONS = {
     description: "Manage script connections.",
     namespace: "script-connection",
   },
+  "script-connection.invoke": {
+    description: "Invoke a script MCP connection through the server-side proxy.",
+    namespace: "script-connection",
+  },
   "config.credential-bindings.write": {
     description: "Write the SCRIPT_CREDENTIAL_BINDINGS swarm-config key.",
     namespace: "config",

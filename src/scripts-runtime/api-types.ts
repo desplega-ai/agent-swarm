@@ -39,7 +39,25 @@ export type ScriptApiConnectionDescriptor = {
   operations: ScriptApiOperationDescriptor[];
 };
 
+export type ScriptMcpToolDescriptor = {
+  name: string;
+  description?: string;
+  inputSchema: ScriptApiJsonSchema;
+};
+
+export type ScriptMcpConnectionDescriptor = {
+  slug: string;
+  kind: "mcp";
+  connectionId: string;
+  tools: ScriptMcpToolDescriptor[];
+};
+
 export type ScriptApiRegistryClient = Record<
+  string,
+  Record<string, (args?: Record<string, unknown>) => Promise<unknown>>
+>;
+
+export type ScriptMcpRegistryClient = Record<
   string,
   Record<string, (args?: Record<string, unknown>) => Promise<unknown>>
 >;

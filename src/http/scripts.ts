@@ -3,7 +3,12 @@ import { z } from "zod";
 import { resolveHttpAuditUserId } from "../be/audit-user";
 import { getAgentById, recordInlineScriptRun, upsertKv } from "../be/db";
 import { createEvent } from "../be/events";
-import { getScriptApiConnectionDescriptors, getScriptApiTypes } from "../be/script-connections";
+import {
+  getScriptApiConnectionDescriptors,
+  getScriptApiTypes,
+  getScriptMcpConnectionDescriptors,
+  getScriptMcpTypes,
+} from "../be/script-connections";
 import { buildScriptCredentialBindings } from "../be/script-credential-broker";
 import {
   createScriptApi,
@@ -513,6 +518,7 @@ export async function handleScripts(
       agentId: agent.id,
       egressSecrets: await buildScriptCredentialBindings({ agentId: agent.id }),
       apiConnections: getScriptApiConnectionDescriptors({ agentId: agent.id }),
+      mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agent.id }),
     });
 
     // Persist output to KV when idempotencyKey is provided and run succeeded
@@ -668,7 +674,7 @@ export async function handleScripts(
   // pattern would otherwise swallow the literal "type-defs" segment.
   if (typeDefsRoute.match(req.method, pathSegments)) {
     json(res, {
-      sdkTypes: scriptSdkTypesWithGeneratedApis(getScriptApiTypes()),
+      sdkTypes: scriptSdkTypesWithGeneratedApis(getScriptApiTypes(), getScriptMcpTypes()),
       stdlibTypes: SCRIPT_STDLIB_TYPES,
     });
     return true;
@@ -718,7 +724,10 @@ export async function handleScripts(
     json(res, {
       signature: JSON.parse(script.signatureJson),
       argsJsonSchema: script.argsJsonSchema ? (JSON.parse(script.argsJsonSchema) as unknown) : null,
-      sdkTypes: scriptSdkTypesWithGeneratedApis(getScriptApiTypes({ agentId: agent.id })),
+      sdkTypes: scriptSdkTypesWithGeneratedApis(
+        getScriptApiTypes({ agentId: agent.id }),
+        getScriptMcpTypes({ agentId: agent.id }),
+      ),
       stdlibTypes: SCRIPT_STDLIB_TYPES,
     });
     return true;

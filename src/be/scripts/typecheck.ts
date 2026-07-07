@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { getScriptApiTypes } from "@/be/script-connections";
+import { getScriptApiTypes, getScriptMcpTypes } from "@/be/script-connections";
 
 /**
  * Structured diagnostic record returned to API callers when typecheck fails.
@@ -276,6 +276,7 @@ export interface ScriptContext {
   step?: ScriptWorkflowSteps;
   swarm: SwarmSdk & { config: SwarmConfig };
   api: ScriptApiRegistry;
+  mcp: ScriptMcpRegistry;
   stdlib: ScriptStdlib;
   logger: ScriptLogger;
 }
@@ -284,8 +285,11 @@ export interface ScriptContext {
 export type ScriptMain = (args: any, ctx: ScriptContext) => unknown | Promise<unknown>;
 `;
 
-export function scriptSdkTypesWithGeneratedApis(apiTypes = getScriptApiTypes()): string {
-  return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n`;
+export function scriptSdkTypesWithGeneratedApis(
+  apiTypes = getScriptApiTypes(),
+  mcpTypes = getScriptMcpTypes(),
+): string {
+  return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n`;
 }
 
 export const SCRIPT_STDLIB_TYPES = `
@@ -799,7 +803,10 @@ export function typecheckScript(
     types: [],
   };
 
-  const sdkTypes = scriptSdkTypesWithGeneratedApis(getScriptApiTypes(context));
+  const sdkTypes = scriptSdkTypesWithGeneratedApis(
+    getScriptApiTypes(context),
+    getScriptMcpTypes(context),
+  );
   const files = new Map<string, string>([
     [USER_FILE, source],
     [SDK_FILE, sdkTypes],

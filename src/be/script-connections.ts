@@ -5,12 +5,15 @@ import type {
   ScriptApiJsonSchema,
   ScriptApiJsonValue,
   ScriptApiOperationDescriptor,
+  ScriptMcpConnectionDescriptor,
+  ScriptMcpToolDescriptor,
 } from "@/scripts-runtime/api-types";
 import {
   CREDENTIAL_BINDINGS_CONFIG_KEY,
   type CredentialBinding,
   normalizeCredentialBindingsDocument,
 } from "@/scripts-runtime/credential-broker";
+import { listMcpServerTools } from "./mcp-proxy";
 
 export type ScriptConnectionScope = "global" | "agent" | "repo";
 export type ScriptConnectionKind = "raw" | "openapi" | "mcp";
@@ -414,6 +417,13 @@ export function listScriptConnections(context?: {
     .filter((connection) => !context || applies(connection.scope, connection.scopeId, context));
 }
 
+export function getScriptConnectionById(id: string): ScriptConnectionRecord | null {
+  const row = getDb()
+    .prepare<ConnectionRow, [string]>("SELECT * FROM script_connections WHERE id = ?")
+    .get(id);
+  return row ? connectionFromRow(row) : null;
+}
+
 function schemaToTs(schema: unknown): string {
   if (!schema || typeof schema !== "object") return "JsonValue";
   const s = schema as Record<string, unknown>;
@@ -633,6 +643,46 @@ function openapiSpecUrlOptions() {
   };
 }
 
+function mcpToolMethodName(name: string): string {
+  return normalizeSlug(name);
+}
+
+function mcpToolArgsType(inputSchema: unknown): string {
+  if (!inputSchema || typeof inputSchema !== "object") return "Record<string, JsonValue>";
+  const schema = inputSchema as Record<string, unknown>;
+  if (Object.keys(schema).length === 0) return "Record<string, JsonValue>";
+  const type = schemaToTs(schema);
+  return type === "JsonValue" ? "Record<string, JsonValue>" : type;
+}
+
+export function buildMcpGeneratedArtifacts(input: {
+  slug: string;
+  connectionId: string;
+  tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;
+}): { generatedTypes: string; generatedRuntimeJson: string } {
+  const slug = normalizeSlug(input.slug);
+  const tools: ScriptMcpToolDescriptor[] = input.tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: jsonSchema(tool.inputSchema ?? {}),
+  }));
+  const generatedTypes = [
+    `export interface ${pascal(slug)}Mcp {`,
+    ...input.tools.map(
+      (tool) =>
+        `  ${mcpToolMethodName(tool.name)}(args: ${mcpToolArgsType(tool.inputSchema)}): Promise<JsonValue>;`,
+    ),
+    "}",
+  ].join("\n");
+  const descriptor: ScriptMcpConnectionDescriptor = {
+    slug,
+    kind: "mcp",
+    connectionId: input.connectionId,
+    tools,
+  };
+  return { generatedTypes, generatedRuntimeJson: JSON.stringify(descriptor) };
+}
+
 function parseOpenapiSpecBody(body: string): unknown {
   try {
     return JSON.parse(body);
@@ -712,12 +762,14 @@ export async function upsertScriptConnection(data: {
   openapiSpecFetchedAt?: string | null;
   mcpServerId?: string | null;
   enabled?: boolean;
+  agentId?: string;
   userId?: string | null;
 }): Promise<ScriptConnectionRecord> {
   const now = new Date().toISOString();
   const id = data.id ?? crypto.randomUUID();
   const scope = data.scope ?? "global";
   const scopeId = scope === "global" ? null : (data.scopeId ?? null);
+  const normalizedSlug = normalizeSlug(data.slug);
   let generatedTypes: string | null = null;
   let generatedRuntimeJson: string | null = null;
   let generationError: string | null = null;
@@ -730,6 +782,19 @@ export async function upsertScriptConnection(data: {
   let openapiSpecEtag = data.openapiSpecEtag ?? null;
   let openapiSpecFetchedAt = data.openapiSpecFetchedAt ?? null;
   let openapiSpec: unknown;
+
+  const existing = data.id
+    ? getDb()
+        .prepare<{ id: string; version: number }, [string]>(
+          "SELECT id, version FROM script_connections WHERE id = ?",
+        )
+        .get(data.id)
+    : getDb()
+        .prepare<{ id: string; version: number }, [string, string, string | null]>(
+          "SELECT id, version FROM script_connections WHERE slug = ? AND scope = ? AND COALESCE(scope_id, '') = COALESCE(?, '')",
+        )
+        .get(normalizedSlug, scope, scopeId);
+  const connectionId = existing?.id ?? id;
 
   if (data.kind === "openapi") {
     if (!openapiSpecJson && data.openapiSpecUrl) {
@@ -763,20 +828,25 @@ export async function upsertScriptConnection(data: {
     }
   }
 
-  const existing = data.id
-    ? getDb()
-        .prepare<{ id: string; version: number }, [string]>(
-          "SELECT id, version FROM script_connections WHERE id = ?",
-        )
-        .get(data.id)
-    : getDb()
-        .prepare<{ id: string; version: number }, [string, string, string | null]>(
-          "SELECT id, version FROM script_connections WHERE slug = ? AND scope = ? AND COALESCE(scope_id, '') = COALESCE(?, '')",
-        )
-        .get(normalizeSlug(data.slug), scope, scopeId);
+  if (data.kind === "mcp") {
+    try {
+      if (!data.mcpServerId) throw new Error("mcpServerId is required for MCP connections");
+      const tools = await listMcpServerTools(data.mcpServerId, { agentId: data.agentId });
+      const artifacts = buildMcpGeneratedArtifacts({
+        slug: data.slug,
+        connectionId,
+        tools,
+      });
+      generatedTypes = artifacts.generatedTypes;
+      generatedRuntimeJson = artifacts.generatedRuntimeJson;
+      generatedAt = now;
+    } catch (err) {
+      generationError = err instanceof Error ? err.message : String(err);
+    }
+  }
 
   const params = [
-    normalizeSlug(data.slug),
+    normalizedSlug,
     data.displayName ?? null,
     data.kind,
     scope,
@@ -913,6 +983,21 @@ export function getScriptApiConnectionDescriptors(
     .filter((descriptor): descriptor is ScriptApiConnectionDescriptor => Boolean(descriptor));
 }
 
+export function getScriptMcpConnectionDescriptors(
+  context: { agentId?: string; repoId?: string } = {},
+): ScriptMcpConnectionDescriptor[] {
+  return listScriptConnections({ ...context, kind: "mcp" })
+    .map((connection) => {
+      if (!connection.generatedRuntimeJson) return null;
+      try {
+        return JSON.parse(connection.generatedRuntimeJson) as ScriptMcpConnectionDescriptor;
+      } catch {
+        return null;
+      }
+    })
+    .filter((descriptor): descriptor is ScriptMcpConnectionDescriptor => Boolean(descriptor));
+}
+
 export function getScriptApiTypes(context: { agentId?: string; repoId?: string } = {}): string {
   const connections = listScriptConnections({ ...context, kind: "openapi" });
   const blocks = connections
@@ -923,4 +1008,16 @@ export function getScriptApiTypes(context: { agentId?: string; repoId?: string }
     .filter((connection) => connection.generatedTypes)
     .map((connection) => `  ${connection.slug}: ${pascal(connection.slug)}Api;`);
   return `${blocks.join("\n\n")}\n\nexport interface ScriptApiRegistry {\n${members.join("\n")}\n}\n`;
+}
+
+export function getScriptMcpTypes(context: { agentId?: string; repoId?: string } = {}): string {
+  const connections = listScriptConnections({ ...context, kind: "mcp" });
+  const blocks = connections
+    .filter((connection) => connection.generatedTypes)
+    .map((connection) => connection.generatedTypes as string);
+  if (blocks.length === 0) return "export interface ScriptMcpRegistry {}\n";
+  const members = connections
+    .filter((connection) => connection.generatedTypes)
+    .map((connection) => `  ${connection.slug}: ${pascal(connection.slug)}Mcp;`);
+  return `${blocks.join("\n\n")}\n\nexport interface ScriptMcpRegistry {\n${members.join("\n")}\n}\n`;
 }

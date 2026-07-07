@@ -14,13 +14,14 @@ import { createToolRegistrar } from "@/tools/utils";
 
 const scriptConnectionsInputSchema = z.object({
   action: z
-    .enum(["list", "upsert-openapi", "refresh", "disable"])
+    .enum(["list", "upsert-openapi", "upsert-mcp", "refresh", "disable"])
     .describe("List, create/update, refresh, or disable a script connection."),
   id: z.string().uuid().optional(),
   slug: z.string().min(1).max(80).optional(),
   displayName: z.string().max(160).optional(),
   scope: z.enum(["global", "agent", "repo"]).default("global").optional(),
   scopeId: z.string().uuid().nullable().optional(),
+  mcpServerId: z.string().uuid().optional(),
   baseUrl: z.string().url().optional(),
   allowedHosts: z.array(z.string().min(1)).optional(),
   credentialBindingId: z.string().uuid().nullable().optional(),
@@ -156,6 +157,45 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
             message: refreshed.generationError
               ? `Refreshed but generation failed: ${refreshed.generationError}`
               : `Script connection ${refreshed.slug} refreshed.`,
+            connections,
+          },
+        };
+      }
+
+      if (args.action === "upsert-mcp") {
+        if (!args.slug || !args.mcpServerId) {
+          return {
+            content: [{ type: "text", text: "slug and mcpServerId are required." }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: "slug and mcpServerId are required.",
+              connections: listScriptConnections({ includeDisabled: true }),
+            },
+          };
+        }
+
+        const connection = await upsertScriptConnection({
+          id: args.id,
+          slug: args.slug,
+          displayName: args.displayName,
+          kind: "mcp",
+          scope: args.scope ?? "global",
+          scopeId: args.scope === "global" ? null : (args.scopeId ?? null),
+          mcpServerId: args.mcpServerId,
+          enabled: args.enabled !== false,
+          agentId: requestInfo.agentId,
+        });
+
+        const connections = listScriptConnections({ includeDisabled: true });
+        return {
+          content: [{ type: "text", text: `Script MCP connection ${connection.slug} saved.` }],
+          structuredContent: {
+            yourAgentId: requestInfo.agentId,
+            success: !connection.generationError,
+            message: connection.generationError
+              ? `Saved but generation failed: ${connection.generationError}`
+              : `Script MCP connection ${connection.slug} saved.`,
             connections,
           },
         };

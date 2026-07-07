@@ -163,6 +163,7 @@ export const LEGACY_POLICY = {
   "integration.slack.update": leadOnly,
   "credential-binding.manage": leadOnly,
   "script-connection.manage": leadOnly,
+  "script-connection.invoke": anyAuthenticated,
   "config.credential-bindings.write": leadOnly,
   "config.write.any": leadOnly,
   "config.delete.any": leadOnly,

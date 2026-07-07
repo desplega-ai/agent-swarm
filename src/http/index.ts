@@ -80,6 +80,7 @@ import { handlePromptTemplates } from "./prompt-templates";
 import { handleRepos } from "./repos";
 import { describeRequestRoute } from "./route-def";
 import { handleSchedules } from "./schedules";
+import { handleScriptConnectionProxy } from "./script-connection-proxy";
 import { handleScriptRuns } from "./script-runs";
 import { handleScripts } from "./scripts";
 import { handleSessionData } from "./session-data";
@@ -324,6 +325,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),
         () => handleRepos(req, res, pathSegments, queryParams),
         () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
+        () => handleScriptConnectionProxy(req, res, pathSegments, queryParams, myAgentId),
         () => handleScriptRuns(req, res, pathSegments, queryParams, myAgentId),
         () => handleScripts(req, res, pathSegments, queryParams, myAgentId),
         () => handleX(req, res, pathSegments),

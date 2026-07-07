@@ -379,10 +379,16 @@ declare module "swarm-sdk" {
     run?: ScriptRunContext;
     step?: ScriptWorkflowSteps;
     swarm: SwarmSdk & { config: SwarmConfig };
+    api: ScriptApiRegistry;
+    mcp: ScriptMcpRegistry;
     stdlib: ScriptStdlib;
     logger: ScriptLogger;
   }
 
   // biome-ignore lint/suspicious/noExplicitAny: scripts may narrow their args type at the entrypoint.
   export type ScriptMain = (args: any, ctx: ScriptContext) => unknown | Promise<unknown>;
+
+  export interface ScriptApiRegistry {}
+
+  export interface ScriptMcpRegistry {}
 }

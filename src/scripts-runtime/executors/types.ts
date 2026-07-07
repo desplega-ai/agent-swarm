@@ -1,4 +1,4 @@
-import type { ScriptApiConnectionDescriptor } from "../api-types";
+import type { ScriptApiConnectionDescriptor, ScriptMcpConnectionDescriptor } from "../api-types";
 import type { ResolvedCredentialBinding } from "../credential-broker";
 
 export type ScriptFsMode = "none" | "workspace-rw";
@@ -14,6 +14,7 @@ export type SwarmConfigPayload = {
   user: Record<string, { value: string; isSecret: boolean }>;
   egressSecrets?: EgressSecretEntry[];
   apiConnections?: ScriptApiConnectionDescriptor[];
+  mcpConnections?: ScriptMcpConnectionDescriptor[];
 };
 
 export type ScriptResourcePolicy = {

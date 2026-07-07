@@ -39,6 +39,7 @@ import "./pricing";
 import "./repos";
 import "./schedules";
 import "./script-runs";
+import "./script-connection-proxy";
 import "./session-data";
 import "./sessions";
 import "./skills";

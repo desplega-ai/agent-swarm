@@ -9889,6 +9889,66 @@
         }
       }
     },
+    "/api/script-connections/{id}/mcp-call": {
+      "post": {
+        "summary": "Invoke a tool on an MCP script connection",
+        "tags": [
+          "Script Connections"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tool": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "arguments": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "tool"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "MCP call result"
+          },
+          "400": {
+            "description": "Invalid MCP connection or request"
+          },
+          "403": {
+            "description": "Not allowed to invoke this MCP connection"
+          },
+          "404": {
+            "description": "Script connection or agent not found"
+          }
+        }
+      }
+    },
     "/api/session-logs": {
       "post": {
         "summary": "Store session logs",

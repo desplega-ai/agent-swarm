@@ -92,7 +92,11 @@ try {
   const rawArgs = JSON.parse(await Bun.file(requiredEnv("SWARM_SCRIPT_ARGS_FILE")).text());
   // Accept both shapes: callers may pass an already-serialized JSON string.
   const parsedArgs = typeof rawArgs === "string" ? JSON.parse(rawArgs) : rawArgs;
-  const ctx = buildCtx({ swarmConfig, apiConnections: payload.apiConnections });
+  const ctx = buildCtx({
+    swarmConfig,
+    apiConnections: payload.apiConnections,
+    mcpConnections: payload.mcpConnections,
+  });
 
   const sourceText = await Bun.file(requiredEnv("SWARM_SCRIPT_SOURCE_FILE")).text();
   await Bun.write(userModulePath, sourceText);
