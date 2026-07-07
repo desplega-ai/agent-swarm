@@ -1,6 +1,11 @@
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createAgent, deleteSwarmConfig, getDb, upsertSwarmConfig } from "../be/db";
+import { runMigrations } from "../be/migrations/runner";
 import {
   getScriptApiConnectionDescriptors,
   refreshScriptConnection,
@@ -18,6 +23,7 @@ const createdConfigIds: string[] = [];
 const originalFetch = globalThis.fetch;
 const savedEnv = { ...process.env };
 const resources = { memoryMb: 2048, cpuTimeSec: 20, maxStdoutBytes: 1_048_576 };
+const MIGRATION_REBUILD_DB_PATH = "./test-script-connections-graphql-migration.sqlite";
 
 type RegisteredTool = {
   handler: (args: unknown, extra: unknown) => Promise<unknown>;
@@ -31,6 +37,48 @@ function scriptConnectionsTool() {
   const tool = registered["script-connections"];
   if (!tool) throw new Error("script-connections tool not registered");
   return tool;
+}
+
+function removeDbFiles(path: string) {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      unlinkSync(path + suffix);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+  }
+}
+
+function migrationsDir() {
+  return new URL("../be/migrations", import.meta.url).pathname;
+}
+
+function migrationSql(file: string) {
+  return readFileSync(join(migrationsDir(), file), "utf-8");
+}
+
+function markMigrationsAppliedThrough(database: Database, throughVersion: number) {
+  database.run(`
+    CREATE TABLE IF NOT EXISTS _migrations (
+      version INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      applied_at TEXT NOT NULL,
+      checksum TEXT NOT NULL
+    )
+  `);
+  const files = readdirSync(migrationsDir())
+    .filter((file) => file.endsWith(".sql"))
+    .sort();
+  const insert = database.prepare(
+    "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
+  );
+  for (const file of files) {
+    const version = Number.parseInt(file.split("_")[0] ?? "0", 10);
+    if (!version || version > throughVersion) continue;
+    const sql = migrationSql(file);
+    const checksum = createHash("sha256").update(sql).digest("hex");
+    insert.run(version, file.replace(".sql", ""), new Date().toISOString(), checksum);
+  }
 }
 
 function meta(agentId: string) {
@@ -202,6 +250,7 @@ afterEach(() => {
   for (const id of createdConfigIds.splice(0)) {
     deleteSwarmConfig(id);
   }
+  removeDbFiles(MIGRATION_REBUILD_DB_PATH);
 });
 
 describe("script connections", () => {
@@ -312,6 +361,184 @@ describe("script connections", () => {
         private: { type: "boolean" },
       },
     });
+  });
+
+  test("GraphQL connections generate ctx.api descriptor and graphql method types", async () => {
+    const binding = upsertCredentialBinding({
+      configKey: "GRAPHQL_VENDOR_KEY",
+      allowedHosts: ["countries.vendor.test"],
+      headerTemplate: "Authorization: Bearer [REDACTED:GRAPHQL_VENDOR_KEY]",
+    });
+    createdBindingIds.push(binding.id);
+
+    const connection = await upsertScriptConnection({
+      slug: "countries",
+      kind: "graphql",
+      baseUrl: "https://countries.vendor.test/graphql",
+      allowedHosts: ["countries.vendor.test"],
+      credentialBindingId: binding.id,
+    });
+    createdConnectionIds.push(connection.id);
+
+    expect(connection.generationError).toBeNull();
+    expect(connection.generatedRuntimeJson).toBe(
+      JSON.stringify({
+        slug: "countries",
+        kind: "graphql",
+        baseUrl: "https://countries.vendor.test/graphql",
+        credential: {
+          configKey: "GRAPHQL_VENDOR_KEY",
+          headerTemplate: "Authorization: Bearer [REDACTED:GRAPHQL_VENDOR_KEY]",
+        },
+      }),
+    );
+    expect(connection.generatedTypes).toContain("interface CountriesApi");
+    expect(connection.generatedTypes).toContain(
+      "graphql<T = JsonValue>(query: string, variables?: Record<string, JsonValue>): Promise<T>;",
+    );
+
+    const descriptor = getScriptApiConnectionDescriptors().find(
+      (candidate) => candidate.slug === "countries",
+    );
+    expect(descriptor).toEqual({
+      slug: "countries",
+      kind: "graphql",
+      baseUrl: "https://countries.vendor.test/graphql",
+      credential: {
+        configKey: "GRAPHQL_VENDOR_KEY",
+        headerTemplate: "Authorization: Bearer [REDACTED:GRAPHQL_VENDOR_KEY]",
+      },
+    });
+
+    const source = `
+      import type { ScriptMain } from "swarm-sdk";
+      const main: ScriptMain = async (_args, ctx) => {
+        const result = await ctx.api.countries.graphql<{ country: { name: string; capital: string } }>(
+          "query Country($code: ID!) { country(code: $code) { name capital } }",
+          { code: "UA" },
+        );
+        const name: string = result.country.name;
+        const capital: string = result.country.capital;
+        return { name, capital };
+      };
+      export default main;
+    `;
+
+    expect(typecheckScript(source)).toEqual({ ok: true });
+  });
+
+  test("migration 110 rebuild preserves existing script connection rows", () => {
+    removeDbFiles(MIGRATION_REBUILD_DB_PATH);
+    const database = new Database(MIGRATION_REBUILD_DB_PATH, { create: true });
+    try {
+      database.run("CREATE TABLE users (id TEXT PRIMARY KEY)");
+      database.run("CREATE TABLE mcp_servers (id TEXT PRIMARY KEY)");
+      database.exec(migrationSql("101_script_connections.sql"));
+      database.exec(migrationSql("109_oauth_credential_bindings.sql"));
+      markMigrationsAppliedThrough(database, 109);
+
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      database.run(
+        `INSERT INTO script_connections (
+          id, slug, display_name, kind, scope, scope_id, base_url, allowed_hosts_json,
+          credential_binding_id, openapi_spec_source_kind, openapi_spec_source,
+          openapi_spec_json, openapi_spec_etag, openapi_spec_fetched_at, mcp_server_id,
+          generated_types, generated_runtime_json, generated_at, generation_error, enabled,
+          version, created_at, updated_at, created_by, updated_by
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          "preGraphql",
+          "Pre GraphQL",
+          "raw",
+          "global",
+          null,
+          "https://api.vendor.test",
+          JSON.stringify(["api.vendor.test"]),
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "export interface PreGraphqlApi {}",
+          JSON.stringify({ slug: "preGraphql", baseUrl: "https://api.vendor.test" }),
+          now,
+          null,
+          1,
+          7,
+          now,
+          now,
+          null,
+          null,
+        ],
+      );
+
+      runMigrations(database);
+
+      const preserved = database
+        .prepare<
+          {
+            slug: string;
+            kind: string;
+            allowed_hosts_json: string;
+            generated_runtime_json: string | null;
+            version: number;
+          },
+          [string]
+        >(
+          `SELECT slug, kind, allowed_hosts_json, generated_runtime_json, version
+           FROM script_connections WHERE id = ?`,
+        )
+        .get(id);
+      expect(preserved).toEqual({
+        slug: "preGraphql",
+        kind: "raw",
+        allowed_hosts_json: JSON.stringify(["api.vendor.test"]),
+        generated_runtime_json: JSON.stringify({
+          slug: "preGraphql",
+          baseUrl: "https://api.vendor.test",
+        }),
+        version: 7,
+      });
+
+      const indexes = database
+        .prepare<{ name: string }, []>(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'script_connections'",
+        )
+        .all()
+        .map((row) => row.name);
+      expect(indexes).toContain("idx_script_connections_slug_scope");
+      expect(indexes).toContain("idx_script_connections_kind_enabled");
+
+      expect(() => {
+        database.run(
+          `INSERT INTO script_connections (
+            id, slug, kind, scope, base_url, allowed_hosts_json, generated_types,
+            generated_runtime_json, generated_at, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            crypto.randomUUID(),
+            "postGraphql",
+            "graphql",
+            "global",
+            "https://graphql.vendor.test",
+            JSON.stringify(["graphql.vendor.test"]),
+            "export interface PostGraphqlApi {}",
+            JSON.stringify({ slug: "postGraphql", kind: "graphql" }),
+            now,
+            now,
+            now,
+          ],
+        );
+      }).not.toThrow();
+    } finally {
+      database.close();
+    }
   });
 
   test("OpenAPI connections can be registered from a spec URL", async () => {
@@ -559,6 +786,60 @@ describe("script connections", () => {
     } finally {
       server.stop();
     }
+  });
+
+  test("script-connections tool can upsert GraphQL connections", async () => {
+    const suffix = crypto.randomUUID().replace(/-/g, "");
+    const slug = `toolGraphql${suffix}`;
+    const configKey = `TOOL_GRAPHQL_KEY_${suffix}`;
+    const lead = createAgent({
+      name: `script-connections-tool-graphql-lead-${crypto.randomUUID()}`,
+      isLead: true,
+      status: "idle",
+    });
+    const tool = scriptConnectionsTool();
+
+    const result = (await tool.handler(
+      {
+        action: "upsert-graphql",
+        slug,
+        displayName: "Tool GraphQL",
+        baseUrl: "https://graphql.vendor.test/query",
+        allowedHosts: ["graphql.vendor.test"],
+        configKey,
+      },
+      meta(lead.id),
+    )) as {
+      structuredContent: { success: boolean; message: string };
+    };
+
+    expect(result.structuredContent.success).toBe(true);
+    const row = getDb()
+      .prepare<
+        {
+          id: string;
+          kind: string;
+          credential_binding_id: string | null;
+          generated_types: string | null;
+        },
+        [string]
+      >(
+        `SELECT id, kind, credential_binding_id, generated_types
+         FROM script_connections WHERE slug = ?`,
+      )
+      .get(slug);
+    expect(row?.kind).toBe("graphql");
+    expect(row?.generated_types).toContain("graphql<T = JsonValue>");
+    createdConnectionIds.push(row!.id);
+
+    const bindingRow = getDb()
+      .prepare<{ id: string; allowed_hosts_json: string }, [string]>(
+        "SELECT id, allowed_hosts_json FROM script_credential_bindings WHERE config_key = ?",
+      )
+      .get(configKey);
+    expect(bindingRow?.id).toBe(row?.credential_binding_id);
+    expect(bindingRow?.allowed_hosts_json).toBe(JSON.stringify(["graphql.vendor.test"]));
+    createdBindingIds.push(bindingRow!.id);
   });
 
   test("ctx.api runtime emits plain fetch with credential placeholders", async () => {

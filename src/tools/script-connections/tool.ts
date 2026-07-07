@@ -14,7 +14,7 @@ import { createToolRegistrar } from "@/tools/utils";
 
 const scriptConnectionsInputSchema = z.object({
   action: z
-    .enum(["list", "upsert-openapi", "upsert-mcp", "refresh", "disable"])
+    .enum(["list", "upsert-openapi", "upsert-mcp", "upsert-graphql", "refresh", "disable"])
     .describe("List, create/update, refresh, or disable a script connection."),
   id: z.string().uuid().optional(),
   slug: z.string().min(1).max(80).optional(),
@@ -46,7 +46,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
     {
       title: "Script Connections",
       description:
-        "Lead-only registry management for scripts ctx.api/ctx.mcp connections. Phase 1 supports OpenAPI ctx.api connections with generated args and response types.",
+        "Lead-only registry management for scripts ctx.api/ctx.mcp connections. Supports OpenAPI, MCP, and GraphQL script connections.",
       annotations: { idempotentHint: true },
       inputSchema: scriptConnectionsInputSchema,
       outputSchema: scriptConnectionsOutputSchema,
@@ -196,6 +196,60 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
             message: connection.generationError
               ? `Saved but generation failed: ${connection.generationError}`
               : `Script MCP connection ${connection.slug} saved.`,
+            connections,
+          },
+        };
+      }
+
+      if (args.action === "upsert-graphql") {
+        if (!args.slug || !args.baseUrl || !args.allowedHosts?.length) {
+          return {
+            content: [{ type: "text", text: "slug, baseUrl, and allowedHosts are required." }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: "slug, baseUrl, and allowedHosts are required.",
+              connections: listScriptConnections({ includeDisabled: true }),
+            },
+          };
+        }
+
+        let credentialBindingId = args.credentialBindingId ?? null;
+        if (!credentialBindingId && args.configKey) {
+          const placeholder = placeholderForConfigKey(args.configKey);
+          const binding = upsertCredentialBinding({
+            configKey: args.configKey,
+            allowedHosts: args.allowedHosts,
+            headerTemplate: args.headerTemplate ?? `Authorization: Bearer ${placeholder}`,
+            queryTemplate: args.queryTemplate,
+            scope: args.scope ?? "global",
+            scopeId: args.scope === "global" ? null : (args.scopeId ?? null),
+          });
+          credentialBindingId = binding.id;
+        }
+
+        const connection = await upsertScriptConnection({
+          id: args.id,
+          slug: args.slug,
+          displayName: args.displayName,
+          kind: "graphql",
+          scope: args.scope ?? "global",
+          scopeId: args.scope === "global" ? null : (args.scopeId ?? null),
+          baseUrl: args.baseUrl,
+          allowedHosts: args.allowedHosts,
+          credentialBindingId,
+          enabled: args.enabled !== false,
+        });
+
+        const connections = listScriptConnections({ includeDisabled: true });
+        return {
+          content: [{ type: "text", text: `Script GraphQL connection ${connection.slug} saved.` }],
+          structuredContent: {
+            yourAgentId: requestInfo.agentId,
+            success: !connection.generationError,
+            message: connection.generationError
+              ? `Saved but generation failed: ${connection.generationError}`
+              : `Script GraphQL connection ${connection.slug} saved.`,
             connections,
           },
         };

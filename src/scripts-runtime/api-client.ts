@@ -1,15 +1,32 @@
 import type {
   ScriptApiConnectionDescriptor,
+  ScriptApiCredentialDescriptor,
   ScriptApiOperationDescriptor,
   ScriptApiRegistryClient,
 } from "./api-types";
 
-function applyTemplate(template: string, _placeholder: string): [string, string] | null {
+function applyTemplate(template: string): [string, string] | null {
   const idx = template.indexOf("=");
   if (idx >= 0) return [template.slice(0, idx), template.slice(idx + 1)];
   const colon = template.indexOf(":");
   if (colon >= 0) return [template.slice(0, colon).trim(), template.slice(colon + 1).trim()];
   return null;
+}
+
+function applyCredential(
+  credential: ScriptApiCredentialDescriptor | null,
+  url: URL,
+  headers: Headers,
+) {
+  if (!credential) return;
+  if (credential.headerTemplate) {
+    const parsed = applyTemplate(credential.headerTemplate);
+    if (parsed) headers.set(parsed[0], parsed[1]);
+  }
+  if (credential.queryTemplate) {
+    const parsed = applyTemplate(credential.queryTemplate);
+    if (parsed) url.searchParams.set(parsed[0], parsed[1]);
+  }
 }
 
 function operationUrl(
@@ -44,12 +61,56 @@ function operationUrl(
   return url;
 }
 
+function graphqlErrorMessage(errors: unknown): string {
+  if (!Array.isArray(errors)) return JSON.stringify(errors);
+  return errors
+    .map((error) => {
+      if (error && typeof error === "object" && "message" in error) {
+        return String((error as { message: unknown }).message);
+      }
+      return JSON.stringify(error);
+    })
+    .join("; ");
+}
+
 export function createApiRegistryClient(
   descriptors: ScriptApiConnectionDescriptor[] = [],
 ): ScriptApiRegistryClient {
   const registry: ScriptApiRegistryClient = {};
   for (const descriptor of descriptors) {
     const client: ScriptApiRegistryClient[string] = {};
+    if (descriptor.kind === "graphql") {
+      client.graphql = async (query, variables) => {
+        if (typeof query !== "string") {
+          throw new Error(`ctx.api.${descriptor.slug}.graphql query must be a string`);
+        }
+        const url = new URL(descriptor.baseUrl);
+        const headers = new Headers({ "content-type": "application/json" });
+        applyCredential(descriptor.credential, url, headers);
+        const response = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ query, variables }),
+        });
+        if (!response.ok) {
+          throw new Error(`ctx.api.${descriptor.slug}.graphql failed with ${response.status}`);
+        }
+        const body = (await response.json()) as unknown;
+        if (body && typeof body === "object") {
+          const record = body as { data?: unknown; errors?: unknown };
+          if (Array.isArray(record.errors) && !("data" in record)) {
+            throw new Error(
+              `ctx.api.${descriptor.slug}.graphql failed: ${graphqlErrorMessage(record.errors)}`,
+            );
+          }
+          if ("data" in record) return record.data;
+        }
+        return body;
+      };
+      registry[descriptor.slug] = client;
+      continue;
+    }
+
     for (const operation of descriptor.operations) {
       client[operation.name] = async (rawArgs = {}) => {
         const args = rawArgs as Record<string, unknown>;
@@ -67,17 +128,7 @@ export function createApiRegistryClient(
           headers.set(param.name, String(value));
         }
 
-        const placeholder = descriptor.credential
-          ? `[REDACTED:${descriptor.credential.configKey}]`
-          : null;
-        if (placeholder && descriptor.credential?.headerTemplate) {
-          const parsed = applyTemplate(descriptor.credential.headerTemplate, placeholder);
-          if (parsed) headers.set(parsed[0], parsed[1]);
-        }
-        if (placeholder && descriptor.credential?.queryTemplate) {
-          const parsed = applyTemplate(descriptor.credential.queryTemplate, placeholder);
-          if (parsed) url.searchParams.set(parsed[0], parsed[1]);
-        }
+        applyCredential(descriptor.credential, url, headers);
 
         const init: RequestInit = { method: operation.method, headers };
         if (operation.hasBody) {

@@ -28,16 +28,30 @@ export type ScriptApiOperationDescriptor = {
   responseType: string;
 };
 
-export type ScriptApiConnectionDescriptor = {
+export type ScriptApiCredentialDescriptor = {
+  configKey: string;
+  headerTemplate?: string;
+  queryTemplate?: string;
+};
+
+export type ScriptOpenApiConnectionDescriptor = {
   slug: string;
+  kind?: "openapi";
   baseUrl: string;
-  credential: {
-    configKey: string;
-    headerTemplate?: string;
-    queryTemplate?: string;
-  } | null;
+  credential: ScriptApiCredentialDescriptor | null;
   operations: ScriptApiOperationDescriptor[];
 };
+
+export type ScriptGraphqlConnectionDescriptor = {
+  slug: string;
+  kind: "graphql";
+  baseUrl: string;
+  credential: ScriptApiCredentialDescriptor | null;
+};
+
+export type ScriptApiConnectionDescriptor =
+  | ScriptOpenApiConnectionDescriptor
+  | ScriptGraphqlConnectionDescriptor;
 
 export type ScriptMcpToolDescriptor = {
   name: string;
@@ -54,7 +68,7 @@ export type ScriptMcpConnectionDescriptor = {
 
 export type ScriptApiRegistryClient = Record<
   string,
-  Record<string, (args?: Record<string, unknown>) => Promise<unknown>>
+  Record<string, (...args: unknown[]) => Promise<unknown>>
 >;
 
 export type ScriptMcpRegistryClient = Record<

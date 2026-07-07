@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { createApiRegistryClient } from "../scripts-runtime/api-client";
 import { runScript } from "../scripts-runtime/loader";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 
 const savedEnv = { ...process.env };
+const originalFetch = globalThis.fetch;
 const resources = { memoryMb: 2048, cpuTimeSec: 20, maxStdoutBytes: 1_048_576 };
 
 beforeEach(() => {
@@ -13,6 +15,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  globalThis.fetch = originalFetch;
   for (const key of Object.keys(process.env)) {
     if (!(key in savedEnv)) delete process.env[key];
   }
@@ -374,5 +377,74 @@ describe("runScript", () => {
     expect(output.error).toBeUndefined();
     expect(output.result).toEqual({ doubled: 84 });
     expect(output.exitCode).toBe(0);
+  });
+
+  test("ctx.api GraphQL client posts JSON body with credential placeholders", async () => {
+    let observed: {
+      url: string;
+      method: string;
+      contentType: string | null;
+      authorization: string | null;
+      body: unknown;
+    } | null = null;
+    globalThis.fetch = (async (input, init) => {
+      observed = {
+        url: String(input),
+        method: init?.method ?? "GET",
+        contentType: new Headers(init?.headers).get("content-type"),
+        authorization: new Headers(init?.headers).get("authorization"),
+        body: JSON.parse(String(init?.body)),
+      };
+      return Response.json({ data: { country: { name: "Ukraine", capital: "Kyiv" } } });
+    }) as typeof fetch;
+
+    const client = createApiRegistryClient([
+      {
+        slug: "countries",
+        kind: "graphql",
+        baseUrl: "https://countries.vendor.test/graphql",
+        credential: {
+          configKey: "COUNTRIES_KEY",
+          headerTemplate: "Authorization: Bearer [REDACTED:COUNTRIES_KEY]",
+        },
+      },
+    ]);
+
+    const result = await client.countries.graphql(
+      "query Country($code: ID!) { country(code: $code) { name capital } }",
+      {
+        code: "UA",
+      },
+    );
+
+    expect(result).toEqual({ country: { name: "Ukraine", capital: "Kyiv" } });
+    expect(observed).toEqual({
+      url: "https://countries.vendor.test/graphql",
+      method: "POST",
+      contentType: "application/json",
+      authorization: "Bearer [REDACTED:COUNTRIES_KEY]",
+      body: {
+        query: "query Country($code: ID!) { country(code: $code) { name capital } }",
+        variables: { code: "UA" },
+      },
+    });
+  });
+
+  test("ctx.api GraphQL client throws on errors-only responses", async () => {
+    globalThis.fetch = (async () =>
+      Response.json({ errors: [{ message: "Cannot query field nope" }] })) as typeof fetch;
+
+    const client = createApiRegistryClient([
+      {
+        slug: "countries",
+        kind: "graphql",
+        baseUrl: "https://countries.vendor.test/graphql",
+        credential: null,
+      },
+    ]);
+
+    await expect(client.countries.graphql("query { nope }")).rejects.toThrow(
+      /Cannot query field nope/,
+    );
   });
 });

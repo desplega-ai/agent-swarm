@@ -16,7 +16,7 @@ import {
 import { listMcpServerTools } from "./mcp-proxy";
 
 export type ScriptConnectionScope = "global" | "agent" | "repo";
-export type ScriptConnectionKind = "raw" | "openapi" | "mcp";
+export type ScriptConnectionKind = "raw" | "openapi" | "mcp" | "graphql";
 
 export type ScriptCredentialBindingRecord = CredentialBinding & {
   id: string;
@@ -596,13 +596,7 @@ export function buildGeneratedArtifacts(input: {
 }): { generatedTypes: string; generatedRuntimeJson: string } {
   const slug = normalizeSlug(input.slug);
   const { operations, types } = extractOperations(input.openapiSpec, slug);
-  const credential = input.credentialBinding
-    ? {
-        configKey: input.credentialBinding.configKey,
-        headerTemplate: input.credentialBinding.headerTemplate,
-        queryTemplate: input.credentialBinding.queryTemplate,
-      }
-    : null;
+  const credential = credentialDescriptor(input.credentialBinding);
   const descriptor: ScriptApiConnectionDescriptor = {
     slug,
     baseUrl: input.baseUrl,
@@ -616,6 +610,36 @@ export function buildGeneratedArtifacts(input: {
       (operation) =>
         `  ${operation.name}(args: ${operation.requestType}): Promise<${operation.responseType}>;`,
     ),
+    "}",
+  ].join("\n");
+  return { generatedTypes, generatedRuntimeJson: JSON.stringify(descriptor) };
+}
+
+function credentialDescriptor(binding: ScriptCredentialBindingRecord | null) {
+  return binding
+    ? {
+        configKey: binding.configKey,
+        headerTemplate: binding.headerTemplate,
+        queryTemplate: binding.queryTemplate,
+      }
+    : null;
+}
+
+export function buildGraphqlGeneratedArtifacts(input: {
+  slug: string;
+  baseUrl: string;
+  credentialBinding: ScriptCredentialBindingRecord | null;
+}): { generatedTypes: string; generatedRuntimeJson: string } {
+  const slug = normalizeSlug(input.slug);
+  const descriptor: ScriptApiConnectionDescriptor = {
+    slug,
+    kind: "graphql",
+    baseUrl: input.baseUrl,
+    credential: credentialDescriptor(input.credentialBinding),
+  };
+  const generatedTypes = [
+    `export interface ${pascal(slug)}Api {`,
+    "  graphql<T = JsonValue>(query: string, variables?: Record<string, JsonValue>): Promise<T>;",
     "}",
   ].join("\n");
   return { generatedTypes, generatedRuntimeJson: JSON.stringify(descriptor) };
@@ -845,6 +869,25 @@ export async function upsertScriptConnection(data: {
     }
   }
 
+  if (data.kind === "graphql") {
+    if (!data.baseUrl) throw new Error("baseUrl is required for GraphQL connections");
+    if (!data.allowedHosts?.length) {
+      throw new Error("allowedHosts is required for GraphQL connections");
+    }
+    new URL(data.baseUrl);
+    const binding = data.credentialBindingId
+      ? getCredentialBindingById(data.credentialBindingId)
+      : null;
+    const artifacts = buildGraphqlGeneratedArtifacts({
+      slug: data.slug,
+      baseUrl: data.baseUrl,
+      credentialBinding: binding,
+    });
+    generatedTypes = artifacts.generatedTypes;
+    generatedRuntimeJson = artifacts.generatedRuntimeJson;
+    generatedAt = now;
+  }
+
   const params = [
     normalizedSlug,
     data.displayName ?? null,
@@ -971,7 +1014,8 @@ export function setScriptConnectionEnabled(
 export function getScriptApiConnectionDescriptors(
   context: { agentId?: string; repoId?: string } = {},
 ): ScriptApiConnectionDescriptor[] {
-  return listScriptConnections({ ...context, kind: "openapi" })
+  return listScriptConnections(context)
+    .filter((connection) => connection.kind === "openapi" || connection.kind === "graphql")
     .map((connection) => {
       if (!connection.generatedRuntimeJson) return null;
       try {
@@ -999,7 +1043,9 @@ export function getScriptMcpConnectionDescriptors(
 }
 
 export function getScriptApiTypes(context: { agentId?: string; repoId?: string } = {}): string {
-  const connections = listScriptConnections({ ...context, kind: "openapi" });
+  const connections = listScriptConnections(context).filter(
+    (connection) => connection.kind === "openapi" || connection.kind === "graphql",
+  );
   const blocks = connections
     .filter((connection) => connection.generatedTypes)
     .map((connection) => connection.generatedTypes as string);
