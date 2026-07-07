@@ -35,6 +35,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
       outputSchema: z.object({
         success: z.boolean(),
         message: z.string(),
+        messageTs: z.string().optional(),
       }),
     },
     async ({ inboxMessageId, taskId, message }, requestInfo, _meta) => {
@@ -119,7 +120,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
       try {
         const slackMessage = markdownToSlack(message);
 
-        await withAutoJoin(app.client, slackChannelId, () =>
+        const result = await withAutoJoin(app.client, slackChannelId, () =>
           app.client.chat.postMessage({
             channel: slackChannelId,
             thread_ts: slackThreadTs,
@@ -138,6 +139,8 @@ export const registerSlackReplyTool = (server: McpServer) => {
           }),
         );
 
+        const messageTs = result.ts;
+
         // After successful postMessage, mark task as having a Slack reply
         if (taskId) {
           markTaskSlackReplySent(taskId);
@@ -145,8 +148,13 @@ export const registerSlackReplyTool = (server: McpServer) => {
         }
 
         return {
-          content: [{ type: "text", text: "Reply sent successfully." }],
-          structuredContent: { success: true, message: "Reply sent successfully." },
+          content: [
+            {
+              type: "text",
+              text: `Reply sent successfully.${messageTs ? ` Message timestamp: ${messageTs}` : ""}`,
+            },
+          ],
+          structuredContent: { success: true, message: "Reply sent successfully.", messageTs },
         };
       } catch (error) {
         return {

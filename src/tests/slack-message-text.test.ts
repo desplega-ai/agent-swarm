@@ -469,9 +469,9 @@ describe("parseSlackTs", () => {
   });
 
   test("extracts the ts from a full permalink URL", () => {
-    expect(
-      parseSlackTs("https://example.slack.com/archives/C0123456789/p1783411554596189"),
-    ).toBe("1783411554.596189");
+    expect(parseSlackTs("https://example.slack.com/archives/C0123456789/p1783411554596189")).toBe(
+      "1783411554.596189",
+    );
   });
 
   test("extracts the ts from a permalink URL with a thread_ts query param", () => {

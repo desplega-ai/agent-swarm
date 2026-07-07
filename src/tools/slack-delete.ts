@@ -46,9 +46,7 @@ export const registerSlackDeleteTool = (server: McpServer) => {
 
       if (!agent.isLead) {
         return {
-          content: [
-            { type: "text", text: "Deleting Slack messages requires lead privileges." },
-          ],
+          content: [{ type: "text", text: "Deleting Slack messages requires lead privileges." }],
           structuredContent: {
             success: false,
             message: "Deleting Slack messages requires lead privileges.",

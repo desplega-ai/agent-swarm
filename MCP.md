@@ -47,6 +47,8 @@
   - [slack-list-channels](#slack-list-channels)
   - [slack-upload-file](#slack-upload-file)
   - [slack-download-file](#slack-download-file)
+  - [slack-delete](#slack-delete)
+  - [slack-update](#slack-update)
   - [register-agentmail-inbox](#register-agentmail-inbox)
   - [register-kapso-number](#register-kapso-number)
   - [unregister-kapso-number](#unregister-kapso-number)
@@ -556,6 +558,29 @@ Download a file from Slack by file ID or URL. Files are saved to the agent's dow
 | `url` | `string` | No | - | Direct URL to download (url_private_download from a file object). |
 | `savePath` | `string` | No | - | Where to save the file. Can be a directory or full path. Defaults to /workspace/shared/downloads/{agentId}/slack/ |
 | `filename` | `string` | No | - | Filename to use when saving. Only used if savePath is a directory. |
+
+### slack-delete
+
+**Delete a Slack message**
+
+Deletes a Slack message that THIS bot authored (e.g. a message previously posted via `slack-post`/`slack-reply`). Cannot delete messages authored by humans or other apps. Requires lead privileges.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `channelId` | `string` | Yes | - | The Slack channel ID the message is in. |
+| `messageTs` | `string` | Yes | - | Timestamp of the message to delete. Accepts the dotted form (1783411554.596189), the 'p' deep-link form (p1783411554596189), or a full Slack permalink URL. |
+
+### slack-update
+
+**Edit a Slack message**
+
+Edits (in place) the text of a Slack message that THIS bot authored — use it to post corrections to your own messages. Cannot edit messages authored by humans or other apps. Note: editing may reset the message's display name/icon to the app default (Slack's chat.update cannot set the crown persona). Requires lead privileges.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `channelId` | `string` | Yes | - | The Slack channel ID the message is in. |
+| `messageTs` | `string` | Yes | - | Timestamp of the message to edit (dotted, 'p' deep-link, or full permalink URL). |
+| `message` | `string` | Yes | - | The new message content. |
 
 ### register-agentmail-inbox
 
