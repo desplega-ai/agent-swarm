@@ -28,6 +28,11 @@ const putFavorite = route({
   pattern: ["api", "favorites"],
   summary: "Set favorite state for an item",
   tags: ["Favorites"],
+  // Self-scoped write: the row is keyed to the authenticated user
+  // (resolveHttpAuditUserId), never a body-supplied id, so there is no
+  // cross-principal authorization to gate — a user can only favorite for
+  // themselves.
+  rbac: { ungated: "self-scoped to the authenticated user; no cross-principal access" },
   body: z.object({
     itemType: FavoriteItemTypeSchema,
     itemId: z.string().min(1),

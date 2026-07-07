@@ -398,9 +398,46 @@ function checkRoutes(): string[] {
   return errors;
 }
 
+// ─── 4. Route-import completeness ────────────────────────────────────────────
+
+/**
+ * The route checks only see routes whose module is imported by
+ * `src/http/all-routes.ts` (that side-effect list is what populates
+ * `routeRegistry`). A handler file that registers routes but is missing from
+ * the list escapes the coverage check entirely AND generated OpenAPI — exactly
+ * how `PUT /api/favorites` slipped through (codex review, PR #921). This guard
+ * makes the list self-verifying: every `src/http` file that calls
+ * `= route(` must be imported.
+ */
+function checkRouteImports(): string[] {
+  const errors: string[] = [];
+  const httpDir = join(REPO_ROOT, "src/http");
+
+  const imported = new Set<string>();
+  for (const m of readFileSync(join(httpDir, "all-routes.ts"), "utf8").matchAll(/"\.\/([^"]+)"/g)) {
+    imported.add(m[1]);
+  }
+
+  for (const file of walk(httpDir)) {
+    const rel = relative(httpDir, file).replace(/\.ts$/, "");
+    if (rel === "all-routes" || rel === "route-def") continue;
+    // Real route definitions are `const x = route({ ... })`; the bare
+    // `route({` string also appears in comments, so key on the assignment.
+    if (!/=\s*route\(/.test(readFileSync(file, "utf8"))) continue;
+    if (!imported.has(rel)) {
+      errors.push(
+        `src/http/${rel}.ts registers routes but is not imported in src/http/all-routes.ts — ` +
+          `its routes escape the coverage check and OpenAPI. Add \`import "./${rel}";\`.`,
+      );
+    }
+  }
+  return errors;
+}
+
 // ─── Run ─────────────────────────────────────────────────────────────────────
 
 const sections: Array<[string, string[]]> = [
+  ["Route-import completeness", checkRouteImports()],
   ["MCP tools", checkTools()],
   ["Permission verbs", checkVerbs()],
   ["HTTP routes", checkRoutes()],

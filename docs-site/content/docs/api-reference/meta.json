@@ -15,6 +15,7 @@
     "events",
     "external-apis",
     "fs",
+    "favorites",
     "heartbeat",
     "inbox-state",
     "integrations",
