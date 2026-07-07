@@ -58,8 +58,8 @@ export type BasePromptArgs = {
   traits?: ProviderTraits;
   /**
    * Harness provider for this session. Gates provider-specific prompt blocks
-   * (e.g. the context-mode block is excluded for `pi`, which has no
-   * context-mode MCP wiring yet — deferred to DES-514).
+   * (e.g. the context-mode MCP tool list is excluded for `pi`, which has no
+   * context-mode MCP wiring yet).
    */
   provider?: ProviderName;
   name?: string;
@@ -102,10 +102,11 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   } else if (role === "lead") {
     compositeEventType = "system.session.lead";
   } else if (args.provider === "pi") {
-    // Pi has no context-mode MCP wiring yet (deferred to DES-514), so it uses a
-    // worker composite that omits the context_mode block to avoid advertising
-    // phantom `ctx_*` tools. All other local providers (claude, codex, opencode)
-    // keep the block via the standard worker composite.
+    // Pi has no context-mode MCP wiring yet, so it uses a worker composite that
+    // omits the context-mode tool list while still including the shared script
+    // rubric and seed-script guidance. All other local providers (claude,
+    // codex, opencode) keep the full context block via the standard worker
+    // composite.
     compositeEventType = "system.session.worker.pi";
   } else {
     compositeEventType = "system.session.worker";
