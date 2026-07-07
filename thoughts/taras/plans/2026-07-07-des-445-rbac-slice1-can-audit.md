@@ -4,7 +4,9 @@ author: Claude
 planner: Claude
 topic: "DES-445 RBAC — Slice 1: central can() + audit log (increments 1+2)"
 tags: [plan, rbac, auth, security, des-445]
-status: reviewed
+status: in-progress
+last_updated: 2026-07-07
+last_updated_by: Claude (phase-1 agent)
 related_brainstorm: thoughts/taras/brainstorms/2026-05-15-rbac-for-swarm.md
 related_research: thoughts/taras/research/2026-07-06-rbac-enforcement-surfaces.md
 ---
@@ -108,12 +110,12 @@ Deliverables: (a) the definitive, HEAD-verified migration checklist (every `isLe
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] New characterization tests pass against unmodified code: `bun test src/tests/rbac-charact-skills.test.ts && bun test src/tests/rbac-charact-slack.test.ts && bun test src/tests/rbac-charact-misc-tools.test.ts`
-- [ ] Full suite still green: `bun test`
-- [ ] Types + lint: `bun run tsc:check && bun run lint`
+- [x] New characterization tests pass against unmodified code: `bun test src/tests/rbac-charact-skills.test.ts && bun test src/tests/rbac-charact-slack.test.ts && bun test src/tests/rbac-charact-misc-tools.test.ts`
+- [x] Full suite still green: `bun test`
+- [x] Types + lint: `bun run tsc:check && bun run lint`
 
 #### Automated QA:
-- [ ] Agent cross-checks the appendix inventory table against a fresh `grep -rn "isLead" src/tools src/http --include='*.ts'` — every hit row appears in the table with a classification; every HARD row has a test (new or pre-existing, referenced by file)
+- [x] Agent cross-checks the appendix inventory table against a fresh `grep -rn "isLead" src/tools src/http --include='*.ts'` — every hit row appears in the table with a classification; every HARD row has a test (new or pre-existing, referenced by file)
 
 #### Manual Verification:
 - [ ] Taras skims the classification table — especially the verdicts on `slack-reply.ts`, `send-task.ts`, `http/agents.ts`, `join-swarm.ts`, `http/poll.ts`
@@ -394,7 +396,76 @@ kill %1
 
 ### A. Gate inventory (updated in Phase 1)
 
-Baseline = research §3's 34-site table (authoritative rules + file:lines). Phase 1 appends the classification of the post-pin drift files: `slack-reply.ts`, `send-task.ts`, `join-swarm.ts`, `http/agents.ts`, `http/poll.ts`, `http/memory.ts` (expected SOFT), `memory-search.ts`/`memory-get.ts` (expected SOFT). Every HARD row gets: verb, migrating phase, characterization test file.
+Definitive classification of `grep -rn "isLead" src/tools src/http --include='*.ts'` at HEAD 2026-07-07 (Phase-1 sweep): **61 raw hits across 42 files** → **36 HARD-gate sites** (34 research-§3 + 2 post-pin: `slack-delete.ts`, `slack-update.ts` from PR #918), **10 SOFT-scoping hits** (memory read-visibility, excluded — memory RBAC track), **12 NON-AUTHZ hits**, **4 helper-plumbing hits** (folded into their gate row).
+
+#### HARD gates (migrate through `can()`)
+
+Rules verified against HEAD source. "Test" = characterization coverage (new = added in Phase 1).
+
+| # | Site | Rule (today) | Verb (Phase-3 draft) | Phase | Characterization test |
+|---|---|---|---|---|---|
+| 1 | `src/tools/manage-user.ts:89` | lead-only | `user.manage` | P4 | `mcp-tools-user.test.ts:311` (pre-existing) |
+| 2 | `src/tools/update-profile.ts:175` | lead-only (other-agent target) | `agent.profile.update.any` | P4 | `update-profile-auth.test.ts` (pre-existing) |
+| 3 | `src/tools/cancel-task.ts:74` | lead OR task-creator | `task.cancel.any` | P4 | `rbac-charact-misc-tools.test.ts` (new — first denial coverage) |
+| 4 | `src/tools/inject-learning.ts:48` | lead-only | `memory.learning.inject` | P4 | `rbac-charact-misc-tools.test.ts` (new — real handler test, supersedes the re-implemented predicate in `self-improvement.test.ts:371-379`) |
+| 5 | `src/tools/delete-channel.ts:48` | lead-only | `channel.delete` | P4 | `rbac-charact-slack.test.ts` (new) |
+| 6 | `src/tools/context-history.ts:83` | lead-only (other-agent) | `agent.context.read.any` | P4 | `rbac-charact-misc-tools.test.ts` (new) |
+| 7 | `src/tools/context-diff.ts:95` | lead-only (other-agent) | `agent.context.read.any` | P4 | `rbac-charact-misc-tools.test.ts` (new) |
+| 8 | `src/tools/memory-delete.ts:54,56` | owner OR (lead AND scope=swarm) | `memory.delete.any` | P4 | `rbac-charact-misc-tools.test.ts` (new — incl. lead+agent-scope deny edge) |
+| 9 | `src/tools/register-kapso-number.ts:71` | lead-only | `integration.kapso.manage` | P4 | `rbac-charact-slack.test.ts` (new) |
+| 10 | `src/tools/register-kapso-number.ts:174` | lead-only | `integration.kapso.manage` | P4 | `rbac-charact-slack.test.ts` (new) |
+| 11 | `src/tools/credential-bindings/tool.ts:60` | lead-only | `credential-binding.manage` | P4 | `rbac-charact-misc-tools.test.ts` (new) |
+| 12 | `src/tools/script-connections/tool.ts:63` | lead-only | `script-connection.manage` | P4 | `rbac-charact-misc-tools.test.ts` (new) |
+| 13 | `src/tools/swarm-config/set-config.ts:100` | lead-only (`SCRIPT_CREDENTIAL_BINDINGS` key) | `config.credential-bindings.write` | P4 | `swarm-config-reserved-keys.test.ts:268` (pre-existing) |
+| 14 | `src/tools/slack-post.ts:51` | lead-only | `integration.slack.post` | P4 | `rbac-charact-slack.test.ts` (new) |
+| 15 | `src/tools/slack-read.ts:146` | lead-only (direct-channel branch only; inbox/task branches are ownership checks on other fields) | `integration.slack.read` | P4 | `rbac-charact-slack.test.ts` (new) |
+| 16 | `src/tools/slack-start-thread.ts:46` | lead-only | `integration.slack.thread.start` | P4 | `rbac-charact-slack.test.ts` (new) |
+| 17 | `src/tools/slack-upload-file.ts:219` | lead-only (direct-channel branch) | `integration.slack.upload` | P4 | `rbac-charact-slack.test.ts` (new) |
+| 18 | `src/tools/slack-delete.ts:47` | lead-only — **post-pin (PR #918)** | `integration.slack.delete` (add to registry) | P4 | `slack-delete.test.ts:91` (pre-existing) |
+| 19 | `src/tools/slack-update.ts:50` | lead-only — **post-pin (PR #918)** | `integration.slack.update` (add to registry) | P4 | `slack-update.test.ts:94` (pre-existing) |
+| 20 | `src/tools/skills/skill-create.ts:47` | lead-only (swarm scope) | `skill.create.swarm` | P4 | `rbac-charact-skills.test.ts` (new) |
+| 21 | `src/tools/skills/skill-install.ts:40` | lead-only (cross-agent) | `skill.install.any` | P4 | `rbac-charact-skills.test.ts` (new) |
+| 22 | `src/tools/skills/skill-install-remote.ts:46` | lead-only | `skill.install.global` | P4 | `rbac-charact-skills.test.ts` (new) |
+| 23 | `src/tools/skills/skill-uninstall.ts:35` | lead-only (cross-agent) | `skill.uninstall.any` | P4 | `rbac-charact-skills.test.ts` (new) |
+| 24 | `src/tools/skills/skill-update.ts:70` | owner OR lead | `skill.update.any` | P4 | `skill-update-scope.test.ts` (pre-existing) |
+| 25 | `src/tools/skills/skill-update.ts:116` | lead-only (promote to swarm) | `skill.promote.swarm` | P4 | `skill-update-scope.test.ts:100` (pre-existing) |
+| 26 | `src/tools/skills/skill-delete.ts:46` | owner OR lead | `skill.delete.any` | P4 | `rbac-charact-skills.test.ts` (new) |
+| 27 | `src/tools/mcp-servers/mcp-server-create.ts:88` | lead-only (swarm/global scope) | `mcp-server.create.swarm` | P4 | `rbac-charact-skills.test.ts` (new — both scopes) |
+| 28 | `src/tools/mcp-servers/mcp-server-install.ts:41` | lead-only (cross-agent) | `mcp-server.install.any` | P4 | `rbac-charact-skills.test.ts` (new) |
+| 29 | `src/tools/mcp-servers/mcp-server-uninstall.ts:36` | lead-only (cross-agent) | `mcp-server.uninstall.any` | P4 | `rbac-charact-skills.test.ts` (new) |
+| 30 | `src/tools/mcp-servers/mcp-server-delete.ts:43` | owner OR lead | `mcp-server.delete.any` | P4 | `rbac-charact-skills.test.ts` (new) |
+| 31 | `src/tools/mcp-servers/mcp-server-update.ts:62` | owner OR lead | `mcp-server.update.any` | P4 | `rbac-charact-skills.test.ts` (new) |
+| 32 | `src/tools/kv/kv-set.ts:22` | own `task:agent:` namespace OR lead (page branch stays inline) | `kv.write.any` | P4 | `kv-tool.test.ts:178,188` (pre-existing) |
+| 33 | `src/tools/kv/kv-delete.ts:17` | own `task:agent:` namespace OR lead | `kv.write.any` | P4 | `rbac-charact-misc-tools.test.ts` (new) |
+| 34 | `src/tools/kv/kv-incr.ts:17` | own `task:agent:` namespace OR lead | `kv.write.any` | P4 | `rbac-charact-misc-tools.test.ts` (new) |
+| 35 | `src/http/kv.ts:329` (`authorizeWrite`; plumbing hits `:288,294,297,299`) | own `task:agent:` namespace OR lead → 403; `task:page:*` branch (`:318-327`) is a request-shape guard, stays inline | `kv.write.any` | P5 | `kv-http.test.ts:269-311` (pre-existing) |
+| 36 | `src/http/fs.ts:442` (`canMutateTask`) | operator OR user OR lead OR assignee OR creator → 403 | `task.fs.mutate` | P5 | Phase 2 → `rbac-charact-http.test.ts` (new) |
+
+Plus the **documented-but-unenforced** `src/http/scripts.ts` global write/delete gap (no `isLead` hit — that's the bug): verbs `script.global.write` / `script.global.delete`, closed in P5, tests flipped in `scripts-http.test.ts:319-345`.
+
+#### SOFT scoping (excluded — memory RBAC parallel track)
+
+| Site | What it does |
+|---|---|
+| `src/tools/memory-search.ts:81,93,100,168` | lead widens memory read-visibility (recall scope) |
+| `src/tools/memory-get.ts:138` | same — read-visibility flag into store |
+| `src/http/memory.ts:506,513` | recall routes pin `isLead: false` (worker-visibility view) |
+| `src/http/memory.ts:590,638` | admin/list routes pin `isLead: true` (lead-visibility view) |
+
+#### NON-AUTHZ (no migration; allowlisted in the Phase-5 CI check)
+
+| Site | Verdict |
+|---|---|
+| `src/tools/slack-reply.ts:129` | Cosmetic — picks `:crown:` vs `:robot_face:` icon_emoji (verified 2026-07-07) |
+| `src/tools/join-swarm.ts:83,95,134,140` | Registration-time lead assignment (first-lead-wins) + join-message text. Not a caller-permission gate; it IS the lead-escalation surface increment 4 must cover (derail note) |
+| `src/tools/send-task.ts:365` | Target-shape validation — rejects assigning tasks TO the lead ("wtf?" guard). Constraint on the target, not the caller |
+| `src/http/poll.ts:321` | Lead-vs-worker trigger routing branch (lead triggers vs worker auto-claim) |
+| `src/http/poll.ts:454` | Lead-only channel-activity monitor trigger (env-gated `LEAD_MONITOR_CHANNELS` routing, not authz) |
+| `src/http/agents.ts:47,317,344` | Registration payload schema field, `createAgent` isLead pass-through, telemetry attribute. Registration surface — self-asserted, increment-4 hardening scope |
+
+#### Coverage summary
+
+36 HARD sites: 9 covered by pre-existing tests (rows 1, 2, 13, 18, 19, 24, 25, 32, 35), 26 covered by the new Phase-1 suites (`rbac-charact-skills.test.ts` — 10 gates incl. both mcp-server-create scopes, `rbac-charact-slack.test.ts` — 7 gates, `rbac-charact-misc-tools.test.ts` — 9 gates), 1 deferred to Phase 2 (row 36, HTTP fs).
 
 ### B. Increments 3–6 outline (higher altitude — separate plans)
 
