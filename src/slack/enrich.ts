@@ -23,6 +23,7 @@
 
 import type { WebClient } from "@slack/web-api";
 import { getKv, upsertKv } from "../be/db";
+import { resolveIdentity } from "../be/identity";
 import { recordUnmappedIdentity } from "../be/unmapped-identities";
 import {
   findOrCreateUserByEmail,
@@ -159,4 +160,20 @@ export async function resolveSlackUserId(
   // 3. No email — track as unmapped.
   recordUnmappedIdentity("slack", slackUserId, eventContext);
   return undefined;
+}
+
+/**
+ * Rewrite every Slack `<@USERID>` mention token in `text` via the identity
+ * primitive: `<@USERID|Name>` when resolved, `<@USERID> (unknown user)` when
+ * not. Covers both author labels (`<@U…>: message`) and mentions embedded in
+ * message bodies — both are just this same token. Pure DB reads via
+ * `resolveIdentity`; zero Slack API calls, no cache.
+ */
+export function rewriteSlackMentions(text: string): string {
+  return text.replace(/<@([A-Z0-9]+)>/g, (_match, userId: string) => {
+    const resolution = resolveIdentity("slack", userId);
+    return resolution.status === "resolved"
+      ? `<@${userId}|${resolution.name}>`
+      : `<@${userId}> (unknown user)`;
+  });
 }

@@ -19,9 +19,16 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
-import { closeDb, getDb, getKv, initDb } from "../be/db";
-import { findUserByExternalId, getUserIdentities } from "../be/users";
-import { enrichSlackUserEmail, resolveSlackUserId } from "../slack/enrich";
+import { closeDb, createUser, getDb, getKv, initDb } from "../be/db";
+import {
+  findUserByExternalId,
+  getUserIdentities,
+  type IdentityActor,
+  linkIdentity,
+} from "../be/users";
+import { enrichSlackUserEmail, resolveSlackUserId, rewriteSlackMentions } from "../slack/enrich";
+
+const SYSTEM_ACTOR: IdentityActor = { kind: "system", id: "test" };
 
 const TEST_DB_PATH = "./test-slack-identity-resolution.sqlite";
 
@@ -344,5 +351,32 @@ describe("findUserByExternalId — sanity check after cascade", () => {
     const looked = findUserByExternalId("slack", "U_HUMAN");
     expect(looked).not.toBeNull();
     expect(looked!.id).toBe(id);
+  });
+});
+
+describe("rewriteSlackMentions — pure DB, zero Slack API calls", () => {
+  test("resolved mention renders '<@id|Name>' — the canonical pair", () => {
+    const user = createUser({ name: "Manuel", email: "manuel-rw@example.com" });
+    linkIdentity(user.id, "slack", "U3000RESOLVED", SYSTEM_ACTOR);
+
+    const rewritten = rewriteSlackMentions("hey <@U3000RESOLVED> can you look at this");
+    expect(rewritten).toBe("hey <@U3000RESOLVED|Manuel> can you look at this");
+  });
+
+  test("unresolved mention renders '<@id> (unknown user)' — never a guessed name", () => {
+    const rewritten = rewriteSlackMentions("hey <@U4000UNKNOWN> can you look at this");
+    expect(rewritten).toBe("hey <@U4000UNKNOWN> (unknown user) can you look at this");
+  });
+
+  test("multiple mentions in one string are each rewritten independently", () => {
+    const user = createUser({ name: "Tainá", email: "taina-rw@example.com" });
+    linkIdentity(user.id, "slack", "U5000RESOLVED", SYSTEM_ACTOR);
+
+    const rewritten = rewriteSlackMentions("<@U5000RESOLVED> and <@U6000UNKNOWN> both here");
+    expect(rewritten).toBe("<@U5000RESOLVED|Tainá> and <@U6000UNKNOWN> (unknown user) both here");
+  });
+
+  test("text with no mentions passes through unchanged", () => {
+    expect(rewriteSlackMentions("no mentions here")).toBe("no mentions here");
   });
 });

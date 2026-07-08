@@ -3,7 +3,7 @@ import { getAgentWorkingOnThread, getLeadAgent, getMostRecentTaskInThread } from
 import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { resolveSlackUserId } from "./enrich";
+import { resolveSlackUserId, rewriteSlackMentions } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
 import { hasOtherUserMention } from "./router";
 import { bufferThreadMessage } from "./thread-buffer";
@@ -76,6 +76,11 @@ export function createAssistant(): Assistant {
         const channelId = message.channel;
         const messageText = (msg.text as string) || "";
         const userId = (msg.user as string) || "";
+        // Any in-body `<@U…>` mention the requester typed is rewritten via
+        // the identity primitive before it reaches agent-visible task text —
+        // never a raw Slack ID. Bot-mention routing checks below use the
+        // raw `messageText`, not this rendered copy.
+        const renderedMessageText = rewriteSlackMentions(messageText);
 
         // Resolve the bot's own Slack user ID (cached after first call) so we can
         // check whether this message is actually addressed to us.
@@ -123,7 +128,7 @@ export function createAssistant(): Assistant {
 
           // Otherwise, create a follow-up task for the working agent
           const latestTask = getMostRecentTaskInThread(channelId, threadTs);
-          createTaskWithSiblingAwareness(messageText, {
+          createTaskWithSiblingAwareness(renderedMessageText, {
             agentId: workingAgent.id,
             source: "slack",
             slackChannelId: channelId,
@@ -141,8 +146,11 @@ export function createAssistant(): Assistant {
         // 2. First message in thread — create new task for lead
         await safeSetStatus("Processing your request...");
 
-        if (messageText) {
-          const title = messageText.length > 50 ? `${messageText.slice(0, 47)}...` : messageText;
+        if (renderedMessageText) {
+          const title =
+            renderedMessageText.length > 50
+              ? `${renderedMessageText.slice(0, 47)}...`
+              : renderedMessageText;
           await safeSetTitle(title);
         }
 
@@ -156,7 +164,7 @@ export function createAssistant(): Assistant {
         const lead = getLeadAgent();
         if (!lead) {
           // No lead — still queue the task
-          createTaskWithSiblingAwareness(messageText + channelContext, {
+          createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
             source: "slack",
             slackChannelId: channelId,
             slackThreadTs: threadTs,
@@ -169,7 +177,7 @@ export function createAssistant(): Assistant {
           return;
         }
 
-        createTaskWithSiblingAwareness(messageText + channelContext, {
+        createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
           agentId: lead.id,
           source: "slack",
           slackChannelId: channelId,
