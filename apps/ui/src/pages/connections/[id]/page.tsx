@@ -10,6 +10,7 @@ import {
   useScriptConnection,
   useSetScriptConnectionEnabled,
 } from "@/api/hooks/use-script-connections";
+import type { ScriptConnectionTool } from "@/api/types";
 import { ScriptSourceEditor } from "@/components/scripts/script-source-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ import {
   JsonSourceViewer,
 } from "@/pages/connections/components/code-viewer-dialog";
 import { CopyIconButton } from "@/pages/connections/components/copy-icon-button";
+import { OperationDetailDialog } from "@/pages/connections/components/operation-detail-dialog";
 import { OperationsTable } from "@/pages/connections/components/operations-table";
 import {
   AddConnectionDialog,
@@ -79,6 +81,7 @@ export default function ConnectionDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [typesExpanded, setTypesExpanded] = useState(false);
   const [specExpanded, setSpecExpanded] = useState(false);
+  const [selectedTool, setSelectedTool] = useState<ScriptConnectionTool | null>(null);
 
   if (isLoading) {
     return <div className="p-4 text-sm text-muted-foreground">Loading connection...</div>;
@@ -252,19 +255,24 @@ export default function ConnectionDetailPage() {
                   connection.tools.length ? (
                     <div className="divide-y rounded-md border">
                       {connection.tools.map((tool) => (
-                        <div key={tool.name} className="grid gap-1 p-3 text-sm">
+                        <button
+                          key={tool.name}
+                          type="button"
+                          onClick={() => setSelectedTool(tool)}
+                          className="grid w-full cursor-pointer gap-1 p-3 text-left text-sm hover:bg-muted/50"
+                        >
                           <div className="font-medium">{tool.name}</div>
                           {tool.description ? (
                             <div className="text-muted-foreground">{tool.description}</div>
                           ) : null}
-                        </div>
+                        </button>
                       ))}
                     </div>
                   ) : (
                     <div className="text-sm text-muted-foreground">No tools generated.</div>
                   )
                 ) : connection.operations.length ? (
-                  <OperationsTable operations={connection.operations} />
+                  <OperationsTable operations={connection.operations} slug={connection.slug} />
                 ) : (
                   <div className="text-sm text-muted-foreground">
                     {connection.graphql ? "GraphQL helper generated." : "No operations generated."}
@@ -362,6 +370,14 @@ export default function ConnectionDetailPage() {
           language="json"
         />
       ) : null}
+      <OperationDetailDialog
+        open={selectedTool !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedTool(null);
+        }}
+        slug={connection.slug}
+        subject={selectedTool ? { kind: "tool", tool: selectedTool } : null}
+      />
     </div>
   );
 }

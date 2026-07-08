@@ -376,9 +376,25 @@ type DecoratedConnection = Omit<
   credentialBinding: BindingSummary | null;
 };
 
+type ConnectionOperationParameter = {
+  name: string;
+  in: string;
+  required: boolean;
+  schema?: unknown;
+};
+
 type ConnectionDetail = DecoratedConnection & {
-  operations: Array<{ name: string; method: string; path: string }>;
-  tools: Array<{ name: string; description?: string }>;
+  operations: Array<{
+    name: string;
+    method: string;
+    path: string;
+    parameters?: ConnectionOperationParameter[];
+    hasBody?: boolean;
+    successStatus?: string;
+    requestBodySchema?: unknown;
+    responseSchema?: unknown;
+  }>;
+  tools: Array<{ name: string; description?: string; inputSchema?: unknown }>;
   graphql: boolean;
   generatedTypes: string;
   specSummary?: { title?: string; version?: string; pathCount: number };
@@ -531,6 +547,31 @@ function connectionDetail(connection: ScriptConnectionRecord): ConnectionDetail 
           name: String(operation.name ?? ""),
           method: String(operation.method ?? ""),
           path: String(operation.path ?? ""),
+          ...(Array.isArray(operation.parameters)
+            ? {
+                parameters: operation.parameters
+                  .filter((param): param is Record<string, unknown> => {
+                    return param !== null && typeof param === "object" && !Array.isArray(param);
+                  })
+                  .map((param) => ({
+                    name: String(param.name ?? ""),
+                    in: String(param.in ?? "query"),
+                    required: param.required === true,
+                    ...(param.schema !== undefined ? { schema: param.schema } : {}),
+                  }))
+                  .filter((param) => param.name),
+              }
+            : {}),
+          ...(typeof operation.hasBody === "boolean" ? { hasBody: operation.hasBody } : {}),
+          ...(typeof operation.successStatus === "string"
+            ? { successStatus: operation.successStatus }
+            : {}),
+          ...(operation.requestBodySchema !== undefined
+            ? { requestBodySchema: operation.requestBodySchema }
+            : {}),
+          ...(operation.responseSchema !== undefined
+            ? { responseSchema: operation.responseSchema }
+            : {}),
         }))
         .filter((operation) => operation.name && operation.method && operation.path)
     : [];
@@ -542,6 +583,7 @@ function connectionDetail(connection: ScriptConnectionRecord): ConnectionDetail 
         .map((tool) => ({
           name: String(tool.name ?? ""),
           ...(typeof tool.description === "string" ? { description: tool.description } : {}),
+          ...(tool.inputSchema !== undefined ? { inputSchema: tool.inputSchema } : {}),
         }))
         .filter((tool) => tool.name)
     : [];
