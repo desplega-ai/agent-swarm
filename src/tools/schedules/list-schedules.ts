@@ -24,6 +24,18 @@ export const registerListSchedulesTool = (server: McpServer) => {
           .default(true)
           .optional()
           .describe("Hide completed one-time schedules (default: true)"),
+        consecutiveErrorsMin: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Only return schedules with at least this many consecutive errors."),
+        lastRunStatus: z
+          .enum(["failed", "succeeded"])
+          .optional()
+          .describe(
+            "Filter by derived last run status. `failed` means consecutiveErrors > 0; `succeeded` means lastRunAt is set and consecutiveErrors is 0.",
+          ),
         includeFull: z
           .boolean()
           .optional()
@@ -54,6 +66,9 @@ export const registerListSchedulesTool = (server: McpServer) => {
             nextRunAt: z.string().optional(),
             createdByAgentId: z.string().optional(),
             timezone: z.string(),
+            consecutiveErrors: z.number().optional(),
+            lastErrorAt: z.string().optional(),
+            lastErrorMessage: z.string().optional(),
             scheduleType: z.string(),
             createdAt: z.string(),
             lastUpdatedAt: z.string(),
@@ -62,7 +77,19 @@ export const registerListSchedulesTool = (server: McpServer) => {
         count: z.number(),
       }),
     },
-    async ({ enabled, name, scheduleType, hideCompleted, includeFull }, requestInfo, _meta) => {
+    async (
+      {
+        enabled,
+        name,
+        scheduleType,
+        hideCompleted,
+        consecutiveErrorsMin,
+        lastRunStatus,
+        includeFull,
+      },
+      requestInfo,
+      _meta,
+    ) => {
       if (!requestInfo.agentId) {
         return {
           content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
@@ -76,7 +103,14 @@ export const registerListSchedulesTool = (server: McpServer) => {
       }
 
       try {
-        const filters = { enabled, name, scheduleType, hideCompleted };
+        const filters = {
+          enabled,
+          name,
+          scheduleType,
+          hideCompleted,
+          consecutiveErrorsMin,
+          lastRunStatus,
+        };
         const schedules = includeFull
           ? getScheduledTasks(filters)
           : getScheduledTasks(filters, { slim: true });

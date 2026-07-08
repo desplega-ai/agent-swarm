@@ -31,6 +31,7 @@ export const SDK_TOOL_NAME_MAP = {
   schedule_list: "list-schedules",
   schedule_create: "create-schedule",
   schedule_update: "update-schedule",
+  schedule_patch: "patch-schedule",
   schedule_delete: "delete-schedule", // destructive
   schedule_runNow: "run-schedule-now",
 

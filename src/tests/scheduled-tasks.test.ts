@@ -195,6 +195,40 @@ describe("Scheduled Tasks Integration", () => {
       expect(disabledOnly.every((s) => !s.enabled)).toBe(true);
     });
 
+    test("should filter scheduled tasks by triage error fields", () => {
+      const ok = createScheduledTask({
+        name: "test-filter-last-run-ok",
+        intervalMs: 60000,
+        taskTemplate: "Healthy task",
+      });
+      const failing = createScheduledTask({
+        name: "test-filter-last-run-failed",
+        intervalMs: 60000,
+        taskTemplate: "Failing task",
+      });
+      updateScheduledTask(ok.id, {
+        lastRunAt: new Date(Date.now() - 120000).toISOString(),
+        consecutiveErrors: 0,
+      });
+      updateScheduledTask(failing.id, {
+        lastRunAt: new Date(Date.now() - 60000).toISOString(),
+        consecutiveErrors: 3,
+        lastErrorAt: new Date().toISOString(),
+        lastErrorMessage: "boom",
+      });
+
+      const failingOnly = getScheduledTasks({
+        lastRunStatus: "failed",
+        consecutiveErrorsMin: 2,
+      });
+      const succeededOnly = getScheduledTasks({ lastRunStatus: "succeeded" });
+
+      expect(failingOnly.some((s) => s.id === failing.id)).toBe(true);
+      expect(failingOnly.some((s) => s.id === ok.id)).toBe(false);
+      expect(succeededOnly.some((s) => s.id === ok.id)).toBe(true);
+      expect(succeededOnly.some((s) => s.id === failing.id)).toBe(false);
+    });
+
     test("should filter scheduled tasks by name", () => {
       createScheduledTask({
         name: "unique-name-xyz-123",

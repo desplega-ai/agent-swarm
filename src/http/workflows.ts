@@ -45,6 +45,12 @@ const listWorkflowsRoute = route({
     "Returns workflows WITHOUT the heavy `definition` (the full DAG) by default — the list view only needs a `nodeCount`, which is included. Pass `fields=full` to restore `definition` + trigger config. Fetch the full workflow via `GET /api/workflows/{id}`.",
   tags: ["Workflows"],
   query: z.object({
+    enabled: z
+      .enum(["true", "false"])
+      .optional()
+      .transform((v) => (v === undefined ? undefined : v === "true")),
+    consecutiveErrorsMin: z.coerce.number().int().min(0).optional(),
+    lastRunStatus: WorkflowRunStatusSchema.optional(),
     /** `full` restores the legacy shape (includes `definition`); default is slim. */
     fields: z.enum(["full", "slim"]).optional(),
   }),
@@ -403,13 +409,18 @@ export async function handleWorkflows(
     const parsed = await listWorkflowsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const userId = resolveHttpAuditUserId(req, myAgentId);
+    const filters = {
+      enabled: parsed.query.enabled,
+      consecutiveErrorsMin: parsed.query.consecutiveErrorsMin,
+      lastRunStatus: parsed.query.lastRunStatus,
+    };
     // List responses default to slim (no `definition`); `?fields=full` restores it.
     if (parsed.query.fields === "full") {
-      json(res, withFavoriteFlags(listWorkflows(), { userId, itemType: "workflow" }));
+      json(res, withFavoriteFlags(listWorkflows(filters), { userId, itemType: "workflow" }));
     } else {
       json(
         res,
-        withFavoriteFlags(listWorkflows(undefined, { slim: true }), {
+        withFavoriteFlags(listWorkflows(filters, { slim: true }), {
           userId,
           itemType: "workflow",
         }),

@@ -39,10 +39,11 @@ export const CORE_TOOLS = new Set([
 
 /** Tools that can be discovered via Tool Search on demand */
 export const DEFERRED_TOOLS = new Set([
-  // Scheduling (5)
+  // Scheduling (6)
   "list-schedules",
   "create-schedule",
   "update-schedule",
+  "patch-schedule",
   "delete-schedule",
   "run-schedule-now",
 
