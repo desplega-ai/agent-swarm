@@ -2,8 +2,8 @@ import { resolveTemplate } from "@/prompts/resolver";
 import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
 import { workflowEventBus } from "@/workflows/event-bus";
 import "@/tools/templates";
+import { type IdentityResolution, renderIdentity, resolveIdentity } from "@/be/identity";
 import { recordUnmappedIdentity } from "@/be/unmapped-identities";
-import { findUserByExternalId } from "@/be/users";
 import { getKapsoNumberMapping, markKapsoMessageSeen } from "./config";
 
 const KAPSO_IDENTITY_KIND = "kapso";
@@ -44,11 +44,15 @@ function extractText(message: NonNullable<KapsoWebhookPayload["message"]>): stri
 function buildTaskDescription(payload: KapsoWebhookPayload): string {
   const message = payload.message ?? {};
   const conversation = payload.conversation ?? {};
+  const externalId = normalizeKapsoSender(payload);
+  const contactDisplay = externalId
+    ? renderIdentity(resolveKapsoIdentity(externalId))
+    : "(unknown user)";
   return resolveTemplate("kapso.message.received", {
     conversation_id: conversation.id ?? "unknown",
     inbound_wamid: message.id ?? "unknown",
     sender_phone: message.from ?? conversation.phone_number ?? "unknown",
-    contact_name: conversation.contact_name ?? "unknown",
+    contact_name: contactDisplay,
     phone_number_id: payload.phone_number_id ?? "unknown",
     test_note: payload.test ? "\n- test: true (do NOT send a real WhatsApp reply)" : "",
     message_text: extractText(message),
@@ -61,14 +65,27 @@ function normalizeKapsoSender(payload: KapsoWebhookPayload): string | null {
   return digits || null;
 }
 
+/**
+ * Reverse-lookup a phone-number externalId across both identity kinds this
+ * integration writes (`kapso`, `whatsapp` — see the dual-kind note on
+ * `resolveKapsoRequestedByUserId`). Never a provider profile label.
+ */
+function resolveKapsoIdentity(externalId: string): IdentityResolution {
+  const kapsoResolution = resolveIdentity(KAPSO_IDENTITY_KIND, externalId);
+  if (kapsoResolution.status === "resolved") return kapsoResolution;
+  const whatsappResolution = resolveIdentity(WHATSAPP_IDENTITY_KIND, externalId);
+  if (whatsappResolution.status === "resolved") return whatsappResolution;
+  // Both unknown — report under the `kapso` kind for consistency with
+  // resolveKapsoRequestedByUserId's unmapped-tracker recording.
+  return kapsoResolution;
+}
+
 function resolveKapsoRequestedByUserId(payload: KapsoWebhookPayload): string | undefined {
   const externalId = normalizeKapsoSender(payload);
   if (!externalId) return undefined;
 
-  const mapped =
-    findUserByExternalId(KAPSO_IDENTITY_KIND, externalId) ??
-    findUserByExternalId(WHATSAPP_IDENTITY_KIND, externalId);
-  if (mapped) return mapped.id;
+  const resolution = resolveKapsoIdentity(externalId);
+  if (resolution.status === "resolved") return resolution.userId;
 
   recordUnmappedIdentity(KAPSO_IDENTITY_KIND, externalId, {
     sampleEventType: "kapso.message.received",
