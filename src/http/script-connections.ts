@@ -2,7 +2,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "@/be/audit-user";
 import { getAgentById, getDb } from "@/be/db";
-import { deleteOAuthTokens, getOAuthApp, upsertOAuthApp } from "@/be/db-queries/oauth";
+import {
+  deleteOAuthTokens,
+  getOAuthApp,
+  getOAuthTokens,
+  upsertOAuthApp,
+} from "@/be/db-queries/oauth";
 import {
   getOAuthBindingTokenStatus,
   getOAuthProviderConfig,
@@ -26,8 +31,10 @@ import {
   CredentialBindingSchema,
   placeholderForConfigKey,
 } from "@/scripts-runtime/credential-broker";
+import type { OAuthApp } from "@/tracker/types";
 import { getPublicMcpBaseUrl } from "@/utils/constants";
 import { getRequestAuth } from "@/utils/request-auth-context";
+import { scrubSecrets } from "@/utils/secret-scrubber";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -309,6 +316,23 @@ const integrationsCatalogRoute = route({
     200: { description: "Integrations catalog entries" },
     502: { description: "Catalog upstream unavailable" },
   },
+});
+
+const disconnectOAuthAppRoute = route({
+  method: "delete",
+  path: "/api/oauth-apps/{provider}/tokens",
+  pattern: ["api", "oauth-apps", null, "tokens"],
+  operationId: "oauth_app_disconnect",
+  summary:
+    "Disconnect an OAuth app: delete stored tokens (best-effort remote revocation when a revocation endpoint is known)",
+  tags: ["Script Connections"],
+  params: providerParamsSchema,
+  responses: {
+    200: { description: "Disconnect result" },
+    403: { description: "Only the lead agent can manage script connections" },
+    404: { description: "OAuth app not found" },
+  },
+  rbac: { permission: "script-connection.manage" },
 });
 
 type BindingSummary = {
@@ -694,6 +718,54 @@ function listOAuthApps() {
     )
     .all();
   return rows.map(sanitizeOAuthApp);
+}
+
+/**
+ * Best-effort RFC 7009 token revocation. Returns true when a revocation
+ * request was attempted (a revocationUrl is configured), false otherwise.
+ * Network/HTTP failures are logged (scrubbed) and never fail the caller.
+ */
+async function attemptRemoteRevocation(app: OAuthApp, accessToken: string): Promise<boolean> {
+  const metadata = parseMetadata(app.metadata);
+  const revocationUrl =
+    typeof metadata.revocationUrl === "string" ? metadata.revocationUrl : undefined;
+  if (!revocationUrl) return false;
+
+  const body = new URLSearchParams({
+    token: accessToken,
+    token_type_hint: "access_token",
+  });
+  const headers: Record<string, string> = {
+    "content-type": "application/x-www-form-urlencoded",
+  };
+  if (metadata.tokenAuthStyle === "basic") {
+    headers.authorization = `Basic ${Buffer.from(`${app.clientId}:${app.clientSecret}`).toString("base64")}`;
+  } else {
+    body.set("client_id", app.clientId);
+    body.set("client_secret", app.clientSecret);
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  try {
+    await fetch(revocationUrl, {
+      method: "POST",
+      headers,
+      body: body.toString(),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    console.warn(
+      scrubSecrets(
+        `OAuth token revocation request failed for provider ${app.provider}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      ),
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+  return true;
 }
 
 function genericOAuthRedirectUri(provider: string): string {
@@ -1193,6 +1265,27 @@ export async function handleScriptConnections(
         502,
       );
     }
+    return true;
+  }
+
+  if (disconnectOAuthAppRoute.match(req.method, pathSegments)) {
+    const parsed = await disconnectOAuthAppRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+
+    const app = getOAuthApp(parsed.params.provider);
+    if (!app) {
+      jsonError(res, `OAuth app ${parsed.params.provider} is not configured.`, 404);
+      return true;
+    }
+    const tokens = getOAuthTokens(parsed.params.provider);
+    if (!tokens) {
+      json(res, { disconnected: false, message: "no stored tokens" });
+      return true;
+    }
+    const revocationAttempted = await attemptRemoteRevocation(app, tokens.accessToken);
+    deleteOAuthTokens(parsed.params.provider);
+    json(res, { disconnected: true, revocationAttempted });
     return true;
   }
 

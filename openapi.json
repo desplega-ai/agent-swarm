@@ -10351,6 +10351,44 @@
         }
       }
     },
+    "/api/oauth-apps/{provider}/tokens": {
+      "delete": {
+        "operationId": "oauth_app_disconnect",
+        "summary": "Disconnect an OAuth app: delete stored tokens (best-effort remote revocation when a revocation endpoint is known)",
+        "tags": [
+          "Script Connections"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Disconnect result"
+          },
+          "403": {
+            "description": "Only the lead agent can manage script connections"
+          },
+          "404": {
+            "description": "OAuth app not found"
+          }
+        }
+      }
+    },
     "/api/script-runs": {
       "post": {
         "operationId": "script_runs_create",

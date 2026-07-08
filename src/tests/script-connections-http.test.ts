@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
@@ -437,5 +437,99 @@ describe("/api/script-connections HTTP", () => {
         categories: ["payments"],
       },
     ]);
+  });
+});
+
+describe("DELETE /api/oauth-apps/{provider}/tokens", () => {
+  const ACCESS_TOKEN = "access-token-should-not-leak";
+  const realFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  function seedOAuthApp(metadata?: Record<string, unknown>) {
+    upsertOAuthApp("vendor_oauth", {
+      clientId: "vendor-client",
+      clientSecret: "oauth-client-secret-should-not-leak",
+      authorizeUrl: "https://oauth.vendor.test/authorize",
+      tokenUrl: "https://oauth.vendor.test/token",
+      redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
+      scopes: "read,write",
+      ...(metadata ? { metadata: JSON.stringify(metadata) } : {}),
+    });
+  }
+
+  function seedTokens() {
+    storeOAuthTokens("vendor_oauth", {
+      accessToken: ACCESS_TOKEN,
+      refreshToken: "refresh-token-should-not-leak",
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      scope: "read,write",
+    });
+  }
+
+  test("404 for unknown provider", async () => {
+    const res = await dispatch("/api/oauth-apps/unknown_provider/tokens", {
+      method: "DELETE",
+      agentId: leadAgentId,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  test("returns disconnected:false when no stored tokens", async () => {
+    seedOAuthApp();
+    const res = await dispatch("/api/oauth-apps/vendor_oauth/tokens", {
+      method: "DELETE",
+      agentId: leadAgentId,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ disconnected: false, message: "no stored tokens" });
+  });
+
+  test("deletes the oauth_tokens row and returns disconnected:true", async () => {
+    seedOAuthApp();
+    seedTokens();
+    const res = await dispatch("/api/oauth-apps/vendor_oauth/tokens", {
+      method: "DELETE",
+      agentId: leadAgentId,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ disconnected: true, revocationAttempted: false });
+    expect(getOAuthTokens("vendor_oauth")).toBeNull();
+    expect(res.text).not.toContain(ACCESS_TOKEN);
+  });
+
+  test("attempts remote revocation when metadata.revocationUrl is set", async () => {
+    seedOAuthApp({ revocationUrl: "https://oauth.vendor.test/revoke" });
+    seedTokens();
+
+    let captured: { url: string; method?: string; body?: string } | null = null;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      captured = {
+        url: String(input),
+        method: init?.method,
+        body: typeof init?.body === "string" ? init.body : undefined,
+      };
+      return new Response("", { status: 200 });
+    }) as typeof fetch;
+
+    const res = await dispatch("/api/oauth-apps/vendor_oauth/tokens", {
+      method: "DELETE",
+      agentId: leadAgentId,
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ disconnected: true, revocationAttempted: true });
+    expect(getOAuthTokens("vendor_oauth")).toBeNull();
+
+    expect(captured).not.toBeNull();
+    expect(captured?.url).toBe("https://oauth.vendor.test/revoke");
+    expect(captured?.method).toBe("POST");
+    expect(captured?.body).toContain("token_type_hint=access_token");
+    expect(captured?.body).toContain(`token=${ACCESS_TOKEN}`);
+    // Tokens and secrets must never leak into the HTTP response.
+    expect(res.text).not.toContain(ACCESS_TOKEN);
+    expect(res.text).not.toContain("oauth-client-secret-should-not-leak");
   });
 });
