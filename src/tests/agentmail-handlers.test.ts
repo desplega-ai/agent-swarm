@@ -81,7 +81,7 @@ function makePayload(opts: {
 // re-runs initDb's global resolver registration right before this file's own
 // resolveTemplate() calls, minimizing the window for another concurrently
 // executing test file's own initDb() to have repointed it in between.
-beforeEach(() => {
+beforeEach(async () => {
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       unlinkSync(`${TEST_DB_PATH}${suffix}`);
@@ -91,6 +91,14 @@ beforeEach(() => {
   // Ensure a lead exists so handler's findLeadAgent() returns truthy and a
   // task gets created on the "no inbox mapping" path.
   createAgent({ name: "LeadAgent", isLead: true, status: "idle" });
+  // Re-register agentmail templates — prompt-template-resolver.test.ts and
+  // prompt-template-session.test.ts call clearTemplateDefinitions() and never
+  // restore the shared (process-wide) registry, so if either runs first in
+  // the same bun worker, resolveTemplate("agentmail.email.*", ...) silently
+  // returns { text: "", skipped: true } here instead of throwing — producing
+  // a task with an empty body rather than a visible failure. Same defensive
+  // pattern as heartbeat-checklist.test.ts's beforeEach.
+  await import(`../agentmail/templates?t=${Date.now()}`);
 });
 
 afterEach(() => {
