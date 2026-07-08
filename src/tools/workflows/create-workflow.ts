@@ -29,6 +29,11 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         "- TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. " +
         "Supported keywords: type, required, properties, enum, const, items (recursive into arrays). " +
         "Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored.\n" +
+        "- WEBHOOK VERIFICATION: Webhook triggers use hmacSecret for all verification formats. " +
+        "Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; " +
+        "or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, " +
+        "or { format: 'token-equality', header }. Example: { type: 'webhook', hmacSecret: 'secret.SUPERAGENT_WEBHOOK_SECRET', " +
+        "verification: { format: 'timestamped-hmac-sha256', header: 'X-Superagent-Signature', toleranceSeconds: 300 } }.\n" +
         "- WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. " +
         "See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.",
       inputSchema: z.object({
@@ -40,7 +45,9 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         triggers: z
           .array(TriggerConfigSchema)
           .optional()
-          .describe("Optional trigger configurations (webhook, schedule)"),
+          .describe(
+            "Optional trigger configurations (webhook, schedule). Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality.",
+          ),
         cooldown: CooldownConfigSchema.optional().describe(
           "Optional cooldown configuration to prevent re-triggering too frequently",
         ),

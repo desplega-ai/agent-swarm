@@ -899,10 +899,28 @@ export interface WorkflowDefinition {
   onNodeFailure?: "fail" | "continue";
 }
 
+export type WebhookVerification =
+  | {
+      format: "hmac-sha256";
+      header?: string;
+    }
+  | {
+      format: "timestamped-hmac-sha256";
+      header: string;
+      timestampKey?: string;
+      signatureKey?: string;
+      toleranceSeconds?: number;
+    }
+  | {
+      format: "token-equality";
+      header: string;
+    };
+
 export interface TriggerConfig {
   type: "webhook" | "schedule";
   hmacSecret?: string;
   hmacHeader?: string;
+  verification?: WebhookVerification;
   scheduleId?: string;
 }
 

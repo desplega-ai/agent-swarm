@@ -15597,7 +15597,88 @@
                             },
                             "hmacHeader": {
                               "type": "string",
-                              "default": "X-Hub-Signature-256"
+                              "default": "X-Hub-Signature-256",
+                              "description": "Legacy HMAC header for webhook verification. Prefer verification.header for new workflows."
+                            },
+                            "verification": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "hmac-sha256"
+                                      ]
+                                    },
+                                    "header": {
+                                      "type": "string",
+                                      "default": "X-Hub-Signature-256",
+                                      "description": "Header containing HMAC-SHA256 over the raw request body. Accepts sha256=<hex> or bare hex."
+                                    }
+                                  },
+                                  "required": [
+                                    "format"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "timestamped-hmac-sha256"
+                                      ]
+                                    },
+                                    "header": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "description": "Header containing comma-separated timestamp/signature pairs such as t=<timestamp>,v1=<hex>."
+                                    },
+                                    "timestampKey": {
+                                      "type": "string",
+                                      "default": "t",
+                                      "description": "Timestamp field key in the signature header"
+                                    },
+                                    "signatureKey": {
+                                      "type": "string",
+                                      "default": "v1",
+                                      "description": "Signature field key in the signature header; multiple entries are allowed"
+                                    },
+                                    "toleranceSeconds": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "default": 300,
+                                      "description": "Maximum allowed clock skew, in seconds, for replay protection"
+                                    }
+                                  },
+                                  "required": [
+                                    "format",
+                                    "header"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "token-equality"
+                                      ]
+                                    },
+                                    "header": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "description": "Header containing the shared token to compare"
+                                    }
+                                  },
+                                  "required": [
+                                    "format",
+                                    "header"
+                                  ]
+                                }
+                              ],
+                              "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
                             }
                           },
                           "required": [
@@ -15935,7 +16016,88 @@
                             },
                             "hmacHeader": {
                               "type": "string",
-                              "default": "X-Hub-Signature-256"
+                              "default": "X-Hub-Signature-256",
+                              "description": "Legacy HMAC header for webhook verification. Prefer verification.header for new workflows."
+                            },
+                            "verification": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "hmac-sha256"
+                                      ]
+                                    },
+                                    "header": {
+                                      "type": "string",
+                                      "default": "X-Hub-Signature-256",
+                                      "description": "Header containing HMAC-SHA256 over the raw request body. Accepts sha256=<hex> or bare hex."
+                                    }
+                                  },
+                                  "required": [
+                                    "format"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "timestamped-hmac-sha256"
+                                      ]
+                                    },
+                                    "header": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "description": "Header containing comma-separated timestamp/signature pairs such as t=<timestamp>,v1=<hex>."
+                                    },
+                                    "timestampKey": {
+                                      "type": "string",
+                                      "default": "t",
+                                      "description": "Timestamp field key in the signature header"
+                                    },
+                                    "signatureKey": {
+                                      "type": "string",
+                                      "default": "v1",
+                                      "description": "Signature field key in the signature header; multiple entries are allowed"
+                                    },
+                                    "toleranceSeconds": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "default": 300,
+                                      "description": "Maximum allowed clock skew, in seconds, for replay protection"
+                                    }
+                                  },
+                                  "required": [
+                                    "format",
+                                    "header"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "token-equality"
+                                      ]
+                                    },
+                                    "header": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "description": "Header containing the shared token to compare"
+                                    }
+                                  },
+                                  "required": [
+                                    "format",
+                                    "header"
+                                  ]
+                                }
+                              ],
+                              "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
                             }
                           },
                           "required": [

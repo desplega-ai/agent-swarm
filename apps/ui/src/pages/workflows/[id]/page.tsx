@@ -17,7 +17,7 @@ import {
   Webhook,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api, TriggerSchemaApiError } from "@/api/client";
@@ -35,6 +35,7 @@ import {
 import type {
   CooldownConfig,
   TriggerConfig,
+  WebhookVerification,
   WorkflowNode,
   WorkflowRun,
   WorkflowRunStatus,
@@ -1718,7 +1719,7 @@ function TriggerCard({ workflowId, trigger }: { workflowId: string; trigger: Tri
   if (trigger.type === "webhook") {
     const apiUrl = getConfig().apiUrl.replace(/\/$/, "");
     const webhookUrl = `${apiUrl}/api/webhooks/${workflowId}`;
-    const hmacHeader = trigger.hmacHeader ?? "X-Hub-Signature-256";
+    const verification = getWebhookVerificationDisplay(trigger);
     return (
       <div className="rounded-lg border bg-card p-4 space-y-3">
         <div className="flex items-center gap-2">
@@ -1731,11 +1732,17 @@ function TriggerCard({ workflowId, trigger }: { workflowId: string; trigger: Tri
           <CopyableField label="POST URL" value={webhookUrl} />
           {trigger.hmacSecret ? (
             <>
-              <CopyableField label="HMAC header" value={hmacHeader} />
-              <SecretField label="HMAC secret" value={trigger.hmacSecret} />
+              <CopyableField label="Verification format" value={verification.formatLabel} />
+              <CopyableField label="Verification header" value={verification.header} />
+              {verification.toleranceSeconds !== undefined && (
+                <CopyableField
+                  label="Timestamp tolerance"
+                  value={`${verification.toleranceSeconds}s`}
+                />
+              )}
+              <SecretField label={verification.secretLabel} value={trigger.hmacSecret} />
               <p className="text-[11px] text-muted-foreground leading-relaxed">
-                Sign the raw request body with HMAC-SHA256 using the secret, then send the digest as{" "}
-                <code className="font-mono">{hmacHeader}: sha256=&lt;hex&gt;</code>.
+                {verification.hint}
               </p>
             </>
           ) : (
@@ -1773,6 +1780,79 @@ function TriggerCard({ workflowId, trigger }: { workflowId: string; trigger: Tri
       </Badge>
     </div>
   );
+}
+
+function getWebhookVerificationDisplay(trigger: TriggerConfig): {
+  formatLabel: string;
+  header: string;
+  toleranceSeconds?: number;
+  secretLabel: string;
+  hint: ReactNode;
+} {
+  const verification: WebhookVerification | undefined = trigger.verification;
+
+  if (!verification) {
+    const header = trigger.hmacHeader ?? "X-Hub-Signature-256";
+    return {
+      formatLabel: "hmac-sha256 (legacy)",
+      header,
+      secretLabel: "HMAC secret",
+      hint: (
+        <>
+          Sign the raw request body with HMAC-SHA256 using the secret, then send the digest as{" "}
+          <code className="font-mono">{header}: sha256=&lt;hex&gt;</code>.
+        </>
+      ),
+    };
+  }
+
+  if (verification.format === "timestamped-hmac-sha256") {
+    const timestampKey = verification.timestampKey ?? "t";
+    const signatureKey = verification.signatureKey ?? "v1";
+    return {
+      formatLabel: "timestamped-hmac-sha256",
+      header: verification.header,
+      toleranceSeconds: verification.toleranceSeconds ?? 300,
+      secretLabel: "HMAC secret",
+      hint: (
+        <>
+          Sign <code className="font-mono">&lt;timestamp&gt;.&lt;raw body&gt;</code> with
+          HMAC-SHA256, then send{" "}
+          <code className="font-mono">
+            {verification.header}: {timestampKey}=&lt;timestamp&gt;,{signatureKey}=&lt;hex&gt;
+          </code>
+          .
+        </>
+      ),
+    };
+  }
+
+  if (verification.format === "token-equality") {
+    return {
+      formatLabel: "token-equality",
+      header: verification.header,
+      secretLabel: "Shared token",
+      hint: (
+        <>
+          Send the shared token in{" "}
+          <code className="font-mono">{verification.header}: &lt;token&gt;</code>.
+        </>
+      ),
+    };
+  }
+
+  const header = verification.header ?? "X-Hub-Signature-256";
+  return {
+    formatLabel: "hmac-sha256",
+    header,
+    secretLabel: "HMAC secret",
+    hint: (
+      <>
+        Sign the raw request body with HMAC-SHA256 using the secret, then send the digest as{" "}
+        <code className="font-mono">{header}: sha256=&lt;hex&gt;</code>.
+      </>
+    ),
+  };
 }
 
 // --- Version History ---

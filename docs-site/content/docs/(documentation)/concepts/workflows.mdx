@@ -11,7 +11,7 @@ A workflow consists of:
 
 - **Nodes** — Individual steps with a `next` field that defines routing (no explicit edges needed)
 - **Executors** — Class-based step implementations with Zod-typed config and output schemas
-- **Triggers** — Entry points: webhook (HMAC-SHA256), schedule (ref), or manual
+- **Triggers** — Entry points: webhook (HMAC-SHA256, timestamped HMAC, shared token), schedule (ref), or manual
 - **Checkpoint durability** — Atomic DB write after every step; resume from last checkpoint on crash
 - **Fan-out / convergence** — Parallel execution via array `next` with automatic convergence gating
 
@@ -56,7 +56,7 @@ The `next` field supports three formats:
   "name": "pr-review-pipeline",
   "description": "Auto-assign PR reviews on webhook",
   "triggers": [
-    { "type": "webhook", "config": { "hmacSecret": "my-secret" } }
+    { "type": "webhook", "hmacSecret": "secret.GITHUB_WEBHOOK_SECRET" }
   ],
   "definition": {
     "nodes": [
@@ -86,9 +86,65 @@ The `next` field supports three formats:
 
 | Type | Description |
 |------|-------------|
-| `webhook` | HTTP POST to `/api/workflows/:id/trigger` with optional HMAC-SHA256 verification |
+| `webhook` | HTTP POST to `/api/workflows/:id/trigger` with optional verification |
 | `schedule` | References a schedule by ID — the schedule creates workflow runs at configured times |
 | `manual` | Triggered via the `trigger-workflow` MCP tool or dashboard UI |
+
+### Webhook verification formats
+
+Webhook triggers verify signatures only when `hmacSecret` is set. The secret can be a literal, an environment reference such as `${WEBHOOK_SECRET}`, or a swarm secret reference such as `secret.SUPERAGENT_WEBHOOK_SECRET`.
+
+Omitting `verification` keeps the legacy behavior: HMAC-SHA256 over the raw request body, accepting either `sha256=<hex>` or bare hex. The verifier checks `hmacHeader` first and then the legacy fallback headers.
+
+```json
+{
+  "type": "webhook",
+  "hmacSecret": "secret.GITHUB_WEBHOOK_SECRET",
+  "hmacHeader": "X-Hub-Signature-256"
+}
+```
+
+Set `verification.format` to make the expected format explicit. Explicit formats read only the configured header.
+
+```json
+{
+  "type": "webhook",
+  "hmacSecret": "secret.GITHUB_WEBHOOK_SECRET",
+  "verification": {
+    "format": "hmac-sha256",
+    "header": "X-Hub-Signature-256"
+  }
+}
+```
+
+Use `timestamped-hmac-sha256` for Stripe/Superagent-style headers such as `t=<timestamp>,v1=<hex>`. The signed payload is `<timestamp>.<raw body>`, multiple `v1` entries are accepted for secret rotation, and timestamps outside the tolerance window are rejected.
+
+```json
+{
+  "type": "webhook",
+  "hmacSecret": "secret.SUPERAGENT_WEBHOOK_SECRET",
+  "verification": {
+    "format": "timestamped-hmac-sha256",
+    "header": "X-Superagent-Signature",
+    "timestampKey": "t",
+    "signatureKey": "v1",
+    "toleranceSeconds": 300
+  }
+}
+```
+
+Use `token-equality` for shared-token providers such as GitLab. The configured `hmacSecret` stores the expected token and the request header must match it.
+
+```json
+{
+  "type": "webhook",
+  "hmacSecret": "secret.GITLAB_WEBHOOK_TOKEN",
+  "verification": {
+    "format": "token-equality",
+    "header": "X-Gitlab-Token"
+  }
+}
+```
 
 ### Cooldown
 

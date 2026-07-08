@@ -23,13 +23,22 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
         "Creates a version snapshot before applying changes. " +
         "TRIGGER SCHEMA: pass 'triggerSchema' as a JSON-Schema object to set/replace, or 'null' to clear. " +
         "Supported JSON-Schema keywords: type, required, properties, enum, const, items (recursive into arrays). " +
-        "Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored.",
+        "Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored. " +
+        "WEBHOOK VERIFICATION: webhook triggers use hmacSecret for all verification formats. " +
+        "Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; " +
+        "or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, " +
+        "or { format: 'token-equality', header }.",
       inputSchema: z.object({
         id: z.string().uuid().describe("Workflow ID to update"),
         name: z.string().optional().describe("New name for the workflow"),
         description: z.string().optional().describe("New description"),
         definition: WorkflowDefinitionSchema.optional().describe("New workflow definition"),
-        triggers: z.array(TriggerConfigSchema).optional().describe("New trigger configurations"),
+        triggers: z
+          .array(TriggerConfigSchema)
+          .optional()
+          .describe(
+            "New trigger configurations. Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality.",
+          ),
         cooldown: CooldownConfigSchema.optional()
           .nullable()
           .describe("New cooldown configuration (null to remove)"),
