@@ -4,14 +4,9 @@ Use swarm scripts when direct tool calls would create repetitive work, flood the
 
 ## Decision Rubric
 
-| Situation | Use |
-|---|---|
-| 1-10 SDK calls, result fits in context | Direct tool call |
-| 10+ items or bulk fan-out SDK operations | Script |
-| Heavy fetch, parse, transform, or aggregation | Script or context-mode |
-| Single expensive web fetch | `ctx_fetch_and_index` |
-| Multi-agent parallel work | Workflow |
-| Logic needed across sessions or agents | Named script |
+The canonical decision rubric lives in the prompt-template registry as `system.agent.script_rubric` and is injected into agent session prompts. Do not maintain a second script-vs-tool table in this skill; keeping one source of truth prevents drift between the session prompt and this reference.
+
+Operationally, follow the prompt rubric: direct tool call below the ~10-call threshold; inline `script-run` for genuine one-offs; named script only when the logic will be invoked ≥2 times by you, another agent, or a workflow.
 
 ## Loading Script Tools
 
@@ -53,7 +48,7 @@ Keep logs useful but compact. The value returned from `main` is what comes back 
 
 ## Named Script Pattern
 
-Use `script-upsert` when the same logic is likely to be reused by another task or agent. Give the script a searchable name, a concrete description, and an intent that explains when to choose it.
+Use `script-upsert` when the same logic is likely to be reused at least twice by another task, agent, or workflow. Give the script a searchable name, a concrete description, and an intent that explains when to choose it.
 
 Good named scripts:
 
@@ -61,6 +56,22 @@ Good named scripts:
 - Fetch and normalize a third-party API response.
 - Fan out over many swarm tasks, memories, repos, or schedules.
 - Convert noisy JSON or HTML into a compact summary.
+
+## Typed API Connections (`ctx.api`)
+
+When a script calls an allow-listed external API, prefer a typed `ctx.api.<slug>` client over hand-writing `[REDACTED:<KEY>]` Authorization headers. `ctx.api` auto-injects the configured credential at egress, so the script source only describes the API call.
+
+Connections are registered by Lead via the `script-connections` tool. Workers should document the connection spec for handoff: `slug`, `baseUrl`, `allowedHosts`, `configKey`, and `headerTemplate`.
+
+Minimal zero-auth usage after Lead registration:
+
+```typescript
+export default async function main(args: any, ctx: any) {
+  return await ctx.api.publicExample.getStatus({});
+}
+```
+
+For the full credential-broker and `script-connections` flow, see `docs-site/content/docs/(documentation)/guides/scripts-credential-broker.mdx`.
 
 ## Using `db_query` For Aggregation
 

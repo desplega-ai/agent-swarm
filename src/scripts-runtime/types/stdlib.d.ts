@@ -77,7 +77,17 @@ declare module "swarm-sdk" {
     // --- repos ---
     repo_list(args?: Record<string, unknown>): Promise<unknown>;
     // --- schedules ---
-    schedule_list(args?: Record<string, unknown>): Promise<unknown>;
+    schedule_list(args?: {
+      enabled?: boolean;
+      name?: string;
+      scheduleType?: "recurring" | "one_time";
+      targetType?: "agent-task" | "workflow" | "script";
+      workflowId?: string;
+      scriptName?: string;
+      hideCompleted?: boolean;
+      consecutiveErrorsMin?: number;
+      lastRunStatus?: "failed" | "succeeded";
+    }): Promise<unknown>;
     // --- scripts ---
     script_search(args: { query?: string; scope?: ScriptScope; limit?: number }): Promise<unknown>;
     script_run(args: {
@@ -150,7 +160,12 @@ declare module "swarm-sdk" {
     }): Promise<unknown>;
     context_diff(args: { versionId: string; compareToVersionId?: string }): Promise<unknown>;
     // --- workflows ---
-    workflow_list(args?: { enabled?: boolean; includeFull?: boolean }): Promise<unknown>;
+    workflow_list(args?: {
+      enabled?: boolean;
+      includeFull?: boolean;
+      consecutiveErrorsMin?: number;
+      lastRunStatus?: "running" | "waiting" | "completed" | "failed" | "skipped" | "cancelled";
+    }): Promise<unknown>;
     workflow_get(args: { id: string }): Promise<unknown>;
     workflow_listRuns(args: {
       workflowId: string;
@@ -245,6 +260,7 @@ declare module "swarm-sdk" {
     // --- write: schedules ---
     schedule_create(args: Record<string, unknown>): Promise<unknown>;
     schedule_update(args: Record<string, unknown>): Promise<unknown>;
+    schedule_patch(args: Record<string, unknown>): Promise<unknown>;
     schedule_delete(args: { id: string }): Promise<unknown>;
     schedule_runNow(args: { id: string }): Promise<unknown>;
 

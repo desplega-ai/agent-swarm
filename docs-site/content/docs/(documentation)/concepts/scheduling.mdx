@@ -75,6 +75,16 @@ create-schedule(
 | `modelTier` | Portable model intent for created agent tasks: `smol`, `regular`, `smart`, or `ultra` |
 | `enabled` | Whether the schedule is active (default: true) |
 
+## Choosing `targetType`
+
+Pick the schedule target that matches the work you actually want to fire:
+
+- Use **`agent-task`** when a reasoning agent needs to read the prompt, use tools, and make judgment calls before doing the work.
+- Use **`workflow`** when the schedule's only job is to start an existing workflow DAG. Pass `workflowId` and skip agent-task fields that only apply to delegated tasks.
+- Use **`script`** when the schedule should run a saved catalog script directly with `scriptName` and optional `scriptArgs`, without opening an interactive agent session.
+
+This avoids a common anti-pattern: creating an `agent-task` schedule whose task body only says "trigger workflow X" or "run script Y". If the work is already captured as a workflow or script, schedule that target directly.
+
 ## Managing Schedules
 
 ### List Schedules

@@ -5740,6 +5740,8 @@ export interface ScheduledTaskFilters {
   targetType?: "agent-task" | "workflow" | "script";
   workflowId?: string;
   scriptName?: string;
+  consecutiveErrorsMin?: number;
+  lastRunStatus?: "failed" | "succeeded";
 }
 
 /**
@@ -5795,6 +5797,17 @@ export function getScheduledTasks(
   if (filters?.scriptName) {
     query += " AND scriptName = ?";
     params.push(filters.scriptName);
+  }
+
+  if (filters?.consecutiveErrorsMin !== undefined) {
+    query += " AND consecutiveErrors >= ?";
+    params.push(filters.consecutiveErrorsMin);
+  }
+
+  if (filters?.lastRunStatus === "failed") {
+    query += " AND consecutiveErrors > 0";
+  } else if (filters?.lastRunStatus === "succeeded") {
+    query += " AND lastRunAt IS NOT NULL AND consecutiveErrors = 0";
   }
 
   if (filters?.hideCompleted !== false) {
@@ -7211,13 +7224,19 @@ function rowToWorkflowSummary(row: WorkflowRow): WorkflowSummary {
   };
 }
 
-export function listWorkflows(filters?: { enabled?: boolean }): Workflow[];
+export interface WorkflowFilters {
+  enabled?: boolean;
+  lastRunStatus?: WorkflowRunStatus;
+  consecutiveErrorsMin?: number;
+}
+
+export function listWorkflows(filters?: WorkflowFilters): Workflow[];
 export function listWorkflows(
-  filters: { enabled?: boolean } | undefined,
+  filters: WorkflowFilters | undefined,
   opts: { slim: true },
 ): WorkflowSummary[];
 export function listWorkflows(
-  filters?: { enabled?: boolean },
+  filters?: WorkflowFilters,
   opts?: { slim?: boolean },
 ): Workflow[] | WorkflowSummary[] {
   let query = "SELECT * FROM workflows WHERE 1=1";
@@ -7225,6 +7244,27 @@ export function listWorkflows(
   if (filters?.enabled !== undefined) {
     query += " AND enabled = ?";
     params.push(filters.enabled ? 1 : 0);
+  }
+  if (filters?.lastRunStatus !== undefined) {
+    query +=
+      " AND (SELECT status FROM workflow_runs WHERE workflowId = workflows.id ORDER BY startedAt DESC LIMIT 1) = ?";
+    params.push(filters.lastRunStatus);
+  }
+  if (filters?.consecutiveErrorsMin !== undefined) {
+    query += ` AND (
+      SELECT COUNT(*)
+      FROM workflow_runs wr
+      WHERE wr.workflowId = workflows.id
+        AND wr.status = 'failed'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM workflow_runs newer_non_failed
+          WHERE newer_non_failed.workflowId = wr.workflowId
+            AND newer_non_failed.status != 'failed'
+            AND newer_non_failed.startedAt > wr.startedAt
+        )
+    ) >= ?`;
+    params.push(filters.consecutiveErrorsMin);
   }
   query += " ORDER BY lastUpdatedAt DESC";
   const rows = getDb()

@@ -163,6 +163,15 @@ Agents can read Slack threads using `slack-read`:
 
 The lead agent can post messages to channels using `slack-post`. By default each call creates a new top-level message. To run a multi-message conversation under a single Slack thread, the lead first calls `slack-start-thread` to create the parent message, then passes the returned `ts` as `threadTs` on subsequent `slack-post` calls — keeping the channel tidy and the conversation discoverable.
 
+### Updating or Deleting Messages
+
+Lead-gated Slack mutation tools can also manage an existing swarm-authored message after it has been posted:
+
+- **`slack-update`** — replace the text or blocks of an existing message in a channel or thread
+- **`slack-delete`** — remove an existing message when follow-up automation or cleanup needs it
+
+These mutation tools follow the same public-channel auto-join behavior as the other Slack tools, but they stay lead-only because they change already-published Slack state.
+
 ### Channel Membership
 
 If the bot is not yet a member of a **public, internal** channel, `slack-read`, `slack-post`, `slack-reply`, and `slack-start-thread` automatically join it (via the `channels:join` scope) and retry — no manual `/invite` needed. **Private** channels and **external Slack Connect** channels cannot be self-joined: the tools return a clear error asking you to invite the bot with `/invite @<bot-name>` first.

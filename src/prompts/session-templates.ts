@@ -392,13 +392,9 @@ Use this to debug issues and propose improvements to your own infrastructure.
 });
 
 registerTemplate({
-  eventType: "system.agent.context_mode",
+  eventType: "system.agent.script_rubric",
   header: "",
   defaultBody: `
-### Context Window Management
-
-You have access to the \`context-mode\` MCP tools (\`batch_execute\`, \`execute\`, \`execute_file\`, \`search\`, \`fetch_and_index\`, \`index\`) which compress tool output to save context window space. For data-heavy operations (web fetches, large file reads, CLI output processing), prefer these over raw Bash/WebFetch to avoid flooding your context window with raw output.
-
 ### Agent Scripts — for bulk, repetitive, or data-heavy work
 
 Use **scripts** (\`script-upsert\` + \`script-run\`) when a task involves repetitive SDK calls, large data processing, or deterministic multi-step pipelines. Scripts run out-of-process and return only their final result.
@@ -407,12 +403,16 @@ Use **scripts** (\`script-upsert\` + \`script-run\`) when a task involves repeti
 
 | Situation | Preferred approach |
 |---|---|
-| 1–10 SDK calls, result fits in context | Direct tool call |
+| 1–10 SDK calls, result fits in context | Direct tool call. Do not script below the ~10-call threshold. |
 | 10+ items, bulk/fan-out SDK ops | **Script** (\`script-run\` with inline source or named) |
 | Heavy data (fetch + parse + transform) | **Script** or \`ctx_*\` (context-mode) |
 | Single expensive web fetch | \`ctx_fetch_and_index\` (context-mode) |
 | Multi-agent fan-out, parallel work, deterministic pipeline | **Workflow** |
 | One-off bash/TS with no reuse needed | \`code-mode run\` (Bash) |
+
+**Script persistence guardrail:** use a named script only when the logic will be invoked ≥2 times by you, another agent, or a workflow. For genuine one-offs, use inline \`script-run\` so the catalog does not accumulate scratch-* auto-saves.
+
+**Worked example:** workflow triage that previously cost ~26 underlying calls can return one ~4.3k-token result in ~13s, a ~90-95% context reduction.
 
 The 5 script tools (\`script-search\`, \`script-run\`, \`script-upsert\`, \`script-delete\`, \`script-query-types\`) are deferred tools. Call ToolSearch to load \`script-upsert\`, \`script-run\`, and \`script-query-types\` before using them.
 
@@ -420,6 +420,32 @@ The 5 script tools (\`script-search\`, \`script-run\`, \`script-upsert\`, \`scri
 - \`agentId\` IS propagated to scripts via the \`X-Agent-ID\` header.
 - \`taskId\` is NOT propagated to scripts — there is no ambient task context. Pass \`taskId\` explicitly via \`args\` if the script needs to call \`ctx.swarm.task_storeProgress\`.
 - Use \`script-query-types\` to inspect the live \`swarm-sdk.d.ts\` before authoring a complex script.
+- Typed API connections: a lead-registered \`script_connections\` entry exposes a typed \`ctx.api.<slug>.<method>(...)\` client in scripts.
+- \`ctx.api\` clients auto-inject the configured credential at egress, so scripts calling an allow-listed external API should prefer \`ctx.api\` over hand-written \`[REDACTED:<KEY>]\` Authorization headers.
+- Registration is lead-only; workers should document the connection spec and hand it to the lead to register.
+`,
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.context_mode",
+  header: "",
+  defaultBody: `
+### Context Window Management
+
+You have access to the \`context-mode\` MCP tools (\`batch_execute\`, \`execute\`, \`execute_file\`, \`search\`, \`fetch_and_index\`, \`index\`) which compress tool output to save context window space. For data-heavy operations (web fetches, large file reads, CLI output processing), prefer these over raw Bash/WebFetch to avoid flooding your context window with raw output.
+
+{{@template[system.agent.script_rubric]}}
+
+### Scheduling — Pick the Right targetType
+
+When creating a schedule, match \`targetType\` to the work being fired:
+- Use \`targetType: "workflow"\` with \`workflowId\` when the schedule's only job is to start a workflow.
+- Use \`targetType: "script"\` with \`scriptName\` and optional \`scriptArgs\` when it only needs to run a catalog script.
+- Use \`targetType: "agent-task"\` only when a reasoning agent genuinely needs to be in the loop for judgment, open-ended work, or tool orchestration that is not already captured by a workflow or script.
+
+Do not create an \`agent-task\` schedule whose \`taskTemplate\` just says to trigger a workflow or script. Workflow/script targets dispatch directly; agent-task fields such as \`targetAgentId\`, \`model\`, \`taskTemplate\`, \`priority\`, and \`tags\` do not drive those direct runs, and workflow cooldowns still gate workflow targets.
 `,
   variables: [],
   category: "system",
@@ -680,11 +706,10 @@ registerTemplate({
 });
 
 // Pi-specific worker composite. Identical to `system.session.worker` except it
-// OMITS the `system.agent.context_mode` block — pi has no context-mode MCP
-// wiring yet (deferred to DES-514), so advertising the `ctx_*` tools to pi
-// workers would point at phantom tools. `getBasePrompt` selects this composite
-// when `provider === 'pi'`; all other local providers (claude, codex, opencode)
-// keep the context_mode block via `system.session.worker`.
+// omits only the `system.agent.context_mode` MCP-tool block — pi has no
+// context-mode MCP wiring yet, so advertising the `ctx_*` tools would point at
+// phantom tools. It still includes the shared script rubric and seed-script
+// guidance so pi sessions get the same bulk-work decision policy (DES-514).
 registerTemplate({
   eventType: "system.session.worker.pi",
   header: "",
@@ -694,6 +719,8 @@ registerTemplate({
 {{@template[system.agent.worker]}}
 {{@template[system.agent.filesystem]}}
 {{@template[system.agent.self_awareness]}}
+{{@template[system.agent.script_rubric]}}
+{{@template[system.agent.seed_scripts]}}
 
 {{@template[system.agent.system]}}
 {{@template[system.agent.share_urls]}}

@@ -78,6 +78,7 @@ import {
   registerCreateScheduleTool,
   registerDeleteScheduleTool,
   registerListSchedulesTool,
+  registerPatchScheduleTool,
   registerRunScheduleNowTool,
   registerUpdateScheduleTool,
 } from "./tools/schedules";
@@ -316,6 +317,7 @@ export function createServer() {
     registerListSchedulesTool(server);
     registerCreateScheduleTool(server);
     registerUpdateScheduleTool(server);
+    registerPatchScheduleTool(server);
     registerDeleteScheduleTool(server);
     registerRunScheduleNowTool(server);
   }
