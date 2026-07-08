@@ -15,9 +15,9 @@ import { calculateNextRun } from "@/scheduler";
 import { createToolRegistrar } from "@/tools/utils";
 import { ModelTierSchema, ScheduledTaskTargetTypeSchema, splitLegacyModelAlias } from "../../types";
 
-export const updateScheduleInputSchema = z.object({
-  scheduleId: z.string().uuid().optional().describe("Schedule ID to update"),
-  name: z.string().optional().describe("Schedule name to update (alternative to ID)"),
+export const patchScheduleInputSchema = z.object({
+  scheduleId: z.string().uuid().optional().describe("Schedule ID to patch"),
+  name: z.string().optional().describe("Schedule name to patch (alternative to ID)"),
   newName: z.string().min(1).max(100).optional().describe("New name for the schedule"),
   taskTemplate: z.string().min(1).optional().describe("New task template"),
   targetType: ScheduledTaskTargetTypeSchema.optional().describe(
@@ -66,14 +66,15 @@ export const updateScheduleInputSchema = z.object({
     .describe("Portable model tier for tasks created by this schedule. Set to null to clear."),
 });
 
-export const registerUpdateScheduleTool = (server: McpServer) => {
+export const registerPatchScheduleTool = (server: McpServer) => {
   createToolRegistrar(server)(
-    "update-schedule",
+    "patch-schedule",
     {
-      title: "Update Scheduled Task",
+      title: "Patch Scheduled Task",
       annotations: { idempotentHint: true },
-      description: "Update an existing scheduled task. Any registered agent can update schedules.",
-      inputSchema: updateScheduleInputSchema,
+      description:
+        "Patch an existing scheduled task by shallow-merging provided fields over the current row. Any registered agent can patch schedules.",
+      inputSchema: patchScheduleInputSchema,
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
@@ -206,7 +207,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
       }
 
       // Validate targetAgentId if provided and not null
-      if (targetAgentId && targetAgentId !== null) {
+      if (targetAgentId) {
         const agent = getAgentById(targetAgentId);
         if (!agent) {
           return {
@@ -378,13 +379,13 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
           content: [
             {
               type: "text",
-              text: `Updated schedule "${updated.name}". Next run: ${updated.nextRunAt || "disabled"}`,
+              text: `Patched schedule "${updated.name}". Next run: ${updated.nextRunAt || "disabled"}`,
             },
           ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: true,
-            message: `Updated schedule "${updated.name}".`,
+            message: `Patched schedule "${updated.name}".`,
             schedule: updated,
           },
         };

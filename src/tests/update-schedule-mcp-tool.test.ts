@@ -20,6 +20,7 @@ import {
   initDb,
 } from "../be/db";
 import { registerDeleteScheduleTool } from "../tools/schedules/delete-schedule";
+import { registerPatchScheduleTool } from "../tools/schedules/patch-schedule";
 import { registerUpdateScheduleTool } from "../tools/schedules/update-schedule";
 
 const TEST_DB_PATH = "./test-update-schedule-mcp-tool.sqlite";
@@ -31,6 +32,7 @@ type RegisteredTool = {
 function buildServer(): McpServer {
   const server = new McpServer({ name: "update-schedule-mcp-test", version: "1.0.0" });
   registerUpdateScheduleTool(server);
+  registerPatchScheduleTool(server);
   registerDeleteScheduleTool(server);
   return server;
 }
@@ -57,6 +59,14 @@ function callUpdateSchedule(
   callerAgentId: string,
 ): Promise<CallToolResult> {
   return callTool(server, "update-schedule", args, callerAgentId);
+}
+
+function callPatchSchedule(
+  server: McpServer,
+  args: Record<string, unknown>,
+  callerAgentId: string,
+): Promise<CallToolResult> {
+  return callTool(server, "patch-schedule", args, callerAgentId);
 }
 
 type ScheduleOutput = {
@@ -108,6 +118,53 @@ afterAll(async () => {
 });
 
 describe("update-schedule MCP tool", () => {
+  test("patch-schedule can clear one field without restating the whole schedule", async () => {
+    const server = buildServer();
+    const schedule = createScheduledTask({
+      name: `mcp-patch-single-field-${Date.now()}`,
+      intervalMs: 60000,
+      taskTemplate: "has model override",
+      model: "gpt-5.5",
+      createdByAgentId: creatorId,
+      timezone: "UTC",
+    });
+
+    const result = await callPatchSchedule(
+      server,
+      { scheduleId: schedule.id, model: null },
+      creatorId,
+    );
+    const sc = structured(result);
+
+    expect(sc.success).toBe(true);
+    const updated = getScheduledTaskById(schedule.id);
+    expect(updated?.model).toBeUndefined();
+    expect(updated?.intervalMs).toBe(60000);
+    expect(updated?.taskTemplate).toBe("has model override");
+  });
+
+  test("disabling through update-schedule clears nextRunAt", async () => {
+    const server = buildServer();
+    const schedule = createScheduledTask({
+      name: `mcp-disable-next-run-${Date.now()}`,
+      intervalMs: 60000,
+      nextRunAt: new Date(Date.now() + 60000).toISOString(),
+      taskTemplate: "disable me",
+      createdByAgentId: creatorId,
+      timezone: "UTC",
+    });
+
+    const result = await callUpdateSchedule(
+      server,
+      { scheduleId: schedule.id, enabled: false },
+      creatorId,
+    );
+    const sc = structured(result);
+
+    expect(sc.success).toBe(true);
+    expect(getScheduledTaskById(schedule.id)?.nextRunAt).toBeUndefined();
+  });
+
   test("non-lead, non-creator agent can update a schedule", async () => {
     const server = buildServer();
     const schedule = createScheduledTask({

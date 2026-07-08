@@ -22,6 +22,27 @@ import { json, jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
+const scheduleUpdateBodySchema = z.object({
+  name: z.string().optional(),
+  description: z.string().optional(),
+  cronExpression: z.string().nullable().optional(),
+  intervalMs: z.number().int().positive().nullable().optional(),
+  taskTemplate: z.string().optional(),
+  taskType: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  priority: z.number().int().optional(),
+  targetAgentId: z.string().uuid().nullable().optional(),
+  enabled: z.boolean().optional(),
+  timezone: z.string().optional(),
+  model: z.string().nullable().optional(),
+  modelTier: ModelTierSchema.nullable().optional(),
+  nextRunAt: z.string().nullable().optional(),
+  targetType: ScheduledTaskTargetTypeSchema.optional(),
+  workflowId: z.string().uuid().nullable().optional(),
+  scriptName: z.string().nullable().optional(),
+  scriptArgs: z.record(z.string(), z.unknown()).nullable().optional(),
+});
+
 const createSchedule = route({
   method: "post",
   path: "/api/schedules",
@@ -93,6 +114,8 @@ const listSchedules = route({
       .enum(["true", "false"])
       .optional()
       .transform((v) => (v === undefined ? undefined : v === "true")),
+    consecutiveErrorsMin: z.coerce.number().int().min(0).optional(),
+    lastRunStatus: z.enum(["failed", "succeeded"]).optional(),
     /** `full` restores the legacy shape (includes `taskTemplate`); default is slim. */
     fields: z.enum(["full", "slim"]).optional(),
   }),
@@ -121,31 +144,34 @@ const updateSchedule = route({
   summary: "Update a schedule",
   tags: ["Schedules"],
   params: z.object({ id: z.string() }),
-  body: z.object({
-    name: z.string().optional(),
-    description: z.string().optional(),
-    cronExpression: z.string().nullable().optional(),
-    intervalMs: z.number().int().positive().nullable().optional(),
-    taskTemplate: z.string().optional(),
-    taskType: z.string().optional(),
-    tags: z.array(z.string()).optional(),
-    priority: z.number().int().optional(),
-    targetAgentId: z.string().uuid().optional(),
-    enabled: z.boolean().optional(),
-    timezone: z.string().optional(),
-    model: z.string().optional(),
-    modelTier: ModelTierSchema.nullable().optional(),
-    nextRunAt: z.string().nullable().optional(),
-    targetType: ScheduledTaskTargetTypeSchema.optional(),
-    workflowId: z.string().uuid().nullable().optional(),
-    scriptName: z.string().nullable().optional(),
-    scriptArgs: z.record(z.string(), z.unknown()).nullable().optional(),
-  }),
+  body: scheduleUpdateBodySchema,
   responses: {
     200: { description: "Schedule updated" },
     400: { description: "Validation error" },
     404: { description: "Schedule not found" },
     409: { description: "Duplicate name" },
+  },
+});
+
+const patchSchedule = route({
+  method: "patch",
+  path: "/api/schedules/{id}",
+  pattern: ["api", "schedules", null],
+  summary: "Patch a schedule",
+  description:
+    "Partially updates a schedule by shallow-merging provided fields over the existing row.",
+  tags: ["Schedules"],
+  params: z.object({ id: z.string() }),
+  body: scheduleUpdateBodySchema,
+  responses: {
+    200: { description: "Schedule patched" },
+    400: { description: "Validation error" },
+    404: { description: "Schedule not found" },
+    409: { description: "Duplicate name" },
+  },
+  rbac: {
+    ungated:
+      "matches existing schedule update/delete posture: bearer-authenticated agents may manage schedules",
   },
 });
 
@@ -182,6 +208,8 @@ export async function handleSchedules(
       workflowId: parsed.query.workflowId,
       scriptName: parsed.query.scriptName,
       hideCompleted: parsed.query.hideCompleted,
+      consecutiveErrorsMin: parsed.query.consecutiveErrorsMin,
+      lastRunStatus: parsed.query.lastRunStatus,
     };
     // List responses default to slim (no full `taskTemplate`); `?fields=full` restores it.
     const schedules =
@@ -387,8 +415,14 @@ export async function handleSchedules(
     return true;
   }
 
-  if (updateSchedule.match(req.method, pathSegments)) {
-    const parsed = await updateSchedule.parse(req, res, pathSegments, queryParams);
+  if (
+    updateSchedule.match(req.method, pathSegments) ||
+    patchSchedule.match(req.method, pathSegments)
+  ) {
+    const routeHandle = updateSchedule.match(req.method, pathSegments)
+      ? updateSchedule
+      : patchSchedule;
+    const parsed = await routeHandle.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const body = parsed.body as Record<string, unknown>;
     if (parsed.body.model !== undefined || parsed.body.modelTier !== undefined) {

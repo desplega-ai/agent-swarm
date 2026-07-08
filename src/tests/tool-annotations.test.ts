@@ -259,6 +259,7 @@ describe("Tool Annotations & Classification", () => {
       "list-schedules",
       "create-schedule",
       "update-schedule",
+      "patch-schedule",
       "delete-schedule",
       "run-schedule-now",
     ];

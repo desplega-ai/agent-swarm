@@ -13,6 +13,7 @@ import {
   createWorkflowRunStep,
   getWorkflowVersions,
   initDb,
+  updateWorkflowRun,
 } from "../be/db";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
@@ -280,6 +281,85 @@ describe("Workflow HTTP API v2", () => {
         expect(wf.definition).toBeDefined();
         expect(wf.definition.nodes).toBeDefined();
       }
+    });
+
+    test("filters workflows by enabled and latest run status", async () => {
+      const failedLatest = await createTestWorkflow({
+        name: `failed-latest-${crypto.randomUUID()}`,
+      });
+      const completedLatest = await createTestWorkflow({
+        name: `completed-latest-${crypto.randomUUID()}`,
+      });
+      const disabled = await createTestWorkflow({ name: `disabled-filter-${crypto.randomUUID()}` });
+      await fetch(`${baseUrl}/api/workflows/${disabled.id}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ enabled: false }),
+      });
+
+      const failedRun = createWorkflowRun({ id: crypto.randomUUID(), workflowId: failedLatest.id });
+      updateWorkflowRun(failedRun.id, { status: "failed", finishedAt: new Date().toISOString() });
+      const completedRun = createWorkflowRun({
+        id: crypto.randomUUID(),
+        workflowId: completedLatest.id,
+      });
+      updateWorkflowRun(completedRun.id, {
+        status: "completed",
+        finishedAt: new Date().toISOString(),
+      });
+
+      const failedRes = await fetch(`${baseUrl}/api/workflows?lastRunStatus=failed`, { headers });
+      expect(failedRes.status).toBe(200);
+      const failedBody = (await failedRes.json()) as WorkflowSummary[];
+      expect(failedBody.some((wf) => wf.id === failedLatest.id)).toBe(true);
+      expect(failedBody.some((wf) => wf.id === completedLatest.id)).toBe(false);
+
+      const disabledRes = await fetch(`${baseUrl}/api/workflows?enabled=false`, { headers });
+      expect(disabledRes.status).toBe(200);
+      const disabledBody = (await disabledRes.json()) as WorkflowSummary[];
+      expect(disabledBody.some((wf) => wf.id === disabled.id)).toBe(true);
+      expect(disabledBody.every((wf) => !wf.enabled)).toBe(true);
+    });
+
+    test("filters workflows by latest consecutive failed run count", async () => {
+      const twoFailures = await createTestWorkflow({
+        name: `two-failures-${crypto.randomUUID()}`,
+      });
+      const recovered = await createTestWorkflow({ name: `recovered-${crypto.randomUUID()}` });
+
+      for (const workflow of [twoFailures, recovered]) {
+        const oldFailedRun = createWorkflowRun({
+          id: crypto.randomUUID(),
+          workflowId: workflow.id,
+        });
+        updateWorkflowRun(oldFailedRun.id, {
+          status: "failed",
+          finishedAt: new Date().toISOString(),
+        });
+      }
+
+      await Bun.sleep(2);
+      const recoveredRun = createWorkflowRun({ id: crypto.randomUUID(), workflowId: recovered.id });
+      updateWorkflowRun(recoveredRun.id, {
+        status: "completed",
+        finishedAt: new Date().toISOString(),
+      });
+
+      await Bun.sleep(2);
+      const latestFailedRun = createWorkflowRun({
+        id: crypto.randomUUID(),
+        workflowId: twoFailures.id,
+      });
+      updateWorkflowRun(latestFailedRun.id, {
+        status: "failed",
+        finishedAt: new Date().toISOString(),
+      });
+
+      const res = await fetch(`${baseUrl}/api/workflows?consecutiveErrorsMin=2`, { headers });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as WorkflowSummary[];
+      expect(body.some((wf) => wf.id === twoFailures.id)).toBe(true);
+      expect(body.some((wf) => wf.id === recovered.id)).toBe(false);
     });
   });
 

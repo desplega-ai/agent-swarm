@@ -8977,6 +8977,30 @@
           },
           {
             "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "consecutiveErrorsMin",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "failed",
+                "succeeded"
+              ]
+            },
+            "required": false,
+            "name": "lastRunStatus",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "string",
               "enum": [
                 "full",
@@ -9120,7 +9144,10 @@
                     "type": "integer"
                   },
                   "targetAgentId": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "format": "uuid"
                   },
                   "enabled": {
@@ -9130,7 +9157,10 @@
                     "type": "string"
                   },
                   "model": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "modelTier": {
                     "type": [
@@ -9187,6 +9217,153 @@
         "responses": {
           "200": {
             "description": "Schedule updated"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Schedule not found"
+          },
+          "409": {
+            "description": "Duplicate name"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Patch a schedule",
+        "description": "Partially updates a schedule by shallow-merging provided fields over the existing row.",
+        "tags": [
+          "Schedules"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "cronExpression": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "intervalMs": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "exclusiveMinimum": 0
+                  },
+                  "taskTemplate": {
+                    "type": "string"
+                  },
+                  "taskType": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "priority": {
+                    "type": "integer"
+                  },
+                  "targetAgentId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uuid"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "modelTier": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "smol",
+                      "regular",
+                      "smart",
+                      "ultra",
+                      null
+                    ]
+                  },
+                  "nextRunAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "targetType": {
+                    "type": "string",
+                    "enum": [
+                      "agent-task",
+                      "workflow",
+                      "script"
+                    ]
+                  },
+                  "workflowId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uuid"
+                  },
+                  "scriptName": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "scriptArgs": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": {}
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Schedule patched"
           },
           "400": {
             "description": "Validation error"
@@ -15157,6 +15334,46 @@
           }
         ],
         "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "enabled",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "consecutiveErrorsMin",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "running",
+                "waiting",
+                "completed",
+                "failed",
+                "skipped",
+                "cancelled"
+              ]
+            },
+            "required": false,
+            "name": "lastRunStatus",
+            "in": "query"
+          },
           {
             "schema": {
               "type": "string",

@@ -158,9 +158,37 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
           enabled: body.enabled,
           name: body.name,
           scheduleType: body.scheduleType,
+          targetType: body.targetType,
+          workflowId: body.workflowId,
+          scriptName: body.scriptName,
           hideCompleted: body.hideCompleted,
+          consecutiveErrorsMin: body.consecutiveErrorsMin,
+          lastRunStatus: body.lastRunStatus,
         }),
       };
+    case "schedule_create":
+      return { method: "POST", path: "/api/schedules", body };
+    case "schedule_update":
+    case "schedule_patch": {
+      const id = typeof body.id === "string" ? body.id : body.scheduleId;
+      if (typeof id !== "string") throw new Error(`${name} requires string \`id\``);
+      const { id: _id, scheduleId: _scheduleId, newName, ...rest } = body;
+      return {
+        method: name === "schedule_patch" ? "PATCH" : "PUT",
+        path: `/api/schedules/${encodeURIComponent(id)}`,
+        body: { ...rest, ...(newName !== undefined ? { name: newName } : {}) },
+      };
+    }
+    case "schedule_delete": {
+      const id = typeof body.id === "string" ? body.id : body.scheduleId;
+      if (typeof id !== "string") throw new Error("schedule_delete requires string `id`");
+      return { method: "DELETE", path: `/api/schedules/${encodeURIComponent(id)}` };
+    }
+    case "schedule_runNow": {
+      const id = typeof body.id === "string" ? body.id : body.scheduleId;
+      if (typeof id !== "string") throw new Error("schedule_runNow requires string `id`");
+      return { method: "POST", path: `/api/schedules/${encodeURIComponent(id)}/run` };
+    }
 
     // ── scripts ──
     case "script_search":
@@ -228,6 +256,9 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
       return {
         method: "GET",
         path: appendQuery("/api/workflows", {
+          enabled: body.enabled,
+          consecutiveErrorsMin: body.consecutiveErrorsMin,
+          lastRunStatus: body.lastRunStatus,
           fields: body.includeFull ? "full" : "slim",
         }),
       };
@@ -255,6 +286,56 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
       const id = typeof body.id === "string" ? body.id : undefined;
       if (!id) throw new Error("workflow_delete requires string `id`");
       return { method: "DELETE", path: `/api/workflows/${encodeURIComponent(id)}` };
+    }
+    case "workflow_create":
+      return { method: "POST", path: "/api/workflows", body };
+    case "workflow_update": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      if (!id) throw new Error("workflow_update requires string `id`");
+      const { id: _id, ...rest } = body;
+      return { method: "PUT", path: `/api/workflows/${encodeURIComponent(id)}`, body: rest };
+    }
+    case "workflow_patch": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      if (!id) throw new Error("workflow_patch requires string `id`");
+      const { id: _id, ...rest } = body;
+      return { method: "PATCH", path: `/api/workflows/${encodeURIComponent(id)}`, body: rest };
+    }
+    case "workflow_patchNode": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      const nodeId = typeof body.nodeId === "string" ? body.nodeId : undefined;
+      if (!id || !nodeId) {
+        throw new Error("workflow_patchNode requires string `id` and `nodeId`");
+      }
+      const { id: _id, nodeId: _nodeId, ...rest } = body;
+      return {
+        method: "PATCH",
+        path: `/api/workflows/${encodeURIComponent(id)}/nodes/${encodeURIComponent(nodeId)}`,
+        body: rest,
+      };
+    }
+    case "workflow_trigger": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      if (!id) throw new Error("workflow_trigger requires string `id`");
+      return {
+        method: "POST",
+        path: `/api/workflows/${encodeURIComponent(id)}/trigger`,
+        body: body.triggerData ?? {},
+      };
+    }
+    case "workflow_retryRun": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      if (!id) throw new Error("workflow_retryRun requires string `id`");
+      return { method: "POST", path: `/api/workflow-runs/${encodeURIComponent(id)}/retry` };
+    }
+    case "workflow_cancelRun": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      if (!id) throw new Error("workflow_cancelRun requires string `id`");
+      return {
+        method: "POST",
+        path: `/api/workflow-runs/${encodeURIComponent(id)}/cancel`,
+        body: body.reason !== undefined ? { reason: body.reason } : undefined,
+      };
     }
 
     // ── prompt templates ──

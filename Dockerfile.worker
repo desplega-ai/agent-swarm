@@ -109,7 +109,7 @@ RUN HOME=/home/worker BUN_INSTALL=/home/worker/.bun curl -fsSL https://bun.sh/in
 ENV PATH="/home/worker/.bun/bin:$PATH"
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.201
+ARG CLAUDE_CODE_VERSION=2.1.204
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -135,7 +135,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match @openai/codex-sdk in package.json — enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.142.5
+ARG CODEX_VERSION=0.143.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -180,10 +180,10 @@ RUN codex plugin marketplace add mksglu/context-mode || true \
 # The installer drops the binary at ~/.opencode/bin/opencode and only modifies
 # ~/.bashrc — non-interactive shells (entrypoint, gosu drops) miss that PATH
 # update, so we extend ENV PATH explicitly.
-ARG OPENCODE_VERSION=1.17.13
+ARG OPENCODE_VERSION=1.17.15
 RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash
 ENV PATH="/home/worker/.opencode/bin:$PATH"
-ARG OPENCODE_SDK_VERSION=1.17.13
+ARG OPENCODE_SDK_VERSION=1.17.15
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION} \
