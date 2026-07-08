@@ -155,7 +155,7 @@ describe("GitLab — backward compatibility", () => {
     const expected = `[GitLab MR #5] Add feature
 
 Repo: group/project
-Author: @dev1
+Author: dev1
 Branch: feature-branch \u2192 main
 URL: https://gitlab.com/group/project/-/merge_requests/5
 
@@ -206,7 +206,7 @@ The CI pipeline has failed. Please investigate and fix the issues.
 
     expect(result.skipped).toBe(false);
 
-    const expected = `[GitLab Comment on MR #5] @dev1 mentioned bot
+    const expected = `[GitLab Comment on MR #5] dev1 mentioned bot
 
 Repo: group/project
 URL: https://gitlab.com/group/project/-/merge_requests/5
