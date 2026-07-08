@@ -177,6 +177,17 @@ export function useDeleteOAuthApp() {
   });
 }
 
+export function useRefreshOAuthApp() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (provider: string) => api.refreshOAuthApp(provider),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["oauth-apps"] });
+      queryClient.invalidateQueries({ queryKey: ["credential-bindings"] });
+    },
+  });
+}
+
 export function useDisconnectOAuthApp() {
   const queryClient = useQueryClient();
   return useMutation({

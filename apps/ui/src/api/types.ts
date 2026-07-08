@@ -1284,6 +1284,7 @@ export interface OAuthAppSummary {
   tokenBodyFormat: "form" | "json";
   tokenStatus: OAuthBindingTokenStatus;
   expiresAt?: string | null;
+  lastRefreshedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

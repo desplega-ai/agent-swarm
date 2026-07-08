@@ -1206,6 +1206,18 @@ class ApiClient {
     return res.json();
   }
 
+  async refreshOAuthApp(
+    provider: string,
+  ): Promise<{ refreshed: boolean; tokenStatus: string; expiresAt: string | null }> {
+    const url = `${this.getBaseUrl()}/api/oauth-apps/${encodeURIComponent(provider)}/refresh`;
+    const res = await fetch(url, { method: "POST", headers: this.getHeaders() });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to refresh OAuth token" }));
+      throw new Error(error.error || `Failed to refresh OAuth token: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async disconnectOAuthApp(
     provider: string,
   ): Promise<{ disconnected: boolean; revocationAttempted?: boolean; message?: string }> {

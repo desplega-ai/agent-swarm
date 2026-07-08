@@ -1,4 +1,4 @@
-import { ArrowLeft, ExternalLink, Pencil, Trash2, Unplug } from "lucide-react";
+import { ArrowLeft, ExternalLink, Pencil, RotateCw, Trash2, Unplug } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -8,6 +8,7 @@ import {
   useDisconnectOAuthApp,
   useOAuthApps,
   useOAuthAuthorizeUrl,
+  useRefreshOAuthApp,
 } from "@/api/hooks/use-script-connections";
 import {
   AlertDialog,
@@ -60,6 +61,7 @@ export default function OAuthAppDetailPage() {
   const authorize = useOAuthAuthorizeUrl();
   const deleteApp = useDeleteOAuthApp();
   const disconnect = useDisconnectOAuthApp();
+  const refreshToken = useRefreshOAuthApp();
   const [editOpen, setEditOpen] = useState(false);
   const app = apps.find((candidate) => candidate.provider === decodedProvider);
   const hasToken = app ? app.tokenStatus !== "missing" : false;
@@ -119,6 +121,24 @@ export default function OAuthAppDetailPage() {
               <ExternalLink className="size-4" />
               {hasToken ? "Re-authorize" : "Authorize"}
             </Button>
+            {hasToken ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  const result = await refreshToken.mutateAsync(app.provider);
+                  toast.success(
+                    result.refreshed
+                      ? `Token refreshed — status ${result.tokenStatus}`
+                      : "Token refresh skipped",
+                  );
+                }}
+                disabled={refreshToken.isPending}
+              >
+                <RotateCw className="size-4" />
+                Refresh now
+              </Button>
+            ) : null}
             {hasToken ? (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
@@ -258,6 +278,10 @@ export default function OAuthAppDetailPage() {
                 label="Expires"
                 value={app.expiresAt ? formatSmartTime(app.expiresAt) : "No token"}
               />
+              <QuickStat
+                label="Last refreshed"
+                value={app.lastRefreshedAt ? formatSmartTime(app.lastRefreshedAt) : "Never"}
+              />
               <QuickStat label="Created" value={formatSmartTime(app.createdAt)} />
               <QuickStat label="Updated" value={formatSmartTime(app.updatedAt)} />
             </QuickStats>
@@ -265,7 +289,9 @@ export default function OAuthAppDetailPage() {
         }
       />
 
-      <InlineError error={authorize.error ?? deleteApp.error ?? disconnect.error} />
+      <InlineError
+        error={authorize.error ?? deleteApp.error ?? disconnect.error ?? refreshToken.error}
+      />
       <OAuthAppDialog open={editOpen} onOpenChange={setEditOpen} app={app} />
     </div>
   );
