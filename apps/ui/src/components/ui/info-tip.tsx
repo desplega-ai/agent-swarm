@@ -11,6 +11,9 @@ export function InfoTip({ content, className }: { content: ReactNode; className?
     <Tooltip>
       <TooltipTrigger
         type="button"
+        // Non-focusable so dialogs don't autofocus the trigger and pop the
+        // tooltip open on mount (Radix Tooltip opens on focus). Hover still works.
+        tabIndex={-1}
         aria-label="What is this?"
         className={cn(
           "inline-flex shrink-0 cursor-help items-center text-muted-foreground/70 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm",

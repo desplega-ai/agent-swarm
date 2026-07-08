@@ -1177,6 +1177,18 @@ class ApiClient {
     return res.json();
   }
 
+  async disconnectOAuthApp(
+    provider: string,
+  ): Promise<{ disconnected: boolean; revocationAttempted?: boolean; message?: string }> {
+    const url = `${this.getBaseUrl()}/api/oauth-apps/${encodeURIComponent(provider)}/tokens`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to disconnect OAuth app" }));
+      throw new Error(error.error || `Failed to disconnect OAuth app: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async fetchOAuthAuthorizeUrl(
     provider: string,
   ): Promise<{ authorizeUrl: string; redirectUri: string }> {

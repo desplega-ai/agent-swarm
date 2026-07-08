@@ -3,7 +3,6 @@ import {
   Check,
   Copy,
   ExternalLink,
-  KeyRound,
   Link2,
   Play,
   Plus,
@@ -90,9 +89,31 @@ import { cn, formatSmartTime } from "@/lib/utils";
 
 const KIND_OPTIONS: Array<ScriptConnectionKind | "all"> = ["all", "openapi", "graphql", "mcp"];
 const SCOPE_OPTIONS: Array<ScriptConnectionScope | "all"> = ["all", "global", "agent", "repo"];
-const PLAYGROUND_SOURCE = `export default async function(args, ctx) {
+const TAB_VALUES = ["connections", "bindings", "oauth-apps", "playground"] as const;
+type ConnectionsTab = (typeof TAB_VALUES)[number];
+const NEW_PARAM_BY_TAB: Partial<Record<ConnectionsTab, string>> = {
+  connections: "connection",
+  bindings: "binding",
+  "oauth-apps": "oauth-app",
+};
+const ADD_LABEL_BY_TAB: Partial<Record<ConnectionsTab, string>> = {
+  connections: "Add Connection",
+  bindings: "Add Binding",
+  "oauth-apps": "Add OAuth App",
+};
+const SEARCH_PLACEHOLDER_BY_TAB: Partial<Record<ConnectionsTab, string>> = {
+  connections: "Search connections...",
+  bindings: "Search bindings by config key, provider...",
+  "oauth-apps": "Search OAuth apps by provider, client ID...",
+};
+const PLAYGROUND_SOURCE = `import type { ScriptMain } from "swarm-sdk";
+
+const main: ScriptMain = async (args, ctx) => {
   return { api: Object.keys(ctx.api ?? {}), mcp: Object.keys(ctx.mcp ?? {}) };
-}`;
+};
+
+export default main;
+`;
 
 function splitList(value: string): string[] {
   return value
@@ -158,7 +179,13 @@ function scriptUsageSnippet(
     const tool = detail?.tools[0]?.name || "toolName";
     return `await ctx.mcp.${namespace}.${tool}({});`;
   }
-  const operation = detail?.operations[0]?.name || "exampleOperation";
+  // Prefer a read-only operation as the example — the first spec entry is
+  // often a DELETE, which is a poor thing to invite copy-pasting.
+  const operations = detail?.operations ?? [];
+  const operation =
+    operations.find((op) => op.method.toUpperCase() === "GET")?.name ||
+    operations[0]?.name ||
+    "exampleOperation";
   return `await ctx.api.${namespace}.${operation}({});`;
 }
 
@@ -639,7 +666,11 @@ export function AddConnectionDialog({
                 <FieldLabel tip="Namespace under ctx.api or ctx.mcp in scripts. Use a short JavaScript-safe name.">
                   Slug
                 </FieldLabel>
-                <Input value={slug} onChange={(event) => setSlug(event.target.value)} />
+                <Input
+                  value={slug}
+                  onChange={(event) => setSlug(event.target.value)}
+                  placeholder="github"
+                />
               </div>
               <div className="space-y-2">
                 <FieldLabel tip="Human-readable label shown in the dashboard; scripts still use the slug.">
@@ -648,6 +679,7 @@ export function AddConnectionDialog({
                 <Input
                   value={displayName}
                   onChange={(event) => setDisplayName(event.target.value)}
+                  placeholder="GitHub API"
                 />
               </div>
             </div>
@@ -677,7 +709,11 @@ export function AddConnectionDialog({
                     <FieldLabel tip="Provider API origin used when scripts call this connection.">
                       Base URL
                     </FieldLabel>
-                    <Input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
+                    <Input
+                      value={baseUrl}
+                      onChange={(event) => setBaseUrl(event.target.value)}
+                      placeholder="https://api.github.com"
+                    />
                   </div>
                   <div className="space-y-2">
                     <FieldLabel tip="Exact hostnames where the credential placeholder is substituted at egress.">
@@ -686,7 +722,7 @@ export function AddConnectionDialog({
                     <Input
                       value={allowedHosts}
                       onChange={(event) => setAllowedHosts(event.target.value)}
-                      placeholder="api.example.com, uploads.example.com"
+                      placeholder="api.github.com, uploads.github.com"
                     />
                   </div>
                 </div>
@@ -716,6 +752,7 @@ export function AddConnectionDialog({
                         <Input
                           value={openapiSpecUrl}
                           onChange={(event) => setOpenapiSpecUrl(event.target.value)}
+                          placeholder="https://example.com/openapi.json"
                         />
                       </div>
                     ) : (
@@ -727,6 +764,7 @@ export function AddConnectionDialog({
                           value={openapiSpecJson}
                           onChange={(event) => setOpenapiSpecJson(event.target.value)}
                           className="min-h-40 font-mono text-xs"
+                          placeholder={`{"openapi": "3.1.0", "info": {"title": "GitHub API"}, "paths": {...}}`}
                         />
                       </div>
                     )}
@@ -789,6 +827,7 @@ export function AddConnectionDialog({
                         <Input
                           value={configKey}
                           onChange={(event) => setConfigKey(event.target.value)}
+                          placeholder="GITHUB_TOKEN"
                         />
                       </div>
                       <div className="space-y-2">
@@ -817,6 +856,7 @@ export function AddConnectionDialog({
                             value={oauthProvider}
                             onChange={(event) => setOauthProvider(event.target.value)}
                             list="oauth-provider-options"
+                            placeholder="github"
                           />
                           <datalist id="oauth-provider-options">
                             {oauthApps.map((app) => (
@@ -835,6 +875,7 @@ export function AddConnectionDialog({
                       <Input
                         value={headerTemplate}
                         onChange={(event) => setHeaderTemplate(event.target.value)}
+                        placeholder={`Authorization: Bearer ${configPlaceholder(configKey)}`}
                       />
                     </div>
                     <div className="space-y-2">
@@ -846,6 +887,7 @@ export function AddConnectionDialog({
                       <Input
                         value={queryTemplate}
                         onChange={(event) => setQueryTemplate(event.target.value)}
+                        placeholder={`access_token=${configPlaceholder(configKey)}`}
                       />
                     </div>
                   </div>
@@ -969,7 +1011,11 @@ function CredentialBindingDialog({
               <FieldLabel tip="Secret config key referenced by the redacted placeholder in templates.">
                 Config Key
               </FieldLabel>
-              <Input value={configKey} onChange={(event) => setConfigKey(event.target.value)} />
+              <Input
+                value={configKey}
+                onChange={(event) => setConfigKey(event.target.value)}
+                placeholder="GITHUB_TOKEN"
+              />
             </div>
             <div className="space-y-2">
               <FieldLabel tip="Config uses a stored swarm secret; OAuth uses the selected OAuth app token.">
@@ -1023,7 +1069,7 @@ function CredentialBindingDialog({
             <TagInput
               values={allowedHosts}
               onChange={setAllowedHosts}
-              placeholder="api.example.com uploads.example.com"
+              placeholder="api.github.com uploads.github.com"
               ariaLabel="Allowed host"
             />
           </div>
@@ -1038,6 +1084,7 @@ function CredentialBindingDialog({
                 setHeaderTemplate(event.target.value);
                 setHeaderManuallyEdited(true);
               }}
+              placeholder={`Authorization: Bearer ${placeholder}`}
               className="font-mono text-xs"
             />
           </div>
@@ -1084,7 +1131,11 @@ function CredentialBindingDialog({
                 <FieldLabel tip="UUID of the agent or repo that owns this scoped binding.">
                   Scope ID
                 </FieldLabel>
-                <Input value={scopeId} onChange={(event) => setScopeId(event.target.value)} />
+                <Input
+                  value={scopeId}
+                  onChange={(event) => setScopeId(event.target.value)}
+                  placeholder="a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                />
               </div>
             ) : null}
           </div>
@@ -1120,26 +1171,17 @@ function CredentialBindingsSection({
   connections,
   oauthApps,
   search,
-  scopeFilter,
   loading,
 }: {
   bindings: ScriptCredentialBinding[];
   connections: ScriptConnection[];
   oauthApps: OAuthAppSummary[];
   search: string;
-  scopeFilter: ScriptConnectionScope | "all";
   loading: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [editBinding, setEditBinding] = useState<ScriptCredentialBinding | undefined>();
   const upsert = useUpsertCredentialBinding();
-  const filteredBindings = useMemo(
-    () =>
-      scopeFilter === "all"
-        ? bindings
-        : bindings.filter((binding) => binding.scope === scopeFilter),
-    [bindings, scopeFilter],
-  );
   const usedByCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const binding of bindings) {
@@ -1290,21 +1332,8 @@ function CredentialBindingsSection({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3">
-      <div className="flex justify-end">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setEditBinding(undefined);
-            setOpen(true);
-          }}
-        >
-          <Plus className="size-4" />
-          Add Binding
-        </Button>
-      </div>
       <DataGrid
-        rowData={filteredBindings}
+        rowData={bindings}
         columnDefs={columnDefs}
         quickFilterText={search}
         loading={loading}
@@ -1315,14 +1344,14 @@ function CredentialBindingsSection({
           if (target?.closest("a, button")) return;
           if (event.data) {
             setEditBinding(event.data);
-            setOpen(true);
+            setEditOpen(true);
           }
         }}
       />
       <InlineError error={upsert.error} />
       <CredentialBindingDialog
-        open={open}
-        onOpenChange={setOpen}
+        open={editOpen}
+        onOpenChange={setEditOpen}
         binding={editBinding}
         oauthApps={oauthApps}
       />
@@ -1330,121 +1359,167 @@ function CredentialBindingsSection({
   );
 }
 
-function OAuthAppsSection({ apps }: { apps: OAuthAppSummary[] }) {
+function OAuthAppsSection({
+  apps,
+  search,
+  loading,
+}: {
+  apps: OAuthAppSummary[];
+  search: string;
+  loading: boolean;
+}) {
   const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [editApp, setEditApp] = useState<OAuthAppSummary | undefined>();
   const authorize = useOAuthAuthorizeUrl();
   const deleteApp = useDeleteOAuthApp();
 
-  async function openAuthorize(provider: string) {
-    const result = await authorize.mutateAsync(provider);
-    window.open(result.authorizeUrl, "_blank", "noopener,noreferrer");
-  }
-
-  async function confirmDelete(provider: string) {
-    await deleteApp.mutateAsync(provider);
-    toast.success("OAuth app deleted");
-  }
+  const columnDefs = useMemo<ColDef<OAuthAppSummary>[]>(
+    () => [
+      {
+        field: "provider",
+        headerName: "Provider",
+        minWidth: 140,
+        flex: 1,
+        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => (
+          <span className="font-semibold">{params.value}</span>
+        ),
+      },
+      {
+        field: "clientId",
+        headerName: "Client ID",
+        minWidth: 180,
+        flex: 1,
+        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => (
+          <span className="block max-w-full truncate font-mono text-xs text-muted-foreground">
+            {params.value}
+          </span>
+        ),
+      },
+      {
+        field: "redirectUri",
+        headerName: "Redirect URI",
+        minWidth: 240,
+        flex: 1,
+        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) =>
+          params.data ? (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate text-xs text-muted-foreground">
+                {params.data.redirectUri}
+              </span>
+              <span onClick={(event) => event.stopPropagation()}>
+                <CopyButton value={params.data.redirectUri} />
+              </span>
+            </span>
+          ) : null,
+      },
+      {
+        field: "scopes",
+        headerName: "Scopes",
+        minWidth: 160,
+        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => (
+          <HostChips hosts={params.data?.scopes ?? []} />
+        ),
+      },
+      {
+        field: "tokenStatus",
+        headerName: "Token",
+        width: 100,
+        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => (
+          <TokenStatusBadge status={params.data?.tokenStatus} />
+        ),
+      },
+      {
+        headerName: "Actions",
+        width: 250,
+        sortable: false,
+        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => {
+          const app = params.data;
+          if (!app) return null;
+          return (
+            <span
+              className="flex items-center gap-1.5"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={async () => {
+                  const result = await authorize.mutateAsync(app.provider);
+                  window.open(result.authorizeUrl, "_blank", "noopener,noreferrer");
+                }}
+                disabled={authorize.isPending}
+              >
+                <ExternalLink className="size-3" />
+                {app.tokenStatus === "missing" ? "Authorize" : "Re-authorize"}
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => {
+                  setEditApp(app);
+                  setEditOpen(true);
+                }}
+              >
+                Edit
+              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button size="icon-sm" variant="ghost" aria-label={`Delete ${app.provider}`}>
+                    <Trash2 className="size-4" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete OAuth app?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This deletes the app configuration and all stored OAuth tokens for{" "}
+                      {app.provider}.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      variant="destructive"
+                      onClick={async () => {
+                        await deleteApp.mutateAsync(app.provider);
+                        toast.success("OAuth app deleted");
+                      }}
+                      disabled={deleteApp.isPending}
+                    >
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </span>
+          );
+        },
+      },
+    ],
+    [authorize, deleteApp],
+  );
 
   return (
-    <Card className="rounded-lg">
-      <CardHeader className="flex-row items-center justify-between gap-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <KeyRound className="size-4 text-muted-foreground" />
-          OAuth Apps
-        </CardTitle>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setEditApp(undefined);
-            setOpen(true);
-          }}
-        >
-          <Plus className="size-4" />
-          Add OAuth App
-        </Button>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {apps.length === 0 ? (
-          <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-            No OAuth apps
-          </div>
-        ) : (
-          <div className="grid gap-2">
-            {apps.map((app) => (
-              <div
-                key={app.provider}
-                className="grid cursor-pointer gap-3 rounded-md border p-3 transition-colors hover:bg-muted/40 md:grid-cols-[minmax(120px,1fr)_minmax(220px,2fr)_auto_auto_auto] md:items-center"
-                onClick={() =>
-                  navigate(`/connections/oauth-apps/${encodeURIComponent(app.provider)}`)
-                }
-              >
-                <div className="min-w-0">
-                  <div className="truncate font-medium">{app.provider}</div>
-                  <div className="truncate text-xs text-muted-foreground">{app.clientId}</div>
-                </div>
-                <div className="truncate text-xs text-muted-foreground">{app.redirectUri}</div>
-                <TokenStatusBadge status={app.tokenStatus} />
-                <div
-                  className="flex items-center gap-2"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => openAuthorize(app.provider)}
-                    disabled={authorize.isPending}
-                  >
-                    <ExternalLink className="size-3" />
-                    Authorize
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      setEditApp(app);
-                      setOpen(true);
-                    }}
-                  >
-                    Edit
-                  </Button>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button size="icon-sm" variant="ghost" aria-label={`Delete ${app.provider}`}>
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Delete OAuth app?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          This deletes the app configuration and all stored OAuth tokens for{" "}
-                          {app.provider}.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction
-                          variant="destructive"
-                          onClick={() => confirmDelete(app.provider)}
-                          disabled={deleteApp.isPending}
-                        >
-                          Delete
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        <InlineError error={authorize.error ?? deleteApp.error} />
-      </CardContent>
-      <OAuthAppDialog open={open} onOpenChange={setOpen} app={editApp} />
-    </Card>
+    <div className="flex flex-col flex-1 min-h-0 gap-3">
+      <DataGrid
+        rowData={apps}
+        columnDefs={columnDefs}
+        quickFilterText={search}
+        loading={loading}
+        emptyMessage="No OAuth apps found"
+        paginationQueryKey="oauthApps"
+        onRowClicked={(event) => {
+          const target = event.event?.target as HTMLElement | null;
+          if (target?.closest("a, button")) return;
+          if (event.data) {
+            navigate(`/connections/oauth-apps/${encodeURIComponent(event.data.provider)}`);
+          }
+        }}
+      />
+      <InlineError error={authorize.error ?? deleteApp.error} />
+      <OAuthAppDialog open={editOpen} onOpenChange={setEditOpen} app={editApp} />
+    </div>
   );
 }
 
@@ -1522,7 +1597,7 @@ function ScopeTagInput({
     <TagInput
       values={scopes}
       onChange={onChange}
-      placeholder="read write"
+      placeholder="repo read:org"
       ariaLabel="OAuth scope"
     />
   );
@@ -1625,7 +1700,7 @@ export function OAuthAppDialog({
               <Input
                 value={discoverUrl}
                 onChange={(event) => setDiscoverUrl(event.target.value)}
-                placeholder="https://accounts.example.com"
+                placeholder="https://accounts.google.com"
               />
               <Button
                 type="button"
@@ -1646,13 +1721,18 @@ export function OAuthAppDialog({
                 value={provider}
                 onChange={(event) => setProvider(event.target.value)}
                 disabled={isEdit}
+                placeholder="github"
               />
             </div>
             <div className="space-y-2">
               <FieldLabel tip="OAuth client ID from the provider's developer console.">
                 Client ID
               </FieldLabel>
-              <Input value={clientId} onChange={(event) => setClientId(event.target.value)} />
+              <Input
+                value={clientId}
+                onChange={(event) => setClientId(event.target.value)}
+                placeholder="Iv1.8a61f9b3a7aba766"
+              />
             </div>
           </div>
           <div className="space-y-2">
@@ -1663,7 +1743,7 @@ export function OAuthAppDialog({
               type="password"
               value={clientSecret}
               onChange={(event) => setClientSecret(event.target.value)}
-              placeholder={isEdit ? "unchanged" : undefined}
+              placeholder={isEdit ? "unchanged" : "3c9d1f2e8ab74650cd1208d586cf1a2b34e5d6f7"}
             />
           </div>
           <div className="grid gap-4 md:grid-cols-2">
@@ -1674,13 +1754,18 @@ export function OAuthAppDialog({
               <Input
                 value={authorizeUrl}
                 onChange={(event) => setAuthorizeUrl(event.target.value)}
+                placeholder="https://github.com/login/oauth/authorize"
               />
             </div>
             <div className="space-y-2">
               <FieldLabel tip="Provider token endpoint used to exchange and refresh OAuth tokens.">
                 Token URL
               </FieldLabel>
-              <Input value={tokenUrl} onChange={(event) => setTokenUrl(event.target.value)} />
+              <Input
+                value={tokenUrl}
+                onChange={(event) => setTokenUrl(event.target.value)}
+                placeholder="https://github.com/login/oauth/access_token"
+              />
             </div>
           </div>
           <div className="space-y-2">
@@ -1752,6 +1837,8 @@ export function OAuthAppDialog({
                         ),
                       )
                     }
+                    placeholder="access_type"
+                    aria-label="Extra parameter name"
                   />
                   <Input
                     value={row.value}
@@ -1762,6 +1849,8 @@ export function OAuthAppDialog({
                         ),
                       )
                     }
+                    placeholder="offline"
+                    aria-label="Extra parameter value"
                   />
                   <Button
                     type="button"
@@ -1813,9 +1902,12 @@ function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string }) {
           Playground
         </CardTitle>
         <div className="flex items-center gap-2">
+          <FieldLabel tip="Scripts execute under this agent's identity (X-Agent-ID) — its scope determines which connections and credentials resolve.">
+            Run as
+          </FieldLabel>
           <Select value={agentId} onValueChange={setAgentId}>
             <SelectTrigger className="w-48">
-              <SelectValue placeholder="Run as" />
+              <SelectValue placeholder="Select agent" />
             </SelectTrigger>
             <SelectContent>
               {(agents ?? []).map((agent) => (
@@ -1884,14 +1976,18 @@ export default function ConnectionsPage() {
   const scopeFilter = SCOPE_OPTIONS.includes(scopeParam as ScriptConnectionScope | "all")
     ? (scopeParam as ScriptConnectionScope | "all")
     : "all";
-  const [addOpen, setAddOpen] = useState(false);
+  const tabParam = readStringParam(searchParams, "tab", "connections");
+  const activeTab: ConnectionsTab = (TAB_VALUES as readonly string[]).includes(tabParam)
+    ? (tabParam as ConnectionsTab)
+    : "connections";
+  const newParam = readStringParam(searchParams, "new");
 
   const { data: connections, isLoading } = useScriptConnections({
     kind: kindFilter,
     scope: scopeFilter,
   });
   const { data: bindings = [], isLoading: bindingsLoading } = useCredentialBindings();
-  const { data: oauthApps = [] } = useOAuthApps();
+  const { data: oauthApps = [], isLoading: oauthAppsLoading } = useOAuthApps();
   const { data: mcpServersData } = useMcpServers();
   const { data: agents } = useAgents(false);
   const refreshConnection = useRefreshScriptConnection();
@@ -2002,82 +2098,102 @@ export default function ConnectionsPage() {
     [refreshConnection, setEnabled],
   );
 
+  const addTarget = NEW_PARAM_BY_TAB[activeTab];
+  const addLabel = ADD_LABEL_BY_TAB[activeTab];
+  const searchPlaceholder = SEARCH_PLACEHOLDER_BY_TAB[activeTab];
+
+  function setNewParam(value: string) {
+    setParam("new", value);
+  }
+
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       <PageHeader
         title="Connections"
         icon={Link2}
         action={
-          <Button onClick={() => setAddOpen(true)}>
-            <Plus className="size-4" />
-            Add Connection
-          </Button>
+          addTarget && addLabel ? (
+            <Button onClick={() => setNewParam(addTarget)}>
+              <Plus className="size-4" />
+              {addLabel}
+            </Button>
+          ) : undefined
         }
       />
 
-      <Tabs defaultValue="connections" className="flex flex-col flex-1 min-h-0">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) =>
+          setParam("tab", value, { defaultValue: "connections", reset: ["new"] })
+        }
+        className="flex flex-col flex-1 min-h-0"
+      >
         <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <TabsList className="w-full justify-start overflow-x-auto sm:w-fit">
+          <TabsList className="w-full justify-start overflow-x-auto overflow-y-hidden sm:w-fit">
             <TabsTrigger value="connections">Connections</TabsTrigger>
             <TabsTrigger value="bindings">Bindings</TabsTrigger>
-            <TabsTrigger value="oauth">OAuth Apps</TabsTrigger>
+            <TabsTrigger value="oauth-apps">OAuth Apps</TabsTrigger>
             <TabsTrigger value="playground">Playground</TabsTrigger>
           </TabsList>
-          <div className="flex w-full flex-col gap-2 md:flex-row md:items-center md:justify-end lg:w-auto">
-            <div className="relative w-full md:w-72">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search connections..."
-                value={search}
-                onChange={(event) =>
-                  setParam("search", event.target.value, {
-                    reset: ["connectionsPage", "credentialBindingsPage"],
-                  })
-                }
-                className="pl-9"
-              />
+          {activeTab !== "playground" ? (
+            <div className="flex w-full flex-col gap-2 md:flex-row md:items-center md:justify-end lg:w-auto">
+              <div className="relative w-full md:w-72">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder={searchPlaceholder}
+                  value={search}
+                  onChange={(event) =>
+                    setParam("search", event.target.value, {
+                      reset: ["connectionsPage", "credentialBindingsPage", "oauthAppsPage"],
+                    })
+                  }
+                  className="pl-9"
+                />
+              </div>
+              {activeTab === "connections" ? (
+                <div className="grid grid-cols-2 gap-2 md:flex md:items-center">
+                  <Select
+                    value={kindFilter}
+                    onValueChange={(value) =>
+                      setParam("kind", value, {
+                        defaultValue: "all",
+                        reset: ["connectionsPage"],
+                      })
+                    }
+                  >
+                    <SelectTrigger className="w-full md:w-[140px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Kinds</SelectItem>
+                      <SelectItem value="openapi">OpenAPI</SelectItem>
+                      <SelectItem value="graphql">GraphQL</SelectItem>
+                      <SelectItem value="mcp">MCP</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={scopeFilter}
+                    onValueChange={(value) =>
+                      setParam("scope", value, {
+                        defaultValue: "all",
+                        reset: ["connectionsPage"],
+                      })
+                    }
+                  >
+                    <SelectTrigger className="w-full md:w-[140px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Scopes</SelectItem>
+                      <SelectItem value="global">Global</SelectItem>
+                      <SelectItem value="agent">Agent</SelectItem>
+                      <SelectItem value="repo">Repo</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
             </div>
-            <div className="grid grid-cols-2 gap-2 md:flex md:items-center">
-              <Select
-                value={kindFilter}
-                onValueChange={(value) =>
-                  setParam("kind", value, {
-                    defaultValue: "all",
-                    reset: ["connectionsPage", "credentialBindingsPage"],
-                  })
-                }
-              >
-                <SelectTrigger className="w-full md:w-[140px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Kinds</SelectItem>
-                  <SelectItem value="openapi">OpenAPI</SelectItem>
-                  <SelectItem value="graphql">GraphQL</SelectItem>
-                  <SelectItem value="mcp">MCP</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select
-                value={scopeFilter}
-                onValueChange={(value) =>
-                  setParam("scope", value, {
-                    defaultValue: "all",
-                    reset: ["connectionsPage", "credentialBindingsPage"],
-                  })
-                }
-              >
-                <SelectTrigger className="w-full md:w-[140px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Scopes</SelectItem>
-                  <SelectItem value="global">Global</SelectItem>
-                  <SelectItem value="agent">Agent</SelectItem>
-                  <SelectItem value="repo">Repo</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          ) : null}
         </div>
         <TabsContent value="connections" className="flex flex-col flex-1 min-h-0 mt-3">
           <DataGrid
@@ -2099,12 +2215,11 @@ export default function ConnectionsPage() {
             connections={connections ?? []}
             oauthApps={oauthApps}
             search={search}
-            scopeFilter={scopeFilter}
             loading={bindingsLoading}
           />
         </TabsContent>
-        <TabsContent value="oauth" className="mt-3">
-          <OAuthAppsSection apps={oauthApps} />
+        <TabsContent value="oauth-apps" className="flex flex-col flex-1 min-h-0 mt-3">
+          <OAuthAppsSection apps={oauthApps} search={search} loading={oauthAppsLoading} />
         </TabsContent>
         <TabsContent value="playground" className="mt-3">
           <PlaygroundPanel defaultAgentId={defaultAgentId} />
@@ -2112,14 +2227,23 @@ export default function ConnectionsPage() {
       </Tabs>
 
       <AddConnectionDialog
-        open={addOpen}
-        onOpenChange={setAddOpen}
+        open={newParam === "connection"}
+        onOpenChange={(open) => setNewParam(open ? "connection" : "")}
         bindings={bindings}
         oauthApps={oauthApps}
         mcpServers={(mcpServersData?.servers ?? []).map((server) => ({
           id: server.id,
           name: server.name,
         }))}
+      />
+      <CredentialBindingDialog
+        open={newParam === "binding"}
+        onOpenChange={(open) => setNewParam(open ? "binding" : "")}
+        oauthApps={oauthApps}
+      />
+      <OAuthAppDialog
+        open={newParam === "oauth-app"}
+        onOpenChange={(open) => setNewParam(open ? "oauth-app" : "")}
       />
     </div>
   );

@@ -95,6 +95,9 @@ export function ScriptSourceEditor({
           renderLineHighlight: "none",
           scrollbar: { vertical: "auto", horizontal: "auto" },
           overviewRulerLanes: 0,
+          // Fixed-position suggest/hover widgets so they escape
+          // overflow-hidden ancestors (cards, dialogs) instead of clipping.
+          fixedOverflowWidgets: true,
         }}
       />
     </div>

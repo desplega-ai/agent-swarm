@@ -79,7 +79,7 @@ export default function ConnectionDetailPage() {
   const target = connection.baseUrl ?? connection.mcpServerId ?? "-";
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col flex-1 min-h-0 overflow-y-auto gap-4">
       <Button asChild variant="outline" size="sm" className="w-fit">
         <Link to="/connections">
           <ArrowLeft className="size-4" />

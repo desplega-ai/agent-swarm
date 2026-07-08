@@ -177,6 +177,19 @@ export function useDeleteOAuthApp() {
   });
 }
 
+export function useDisconnectOAuthApp() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (provider: string) => api.disconnectOAuthApp(provider),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["oauth-apps"] });
+      queryClient.invalidateQueries({ queryKey: ["credential-bindings"] });
+      queryClient.invalidateQueries({ queryKey: ["script-connections"] });
+      queryClient.invalidateQueries({ queryKey: ["script-connection"] });
+    },
+  });
+}
+
 export function useDiscoverOAuthApp() {
   return useMutation({
     mutationFn: (url: string) => api.discoverOAuthApp(url),

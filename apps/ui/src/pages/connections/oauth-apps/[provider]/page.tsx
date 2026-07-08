@@ -1,10 +1,11 @@
-import { ArrowLeft, ExternalLink, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, ExternalLink, Pencil, Trash2, Unplug } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   useDeleteOAuthApp,
+  useDisconnectOAuthApp,
   useOAuthApps,
   useOAuthAuthorizeUrl,
 } from "@/api/hooks/use-script-connections";
@@ -58,8 +59,10 @@ export default function OAuthAppDetailPage() {
   const { data: apps = [], isLoading, error } = useOAuthApps();
   const authorize = useOAuthAuthorizeUrl();
   const deleteApp = useDeleteOAuthApp();
+  const disconnect = useDisconnectOAuthApp();
   const [editOpen, setEditOpen] = useState(false);
   const app = apps.find((candidate) => candidate.provider === decodedProvider);
+  const hasToken = app ? app.tokenStatus !== "missing" : false;
 
   async function openAuthorize() {
     if (!app) return;
@@ -92,7 +95,7 @@ export default function OAuthAppDetailPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col flex-1 min-h-0 overflow-y-auto gap-4">
       <Button asChild variant="outline" size="sm" className="w-fit">
         <Link to="/connections">
           <ArrowLeft className="size-4" />
@@ -111,8 +114,45 @@ export default function OAuthAppDetailPage() {
               disabled={authorize.isPending}
             >
               <ExternalLink className="size-4" />
-              Authorize
+              {hasToken ? "Re-authorize" : "Authorize"}
             </Button>
+            {hasToken ? (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={disconnect.isPending}>
+                    <Unplug className="size-4" />
+                    Disconnect
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Disconnect {app.provider}?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Deletes the stored access and refresh tokens (with a best-effort revocation at
+                      the provider). The app configuration stays — you can authorize again at any
+                      time. Bindings using this provider will stop resolving until then.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      variant="destructive"
+                      onClick={async () => {
+                        const result = await disconnect.mutateAsync(app.provider);
+                        toast.success(
+                          result.revocationAttempted
+                            ? "Disconnected (revocation attempted at provider)"
+                            : "Disconnected — stored tokens deleted",
+                        );
+                      }}
+                      disabled={disconnect.isPending}
+                    >
+                      Disconnect
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : null}
             <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
               <Pencil className="size-4" />
               Edit
@@ -226,7 +266,7 @@ export default function OAuthAppDetailPage() {
         }
       />
 
-      <InlineError error={authorize.error ?? deleteApp.error} />
+      <InlineError error={authorize.error ?? deleteApp.error ?? disconnect.error} />
       <OAuthAppDialog open={editOpen} onOpenChange={setEditOpen} app={app} />
     </div>
   );
