@@ -186,8 +186,10 @@ describe("handleMessageReceived — identity auto-link via findOrCreateUserByEma
 
     const task = getTaskById(result.taskId!);
     expect(task!.requestedByUserId).toBeFalsy();
-    // No display name is ever guessed — the raw header is kept as the
-    // sentinel's identifier, suffixed with the explicit UNKNOWN marker.
-    expect(task!.task).toContain("Unknown Sender (no address) (unknown user)");
+    // No display name — not even the raw provider label — is ever rendered
+    // for an unresolved sender. The task text carries only the non-name
+    // sentinel shape, never the raw From header.
+    expect(task!.task).toContain("email:unknown (unknown user)");
+    expect(task!.task).not.toContain("Unknown Sender (no address)");
   });
 });

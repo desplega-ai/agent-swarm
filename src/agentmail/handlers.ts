@@ -188,10 +188,12 @@ export async function handleMessageReceived(
   // Render the resolved canonical name (or the UNKNOWN sentinel) for
   // agent-visible text — never the raw From header. `findOrCreateUserByEmail`
   // above auto-creates on a real email, so `senderEmail` present implies
-  // resolved; only a missing/unparseable From header falls to the sentinel.
+  // resolved; a missing/unparseable From header has no machine-carried
+  // identifier at all, so it renders the same non-name sentinel shape via
+  // the identity primitive rather than echoing the raw header string.
   const senderDisplay = senderEmail
     ? renderIdentity(resolveIdentityByEmail(senderEmail))
-    : `${from} (unknown user)`;
+    : renderIdentity({ status: "unknown", kind: "email", externalId: "unknown" });
   const preview = body.length > 500 ? `${body.substring(0, 500)}...` : body;
 
   // Emit workflow trigger event
