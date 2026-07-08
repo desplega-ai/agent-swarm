@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { createApprovalRequest, getAgentCurrentTask } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { getAppUrl } from "@/utils/constants";
@@ -93,6 +94,7 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
         approvers: { policy: "any" },
         sourceTaskId: sourceTaskId ?? undefined,
         timeoutSeconds,
+        createdBy: resolveTaskAuditUserId(sourceTaskId, requestInfo.agentId) ?? undefined,
       });
 
       const appUrl = getAppUrl();

@@ -11,8 +11,11 @@ import { unlink } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { Readable } from "node:stream";
 import { resolveHttpAuditUserId, resolveTaskAuditUserId } from "../be/audit-user";
-import { closeDb, createAgent, createTaskExtended, createUser, initDb } from "../be/db";
+import { closeDb, createAgent, createTaskExtended, createUser, initDb, startTask } from "../be/db";
+import { type IdentityActor, linkIdentity } from "../be/users";
 import { setRequestAuth } from "../utils/request-auth-context";
+
+const SYSTEM_ACTOR: IdentityActor = { kind: "system", id: "test" };
 
 const TEST_DB_PATH = "./test-audit-user.sqlite";
 
@@ -94,6 +97,49 @@ describe("resolveTaskAuditUserId", () => {
 
   test("returns null when owned task has no human requester", () => {
     expect(resolveTaskAuditUserId(noRequesterTaskId, agentId)).toBeNull();
+  });
+
+  test("ambient-task fallback: no sourceTaskId resolves via the caller's current in-progress task", () => {
+    const ambientAgent = createAgent({ name: "ambient-agent", isLead: false, status: "idle" });
+    const ambientTask = createTaskExtended("ambient task", {
+      agentId: ambientAgent.id,
+      requestedByUserId: humanUserId,
+    });
+    startTask(ambientTask.id);
+
+    expect(resolveTaskAuditUserId(undefined, ambientAgent.id)).toBe(humanUserId);
+  });
+
+  test("ambient-task fallback: no in-progress task for the caller still returns null", () => {
+    const idleAgent = createAgent({ name: "idle-agent", isLead: false, status: "idle" });
+    expect(resolveTaskAuditUserId(undefined, idleAgent.id)).toBeNull();
+  });
+
+  test("machine-carried external-ID fallback: no requestedByUserId but a linked Slack id resolves the user", () => {
+    const slackLinkedUser = createUser({ name: "Slack Fallback User" });
+    linkIdentity(slackLinkedUser.id, "slack", "U_AUDIT_FALLBACK", SYSTEM_ACTOR);
+
+    const fallbackAgent = createAgent({ name: "fallback-agent", isLead: false, status: "idle" });
+    const fallbackTask = createTaskExtended("slack-originated task, requester never stamped", {
+      agentId: fallbackAgent.id,
+      slackUserId: "U_AUDIT_FALLBACK",
+    });
+
+    expect(resolveTaskAuditUserId(fallbackTask.id, fallbackAgent.id)).toBe(slackLinkedUser.id);
+  });
+
+  test("machine-carried external-ID fallback: unlinked Slack id still returns null (no guess)", () => {
+    const fallbackAgent = createAgent({
+      name: "fallback-agent-unlinked",
+      isLead: false,
+      status: "idle",
+    });
+    const fallbackTask = createTaskExtended("slack-originated task, unlinked sender", {
+      agentId: fallbackAgent.id,
+      slackUserId: "U_NEVER_LINKED_AUDIT",
+    });
+
+    expect(resolveTaskAuditUserId(fallbackTask.id, fallbackAgent.id)).toBeNull();
   });
 });
 
