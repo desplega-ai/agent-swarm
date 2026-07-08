@@ -4,7 +4,7 @@ author: Claude
 planner: Claude
 topic: "DES-445 RBAC increment 3 — role engine (per-user, union, deny-deferred)"
 tags: [plan, rbac, auth, security, des-445]
-status: in_progress
+status: completed
 autonomy: autopilot
 last_updated: 2026-07-08
 last_updated_by: Claude
