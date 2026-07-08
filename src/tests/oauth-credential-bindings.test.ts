@@ -260,9 +260,7 @@ describe("OAuth credential bindings", () => {
       if (url !== "https://oauth.example.test/token") {
         return originalFetch(input, init);
       }
-      return Promise.resolve(
-        Response.json({ error: "invalid_grant" }, { status: 400 }),
-      );
+      return Promise.resolve(Response.json({ error: "invalid_grant" }, { status: 400 }));
     });
     globalThis.fetch = fetchSpy as typeof fetch;
 

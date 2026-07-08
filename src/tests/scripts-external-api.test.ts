@@ -306,12 +306,7 @@ describe("public execution route", () => {
            (id, slug, kind, scope, allowed_hosts_json, mcp_server_id, generated_runtime_json)
          VALUES (?, ?, 'mcp', 'global', '[]', ?, ?)`,
       )
-      .run(
-        runtimeDescriptor.connectionId,
-        "xmcp",
-        mcpServer.id,
-        JSON.stringify(runtimeDescriptor),
-      );
+      .run(runtimeDescriptor.connectionId, "xmcp", mcpServer.id, JSON.stringify(runtimeDescriptor));
 
     const script = insertScript({
       name: `mcp-keys-${crypto.randomUUID().slice(0, 8)}`,
