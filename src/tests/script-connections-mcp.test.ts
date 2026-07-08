@@ -323,6 +323,44 @@ describe("script MCP connections", () => {
     }
   });
 
+  test("agent-scoped registration resolves discovery auth with the target agent's scoped config", async () => {
+    const fake = startFakeMcpServer();
+    try {
+      const lead = createAgent({ name: "mcp-scope-lead", isLead: true, status: "idle" });
+      const owner = createAgent({ name: "mcp-scope-owner", isLead: false, status: "idle" });
+      // Secret visible ONLY in the owner agent's scope — not to the lead caller.
+      upsertSwarmConfig({
+        scope: "agent",
+        scopeId: owner.id,
+        key: "MCP_OWNER_ONLY_SECRET",
+        value: "owner-only-secret",
+        isSecret: true,
+      });
+      const mcpServer = createMcpServer({
+        name: `external-owner-${crypto.randomUUID()}`,
+        transport: "http",
+        scope: "global",
+        url: fake.url,
+        headerConfigKeys: JSON.stringify({ "X-Test-Secret": "MCP_OWNER_ONLY_SECRET" }),
+      });
+
+      const connection = await upsertScriptConnection({
+        slug: "ownerScopedDiscovery",
+        kind: "mcp",
+        scope: "agent",
+        scopeId: owner.id,
+        mcpServerId: mcpServer.id,
+        agentId: lead.id,
+      });
+
+      expect(connection.generationError).toBeNull();
+      const listRequest = fake.requests.find((request) => request.method === "tools/list");
+      expect(listRequest?.secretHeader).toBe("owner-only-secret");
+    } finally {
+      fake.stop();
+    }
+  });
+
   test("proxy route lets a worker invoke a global MCP connection and forwards resolved secret headers", async () => {
     const fake = startFakeMcpServer();
     try {

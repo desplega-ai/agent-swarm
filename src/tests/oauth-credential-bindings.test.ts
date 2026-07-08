@@ -234,6 +234,16 @@ describe("OAuth credential bindings", () => {
     expect(getOAuthTokens("phase2-refresh")?.refreshToken).toBe("new-refresh-token");
   });
 
+  test("generic OAuth authorize URL uses space-separated scopes", async () => {
+    upsertOAuthApp("phase2-scopes", testApp("phase2-scopes"));
+    const config = getOAuthProviderConfig("phase2-scopes");
+    expect(config).not.toBeNull();
+    if (!config) throw new Error("missing provider config");
+    const { url } = await buildAuthorizationUrl(config);
+    expect(url).toContain("scope=read+write");
+    expect(url).not.toContain("scope=read%2Cwrite");
+  });
+
   test("failed OAuth token refresh skips only that binding, others still resolve", async () => {
     upsertOAuthApp("phase2-broken", testApp("phase2-broken"));
     storeOAuthTokens("phase2-broken", {

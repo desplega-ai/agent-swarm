@@ -862,7 +862,16 @@ export async function upsertScriptConnection(data: {
   if (data.kind === "mcp") {
     try {
       if (!data.mcpServerId) throw new Error("mcpServerId is required for MCP connections");
-      const tools = await listMcpServerTools(data.mcpServerId, { agentId: data.agentId });
+      // Resolve MCP auth config in the scope the connection will RUN under:
+      // an agent-scoped connection may rely on that agent's scoped secrets,
+      // which the (lead) caller's own context cannot see.
+      const discoveryContext =
+        scope === "agent" && scopeId
+          ? { agentId: scopeId }
+          : scope === "repo" && scopeId
+            ? { agentId: data.agentId, repoId: scopeId }
+            : { agentId: data.agentId };
+      const tools = await listMcpServerTools(data.mcpServerId, discoveryContext);
       const artifacts = buildMcpGeneratedArtifacts({
         slug: data.slug,
         connectionId,

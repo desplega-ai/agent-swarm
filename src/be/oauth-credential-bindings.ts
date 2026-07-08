@@ -39,6 +39,9 @@ export function oauthAppToProviderConfig(app: OAuthApp): OAuthProviderConfig {
       .map((scope) => scope.trim())
       .filter(Boolean),
     extraParams,
+    // Standard OAuth wants space-separated scopes; the wrapper's comma
+    // default exists only for Linear, which has its own dedicated flow.
+    scopeSeparator: " ",
     requiresRefreshTokenRotation: app.provider === "jira",
   };
 }

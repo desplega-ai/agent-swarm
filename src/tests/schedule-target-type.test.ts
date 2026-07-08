@@ -288,6 +288,56 @@ describe("dispatchScheduleTarget — script target", () => {
     expect(result.task).toBeUndefined();
   }, 15_000);
 
+  test("scheduled script runs receive ctx.api and ctx.mcp connections", async () => {
+    const { upsertScriptConnection } = await import("../be/script-connections");
+    await upsertScriptConnection({
+      slug: "schedgql",
+      kind: "graphql",
+      scope: "global",
+      baseUrl: "https://gql.vendor.test/graphql",
+      allowedHosts: ["gql.vendor.test"],
+      agentId,
+    });
+    const mcpRow = {
+      id: crypto.randomUUID(),
+      serverId: crypto.randomUUID(),
+      runtime: { slug: "schedmcp", kind: "mcp", connectionId: "", tools: [{ name: "ping" }] },
+    };
+    mcpRow.runtime.connectionId = mcpRow.id;
+    getDb()
+      .prepare(
+        `INSERT INTO mcp_servers (id, name, transport, scope, url, createdAt, lastUpdatedAt)
+         VALUES (?, ?, 'http', 'global', 'http://mcp.invalid.test/mcp', datetime('now'), datetime('now'))`,
+      )
+      .run(mcpRow.serverId, `sched-mcp-${mcpRow.serverId.slice(0, 8)}`);
+    getDb()
+      .prepare(
+        `INSERT INTO script_connections
+           (id, slug, kind, scope, allowed_hosts_json, mcp_server_id, generated_runtime_json)
+         VALUES (?, 'schedmcp', 'mcp', 'global', '[]', ?, ?)`,
+      )
+      .run(mcpRow.id, mcpRow.serverId, JSON.stringify(mcpRow.runtime));
+
+    await saveGlobalScript(
+      "schedule-target-type-ctx-connections",
+      `export default async (args, ctx) => {
+        if (!ctx.api || !("schedgql" in ctx.api)) throw new Error("ctx.api missing schedgql");
+        if (!ctx.mcp || !("schedmcp" in ctx.mcp)) throw new Error("ctx.mcp missing schedmcp");
+        return { ok: true };
+      };`,
+    );
+    const schedule = createScheduledTask({
+      name: `dispatch-script-ctx-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      targetType: "script",
+      scriptName: "schedule-target-type-ctx-connections",
+      createdByAgentId: agentId,
+    });
+
+    const result = await dispatchScheduleTarget(schedule);
+    expect(result.triggeredWorkflows).toBe(false);
+  }, 15_000);
+
   test("throws a clear error when the script does not exist", async () => {
     const schedule = createScheduledTask({
       name: `dispatch-script-missing-${crypto.randomUUID()}`,

@@ -7,6 +7,10 @@ import {
   getWorkflow,
   updateScheduledTask,
 } from "@/be/db";
+import {
+  getScriptApiConnectionDescriptors,
+  getScriptMcpConnectionDescriptors,
+} from "@/be/script-connections";
 import { buildScriptCredentialBindings } from "@/be/script-credential-broker";
 import { getScript } from "@/be/scripts/db";
 import { runScript } from "@/scripts-runtime/loader";
@@ -82,6 +86,8 @@ async function executeScheduleScript(schedule: ScheduledTask): Promise<void> {
     fsMode: "none",
     agentId,
     egressSecrets: await buildScriptCredentialBindings({ agentId }),
+    apiConnections: getScriptApiConnectionDescriptors({ agentId }),
+    mcpConnections: getScriptMcpConnectionDescriptors({ agentId }),
     timeoutMs: 60_000,
   });
 
