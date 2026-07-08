@@ -30,16 +30,16 @@ import {
   QuickStats,
 } from "@/components/ui/detail-page-layout";
 import { PageHeader } from "@/components/ui/page-header";
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { formatSmartTime } from "@/lib/utils";
+import { CopyIconButton } from "@/pages/connections/components/copy-icon-button";
 import { InlineError, OAuthAppDialog, TokenStatusBadge } from "@/pages/connections/page";
 
-function CopyButton({ value }: { value: string }) {
-  const { copied, copy } = useCopyToClipboard();
+function CopyableValue({ value, label }: { value: string; label: string }) {
   return (
-    <Button type="button" size="xs" variant="outline" onClick={() => copy(value)} disabled={!value}>
-      {copied ? "Copied" : "Copy"}
-    </Button>
+    <div className="flex min-w-0 items-center gap-1">
+      <span className="break-all">{value}</span>
+      <CopyIconButton value={value} label={label} />
+    </div>
   );
 }
 
@@ -95,15 +95,18 @@ export default function OAuthAppDetailPage() {
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto lg:overflow-y-hidden">
-      <Button asChild variant="outline" size="sm" className="w-fit">
-        <Link to="/connections">
-          <ArrowLeft className="size-4" />
-          Back
-        </Link>
-      </Button>
+    <div className="flex flex-col gap-4 lg:flex-1 lg:min-h-0 lg:overflow-y-hidden">
       <PageHeader
-        title={app.provider}
+        title={
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
+            <Button asChild variant="ghost" size="icon-sm" aria-label="Back to connections">
+              <Link to="/connections">
+                <ArrowLeft className="size-4" />
+              </Link>
+            </Button>
+            <span className="truncate text-xl font-semibold">{app.provider}</span>
+          </span>
+        }
         description={`OAuth app for ${app.clientId}`}
         action={
           <div className="flex flex-wrap items-center gap-2">
@@ -189,7 +192,7 @@ export default function OAuthAppDetailPage() {
       />
 
       <DetailPageBody
-        className="flex-1 min-h-0"
+        className="lg:flex-1 lg:min-h-0"
         main={
           <div className="space-y-4 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
             <Card>
@@ -199,24 +202,19 @@ export default function OAuthAppDetailPage() {
               <CardContent className="divide-y">
                 <InfoRow
                   label="Client ID"
-                  value={<span className="break-all">{app.clientId}</span>}
+                  value={<CopyableValue value={app.clientId} label="Copy client ID" />}
                 />
                 <InfoRow
                   label="Authorize URL"
-                  value={<span className="break-all">{app.authorizeUrl}</span>}
+                  value={<CopyableValue value={app.authorizeUrl} label="Copy authorize URL" />}
                 />
                 <InfoRow
                   label="Token URL"
-                  value={<span className="break-all">{app.tokenUrl}</span>}
+                  value={<CopyableValue value={app.tokenUrl} label="Copy token URL" />}
                 />
                 <InfoRow
                   label="Redirect URI"
-                  value={
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="break-all">{app.redirectUri}</span>
-                      <CopyButton value={app.redirectUri} />
-                    </div>
-                  }
+                  value={<CopyableValue value={app.redirectUri} label="Copy redirect URI" />}
                 />
                 <InfoRow
                   label="Scopes"

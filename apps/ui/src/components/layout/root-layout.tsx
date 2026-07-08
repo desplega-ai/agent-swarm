@@ -26,8 +26,15 @@ export function RootLayout() {
           <AppSidebar />
           <SidebarInset className="min-w-0">
             <AppHeader />
+            {/* Below lg the main column is the scroll container so pages that
+                flow naturally (detail pages, forms) can scroll; at lg+ it goes
+                back to overflow-hidden and pages own their scroll regions
+                (pinned headers, grid-internal scrolling). */}
             <main
-              className={cn("flex flex-1 flex-col min-h-0 min-w-0 overflow-hidden", mainPadding)}
+              className={cn(
+                "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden",
+                mainPadding,
+              )}
             >
               <ErrorBoundary>
                 <Suspense fallback={<PageSkeleton />}>

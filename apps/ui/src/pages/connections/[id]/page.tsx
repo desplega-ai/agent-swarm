@@ -1,4 +1,4 @@
-import { ArrowLeft, Pencil, Power, PowerOff, RefreshCw } from "lucide-react";
+import { ArrowLeft, Maximize2, Pencil, Power, PowerOff, RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -10,9 +10,10 @@ import {
   useScriptConnection,
   useSetScriptConnectionEnabled,
 } from "@/api/hooks/use-script-connections";
+import { ScriptSourceEditor } from "@/components/scripts/script-source-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DetailPageBody,
   DetailPageRail,
@@ -20,8 +21,14 @@ import {
   QuickStats,
 } from "@/components/ui/detail-page-layout";
 import { PageHeader } from "@/components/ui/page-header";
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatSmartTime } from "@/lib/utils";
+import {
+  CodeViewerDialog,
+  JsonSourceViewer,
+} from "@/pages/connections/components/code-viewer-dialog";
+import { CopyIconButton } from "@/pages/connections/components/copy-icon-button";
+import { OperationsTable } from "@/pages/connections/components/operations-table";
 import {
   AddConnectionDialog,
   InlineError,
@@ -30,21 +37,32 @@ import {
   UsagePreview,
 } from "@/pages/connections/page";
 
-function CopyButton({ value }: { value: string }) {
-  const { copied, copy } = useCopyToClipboard();
-  return (
-    <Button type="button" size="xs" variant="outline" onClick={() => copy(value)} disabled={!value}>
-      {copied ? "Copied" : "Copy"}
-    </Button>
-  );
-}
-
 function InfoRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="grid gap-1 py-2 text-sm md:grid-cols-[160px_1fr]">
       <div className="text-muted-foreground">{label}</div>
       <div className="min-w-0">{value}</div>
     </div>
+  );
+}
+
+function ExpandButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="ghost"
+          aria-label={label}
+          onClick={onClick}
+          className="shrink-0 text-muted-foreground hover:text-foreground"
+        >
+          <Maximize2 />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -57,6 +75,8 @@ export default function ConnectionDetailPage() {
   const refreshConnection = useRefreshScriptConnection();
   const setEnabled = useSetScriptConnectionEnabled();
   const [editOpen, setEditOpen] = useState(false);
+  const [typesExpanded, setTypesExpanded] = useState(false);
+  const [specExpanded, setSpecExpanded] = useState(false);
 
   if (isLoading) {
     return <div className="p-4 text-sm text-muted-foreground">Loading connection...</div>;
@@ -77,19 +97,21 @@ export default function ConnectionDetailPage() {
 
   const canRefresh = connection.kind === "openapi" || connection.kind === "mcp";
   const target = connection.baseUrl ?? connection.mcpServerId ?? "-";
+  const specUrl =
+    connection.openapiSpecSourceKind === "url" ? (connection.openapiSpecSource ?? "") : "";
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto lg:overflow-y-hidden">
-      <Button asChild variant="outline" size="sm" className="w-fit">
-        <Link to="/connections">
-          <ArrowLeft className="size-4" />
-          Back
-        </Link>
-      </Button>
+    <div className="flex flex-col gap-4 lg:flex-1 lg:min-h-0 lg:overflow-y-hidden">
       <PageHeader
         title={
-          <span className="inline-flex min-w-0 items-center gap-3">
-            <span className="truncate">{connection.slug}</span>
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
+            <Button asChild variant="ghost" size="icon-sm" aria-label="Back to connections">
+              <Link to="/connections">
+                <ArrowLeft className="size-4" />
+              </Link>
+            </Button>
+            <span className="truncate text-xl font-semibold">{connection.slug}</span>
+            <CopyIconButton value={connection.slug} label="Copy slug" />
             <KindBadge kind={connection.kind} />
             <Badge variant={connection.enabled ? "outline" : "secondary"} size="tag">
               {connection.enabled ? "enabled" : "disabled"}
@@ -128,7 +150,7 @@ export default function ConnectionDetailPage() {
       />
 
       <DetailPageBody
-        className="flex-1 min-h-0"
+        className="lg:flex-1 lg:min-h-0"
         main={
           <div className="space-y-4 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
             <Card>
@@ -136,7 +158,35 @@ export default function ConnectionDetailPage() {
                 <CardTitle className="text-base">Overview</CardTitle>
               </CardHeader>
               <CardContent className="divide-y">
-                <InfoRow label="Target" value={<span className="break-all">{target}</span>} />
+                <InfoRow
+                  label="Target"
+                  value={
+                    <div className="flex min-w-0 items-center gap-1">
+                      <span className="break-all">{target}</span>
+                      {target !== "-" ? (
+                        <CopyIconButton value={target} label="Copy target" />
+                      ) : null}
+                    </div>
+                  }
+                />
+                {connection.openapiSpecSourceKind ? (
+                  <InfoRow
+                    label="Spec source"
+                    value={
+                      <div className="flex min-w-0 items-center gap-1">
+                        <Badge variant="outline" size="tag">
+                          {connection.openapiSpecSourceKind}
+                        </Badge>
+                        {specUrl ? (
+                          <>
+                            <span className="break-all">{specUrl}</span>
+                            <CopyIconButton value={specUrl} label="Copy spec URL" />
+                          </>
+                        ) : null}
+                      </div>
+                    }
+                  />
+                ) : null}
                 <InfoRow
                   label="Allowed hosts"
                   value={
@@ -161,11 +211,21 @@ export default function ConnectionDetailPage() {
                         <Badge variant="outline" size="tag">
                           {connection.credentialBinding.authKind}
                         </Badge>
-                        <span>{connection.credentialBinding.configKey}</span>
+                        <Link
+                          to="/connections?tab=bindings"
+                          className="hover:underline"
+                          title="View credential bindings"
+                        >
+                          {connection.credentialBinding.configKey}
+                        </Link>
                         {connection.credentialBinding.oauthProvider ? (
-                          <span className="text-muted-foreground">
+                          <Link
+                            to={`/connections/oauth-apps/${encodeURIComponent(connection.credentialBinding.oauthProvider)}`}
+                            className="text-muted-foreground hover:text-foreground hover:underline"
+                            title="View OAuth app"
+                          >
                             {connection.credentialBinding.oauthProvider}
-                          </span>
+                          </Link>
                         ) : null}
                         <TokenStatusBadge status={connection.credentialBinding.tokenStatus} />
                       </div>
@@ -200,26 +260,7 @@ export default function ConnectionDetailPage() {
                     <div className="text-sm text-muted-foreground">No tools generated.</div>
                   )
                 ) : connection.operations.length ? (
-                  <div className="overflow-hidden rounded-md border">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
-                        <tr>
-                          <th className="px-3 py-2">Name</th>
-                          <th className="px-3 py-2">Method</th>
-                          <th className="px-3 py-2">Path</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {connection.operations.map((operation) => (
-                          <tr key={`${operation.method}-${operation.path}-${operation.name}`}>
-                            <td className="px-3 py-2 font-medium">{operation.name}</td>
-                            <td className="px-3 py-2">{operation.method}</td>
-                            <td className="px-3 py-2 font-mono text-xs">{operation.path}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <OperationsTable operations={connection.operations} />
                 ) : (
                   <div className="text-sm text-muted-foreground">
                     {connection.graphql ? "GraphQL helper generated." : "No operations generated."}
@@ -231,31 +272,36 @@ export default function ConnectionDetailPage() {
             <UsagePreview kind={connection.kind} slug={connection.slug} detail={connection} />
 
             {connection.generatedTypes ? (
-              <details className="rounded-md border">
-                <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
-                  Generated types
-                </summary>
-                <div className="border-t p-4">
-                  <div className="mb-2 flex justify-end">
-                    <CopyButton value={connection.generatedTypes} />
-                  </div>
-                  <pre className="max-h-[480px] overflow-auto rounded-md bg-muted/40 p-3 text-xs">
-                    {connection.generatedTypes}
-                  </pre>
-                </div>
-              </details>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Generated types</CardTitle>
+                  <CardAction className="flex items-center gap-1">
+                    <CopyIconButton value={connection.generatedTypes} label="Copy types" />
+                    <ExpandButton label="Expand types" onClick={() => setTypesExpanded(true)} />
+                  </CardAction>
+                </CardHeader>
+                <CardContent>
+                  <ScriptSourceEditor source={connection.generatedTypes} readOnly height="360px" />
+                </CardContent>
+              </Card>
             ) : null}
 
             {connection.specPreview ? (
-              <details className="rounded-md border">
-                <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
-                  OpenAPI spec preview
-                  {connection.specPreview.truncated ? " (truncated)" : ""}
-                </summary>
-                <pre className="max-h-[480px] overflow-auto border-t bg-muted/40 p-3 text-xs">
-                  {connection.specPreview.json}
-                </pre>
-              </details>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    OpenAPI spec preview
+                    {connection.specPreview.truncated ? " (truncated)" : ""}
+                  </CardTitle>
+                  <CardAction className="flex items-center gap-1">
+                    <CopyIconButton value={connection.specPreview.json} label="Copy spec JSON" />
+                    <ExpandButton label="Expand spec" onClick={() => setSpecExpanded(true)} />
+                  </CardAction>
+                </CardHeader>
+                <CardContent>
+                  <JsonSourceViewer source={connection.specPreview.json} height="360px" />
+                </CardContent>
+              </Card>
             ) : null}
           </div>
         }
@@ -295,6 +341,24 @@ export default function ConnectionDetailPage() {
           name: server.name,
         }))}
       />
+      {connection.generatedTypes ? (
+        <CodeViewerDialog
+          open={typesExpanded}
+          onOpenChange={setTypesExpanded}
+          title={`${connection.slug} — generated types`}
+          code={connection.generatedTypes}
+          language="typescript"
+        />
+      ) : null}
+      {connection.specPreview ? (
+        <CodeViewerDialog
+          open={specExpanded}
+          onOpenChange={setSpecExpanded}
+          title={`${connection.slug} — OpenAPI spec${connection.specPreview.truncated ? " (truncated)" : ""}`}
+          code={connection.specPreview.json}
+          language="json"
+        />
+      ) : null}
     </div>
   );
 }

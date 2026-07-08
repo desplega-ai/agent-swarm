@@ -6,6 +6,7 @@ import { useMcpServer } from "@/api/hooks/use-mcp-servers";
 import { usePage } from "@/api/hooks/use-pages";
 import { useRepo } from "@/api/hooks/use-repos";
 import { useScheduledTask } from "@/api/hooks/use-schedules";
+import { useScriptConnection } from "@/api/hooks/use-script-connections";
 import { useScriptRun } from "@/api/hooks/use-script-runs";
 import { useScript } from "@/api/hooks/use-scripts";
 import { useSession } from "@/api/hooks/use-sessions";
@@ -36,6 +37,7 @@ const routeLabels: Record<string, string> = {
   settings: "Settings",
   config: "Config",
   connections: "Connections",
+  "oauth-apps": "OAuth Apps",
   secrets: "Secrets",
   repos: "Repos",
   templates: "Templates",
@@ -57,6 +59,7 @@ const INTEGRATION_NAME_BY_ID: Record<string, string> = Object.fromEntries(
 const routeRedirects: Record<string, string> = {
   "workflow-runs": "/workflows",
   "script-runs": "/scripts?tab=runs",
+  "oauth-apps": "/connections?tab=oauth-apps",
 };
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -123,6 +126,7 @@ export function Breadcrumbs() {
   const { data: mcpServerMeta } = useMcpServer(idFor("mcp-servers"));
   const { data: repoMeta } = useRepo(idFor("repos"));
   const { data: approvalMeta } = useApprovalRequest(idFor("approval-requests"));
+  const { data: connectionMeta } = useScriptConnection(idFor("connections") || undefined);
 
   if (segments.length === 0) return null;
 
@@ -155,7 +159,9 @@ export function Breadcrumbs() {
                             ? repoMeta?.name
                             : parent === "approval-requests"
                               ? approvalMeta?.title
-                              : undefined
+                              : parent === "connections"
+                                ? connectionMeta?.slug
+                                : undefined
     : undefined;
 
   const crumbs = segments.map((segment, index) => {
