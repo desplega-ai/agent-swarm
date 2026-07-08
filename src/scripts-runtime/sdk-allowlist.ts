@@ -139,6 +139,7 @@ export const SDK_TOOL_NAME_MAP = {
 
   // ── pages & metrics ──
   page_create: "create_page",
+  page_delete: "delete-page", // destructive
   metric_create: "create_metric",
 
   // ── human input ──
