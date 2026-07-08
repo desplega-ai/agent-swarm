@@ -82,6 +82,8 @@ const LEAD_OR_TASK_CREATOR_VERBS: PermissionVerb[] = ["task.cancel.any"];
 
 const LEAD_OR_OWN_NAMESPACE_VERBS: PermissionVerb[] = ["kv.write.any"];
 
+const ANY_AUTHENTICATED_VERBS: PermissionVerb[] = ["mcp-oauth.authorize.any"];
+
 const REQUESTER_OWNS_TASK_VERBS: PermissionVerb[] = [
   "task.read.own",
   "task.cancel.own",
@@ -145,6 +147,7 @@ describe("verb-group partition", () => {
       ...LEAD_OR_RESOURCE_OWNER_VERBS,
       ...LEAD_OR_TASK_CREATOR_VERBS,
       ...LEAD_OR_OWN_NAMESPACE_VERBS,
+      ...ANY_AUTHENTICATED_VERBS,
       ...REQUESTER_OWNS_TASK_VERBS,
       ...COMPOSITE_VERBS,
     ];
@@ -304,6 +307,23 @@ describe("requester-owns-task verbs", () => {
     expect(decision.allow).toBe(false);
     if (!decision.allow) expect(decision.reason).toBe("not the task requester");
   });
+});
+
+describe("any-authenticated verbs", () => {
+  const expected: Expected = {
+    lead: true,
+    worker: true,
+    ownerWorker: true,
+    creatorWorker: true,
+    userRequester: true,
+    foreignUser: true,
+    operator: true,
+  };
+  for (const verb of ANY_AUTHENTICATED_VERBS) {
+    test(`${verb}: any authenticated principal allowed`, () => {
+      expectDecisions(verb, { kind: "none" }, expected);
+    });
+  }
 });
 
 describe("memory.delete.any composite (owner OR (lead AND scope=swarm))", () => {

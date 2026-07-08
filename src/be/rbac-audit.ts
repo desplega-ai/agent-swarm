@@ -16,7 +16,7 @@
  * ticks daily and deletes rows older than RBAC_AUDIT_RETENTION_DAYS
  * (default 30).
  */
-import type { RbacCheck, RbacDecision } from "../rbac";
+import type { AdmissionDecision, RbacCheck, RbacDecision } from "../rbac";
 import { getDb } from "./db";
 
 type AuditRow = {
@@ -87,6 +87,20 @@ function toRow(check: RbacCheck, decision: RbacDecision): AuditRow {
   };
 }
 
+function enqueueRow(row: AuditRow): void {
+  buffer.push(row);
+  // The threshold flush is deferred to a zero-delay timeout so the caller
+  // that happens to be the 200th never pays for the SQLite transaction itself.
+  if (buffer.length >= FLUSH_MAX_ROWS && !thresholdFlushScheduled) {
+    thresholdFlushScheduled = true;
+    const t = setTimeout(() => {
+      thresholdFlushScheduled = false;
+      flushAuditBuffer();
+    }, 0);
+    if (typeof t.unref === "function") t.unref();
+  }
+}
+
 /**
  * The concrete AuditSink for `can()`. Never throws — `can()` already swallows
  * sink exceptions, but the audit path defends independently.
@@ -94,20 +108,34 @@ function toRow(check: RbacCheck, decision: RbacDecision): AuditRow {
 export function enqueueAuditRow(check: RbacCheck, decision: RbacDecision): void {
   if (isAuditDisabled()) return;
   try {
-    buffer.push(toRow(check, decision));
-    // The threshold flush is deferred to a zero-delay timeout so the can()
-    // call that happens to be the 200th never pays for the SQLite transaction
-    // itself — audit stays fire-and-forget on the request path.
-    if (buffer.length >= FLUSH_MAX_ROWS && !thresholdFlushScheduled) {
-      thresholdFlushScheduled = true;
-      const t = setTimeout(() => {
-        thresholdFlushScheduled = false;
-        flushAuditBuffer();
-      }, 0);
-      if (typeof t.unref === "function") t.unref();
-    }
+    enqueueRow(toRow(check, decision));
   } catch (err) {
     console.warn("[rbac-audit] enqueue failed, dropping row:", (err as Error).message);
+  }
+}
+
+export function enqueueAdmissionRow(input: {
+  userId: string;
+  decision: AdmissionDecision;
+  method: string | undefined;
+  route: string;
+}): void {
+  if (isAuditDisabled()) return;
+  try {
+    const method = (input.method ?? "UNKNOWN").toUpperCase();
+    enqueueRow({
+      principalType: "user",
+      principalId: input.userId,
+      originatorUserId: null,
+      verb: input.decision.verb ?? "(admission:no-verb)",
+      resourceType: "http-route",
+      resourceId: `${method} ${input.route}`,
+      decision: input.decision.allow ? "allow" : "deny",
+      reason: input.decision.allow ? null : input.decision.reason,
+      source: "http",
+    });
+  } catch (err) {
+    console.warn("[rbac-audit] enqueue failed, dropping admission row:", (err as Error).message);
   }
 }
 

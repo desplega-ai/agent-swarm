@@ -192,6 +192,7 @@ const authorizeRoute = route({
     userId: z.string().optional(),
     scopes: z.string().optional(),
   }),
+  rbac: { permission: "mcp-oauth.authorize.any" },
   responses: {
     302: { description: "Redirect to authorization server" },
     400: { description: "MCP has no URL / does not require OAuth" },
@@ -213,6 +214,7 @@ const authorizeUrlRoute = route({
     userId: z.string().optional(),
     scopes: z.string().optional(),
   }),
+  rbac: { permission: "mcp-oauth.authorize.any" },
   responses: {
     200: { description: "{ providerUrl: string }" },
     400: { description: "MCP has no URL / does not require OAuth" },

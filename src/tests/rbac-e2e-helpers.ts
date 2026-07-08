@@ -92,6 +92,9 @@ export async function spawnSwarmServer(opts: {
       OAUTH_KEEPALIVE_DISABLE: "true",
       RBAC_AUDIT_DISABLED: "",
       RBAC_AUDIT_FLUSH_MS: "",
+      // Keep subprocess suites deterministic: shell-level RBAC_ENABLED=true is
+      // ignored unless a suite explicitly opts in through opts.env.
+      RBAC_ENABLED: "false",
       ...opts.env,
     },
   });
