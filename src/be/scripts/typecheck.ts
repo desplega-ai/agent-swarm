@@ -292,7 +292,7 @@ export function scriptSdkTypesWithGeneratedApis(
   return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n`;
 }
 
-export const SCRIPT_STDLIB_TYPES = `
+const STDLIB_MODULE_TYPES = `
 declare module "stdlib" {
   export interface Redacted<T> {
     readonly __redactedBrand?: T;
@@ -310,11 +310,36 @@ declare module "stdlib" {
   export function glob(pattern: string): Promise<string[]>;
   export function table(rows: Array<Record<string, unknown>>): string;
 }
+`;
 
+function stdlibTypesFor(sdkModuleBody: string): string {
+  return `${STDLIB_MODULE_TYPES}
 declare module "swarm-sdk" {
-${SCRIPT_SDK_TYPES.replace(/^/gm, "  ")}
+${sdkModuleBody.replace(/^/gm, "  ")}
 }
 `;
+}
+
+export const SCRIPT_STDLIB_TYPES = stdlibTypesFor(SCRIPT_SDK_TYPES);
+
+/**
+ * Stdlib blob whose ambient `declare module "swarm-sdk"` also carries the
+ * generated per-connection registries (`ScriptApiRegistry` / `ScriptMcpRegistry`
+ * and their `<Slug>Api` / `<Slug>Mcp` interfaces).
+ *
+ * Monaco resolves the bare `import ... from "swarm-sdk"` through this ambient
+ * module — unlike the server typechecker, whose custom resolver maps the
+ * specifier onto the flat SDK virtual file. Without the generated registries
+ * inlined here, the ambient copy of `ScriptContext` references names that do
+ * not exist in that module scope ("Cannot find name 'ScriptApiRegistry'") and
+ * `ctx.api.<slug>` completions break in the editor.
+ */
+export function scriptStdlibTypesWithGeneratedApis(
+  apiTypes = getScriptApiTypes(),
+  mcpTypes = getScriptMcpTypes(),
+): string {
+  return stdlibTypesFor(`${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}`);
+}
 
 /**
  * Minimal ambient declarations for runtime globals the executor (Bun) actually

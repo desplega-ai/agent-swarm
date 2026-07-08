@@ -1037,6 +1037,35 @@ class ApiClient {
     return res.json();
   }
 
+  async upsertScript(data: {
+    name: string;
+    source: string;
+    description?: string;
+    intent?: string;
+    agentId: string;
+  }): Promise<{ name: string; version: number; contentDeduped: boolean }> {
+    const url = `${this.getBaseUrl()}/api/scripts/upsert`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { ...this.getHeaders(), "X-Agent-ID": data.agentId },
+      body: JSON.stringify({
+        name: data.name,
+        source: data.source,
+        description: data.description ?? "",
+        intent: data.intent ?? "",
+      }),
+    });
+    if (!res.ok) {
+      const error = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        diagnostics?: string[];
+      };
+      const detail = error.diagnostics?.length ? `: ${error.diagnostics.join("; ")}` : "";
+      throw new Error(`${error.error || `Failed to save script (${res.status})`}${detail}`);
+    }
+    return res.json();
+  }
+
   // ── Script connections ──
 
   async fetchScriptConnections(filters?: {

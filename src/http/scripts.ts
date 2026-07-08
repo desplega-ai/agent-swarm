@@ -28,8 +28,8 @@ import {
 import { searchScripts } from "../be/scripts/embeddings";
 import { extractArgsJsonSchema } from "../be/scripts/extract-schema";
 import {
-  SCRIPT_STDLIB_TYPES,
   scriptSdkTypesWithGeneratedApis,
+  scriptStdlibTypesWithGeneratedApis,
   typecheckScript,
 } from "../be/scripts/typecheck";
 import { can } from "../rbac";
@@ -673,9 +673,11 @@ export async function handleScripts(
   // Must be matched before getScriptByIdRoute — its ["api", "scripts", null]
   // pattern would otherwise swallow the literal "type-defs" segment.
   if (typeDefsRoute.match(req.method, pathSegments)) {
+    const apiTypes = getScriptApiTypes();
+    const mcpTypes = getScriptMcpTypes();
     json(res, {
-      sdkTypes: scriptSdkTypesWithGeneratedApis(getScriptApiTypes(), getScriptMcpTypes()),
-      stdlibTypes: SCRIPT_STDLIB_TYPES,
+      sdkTypes: scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes),
+      stdlibTypes: scriptStdlibTypesWithGeneratedApis(apiTypes, mcpTypes),
     });
     return true;
   }
@@ -728,7 +730,10 @@ export async function handleScripts(
         getScriptApiTypes({ agentId: agent.id }),
         getScriptMcpTypes({ agentId: agent.id }),
       ),
-      stdlibTypes: SCRIPT_STDLIB_TYPES,
+      stdlibTypes: scriptStdlibTypesWithGeneratedApis(
+        getScriptApiTypes({ agentId: agent.id }),
+        getScriptMcpTypes({ agentId: agent.id }),
+      ),
     });
     return true;
   }

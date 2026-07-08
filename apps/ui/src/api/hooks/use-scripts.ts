@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ScriptScope } from "@/api/types";
 import { api } from "../client";
 
@@ -28,6 +28,22 @@ export function useScriptVersions(id: string) {
     queryKey: ["script-versions", id],
     queryFn: () => api.fetchScriptVersions(id),
     enabled: !!id,
+  });
+}
+
+export function useUpsertScript() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      name: string;
+      source: string;
+      description?: string;
+      intent?: string;
+      agentId: string;
+    }) => api.upsertScript(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["scripts"] });
+    },
   });
 }
 

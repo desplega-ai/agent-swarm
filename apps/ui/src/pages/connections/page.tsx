@@ -1,17 +1,5 @@
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
-import {
-  Check,
-  Copy,
-  ExternalLink,
-  Link2,
-  Play,
-  Plus,
-  RefreshCw,
-  Search,
-  SquareCode,
-  Trash2,
-  X,
-} from "lucide-react";
+import { Check, Copy, ExternalLink, Link2, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -25,14 +13,12 @@ import {
   useOAuthApps,
   useOAuthAuthorizeUrl,
   useRefreshScriptConnection,
-  useRunInlineScript,
   useScriptConnections,
   useSetScriptConnectionEnabled,
   useUpsertCredentialBinding,
   useUpsertOAuthApp,
   useUpsertScriptConnection,
 } from "@/api/hooks/use-script-connections";
-import { useScriptTypeDefs } from "@/api/hooks/use-scripts";
 import type {
   CredentialAuthKind,
   IntegrationsCatalogEntry,
@@ -44,7 +30,6 @@ import type {
   ScriptConnectionScope,
   ScriptCredentialBinding,
 } from "@/api/types";
-import { ScriptSourceEditor } from "@/components/scripts/script-source-editor";
 import { DataGrid } from "@/components/shared/data-grid";
 import {
   AlertDialog,
@@ -59,7 +44,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -85,7 +69,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
-import { cn, formatSmartTime } from "@/lib/utils";
+import { formatSmartTime } from "@/lib/utils";
+import { PlaygroundPanel } from "./playground-panel";
 
 const KIND_OPTIONS: Array<ScriptConnectionKind | "all"> = ["all", "openapi", "graphql", "mcp"];
 const SCOPE_OPTIONS: Array<ScriptConnectionScope | "all"> = ["all", "global", "agent", "repo"];
@@ -106,15 +91,6 @@ const SEARCH_PLACEHOLDER_BY_TAB: Partial<Record<ConnectionsTab, string>> = {
   bindings: "Search bindings by config key, provider...",
   "oauth-apps": "Search OAuth apps by provider, client ID...",
 };
-const PLAYGROUND_SOURCE = `import type { ScriptMain } from "swarm-sdk";
-
-const main: ScriptMain = async (args, ctx) => {
-  return { api: Object.keys(ctx.api ?? {}), mcp: Object.keys(ctx.mcp ?? {}) };
-};
-
-export default main;
-`;
-
 function splitList(value: string): string[] {
   return value
     .split(/[,\s]+/)
@@ -1879,88 +1855,6 @@ export function OAuthAppDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string }) {
-  const { data: agents } = useAgents(false);
-  const { data: typeDefs } = useScriptTypeDefs();
-  const run = useRunInlineScript();
-  const [source, setSource] = useState(PLAYGROUND_SOURCE);
-  const [agentId, setAgentId] = useState(defaultAgentId ?? "");
-
-  useEffect(() => {
-    if (!agentId && defaultAgentId) setAgentId(defaultAgentId);
-  }, [agentId, defaultAgentId]);
-
-  const result = run.data;
-  return (
-    <Card className="rounded-lg">
-      <CardHeader className="flex-row items-center justify-between gap-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <SquareCode className="size-4 text-muted-foreground" />
-          Playground
-        </CardTitle>
-        <div className="flex items-center gap-2">
-          <FieldLabel tip="Scripts execute under this agent's identity (X-Agent-ID) — its scope determines which connections and credentials resolve.">
-            Run as
-          </FieldLabel>
-          <Select value={agentId} onValueChange={setAgentId}>
-            <SelectTrigger className="w-48">
-              <SelectValue placeholder="Select agent" />
-            </SelectTrigger>
-            <SelectContent>
-              {(agents ?? []).map((agent) => (
-                <SelectItem key={agent.id} value={agent.id}>
-                  {agent.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            size="sm"
-            onClick={() => run.mutate({ source, intent: "connections playground", agentId })}
-            disabled={!agentId || run.isPending}
-          >
-            <Play className="size-4" />
-            Run
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="grid gap-3">
-        <ScriptSourceEditor
-          source={source}
-          onChange={setSource}
-          readOnly={false}
-          typeDefs={typeDefs}
-          className="h-72"
-        />
-        <InlineError error={run.error} />
-        {result ? (
-          <div className="grid gap-2 md:grid-cols-3">
-            <pre className="min-h-24 overflow-auto rounded-md border bg-muted/40 p-3 text-xs md:col-span-2">
-              {JSON.stringify(result.result ?? null, null, 2)}
-            </pre>
-            <div className="grid gap-2">
-              <div className="rounded-md border p-3 text-sm">
-                <div className="text-xs text-muted-foreground">Duration</div>
-                <div className="font-medium">{result.durationMs ?? 0} ms</div>
-              </div>
-              <pre
-                className={cn(
-                  "min-h-16 overflow-auto rounded-md border p-3 text-xs",
-                  result.stderr
-                    ? "border-status-error/40 text-status-error"
-                    : "text-muted-foreground",
-                )}
-              >
-                {result.stderr || result.stdout || "No stdout"}
-              </pre>
-            </div>
-          </div>
-        ) : null}
-      </CardContent>
-    </Card>
   );
 }
 

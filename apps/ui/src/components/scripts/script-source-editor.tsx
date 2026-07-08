@@ -11,9 +11,12 @@ const STDLIB_LIB_URI = "file:///stdlib.d.ts";
 /**
  * Register the swarm SDK + stdlib `.d.ts` as TypeScript extra libs so Monaco's
  * TS worker resolves SDK symbols and shows real inferred types on hover.
- * `typescriptDefaults` is a Monaco-global singleton — guard against duplicate
- * registration across mounts (each addExtraLib call would otherwise stack a
- * new lib version and re-trigger worker syncs).
+ * `typescriptDefaults` is a Monaco-global singleton — only (re)register a lib
+ * when its content actually changed (each addExtraLib call would otherwise
+ * stack a new lib version and re-trigger worker syncs). Content can change
+ * between fetches: the stdlib blob embeds the generated per-connection
+ * `ScriptApiRegistry` / `ScriptMcpRegistry` types, which grow as connections
+ * are added.
  */
 function registerScriptTypeDefs(monaco: Monaco, typeDefs: ScriptTypeDefs) {
   const tsDefaults = monaco.languages.typescript.typescriptDefaults;
@@ -26,8 +29,12 @@ function registerScriptTypeDefs(monaco: Monaco, typeDefs: ScriptTypeDefs) {
     strict: false,
   });
   const existing = tsDefaults.getExtraLibs();
-  if (!existing[SDK_LIB_URI]) tsDefaults.addExtraLib(typeDefs.sdkTypes, SDK_LIB_URI);
-  if (!existing[STDLIB_LIB_URI]) tsDefaults.addExtraLib(typeDefs.stdlibTypes, STDLIB_LIB_URI);
+  if (existing[SDK_LIB_URI]?.content !== typeDefs.sdkTypes) {
+    tsDefaults.addExtraLib(typeDefs.sdkTypes, SDK_LIB_URI);
+  }
+  if (existing[STDLIB_LIB_URI]?.content !== typeDefs.stdlibTypes) {
+    tsDefaults.addExtraLib(typeDefs.stdlibTypes, STDLIB_LIB_URI);
+  }
 }
 
 interface ScriptSourceEditorProps {
