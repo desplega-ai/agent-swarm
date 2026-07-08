@@ -118,6 +118,18 @@ const credentialBindingsInputSchema = z.object({
     .record(z.string(), z.string())
     .optional()
     .describe("Extra OAuth authorization parameters stored with the OAuth app."),
+  tokenAuthStyle: z
+    .enum(["body", "basic"])
+    .optional()
+    .describe(
+      "How client credentials reach the token endpoint: body params (default) or HTTP Basic auth (required by e.g. Notion).",
+    ),
+  tokenBodyFormat: z
+    .enum(["form", "json"])
+    .optional()
+    .describe(
+      "Token request body encoding: form-urlencoded (default) or JSON (required by e.g. Notion).",
+    ),
 });
 
 type BindingWithTokenStatus = ScriptCredentialBindingRecord & {
@@ -220,8 +232,14 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
           tokenUrl: args.tokenUrl,
           redirectUri,
           scopes: args.scopes.join(","),
-          ...(args.extraParams
-            ? { metadata: JSON.stringify({ extraParams: args.extraParams }) }
+          ...(args.extraParams || args.tokenAuthStyle || args.tokenBodyFormat
+            ? {
+                metadata: JSON.stringify({
+                  ...(args.extraParams ? { extraParams: args.extraParams } : {}),
+                  ...(args.tokenAuthStyle ? { tokenAuthStyle: args.tokenAuthStyle } : {}),
+                  ...(args.tokenBodyFormat ? { tokenBodyFormat: args.tokenBodyFormat } : {}),
+                }),
+              }
             : {}),
         });
 

@@ -560,7 +560,10 @@ function extractOperations(
             (param) => `${JSON.stringify(param.name)}${param.required ? "" : "?"}: ${param.type}`,
           )
           .join("; ");
-      const hasBody = Boolean(jsonContent?.schema || requestBody);
+      // Some generated specs (e.g. readme.io exports) declare a requestBody on
+      // GET operations; fetch() rejects GET/HEAD bodies, so never generate one.
+      const methodAllowsBody = method !== "get" && method !== "head";
+      const hasBody = methodAllowsBody && Boolean(jsonContent?.schema || requestBody);
       const requestType = `export type ${typeBase}Args = {${paramsByPlace("path") ? ` path: { ${paramsByPlace("path")} };` : ""}${paramsByPlace("query") ? ` query?: { ${paramsByPlace("query")} };` : ""}${paramsByPlace("header") ? ` header?: { ${paramsByPlace("header")} };` : ""}${hasBody ? ` body: ${bodyType};` : ""}};`;
       const responseDecl = `export type ${typeBase}Response = ${responseType};`;
       typeBlocks.push(requestType, responseDecl);

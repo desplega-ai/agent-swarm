@@ -73,6 +73,7 @@
   - [list-schedules](#list-schedules)
   - [create-schedule](#create-schedule)
   - [update-schedule](#update-schedule)
+  - [patch-schedule](#patch-schedule)
   - [delete-schedule](#delete-schedule)
   - [run-schedule-now](#run-schedule-now)
 - [Memory Tools](#memory-tools)
@@ -374,6 +375,8 @@ Lead-only management for scripts-runtime credential broker bindings. Bindings ma
 | `tokenUrl` | `string` | No | - | OAuth token URL for oauth-app-upsert. |
 | `scopes` | `array` | No | - | OAuth scopes for oauth-app-upsert. |
 | `extraParams` | `object` | No | - | Extra OAuth authorization parameters stored with the OAuth app. |
+| `tokenAuthStyle` | `body \| basic` | No | - | How client credentials reach the token endpoint: body params (default) or HTTP Basic auth (required by e.g. Notion). |
+| `tokenBodyFormat` | `form \| json` | No | - | Token request body encoding: form-urlencoded (default) or JSON (required by e.g. Notion). |
 
 ### get-repos
 
@@ -929,6 +932,8 @@ View all scheduled tasks with optional filters. Use this to discover existing sc
 | `name` | `string` | No | - | Filter by name (partial match) |
 | `scheduleType` | `recurring \| one_time` | No | - | Filter by schedule type |
 | `hideCompleted` | `boolean` | No | true | Hide completed one-time schedules (default: true) |
+| `consecutiveErrorsMin` | `number` | No | - | Only return schedules with at least this many consecutive errors. |
+| `lastRunStatus` | `failed \| succeeded` | No | - | Filter by derived last run status. `failed` means consecutiveErrors > 0; `succeeded` means lastRunAt is set and consecutiveErrors is 0. |
 | `includeFull` | `boolean` | No | - | Return the full `taskTemplate` instead of a short `taskTemplatePreview`. Default false. |
 
 ### create-schedule
@@ -941,7 +946,7 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 |-----------|------|----------|---------|-------------|
 | `name` | `string` | Yes | - | Unique name for the schedule (e.g., 'daily-cleanup') |
 | `taskTemplate` | `string` | No | - | The task description that will be created each time. Required when targetType is 'agent-task' (the default). |
-| `targetType` | `unknown` | No | "agent-task" | Execution target: 'agent-task' (default, creates an agent task from taskTemplate), 'workflow' (directly triggers a workflow run, no agent in the loop), or 'script' (directly runs a catalog script, no agent in the loop). |
+| `targetType` | `unknown` | No | "agent-task" | Execution target. Use 'workflow' + workflowId when the schedule only starts a workflow; use 'script' + scriptName/scriptArgs when it only runs a catalog script; use 'agent-task' only when a reasoning agent genuinely needs to be in the loop. Do not create an agent-task whose taskTemplate just tells an agent to trigger a workflow or script. |
 | `workflowId` | `string` | No | - | Workflow ID to trigger. Required when targetType is 'workflow'. |
 | `scriptName` | `string` | No | - | Catalog script name (global scope). Required when targetType is 'script'. |
 | `scriptArgs` | `object` | No | - | JSON args passed to the script. Used when targetType is 'script'. |
@@ -970,6 +975,34 @@ Update an existing scheduled task. Any registered agent can update schedules.
 |-----------|------|----------|---------|-------------|
 | `scheduleId` | `string` | No | - | Schedule ID to update |
 | `name` | `string` | No | - | Schedule name to update (alternative to ID) |
+| `newName` | `string` | No | - | New name for the schedule |
+| `taskTemplate` | `string` | No | - | New task template |
+| `targetType` | `unknown` | No | - | Change the execution target: 'agent-task', 'workflow', or 'script'. |
+| `workflowId` | `string` | No | - | New workflow ID (required when targetType is 'workflow'; null to clear) |
+| `scriptName` | `string` | No | - | New catalog script name (required when targetType is 'script'; null to clear) |
+| `scriptArgs` | `object` | No | - | New JSON args for the script target (null to clear) |
+| `cronExpression` | `string` | No | - | New cron expression (null to clear) |
+| `intervalMs` | `number` | No | - | New interval in milliseconds (null to clear) |
+| `description` | `string` | No | - | New description |
+| `taskType` | `string` | No | - | New task type |
+| `tags` | `array` | No | - | New tags |
+| `priority` | `number` | No | - | New priority |
+| `targetAgentId` | `string` | No | - | New target agent ID |
+| `timezone` | `string` | No | - | New timezone |
+| `enabled` | `boolean` | No | - | Enable or disable the schedule |
+| `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. |
+| `modelTier` | `unknown` | No | - | Portable model tier for tasks created by this schedule. Set to null to clear. |
+
+### patch-schedule
+
+**Patch Scheduled Task**
+
+Patch an existing scheduled task by shallow-merging provided fields over the current row. Any registered agent can patch schedules.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `scheduleId` | `string` | No | - | Schedule ID to patch |
+| `name` | `string` | No | - | Schedule name to patch (alternative to ID) |
 | `newName` | `string` | No | - | New name for the schedule |
 | `taskTemplate` | `string` | No | - | New task template |
 | `targetType` | `unknown` | No | - | Change the execution target: 'agent-task', 'workflow', or 'script'. |
@@ -1123,6 +1156,8 @@ List all automation workflows, optionally filtered by enabled status. Returns SL
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `enabled` | `boolean` | No | - | Filter by enabled status (omit to return all) |
+| `consecutiveErrorsMin` | `number` | No | - | Only return workflows with at least this many latest consecutive failed runs. |
+| `lastRunStatus` | `unknown` | No | - | Only return workflows whose latest run has this status. |
 | `includeFull` | `boolean` | No | - | Return the full workflow `definition` + trigger config instead of slim rows. Default false — prefer `get-workflow` to fetch a single workflow in full. |
 
 ### get-workflow

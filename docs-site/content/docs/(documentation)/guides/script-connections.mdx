@@ -186,7 +186,17 @@ For APIs where a user authorizes an OAuth app (GitHub, Google, Slack, ...):
 The user opens the returned URL, authorizes, and the provider redirects to
 `GET /api/oauth/{provider}/callback`, where the swarm exchanges the code
 (client secret + PKCE verifier), stores access + refresh tokens, and shows a
-"you can close this tab" page. Then bind the token:
+"you can close this tab" page.
+
+By default client credentials are sent as form-encoded body parameters. For
+providers that require HTTP Basic auth and/or a JSON token request (e.g.
+Notion), set the token-endpoint knobs on the app:
+
+```jsonc
+{ "action": "oauth-app-upsert", "provider": "notion", ..., "tokenAuthStyle": "basic", "tokenBodyFormat": "json" }
+```
+
+Then bind the token:
 
 ```jsonc
 // 3. bind — the token resolves from oauth_tokens at run time

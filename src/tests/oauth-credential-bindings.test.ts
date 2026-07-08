@@ -234,6 +234,65 @@ describe("OAuth credential bindings", () => {
     expect(getOAuthTokens("phase2-refresh")?.refreshToken).toBe("new-refresh-token");
   });
 
+  test("basic tokenAuthStyle + json tokenBodyFormat reach the token endpoint (Notion-style)", async () => {
+    upsertOAuthApp("phase2-basic", {
+      ...testApp("phase2-basic"),
+      metadata: JSON.stringify({ tokenAuthStyle: "basic", tokenBodyFormat: "json" }),
+    });
+    storeOAuthTokens("phase2-basic", {
+      accessToken: "old-basic-access",
+      refreshToken: "old-basic-refresh",
+      expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
+    });
+    upsertCredentialBinding({
+      configKey: "PHASE2_BASIC_OAUTH",
+      allowedHosts: ["api.vendor.test"],
+      headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_BASIC_OAUTH]",
+      authKind: "oauth",
+      oauthProvider: "phase2-basic",
+    });
+
+    const config = getOAuthProviderConfig("phase2-basic");
+    expect(config?.tokenAuthStyle).toBe("basic");
+    expect(config?.tokenBodyFormat).toBe("json");
+
+    const expectedBasic = `Basic ${Buffer.from("phase2-basic-client:phase2-basic-secret").toString("base64")}`;
+    const fetchSpy = mock((input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      if (url !== "https://oauth.example.test/token") {
+        return originalFetch(input, init);
+      }
+      const headers = new Headers(init?.headers);
+      expect(headers.get("authorization")).toBe(expectedBasic);
+      expect(headers.get("content-type")).toBe("application/json");
+      const body = JSON.parse(String(init?.body)) as Record<string, string>;
+      expect(body.grant_type).toBe("refresh_token");
+      expect(body.refresh_token).toBe("old-basic-refresh");
+      // Basic auth carries the client credentials — they must NOT be in the body
+      expect(body.client_id).toBeUndefined();
+      expect(body.client_secret).toBeUndefined();
+      return Promise.resolve(
+        Response.json({
+          access_token: "new-basic-access",
+          token_type: "Bearer",
+          expires_in: 3600,
+          refresh_token: "new-basic-refresh",
+        }),
+      );
+    });
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const bindings = await buildScriptCredentialBindings({});
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(bindings).toContainEqual(
+      expect.objectContaining({
+        configKey: "PHASE2_BASIC_OAUTH",
+        value: "new-basic-access",
+      }),
+    );
+  });
+
   test("generic OAuth authorize URL uses space-separated scopes", async () => {
     upsertOAuthApp("phase2-scopes", testApp("phase2-scopes"));
     const config = getOAuthProviderConfig("phase2-scopes");

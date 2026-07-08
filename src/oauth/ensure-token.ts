@@ -5,8 +5,56 @@ import {
   isTokenExpiringSoon,
   releaseOAuthRefreshLock,
 } from "../be/db-queries/oauth";
-import type { OAuthTokens } from "../tracker/types";
+import type { OAuthApp, OAuthTokens } from "../tracker/types";
 import { type OAuthProviderConfig, refreshAccessToken } from "./wrapper";
+
+function parseMetadata(metadataJson: string | null | undefined): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(metadataJson || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function stringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, String(item)]));
+}
+
+/**
+ * Map an oauth_apps row to a provider config. Single source of truth for the
+ * token-endpoint behavior knobs stored in metadata (extraParams,
+ * tokenAuthStyle, tokenBodyFormat) — used by ensure-token and re-exported by
+ * be/oauth-credential-bindings (which can't be imported from here without a
+ * cycle).
+ */
+export function oauthAppRowToProviderConfig(app: OAuthApp): OAuthProviderConfig {
+  const metadata = parseMetadata(app.metadata);
+  const extraParams =
+    stringRecord(metadata.extraParams) ??
+    (typeof metadata.actor === "string" ? { actor: metadata.actor } : undefined);
+
+  return {
+    provider: app.provider,
+    clientId: app.clientId,
+    clientSecret: app.clientSecret,
+    authorizeUrl: app.authorizeUrl,
+    tokenUrl: app.tokenUrl,
+    redirectUri: app.redirectUri,
+    scopes: app.scopes
+      .split(",")
+      .map((scope) => scope.trim())
+      .filter(Boolean),
+    extraParams,
+    // Standard OAuth wants space-separated scopes; the wrapper's comma
+    // default exists only for Linear, which has its own dedicated flow.
+    scopeSeparator: " ",
+    ...(metadata.tokenAuthStyle === "basic" ? { tokenAuthStyle: "basic" as const } : {}),
+    ...(metadata.tokenBodyFormat === "json" ? { tokenBodyFormat: "json" as const } : {}),
+    requiresRefreshTokenRotation: app.provider === "jira",
+  };
+}
 
 const refreshLocks = new Map<string, Promise<void>>();
 const REFRESH_LOCK_TTL_MS = 2 * 60 * 1000;
@@ -18,20 +66,7 @@ const REFRESH_LOCK_POLL_MS = 250;
  */
 function getOAuthConfig(provider: string): OAuthProviderConfig | null {
   const app = getOAuthApp(provider);
-  if (!app) return null;
-
-  const metadata = JSON.parse(app.metadata || "{}");
-  return {
-    provider,
-    clientId: app.clientId,
-    clientSecret: app.clientSecret,
-    authorizeUrl: app.authorizeUrl,
-    tokenUrl: app.tokenUrl,
-    redirectUri: app.redirectUri,
-    scopes: app.scopes.split(","),
-    extraParams: metadata.extraParams ?? (metadata.actor ? { actor: metadata.actor } : undefined),
-    requiresRefreshTokenRotation: provider === "jira",
-  };
+  return app ? oauthAppRowToProviderConfig(app) : null;
 }
 
 async function withProviderRefreshLock<T>(provider: string, fn: () => Promise<T>): Promise<T> {

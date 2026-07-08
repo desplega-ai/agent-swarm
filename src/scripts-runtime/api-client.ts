@@ -133,7 +133,10 @@ export function createApiRegistryClient(
         applyCredential(descriptor.credential, url, headers);
 
         const init: RequestInit = { method: operation.method, headers };
-        if (operation.hasBody) {
+        // Guard against stored runtimes generated before hasBody excluded
+        // GET/HEAD — fetch() throws on GET/HEAD requests with a body.
+        const methodAllowsBody = !["GET", "HEAD"].includes(operation.method.toUpperCase());
+        if (operation.hasBody && methodAllowsBody) {
           headers.set("content-type", headers.get("content-type") ?? "application/json");
           init.body = JSON.stringify(args.body ?? null);
         }

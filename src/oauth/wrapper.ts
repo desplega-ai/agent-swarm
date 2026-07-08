@@ -29,6 +29,20 @@ export interface OAuthProviderConfig {
    * pre-existing consumer of this wrapper.
    */
   scopeSeparator?: string;
+  /**
+   * How client credentials are sent to the token endpoint.
+   *
+   * - `"body"` (default): `client_id` + `client_secret` as body parameters.
+   * - `"basic"`: HTTP Basic `Authorization` header (RFC 6749 §2.3.1) —
+   *   required by providers like Notion that reject body credentials.
+   */
+  tokenAuthStyle?: "body" | "basic";
+  /**
+   * Token request body encoding. `"form"` (default) sends
+   * `application/x-www-form-urlencoded`; `"json"` sends a JSON body
+   * (Notion requires JSON).
+   */
+  tokenBodyFormat?: "form" | "json";
 }
 
 interface PendingState {
@@ -97,6 +111,30 @@ export async function buildAuthorizationUrl(
  * Validates the state against our pending map, calls the token endpoint,
  * and persists tokens via storeOAuthTokens().
  */
+/**
+ * Build headers + body for a token-endpoint request, honoring the provider's
+ * client-auth style (body params vs HTTP Basic) and body encoding (form vs JSON).
+ */
+function tokenRequestInit(
+  config: OAuthProviderConfig,
+  params: Record<string, string>,
+): { headers: Record<string, string>; body: string } {
+  const useBasic = config.tokenAuthStyle === "basic";
+  const bodyParams = useBasic
+    ? params
+    : { ...params, client_id: config.clientId, client_secret: config.clientSecret };
+  const headers: Record<string, string> = {};
+  if (useBasic) {
+    headers.Authorization = `Basic ${Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64")}`;
+  }
+  if (config.tokenBodyFormat === "json") {
+    headers["Content-Type"] = "application/json";
+    return { headers, body: JSON.stringify(bodyParams) };
+  }
+  headers["Content-Type"] = "application/x-www-form-urlencoded";
+  return { headers, body: new URLSearchParams(bodyParams).toString() };
+}
+
 export async function exchangeCode(
   config: OAuthProviderConfig,
   code: string,
@@ -111,19 +149,14 @@ export async function exchangeCode(
   const { codeVerifier } = pending;
 
   // Build token request manually — Linear doesn't use standard OAuth discovery
-  const body = new URLSearchParams({
-    grant_type: "authorization_code",
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
-    redirect_uri: config.redirectUri,
-    code,
-    code_verifier: codeVerifier,
-  });
-
   const response = await fetch(config.tokenUrl, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
+    ...tokenRequestInit(config, {
+      grant_type: "authorization_code",
+      redirect_uri: config.redirectUri,
+      code,
+      code_verifier: codeVerifier,
+    }),
   });
 
   if (!response.ok) {
@@ -167,17 +200,12 @@ export async function refreshAccessToken(
   config: OAuthProviderConfig,
   refreshToken: string,
 ): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number; scope?: string }> {
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
-    refresh_token: refreshToken,
-  });
-
   const response = await fetch(config.tokenUrl, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
+    ...tokenRequestInit(config, {
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    }),
   });
 
   if (!response.ok) {

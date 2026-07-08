@@ -378,6 +378,54 @@ describe("script connections", () => {
     });
   });
 
+  test("GET operations never generate a body even when the spec declares one", async () => {
+    // readme.io-exported specs (e.g. Notion on apis.guru) declare form-encoded
+    // requestBody on GET operations; fetch() rejects GET bodies.
+    const spec = JSON.stringify({
+      openapi: "3.0.0",
+      info: { title: "Readmeio", version: "1.0.0" },
+      paths: {
+        "/v1/users/{id}": {
+          get: {
+            operationId: "retrieveAUser",
+            parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+            requestBody: {
+              content: {
+                "application/x-www-form-urlencoded": { schema: { type: "object" } },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+          post: {
+            operationId: "updateAUser",
+            parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+            requestBody: {
+              content: { "application/json": { schema: { type: "object" } } },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    });
+    const connection = await upsertScriptConnection({
+      slug: "readmeio",
+      kind: "openapi",
+      baseUrl: "https://api.readmeio.test",
+      openapiSpecJson: spec,
+    });
+    createdConnectionIds.push(connection.id);
+
+    expect(connection.generationError).toBeNull();
+    const runtime = JSON.parse(connection.generatedRuntimeJson ?? "{}") as {
+      operations: Array<{ name: string; hasBody: boolean }>;
+    };
+    const byName = new Map(runtime.operations.map((op) => [op.name, op]));
+    expect(byName.get("retrieveAUser")?.hasBody).toBe(false);
+    expect(byName.get("updateAUser")?.hasBody).toBe(true);
+    // the generated GET args type must not demand a body either
+    expect(connection.generatedTypes).not.toMatch(/RetrieveAUserArgs = \{[^}]*body/);
+  });
+
   test("GraphQL connections generate ctx.api descriptor and graphql method types", async () => {
     const binding = upsertCredentialBinding({
       configKey: "GRAPHQL_VENDOR_KEY",
