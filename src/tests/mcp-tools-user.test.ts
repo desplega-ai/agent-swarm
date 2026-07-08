@@ -106,12 +106,17 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
     expect(textOf(byAlias)).toContain(user.id);
   });
 
-  test("returns 'No user found' when nothing matches", async () => {
+  test("returns a structured {status: 'unknown', ...} payload when nothing matches — never prose", async () => {
     const result = await callTool(server, "resolve-user", {
       kind: "slack",
       externalId: "U_DOES_NOT_EXIST",
     });
-    expect(textOf(result)).toContain("No user found");
+    const parsed = JSON.parse(textOf(result));
+    expect(parsed).toEqual({
+      status: "unknown",
+      kind: "slack",
+      externalId: "U_DOES_NOT_EXIST",
+    });
   });
 
   // Schema-level validation tests. The MCP SDK runs Zod at the transport
@@ -132,12 +137,17 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
       const msg = JSON.stringify(parsed.error.issues);
-      expect(msg).toMatch(/Provide either \(kind \+ externalId\), email, or userId/);
+      expect(msg).toMatch(/Provide either \(kind \+ externalId\), email, userId, or name/);
     }
   });
 
-  test("name parameter (old shape) is rejected", () => {
+  test("valid {name} input passes the schema", () => {
     const parsed = resolveUserInputSchema.safeParse({ name: "Whoever" });
+    expect(parsed.success).toBe(true);
+  });
+
+  test("name shorter than 2 chars fails the min-length constraint", () => {
+    const parsed = resolveUserInputSchema.safeParse({ name: "A" });
     expect(parsed.success).toBe(false);
   });
 
@@ -201,9 +211,53 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
     expect(parsed.externalIds[0]).toMatchObject({ kind: "linear", externalId: "L_UIDLOOKUP" });
   });
 
-  test("userId lookup returns 'No user found' for unknown ID", async () => {
+  test("userId lookup returns a structured {status: 'unknown', ...} payload for an unknown ID", async () => {
     const result = await callTool(server, "resolve-user", { userId: "nonexistent-user-id-xyz" });
-    expect(textOf(result)).toContain("No user found");
+    const parsed = JSON.parse(textOf(result));
+    expect(parsed).toEqual({
+      status: "unknown",
+      kind: "userId",
+      externalId: "nonexistent-user-id-xyz",
+    });
+  });
+
+  test("name lookup: single exact match resolves to the user profile", async () => {
+    const user = createUser({ name: "Zbigniew Solo", email: "zbigniew@example.com" });
+
+    const result = await callTool(server, "resolve-user", { name: "Zbigniew Solo" });
+    const parsed = JSON.parse(textOf(result));
+    expect(parsed.id).toBe(user.id);
+    expect(parsed.name).toBe("Zbigniew Solo");
+  });
+
+  test("name lookup: single first-token prefix match resolves to the user profile", async () => {
+    const user = createUser({ name: "Priyanka Unique Prefix", email: "priyanka@example.com" });
+
+    const result = await callTool(server, "resolve-user", { name: "Priyanka" });
+    const parsed = JSON.parse(textOf(result));
+    expect(parsed.id).toBe(user.id);
+  });
+
+  test("name lookup: multiple matches return {status: 'ambiguous', candidates: [...]} — never a guess", async () => {
+    const a = createUser({ name: "Alberto Maurel", email: "alberto.maurel@example.com" });
+    const b = createUser({ name: "Alberto Dubois", email: "alberto.dubois@example.com" });
+
+    const result = await callTool(server, "resolve-user", { name: "Alberto" });
+    const parsed = JSON.parse(textOf(result));
+    expect(parsed.status).toBe("ambiguous");
+    expect(parsed.message).toMatch(/AMBIGUOUS/);
+    const candidateIds = parsed.candidates.map((c: { userId: string }) => c.userId).sort();
+    expect(candidateIds).toEqual([a.id, b.id].sort());
+  });
+
+  test("name lookup: zero matches return a structured {status: 'unknown', kind: 'name', ...} payload", async () => {
+    const result = await callTool(server, "resolve-user", { name: "Nobody Registered Xyz" });
+    const parsed = JSON.parse(textOf(result));
+    expect(parsed).toEqual({
+      status: "unknown",
+      kind: "name",
+      externalId: "Nobody Registered Xyz",
+    });
   });
 });
 
