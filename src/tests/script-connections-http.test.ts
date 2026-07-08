@@ -477,6 +477,196 @@ describe("/api/script-connections HTTP", () => {
       },
     ]);
   });
+
+  // Contract: the surface proxy passes through a TRIMMED shape only —
+  // {domain, summary, surfaces: [{type, name, url, docs, auth: {required,
+  // credentialIds, mechanics}}], credentials: {id: {type, label, generateUrl,
+  // setup}}}. CLI surfaces are filtered out (connections are http/mcp only)
+  // and credentials are narrowed to ids referenced by retained surfaces.
+  test("integrations surface proxy trims payload and filters cli surfaces", async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe("https://integrations.sh/api/stripe.com/surface");
+      return new Response(
+        JSON.stringify({
+          version: 3,
+          domain: "stripe.com",
+          detect: { probed: ["llms.txt"] },
+          summary: "Stripe exposes a REST HTTP API and an MCP server.",
+          discoveredAt: "2026-07-08T00:00:00.000Z",
+          usedLlm: true,
+          surfaces: [
+            {
+              type: "http",
+              name: "Stripe API",
+              slug: "stripe-api",
+              url: "https://api.stripe.com",
+              docs: "https://docs.stripe.com/api",
+              basis: { via: "discovered", evidence: ["https://docs.stripe.com/api.md"] },
+              auth: {
+                status: "required",
+                entries: [
+                  {
+                    use: [
+                      {
+                        id: "stripe_api_key",
+                        mechanics: {
+                          source: "http",
+                          in: "header",
+                          headerName: "Authorization",
+                          scheme: "Bearer",
+                        },
+                      },
+                    ],
+                    basis: { via: "discovered" },
+                  },
+                ],
+              },
+            },
+            {
+              type: "mcp",
+              name: "Stripe MCP server",
+              slug: "stripe-mcp-server",
+              url: "https://mcp.stripe.com",
+              docs: "https://docs.stripe.com/mcp",
+              auth: {
+                status: "required",
+                entries: [
+                  { use: [{ id: "stripe_mcp_oauth", mechanics: { source: "well-known" } }] },
+                ],
+              },
+            },
+            {
+              type: "cli",
+              name: "Stripe CLI",
+              docs: "https://docs.stripe.com/stripe-cli",
+              auth: {
+                status: "required",
+                entries: [
+                  {
+                    use: [
+                      {
+                        id: "stripe_cli_session",
+                        mechanics: { source: "cli", command: "stripe login" },
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+          credentials: {
+            stripe_api_key: {
+              type: "api_key",
+              label: "Stripe API key",
+              generateUrl: "https://dashboard.stripe.com/test/apikeys",
+              setup: "Create or reveal a key in the API keys page.",
+              acquisition: "manual",
+            },
+            stripe_mcp_oauth: {
+              type: "oauth2",
+              label: "Stripe MCP OAuth authorization",
+              setup: "Use an MCP client that supports OAuth.",
+              acquisition: "manual",
+            },
+            stripe_cli_session: {
+              type: "compound",
+              label: "Stripe CLI session",
+              setup: "Install the CLI, then run stripe login.",
+            },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const res = await dispatch("/api/integrations-catalog/stripe.com/surface");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      domain: "stripe.com",
+      summary: "Stripe exposes a REST HTTP API and an MCP server.",
+      surfaces: [
+        {
+          type: "http",
+          name: "Stripe API",
+          url: "https://api.stripe.com",
+          docs: "https://docs.stripe.com/api",
+          auth: {
+            required: true,
+            credentialIds: ["stripe_api_key"],
+            mechanics: { in: "header", headerName: "Authorization", scheme: "Bearer" },
+          },
+        },
+        {
+          type: "mcp",
+          name: "Stripe MCP server",
+          url: "https://mcp.stripe.com",
+          docs: "https://docs.stripe.com/mcp",
+          auth: { required: true, credentialIds: ["stripe_mcp_oauth"], mechanics: null },
+        },
+      ],
+      credentials: {
+        stripe_api_key: {
+          type: "api_key",
+          label: "Stripe API key",
+          generateUrl: "https://dashboard.stripe.com/test/apikeys",
+          setup: "Create or reveal a key in the API keys page.",
+        },
+        stripe_mcp_oauth: {
+          type: "oauth2",
+          label: "Stripe MCP OAuth authorization",
+          generateUrl: null,
+          setup: "Use an MCP client that supports OAuth.",
+        },
+      },
+    });
+  });
+
+  test("integrations surface proxy caches by domain", async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return new Response(
+        JSON.stringify({ domain: "cached.example", summary: "hi", surfaces: [], credentials: {} }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    expect((await dispatch("/api/integrations-catalog/cached.example/surface")).status).toBe(200);
+    expect((await dispatch("/api/integrations-catalog/CACHED.example/surface")).status).toBe(200);
+    expect(calls).toBe(1);
+  });
+
+  test("integrations surface proxy passes through upstream 404", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: "surface not found" }), {
+        status: 404,
+      })) as unknown as typeof fetch;
+
+    const res = await dispatch("/api/integrations-catalog/unknown-404.example/surface");
+    expect(res.status).toBe(404);
+    expect(res.text).toContain("No integration surface found");
+  });
+
+  test("integrations surface proxy maps other upstream failures to 502", async () => {
+    globalThis.fetch = (async () =>
+      new Response("boom", { status: 500 })) as unknown as typeof fetch;
+
+    const res = await dispatch("/api/integrations-catalog/broken-500.example/surface");
+    expect(res.status).toBe(502);
+    expect(res.text).toContain("Failed to fetch integration surface");
+  });
+
+  test("integrations surface proxy rejects invalid domains", async () => {
+    let called = false;
+    globalThis.fetch = (async () => {
+      called = true;
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const res = await dispatch("/api/integrations-catalog/bad_domain/surface");
+    expect(res.status).toBe(400);
+    expect(called).toBe(false);
+  });
 });
 
 describe("DELETE /api/oauth-apps/{provider}/tokens", () => {

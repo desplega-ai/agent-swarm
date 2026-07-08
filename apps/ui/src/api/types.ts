@@ -1369,6 +1369,40 @@ export interface IntegrationsCatalogResponse {
   cachedAt: string;
 }
 
+// Trimmed integrations.sh per-domain surface details, proxied by
+// GET /api/integrations-catalog/{domain}/surface.
+export interface IntegrationsSurfaceMechanics {
+  in: string;
+  headerName: string | null;
+  scheme: string | null;
+}
+
+export interface IntegrationsSurfaceEntry {
+  type: string;
+  name: string;
+  url: string | null;
+  docs: string | null;
+  auth: {
+    required: boolean;
+    credentialIds: string[];
+    mechanics: IntegrationsSurfaceMechanics | null;
+  };
+}
+
+export interface IntegrationsSurfaceCredential {
+  type: string;
+  label: string;
+  generateUrl: string | null;
+  setup: string | null;
+}
+
+export interface IntegrationsSurfaceResponse {
+  domain: string;
+  summary: string;
+  surfaces: IntegrationsSurfaceEntry[];
+  credentials: Record<string, IntegrationsSurfaceCredential>;
+}
+
 export interface ScriptRunInlineResult {
   result?: unknown;
   autoSaved?: { slug: string; reason: string };

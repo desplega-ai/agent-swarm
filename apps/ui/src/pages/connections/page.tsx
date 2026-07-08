@@ -21,6 +21,7 @@ import {
   useDeleteOAuthApp,
   useDiscoverOAuthApp,
   useIntegrationsCatalog,
+  useIntegrationsSurface,
   useOAuthApps,
   useOAuthAuthorizeUrl,
   useRefreshScriptConnection,
@@ -33,6 +34,9 @@ import {
 import type {
   CredentialAuthKind,
   IntegrationsCatalogEntry,
+  IntegrationsSurfaceCredential,
+  IntegrationsSurfaceMechanics,
+  IntegrationsSurfaceResponse,
   OAuthAppSummary,
   OAuthBindingTokenStatus,
   ScriptConnection,
@@ -508,6 +512,123 @@ async function resolveApisGuruOpenApi(domain: string): Promise<{
   }
 }
 
+// Session-scoped cache of integrations.sh surface lookups (keyed by domain).
+const integrationsSurfaceCache = new Map<string, IntegrationsSurfaceResponse>();
+
+const SURFACE_DOMAIN_PATTERN = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
+
+function surfaceConfigKeySuggestion(credentialId: string, domain: string): string {
+  const fallback = `${domain.split(".")[0] ?? "API"}_API_KEY`;
+  const cleaned = (credentialId || fallback)
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase();
+  return cleaned || "API_KEY";
+}
+
+function surfaceHeaderTemplate(
+  mechanics: IntegrationsSurfaceMechanics,
+  configKey: string,
+): string | null {
+  if (mechanics.in !== "header" || !mechanics.headerName) return null;
+  const scheme = mechanics.scheme ? `${mechanics.scheme} ` : "";
+  return `${mechanics.headerName}: ${scheme}${configPlaceholder(configKey)}`;
+}
+
+function ExpandableText({ text, className }: { text: string; className?: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div>
+      <p className={cn("text-xs text-muted-foreground", !expanded && "line-clamp-2", className)}>
+        {text}
+      </p>
+      {text.length > 160 ? (
+        <button
+          type="button"
+          className="mt-0.5 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function SurfaceCredentialHelp({ credential }: { credential: IntegrationsSurfaceCredential }) {
+  return (
+    <div className="rounded-md border bg-background p-2">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium">{credential.label}</span>
+        <Badge variant="outline" size="tag">
+          {credential.type}
+        </Badge>
+        {credential.generateUrl ? (
+          <a
+            href={credential.generateUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="ml-auto inline-flex shrink-0 items-center gap-1 text-xs text-primary hover:underline"
+          >
+            Get it here <ExternalLink className="size-3" />
+          </a>
+        ) : null}
+      </div>
+      {credential.setup ? (
+        <div className="mt-1">
+          <ExpandableText text={credential.setup} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SurfaceAboutPanel({
+  surface,
+  kind,
+}: {
+  surface: IntegrationsSurfaceResponse;
+  kind: ScriptConnectionKind;
+}) {
+  const mcpSurface = surface.surfaces.find((entry) => entry.type === "mcp");
+  const credentials = Object.entries(surface.credentials);
+  return (
+    <div className="space-y-3 rounded-md border bg-muted/30 p-3">
+      <div className="text-xs font-medium uppercase text-muted-foreground">
+        About {surface.domain}
+      </div>
+      {surface.summary ? <ExpandableText text={surface.summary} /> : null}
+      {kind === "mcp" && mcpSurface?.url ? (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 rounded-md border bg-background p-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium">MCP server URL</div>
+              <div className="truncate font-mono text-xs text-muted-foreground">
+                {mcpSurface.url}
+              </div>
+            </div>
+            <CopyButton value={mcpSurface.url} label="Copy MCP server URL" />
+            <Button asChild type="button" size="xs" variant="outline">
+              <Link to="/mcp-servers">Register server</Link>
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            MCP connections use a registered server — add this URL under MCP Servers, then select it
+            below.
+          </p>
+        </div>
+      ) : null}
+      {credentials.length > 0 ? (
+        <div className="space-y-2">
+          {credentials.map(([id, credential]) => (
+            <SurfaceCredentialHelp key={id} credential={credential} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function AddConnectionDialog({
   open,
   onOpenChange,
@@ -538,6 +659,10 @@ export function AddConnectionDialog({
   ]);
   const [catalogHint, setCatalogHint] = useState("");
   const [resolvingCatalogId, setResolvingCatalogId] = useState<string | null>(null);
+  const surfaceLookup = useIntegrationsSurface();
+  const [surface, setSurface] = useState<IntegrationsSurfaceResponse | null>(null);
+  const [surfaceLoading, setSurfaceLoading] = useState(false);
+  const [surfaceDomainInput, setSurfaceDomainInput] = useState("");
   const [kind, setKind] = useState<ScriptConnectionKind>("openapi");
   const [slug, setSlug] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -570,6 +695,8 @@ export function AddConnectionDialog({
     setCatalogSearch("");
     setCatalogKinds(["mcp", "openapi", "graphql"]);
     setCatalogHint("");
+    setSurface(null);
+    setSurfaceDomainInput("");
     setStep(connection ? "form" : "catalog");
     setKind(connection?.kind ?? "openapi");
     setSlug(connection?.slug ?? "");
@@ -613,9 +740,99 @@ export function AddConnectionDialog({
     );
   }
 
+  // Prefill form fields from integrations.sh surface data: the http surface
+  // feeds baseUrl/allowedHosts and header-auth mechanics feed the inline
+  // credential section; the mcp surface renders in the About panel.
+  function applySurfacePrefill(
+    data: IntegrationsSurfaceResponse,
+    targetKind: ScriptConnectionKind,
+  ) {
+    const httpSurface = data.surfaces.find((entry) => entry.type === "http");
+    if (!httpSurface || targetKind === "mcp") return;
+    if (httpSurface.url) {
+      const surfaceUrl = httpSurface.url;
+      if (targetKind === "graphql") {
+        // The catalog entry's own URL is the GraphQL endpoint; only fill gaps.
+        setBaseUrl((current) => (current.trim() ? current : surfaceUrl));
+      } else {
+        setBaseUrl(surfaceUrl);
+      }
+      try {
+        const hostname = new URL(surfaceUrl).hostname;
+        setAllowedHosts((current) => uniqueStrings([...splitList(current), hostname]).join(", "));
+      } catch {
+        // Malformed surface URL; skip the allowed-hosts merge.
+      }
+    }
+    const mechanics = httpSurface.auth.mechanics;
+    if (httpSurface.auth.required && mechanics?.in === "header" && mechanics.headerName) {
+      const suggestedKey = surfaceConfigKeySuggestion(
+        httpSurface.auth.credentialIds[0] ?? "",
+        data.domain,
+      );
+      const template = surfaceHeaderTemplate(mechanics, suggestedKey);
+      setCredentialMode((current) => (current === "none" ? "inline" : current));
+      setConfigKey((current) => (current.trim() ? current : suggestedKey));
+      if (template) setHeaderTemplate(template);
+    }
+  }
+
+  async function loadSurface(
+    domain: string,
+    targetKind: ScriptConnectionKind,
+  ): Promise<IntegrationsSurfaceResponse | null> {
+    const normalized = domain.trim().toLowerCase();
+    if (!normalized) return null;
+    const cached = integrationsSurfaceCache.get(normalized);
+    if (cached) {
+      setSurface(cached);
+      applySurfacePrefill(cached, targetKind);
+      return cached;
+    }
+    setSurfaceLoading(true);
+    try {
+      const data = await surfaceLookup.mutateAsync(normalized);
+      integrationsSurfaceCache.set(normalized, data);
+      setSurface(data);
+      applySurfacePrefill(data, targetKind);
+      return data;
+    } catch (error) {
+      // Non-blocking: manual entry still works without surface details.
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : `Could not load integration details for ${normalized}`,
+      );
+      return null;
+    } finally {
+      setSurfaceLoading(false);
+    }
+  }
+
+  async function fetchDomainDetails() {
+    const domain = surfaceDomainInput.trim().toLowerCase();
+    if (!SURFACE_DOMAIN_PATTERN.test(domain)) {
+      toast.error("Enter a bare domain like stripe.com");
+      return;
+    }
+    const data = await loadSurface(domain, kind);
+    if (!data) return;
+    const httpSurface = data.surfaces.find((entry) => entry.type === "http");
+    const mcpSurface = data.surfaces.find((entry) => entry.type === "mcp");
+    if (!httpSurface && mcpSurface) {
+      setKind("mcp");
+      setCatalogHint("Select the matching MCP server from the manual form.");
+    }
+    setSlug((current) => current || normalizeScriptSlug(domain.split(".")[0] ?? domain));
+    setDisplayName((current) => current || httpSurface?.name || mcpSurface?.name || data.domain);
+    setAllowedHosts((current) => (current.trim() ? current : domain));
+    setStep("form");
+  }
+
   async function selectCatalogEntry(entry: IntegrationsCatalogEntry) {
     setStep("form");
     setCatalogHint("");
+    setSurface(null);
     setKind(entry.kind);
     setSlug(normalizeScriptSlug(entry.slug || entry.name));
     setDisplayName(entry.name);
@@ -623,19 +840,25 @@ export function AddConnectionDialog({
 
     if (entry.kind === "graphql") {
       setBaseUrl(entry.url);
+      if (entry.domain) void loadSurface(entry.domain, "graphql");
       return;
     }
     if (entry.kind === "mcp") {
       setCatalogHint("Select the matching MCP server from the manual form.");
+      if (entry.domain) void loadSurface(entry.domain, "mcp");
       return;
     }
     setSpecMode("url");
     setOpenapiSpecUrl("");
     setBaseUrl(entry.url);
     setResolvingCatalogId(entry.id);
-    const resolved = await resolveApisGuruOpenApi(entry.domain);
+    const [resolved] = await Promise.all([
+      resolveApisGuruOpenApi(entry.domain),
+      entry.domain ? loadSurface(entry.domain, "openapi") : Promise.resolve(null),
+    ]);
     setResolvingCatalogId(null);
     if (resolved.specUrl) setOpenapiSpecUrl(resolved.specUrl);
+    // Spec-declared server URL wins over the surface prefill when available.
     if (resolved.baseUrl) setBaseUrl(resolved.baseUrl);
     if (resolved.error) {
       setCatalogHint(`Catalog selected; ${resolved.error}`);
@@ -802,12 +1025,44 @@ export function AddConnectionDialog({
                 ))
               )}
             </div>
+            <div className="flex flex-col gap-2 rounded-md border border-dashed p-3 sm:flex-row sm:items-center">
+              <p className="text-xs text-muted-foreground sm:flex-1">
+                Not listed? Enter a provider domain to fetch connection details.
+              </p>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={surfaceDomainInput}
+                  onChange={(event) => setSurfaceDomainInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void fetchDomainDetails();
+                    }
+                  }}
+                  placeholder="stripe.com"
+                  className="h-8 w-44"
+                />
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  disabled={!surfaceDomainInput.trim() || surfaceLoading}
+                  onClick={() => void fetchDomainDetails()}
+                >
+                  {surfaceLoading ? "Fetching..." : "Fetch details"}
+                </Button>
+              </div>
+            </div>
             <Button type="button" variant="outline" onClick={() => setStep("form")}>
               Skip - start from scratch
             </Button>
           </div>
         ) : (
           <div className="space-y-5">
+            {surface ? <SurfaceAboutPanel surface={surface} kind={kind} /> : null}
+            {surfaceLoading ? (
+              <p className="text-xs text-muted-foreground">Loading integration details...</p>
+            ) : null}
             <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-2">
                 <FieldLabel tip="Select OpenAPI for generated REST methods, GraphQL for a query helper, or MCP for server tools.">

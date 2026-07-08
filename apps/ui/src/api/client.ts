@@ -30,6 +30,7 @@ import type {
   InboxStateResponse,
   InboxStateUpsertResponse,
   IntegrationsCatalogResponse,
+  IntegrationsSurfaceResponse,
   LogsResponse,
   McpOAuthMetadataResponse,
   McpOAuthStatusResponse,
@@ -1165,6 +1166,18 @@ class ApiClient {
         .json()
         .catch(() => ({ error: "Failed to fetch integrations catalog" }));
       throw new Error(error.error || `Failed to fetch integrations catalog: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async fetchIntegrationsSurface(domain: string): Promise<IntegrationsSurfaceResponse> {
+    const url = `${this.getBaseUrl()}/api/integrations-catalog/${encodeURIComponent(domain)}/surface`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) {
+      const error = await res
+        .json()
+        .catch(() => ({ error: "Failed to fetch integration details" }));
+      throw new Error(error.error || `Failed to fetch integration details: ${res.status}`);
     }
     return res.json();
   }

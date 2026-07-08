@@ -320,6 +320,27 @@ const integrationsCatalogRoute = route({
   },
 });
 
+const surfaceDomainSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(/^[a-z0-9.-]+$/i);
+
+const integrationsSurfaceRoute = route({
+  method: "get",
+  path: "/api/integrations-catalog/{domain}/surface",
+  pattern: ["api", "integrations-catalog", null, "surface"],
+  operationId: "integrations_catalog_surface",
+  summary: "Proxy integrations.sh per-domain surface details (trimmed for the Add Connection flow)",
+  tags: ["Script Connections"],
+  params: z.object({ domain: surfaceDomainSchema }),
+  responses: {
+    200: { description: "Trimmed integration surface details for a domain" },
+    404: { description: "No surface data for this domain" },
+    502: { description: "Surface upstream unavailable" },
+  },
+});
+
 const disconnectOAuthAppRoute = route({
   method: "delete",
   path: "/api/oauth-apps/{provider}/tokens",
@@ -438,6 +459,46 @@ let integrationsCatalogCache: {
   expiresAtMs: number;
   payload: { entries: IntegrationsCatalogEntry[]; cachedAt: string };
 } | null = null;
+
+type IntegrationsSurfaceMechanics = {
+  in: string;
+  headerName: string | null;
+  scheme: string | null;
+};
+
+type IntegrationsSurfaceEntry = {
+  type: string;
+  name: string;
+  url: string | null;
+  docs: string | null;
+  auth: {
+    required: boolean;
+    credentialIds: string[];
+    mechanics: IntegrationsSurfaceMechanics | null;
+  };
+};
+
+type IntegrationsSurfaceCredential = {
+  type: string;
+  label: string;
+  generateUrl: string | null;
+  setup: string | null;
+};
+
+type IntegrationsSurfacePayload = {
+  domain: string;
+  summary: string;
+  surfaces: IntegrationsSurfaceEntry[];
+  credentials: Record<string, IntegrationsSurfaceCredential>;
+};
+
+const INTEGRATIONS_SURFACE_CACHE_MAX_ENTRIES = 200;
+const integrationsSurfaceCache = new Map<
+  string,
+  { expiresAtMs: number; payload: IntegrationsSurfacePayload }
+>();
+
+class SurfaceNotFoundError extends Error {}
 
 function singleHeader(req: IncomingMessage, name: string): string | undefined {
   const raw = req.headers[name];
@@ -990,6 +1051,133 @@ async function fetchIntegrationsCatalog() {
   }
 }
 
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value ? value : null;
+}
+
+// Trim the upstream surface payload to what the Add Connection flow needs.
+// CLI surfaces are dropped (connections are http/mcp only) and the credentials
+// map is narrowed to ids referenced by the retained surfaces.
+function trimSurfacePayload(domain: string, payload: unknown): IntegrationsSurfacePayload {
+  const record = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+  const rawSurfaces = Array.isArray(record.surfaces) ? record.surfaces : [];
+  const surfaces: IntegrationsSurfaceEntry[] = [];
+  const referencedCredentialIds = new Set<string>();
+
+  for (const raw of rawSurfaces) {
+    if (!raw || typeof raw !== "object") continue;
+    const surface = raw as Record<string, unknown>;
+    const type = typeof surface.type === "string" ? surface.type : "";
+    if (type !== "http" && type !== "mcp") continue;
+
+    const auth = (surface.auth && typeof surface.auth === "object" ? surface.auth : {}) as Record<
+      string,
+      unknown
+    >;
+    const entries = Array.isArray(auth.entries) ? auth.entries : [];
+    const credentialIds: string[] = [];
+    let mechanics: IntegrationsSurfaceMechanics | null = null;
+    for (const entry of entries) {
+      if (!entry || typeof entry !== "object") continue;
+      const uses = Array.isArray((entry as Record<string, unknown>).use)
+        ? ((entry as Record<string, unknown>).use as unknown[])
+        : [];
+      for (const use of uses) {
+        if (!use || typeof use !== "object") continue;
+        const useRecord = use as Record<string, unknown>;
+        const id = typeof useRecord.id === "string" ? useRecord.id : "";
+        if (id && !credentialIds.includes(id)) credentialIds.push(id);
+        const rawMechanics = (
+          useRecord.mechanics && typeof useRecord.mechanics === "object" ? useRecord.mechanics : {}
+        ) as Record<string, unknown>;
+        const mechanicsIn = typeof rawMechanics.in === "string" ? rawMechanics.in : "";
+        // Prefer the first header mechanics (that is what the credential
+        // header-template prefill can use); fall back to any positioned use.
+        if (
+          mechanicsIn &&
+          (!mechanics || (mechanics.in !== "header" && mechanicsIn === "header"))
+        ) {
+          mechanics = {
+            in: mechanicsIn,
+            headerName: stringOrNull(rawMechanics.headerName),
+            scheme: stringOrNull(rawMechanics.scheme),
+          };
+        }
+      }
+    }
+    for (const id of credentialIds) referencedCredentialIds.add(id);
+    surfaces.push({
+      type,
+      name: typeof surface.name === "string" ? surface.name : "",
+      url: stringOrNull(surface.url),
+      docs: stringOrNull(surface.docs),
+      auth: { required: auth.status === "required", credentialIds, mechanics },
+    });
+  }
+
+  const rawCredentials = (
+    record.credentials && typeof record.credentials === "object" ? record.credentials : {}
+  ) as Record<string, unknown>;
+  const credentials: Record<string, IntegrationsSurfaceCredential> = {};
+  for (const [id, raw] of Object.entries(rawCredentials)) {
+    if (!referencedCredentialIds.has(id) || !raw || typeof raw !== "object") continue;
+    const credential = raw as Record<string, unknown>;
+    credentials[id] = {
+      type: typeof credential.type === "string" ? credential.type : "unknown",
+      label: typeof credential.label === "string" ? credential.label : id,
+      generateUrl: stringOrNull(credential.generateUrl),
+      setup: stringOrNull(credential.setup),
+    };
+  }
+
+  return {
+    domain: typeof record.domain === "string" && record.domain ? record.domain : domain,
+    summary: typeof record.summary === "string" ? record.summary : "",
+    surfaces,
+    credentials,
+  };
+}
+
+async function fetchIntegrationsSurface(domain: string): Promise<IntegrationsSurfacePayload> {
+  const cacheKey = domain.toLowerCase();
+  const now = Date.now();
+  const cached = integrationsSurfaceCache.get(cacheKey);
+  if (cached && cached.expiresAtMs > now) return cached.payload;
+  integrationsSurfaceCache.delete(cacheKey);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), INTEGRATIONS_CATALOG_TIMEOUT_MS);
+  try {
+    const response = await fetch(
+      `https://integrations.sh/api/${encodeURIComponent(cacheKey)}/surface`,
+      { headers: { accept: "application/json" }, signal: controller.signal },
+    );
+    if (response.status === 404) {
+      throw new SurfaceNotFoundError(`No integration surface found for ${domain}.`);
+    }
+    if (!response.ok) {
+      throw new Error(`integrations.sh returned HTTP ${response.status}`);
+    }
+    const payload = trimSurfacePayload(cacheKey, (await response.json()) as unknown);
+    if (integrationsSurfaceCache.size >= INTEGRATIONS_SURFACE_CACHE_MAX_ENTRIES) {
+      const oldestKey = integrationsSurfaceCache.keys().next().value;
+      if (oldestKey !== undefined) integrationsSurfaceCache.delete(oldestKey);
+    }
+    integrationsSurfaceCache.set(cacheKey, {
+      expiresAtMs: now + INTEGRATIONS_CATALOG_TTL_MS,
+      payload,
+    });
+    return payload;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Timed out fetching integration surface after 15s.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function deleteOAuthApp(provider: string): boolean {
   const existing = getOAuthApp(provider);
   if (!existing) return false;
@@ -1329,6 +1517,25 @@ export async function handleScriptConnections(
       jsonError(
         res,
         `Failed to fetch integrations catalog: ${err instanceof Error ? err.message : String(err)}`,
+        502,
+      );
+    }
+    return true;
+  }
+
+  if (integrationsSurfaceRoute.match(req.method, pathSegments)) {
+    const parsed = await integrationsSurfaceRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    try {
+      json(res, await fetchIntegrationsSurface(parsed.params.domain));
+    } catch (err) {
+      if (err instanceof SurfaceNotFoundError) {
+        jsonError(res, err.message, 404);
+        return true;
+      }
+      jsonError(
+        res,
+        `Failed to fetch integration surface: ${err instanceof Error ? err.message : String(err)}`,
         502,
       );
     }

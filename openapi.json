@@ -10351,6 +10351,44 @@
         }
       }
     },
+    "/api/integrations-catalog/{domain}/surface": {
+      "get": {
+        "operationId": "integrations_catalog_surface",
+        "summary": "Proxy integrations.sh per-domain surface details (trimmed for the Add Connection flow)",
+        "tags": [
+          "Script Connections"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "pattern": "^[a-z0-9.-]+$/i"
+            },
+            "required": true,
+            "name": "domain",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trimmed integration surface details for a domain"
+          },
+          "404": {
+            "description": "No surface data for this domain"
+          },
+          "502": {
+            "description": "Surface upstream unavailable"
+          }
+        }
+      }
+    },
     "/api/oauth-apps/{provider}/tokens": {
       "delete": {
         "operationId": "oauth_app_disconnect",

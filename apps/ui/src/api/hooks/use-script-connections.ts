@@ -207,6 +207,12 @@ export function useDiscoverOAuthApp() {
   });
 }
 
+export function useIntegrationsSurface() {
+  return useMutation({
+    mutationFn: (domain: string) => api.fetchIntegrationsSurface(domain),
+  });
+}
+
 export function useOAuthAuthorizeUrl() {
   return useMutation({
     mutationFn: (provider: string) => api.fetchOAuthAuthorizeUrl(provider),
