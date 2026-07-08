@@ -2,7 +2,10 @@ import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { recordInlineScriptRun } from "../be/db";
-import { getScriptApiConnectionDescriptors } from "../be/script-connections";
+import {
+  getScriptApiConnectionDescriptors,
+  getScriptMcpConnectionDescriptors,
+} from "../be/script-connections";
 import { buildScriptCredentialBindings } from "../be/script-credential-broker";
 import {
   getScriptApiById,
@@ -206,6 +209,7 @@ export async function handleX(
     timeoutMs,
     egressSecrets: await buildScriptCredentialBindings({ agentId: endpoint.agentId }),
     apiConnections: getScriptApiConnectionDescriptors({ agentId: endpoint.agentId }),
+    mcpConnections: getScriptMcpConnectionDescriptors({ agentId: endpoint.agentId }),
   });
 
   const ok = output.exitCode === 0 && !output.error && !output.runtimeError;

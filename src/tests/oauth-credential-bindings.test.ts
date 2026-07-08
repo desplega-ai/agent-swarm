@@ -234,6 +234,50 @@ describe("OAuth credential bindings", () => {
     expect(getOAuthTokens("phase2-refresh")?.refreshToken).toBe("new-refresh-token");
   });
 
+  test("failed OAuth token refresh skips only that binding, others still resolve", async () => {
+    upsertOAuthApp("phase2-broken", testApp("phase2-broken"));
+    storeOAuthTokens("phase2-broken", {
+      accessToken: "stale-access-token",
+      refreshToken: "stale-refresh-token",
+      expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
+    });
+    upsertCredentialBinding({
+      configKey: "PHASE2_BROKEN_OAUTH",
+      allowedHosts: ["api.vendor.test"],
+      headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_BROKEN_OAUTH]",
+      authKind: "oauth",
+      oauthProvider: "phase2-broken",
+    });
+    upsertCredentialBinding({
+      configKey: "PHASE2_HEALTHY_CONFIG",
+      allowedHosts: ["api.vendor.test"],
+      headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_HEALTHY_CONFIG]",
+    });
+    process.env.PHASE2_HEALTHY_CONFIG = "healthy-config-value";
+
+    const fetchSpy = mock((input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      if (url !== "https://oauth.example.test/token") {
+        return originalFetch(input, init);
+      }
+      return Promise.resolve(
+        Response.json({ error: "invalid_grant" }, { status: 400 }),
+      );
+    });
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const bindings = await buildScriptCredentialBindings({});
+
+    expect(bindings.some((binding) => binding.configKey === "PHASE2_BROKEN_OAUTH")).toBe(false);
+    expect(bindings).toContainEqual(
+      expect.objectContaining({
+        configKey: "PHASE2_HEALTHY_CONFIG",
+        value: "healthy-config-value",
+      }),
+    );
+    delete process.env.PHASE2_HEALTHY_CONFIG;
+  });
+
   test("missing OAuth token skips binding resolution and list reports missing", async () => {
     upsertOAuthApp("phase2-missing", testApp("phase2-missing"));
     upsertCredentialBinding({

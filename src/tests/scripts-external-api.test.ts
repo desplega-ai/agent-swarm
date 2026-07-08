@@ -3,7 +3,7 @@ import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { __resetEncryptionKeyForTests } from "../be/crypto";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, createMcpServer, getDb, initDb } from "../be/db";
 import {
   createScriptApi,
   getScriptApiById,
@@ -285,6 +285,59 @@ describe("public execution route", () => {
     expect(body.result).toEqual({ doubled: 42 });
     expect(body.error).toBeNull();
     expect(typeof body.durationMs).toBe("number");
+  });
+
+  test("external endpoint runs receive ctx.mcp connections (parity with /api/scripts/run)", async () => {
+    const mcpServer = createMcpServer({
+      name: `x-mcp-${crypto.randomUUID()}`,
+      transport: "http",
+      scope: "global",
+      url: "http://mcp.invalid.test/mcp",
+    });
+    const runtimeDescriptor = {
+      slug: "xmcp",
+      kind: "mcp",
+      connectionId: crypto.randomUUID(),
+      tools: [{ name: "ping", inputSchema: {} }],
+    };
+    getDb()
+      .prepare(
+        `INSERT INTO script_connections
+           (id, slug, kind, scope, allowed_hosts_json, mcp_server_id, generated_runtime_json)
+         VALUES (?, ?, 'mcp', 'global', '[]', ?, ?)`,
+      )
+      .run(
+        runtimeDescriptor.connectionId,
+        "xmcp",
+        mcpServer.id,
+        JSON.stringify(runtimeDescriptor),
+      );
+
+    const script = insertScript({
+      name: `mcp-keys-${crypto.randomUUID().slice(0, 8)}`,
+      scope: "agent",
+      scopeId: workerId,
+      source:
+        "export default async function run(args, ctx) { return { slugs: Object.keys(ctx.mcp ?? {}) }; }",
+      description: "Lists ctx.mcp slugs",
+      intent: "test fixture",
+      signatureJson: "{}",
+    });
+    const endpoint = createScriptApi({
+      scriptId: script.id,
+      agentId: workerId,
+      authMode: "none",
+    });
+
+    const res = await dispatch(`/api/x/script/${endpoint.id}`, {
+      method: "POST",
+      body: JSON.stringify({}),
+      auth: null,
+    });
+    const body = (await res.json()) as { ok: boolean; result: { slugs: string[] } };
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.result.slugs).toContain("xmcp");
   });
 
   test("oversized body → 413 before execution, even for authMode 'none'", async () => {

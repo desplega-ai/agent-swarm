@@ -4,7 +4,7 @@ import {
   SwarmConfigCredentialBindingStore,
 } from "@/scripts-runtime/credential-broker";
 import type { EgressSecretEntry } from "@/scripts-runtime/executors/types";
-import { registerVolatileSecret } from "@/utils/secret-scrubber";
+import { registerVolatileSecret, scrubSecrets } from "@/utils/secret-scrubber";
 import { getResolvedConfig, getSwarmConfigs } from "./db";
 import { resolveOAuthBindingToken } from "./oauth-credential-bindings";
 import { listRelationalCredentialBindings } from "./script-connections";
@@ -31,7 +31,19 @@ export async function buildScriptCredentialBindings(input: {
     configMap.set(binding.configKey, "");
     if (!binding.oauthProvider) continue;
 
-    const accessToken = await resolveOAuthBindingToken(binding.oauthProvider);
+    let accessToken: string | undefined;
+    try {
+      accessToken = await resolveOAuthBindingToken(binding.oauthProvider);
+    } catch (err) {
+      // A stale/broken provider must not take down unrelated script runs —
+      // skip just this binding (the "" shadow above keeps the placeholder
+      // unresolved instead of falling through to a same-named config value).
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[script-credential-broker] skipping OAuth binding ${binding.configKey}: token refresh for provider ${binding.oauthProvider} failed: ${scrubSecrets(message)}`,
+      );
+      continue;
+    }
     if (!accessToken) continue;
 
     configMap.set(binding.configKey, accessToken);
