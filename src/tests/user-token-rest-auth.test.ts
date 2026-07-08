@@ -6,7 +6,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, createUser, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, createTaskExtended, createUser, getDb, initDb } from "../be/db";
 import { type IdentityActor, mintToken, revokeToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleTasks } from "../http/tasks";
@@ -108,6 +108,35 @@ describe("normal REST API user-bound token auth", () => {
     expect(res.status).toBe(201);
     const body = (await res.json()) as { id: string; requestedByUserId?: string };
     expect(body.requestedByUserId).toBeUndefined();
+  });
+
+  test("global API key caller cannot spoof requestedByUserId via body — falls back to owned task context", async () => {
+    const legitRequester = createUser({ name: "Legit Requester" });
+    const attacker = createUser({ name: "Attacker" });
+    const agent = createAgent({ name: "spoof-test-agent", isLead: false, status: "idle" });
+    const ownedTask = createTaskExtended("owned task for spoof test", {
+      agentId: agent.id,
+      requestedByUserId: legitRequester.id,
+    });
+
+    const res = await fetch(`http://localhost:${port}/api/tasks`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        "Content-Type": "application/json",
+        "x-agent-id": agent.id,
+        "x-source-task-id": ownedTask.id,
+      },
+      body: JSON.stringify({
+        task: "created through global key with spoofed requestedByUserId",
+        requestedByUserId: attacker.id,
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string; requestedByUserId?: string };
+    expect(body.requestedByUserId).toBe(legitRequester.id);
+    expect(body.requestedByUserId).not.toBe(attacker.id);
   });
 
   test("revoked user token is unauthorized for normal API", async () => {

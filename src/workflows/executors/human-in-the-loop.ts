@@ -148,6 +148,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
       workflowRunStepId: meta.stepId,
       timeoutSeconds: config.timeout?.seconds,
       notificationChannels: config.notifications,
+      createdBy: meta.requestedByUserId,
     });
 
     // 3. Dispatch notifications (fire-and-forget — failures must not block the workflow)

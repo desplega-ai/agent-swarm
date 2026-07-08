@@ -4,15 +4,19 @@ import {
   closeDb,
   createAgent,
   createTaskExtended,
+  createUser,
   getLatestActiveTaskInThread,
   initDb,
 } from "../be/db";
+import { type IdentityActor, linkIdentity } from "../be/users";
 import {
   bufferThreadMessage,
   getBufferMessageCount,
   instantFlush,
   isThreadBuffered,
 } from "../slack/thread-buffer";
+
+const SYSTEM_ACTOR: IdentityActor = { kind: "system", id: "test" };
 
 const TEST_DB_PATH = "./test-slack-thread-buffer.sqlite";
 
@@ -124,6 +128,30 @@ describe("Slack thread buffer", () => {
       expect(task!.source).toBe("slack");
       expect(task!.slackChannelId).toBe(channelId);
       expect(task!.slackThreadTs).toBe(threadTs);
+    });
+
+    test("in-body <@U…> mentions are rewritten via the identity primitive — resolved and unknown", async () => {
+      const channelId = "C601";
+      const threadTs = "6001.0001";
+      const linked = createUser({ name: "Luis", email: "luis-buf@example.com" });
+      // Slack user ids are uppercase-alphanumeric only (matches the
+      // `/<@([A-Z0-9]+)>/g` mention regex) — no underscores.
+      linkIdentity(linked.id, "slack", "U1000LINKED", SYSTEM_ACTOR);
+
+      bufferThreadMessage(
+        channelId,
+        threadTs,
+        "cc <@U1000LINKED> and <@U2000UNKNOWN>",
+        "U1",
+        "6001.0010",
+      );
+
+      await instantFlush(`${channelId}:${threadTs}`);
+
+      const task = getLatestActiveTaskInThread(channelId, threadTs);
+      expect(task).not.toBeNull();
+      expect(task!.task).toContain("<@U1000LINKED|Luis>");
+      expect(task!.task).toContain("<@U2000UNKNOWN> (unknown user)");
     });
   });
 

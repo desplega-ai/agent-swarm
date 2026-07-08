@@ -136,6 +136,30 @@ export function findUserByEmail(email: string): User | null {
 }
 
 /**
+ * Look up users by display name — exact match (case-insensitive) first;
+ * falls back to a first-token prefix match (e.g. "Alberto" matches both
+ * "Alberto Maurel" and "Alberto Dubois"). Deterministic, no fuzzy matching:
+ * `resolve-user`'s name lookup treats more than one match as ambiguous
+ * rather than guessing.
+ */
+export function findUsersByName(name: string): User[] {
+  const trimmed = name.trim();
+  if (!trimmed) return [];
+  const db = getDb();
+
+  const exact = db
+    .prepare<UserRow, string>("SELECT * FROM users WHERE LOWER(name) = LOWER(?)")
+    .all(trimmed);
+  if (exact.length > 0) return exact.map(rowToUser);
+
+  const firstToken = trimmed.split(/\s+/)[0] ?? trimmed;
+  const prefixed = db
+    .prepare<UserRow, string>("SELECT * FROM users WHERE LOWER(name) LIKE LOWER(?) || '%'")
+    .all(firstToken);
+  return prefixed.map(rowToUser);
+}
+
+/**
  * Return all `(kind, externalId)` mappings for a user — used by the People
  * page detail view to render identity badges in one request.
  */

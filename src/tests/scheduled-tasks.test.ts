@@ -4,11 +4,13 @@ import {
   closeDb,
   createAgent,
   createScheduledTask,
+  createUser,
   deleteScheduledTask,
   getDb,
   getScheduledTaskById,
   getScheduledTaskByName,
   getScheduledTasks,
+  getTaskById,
   initDb,
   updateScheduledTask,
 } from "../be/db";
@@ -313,6 +315,44 @@ describe("Scheduled Tasks Integration", () => {
       expect(afterRun?.nextRunAt).toBe(futureDate);
       // lastRunAt should be set
       expect(afterRun?.lastRunAt).toBeDefined();
+    });
+
+    test("fired task inherits the schedule's createdBy as requestedByUserId", async () => {
+      const requester = createUser({ name: "Schedule Requester", email: "sched-req@example.com" });
+      const schedule = createScheduledTask({
+        name: "test-manual-run-createdby",
+        cronExpression: "0 9 * * *",
+        taskTemplate: "Task carrying schedule provenance",
+        createdByAgentId: testAgent.id,
+        createdBy: requester.id,
+        enabled: true,
+      });
+
+      await runScheduleNow(schedule.id);
+
+      const createdTask = getDb()
+        .query("SELECT id FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
+        .get(schedule.taskTemplate) as { id: string };
+      const task = getTaskById(createdTask.id);
+      expect(task?.requestedByUserId).toBe(requester.id);
+    });
+
+    test("fired task has no requestedByUserId when the schedule's createdBy is unset (first-ever schedules)", async () => {
+      const schedule = createScheduledTask({
+        name: "test-manual-run-no-createdby",
+        cronExpression: "0 9 * * *",
+        taskTemplate: "Task with no schedule provenance",
+        createdByAgentId: testAgent.id,
+        enabled: true,
+      });
+
+      await runScheduleNow(schedule.id);
+
+      const createdTask = getDb()
+        .query("SELECT id FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
+        .get(schedule.taskTemplate) as { id: string };
+      const task = getTaskById(createdTask.id);
+      expect(task?.requestedByUserId ?? null).toBeNull();
     });
 
     test("should throw error for non-existent schedule", async () => {

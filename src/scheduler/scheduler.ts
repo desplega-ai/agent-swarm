@@ -60,6 +60,7 @@ export function createStandaloneScheduleTask(
     modelTier: schedule.modelTier,
     scheduleId: schedule.id,
     source: "schedule",
+    requestedByUserId: schedule.createdBy,
     contextKey: scheduleContextKey({ scheduleId: schedule.id }),
   });
 }
@@ -142,6 +143,7 @@ export async function dispatchScheduleTarget(
       };
       const runId = await startWorkflowExecution(workflow, triggerData, registry, {
         triggerType: "schedule",
+        requestedByUserId: schedule.createdBy,
       });
       console.log(
         `[Scheduler] Schedule "${schedule.name}" → triggered workflow "${workflow.name}"`,

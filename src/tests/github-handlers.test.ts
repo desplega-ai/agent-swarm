@@ -119,11 +119,11 @@ function makeCommentEvent(senderLogin: string, body: string): CommentEvent {
   };
 }
 
-function makeReviewEvent(senderLogin: string): PullRequestReviewEvent {
+function makeReviewEvent(senderLogin: string, reviewId = 1): PullRequestReviewEvent {
   return {
     action: "submitted",
     review: {
-      id: 1,
+      id: reviewId,
       body: "Looks good",
       state: "approved",
       html_url: "https://github.com/test/repo/pull/99#pullrequestreview-1",
@@ -151,6 +151,13 @@ function getMappedUserTaskCount(userId: string): number {
     )
     .get(userId);
   return row?.n ?? 0;
+}
+
+function getLatestTaskText(): string | null {
+  const row = getDb()
+    .prepare<{ task: string }, []>("SELECT task FROM agent_tasks ORDER BY rowid DESC LIMIT 1")
+    .get();
+  return row?.task ?? null;
 }
 
 // ── Known sender → mapped requestedByUserId, no unmapped writes ──
@@ -215,6 +222,17 @@ describe("known github sender", () => {
     // Mapped sender → no unmapped kv writes.
     expect(getKv(UNMAPPED_NAMESPACE, "reviewer:meta")).toBeNull();
     expect(getKv(UNMAPPED_NAMESPACE, "reviewer:count")).toBeNull();
+  });
+
+  test("review event from mapped user renders the resolved identity pair, never the raw login", async () => {
+    const user = createUser({ name: "Pair Reviewer", email: "pair-reviewer@example.com" });
+    linkIdentity(user.id, "github", "pair-reviewer", SYSTEM_ACTOR);
+
+    const result = await handlePullRequestReview(makeReviewEvent("pair-reviewer", 1001));
+    expect(result.created).toBe(true);
+
+    const text = getLatestTaskText();
+    expect(text).toContain("Pair Reviewer (github:pair-reviewer)");
   });
 });
 
@@ -289,6 +307,14 @@ describe("unknown github sender", () => {
     const meta = getKv(UNMAPPED_NAMESPACE, "trunc-ghost:meta");
     const metaValue = meta?.value as { sampleContext: string };
     expect(metaValue.sampleContext.length).toBeLessThanOrEqual(100);
+  });
+
+  test("review event from unknown user renders the UNKNOWN sentinel, never a bare login", async () => {
+    const result = await handlePullRequestReview(makeReviewEvent("sentinel-ghost", 1002));
+    expect(result.created).toBe(true);
+
+    const text = getLatestTaskText();
+    expect(text).toContain("github:sentinel-ghost (unknown user)");
   });
 });
 

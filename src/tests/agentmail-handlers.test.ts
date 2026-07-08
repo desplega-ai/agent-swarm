@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import { handleMessageReceived } from "../agentmail/handlers";
 import type { AgentMailWebhookPayload } from "../agentmail/types";
@@ -69,7 +69,19 @@ function makePayload(opts: {
   };
 }
 
-beforeAll(() => {
+// Per-test (not per-file) DB reset: bun's default `retry` (bunfig.toml) retries
+// a failing test in place, re-invoking beforeEach/afterEach around each
+// attempt. With a file-level beforeAll/afterAll instead, a transient failure
+// on attempt 1 (of any cause) leaves its side effects (the just-created user)
+// in place for the retry, which then finds that user already resolved and
+// silently no-ops the create — turning one flaky attempt into a deterministic
+// "before+1 != after" mismatch on every subsequent attempt. Resetting to a
+// fresh DB (and re-registering the lead) before every test/retry makes each
+// attempt idempotent regardless of how many times it's retried, and also
+// re-runs initDb's global resolver registration right before this file's own
+// resolveTemplate() calls, minimizing the window for another concurrently
+// executing test file's own initDb() to have repointed it in between.
+beforeEach(async () => {
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       unlinkSync(`${TEST_DB_PATH}${suffix}`);
@@ -79,9 +91,17 @@ beforeAll(() => {
   // Ensure a lead exists so handler's findLeadAgent() returns truthy and a
   // task gets created on the "no inbox mapping" path.
   createAgent({ name: "LeadAgent", isLead: true, status: "idle" });
+  // Re-register agentmail templates — prompt-template-resolver.test.ts and
+  // prompt-template-session.test.ts call clearTemplateDefinitions() and never
+  // restore the shared (process-wide) registry, so if either runs first in
+  // the same bun worker, resolveTemplate("agentmail.email.*", ...) silently
+  // returns { text: "", skipped: true } here instead of throwing — producing
+  // a task with an empty body rather than a visible failure. Same defensive
+  // pattern as heartbeat-checklist.test.ts's beforeEach.
+  await import(`../agentmail/templates?t=${Date.now()}`);
 });
 
-afterAll(() => {
+afterEach(() => {
   closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
@@ -111,6 +131,10 @@ describe("handleMessageReceived — identity auto-link via findOrCreateUserByEma
     const task = getTaskById(result.taskId!);
     expect(task).not.toBeNull();
     expect(task!.requestedByUserId).toBe(user!.id);
+    // The resolved canonical name renders in the task text — never the raw
+    // From header (Alice's display name + email as typed by the sender).
+    expect(task!.task).toContain("Alice Newcomer (email:alice.newcomer@example.com)");
+    expect(task!.task).not.toContain("Alice Newcomer <alice.newcomer@example.com>");
   });
 
   test("KNOWN sender (existing users.email) → no duplicate row, auto_merge event, task requestedByUserId populated", async () => {
@@ -162,5 +186,10 @@ describe("handleMessageReceived — identity auto-link via findOrCreateUserByEma
 
     const task = getTaskById(result.taskId!);
     expect(task!.requestedByUserId).toBeFalsy();
+    // No display name — not even the raw provider label — is ever rendered
+    // for an unresolved sender. The task text carries only the non-name
+    // sentinel shape, never the raw From header.
+    expect(task!.task).toContain("email:unknown (unknown user)");
+    expect(task!.task).not.toContain("Unknown Sender (no address)");
   });
 });

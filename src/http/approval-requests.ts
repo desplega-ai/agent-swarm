@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { resolveTaskAuditUserId } from "../be/audit-user";
 import {
   createApprovalRequest,
   createTaskExtended,
@@ -9,6 +10,7 @@ import {
   resolveApprovalRequest,
 } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { workflowEventBus } from "../workflows/event-bus";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -248,6 +250,15 @@ export async function handleApprovalRequests(
     if (!parsed) return true;
 
     const id = crypto.randomUUID();
+    // Prefer a trusted authenticated user (never client-controlled); else fall
+    // back to the ownership-validated sourceTaskId the request body carries.
+    const auth = getRequestAuth(req);
+    const rawCallerAgentId = req.headers["x-agent-id"];
+    const callerAgentId = Array.isArray(rawCallerAgentId) ? rawCallerAgentId[0] : rawCallerAgentId;
+    const createdBy =
+      auth?.kind === "user"
+        ? auth.userId
+        : (resolveTaskAuditUserId(parsed.body.sourceTaskId, callerAgentId) ?? undefined);
     const request = createApprovalRequest({
       id,
       title: parsed.body.title,
@@ -258,6 +269,7 @@ export async function handleApprovalRequests(
       sourceTaskId: parsed.body.sourceTaskId,
       timeoutSeconds: parsed.body.timeoutSeconds,
       notificationChannels: parsed.body.notifications,
+      createdBy,
     });
 
     res.writeHead(201, { "Content-Type": "application/json" });
