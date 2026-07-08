@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import { handleMessageReceived } from "../agentmail/handlers";
 import type { AgentMailWebhookPayload } from "../agentmail/types";
@@ -69,7 +69,19 @@ function makePayload(opts: {
   };
 }
 
-beforeAll(() => {
+// Per-test (not per-file) DB reset: bun's default `retry` (bunfig.toml) retries
+// a failing test in place, re-invoking beforeEach/afterEach around each
+// attempt. With a file-level beforeAll/afterAll instead, a transient failure
+// on attempt 1 (of any cause) leaves its side effects (the just-created user)
+// in place for the retry, which then finds that user already resolved and
+// silently no-ops the create — turning one flaky attempt into a deterministic
+// "before+1 != after" mismatch on every subsequent attempt. Resetting to a
+// fresh DB (and re-registering the lead) before every test/retry makes each
+// attempt idempotent regardless of how many times it's retried, and also
+// re-runs initDb's global resolver registration right before this file's own
+// resolveTemplate() calls, minimizing the window for another concurrently
+// executing test file's own initDb() to have repointed it in between.
+beforeEach(() => {
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       unlinkSync(`${TEST_DB_PATH}${suffix}`);
@@ -81,7 +93,7 @@ beforeAll(() => {
   createAgent({ name: "LeadAgent", isLead: true, status: "idle" });
 });
 
-afterAll(() => {
+afterEach(() => {
   closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
