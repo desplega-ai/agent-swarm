@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
+import { resolveHttpAuditUserId } from "../be/audit-user";
 import {
   backfillSupersedeTaskResumeTaskId,
   cancelTask,
@@ -14,7 +15,6 @@ import {
   getTaskAttachments,
   getTaskById,
   getTasksCount,
-  getUserById,
   pauseTask,
   resumeTask,
   supersedeTask,
@@ -37,7 +37,6 @@ import {
   ResumeReasonSchema,
   splitLegacyModelAlias,
 } from "../types";
-import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -360,18 +359,15 @@ export async function handleTasks(
     const parsed = await createTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    // Tolerant `requestedByUserId`: prevent the deleted-user race from
-    // becoming a 500 — if the referenced user doesn't exist, log and drop
-    // the field rather than letting the FK fail at INSERT.
-    const auth = getRequestAuth(req);
-    let requestedByUserId =
-      auth?.kind === "user" ? auth.userId : parsed.body.requestedByUserId || undefined;
-    if (requestedByUserId && !getUserById(requestedByUserId)) {
-      console.warn(
-        `[tasks] requestedByUserId ${requestedByUserId} does not exist — coercing to NULL`,
-      );
-      requestedByUserId = undefined;
-    }
+    // Attribution must not be spoofable by a client-supplied body field: a
+    // non-user-authenticated caller (agent/API key) could otherwise attribute
+    // a task to any existing userId (previously existence-checked only).
+    // Mirror the pattern already used at every other audited write site
+    // (schedules, workflows, approvals, pages, stats) — trust the
+    // authenticated request user directly, otherwise derive the actor from
+    // the caller's own task context (ownership-gated `X-Source-Task-Id` /
+    // ambient current task), never the request body.
+    const requestedByUserId = resolveHttpAuditUserId(req, myAgentId) ?? undefined;
 
     // Default agent for ingress-created tasks: when no explicit `agentId` is
     // provided, route to the lead so the task has an owner immediately
