@@ -55,12 +55,18 @@ END;
 `;
 
 type GrantRow = {
+  roleId: string;
   grantsAll: number;
   verb: string | null;
 };
 
 type RoleIdRow = {
   id: string;
+};
+
+type RoleIdentityRow = {
+  id: string;
+  name: string;
 };
 
 type UserRoleRow = {
@@ -125,10 +131,30 @@ function validatedBuiltinVerbSets(): Map<string, Set<PermissionVerb>> {
   return byRoleId;
 }
 
+const loggedInvalidGrantVerbs = new Set<string>();
+
+function parseDatabaseGrantVerb(roleId: string, verb: string): PermissionVerb | null {
+  const parsed = PermissionVerbSchema.safeParse(verb);
+  if (parsed.success) {
+    return parsed.data;
+  }
+
+  const logKey = `${roleId}:${verb}`;
+  if (!loggedInvalidGrantVerbs.has(logKey)) {
+    loggedInvalidGrantVerbs.add(logKey);
+    console.error(
+      `[rbac] Ignoring invalid role_permissions verb "${verb}" for roleId="${roleId}". ` +
+        "Invalid RBAC verbs grant nothing; remove or repair the row.",
+    );
+  }
+
+  return null;
+}
+
 export function getUserGrant(userId: string): EffectiveGrant {
   const rows = getDb()
     .prepare<GrantRow, string>(
-      `SELECT r.grantsAll, rp.verb
+      `SELECT r.id AS roleId, r.grantsAll, rp.verb
        FROM principal_roles pr
        JOIN roles r ON r.id = pr.roleId
        LEFT JOIN role_permissions rp ON rp.roleId = r.id
@@ -147,7 +173,10 @@ export function getUserGrant(userId: string): EffectiveGrant {
       return { grantsAll: true, verbs: new Set() };
     }
     if (row.verb) {
-      verbs.add(validateBuiltinVerb("database grant", row.verb));
+      const verb = parseDatabaseGrantVerb(row.roleId, row.verb);
+      if (verb) {
+        verbs.add(verb);
+      }
     }
   }
 
@@ -208,6 +237,12 @@ export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): void {
          OR grantsAll <> ?
        )`,
   );
+  const selectRoleById = db.prepare<RoleIdentityRow, string>(
+    "SELECT id, name FROM roles WHERE id = ?",
+  );
+  const selectRoleByName = db.prepare<RoleIdentityRow, string>(
+    "SELECT id, name FROM roles WHERE name = ?",
+  );
   const selectRolePermissions = db.prepare<PermissionRow, string>(
     "SELECT verb FROM role_permissions WHERE roleId = ?",
   );
@@ -242,7 +277,30 @@ export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): void {
         );
         stats.rolesUpdated += updateResult.changes;
       }
+    }
 
+    for (const role of BUILTIN_ROLES) {
+      const row = selectRoleById.get(role.id);
+      if (row) {
+        continue;
+      }
+
+      const colliding = selectRoleByName.get(role.name);
+      if (colliding) {
+        throw new Error(
+          `RBAC built-in role "${role.name}" (${role.id}) is missing because role ` +
+            `"${colliding.name}" (${colliding.id}) already uses that name. ` +
+            "Rename or remove the conflicting role, then rerun `rbac bootstrap`.",
+        );
+      }
+
+      throw new Error(
+        `RBAC built-in role "${role.name}" (${role.id}) is missing after seed sync. ` +
+          "Rerun `rbac bootstrap`; if it still fails, inspect the roles table.",
+      );
+    }
+
+    for (const role of BUILTIN_ROLES) {
       const desiredVerbs = desiredVerbsByRoleId.get(role.id) ?? new Set<PermissionVerb>();
       const existingRows = selectRolePermissions.all(role.id);
       for (const row of existingRows) {

@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, createUser, getDb, initDb } from "../be/db";
 import {
@@ -121,6 +121,44 @@ describe("getUserGrant", () => {
     expect(grant.grantsAll).toBe(false);
     expect(grant.verbs.size).toBe(0);
   });
+
+  test("skips invalid database grant verbs fail-closed without throwing", () => {
+    const user = createUser({ name: "Malformed Grant User" });
+    detachRole(user.id, "admin");
+    const db = getDb();
+    db.transaction(() => {
+      db.prepare(
+        "INSERT INTO roles (id, name, description, isBuiltin, grantsAll) VALUES (?, ?, ?, 0, 0)",
+      ).run("custom-role-malformed-grant", "malformed-grant", "Test malformed grant role");
+      db.prepare("INSERT INTO role_permissions (roleId, verb) VALUES (?, ?)").run(
+        "custom-role-malformed-grant",
+        "task.read.own",
+      );
+      db.prepare("INSERT INTO role_permissions (roleId, verb) VALUES (?, ?)").run(
+        "custom-role-malformed-grant",
+        "invalid.permission",
+      );
+      db.prepare(
+        `INSERT INTO principal_roles (principalType, principalId, roleId)
+         VALUES ('user', ?, ?)`,
+      ).run(user.id, "custom-role-malformed-grant");
+    })();
+    const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const grant = getUserGrant(user.id);
+
+      expect(grant.grantsAll).toBe(false);
+      expect(sortedVerbs(grant.verbs)).toEqual(["task.read.own"]);
+      expect(errSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Ignoring invalid role_permissions verb "invalid.permission" for roleId="custom-role-malformed-grant"',
+        ),
+      );
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
 });
 
 describe("role attachment helpers", () => {
@@ -161,6 +199,20 @@ describe("ensureRbacSeedsSynced", () => {
       grantsAll: 0,
     });
     expect(roleVerbs(REQUESTER_ROLE_ID)).toEqual(REQUESTER_VERBS);
+  });
+
+  test("throws when a custom role owns a missing built-in role name", () => {
+    const db = getDb();
+    db.transaction(() => {
+      db.prepare("DELETE FROM roles WHERE id = ?").run(DEFAULT_ROLE_ID);
+      db.prepare(
+        "INSERT INTO roles (id, name, description, isBuiltin, grantsAll) VALUES (?, ?, ?, 0, 0)",
+      ).run("custom-role-admin-collision", "admin", "Conflicting admin role");
+    })();
+
+    expect(() => ensureRbacSeedsSynced({ quiet: true })).toThrow(
+      /RBAC built-in role "admin" \(rbac-role-admin\) is missing because role "admin" \(custom-role-admin-collision\) already uses that name\. Rename or remove the conflicting role, then rerun `rbac bootstrap`\./,
+    );
   });
 
   test("repairs a tampered requester verb set", () => {
