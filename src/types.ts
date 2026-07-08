@@ -1430,11 +1430,58 @@ export interface PatchResult {
 
 // --- Trigger Configuration ---
 
+// Presets only: Slack-style separate timestamp headers, asymmetric signatures,
+// and generic signature-template DSLs are intentionally out of scope for v1.
+export const WebhookVerificationSchema = z.discriminatedUnion("format", [
+  z.object({
+    format: z.literal("hmac-sha256"),
+    header: z
+      .string()
+      .default("X-Hub-Signature-256")
+      .describe(
+        "Header containing HMAC-SHA256 over the raw request body. Accepts sha256=<hex> or bare hex.",
+      ),
+  }),
+  z.object({
+    format: z.literal("timestamped-hmac-sha256"),
+    header: z
+      .string()
+      .min(1)
+      .describe(
+        "Header containing comma-separated timestamp/signature pairs such as t=<timestamp>,v1=<hex>.",
+      ),
+    timestampKey: z.string().default("t").describe("Timestamp field key in the signature header"),
+    signatureKey: z
+      .string()
+      .default("v1")
+      .describe("Signature field key in the signature header; multiple entries are allowed"),
+    toleranceSeconds: z
+      .number()
+      .int()
+      .positive()
+      .default(300)
+      .describe("Maximum allowed clock skew, in seconds, for replay protection"),
+  }),
+  z.object({
+    format: z.literal("token-equality"),
+    header: z.string().min(1).describe("Header containing the shared token to compare"),
+  }),
+]);
+export type WebhookVerification = z.infer<typeof WebhookVerificationSchema>;
+
 export const TriggerConfigSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("webhook"),
     hmacSecret: z.string().optional(),
-    hmacHeader: z.string().default("X-Hub-Signature-256"),
+    hmacHeader: z
+      .string()
+      .default("X-Hub-Signature-256")
+      .describe(
+        "Legacy HMAC header for webhook verification. Prefer verification.header for new workflows.",
+      ),
+    verification: WebhookVerificationSchema.optional().describe(
+      "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning.",
+    ),
   }),
   z.object({
     type: z.literal("schedule"),

@@ -5,6 +5,8 @@ import { startWorkflowExecution } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
 import { resolveInputValue } from "./input";
 
+type WebhookTriggerConfig = Extract<TriggerConfig, { type: "webhook" }>;
+
 /** Header name used to look up an HMAC signature when the trigger configures none. */
 const DEFAULT_HMAC_HEADER = "X-Hub-Signature-256";
 
@@ -56,6 +58,57 @@ function resolveHmacSecret(raw: string): string {
   return raw;
 }
 
+export function verifyWebhookRequest(
+  trigger: WebhookTriggerConfig,
+  rawBody: string,
+  headers: HeaderBag,
+): void {
+  if (!trigger.hmacSecret) return;
+
+  const secret = resolveHmacSecret(trigger.hmacSecret);
+  const verification = trigger.verification;
+
+  if (!verification) {
+    const hmacHeader = trigger.hmacHeader || DEFAULT_HMAC_HEADER;
+    const signature = resolveSignature(headers, hmacHeader);
+    if (!signature) {
+      throw new WebhookError("Missing signature", 401);
+    }
+
+    if (!verifyHmacSignature(secret, rawBody, signature)) {
+      throw new WebhookError("Invalid signature", 401);
+    }
+    return;
+  }
+
+  const header = verification.header || DEFAULT_HMAC_HEADER;
+  const signature = getHeader(headers, header);
+  if (!signature) {
+    throw new WebhookError("Missing signature", 401);
+  }
+
+  let isValid = false;
+  switch (verification.format) {
+    case "hmac-sha256":
+      isValid = verifyHmacSignature(secret, rawBody, signature);
+      break;
+    case "timestamped-hmac-sha256":
+      isValid = verifyTimestampedHmacSignature(secret, rawBody, signature, {
+        timestampKey: verification.timestampKey,
+        signatureKey: verification.signatureKey,
+        toleranceSeconds: verification.toleranceSeconds,
+      });
+      break;
+    case "token-equality":
+      isValid = verifyTokenEquality(secret, signature);
+      break;
+  }
+
+  if (!isValid) {
+    throw new WebhookError("Invalid signature", 401);
+  }
+}
+
 /**
  * Handle an incoming webhook trigger for a workflow.
  *
@@ -86,26 +139,15 @@ export async function handleWebhookTrigger(
   // Find webhook trigger in triggers[]
   const webhookTrigger = workflow.triggers.find((t: TriggerConfig) => t.type === "webhook");
 
-  // If the workflow has a webhook trigger with an hmacSecret, verify the signature
-  // against the RAW body bytes — re-serializing would change whitespace / key order
-  // and break the HMAC.
+  // If the workflow has a webhook trigger with an hmacSecret, verify against the
+  // RAW body bytes — re-serializing would change whitespace / key order and break
+  // HMAC formats.
   if (webhookTrigger && webhookTrigger.type === "webhook" && webhookTrigger.hmacSecret) {
-    const hmacHeader = webhookTrigger.hmacHeader || DEFAULT_HMAC_HEADER;
-    const signature = resolveSignature(headers, hmacHeader);
-    if (!signature) {
-      throw new WebhookError("Missing signature", 401);
-    }
-
-    const secret = resolveHmacSecret(webhookTrigger.hmacSecret);
-    const isValid = verifyHmacSignature(
-      secret,
+    verifyWebhookRequest(
+      webhookTrigger,
       typeof payload === "string" ? payload : JSON.stringify(payload),
-      signature,
+      headers,
     );
-
-    if (!isValid) {
-      throw new WebhookError("Invalid signature", 401);
-    }
   }
 
   // Parse the raw body so downstream nodes can interpolate deep paths
@@ -189,6 +231,78 @@ export function verifyHmacSignature(
       Buffer.from(normalizedProvided, "hex"),
       Buffer.from(expectedHex, "hex"),
     );
+  } catch {
+    return false;
+  }
+}
+
+export function verifyTimestampedHmacSignature(
+  secret: string,
+  body: string,
+  headerValue: string,
+  opts: {
+    timestampKey?: string;
+    signatureKey?: string;
+    toleranceSeconds?: number;
+  } = {},
+  nowMs = Date.now(),
+): boolean {
+  const timestampKey = opts.timestampKey ?? "t";
+  const signatureKey = opts.signatureKey ?? "v1";
+  const toleranceSeconds = opts.toleranceSeconds ?? 300;
+  const parsed = parseSignatureHeader(headerValue);
+  const timestampValue = parsed.get(timestampKey)?.[0];
+  const signatures = parsed.get(signatureKey) ?? [];
+
+  if (!timestampValue || signatures.length === 0 || !/^\d+$/.test(timestampValue)) {
+    return false;
+  }
+
+  const timestampSeconds = Number(timestampValue);
+  if (!Number.isSafeInteger(timestampSeconds)) {
+    return false;
+  }
+
+  const ageSeconds = Math.abs(nowMs / 1000 - timestampSeconds);
+  if (ageSeconds > toleranceSeconds) {
+    return false;
+  }
+
+  const hmac = crypto.createHmac("sha256", secret);
+  hmac.update(`${timestampValue}.${body}`);
+  const expectedHex = hmac.digest("hex");
+  const expected = Buffer.from(expectedHex, "hex");
+
+  return signatures.some((signature) => timingSafeEqualHex(signature, expected));
+}
+
+export function verifyTokenEquality(secret: string, providedToken: string): boolean {
+  try {
+    return crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(secret));
+  } catch {
+    return false;
+  }
+}
+
+function parseSignatureHeader(headerValue: string): Map<string, string[]> {
+  const parsed = new Map<string, string[]>();
+  for (const part of headerValue.split(",")) {
+    const trimmed = part.trim();
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex <= 0) continue;
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const value = trimmed.slice(separatorIndex + 1).trim();
+    const values = parsed.get(key) ?? [];
+    values.push(value);
+    parsed.set(key, values);
+  }
+  return parsed;
+}
+
+function timingSafeEqualHex(providedHex: string, expected: Buffer): boolean {
+  try {
+    return crypto.timingSafeEqual(Buffer.from(providedHex, "hex"), expected);
   } catch {
     return false;
   }
