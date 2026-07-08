@@ -11,6 +11,7 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import type { Workflow } from "../types";
+import { TriggerConfigSchema } from "../types";
 import { startWorkflowExecution } from "../workflows/engine";
 import { BaseExecutor, type ExecutorResult } from "../workflows/executors/base";
 import { ExecutorRegistry } from "../workflows/executors/registry";
@@ -551,6 +552,33 @@ describe("handleWebhookTrigger — verification formats", () => {
       expect((err as WebhookError).statusCode).toBe(401);
     }
   });
+
+  test("verification configured without hmacSecret fails closed instead of accepting the request", async () => {
+    // Bypasses the create/update Zod schema (which now also rejects this shape) to
+    // exercise the runtime guard directly — e.g. for data written before this fix,
+    // or any future write path that skips schema validation.
+    const workflow = makeWorkflow({
+      triggers: [
+        {
+          type: "webhook",
+          verification: { format: "token-equality", header: "X-Gitlab-Token" },
+        },
+      ],
+    });
+
+    try {
+      await handleWebhookTrigger(
+        workflow.id,
+        '{"event":"push"}',
+        { "x-gitlab-token": "anything" },
+        registry,
+      );
+      expect(true).toBe(false);
+    } catch (err) {
+      expect(err).toBeInstanceOf(WebhookError);
+      expect((err as WebhookError).statusCode).toBe(500);
+    }
+  });
 });
 
 describe("handleWebhookTrigger — hmacSecret references", () => {
@@ -740,5 +768,37 @@ describe("cooldown", () => {
     const runId2 = await startWorkflowExecution(workflow, {}, registry);
     const run2 = getWorkflowRun(runId2);
     expect(run2!.status).toBe("completed");
+  });
+});
+
+// ─── TriggerConfigSchema validation ──────────────────────────
+
+describe("TriggerConfigSchema", () => {
+  test("rejects verification configured without hmacSecret", () => {
+    const result = TriggerConfigSchema.safeParse({
+      type: "webhook",
+      verification: { format: "token-equality", header: "X-Gitlab-Token" },
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.includes("hmacSecret"))).toBe(true);
+    }
+  });
+
+  test("accepts verification configured with hmacSecret", () => {
+    const result = TriggerConfigSchema.safeParse({
+      type: "webhook",
+      hmacSecret: "gitlab-token",
+      verification: { format: "token-equality", header: "X-Gitlab-Token" },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts a webhook trigger with neither hmacSecret nor verification (intentionally unauthenticated)", () => {
+    const result = TriggerConfigSchema.safeParse({ type: "webhook" });
+
+    expect(result.success).toBe(true);
   });
 });

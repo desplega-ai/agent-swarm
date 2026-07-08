@@ -63,7 +63,17 @@ export function verifyWebhookRequest(
   rawBody: string,
   headers: HeaderBag,
 ): void {
-  if (!trigger.hmacSecret) return;
+  if (!trigger.hmacSecret) {
+    // `verification` without a secret can never actually check anything — fail closed
+    // instead of silently accepting unauthenticated requests on a trigger that looks protected.
+    if (trigger.verification) {
+      throw new WebhookError(
+        "Webhook trigger has `verification` configured but no `hmacSecret`; refusing to accept unverified requests",
+        500,
+      );
+    }
+    return;
+  }
 
   const secret = resolveHmacSecret(trigger.hmacSecret);
   const verification = trigger.verification;
@@ -139,10 +149,16 @@ export async function handleWebhookTrigger(
   // Find webhook trigger in triggers[]
   const webhookTrigger = workflow.triggers.find((t: TriggerConfig) => t.type === "webhook");
 
-  // If the workflow has a webhook trigger with an hmacSecret, verify against the
-  // RAW body bytes — re-serializing would change whitespace / key order and break
-  // HMAC formats.
-  if (webhookTrigger && webhookTrigger.type === "webhook" && webhookTrigger.hmacSecret) {
+  // If the workflow has a webhook trigger with an hmacSecret or a verification format
+  // configured, verify against the RAW body bytes — re-serializing would change
+  // whitespace / key order and break HMAC formats. Also run when only `verification`
+  // is set (no `hmacSecret`) so that misconfiguration fails closed instead of being
+  // silently skipped.
+  if (
+    webhookTrigger &&
+    webhookTrigger.type === "webhook" &&
+    (webhookTrigger.hmacSecret || webhookTrigger.verification)
+  ) {
     verifyWebhookRequest(
       webhookTrigger,
       typeof payload === "string" ? payload : JSON.stringify(payload),

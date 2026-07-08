@@ -1469,25 +1469,35 @@ export const WebhookVerificationSchema = z.discriminatedUnion("format", [
 ]);
 export type WebhookVerification = z.infer<typeof WebhookVerificationSchema>;
 
-export const TriggerConfigSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("webhook"),
-    hmacSecret: z.string().optional(),
-    hmacHeader: z
-      .string()
-      .default("X-Hub-Signature-256")
-      .describe(
-        "Legacy HMAC header for webhook verification. Prefer verification.header for new workflows.",
+export const TriggerConfigSchema = z
+  .discriminatedUnion("type", [
+    z.object({
+      type: z.literal("webhook"),
+      hmacSecret: z.string().optional(),
+      hmacHeader: z
+        .string()
+        .default("X-Hub-Signature-256")
+        .describe(
+          "Legacy HMAC header for webhook verification. Prefer verification.header for new workflows.",
+        ),
+      verification: WebhookVerificationSchema.optional().describe(
+        "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning.",
       ),
-    verification: WebhookVerificationSchema.optional().describe(
-      "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning.",
-    ),
-  }),
-  z.object({
-    type: z.literal("schedule"),
-    scheduleId: z.string().uuid(),
-  }),
-]);
+    }),
+    z.object({
+      type: z.literal("schedule"),
+      scheduleId: z.string().uuid(),
+    }),
+  ])
+  .superRefine((trigger, ctx) => {
+    if (trigger.type === "webhook" && trigger.verification && !trigger.hmacSecret) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "hmacSecret is required when verification is configured",
+        path: ["hmacSecret"],
+      });
+    }
+  });
 export type TriggerConfig = z.infer<typeof TriggerConfigSchema>;
 
 // --- Cooldown Configuration ---
