@@ -973,8 +973,31 @@ export async function refreshScriptConnection(
     .get(id);
   if (!row) return null;
   const connection = connectionFromRow(row);
+
+  // MCP refresh = re-run tool discovery (servers add/remove tools over time).
+  // Route through the upsert path so discovery scoping, versioning, and
+  // generation-error handling stay identical to registration.
+  if (connection.kind === "mcp") {
+    if (!connection.mcpServerId) {
+      throw new Error("MCP connection has no mcpServerId to refresh from.");
+    }
+    return upsertScriptConnection({
+      id: connection.id,
+      slug: connection.slug,
+      displayName: connection.displayName,
+      kind: "mcp",
+      scope: connection.scope,
+      scopeId: connection.scopeId,
+      allowedHosts: connection.allowedHosts,
+      credentialBindingId: connection.credentialBindingId,
+      mcpServerId: connection.mcpServerId,
+      enabled: connection.enabled,
+      userId,
+    });
+  }
+
   if (connection.kind !== "openapi") {
-    throw new Error("Only OpenAPI script connections can be refreshed.");
+    throw new Error("Only OpenAPI and MCP script connections can be refreshed.");
   }
   if (connection.openapiSpecSourceKind !== "url" || !connection.openapiSpecSource) {
     throw new Error("Only OpenAPI script connections registered by URL can be refreshed.");

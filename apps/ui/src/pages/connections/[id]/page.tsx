@@ -95,7 +95,11 @@ export default function ConnectionDetailPage() {
     );
   }
 
-  const canRefresh = connection.kind === "openapi" || connection.kind === "mcp";
+  // MCP refresh re-runs tool discovery; OpenAPI refresh re-fetches the spec,
+  // so it only exists for URL-sourced specs (inline JSON has nothing to fetch).
+  const canRefresh =
+    connection.kind === "mcp" ||
+    (connection.kind === "openapi" && connection.openapiSpecSourceKind === "url");
   const target = connection.baseUrl ?? connection.mcpServerId ?? "-";
   const specUrl =
     connection.openapiSpecSourceKind === "url" ? (connection.openapiSpecSource ?? "") : "";

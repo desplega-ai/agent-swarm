@@ -6,6 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, createMcpServer, getDb, initDb, upsertSwarmConfig } from "../be/db";
 import {
   getScriptMcpConnectionDescriptors,
+  refreshScriptConnection,
   setScriptConnectionEnabled,
   upsertScriptConnection,
 } from "../be/script-connections";
@@ -68,6 +69,7 @@ function meta(agentId: string) {
 
 function startFakeMcpServer(opts: { failList?: boolean } = {}) {
   const requests: CapturedMcpRequest[] = [];
+  const extraTools: Array<{ name: string; description: string; inputSchema: unknown }> = [];
   const server = Bun.serve({
     port: 0,
     async fetch(req) {
@@ -118,6 +120,7 @@ function startFakeMcpServer(opts: { failList?: boolean } = {}) {
                   properties: { message: { type: "string" } },
                 },
               },
+              ...extraTools,
             ],
           },
         });
@@ -145,6 +148,13 @@ function startFakeMcpServer(opts: { failList?: boolean } = {}) {
   return {
     requests,
     url: `http://127.0.0.1:${server.port}/mcp`,
+    addExtraTool(name: string, description: string) {
+      extraTools.push({
+        name,
+        description,
+        inputSchema: { type: "object", properties: {} },
+      });
+    },
     stop() {
       server.stop(true);
     },
@@ -477,6 +487,36 @@ describe("script MCP connections", () => {
       );
       expect(allowed.status).toBe(200);
       expect(((await allowed.json()) as { ok: boolean }).ok).toBe(true);
+    } finally {
+      fake.stop();
+    }
+  });
+
+  test("refresh re-runs MCP tool discovery and picks up new tools", async () => {
+    const fake = startFakeMcpServer();
+    try {
+      const lead = createAgent({ name: "mcp-refresh-lead", isLead: true, status: "idle" });
+      const mcpServer = seedExternalMcpServer(fake.url);
+      const connection = await upsertScriptConnection({
+        slug: "refreshable",
+        displayName: "Refreshable MCP",
+        kind: "mcp",
+        mcpServerId: mcpServer.id,
+        agentId: lead.id,
+      });
+      const before = getScriptMcpConnectionDescriptors({ agentId: lead.id }).find(
+        (candidate) => candidate.slug === "refreshable",
+      );
+      expect(before?.tools.map((tool) => tool.name)).toEqual(["echo-tool"]);
+
+      fake.addExtraTool("new-tool", "Added after registration");
+      const refreshed = await refreshScriptConnection(connection.id);
+
+      expect(refreshed?.generationError).toBeNull();
+      const after = getScriptMcpConnectionDescriptors({ agentId: lead.id }).find(
+        (candidate) => candidate.slug === "refreshable",
+      );
+      expect(after?.tools.map((tool) => tool.name)).toEqual(["echo-tool", "new-tool"]);
     } finally {
       fake.stop();
     }

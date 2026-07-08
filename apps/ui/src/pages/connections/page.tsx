@@ -2144,7 +2144,9 @@ export default function ConnectionsPage() {
         headerName: "Refresh",
         width: 105,
         cellRenderer: (params: ICellRendererParams<ScriptConnection>) => {
-          const canRefresh = params.data?.kind === "openapi" || params.data?.kind === "mcp";
+          const canRefresh =
+            params.data?.kind === "mcp" ||
+            (params.data?.kind === "openapi" && params.data?.openapiSpecSourceKind === "url");
           return params.data && canRefresh ? (
             <Button
               size="xs"
