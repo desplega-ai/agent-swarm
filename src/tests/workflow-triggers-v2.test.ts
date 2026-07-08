@@ -194,8 +194,13 @@ describe("verifyTokenEquality", () => {
     expect(verifyTokenEquality("shared-token", "shared-token")).toBe(true);
   });
 
-  test("non-matching token fails", () => {
-    expect(verifyTokenEquality("shared-token", "other-token")).toBe(false);
+  test("same-length non-matching token fails", () => {
+    expect(verifyTokenEquality("shared-token", "shared-tokem")).toBe(false);
+  });
+
+  test("wrong-length non-matching token fails without throwing", () => {
+    expect(() => verifyTokenEquality("shared-token", "short")).not.toThrow();
+    expect(verifyTokenEquality("shared-token", "short")).toBe(false);
   });
 });
 

@@ -277,11 +277,9 @@ export function verifyTimestampedHmacSignature(
 }
 
 export function verifyTokenEquality(secret: string, providedToken: string): boolean {
-  try {
-    return crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(secret));
-  } catch {
-    return false;
-  }
+  const secretDigest = crypto.createHash("sha256").update(secret).digest();
+  const providedDigest = crypto.createHash("sha256").update(providedToken).digest();
+  return crypto.timingSafeEqual(providedDigest, secretDigest);
 }
 
 function parseSignatureHeader(headerValue: string): Map<string, string[]> {
