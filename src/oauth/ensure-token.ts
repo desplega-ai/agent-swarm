@@ -130,6 +130,26 @@ export async function ensureToken(provider: string, bufferMs?: number): Promise<
 }
 
 /**
+ * Buffer large enough that any stored expiry counts as "expiring soon",
+ * turning {@link ensureTokenOrThrow} into an unconditional refresh.
+ */
+const FORCE_REFRESH_BUFFER_MS = 1000 * 60 * 60 * 24 * 365 * 100; // ~100 years
+
+/**
+ * Force a refresh of the stored token regardless of remaining lifetime,
+ * going through the exact same in-process queue + DB refresh-lock path as
+ * {@link ensureTokenOrThrow}. Used by the manual refresh endpoint and the
+ * background refresh sweep's keep-alive path.
+ *
+ * Like {@link ensureTokenOrThrow}, stays silent (no throw) when the provider
+ * has no app config or no stored refresh token — callers that need those to
+ * be errors must pre-check.
+ */
+export async function forceRefreshTokenOrThrow(provider: string): Promise<void> {
+  await ensureTokenOrThrow(provider, FORCE_REFRESH_BUFFER_MS);
+}
+
+/**
  * Strict variant of {@link ensureToken}: throws on refresh failure of a
  * configured provider so callers (keepalive, alerting) can react.
  *

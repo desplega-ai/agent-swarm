@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "@/be/audit-user";
+import { normalizeDate } from "@/be/date-utils";
 import { getAgentById, getDb } from "@/be/db";
 import {
   deleteOAuthTokens,
@@ -25,6 +26,7 @@ import {
   upsertCredentialBinding,
   upsertScriptConnection,
 } from "@/be/script-connections";
+import { forceRefreshTokenOrThrow } from "@/oauth/ensure-token";
 import { buildAuthorizationUrl } from "@/oauth/wrapper";
 import { can } from "@/rbac";
 import {
@@ -335,6 +337,24 @@ const disconnectOAuthAppRoute = route({
   rbac: { permission: "script-connection.manage" },
 });
 
+const refreshOAuthAppTokensRoute = route({
+  method: "post",
+  path: "/api/oauth-apps/{provider}/refresh",
+  pattern: ["api", "oauth-apps", null, "refresh"],
+  operationId: "oauth_app_refresh_tokens",
+  summary: "Force-refresh the stored OAuth tokens for a provider (never returns token values)",
+  tags: ["Script Connections"],
+  params: providerParamsSchema,
+  responses: {
+    200: { description: "Refresh result with token status and new expiry" },
+    400: { description: "No stored tokens or provider does not support refresh" },
+    403: { description: "Only the lead agent can manage script connections" },
+    404: { description: "OAuth app not found" },
+    502: { description: "Provider token endpoint rejected the refresh" },
+  },
+  rbac: { permission: "script-connection.manage" },
+});
+
 type BindingSummary = {
   id: string;
   configKey: string;
@@ -375,6 +395,7 @@ type OAuthAppRow = {
   scopes: string;
   metadata: string;
   tokenExpiresAt: string | null;
+  tokenUpdatedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -703,6 +724,7 @@ function sanitizeOAuthApp(row: OAuthAppRow) {
     tokenBodyFormat: metadata.tokenBodyFormat === "json" ? "json" : "form",
     tokenStatus: getOAuthBindingTokenStatus(row.provider),
     expiresAt: row.tokenExpiresAt,
+    lastRefreshedAt: normalizeDate(row.tokenUpdatedAt),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -712,7 +734,8 @@ function listOAuthApps() {
   const rows = getDb()
     .prepare<OAuthAppRow, []>(
       `SELECT a.id, a.provider, a.clientId, a.authorizeUrl, a.tokenUrl, a.redirectUri,
-              a.scopes, a.metadata, t.expiresAt AS tokenExpiresAt, a.createdAt, a.updatedAt
+              a.scopes, a.metadata, t.expiresAt AS tokenExpiresAt,
+              t.updatedAt AS tokenUpdatedAt, a.createdAt, a.updatedAt
        FROM oauth_apps a
        LEFT JOIN oauth_tokens t ON t.provider = a.provider
        ORDER BY a.provider ASC`,
@@ -1288,6 +1311,46 @@ export async function handleScriptConnections(
     const revocationAttempted = await attemptRemoteRevocation(app, tokens.accessToken);
     deleteOAuthTokens(parsed.params.provider);
     json(res, { disconnected: true, revocationAttempted });
+    return true;
+  }
+
+  if (refreshOAuthAppTokensRoute.match(req.method, pathSegments)) {
+    const parsed = await refreshOAuthAppTokensRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+
+    const provider = parsed.params.provider;
+    if (!getOAuthApp(provider)) {
+      jsonError(res, `OAuth app ${provider} is not configured.`, 404);
+      return true;
+    }
+    const tokens = getOAuthTokens(provider);
+    if (!tokens) {
+      jsonError(res, "Nothing to refresh — authorize first.", 400);
+      return true;
+    }
+    if (!tokens.refreshToken) {
+      jsonError(
+        res,
+        `OAuth app ${provider} does not support refresh (no refresh token stored).`,
+        400,
+      );
+      return true;
+    }
+
+    try {
+      await forceRefreshTokenOrThrow(provider);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      jsonError(res, scrubSecrets(`Token refresh failed: ${message}`), 502);
+      return true;
+    }
+
+    json(res, {
+      refreshed: true,
+      tokenStatus: getOAuthBindingTokenStatus(provider),
+      expiresAt: getOAuthTokens(provider)?.expiresAt ?? null,
+    });
     return true;
   }
 

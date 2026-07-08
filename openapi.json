@@ -10389,6 +10389,50 @@
         }
       }
     },
+    "/api/oauth-apps/{provider}/refresh": {
+      "post": {
+        "operationId": "oauth_app_refresh_tokens",
+        "summary": "Force-refresh the stored OAuth tokens for a provider (never returns token values)",
+        "tags": [
+          "Script Connections"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Refresh result with token status and new expiry"
+          },
+          "400": {
+            "description": "No stored tokens or provider does not support refresh"
+          },
+          "403": {
+            "description": "Only the lead agent can manage script connections"
+          },
+          "404": {
+            "description": "OAuth app not found"
+          },
+          "502": {
+            "description": "Provider token endpoint rejected the refresh"
+          }
+        }
+      }
+    },
     "/api/script-runs": {
       "post": {
         "operationId": "script_runs_create",

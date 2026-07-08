@@ -245,7 +245,34 @@ describe("/api/script-connections HTTP", () => {
     expect(body.oauthApps[0]?.provider).toBe("vendor_oauth");
     expect(body.oauthApps[0]?.clientId).toBe("vendor-client");
     expect(body.oauthApps[0]).not.toHaveProperty("clientSecret");
+    expect(body.oauthApps[0]?.lastRefreshedAt).toBeNull();
     expect(JSON.stringify(body)).not.toContain("oauth-client-secret-should-not-leak");
+  });
+
+  test("oauth-apps GET includes lastRefreshedAt when tokens are stored", async () => {
+    upsertOAuthApp("vendor_oauth", {
+      clientId: "vendor-client",
+      clientSecret: "oauth-client-secret-should-not-leak",
+      authorizeUrl: "https://oauth.vendor.test/authorize",
+      tokenUrl: "https://oauth.vendor.test/token",
+      redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
+      scopes: "read,write",
+    });
+    storeOAuthTokens("vendor_oauth", {
+      accessToken: "access-token-should-not-leak",
+      refreshToken: "refresh-token-should-not-leak",
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      scope: "read,write",
+    });
+
+    const res = await dispatch("/api/oauth-apps");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { oauthApps: Array<Record<string, unknown>> };
+    expect(body.oauthApps).toHaveLength(1);
+    expect(typeof body.oauthApps[0]?.lastRefreshedAt).toBe("string");
+    expect(body.oauthApps[0]?.lastRefreshedAt).toBe(getOAuthTokens("vendor_oauth")?.updatedAt);
+    expect(res.text).not.toContain("access-token-should-not-leak");
+    expect(res.text).not.toContain("refresh-token-should-not-leak");
   });
 
   test("detail returns operations and generated types without secrets", async () => {
@@ -532,5 +559,143 @@ describe("DELETE /api/oauth-apps/{provider}/tokens", () => {
     // Tokens and secrets must never leak into the HTTP response.
     expect(res.text).not.toContain(ACCESS_TOKEN);
     expect(res.text).not.toContain("oauth-client-secret-should-not-leak");
+  });
+});
+
+describe("POST /api/oauth-apps/{provider}/refresh", () => {
+  const ACCESS_TOKEN = "access-token-should-not-leak";
+  const REFRESH_TOKEN = "refresh-token-should-not-leak";
+  const realFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  function seedOAuthApp() {
+    upsertOAuthApp("vendor_oauth", {
+      clientId: "vendor-client",
+      clientSecret: "oauth-client-secret-should-not-leak",
+      authorizeUrl: "https://oauth.vendor.test/authorize",
+      tokenUrl: "https://oauth.vendor.test/token",
+      redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
+      scopes: "read,write",
+    });
+  }
+
+  function seedTokens(refreshToken: string | null) {
+    storeOAuthTokens("vendor_oauth", {
+      accessToken: ACCESS_TOKEN,
+      refreshToken,
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      scope: "read,write",
+    });
+  }
+
+  test("404 for unknown provider", async () => {
+    const res = await dispatch("/api/oauth-apps/unknown_provider/refresh", {
+      method: "POST",
+      agentId: leadAgentId,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  test("400 when no tokens are stored", async () => {
+    seedOAuthApp();
+    const res = await dispatch("/api/oauth-apps/vendor_oauth/refresh", {
+      method: "POST",
+      agentId: leadAgentId,
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Nothing to refresh — authorize first." });
+  });
+
+  test("400 when no refresh token is stored", async () => {
+    seedOAuthApp();
+    seedTokens(null);
+    const res = await dispatch("/api/oauth-apps/vendor_oauth/refresh", {
+      method: "POST",
+      agentId: leadAgentId,
+    });
+    expect(res.status).toBe(400);
+    expect(res.text).toContain("does not support refresh");
+  });
+
+  test("forces a refresh regardless of expiry and never leaks token values", async () => {
+    seedOAuthApp();
+    seedTokens(REFRESH_TOKEN); // token still valid for an hour — refresh is forced anyway
+
+    let captured: { url: string; body?: string } | null = null;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      captured = {
+        url: String(input),
+        body: typeof init?.body === "string" ? init.body : undefined,
+      };
+      return new Response(
+        JSON.stringify({
+          access_token: "new-access-token-should-not-leak",
+          token_type: "bearer",
+          expires_in: 7200,
+          refresh_token: "new-refresh-token-should-not-leak",
+          scope: "read,write",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const res = await dispatch("/api/oauth-apps/vendor_oauth/refresh", {
+      method: "POST",
+      agentId: leadAgentId,
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      refreshed: boolean;
+      tokenStatus: string;
+      expiresAt: string | null;
+    };
+    expect(body.refreshed).toBe(true);
+    expect(body.tokenStatus).toBe("ok");
+
+    // The token endpoint was hit with a refresh_token grant.
+    expect(captured).not.toBeNull();
+    expect(captured?.url).toBe("https://oauth.vendor.test/token");
+    expect(captured?.body).toContain("grant_type=refresh_token");
+
+    // Response carries the NEW expiry from the mocked expires_in=7200.
+    const stored = getOAuthTokens("vendor_oauth");
+    expect(stored?.accessToken).toBe("new-access-token-should-not-leak");
+    expect(body.expiresAt).toBe(stored?.expiresAt ?? "");
+    expect(new Date(body.expiresAt ?? 0).getTime()).toBeGreaterThan(Date.now() + 3_600_000);
+
+    // No token values in the HTTP response.
+    expect(res.text).not.toContain(ACCESS_TOKEN);
+    expect(res.text).not.toContain(REFRESH_TOKEN);
+    expect(res.text).not.toContain("new-access-token-should-not-leak");
+    expect(res.text).not.toContain("new-refresh-token-should-not-leak");
+    expect(res.text).not.toContain("oauth-client-secret-should-not-leak");
+  });
+
+  test("502 when the provider token endpoint rejects the refresh", async () => {
+    seedOAuthApp();
+    seedTokens(REFRESH_TOKEN);
+    globalThis.fetch = (async () =>
+      new Response("nope", { status: 400 })) as unknown as typeof fetch;
+
+    const res = await dispatch("/api/oauth-apps/vendor_oauth/refresh", {
+      method: "POST",
+      agentId: leadAgentId,
+    });
+    expect(res.status).toBe(502);
+    expect(res.text).toContain("Token refresh failed");
+  });
+
+  test("403 for non-lead agent", async () => {
+    seedOAuthApp();
+    seedTokens(REFRESH_TOKEN);
+    const res = await dispatch("/api/oauth-apps/vendor_oauth/refresh", {
+      method: "POST",
+      agentId: workerAgentId,
+    });
+    expect(res.status).toBe(403);
   });
 });

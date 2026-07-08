@@ -617,6 +617,14 @@ httpServer
       startOAuthKeepalive();
     }
 
+    // Start generic OAuth token refresh sweep (all oauth_apps providers,
+    // 15-min tick, first run ~1 min after boot). Complements the tracker-only
+    // keepalive above — see src/be/oauth-refresh-sweep.ts.
+    if (process.env.OAUTH_REFRESH_SWEEP_DISABLE !== "true") {
+      const { startOAuthRefreshSweep } = await import("../be/oauth-refresh-sweep");
+      startOAuthRefreshSweep();
+    }
+
     // Start MCP OAuth pending-session garbage collector (5-min tick)
     startMcpOAuthPendingGc();
 
