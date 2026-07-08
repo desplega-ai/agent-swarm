@@ -8081,8 +8081,12 @@ export function updatePage(
 }
 
 export function deletePage(id: string): boolean {
-  // ON DELETE CASCADE on page_versions.pageId handles history cleanup.
-  const result = getDb().run("DELETE FROM pages WHERE id = ?", [id]);
+  const result = getDb().transaction(() => {
+    getDb().run("DELETE FROM user_favorites WHERE itemType = 'page' AND itemId = ?", [id]);
+    getDb().run("DELETE FROM kv_entries WHERE namespace = ?", [`task:page:${id}`]);
+    // ON DELETE CASCADE on page_versions.pageId handles history cleanup.
+    return getDb().run("DELETE FROM pages WHERE id = ?", [id]);
+  })();
   return result.changes > 0;
 }
 

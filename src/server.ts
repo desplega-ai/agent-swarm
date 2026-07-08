@@ -15,6 +15,7 @@ import { registerCreatePageTool } from "./tools/create-page";
 import { registerCredentialBindingsTool } from "./tools/credential-bindings";
 import { registerDbQueryTool } from "./tools/db-query";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
+import { registerDeletePageTool } from "./tools/delete-page";
 import { registerGetMetricsTool } from "./tools/get-metrics";
 import { registerGetSwarmTool } from "./tools/get-swarm";
 import { registerGetTaskDetailsTool } from "./tools/get-task-details";
@@ -376,6 +377,7 @@ export function createServer() {
   // `CAPABILITIES=...` env without `pages`.
   if (hasCapability("pages")) {
     registerCreatePageTool(server);
+    registerDeletePageTool(server);
   }
 
   if (hasCapability("metrics")) {

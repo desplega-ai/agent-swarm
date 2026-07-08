@@ -169,6 +169,10 @@ export const PERMISSIONS = {
     description: "Write another agent's task:agent: KV namespace.",
     namespace: "kv",
   },
+  "page.delete.any": {
+    description: "Delete a page the caller does not own.",
+    namespace: "page",
+  },
   "script.global.write": {
     description: "Create or update a global-scope script.",
     namespace: "script",

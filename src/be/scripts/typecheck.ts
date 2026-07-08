@@ -210,6 +210,7 @@ export interface SwarmSdk {
 
   // --- pages & metrics ---
   page_create(args: Record<string, unknown>): Promise<unknown>;
+  page_delete(args: { pageId?: string; slug?: string }): Promise<unknown>;
   metric_create(args: Record<string, unknown>): Promise<unknown>;
 
   // --- human input ---

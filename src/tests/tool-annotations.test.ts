@@ -106,6 +106,7 @@ describe("Tool Annotations & Classification", () => {
       "delete-schedule",
       "delete-config",
       "delete-workflow",
+      "delete-page",
       "unregister-service",
       "slack-delete",
     ];

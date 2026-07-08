@@ -163,8 +163,9 @@ export const DEFERRED_TOOLS = new Set([
   "resolve-user",
   "manage-user",
 
-  // Pages (1)
+  // Pages (2)
   "create_page",
+  "delete-page",
 
   // KV store (5)
   "kv-get",
