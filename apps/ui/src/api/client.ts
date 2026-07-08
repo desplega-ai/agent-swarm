@@ -29,6 +29,7 @@ import type {
   InboxItemType,
   InboxStateResponse,
   InboxStateUpsertResponse,
+  IntegrationsCatalogResponse,
   LogsResponse,
   McpOAuthMetadataResponse,
   McpOAuthStatusResponse,
@@ -42,6 +43,7 @@ import type {
   MetricSaveResponse,
   MetricsListResponse,
   MintTokenResponse,
+  OAuthAppDiscoveryResult,
   PageListItem,
   PageMetadata,
   PagesListResponse,
@@ -59,6 +61,7 @@ import type {
   ScriptApiAuthMode,
   ScriptApiRecord,
   ScriptApiWithSecret,
+  ScriptConnectionDetailResponse,
   ScriptConnectionKind,
   ScriptConnectionScope,
   ScriptConnectionsResponse,
@@ -1052,6 +1055,13 @@ class ApiClient {
     return res.json();
   }
 
+  async fetchScriptConnection(id: string): Promise<ScriptConnectionDetailResponse> {
+    const url = `${this.getBaseUrl()}/api/script-connections/${encodeURIComponent(id)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch script connection: ${res.status}`);
+    return res.json();
+  }
+
   async upsertScriptConnection(data: UpsertScriptConnectionInput) {
     const url = `${this.getBaseUrl()}/api/script-connections`;
     const res = await fetch(url, {
@@ -1118,6 +1128,18 @@ class ApiClient {
     return res.json();
   }
 
+  async fetchIntegrationsCatalog(): Promise<IntegrationsCatalogResponse> {
+    const url = `${this.getBaseUrl()}/api/integrations-catalog`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) {
+      const error = await res
+        .json()
+        .catch(() => ({ error: "Failed to fetch integrations catalog" }));
+      throw new Error(error.error || `Failed to fetch integrations catalog: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async upsertOAuthApp(data: UpsertOAuthAppInput) {
     const url = `${this.getBaseUrl()}/api/oauth-apps`;
     const res = await fetch(url, {
@@ -1128,6 +1150,29 @@ class ApiClient {
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to save OAuth app" }));
       throw new Error(error.error || `Failed to save OAuth app: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async discoverOAuthApp(url: string): Promise<OAuthAppDiscoveryResult> {
+    const res = await fetch(`${this.getBaseUrl()}/api/oauth-apps/discover`, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ url }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to discover OAuth app" }));
+      throw new Error(error.error || `Failed to discover OAuth app: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async deleteOAuthApp(provider: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/oauth-apps/${encodeURIComponent(provider)}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to delete OAuth app" }));
+      throw new Error(error.error || `Failed to delete OAuth app: ${res.status}`);
     }
     return res.json();
   }

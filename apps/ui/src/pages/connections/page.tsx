@@ -1,29 +1,63 @@
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
-import { KeyRound, Link2, Play, Plus, RefreshCw, SquareCode } from "lucide-react";
+import {
+  Check,
+  Copy,
+  ExternalLink,
+  KeyRound,
+  Link2,
+  Play,
+  Plus,
+  RefreshCw,
+  Search,
+  SquareCode,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useMcpServers } from "@/api/hooks/use-mcp-servers";
 import {
   useCredentialBindings,
+  useDeleteOAuthApp,
+  useDiscoverOAuthApp,
+  useIntegrationsCatalog,
   useOAuthApps,
   useOAuthAuthorizeUrl,
   useRefreshScriptConnection,
   useRunInlineScript,
   useScriptConnections,
   useSetScriptConnectionEnabled,
+  useUpsertCredentialBinding,
   useUpsertOAuthApp,
   useUpsertScriptConnection,
 } from "@/api/hooks/use-script-connections";
+import { useScriptTypeDefs } from "@/api/hooks/use-scripts";
 import type {
   CredentialAuthKind,
+  IntegrationsCatalogEntry,
   OAuthAppSummary,
   OAuthBindingTokenStatus,
   ScriptConnection,
+  ScriptConnectionDetail,
   ScriptConnectionKind,
   ScriptConnectionScope,
   ScriptCredentialBinding,
 } from "@/api/types";
+import { ScriptSourceEditor } from "@/components/scripts/script-source-editor";
 import { DataGrid } from "@/components/shared/data-grid";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,6 +69,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -48,6 +83,8 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn, formatSmartTime } from "@/lib/utils";
 
@@ -59,9 +96,23 @@ const PLAYGROUND_SOURCE = `export default async function(args, ctx) {
 
 function splitList(value: string): string[] {
   return value
-    .split(/[,\n]/)
+    .split(/[,\s]+/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function normalizeScriptSlug(value: string): string {
+  const cleaned = value
+    .trim()
+    .replace(/[^A-Za-z0-9]+(.)/g, (_match, char: string) => char.toUpperCase())
+    .replace(/^[^A-Za-z_]+/, "")
+    .replace(/[^A-Za-z0-9_]/g, "");
+  if (!cleaned) return "";
+  return `${cleaned[0]?.toLowerCase()}${cleaned.slice(1)}`;
 }
 
 function configPlaceholder(configKey: string): string {
@@ -77,7 +128,64 @@ function optionalString(value: string): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-function KindBadge({ kind }: { kind: ScriptConnectionKind }) {
+function FieldLabel({ children, tip }: { children: string; tip: string }) {
+  return (
+    <Label className="inline-flex items-center gap-1.5">
+      {children}
+      <InfoTip content={tip} />
+    </Label>
+  );
+}
+
+function CopyButton({ value, label = "Copy" }: { value: string; label?: string }) {
+  const { copied, copy } = useCopyToClipboard();
+  return (
+    <Button type="button" size="xs" variant="outline" onClick={() => copy(value)} disabled={!value}>
+      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+      {copied ? "Copied" : label}
+    </Button>
+  );
+}
+
+function scriptUsageSnippet(
+  kind: ScriptConnectionKind,
+  slug: string,
+  detail?: Pick<ScriptConnectionDetail, "operations" | "tools">,
+): string {
+  const namespace = normalizeScriptSlug(slug) || "myConnection";
+  if (kind === "graphql") return `await ctx.api.${namespace}.graphql("query { ... }");`;
+  if (kind === "mcp") {
+    const tool = detail?.tools[0]?.name || "toolName";
+    return `await ctx.mcp.${namespace}.${tool}({});`;
+  }
+  const operation = detail?.operations[0]?.name || "exampleOperation";
+  return `await ctx.api.${namespace}.${operation}({});`;
+}
+
+export function UsagePreview({
+  kind,
+  slug,
+  detail,
+}: {
+  kind: ScriptConnectionKind;
+  slug: string;
+  detail?: Pick<ScriptConnectionDetail, "operations" | "tools">;
+}) {
+  const snippet = scriptUsageSnippet(kind, slug, detail);
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium uppercase text-muted-foreground">
+          Use it in a script
+        </span>
+        <CopyButton value={snippet} />
+      </div>
+      <pre className="overflow-x-auto text-xs leading-5">{snippet}</pre>
+    </div>
+  );
+}
+
+export function KindBadge({ kind }: { kind: ScriptConnectionKind }) {
   const colors: Record<ScriptConnectionKind, string> = {
     openapi: "border-action-default/30 text-action-default",
     graphql: "border-action-script/30 text-action-script",
@@ -90,7 +198,7 @@ function KindBadge({ kind }: { kind: ScriptConnectionKind }) {
   );
 }
 
-function TokenStatusBadge({ status }: { status?: OAuthBindingTokenStatus }) {
+export function TokenStatusBadge({ status }: { status?: OAuthBindingTokenStatus }) {
   if (!status) return <span className="text-muted-foreground">-</span>;
   const colors: Record<OAuthBindingTokenStatus, string> = {
     ok: "border-status-success/30 text-status-success",
@@ -104,14 +212,58 @@ function TokenStatusBadge({ status }: { status?: OAuthBindingTokenStatus }) {
   );
 }
 
+function AuthKindBadge({ kind }: { kind: CredentialAuthKind }) {
+  const colors: Record<CredentialAuthKind, string> = {
+    config: "border-status-neutral/30 text-status-neutral",
+    oauth: "border-action-script/30 text-action-script",
+  };
+  return (
+    <Badge variant="outline" size="tag" className={colors[kind]}>
+      {kind}
+    </Badge>
+  );
+}
+
+function HostChips({ hosts }: { hosts: string[] }) {
+  if (hosts.length === 0) return <span className="text-muted-foreground">—</span>;
+  const visible = hosts.slice(0, 2);
+  const extraCount = hosts.length - visible.length;
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-1">
+      {visible.map((host) => (
+        <Badge key={host} variant="outline" size="tag" className="max-w-28 normal-case">
+          <span className="truncate">{host}</span>
+        </Badge>
+      ))}
+      {extraCount > 0 ? (
+        <Badge variant="secondary" size="tag">
+          +{extraCount}
+        </Badge>
+      ) : null}
+    </span>
+  );
+}
+
+function TemplateCell({ value }: { value?: string }) {
+  if (!value) return <span className="text-muted-foreground">—</span>;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <code className="block max-w-full truncate rounded bg-muted/50 px-1.5 py-0.5 font-mono text-xs">
+          {value}
+        </code>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xl break-all font-mono leading-5">{value}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function CredentialChip({ connection }: { connection: ScriptConnection }) {
   const binding = connection.credentialBinding;
   if (!binding) return <span className="text-muted-foreground">—</span>;
   return (
     <span className="inline-flex items-center gap-1.5 min-w-0">
-      <Badge variant="outline" size="tag">
-        {binding.authKind}
-      </Badge>
+      <AuthKindBadge kind={binding.authKind} />
       <span className="truncate">{binding.configKey}</span>
       {binding.oauthProvider ? (
         <span className="truncate text-muted-foreground">({binding.oauthProvider})</span>
@@ -121,7 +273,7 @@ function CredentialChip({ connection }: { connection: ScriptConnection }) {
   );
 }
 
-function InlineError({ error }: { error?: unknown }) {
+export function InlineError({ error }: { error?: unknown }) {
   if (!error) return null;
   return (
     <p className="text-sm text-status-error">
@@ -130,20 +282,97 @@ function InlineError({ error }: { error?: unknown }) {
   );
 }
 
-function AddConnectionDialog({
+function catalogSearchText(entry: IntegrationsCatalogEntry): string {
+  return `${entry.name} ${entry.slug} ${entry.domain} ${entry.description}`.toLowerCase();
+}
+
+function tokenScore(text: string, token: string): number {
+  if (!token) return 0;
+  if (text.includes(token)) return token.length * 12;
+  let cursor = 0;
+  let score = 0;
+  for (const char of token) {
+    const found = text.indexOf(char, cursor);
+    if (found === -1) return 0;
+    score += found === cursor ? 4 : 1;
+    cursor = found + 1;
+  }
+  return score;
+}
+
+function scoreCatalogEntry(entry: IntegrationsCatalogEntry, query: string): number {
+  const tokens = query
+    .toLowerCase()
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  if (tokens.length === 0) return 1;
+  const text = catalogSearchText(entry);
+  const total = tokens.reduce((sum, token) => sum + tokenScore(text, token), 0);
+  return tokens.every((token) => tokenScore(text, token) > 0) ? total : 0;
+}
+
+async function resolveApisGuruOpenApi(domain: string): Promise<{
+  specUrl?: string;
+  baseUrl?: string;
+  error?: string;
+}> {
+  if (!domain) return { error: "Catalog entry has no apis.guru domain." };
+  try {
+    const indexResponse = await fetch(
+      `https://api.apis.guru/v2/${encodeURIComponent(domain)}.json`,
+    );
+    if (!indexResponse.ok) return { error: `apis.guru returned HTTP ${indexResponse.status}.` };
+    const index = (await indexResponse.json()) as {
+      preferred?: string;
+      versions?: Record<string, { openapiUrl?: string; swaggerUrl?: string }>;
+    };
+    const versions = index.versions ?? {};
+    const version = (index.preferred && versions[index.preferred]) || Object.values(versions)[0];
+    const candidate =
+      typeof version?.openapiUrl === "string" && version.openapiUrl.endsWith(".json")
+        ? version.openapiUrl
+        : typeof version?.swaggerUrl === "string" && version.swaggerUrl.endsWith(".json")
+          ? version.swaggerUrl
+          : undefined;
+    if (!candidate) return { error: "No JSON OpenAPI spec URL found for this catalog entry." };
+
+    const specResponse = await fetch(candidate);
+    if (!specResponse.ok)
+      return { specUrl: candidate, error: "Spec URL found, but preview failed." };
+    const spec = (await specResponse.json()) as { servers?: Array<{ url?: string }> };
+    const baseUrl = spec.servers?.find((server) => typeof server.url === "string")?.url;
+    return { specUrl: candidate, baseUrl };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export function AddConnectionDialog({
   open,
   onOpenChange,
   bindings,
   oauthApps,
   mcpServers,
+  connection,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   bindings: ScriptCredentialBinding[];
   oauthApps: OAuthAppSummary[];
   mcpServers: Array<{ id: string; name: string }>;
+  connection?: ScriptConnectionDetail | ScriptConnection;
 }) {
   const upsert = useUpsertScriptConnection();
+  const {
+    data: catalog = [],
+    isLoading: catalogLoading,
+    error: catalogError,
+  } = useIntegrationsCatalog();
+  const [step, setStep] = useState<"catalog" | "form">(connection ? "form" : "catalog");
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogHint, setCatalogHint] = useState("");
+  const [resolvingCatalogId, setResolvingCatalogId] = useState<string | null>(null);
   const [kind, setKind] = useState<ScriptConnectionKind>("openapi");
   const [slug, setSlug] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -161,6 +390,7 @@ function AddConnectionDialog({
   const [authKind, setAuthKind] = useState<CredentialAuthKind>("config");
   const [oauthProvider, setOauthProvider] = useState("");
   const previousAutoHeader = useRef(defaultHeaderTemplate(""));
+  const isEdit = Boolean(connection);
 
   useEffect(() => {
     const next = defaultHeaderTemplate(configKey);
@@ -171,26 +401,70 @@ function AddConnectionDialog({
   }, [configKey, headerTemplate]);
 
   useEffect(() => {
-    if (!open) {
-      setKind("openapi");
-      setSlug("");
-      setDisplayName("");
-      setBaseUrl("");
-      setAllowedHosts("");
-      setMcpServerId("");
-      setSpecMode("url");
-      setOpenapiSpecUrl("");
-      setOpenapiSpecJson("");
-      setCredentialMode("none");
-      setCredentialBindingId("");
-      setConfigKey("");
-      setHeaderTemplate(defaultHeaderTemplate(""));
-      setQueryTemplate("");
-      setAuthKind("config");
-      setOauthProvider("");
-      previousAutoHeader.current = defaultHeaderTemplate("");
+    if (!open) return;
+    setCatalogSearch("");
+    setCatalogHint("");
+    setStep(connection ? "form" : "catalog");
+    setKind(connection?.kind ?? "openapi");
+    setSlug(connection?.slug ?? "");
+    setDisplayName(connection?.displayName ?? "");
+    setBaseUrl(connection?.baseUrl ?? "");
+    setAllowedHosts(connection?.allowedHosts.join(", ") ?? "");
+    setMcpServerId(connection?.mcpServerId ?? "");
+    setSpecMode(connection?.openapiSpecSourceKind === "inline" ? "inline" : "url");
+    setOpenapiSpecUrl(
+      connection?.kind === "openapi" && connection.openapiSpecSourceKind === "url"
+        ? (connection.openapiSpecSource ?? "")
+        : "",
+    );
+    setOpenapiSpecJson("");
+    setCredentialMode(connection?.credentialBindingId ? "existing" : "none");
+    setCredentialBindingId(connection?.credentialBindingId ?? "");
+    setConfigKey("");
+    setHeaderTemplate(defaultHeaderTemplate(""));
+    setQueryTemplate("");
+    setAuthKind("config");
+    setOauthProvider("");
+    previousAutoHeader.current = defaultHeaderTemplate("");
+  }, [open, connection]);
+
+  const catalogResults = useMemo(() => {
+    return catalog
+      .map((entry) => ({ entry, score: scoreCatalogEntry(entry, catalogSearch) }))
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name))
+      .slice(0, 50)
+      .map(({ entry }) => entry);
+  }, [catalog, catalogSearch]);
+
+  async function selectCatalogEntry(entry: IntegrationsCatalogEntry) {
+    setStep("form");
+    setCatalogHint("");
+    setKind(entry.kind);
+    setSlug(normalizeScriptSlug(entry.slug || entry.name));
+    setDisplayName(entry.name);
+    if (entry.domain) setAllowedHosts(entry.domain);
+
+    if (entry.kind === "graphql") {
+      setBaseUrl(entry.url);
+      return;
     }
-  }, [open]);
+    if (entry.kind === "mcp") {
+      setCatalogHint("Select the matching MCP server from the manual form.");
+      return;
+    }
+    setSpecMode("url");
+    setOpenapiSpecUrl("");
+    setBaseUrl(entry.url);
+    setResolvingCatalogId(entry.id);
+    const resolved = await resolveApisGuruOpenApi(entry.domain);
+    setResolvingCatalogId(null);
+    if (resolved.specUrl) setOpenapiSpecUrl(resolved.specUrl);
+    if (resolved.baseUrl) setBaseUrl(resolved.baseUrl);
+    if (resolved.error) {
+      setCatalogHint(`Catalog selected; ${resolved.error}`);
+    }
+  }
 
   async function submit() {
     const parsedHosts = splitList(allowedHosts);
@@ -207,6 +481,7 @@ function AddConnectionDialog({
             }
           : {};
     const common = {
+      id: connection?.id,
       slug,
       displayName: optionalString(displayName),
       allowedHosts: parsedHosts.length ? parsedHosts : undefined,
@@ -215,6 +490,7 @@ function AddConnectionDialog({
 
     if (kind === "mcp") {
       await upsert.mutateAsync({
+        id: connection?.id,
         kind: "mcp",
         slug,
         displayName: optionalString(displayName),
@@ -232,9 +508,11 @@ function AddConnectionDialog({
         ...common,
         kind: "openapi",
         baseUrl,
-        ...(specMode === "url"
+        ...(specMode === "url" && openapiSpecUrl.trim()
           ? { openapiSpecUrl: openapiSpecUrl.trim() }
-          : { openapiSpecJson: openapiSpecJson.trim() }),
+          : specMode === "inline" && openapiSpecJson.trim()
+            ? { openapiSpecJson: openapiSpecJson.trim() }
+            : {}),
       });
     }
     onOpenChange(false);
@@ -246,6 +524,7 @@ function AddConnectionDialog({
       ? mcpServerId
       : baseUrl.trim() &&
         (kind === "graphql" ||
+          isEdit ||
           (specMode === "url" ? openapiSpecUrl.trim() : openapiSpecJson.trim()))) &&
     (credentialMode !== "existing" || credentialBindingId) &&
     (credentialMode !== "inline" ||
@@ -253,214 +532,332 @@ function AddConnectionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Add Connection</DialogTitle>
-          <DialogDescription>Register an API or MCP namespace for scripts.</DialogDescription>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader className="pb-2">
+          <DialogTitle>{isEdit ? "Edit Connection" : "Add Connection"}</DialogTitle>
+          <DialogDescription>
+            {isEdit
+              ? "Update the script namespace and generation inputs."
+              : "Register an API or MCP namespace for scripts."}
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-5">
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="space-y-2">
-              <Label>Kind</Label>
-              <Select
-                value={kind}
-                onValueChange={(value) => setKind(value as ScriptConnectionKind)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="openapi">OpenAPI</SelectItem>
-                  <SelectItem value="graphql">GraphQL</SelectItem>
-                  <SelectItem value="mcp">MCP</SelectItem>
-                </SelectContent>
-              </Select>
+        {!isEdit ? (
+          <Tabs value={step} onValueChange={(value) => setStep(value as "catalog" | "form")}>
+            <TabsList>
+              <TabsTrigger value="catalog">Browse catalog</TabsTrigger>
+              <TabsTrigger value="form">Manual form</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        ) : null}
+
+        {step === "catalog" && !isEdit ? (
+          <div className="space-y-4">
+            <Input
+              placeholder="Search APIs, MCP servers, domains..."
+              value={catalogSearch}
+              onChange={(event) => setCatalogSearch(event.target.value)}
+            />
+            <div className="max-h-[52vh] space-y-2 overflow-y-auto pr-1">
+              {catalogLoading ? (
+                <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                  Loading catalog...
+                </div>
+              ) : catalogError ? (
+                <InlineError error={catalogError} />
+              ) : (
+                catalogResults.map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    className="grid w-full gap-2 rounded-md border p-3 text-left transition-colors hover:bg-muted/40"
+                    onClick={() => selectCatalogEntry(entry)}
+                    disabled={resolvingCatalogId === entry.id}
+                  >
+                    <div className="flex items-center gap-3">
+                      {entry.icon ? (
+                        <img src={entry.icon} alt="" className="size-7 rounded-sm" />
+                      ) : (
+                        <div className="flex size-7 items-center justify-center rounded-sm bg-muted text-xs font-medium">
+                          {entry.name.slice(0, 1)}
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="truncate font-medium">{entry.name}</span>
+                          <KindBadge kind={entry.kind} />
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {entry.domain || entry.slug}
+                        </div>
+                      </div>
+                    </div>
+                    {entry.description ? (
+                      <p className="line-clamp-2 text-sm text-muted-foreground">
+                        {entry.description}
+                      </p>
+                    ) : null}
+                    {entry.categories.length ? (
+                      <div className="flex flex-wrap gap-1">
+                        {entry.categories.slice(0, 4).map((category) => (
+                          <Badge key={category} variant="outline" size="tag">
+                            {category}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : null}
+                  </button>
+                ))
+              )}
             </div>
-            <div className="space-y-2">
-              <Label>Slug</Label>
-              <Input value={slug} onChange={(event) => setSlug(event.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Display Name</Label>
-              <Input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
-            </div>
+            <Button type="button" variant="outline" onClick={() => setStep("form")}>
+              Skip - start from scratch
+            </Button>
           </div>
-
-          {kind === "mcp" ? (
-            <div className="space-y-2">
-              <Label>MCP Server</Label>
-              <Select value={mcpServerId} onValueChange={setMcpServerId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select server" />
-                </SelectTrigger>
-                <SelectContent>
-                  {mcpServers.map((server) => (
-                    <SelectItem key={server.id} value={server.id}>
-                      {server.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          ) : (
-            <div className="grid gap-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Base URL</Label>
-                  <Input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Allowed Hosts</Label>
-                  <Input
-                    value={allowedHosts}
-                    onChange={(event) => setAllowedHosts(event.target.value)}
-                    placeholder="api.example.com, uploads.example.com"
-                  />
-                </div>
+        ) : (
+          <div className="space-y-5">
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <FieldLabel tip="Select OpenAPI for generated REST methods, GraphQL for a query helper, or MCP for server tools.">
+                  Kind
+                </FieldLabel>
+                <Select
+                  value={kind}
+                  onValueChange={(value) => setKind(value as ScriptConnectionKind)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="openapi">OpenAPI</SelectItem>
+                    <SelectItem value="graphql">GraphQL</SelectItem>
+                    <SelectItem value="mcp">MCP</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-
-              {kind === "openapi" ? (
-                <div className="grid gap-3">
-                  <Select
-                    value={specMode}
-                    onValueChange={(value) => setSpecMode(value as "url" | "inline")}
-                  >
-                    <SelectTrigger className="w-40">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="url">Spec URL</SelectItem>
-                      <SelectItem value="inline">Inline JSON</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {specMode === "url" ? (
-                    <div className="space-y-2">
-                      <Label>Spec URL</Label>
-                      <Input
-                        value={openapiSpecUrl}
-                        onChange={(event) => setOpenapiSpecUrl(event.target.value)}
-                      />
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <Label>Inline JSON</Label>
-                      <Textarea
-                        value={openapiSpecJson}
-                        onChange={(event) => setOpenapiSpecJson(event.target.value)}
-                        className="min-h-40 font-mono text-xs"
-                      />
-                    </div>
-                  )}
-                </div>
-              ) : null}
+              <div className="space-y-2">
+                <FieldLabel tip="Namespace under ctx.api or ctx.mcp in scripts. Use a short JavaScript-safe name.">
+                  Slug
+                </FieldLabel>
+                <Input value={slug} onChange={(event) => setSlug(event.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <FieldLabel tip="Human-readable label shown in the dashboard; scripts still use the slug.">
+                  Display Name
+                </FieldLabel>
+                <Input
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                />
+              </div>
             </div>
-          )}
 
-          {kind !== "mcp" ? (
-            <div className="grid gap-4 rounded-md border p-4">
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="space-y-2">
-                  <Label>Credential</Label>
-                  <Select
-                    value={credentialMode}
-                    onValueChange={(value) =>
-                      setCredentialMode(value as "none" | "existing" | "inline")
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="existing">Existing</SelectItem>
-                      <SelectItem value="inline">Create Inline</SelectItem>
-                    </SelectContent>
-                  </Select>
+            {kind === "mcp" ? (
+              <div className="space-y-2">
+                <FieldLabel tip="Installed MCP server whose tools should be exposed under ctx.mcp.<slug>.">
+                  MCP Server
+                </FieldLabel>
+                <Select value={mcpServerId} onValueChange={setMcpServerId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select server" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {mcpServers.map((server) => (
+                      <SelectItem key={server.id} value={server.id}>
+                        {server.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <FieldLabel tip="Provider API origin used when scripts call this connection.">
+                      Base URL
+                    </FieldLabel>
+                    <Input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <FieldLabel tip="Exact hostnames where the credential placeholder is substituted at egress.">
+                      Allowed Hosts
+                    </FieldLabel>
+                    <Input
+                      value={allowedHosts}
+                      onChange={(event) => setAllowedHosts(event.target.value)}
+                      placeholder="api.example.com, uploads.example.com"
+                    />
+                  </div>
                 </div>
-                {credentialMode === "existing" ? (
-                  <div className="space-y-2 md:col-span-2">
-                    <Label>Binding</Label>
-                    <Select value={credentialBindingId} onValueChange={setCredentialBindingId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select binding" />
+
+                {kind === "openapi" ? (
+                  <div className="grid gap-3">
+                    <FieldLabel tip="Choose whether the OpenAPI document is fetched from a URL or pasted as JSON.">
+                      Spec Source
+                    </FieldLabel>
+                    <Select
+                      value={specMode}
+                      onValueChange={(value) => setSpecMode(value as "url" | "inline")}
+                    >
+                      <SelectTrigger className="w-40">
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {bindings.map((binding) => (
-                          <SelectItem key={binding.id} value={binding.id}>
-                            {binding.configKey} ({binding.authKind})
-                          </SelectItem>
-                        ))}
+                        <SelectItem value="url">Spec URL</SelectItem>
+                        <SelectItem value="inline">Inline JSON</SelectItem>
                       </SelectContent>
                     </Select>
+                    {specMode === "url" ? (
+                      <div className="space-y-2">
+                        <FieldLabel tip="Public JSON OpenAPI document URL; the server fetches it and generates ctx.api methods.">
+                          Spec URL
+                        </FieldLabel>
+                        <Input
+                          value={openapiSpecUrl}
+                          onChange={(event) => setOpenapiSpecUrl(event.target.value)}
+                        />
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <FieldLabel tip="Raw OpenAPI JSON document pasted directly into this connection.">
+                          Inline JSON
+                        </FieldLabel>
+                        <Textarea
+                          value={openapiSpecJson}
+                          onChange={(event) => setOpenapiSpecJson(event.target.value)}
+                          className="min-h-40 font-mono text-xs"
+                        />
+                      </div>
+                    )}
                   </div>
                 ) : null}
               </div>
+            )}
 
-              {credentialMode === "inline" ? (
-                <div className="grid gap-4">
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <div className="space-y-2">
-                      <Label>Config Key</Label>
-                      <Input
-                        value={configKey}
-                        onChange={(event) => setConfigKey(event.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Auth Kind</Label>
-                      <Select
-                        value={authKind}
-                        onValueChange={(value) => setAuthKind(value as CredentialAuthKind)}
-                      >
+            {kind !== "mcp" ? (
+              <div className="space-y-4 rounded-md border p-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <FieldLabel tip="Choose no credential, reuse an existing binding, or create a binding while saving this connection.">
+                      Credential
+                    </FieldLabel>
+                    <Select
+                      value={credentialMode}
+                      onValueChange={(value) =>
+                        setCredentialMode(value as "none" | "existing" | "inline")
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
+                        <SelectItem value="existing">Existing</SelectItem>
+                        <SelectItem value="inline">Create Inline</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {credentialMode === "existing" ? (
+                    <div className="space-y-2 md:col-span-2">
+                      <FieldLabel tip="Existing credential binding whose config key and templates apply to this connection.">
+                        Binding
+                      </FieldLabel>
+                      <Select value={credentialBindingId} onValueChange={setCredentialBindingId}>
                         <SelectTrigger>
-                          <SelectValue />
+                          <SelectValue placeholder="Select binding" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="config">Config</SelectItem>
-                          <SelectItem value="oauth">OAuth</SelectItem>
+                          {bindings.map((binding) => (
+                            <SelectItem key={binding.id} value={binding.id}>
+                              {binding.configKey} ({binding.authKind})
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
-                    {authKind === "oauth" ? (
+                  ) : null}
+                </div>
+
+                {credentialMode === "inline" ? (
+                  <div className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-3">
                       <div className="space-y-2">
-                        <Label>OAuth Provider</Label>
+                        <FieldLabel tip="Swarm config secret key whose value is substituted only for allowed hosts.">
+                          Config Key
+                        </FieldLabel>
                         <Input
-                          value={oauthProvider}
-                          onChange={(event) => setOauthProvider(event.target.value)}
-                          list="oauth-provider-options"
+                          value={configKey}
+                          onChange={(event) => setConfigKey(event.target.value)}
                         />
-                        <datalist id="oauth-provider-options">
-                          {oauthApps.map((app) => (
-                            <option key={app.provider} value={app.provider} />
-                          ))}
-                        </datalist>
                       </div>
-                    ) : null}
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <FieldLabel tip="Config uses a stored swarm secret; OAuth uses the selected OAuth app token.">
+                          Auth Kind
+                        </FieldLabel>
+                        <Select
+                          value={authKind}
+                          onValueChange={(value) => setAuthKind(value as CredentialAuthKind)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="config">Config</SelectItem>
+                            <SelectItem value="oauth">OAuth</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {authKind === "oauth" ? (
+                        <div className="space-y-2">
+                          <FieldLabel tip="Provider slug from OAuth Apps; its token supplies this credential.">
+                            OAuth Provider
+                          </FieldLabel>
+                          <Input
+                            value={oauthProvider}
+                            onChange={(event) => setOauthProvider(event.target.value)}
+                            list="oauth-provider-options"
+                          />
+                          <datalist id="oauth-provider-options">
+                            {oauthApps.map((app) => (
+                              <option key={app.provider} value={app.provider} />
+                            ))}
+                          </datalist>
+                        </div>
+                      ) : null}
+                    </div>
                     <div className="space-y-2">
-                      <Label>Header Template</Label>
+                      <FieldLabel
+                        tip={`Must contain the exact placeholder ${configPlaceholder(configKey)}. Used to add request headers at egress.`}
+                      >
+                        Header Template
+                      </FieldLabel>
                       <Input
                         value={headerTemplate}
                         onChange={(event) => setHeaderTemplate(event.target.value)}
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Query Template</Label>
+                      <FieldLabel
+                        tip={`Must contain the exact placeholder ${configPlaceholder(configKey)}. Used for APIs that expect credentials in a query string.`}
+                      >
+                        Query Template
+                      </FieldLabel>
                       <Input
                         value={queryTemplate}
                         onChange={(event) => setQueryTemplate(event.target.value)}
                       />
                     </div>
                   </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+                ) : null}
+              </div>
+            ) : null}
 
-          <InlineError error={upsert.error} />
-        </div>
+            {catalogHint ? <p className="text-sm text-muted-foreground">{catalogHint}</p> : null}
+            <UsagePreview kind={kind} slug={slug} />
+            <InlineError error={upsert.error} />
+          </div>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -475,13 +872,479 @@ function AddConnectionDialog({
   );
 }
 
-function OAuthAppsSection({ apps }: { apps: OAuthAppSummary[] }) {
+function CredentialBindingDialog({
+  open,
+  onOpenChange,
+  binding,
+  oauthApps,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  binding?: ScriptCredentialBinding;
+  oauthApps: OAuthAppSummary[];
+}) {
+  const upsert = useUpsertCredentialBinding();
+  const [configKey, setConfigKey] = useState("");
+  const [authKind, setAuthKind] = useState<CredentialAuthKind>("config");
+  const [oauthProvider, setOauthProvider] = useState("");
+  const [allowedHosts, setAllowedHosts] = useState<string[]>([]);
+  const [headerTemplate, setHeaderTemplate] = useState(defaultHeaderTemplate(""));
+  const [queryTemplate, setQueryTemplate] = useState("");
+  const [scope, setScope] = useState<ScriptConnectionScope>("global");
+  const [scopeId, setScopeId] = useState("");
+  const [headerManuallyEdited, setHeaderManuallyEdited] = useState(false);
+  const isEdit = Boolean(binding);
+
+  useEffect(() => {
+    if (!open) return;
+    const nextConfigKey = binding?.configKey ?? "";
+    const nextHeaderTemplate =
+      binding?.headerTemplate ?? (binding ? "" : defaultHeaderTemplate(""));
+    setConfigKey(nextConfigKey);
+    setAuthKind(binding?.authKind ?? "config");
+    setOauthProvider(binding?.oauthProvider ?? "");
+    setAllowedHosts(binding?.allowedHosts ?? []);
+    setHeaderTemplate(nextHeaderTemplate);
+    setQueryTemplate(binding?.queryTemplate ?? "");
+    setScope(binding?.scope ?? "global");
+    setScopeId(binding?.scopeId ?? "");
+    setHeaderManuallyEdited(
+      Boolean(
+        binding &&
+          (!binding.headerTemplate ||
+            binding.headerTemplate !== defaultHeaderTemplate(nextConfigKey)),
+      ),
+    );
+  }, [open, binding]);
+
+  useEffect(() => {
+    if (!open || headerManuallyEdited) return;
+    setHeaderTemplate(defaultHeaderTemplate(configKey));
+  }, [configKey, headerManuallyEdited, open]);
+
+  const providerOptions = useMemo(() => {
+    const providers = oauthApps.map((app) => app.provider);
+    return oauthProvider && !providers.includes(oauthProvider)
+      ? [oauthProvider, ...providers]
+      : providers;
+  }, [oauthApps, oauthProvider]);
+
+  async function submit() {
+    await upsert.mutateAsync({
+      id: binding?.id,
+      configKey: configKey.trim(),
+      allowedHosts,
+      headerTemplate: optionalString(headerTemplate),
+      queryTemplate: optionalString(queryTemplate),
+      scope,
+      scopeId: scope === "global" ? null : (optionalString(scopeId) ?? null),
+      active: binding?.active ?? true,
+      authKind,
+      oauthProvider: authKind === "oauth" ? optionalString(oauthProvider) : undefined,
+    });
+    toast.success(isEdit ? "Credential binding updated" : "Credential binding added");
+    onOpenChange(false);
+  }
+
+  const placeholder = configPlaceholder(configKey.trim());
+  const canSubmit =
+    configKey.trim() &&
+    allowedHosts.length > 0 &&
+    (headerTemplate.trim() || queryTemplate.trim()) &&
+    (scope === "global" || scopeId.trim()) &&
+    (authKind !== "oauth" || oauthProvider.trim());
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader className="pb-2">
+          <DialogTitle>{isEdit ? "Edit Binding" : "Add Binding"}</DialogTitle>
+          <DialogDescription>
+            Bind a redacted placeholder to egress requests for specific hosts.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-6">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <FieldLabel tip="Secret config key referenced by the redacted placeholder in templates.">
+                Config Key
+              </FieldLabel>
+              <Input value={configKey} onChange={(event) => setConfigKey(event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <FieldLabel tip="Config uses a stored swarm secret; OAuth uses the selected OAuth app token.">
+                Auth Kind
+              </FieldLabel>
+              <Select
+                value={authKind}
+                onValueChange={(value) => {
+                  const nextAuthKind = value as CredentialAuthKind;
+                  setAuthKind(nextAuthKind);
+                  if (nextAuthKind === "config") setOauthProvider("");
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="config">Config</SelectItem>
+                  <SelectItem value="oauth">OAuth</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {authKind === "oauth" ? (
+            <div className="space-y-2">
+              <FieldLabel tip="OAuth app provider whose token supplies this credential.">
+                OAuth Provider
+              </FieldLabel>
+              <Select value={oauthProvider} onValueChange={setOauthProvider}>
+                <SelectTrigger>
+                  <SelectValue
+                    placeholder={providerOptions.length ? "Select provider" : "No OAuth apps"}
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {providerOptions.map((provider) => (
+                    <SelectItem key={provider} value={provider}>
+                      {provider}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+
+          <div className="space-y-2">
+            <FieldLabel tip="Exact hostnames where this placeholder may be substituted during script egress.">
+              Allowed Hosts
+            </FieldLabel>
+            <TagInput
+              values={allowedHosts}
+              onChange={setAllowedHosts}
+              placeholder="api.example.com uploads.example.com"
+              ariaLabel="Allowed host"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <FieldLabel tip={`Header line to attach at egress. Must include ${placeholder}.`}>
+              Header Template
+            </FieldLabel>
+            <Input
+              value={headerTemplate}
+              onChange={(event) => {
+                setHeaderTemplate(event.target.value);
+                setHeaderManuallyEdited(true);
+              }}
+              className="font-mono text-xs"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <FieldLabel
+              tip={`Query fragment for APIs that expect credentials in the URL. Must include ${placeholder}.`}
+            >
+              Query Template
+            </FieldLabel>
+            <Input
+              value={queryTemplate}
+              onChange={(event) => setQueryTemplate(event.target.value)}
+              placeholder={`access_token=${placeholder}`}
+              className="font-mono text-xs"
+            />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <FieldLabel tip="Visibility scope for this binding. Global applies across the swarm.">
+                Scope
+              </FieldLabel>
+              <Select
+                value={scope}
+                onValueChange={(value) => {
+                  const nextScope = value as ScriptConnectionScope;
+                  setScope(nextScope);
+                  if (nextScope === "global") setScopeId("");
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="global">Global</SelectItem>
+                  <SelectItem value="agent">Agent</SelectItem>
+                  <SelectItem value="repo">Repo</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {scope !== "global" ? (
+              <div className="space-y-2">
+                <FieldLabel tip="UUID of the agent or repo that owns this scoped binding.">
+                  Scope ID
+                </FieldLabel>
+                <Input value={scopeId} onChange={(event) => setScopeId(event.target.value)} />
+              </div>
+            ) : null}
+          </div>
+
+          <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+            <div className="mb-2 text-xs font-medium uppercase text-foreground">
+              Use in a script
+            </div>
+            <p>
+              Use <code className="font-mono text-foreground">{placeholder}</code> in a header or
+              query template. The server substitutes it only at egress, and only for the allowed
+              hosts above.
+            </p>
+          </div>
+
+          <InlineError error={upsert.error} />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={!canSubmit || upsert.isPending}>
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CredentialBindingsSection({
+  bindings,
+  connections,
+  oauthApps,
+  search,
+  scopeFilter,
+  loading,
+}: {
+  bindings: ScriptCredentialBinding[];
+  connections: ScriptConnection[];
+  oauthApps: OAuthAppSummary[];
+  search: string;
+  scopeFilter: ScriptConnectionScope | "all";
+  loading: boolean;
+}) {
   const [open, setOpen] = useState(false);
+  const [editBinding, setEditBinding] = useState<ScriptCredentialBinding | undefined>();
+  const upsert = useUpsertCredentialBinding();
+  const filteredBindings = useMemo(
+    () =>
+      scopeFilter === "all"
+        ? bindings
+        : bindings.filter((binding) => binding.scope === scopeFilter),
+    [bindings, scopeFilter],
+  );
+  const usedByCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const binding of bindings) {
+      const count = connections.filter((connection) => {
+        return (
+          connection.credentialBindingId === binding.id ||
+          connection.credentialBinding?.id === binding.id ||
+          connection.credentialBinding?.configKey === binding.configKey
+        );
+      }).length;
+      counts.set(binding.id, count);
+    }
+    return counts;
+  }, [bindings, connections]);
+
+  const columnDefs = useMemo<ColDef<ScriptCredentialBinding>[]>(
+    () => [
+      {
+        field: "configKey",
+        headerName: "Config Key",
+        minWidth: 170,
+        flex: 1,
+        cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) => (
+          <span className="font-mono text-xs font-semibold">{params.value}</span>
+        ),
+      },
+      {
+        field: "authKind",
+        headerName: "Auth",
+        width: 105,
+        cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) =>
+          params.value ? <AuthKindBadge kind={params.value as CredentialAuthKind} /> : null,
+      },
+      {
+        field: "oauthProvider",
+        headerName: "OAuth Provider",
+        minWidth: 150,
+        cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) => {
+          const provider = params.data?.oauthProvider;
+          if (!provider) return <span className="text-muted-foreground">—</span>;
+          return (
+            <Link
+              to={`/connections/oauth-apps/${encodeURIComponent(provider)}`}
+              className="inline-flex max-w-full items-center gap-1 text-action-default hover:underline"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <span className="truncate">{provider}</span>
+              <ExternalLink className="size-3 shrink-0" />
+            </Link>
+          );
+        },
+      },
+      {
+        field: "allowedHosts",
+        headerName: "Allowed Hosts",
+        minWidth: 210,
+        flex: 1,
+        cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) => (
+          <HostChips hosts={params.data?.allowedHosts ?? []} />
+        ),
+      },
+      {
+        field: "headerTemplate",
+        headerName: "Header Template",
+        minWidth: 230,
+        flex: 1,
+        cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) => (
+          <TemplateCell value={params.data?.headerTemplate} />
+        ),
+      },
+      {
+        field: "queryTemplate",
+        headerName: "Query Template",
+        minWidth: 210,
+        flex: 1,
+        cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) => (
+          <TemplateCell value={params.data?.queryTemplate} />
+        ),
+      },
+      {
+        headerName: "Token",
+        width: 100,
+        cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) =>
+          params.data?.authKind === "oauth" ? (
+            <TokenStatusBadge status={params.data.tokenStatus} />
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          ),
+      },
+      {
+        headerName: "Used By",
+        width: 105,
+        valueGetter: (params) => (params.data ? (usedByCounts.get(params.data.id) ?? 0) : 0),
+        cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) => {
+          const count = params.data ? (usedByCounts.get(params.data.id) ?? 0) : 0;
+          return (
+            <Badge variant={count > 0 ? "secondary" : "outline"} size="tag">
+              {count} used
+            </Badge>
+          );
+        },
+      },
+      {
+        field: "active",
+        headerName: "Active",
+        width: 95,
+        cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) =>
+          params.data ? (
+            <span onClick={(event) => event.stopPropagation()}>
+              <Switch
+                size="sm"
+                checked={params.data.active}
+                onCheckedChange={(active) =>
+                  upsert.mutate({
+                    id: params.data!.id,
+                    configKey: params.data!.configKey,
+                    allowedHosts: params.data!.allowedHosts,
+                    headerTemplate: params.data!.headerTemplate,
+                    queryTemplate: params.data!.queryTemplate,
+                    scope: params.data!.scope,
+                    scopeId: params.data!.scopeId,
+                    active,
+                    authKind: params.data!.authKind,
+                    oauthProvider:
+                      params.data!.authKind === "oauth" ? params.data!.oauthProvider : undefined,
+                  })
+                }
+                disabled={upsert.isPending}
+              />
+            </span>
+          ) : null,
+      },
+      {
+        field: "createdAt",
+        headerName: "Created",
+        width: 140,
+        valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
+      },
+      {
+        field: "updatedAt",
+        headerName: "Updated",
+        width: 140,
+        valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
+      },
+    ],
+    [upsert, usedByCounts],
+  );
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0 gap-3">
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            setEditBinding(undefined);
+            setOpen(true);
+          }}
+        >
+          <Plus className="size-4" />
+          Add Binding
+        </Button>
+      </div>
+      <DataGrid
+        rowData={filteredBindings}
+        columnDefs={columnDefs}
+        quickFilterText={search}
+        loading={loading}
+        emptyMessage="No credential bindings found"
+        paginationQueryKey="credentialBindings"
+        onRowClicked={(event) => {
+          const target = event.event?.target as HTMLElement | null;
+          if (target?.closest("a, button")) return;
+          if (event.data) {
+            setEditBinding(event.data);
+            setOpen(true);
+          }
+        }}
+      />
+      <InlineError error={upsert.error} />
+      <CredentialBindingDialog
+        open={open}
+        onOpenChange={setOpen}
+        binding={editBinding}
+        oauthApps={oauthApps}
+      />
+    </div>
+  );
+}
+
+function OAuthAppsSection({ apps }: { apps: OAuthAppSummary[] }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [editApp, setEditApp] = useState<OAuthAppSummary | undefined>();
   const authorize = useOAuthAuthorizeUrl();
+  const deleteApp = useDeleteOAuthApp();
 
   async function openAuthorize(provider: string) {
     const result = await authorize.mutateAsync(provider);
     window.open(result.authorizeUrl, "_blank", "noopener,noreferrer");
+  }
+
+  async function confirmDelete(provider: string) {
+    await deleteApp.mutateAsync(provider);
+    toast.success("OAuth app deleted");
   }
 
   return (
@@ -491,7 +1354,14 @@ function OAuthAppsSection({ apps }: { apps: OAuthAppSummary[] }) {
           <KeyRound className="size-4 text-muted-foreground" />
           OAuth Apps
         </CardTitle>
-        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            setEditApp(undefined);
+            setOpen(true);
+          }}
+        >
           <Plus className="size-4" />
           Add OAuth App
         </Button>
@@ -506,7 +1376,10 @@ function OAuthAppsSection({ apps }: { apps: OAuthAppSummary[] }) {
             {apps.map((app) => (
               <div
                 key={app.provider}
-                className="grid gap-3 rounded-md border p-3 md:grid-cols-[minmax(120px,1fr)_minmax(220px,2fr)_auto_auto] md:items-center"
+                className="grid cursor-pointer gap-3 rounded-md border p-3 transition-colors hover:bg-muted/40 md:grid-cols-[minmax(120px,1fr)_minmax(220px,2fr)_auto_auto_auto] md:items-center"
+                onClick={() =>
+                  navigate(`/connections/oauth-apps/${encodeURIComponent(app.provider)}`)
+                }
               >
                 <div className="min-w-0">
                   <div className="truncate font-medium">{app.provider}</div>
@@ -514,65 +1387,208 @@ function OAuthAppsSection({ apps }: { apps: OAuthAppSummary[] }) {
                 </div>
                 <div className="truncate text-xs text-muted-foreground">{app.redirectUri}</div>
                 <TokenStatusBadge status={app.tokenStatus} />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => openAuthorize(app.provider)}
-                  disabled={authorize.isPending}
+                <div
+                  className="flex items-center gap-2"
+                  onClick={(event) => event.stopPropagation()}
                 >
-                  Authorize
-                </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openAuthorize(app.provider)}
+                    disabled={authorize.isPending}
+                  >
+                    <ExternalLink className="size-3" />
+                    Authorize
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setEditApp(app);
+                      setOpen(true);
+                    }}
+                  >
+                    Edit
+                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button size="icon-sm" variant="ghost" aria-label={`Delete ${app.provider}`}>
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete OAuth app?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This deletes the app configuration and all stored OAuth tokens for{" "}
+                          {app.provider}.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          variant="destructive"
+                          onClick={() => confirmDelete(app.provider)}
+                          disabled={deleteApp.isPending}
+                        >
+                          Delete
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
               </div>
             ))}
           </div>
         )}
-        <InlineError error={authorize.error} />
+        <InlineError error={authorize.error ?? deleteApp.error} />
       </CardContent>
-      <OAuthAppDialog open={open} onOpenChange={setOpen} />
+      <OAuthAppDialog open={open} onOpenChange={setOpen} app={editApp} />
     </Card>
   );
 }
 
-function OAuthAppDialog({
+function TagInput({
+  values,
+  onChange,
+  placeholder,
+  ariaLabel,
+}: {
+  values: string[];
+  onChange: (values: string[]) => void;
+  placeholder: string;
+  ariaLabel: string;
+}) {
+  const [draft, setDraft] = useState("");
+
+  function addValues(value: string) {
+    const next = uniqueStrings([...values, ...splitList(value)]);
+    onChange(next);
+    setDraft("");
+  }
+
+  return (
+    <div className="flex min-h-10 flex-wrap items-center gap-2 rounded-md border px-2 py-1.5">
+      {values.map((value) => (
+        <Badge key={value} variant="outline" className="gap-1 pr-1 normal-case" size="tag">
+          {value}
+          <button
+            type="button"
+            className="rounded-sm p-0.5 hover:bg-muted"
+            onClick={() => onChange(values.filter((item) => item !== value))}
+            aria-label={`Remove ${value}`}
+          >
+            <X className="size-3" />
+          </button>
+        </Badge>
+      ))}
+      <input
+        className="min-w-32 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+        value={draft}
+        aria-label={ariaLabel}
+        placeholder={values.length ? "" : placeholder}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            addValues(draft);
+          } else if (event.key === "Backspace" && !draft && values.length) {
+            onChange(values.slice(0, -1));
+          }
+        }}
+        onPaste={(event) => {
+          const text = event.clipboardData.getData("text");
+          if (splitList(text).length > 1) {
+            event.preventDefault();
+            addValues(text);
+          }
+        }}
+        onBlur={() => {
+          if (draft.trim()) addValues(draft);
+        }}
+      />
+    </div>
+  );
+}
+
+function ScopeTagInput({
+  scopes,
+  onChange,
+}: {
+  scopes: string[];
+  onChange: (scopes: string[]) => void;
+}) {
+  return (
+    <TagInput
+      values={scopes}
+      onChange={onChange}
+      placeholder="read write"
+      ariaLabel="OAuth scope"
+    />
+  );
+}
+
+export function OAuthAppDialog({
   open,
   onOpenChange,
+  app,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  app?: OAuthAppSummary;
 }) {
   const upsert = useUpsertOAuthApp();
+  const discover = useDiscoverOAuthApp();
   const [provider, setProvider] = useState("");
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [authorizeUrl, setAuthorizeUrl] = useState("");
   const [tokenUrl, setTokenUrl] = useState("");
-  const [scopes, setScopes] = useState("");
+  const [scopes, setScopes] = useState<string[]>([]);
+  const [discoverUrl, setDiscoverUrl] = useState("");
   const [tokenAuthStyle, setTokenAuthStyle] = useState<"body" | "basic">("body");
   const [tokenBodyFormat, setTokenBodyFormat] = useState<"form" | "json">("form");
   const [extraParams, setExtraParams] = useState<Array<{ key: string; value: string }>>([]);
+  const isEdit = Boolean(app);
 
   useEffect(() => {
-    if (!open) {
-      setProvider("");
-      setClientId("");
-      setClientSecret("");
-      setAuthorizeUrl("");
-      setTokenUrl("");
-      setScopes("");
-      setTokenAuthStyle("body");
-      setTokenBodyFormat("form");
-      setExtraParams([]);
+    if (!open) return;
+    setProvider(app?.provider ?? "");
+    setClientId(app?.clientId ?? "");
+    setClientSecret("");
+    setAuthorizeUrl(app?.authorizeUrl ?? "");
+    setTokenUrl(app?.tokenUrl ?? "");
+    setScopes(app?.scopes ?? []);
+    setDiscoverUrl("");
+    setTokenAuthStyle(app?.tokenAuthStyle ?? "body");
+    setTokenBodyFormat(app?.tokenBodyFormat ?? "form");
+    setExtraParams(
+      app?.extraParams
+        ? Object.entries(app.extraParams).map(([key, value]) => ({ key, value }))
+        : [],
+    );
+  }, [open, app]);
+
+  async function discoverFromUrl() {
+    try {
+      const result = await discover.mutateAsync(discoverUrl.trim());
+      setAuthorizeUrl(result.authorizeUrl);
+      setTokenUrl(result.tokenUrl);
+      setScopes((current) => uniqueStrings([...current, ...result.scopes]));
+      toast.success("OAuth endpoints discovered");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "OAuth discovery failed");
     }
-  }, [open]);
+  }
 
   async function submit() {
     await upsert.mutateAsync({
       provider,
       clientId,
-      clientSecret,
+      ...(clientSecret.trim() ? { clientSecret: clientSecret.trim() } : {}),
       authorizeUrl,
       tokenUrl,
-      scopes: splitList(scopes),
+      scopes,
       tokenAuthStyle,
       tokenBodyFormat,
       extraParams: Object.fromEntries(
@@ -587,57 +1603,97 @@ function OAuthAppDialog({
   const canSubmit =
     provider.trim() &&
     clientId.trim() &&
-    clientSecret.trim() &&
+    (isEdit || clientSecret.trim()) &&
     authorizeUrl.trim() &&
-    tokenUrl.trim() &&
-    splitList(scopes).length > 0;
+    tokenUrl.trim();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Add OAuth App</DialogTitle>
-          <DialogDescription>Client secrets are write-only.</DialogDescription>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader className="pb-2">
+          <DialogTitle>{isEdit ? "Edit OAuth App" : "Add OAuth App"}</DialogTitle>
+          <DialogDescription>
+            Client secrets are write-only. Existing secrets are never shown again.
+          </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4">
+        <div className="space-y-5">
+          <div className="space-y-2 rounded-md border p-4">
+            <FieldLabel tip="Paste the provider base URL or issuer URL; the server checks OAuth and OIDC well-known metadata.">
+              Discover from URL
+            </FieldLabel>
+            <div className="flex gap-2">
+              <Input
+                value={discoverUrl}
+                onChange={(event) => setDiscoverUrl(event.target.value)}
+                placeholder="https://accounts.example.com"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={discoverFromUrl}
+                disabled={!discoverUrl.trim() || discover.isPending}
+              >
+                Discover
+              </Button>
+            </div>
+          </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label>Provider</Label>
-              <Input value={provider} onChange={(event) => setProvider(event.target.value)} />
+              <FieldLabel tip="Stable provider slug used by credential bindings, e.g. github or notion.">
+                Provider
+              </FieldLabel>
+              <Input
+                value={provider}
+                onChange={(event) => setProvider(event.target.value)}
+                disabled={isEdit}
+              />
             </div>
             <div className="space-y-2">
-              <Label>Client ID</Label>
+              <FieldLabel tip="OAuth client ID from the provider's developer console.">
+                Client ID
+              </FieldLabel>
               <Input value={clientId} onChange={(event) => setClientId(event.target.value)} />
             </div>
           </div>
           <div className="space-y-2">
-            <Label>Client Secret</Label>
+            <FieldLabel tip="From the provider's developer console. Stored write-only - never shown again.">
+              Client Secret
+            </FieldLabel>
             <Input
               type="password"
               value={clientSecret}
               onChange={(event) => setClientSecret(event.target.value)}
+              placeholder={isEdit ? "unchanged" : undefined}
             />
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label>Authorize URL</Label>
+              <FieldLabel tip="Provider authorization endpoint; usually in OAuth app or issuer metadata.">
+                Authorize URL
+              </FieldLabel>
               <Input
                 value={authorizeUrl}
                 onChange={(event) => setAuthorizeUrl(event.target.value)}
               />
             </div>
             <div className="space-y-2">
-              <Label>Token URL</Label>
+              <FieldLabel tip="Provider token endpoint used to exchange and refresh OAuth tokens.">
+                Token URL
+              </FieldLabel>
               <Input value={tokenUrl} onChange={(event) => setTokenUrl(event.target.value)} />
             </div>
           </div>
           <div className="space-y-2">
-            <Label>Scopes</Label>
-            <Input value={scopes} onChange={(event) => setScopes(event.target.value)} />
+            <FieldLabel tip="Optional scopes requested during authorization; paste or type and press Enter to add tags.">
+              Scopes
+            </FieldLabel>
+            <ScopeTagInput scopes={scopes} onChange={setScopes} />
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label>Token Auth</Label>
+              <FieldLabel tip="How client credentials are sent to the token endpoint; provider docs usually call this client authentication.">
+                Token Auth
+              </FieldLabel>
               <Select
                 value={tokenAuthStyle}
                 onValueChange={(value) => setTokenAuthStyle(value as "body" | "basic")}
@@ -652,7 +1708,9 @@ function OAuthAppDialog({
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Body Format</Label>
+              <FieldLabel tip="Token request body encoding expected by the provider: form-encoded or JSON.">
+                Body Format
+              </FieldLabel>
               <Select
                 value={tokenBodyFormat}
                 onValueChange={(value) => setTokenBodyFormat(value as "form" | "json")}
@@ -670,7 +1728,9 @@ function OAuthAppDialog({
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label>Extra Params</Label>
+              <FieldLabel tip="Optional static authorization parameters such as audience, resource, prompt, or access_type.">
+                Extra Params
+              </FieldLabel>
               <Button
                 type="button"
                 size="xs"
@@ -712,13 +1772,13 @@ function OAuthAppDialog({
                     }
                     aria-label="Remove extra parameter"
                   >
-                    ×
+                    <X className="size-4" />
                   </Button>
                 </div>
               ))}
             </div>
           </div>
-          <InlineError error={upsert.error} />
+          <InlineError error={upsert.error ?? discover.error} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -735,6 +1795,7 @@ function OAuthAppDialog({
 
 function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string }) {
   const { data: agents } = useAgents(false);
+  const { data: typeDefs } = useScriptTypeDefs();
   const run = useRunInlineScript();
   const [source, setSource] = useState(PLAYGROUND_SOURCE);
   const [agentId, setAgentId] = useState(defaultAgentId ?? "");
@@ -775,10 +1836,12 @@ function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string }) {
         </div>
       </CardHeader>
       <CardContent className="grid gap-3">
-        <Textarea
-          value={source}
-          onChange={(event) => setSource(event.target.value)}
-          className="min-h-36 font-mono text-xs"
+        <ScriptSourceEditor
+          source={source}
+          onChange={setSource}
+          readOnly={false}
+          typeDefs={typeDefs}
+          className="h-72"
         />
         <InlineError error={run.error} />
         {result ? (
@@ -810,6 +1873,7 @@ function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string }) {
 }
 
 export default function ConnectionsPage() {
+  const navigate = useNavigate();
   const { searchParams, setParam } = useUrlSearchState();
   const search = readStringParam(searchParams, "search");
   const kindParam = readStringParam(searchParams, "kind", "all");
@@ -826,7 +1890,7 @@ export default function ConnectionsPage() {
     kind: kindFilter,
     scope: scopeFilter,
   });
-  const { data: bindings = [] } = useCredentialBindings();
+  const { data: bindings = [], isLoading: bindingsLoading } = useCredentialBindings();
   const { data: oauthApps = [] } = useOAuthApps();
   const { data: mcpServersData } = useMcpServers();
   const { data: agents } = useAgents(false);
@@ -951,65 +2015,93 @@ export default function ConnectionsPage() {
         }
       />
 
-      <div className="flex flex-wrap items-center gap-3 shrink-0">
-        <Input
-          placeholder="Search connections..."
-          value={search}
-          onChange={(event) =>
-            setParam("search", event.target.value, { reset: ["connectionsPage"] })
-          }
-          className="max-w-xs"
-        />
-        <Select
-          value={kindFilter}
-          onValueChange={(value) =>
-            setParam("kind", value, { defaultValue: "all", reset: ["connectionsPage"] })
-          }
-        >
-          <SelectTrigger className="w-[140px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Kinds</SelectItem>
-            <SelectItem value="openapi">OpenAPI</SelectItem>
-            <SelectItem value="graphql">GraphQL</SelectItem>
-            <SelectItem value="mcp">MCP</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={scopeFilter}
-          onValueChange={(value) =>
-            setParam("scope", value, { defaultValue: "all", reset: ["connectionsPage"] })
-          }
-        >
-          <SelectTrigger className="w-[140px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Scopes</SelectItem>
-            <SelectItem value="global">Global</SelectItem>
-            <SelectItem value="agent">Agent</SelectItem>
-            <SelectItem value="repo">Repo</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
       <Tabs defaultValue="connections" className="flex flex-col flex-1 min-h-0">
-        <TabsList className="w-fit">
-          <TabsTrigger value="connections">Connections</TabsTrigger>
-          <TabsTrigger value="oauth">OAuth Apps</TabsTrigger>
-          <TabsTrigger value="playground">Playground</TabsTrigger>
-        </TabsList>
+        <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <TabsList className="w-full justify-start overflow-x-auto sm:w-fit">
+            <TabsTrigger value="connections">Connections</TabsTrigger>
+            <TabsTrigger value="bindings">Bindings</TabsTrigger>
+            <TabsTrigger value="oauth">OAuth Apps</TabsTrigger>
+            <TabsTrigger value="playground">Playground</TabsTrigger>
+          </TabsList>
+          <div className="flex w-full flex-col gap-2 md:flex-row md:items-center md:justify-end lg:w-auto">
+            <div className="relative w-full md:w-72">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search connections..."
+                value={search}
+                onChange={(event) =>
+                  setParam("search", event.target.value, {
+                    reset: ["connectionsPage", "credentialBindingsPage"],
+                  })
+                }
+                className="pl-9"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2 md:flex md:items-center">
+              <Select
+                value={kindFilter}
+                onValueChange={(value) =>
+                  setParam("kind", value, {
+                    defaultValue: "all",
+                    reset: ["connectionsPage", "credentialBindingsPage"],
+                  })
+                }
+              >
+                <SelectTrigger className="w-full md:w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Kinds</SelectItem>
+                  <SelectItem value="openapi">OpenAPI</SelectItem>
+                  <SelectItem value="graphql">GraphQL</SelectItem>
+                  <SelectItem value="mcp">MCP</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={scopeFilter}
+                onValueChange={(value) =>
+                  setParam("scope", value, {
+                    defaultValue: "all",
+                    reset: ["connectionsPage", "credentialBindingsPage"],
+                  })
+                }
+              >
+                <SelectTrigger className="w-full md:w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Scopes</SelectItem>
+                  <SelectItem value="global">Global</SelectItem>
+                  <SelectItem value="agent">Agent</SelectItem>
+                  <SelectItem value="repo">Repo</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
         <TabsContent value="connections" className="flex flex-col flex-1 min-h-0 mt-3">
           <DataGrid
             rowData={connections ?? []}
             columnDefs={columnDefs}
             quickFilterText={search}
+            onRowClicked={(event) => {
+              if (event.data?.id) navigate(`/connections/${event.data.id}`);
+            }}
             loading={isLoading}
             emptyMessage="No script connections found"
             paginationQueryKey="connections"
           />
           <InlineError error={refreshConnection.error ?? setEnabled.error} />
+        </TabsContent>
+        <TabsContent value="bindings" className="flex flex-col flex-1 min-h-0 mt-3">
+          <CredentialBindingsSection
+            bindings={bindings}
+            connections={connections ?? []}
+            oauthApps={oauthApps}
+            search={search}
+            scopeFilter={scopeFilter}
+            loading={bindingsLoading}
+          />
         </TabsContent>
         <TabsContent value="oauth" className="mt-3">
           <OAuthAppsSection apps={oauthApps} />

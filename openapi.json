@@ -9860,6 +9860,39 @@
         }
       }
     },
+    "/api/script-connections/{id}": {
+      "get": {
+        "operationId": "script_connections_get",
+        "summary": "Get script connection detail",
+        "tags": [
+          "Script Connections"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Script connection detail"
+          },
+          "404": {
+            "description": "Script connection not found"
+          }
+        }
+      }
+    },
     "/api/script-connections/{id}/refresh": {
       "post": {
         "operationId": "script_connections_refresh",
@@ -10028,6 +10061,10 @@
                     ],
                     "format": "uuid"
                   },
+                  "active": {
+                    "type": "boolean",
+                    "default": true
+                  },
                   "authKind": {
                     "type": "string",
                     "enum": [
@@ -10126,7 +10163,8 @@
                     "items": {
                       "type": "string",
                       "minLength": 1
-                    }
+                    },
+                    "default": []
                   },
                   "extraParams": {
                     "type": "object",
@@ -10152,10 +10190,8 @@
                 "required": [
                   "provider",
                   "clientId",
-                  "clientSecret",
                   "authorizeUrl",
-                  "tokenUrl",
-                  "scopes"
+                  "tokenUrl"
                 ]
               }
             }
@@ -10170,6 +10206,87 @@
           },
           "403": {
             "description": "Only the lead agent can manage script connections"
+          }
+        }
+      }
+    },
+    "/api/oauth-apps/discover": {
+      "post": {
+        "operationId": "oauth_apps_discover",
+        "summary": "Discover OAuth endpoints from provider metadata",
+        "tags": [
+          "Script Connections"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Discovered OAuth metadata"
+          },
+          "400": {
+            "description": "Discovery failed"
+          },
+          "403": {
+            "description": "Only the lead agent can manage script connections"
+          }
+        }
+      }
+    },
+    "/api/oauth-apps/{provider}": {
+      "delete": {
+        "operationId": "oauth_apps_delete",
+        "summary": "Delete an OAuth app and its tokens",
+        "tags": [
+          "Script Connections"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth app deleted"
+          },
+          "403": {
+            "description": "Only the lead agent can manage script connections"
+          },
+          "404": {
+            "description": "OAuth app not found"
           }
         }
       }
@@ -10208,6 +10325,28 @@
           },
           "404": {
             "description": "OAuth app not found"
+          }
+        }
+      }
+    },
+    "/api/integrations-catalog": {
+      "get": {
+        "operationId": "integrations_catalog_list",
+        "summary": "Proxy integrations.sh catalog entries",
+        "tags": [
+          "Script Connections"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Integrations catalog entries"
+          },
+          "502": {
+            "description": "Catalog upstream unavailable"
           }
         }
       }

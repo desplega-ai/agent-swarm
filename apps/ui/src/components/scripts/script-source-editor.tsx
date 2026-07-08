@@ -32,9 +32,12 @@ function registerScriptTypeDefs(monaco: Monaco, typeDefs: ScriptTypeDefs) {
 
 interface ScriptSourceEditorProps {
   source: string;
+  onChange?: (source: string) => void;
   /** SDK + stdlib `.d.ts` from `GET /api/scripts/type-defs`; optional while loading. */
   typeDefs?: ScriptTypeDefs;
+  readOnly?: boolean;
   className?: string;
+  height?: string;
 }
 
 /**
@@ -43,7 +46,14 @@ interface ScriptSourceEditorProps {
  * types (LSP-like quick info). Self-contained — the Versions tab reuses it
  * with a different `source`.
  */
-export function ScriptSourceEditor({ source, typeDefs, className }: ScriptSourceEditorProps) {
+export function ScriptSourceEditor({
+  source,
+  onChange,
+  typeDefs,
+  readOnly = true,
+  className,
+  height = "100%",
+}: ScriptSourceEditorProps) {
   const { theme } = useTheme();
   const monacoRef = useRef<Monaco | null>(null);
 
@@ -69,11 +79,12 @@ export function ScriptSourceEditor({ source, typeDefs, className }: ScriptSource
         language="typescript"
         theme={theme === "dark" ? "github-dark" : "github-light"}
         value={source}
+        onChange={(value) => onChange?.(value ?? "")}
         beforeMount={handleBeforeMount}
-        height="100%"
+        height={height}
         width="100%"
         options={{
-          readOnly: true,
+          readOnly,
           minimap: { enabled: false },
           scrollBeyondLastLine: false,
           fontSize: 12,

@@ -3,7 +3,12 @@ import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { closeDb, createAgent, getDb, initDb, upsertSwarmConfig } from "../be/db";
-import { upsertOAuthApp } from "../be/db-queries/oauth";
+import {
+  getOAuthApp,
+  getOAuthTokens,
+  storeOAuthTokens,
+  upsertOAuthApp,
+} from "../be/db-queries/oauth";
 import { upsertCredentialBinding } from "../be/script-connections";
 import { handleScriptConnections } from "../http/script-connections";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -13,6 +18,7 @@ const SECRET_VALUE = "vendor-secret-should-not-leak";
 
 let leadAgentId: string;
 let workerAgentId: string;
+const originalFetch = globalThis.fetch;
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -117,11 +123,13 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  globalThis.fetch = originalFetch;
   closeDb();
   await removeDbFiles(TEST_DB_PATH);
 });
 
 beforeEach(() => {
+  globalThis.fetch = originalFetch;
   getDb().run("DELETE FROM script_connections");
   getDb().run("DELETE FROM script_credential_bindings");
   getDb().run("DELETE FROM oauth_tokens");
@@ -238,5 +246,196 @@ describe("/api/script-connections HTTP", () => {
     expect(body.oauthApps[0]?.clientId).toBe("vendor-client");
     expect(body.oauthApps[0]).not.toHaveProperty("clientSecret");
     expect(JSON.stringify(body)).not.toContain("oauth-client-secret-should-not-leak");
+  });
+
+  test("detail returns operations and generated types without secrets", async () => {
+    upsertSwarmConfig({
+      scope: "global",
+      key: "VENDOR_TOKEN",
+      value: SECRET_VALUE,
+      isSecret: true,
+    });
+    const binding = upsertCredentialBinding({
+      configKey: "VENDOR_TOKEN",
+      allowedHosts: ["api.vendor.test"],
+      headerTemplate: "Authorization: Bearer [REDACTED:VENDOR_TOKEN]",
+    });
+
+    const create = await dispatch("/api/script-connections", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        kind: "openapi",
+        slug: "vendor",
+        baseUrl: "https://api.vendor.test",
+        allowedHosts: ["api.vendor.test"],
+        credentialBindingId: binding.id,
+        openapiSpecJson: inlineOpenApiSpec(),
+      },
+    });
+    expect(create.status).toBe(200);
+    const created = (await create.json()) as { connection: { id: string } };
+
+    const res = await dispatch(`/api/script-connections/${created.connection.id}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      connection: {
+        operations: Array<{ name: string; method: string; path: string }>;
+        generatedTypes: string;
+        specSummary?: { title?: string; version?: string; pathCount: number };
+        openapiSpecJson?: string;
+        generatedRuntimeJson?: string;
+      };
+    };
+    expect(body.connection.operations).toEqual([
+      { name: "listItems", method: "GET", path: "/items" },
+    ]);
+    expect(body.connection.generatedTypes).toContain("listItems");
+    expect(body.connection.specSummary).toEqual({
+      title: "Vendor",
+      version: "1.0.0",
+      pathCount: 1,
+    });
+    expect(body.connection.openapiSpecJson).toBeUndefined();
+    expect(body.connection.generatedRuntimeJson).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain(SECRET_VALUE);
+    expect(JSON.stringify(body)).not.toContain("[REDACTED:VENDOR_TOKEN]");
+  });
+
+  test("DELETE oauth app removes app and tokens", async () => {
+    upsertOAuthApp("vendor_oauth", {
+      clientId: "vendor-client",
+      clientSecret: "oauth-client-secret",
+      authorizeUrl: "https://oauth.vendor.test/authorize",
+      tokenUrl: "https://oauth.vendor.test/token",
+      redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
+      scopes: "read,write",
+    });
+    storeOAuthTokens("vendor_oauth", {
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      expiresAt: "2035-01-01T00:00:00.000Z",
+      scope: "read write",
+    });
+
+    const res = await dispatch("/api/oauth-apps/vendor_oauth", {
+      method: "DELETE",
+      agentId: leadAgentId,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true });
+    expect(getOAuthApp("vendor_oauth")).toBeNull();
+    expect(getOAuthTokens("vendor_oauth")).toBeNull();
+  });
+
+  test("oauth app upsert without clientSecret keeps existing secret", async () => {
+    upsertOAuthApp("vendor_oauth", {
+      clientId: "vendor-client",
+      clientSecret: "existing-client-secret",
+      authorizeUrl: "https://oauth.vendor.test/authorize",
+      tokenUrl: "https://oauth.vendor.test/token",
+      redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
+      scopes: "read",
+    });
+
+    const res = await dispatch("/api/oauth-apps", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        provider: "vendor_oauth",
+        clientId: "updated-client",
+        authorizeUrl: "https://oauth.vendor.test/oauth2/authorize",
+        tokenUrl: "https://oauth.vendor.test/oauth2/token",
+        scopes: [],
+      },
+    });
+    expect(res.status).toBe(200);
+    const app = getOAuthApp("vendor_oauth");
+    expect(app?.clientId).toBe("updated-client");
+    expect(app?.clientSecret).toBe("existing-client-secret");
+    expect(app?.scopes).toBe("");
+    expect(JSON.stringify(await res.json())).not.toContain("existing-client-secret");
+  });
+
+  test("discover endpoint parses mocked well-known OAuth JSON", async () => {
+    const requested: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requested.push(url);
+      if (url === "https://issuer.vendor.test/.well-known/oauth-authorization-server") {
+        return new Response(
+          JSON.stringify({
+            authorization_endpoint: "https://issuer.vendor.test/oauth/authorize",
+            token_endpoint: "https://issuer.vendor.test/oauth/token",
+            scopes_supported: ["read", "write"],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    const res = await dispatch("/api/oauth-apps/discover", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: { url: "https://issuer.vendor.test" },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      authorizeUrl: "https://issuer.vendor.test/oauth/authorize",
+      tokenUrl: "https://issuer.vendor.test/oauth/token",
+      scopes: ["read", "write"],
+      sourceUrl: "https://issuer.vendor.test/.well-known/oauth-authorization-server",
+    });
+    expect(requested).toEqual([
+      "https://issuer.vendor.test/.well-known/oauth-authorization-server",
+    ]);
+  });
+
+  test("integrations catalog proxy filters cli entries", async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe("https://integrations.sh/api.json");
+      return new Response(
+        JSON.stringify([
+          {
+            id: "stripe",
+            kind: "openapi",
+            slug: "stripe",
+            name: "Stripe",
+            description: "Payments API",
+            url: "https://stripe.com",
+            icon: "https://stripe.com/icon.png",
+            domain: "stripe.com",
+            categories: ["payments"],
+          },
+          {
+            id: "stripe-cli",
+            kind: "cli",
+            slug: "stripeCli",
+            name: "Stripe CLI",
+          },
+        ]),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const res = await dispatch("/api/integrations-catalog");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      entries: Array<{ id: string; kind: string; slug: string; name: string }>;
+    };
+    expect(body.entries).toEqual([
+      {
+        id: "stripe",
+        kind: "openapi",
+        slug: "stripe",
+        name: "Stripe",
+        description: "Payments API",
+        url: "https://stripe.com",
+        icon: "https://stripe.com/icon.png",
+        domain: "stripe.com",
+        categories: ["payments"],
+      },
+    ]);
   });
 });

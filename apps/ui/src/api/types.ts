@@ -1193,8 +1193,21 @@ export interface ScriptConnection {
   updatedBy: string | null;
 }
 
+export interface ScriptConnectionDetail extends ScriptConnection {
+  operations: Array<{ name: string; method: string; path: string }>;
+  tools: Array<{ name: string; description?: string }>;
+  graphql: boolean;
+  generatedTypes: string;
+  specSummary?: { title?: string; version?: string; pathCount: number };
+  specPreview?: { json: string; truncated: boolean };
+}
+
 export interface ScriptConnectionsResponse {
   connections: ScriptConnection[];
+}
+
+export interface ScriptConnectionDetailResponse {
+  connection: ScriptConnectionDetail;
 }
 
 export type UpsertScriptConnectionInput =
@@ -1253,6 +1266,7 @@ export interface UpsertCredentialBindingInput {
   queryTemplate?: string;
   scope?: ScriptConnectionScope;
   scopeId?: string | null;
+  active?: boolean;
   authKind?: CredentialAuthKind;
   oauthProvider?: string;
 }
@@ -1269,6 +1283,7 @@ export interface OAuthAppSummary {
   tokenAuthStyle: "body" | "basic";
   tokenBodyFormat: "form" | "json";
   tokenStatus: OAuthBindingTokenStatus;
+  expiresAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1276,13 +1291,37 @@ export interface OAuthAppSummary {
 export interface UpsertOAuthAppInput {
   provider: string;
   clientId: string;
-  clientSecret: string;
+  clientSecret?: string;
   authorizeUrl: string;
   tokenUrl: string;
-  scopes: string[];
+  scopes?: string[];
   extraParams?: Record<string, string>;
   tokenAuthStyle?: "body" | "basic";
   tokenBodyFormat?: "form" | "json";
+}
+
+export interface OAuthAppDiscoveryResult {
+  authorizeUrl: string;
+  tokenUrl: string;
+  scopes: string[];
+  sourceUrl: string;
+}
+
+export interface IntegrationsCatalogEntry {
+  id: string;
+  kind: ScriptConnectionKind;
+  slug: string;
+  name: string;
+  description: string;
+  url: string;
+  icon: string | null;
+  domain: string;
+  categories: string[];
+}
+
+export interface IntegrationsCatalogResponse {
+  entries: IntegrationsCatalogEntry[];
+  cachedAt: string;
 }
 
 export interface ScriptRunInlineResult {

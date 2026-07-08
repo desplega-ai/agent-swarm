@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "@/be/audit-user";
 import { getAgentById, getDb } from "@/be/db";
-import { upsertOAuthApp } from "@/be/db-queries/oauth";
+import { deleteOAuthTokens, getOAuthApp, upsertOAuthApp } from "@/be/db-queries/oauth";
 import {
   getOAuthBindingTokenStatus,
   getOAuthProviderConfig,
@@ -93,6 +93,7 @@ const credentialBindingBodySchema = z.object({
   queryTemplate: z.string().min(1).optional(),
   scope: scopeSchema.default("global").optional(),
   scopeId: z.string().uuid().nullable().optional(),
+  active: z.boolean().default(true).optional(),
   authKind: z.enum(["config", "oauth"]).default("config").optional(),
   oauthProvider: providerSchema.optional(),
 });
@@ -100,13 +101,17 @@ const credentialBindingBodySchema = z.object({
 const oauthAppBodySchema = z.object({
   provider: providerSchema,
   clientId: z.string().min(1),
-  clientSecret: z.string().min(1),
+  clientSecret: z.string().min(1).optional(),
   authorizeUrl: z.string().url(),
   tokenUrl: z.string().url(),
-  scopes: z.array(z.string().min(1)),
+  scopes: z.array(z.string().min(1)).default([]).optional(),
   extraParams: z.record(z.string(), z.string()).optional(),
   tokenAuthStyle: z.enum(["body", "basic"]).optional(),
   tokenBodyFormat: z.enum(["form", "json"]).optional(),
+});
+
+const discoverOAuthAppBodySchema = z.object({
+  url: z.string().url(),
 });
 
 const listConnectionsRoute = route({
@@ -122,6 +127,20 @@ const listConnectionsRoute = route({
   responses: {
     200: { description: "Script connections" },
     400: { description: "Validation error" },
+  },
+});
+
+const getConnectionRoute = route({
+  method: "get",
+  path: "/api/script-connections/{id}",
+  pattern: ["api", "script-connections", null],
+  operationId: "script_connections_get",
+  summary: "Get script connection detail",
+  tags: ["Script Connections"],
+  params: idParamsSchema,
+  responses: {
+    200: { description: "Script connection detail" },
+    404: { description: "Script connection not found" },
   },
 });
 
@@ -231,6 +250,38 @@ const upsertOAuthAppRoute = route({
   rbac: { permission: "script-connection.manage" },
 });
 
+const discoverOAuthAppRoute = route({
+  method: "post",
+  path: "/api/oauth-apps/discover",
+  pattern: ["api", "oauth-apps", "discover"],
+  operationId: "oauth_apps_discover",
+  summary: "Discover OAuth endpoints from provider metadata",
+  tags: ["Script Connections"],
+  body: discoverOAuthAppBodySchema,
+  responses: {
+    200: { description: "Discovered OAuth metadata" },
+    400: { description: "Discovery failed" },
+    403: { description: "Only the lead agent can manage script connections" },
+  },
+  rbac: { permission: "script-connection.manage" },
+});
+
+const deleteOAuthAppRoute = route({
+  method: "delete",
+  path: "/api/oauth-apps/{provider}",
+  pattern: ["api", "oauth-apps", null],
+  operationId: "oauth_apps_delete",
+  summary: "Delete an OAuth app and its tokens",
+  tags: ["Script Connections"],
+  params: providerParamsSchema,
+  responses: {
+    200: { description: "OAuth app deleted" },
+    403: { description: "Only the lead agent can manage script connections" },
+    404: { description: "OAuth app not found" },
+  },
+  rbac: { permission: "script-connection.manage" },
+});
+
 const authorizeUrlRoute = route({
   method: "post",
   path: "/api/oauth-apps/{provider}/authorize-url",
@@ -245,6 +296,19 @@ const authorizeUrlRoute = route({
     404: { description: "OAuth app not found" },
   },
   rbac: { permission: "script-connection.manage" },
+});
+
+const integrationsCatalogRoute = route({
+  method: "get",
+  path: "/api/integrations-catalog",
+  pattern: ["api", "integrations-catalog"],
+  operationId: "integrations_catalog_list",
+  summary: "Proxy integrations.sh catalog entries",
+  tags: ["Script Connections"],
+  responses: {
+    200: { description: "Integrations catalog entries" },
+    502: { description: "Catalog upstream unavailable" },
+  },
 });
 
 type BindingSummary = {
@@ -268,6 +332,15 @@ type DecoratedConnection = Omit<
   credentialBinding: BindingSummary | null;
 };
 
+type ConnectionDetail = DecoratedConnection & {
+  operations: Array<{ name: string; method: string; path: string }>;
+  tools: Array<{ name: string; description?: string }>;
+  graphql: boolean;
+  generatedTypes: string;
+  specSummary?: { title?: string; version?: string; pathCount: number };
+  specPreview?: { json: string; truncated: boolean };
+};
+
 type OAuthAppRow = {
   id: string;
   provider: string;
@@ -277,9 +350,32 @@ type OAuthAppRow = {
   redirectUri: string;
   scopes: string;
   metadata: string;
+  tokenExpiresAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+type IntegrationsCatalogEntry = {
+  id: string;
+  kind: string;
+  slug: string;
+  name: string;
+  description: string;
+  url: string;
+  icon: string | null;
+  domain: string;
+  categories: string[];
+};
+
+const DISCOVERY_TIMEOUT_MS = 10_000;
+const INTEGRATIONS_CATALOG_TIMEOUT_MS = 15_000;
+const INTEGRATIONS_CATALOG_TTL_MS = 60 * 60 * 1000;
+const SPEC_PREVIEW_MAX_BYTES = 50 * 1024;
+
+let integrationsCatalogCache: {
+  expiresAtMs: number;
+  payload: { entries: IntegrationsCatalogEntry[]; cachedAt: string };
+} | null = null;
 
 function singleHeader(req: IncomingMessage, name: string): string | undefined {
   const raw = req.headers[name];
@@ -361,6 +457,88 @@ function runtimeCounts(connection: ScriptConnectionRecord): {
   } catch {
     return { operationCount: 0, toolCount: 0 };
   }
+}
+
+function parseRecord(value: string | null): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function connectionDetail(connection: ScriptConnectionRecord): ConnectionDetail {
+  const decorated = decorateConnections([connection])[0];
+  if (!decorated) throw new Error("Failed to decorate connection detail.");
+
+  const runtime = parseRecord(connection.generatedRuntimeJson);
+  const operations = Array.isArray(runtime?.operations)
+    ? runtime.operations
+        .filter((operation): operation is Record<string, unknown> => {
+          return operation !== null && typeof operation === "object" && !Array.isArray(operation);
+        })
+        .map((operation) => ({
+          name: String(operation.name ?? ""),
+          method: String(operation.method ?? ""),
+          path: String(operation.path ?? ""),
+        }))
+        .filter((operation) => operation.name && operation.method && operation.path)
+    : [];
+  const tools = Array.isArray(runtime?.tools)
+    ? runtime.tools
+        .filter((tool): tool is Record<string, unknown> => {
+          return tool !== null && typeof tool === "object" && !Array.isArray(tool);
+        })
+        .map((tool) => ({
+          name: String(tool.name ?? ""),
+          ...(typeof tool.description === "string" ? { description: tool.description } : {}),
+        }))
+        .filter((tool) => tool.name)
+    : [];
+
+  const detail: ConnectionDetail = {
+    ...decorated,
+    operations,
+    tools,
+    graphql: connection.kind === "graphql",
+    generatedTypes: connection.generatedTypes ?? "",
+  };
+
+  if (connection.kind === "openapi" && connection.openapiSpecJson) {
+    try {
+      const spec = JSON.parse(connection.openapiSpecJson) as Record<string, unknown>;
+      const info =
+        spec.info && typeof spec.info === "object" && !Array.isArray(spec.info)
+          ? (spec.info as Record<string, unknown>)
+          : {};
+      const paths =
+        spec.paths && typeof spec.paths === "object" && !Array.isArray(spec.paths)
+          ? (spec.paths as Record<string, unknown>)
+          : {};
+      const pretty = JSON.stringify(spec, null, 2);
+      const truncated = pretty.length > SPEC_PREVIEW_MAX_BYTES;
+      detail.specSummary = {
+        ...(typeof info.title === "string" ? { title: info.title } : {}),
+        ...(typeof info.version === "string" ? { version: info.version } : {}),
+        pathCount: Object.keys(paths).length,
+      };
+      detail.specPreview = {
+        json: truncated ? pretty.slice(0, SPEC_PREVIEW_MAX_BYTES) : pretty,
+        truncated,
+      };
+    } catch {
+      detail.specPreview = {
+        json: connection.openapiSpecJson.slice(0, SPEC_PREVIEW_MAX_BYTES),
+        truncated: connection.openapiSpecJson.length > SPEC_PREVIEW_MAX_BYTES,
+      };
+    }
+  }
+
+  return detail;
 }
 
 function decorateConnections(connections: ScriptConnectionRecord[]): DecoratedConnection[] {
@@ -499,6 +677,7 @@ function sanitizeOAuthApp(row: OAuthAppRow) {
     tokenAuthStyle: metadata.tokenAuthStyle === "basic" ? "basic" : "body",
     tokenBodyFormat: metadata.tokenBodyFormat === "json" ? "json" : "form",
     tokenStatus: getOAuthBindingTokenStatus(row.provider),
+    expiresAt: row.tokenExpiresAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -507,9 +686,11 @@ function sanitizeOAuthApp(row: OAuthAppRow) {
 function listOAuthApps() {
   const rows = getDb()
     .prepare<OAuthAppRow, []>(
-      `SELECT id, provider, clientId, authorizeUrl, tokenUrl, redirectUri, scopes, metadata, createdAt, updatedAt
-       FROM oauth_apps
-       ORDER BY provider ASC`,
+      `SELECT a.id, a.provider, a.clientId, a.authorizeUrl, a.tokenUrl, a.redirectUri,
+              a.scopes, a.metadata, t.expiresAt AS tokenExpiresAt, a.createdAt, a.updatedAt
+       FROM oauth_apps a
+       LEFT JOIN oauth_tokens t ON t.provider = a.provider
+       ORDER BY a.provider ASC`,
     )
     .all();
   return rows.map(sanitizeOAuthApp);
@@ -517,6 +698,168 @@ function listOAuthApps() {
 
 function genericOAuthRedirectUri(provider: string): string {
   return `${getPublicMcpBaseUrl()}/api/oauth/${encodeURIComponent(provider)}/callback`;
+}
+
+function oauthDiscoveryUrls(inputUrl: string): string[] {
+  const parsed = new URL(inputUrl);
+  const pathname = parsed.pathname.replace(/\/+$/, "");
+  const base = `${parsed.origin}${pathname === "/" ? "" : pathname}`;
+  return [
+    `${base}/.well-known/oauth-authorization-server`,
+    `${base}/.well-known/openid-configuration`,
+    parsed.toString(),
+  ].filter((url, index, urls) => urls.indexOf(url) === index);
+}
+
+async function fetchJsonMetadata(url: string, signal: AbortSignal): Promise<unknown> {
+  const response = await fetch(url, {
+    headers: { accept: "application/json" },
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new Error("Response was not JSON.");
+  }
+}
+
+function extractOAuthDiscovery(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  const record = metadata as Record<string, unknown>;
+  if (
+    typeof record.authorization_endpoint !== "string" ||
+    typeof record.token_endpoint !== "string"
+  ) {
+    return null;
+  }
+  const scopes = Array.isArray(record.scopes_supported)
+    ? record.scopes_supported.filter((scope): scope is string => typeof scope === "string")
+    : [];
+  return {
+    authorizeUrl: record.authorization_endpoint,
+    tokenUrl: record.token_endpoint,
+    scopes,
+  };
+}
+
+async function discoverOAuthApp(url: string) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DISCOVERY_TIMEOUT_MS);
+  const failures: string[] = [];
+  try {
+    for (const candidate of oauthDiscoveryUrls(url)) {
+      try {
+        const metadata = await fetchJsonMetadata(candidate, controller.signal);
+        const discovered = extractOAuthDiscovery(metadata);
+        if (discovered) return { ...discovered, sourceUrl: candidate };
+        failures.push(`${candidate}: missing authorization_endpoint or token_endpoint`);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          throw new Error("OAuth discovery timed out after 10s.");
+        }
+        failures.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+  throw new Error(`OAuth discovery failed. ${failures.join(" ")}`);
+}
+
+function stringFromCatalogEntry(entry: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = entry[key];
+    if (typeof value === "string") return value;
+  }
+  return "";
+}
+
+function stringArrayFromCatalogEntry(entry: Record<string, unknown>, key: string): string[] {
+  const value = entry[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function normalizeCatalogEntry(entry: unknown): IntegrationsCatalogEntry | null {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+  const record = entry as Record<string, unknown>;
+  const kind = stringFromCatalogEntry(record, ["kind", "type"]);
+  if (!kind || kind === "cli") return null;
+  const slug = stringFromCatalogEntry(record, ["slug", "id", "name"]);
+  const name = stringFromCatalogEntry(record, ["name", "title"]) || slug;
+  const domain = stringFromCatalogEntry(record, ["domain", "hostname"]);
+  return {
+    id: stringFromCatalogEntry(record, ["id", "slug"]) || slug || name,
+    kind,
+    slug,
+    name,
+    description: stringFromCatalogEntry(record, ["description", "summary"]),
+    url: stringFromCatalogEntry(record, ["url", "homepage", "baseUrl"]),
+    icon: stringFromCatalogEntry(record, ["icon", "logo"]) || null,
+    domain,
+    categories: stringArrayFromCatalogEntry(record, "categories"),
+  };
+}
+
+function catalogEntriesFromPayload(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== "object") return [];
+  const record = payload as Record<string, unknown>;
+  for (const key of ["entries", "integrations", "data", "items"]) {
+    if (Array.isArray(record[key])) return record[key] as unknown[];
+  }
+  return [];
+}
+
+async function fetchIntegrationsCatalog() {
+  const now = Date.now();
+  if (integrationsCatalogCache && integrationsCatalogCache.expiresAtMs > now) {
+    return integrationsCatalogCache.payload;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), INTEGRATIONS_CATALOG_TIMEOUT_MS);
+  try {
+    const response = await fetch("https://integrations.sh/api.json", {
+      headers: { accept: "application/json" },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`integrations.sh returned HTTP ${response.status}`);
+    }
+    const payload = (await response.json()) as unknown;
+    const entries = catalogEntriesFromPayload(payload)
+      .map(normalizeCatalogEntry)
+      .filter((entry): entry is IntegrationsCatalogEntry => Boolean(entry));
+    const cachedAt = new Date().toISOString();
+    integrationsCatalogCache = {
+      expiresAtMs: now + INTEGRATIONS_CATALOG_TTL_MS,
+      payload: { entries, cachedAt },
+    };
+    return integrationsCatalogCache.payload;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Timed out fetching integrations catalog after 15s.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function deleteOAuthApp(provider: string): boolean {
+  const existing = getOAuthApp(provider);
+  if (!existing) return false;
+  const tx = getDb().transaction(() => {
+    deleteOAuthTokens(provider);
+    getDb().query("DELETE FROM oauth_apps WHERE provider = ?").run(provider);
+  });
+  tx();
+  return true;
 }
 
 async function refreshHttpConnection(
@@ -560,6 +903,18 @@ export async function handleScriptConnections(
     return true;
   }
 
+  if (getConnectionRoute.match(req.method, pathSegments)) {
+    const parsed = await getConnectionRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const connection = getScriptConnectionById(parsed.params.id);
+    if (!connection) {
+      jsonError(res, "Script connection not found.", 404);
+      return true;
+    }
+    json(res, { connection: connectionDetail(connection) });
+    return true;
+  }
+
   if (upsertConnectionRoute.match(req.method, pathSegments)) {
     const parsed = await upsertConnectionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
@@ -568,7 +923,18 @@ export async function handleScriptConnections(
     try {
       if (
         parsed.body.kind === "openapi" &&
-        Boolean(parsed.body.openapiSpecJson) === Boolean(parsed.body.openapiSpecUrl)
+        Boolean(parsed.body.openapiSpecJson) &&
+        Boolean(parsed.body.openapiSpecUrl)
+      ) {
+        jsonError(res, "Provide exactly one of openapiSpecJson or openapiSpecUrl.", 400);
+        return true;
+      }
+      const existingConnection = parsed.body.id ? getScriptConnectionById(parsed.body.id) : null;
+      if (
+        parsed.body.kind === "openapi" &&
+        !parsed.body.openapiSpecJson &&
+        !parsed.body.openapiSpecUrl &&
+        !existingConnection
       ) {
         jsonError(res, "Provide exactly one of openapiSpecJson or openapiSpecUrl.", 400);
         return true;
@@ -591,8 +957,35 @@ export async function handleScriptConnections(
           parsed.body.allowedHosts ??
           ("baseUrl" in parsed.body ? [new URL(parsed.body.baseUrl).hostname] : []),
         credentialBindingId,
+        openapiSpecSourceKind:
+          parsed.body.kind === "openapi" &&
+          !parsed.body.openapiSpecJson &&
+          !parsed.body.openapiSpecUrl
+            ? existingConnection?.openapiSpecSourceKind
+            : undefined,
+        openapiSpecSource:
+          parsed.body.kind === "openapi" &&
+          !parsed.body.openapiSpecJson &&
+          !parsed.body.openapiSpecUrl
+            ? existingConnection?.openapiSpecSource
+            : undefined,
         openapiSpecUrl: parsed.body.kind === "openapi" ? parsed.body.openapiSpecUrl : undefined,
-        openapiSpecJson: parsed.body.kind === "openapi" ? parsed.body.openapiSpecJson : undefined,
+        openapiSpecJson:
+          parsed.body.kind === "openapi"
+            ? (parsed.body.openapiSpecJson ?? existingConnection?.openapiSpecJson ?? undefined)
+            : undefined,
+        openapiSpecEtag:
+          parsed.body.kind === "openapi" &&
+          !parsed.body.openapiSpecJson &&
+          !parsed.body.openapiSpecUrl
+            ? existingConnection?.openapiSpecEtag
+            : undefined,
+        openapiSpecFetchedAt:
+          parsed.body.kind === "openapi" &&
+          !parsed.body.openapiSpecJson &&
+          !parsed.body.openapiSpecUrl
+            ? existingConnection?.openapiSpecFetchedAt
+            : undefined,
         mcpServerId: parsed.body.kind === "mcp" ? parsed.body.mcpServerId : null,
         enabled: parsed.body.enabled !== false,
         agentId,
@@ -684,7 +1077,7 @@ export async function handleScriptConnections(
         queryTemplate: parsed.body.queryTemplate,
         scope,
         scopeId,
-        active: true,
+        active: parsed.body.active ?? true,
         authKind: parsed.body.authKind ?? "config",
         oauthProvider: parsed.body.oauthProvider,
       });
@@ -696,7 +1089,7 @@ export async function handleScriptConnections(
         queryTemplate: nextBinding.queryTemplate,
         scope: nextBinding.scope,
         scopeId: nextBinding.scopeId ?? null,
-        active: true,
+        active: nextBinding.active,
         authKind: nextBinding.authKind,
         oauthProvider: nextBinding.oauthProvider ?? null,
         userId: resolveHttpAuditUserId(req, agentId),
@@ -718,14 +1111,21 @@ export async function handleScriptConnections(
     if (!parsed) return true;
     if (!ensureConnectionAdmin(req, res, agentId)) return true;
 
+    const existing = getOAuthApp(parsed.body.provider);
+    const clientSecret = parsed.body.clientSecret ?? existing?.clientSecret;
+    if (!clientSecret) {
+      jsonError(res, "clientSecret is required when creating a new OAuth app.", 400);
+      return true;
+    }
+
     const redirectUri = genericOAuthRedirectUri(parsed.body.provider);
     upsertOAuthApp(parsed.body.provider, {
       clientId: parsed.body.clientId,
-      clientSecret: parsed.body.clientSecret,
+      clientSecret,
       authorizeUrl: parsed.body.authorizeUrl,
       tokenUrl: parsed.body.tokenUrl,
       redirectUri,
-      scopes: parsed.body.scopes.join(","),
+      scopes: (parsed.body.scopes ?? []).join(","),
       ...(parsed.body.extraParams || parsed.body.tokenAuthStyle || parsed.body.tokenBodyFormat
         ? {
             metadata: JSON.stringify({
@@ -743,6 +1143,31 @@ export async function handleScriptConnections(
     return true;
   }
 
+  if (discoverOAuthAppRoute.match(req.method, pathSegments)) {
+    const parsed = await discoverOAuthAppRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    try {
+      const discovered = await discoverOAuthApp(parsed.body.url);
+      json(res, discovered);
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : String(err), 400);
+    }
+    return true;
+  }
+
+  if (deleteOAuthAppRoute.match(req.method, pathSegments)) {
+    const parsed = await deleteOAuthAppRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!deleteOAuthApp(parsed.params.provider)) {
+      jsonError(res, `OAuth app ${parsed.params.provider} not found.`, 404);
+      return true;
+    }
+    json(res, { success: true });
+    return true;
+  }
+
   if (authorizeUrlRoute.match(req.method, pathSegments)) {
     const parsed = await authorizeUrlRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
@@ -755,6 +1180,19 @@ export async function handleScriptConnections(
     }
     const result = await buildAuthorizationUrl(config);
     json(res, { authorizeUrl: result.url, redirectUri: config.redirectUri });
+    return true;
+  }
+
+  if (integrationsCatalogRoute.match(req.method, pathSegments)) {
+    try {
+      json(res, await fetchIntegrationsCatalog());
+    } catch (err) {
+      jsonError(
+        res,
+        `Failed to fetch integrations catalog: ${err instanceof Error ? err.message : String(err)}`,
+        502,
+      );
+    }
     return true;
   }
 
