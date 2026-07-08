@@ -1,23 +1,29 @@
-import type { ColDef } from "ag-grid-community";
+import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
+import type { ScriptConnectionOperation } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Input } from "@/components/ui/input";
+import { OperationDetailDialog } from "./operation-detail-dialog";
 
-export interface ConnectionOperation {
-  name: string;
-  method: string;
-  path: string;
-}
+export type ConnectionOperation = ScriptConnectionOperation;
 
 /**
  * Operations list for an OpenAPI connection: token-match filter input over
  * name / method / path + a paginated DataGrid (same primitive as the
  * connections list tab). `autoHeight` so the detail page's main column stays
- * the scroll container.
+ * the scroll container. Clicking a row opens the operation detail dialog
+ * (schemas + call snippet).
  */
-export function OperationsTable({ operations }: { operations: ConnectionOperation[] }) {
+export function OperationsTable({
+  operations,
+  slug,
+}: {
+  operations: ConnectionOperation[];
+  slug: string;
+}) {
   const [filter, setFilter] = useState("");
+  const [selected, setSelected] = useState<ConnectionOperation | null>(null);
 
   const columnDefs = useMemo<ColDef<ConnectionOperation>[]>(
     () => [
@@ -62,6 +68,17 @@ export function OperationsTable({ operations }: { operations: ConnectionOperatio
         paginationQueryKey="operations"
         enableCellTextSelection
         getRowId={(params) => `${params.data.method} ${params.data.path} ${params.data.name}`}
+        onRowClicked={(event: RowClickedEvent<ConnectionOperation>) => {
+          if (event.data) setSelected(event.data);
+        }}
+      />
+      <OperationDetailDialog
+        open={selected !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelected(null);
+        }}
+        slug={slug}
+        subject={selected ? { kind: "operation", operation: selected } : null}
       />
     </div>
   );

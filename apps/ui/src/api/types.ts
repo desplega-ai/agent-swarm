@@ -1211,9 +1211,33 @@ export interface ScriptConnection {
   updatedBy: string | null;
 }
 
+export interface ScriptConnectionOperationParameter {
+  name: string;
+  in: string;
+  required: boolean;
+  schema?: unknown;
+}
+
+export interface ScriptConnectionOperation {
+  name: string;
+  method: string;
+  path: string;
+  parameters?: ScriptConnectionOperationParameter[];
+  hasBody?: boolean;
+  successStatus?: string;
+  requestBodySchema?: unknown;
+  responseSchema?: unknown;
+}
+
+export interface ScriptConnectionTool {
+  name: string;
+  description?: string;
+  inputSchema?: unknown;
+}
+
 export interface ScriptConnectionDetail extends ScriptConnection {
-  operations: Array<{ name: string; method: string; path: string }>;
-  tools: Array<{ name: string; description?: string }>;
+  operations: ScriptConnectionOperation[];
+  tools: ScriptConnectionTool[];
   graphql: boolean;
   generatedTypes: string;
   specSummary?: { title?: string; version?: string; pathCount: number };

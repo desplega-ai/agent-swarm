@@ -113,7 +113,7 @@ function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
-function normalizeScriptSlug(value: string): string {
+export function normalizeScriptSlug(value: string): string {
   const cleaned = value
     .trim()
     .replace(/[^A-Za-z0-9]+(.)/g, (_match, char: string) => char.toUpperCase())

@@ -315,7 +315,18 @@ describe("/api/script-connections HTTP", () => {
       };
     };
     expect(body.connection.operations).toEqual([
-      { name: "listItems", method: "GET", path: "/items" },
+      {
+        name: "listItems",
+        method: "GET",
+        path: "/items",
+        parameters: [],
+        hasBody: false,
+        successStatus: "200",
+        responseSchema: {
+          type: "object",
+          properties: { ok: { type: "boolean" } },
+        },
+      },
     ]);
     expect(body.connection.generatedTypes).toContain("listItems");
     expect(body.connection.specSummary).toEqual({
