@@ -4,6 +4,7 @@ import {
   getAgentMailInboxMapping,
   getAllAgents,
 } from "../be/db";
+import { renderIdentity, resolveIdentityByEmail } from "../be/identity";
 import { findOrCreateUserByEmail } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { createIngressBuffer } from "../tasks/additive-ingress";
@@ -184,6 +185,13 @@ export async function handleMessageReceived(
     );
     requestedByUserId = user.id;
   }
+  // Render the resolved canonical name (or the UNKNOWN sentinel) for
+  // agent-visible text — never the raw From header. `findOrCreateUserByEmail`
+  // above auto-creates on a real email, so `senderEmail` present implies
+  // resolved; only a missing/unparseable From header falls to the sentinel.
+  const senderDisplay = senderEmail
+    ? renderIdentity(resolveIdentityByEmail(senderEmail))
+    : `${from} (unknown user)`;
   const preview = body.length > 500 ? `${body.substring(0, 500)}...` : body;
 
   // Emit workflow trigger event
@@ -207,7 +215,7 @@ export async function handleMessageReceived(
     if (
       agentmailBuffer.enabled &&
       agentmailBuffer.maybeBuffer(contextKey, siblingInFlight, {
-        from,
+        from: senderDisplay,
         subject,
         inboxId: inbox_id,
         threadId: thread_id,
@@ -226,7 +234,7 @@ export async function handleMessageReceived(
 
     // Create a follow-up task with parentTaskId to continue the session
     const followupResult = resolveTemplate("agentmail.email.followup", {
-      from,
+      from: senderDisplay,
       subject,
       inbox_id,
       thread_id,
@@ -264,7 +272,7 @@ export async function handleMessageReceived(
       if (agent.isLead) {
         // Route to lead as task
         const leadResult = resolveTemplate("agentmail.email.mapped_lead", {
-          from,
+          from: senderDisplay,
           subject,
           inbox_id,
           thread_id,
@@ -295,7 +303,7 @@ export async function handleMessageReceived(
 
       // Route to worker as task
       const workerResult = resolveTemplate("agentmail.email.mapped_worker", {
-        from,
+        from: senderDisplay,
         subject,
         inbox_id,
         thread_id,
@@ -328,7 +336,7 @@ export async function handleMessageReceived(
   const lead = findLeadAgent();
   if (lead) {
     const unmappedResult = resolveTemplate("agentmail.email.unmapped", {
-      from,
+      from: senderDisplay,
       subject,
       inbox_id,
       thread_id,
@@ -359,7 +367,7 @@ export async function handleMessageReceived(
 
   // No lead available - create unassigned task
   const noAgentResult = resolveTemplate("agentmail.email.no_agent", {
-    from,
+    from: senderDisplay,
     subject,
     inbox_id,
     thread_id,

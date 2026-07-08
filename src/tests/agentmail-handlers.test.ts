@@ -111,6 +111,10 @@ describe("handleMessageReceived — identity auto-link via findOrCreateUserByEma
     const task = getTaskById(result.taskId!);
     expect(task).not.toBeNull();
     expect(task!.requestedByUserId).toBe(user!.id);
+    // The resolved canonical name renders in the task text — never the raw
+    // From header (Alice's display name + email as typed by the sender).
+    expect(task!.task).toContain("Alice Newcomer (email:alice.newcomer@example.com)");
+    expect(task!.task).not.toContain("Alice Newcomer <alice.newcomer@example.com>");
   });
 
   test("KNOWN sender (existing users.email) → no duplicate row, auto_merge event, task requestedByUserId populated", async () => {
@@ -162,5 +166,8 @@ describe("handleMessageReceived — identity auto-link via findOrCreateUserByEma
 
     const task = getTaskById(result.taskId!);
     expect(task!.requestedByUserId).toBeFalsy();
+    // No display name is ever guessed — the raw header is kept as the
+    // sentinel's identifier, suffixed with the explicit UNKNOWN marker.
+    expect(task!.task).toContain("Unknown Sender (no address) (unknown user)");
   });
 });

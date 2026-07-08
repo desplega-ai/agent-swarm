@@ -21,7 +21,11 @@ Thread: {{thread_id}}
 
 {{preview}}`,
   variables: [
-    { name: "from", description: "Sender address(es)" },
+    {
+      name: "from",
+      description:
+        "Sender identity — resolved canonical name (e.g. 'Luis (email:luis@x.com)') or the UNKNOWN sentinel",
+    },
     { name: "subject", description: "Email subject" },
     { name: "inbox_id", description: "AgentMail inbox ID" },
     { name: "thread_id", description: "AgentMail thread ID" },
@@ -41,7 +45,11 @@ Message: {{message_id}}
 
 {{preview}}`,
   variables: [
-    { name: "from", description: "Sender address(es)" },
+    {
+      name: "from",
+      description:
+        "Sender identity — resolved canonical name (e.g. 'Luis (email:luis@x.com)') or the UNKNOWN sentinel",
+    },
     { name: "subject", description: "Email subject" },
     { name: "inbox_id", description: "AgentMail inbox ID" },
     { name: "thread_id", description: "AgentMail thread ID" },
@@ -61,7 +69,11 @@ Thread: {{thread_id}}
 
 {{preview}}`,
   variables: [
-    { name: "from", description: "Sender address(es)" },
+    {
+      name: "from",
+      description:
+        "Sender identity — resolved canonical name (e.g. 'Luis (email:luis@x.com)') or the UNKNOWN sentinel",
+    },
     { name: "subject", description: "Email subject" },
     { name: "inbox_id", description: "AgentMail inbox ID" },
     { name: "thread_id", description: "AgentMail thread ID" },
@@ -81,7 +93,11 @@ Message: {{message_id}}
 
 {{preview}}`,
   variables: [
-    { name: "from", description: "Sender address(es)" },
+    {
+      name: "from",
+      description:
+        "Sender identity — resolved canonical name (e.g. 'Luis (email:luis@x.com)') or the UNKNOWN sentinel",
+    },
     { name: "subject", description: "Email subject" },
     { name: "inbox_id", description: "AgentMail inbox ID" },
     { name: "thread_id", description: "AgentMail thread ID" },
@@ -101,7 +117,11 @@ Thread: {{thread_id}}
 
 {{preview}}`,
   variables: [
-    { name: "from", description: "Sender address(es)" },
+    {
+      name: "from",
+      description:
+        "Sender identity — resolved canonical name (e.g. 'Luis (email:luis@x.com)') or the UNKNOWN sentinel",
+    },
     { name: "subject", description: "Email subject" },
     { name: "inbox_id", description: "AgentMail inbox ID" },
     { name: "thread_id", description: "AgentMail thread ID" },
