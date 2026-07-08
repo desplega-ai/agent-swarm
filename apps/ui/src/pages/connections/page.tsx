@@ -3,6 +3,7 @@ import {
   Check,
   Copy,
   ExternalLink,
+  KeyRound,
   Link2,
   Play,
   Plus,
@@ -144,6 +145,18 @@ function defaultHeaderTemplate(configKey: string): string {
   return `Authorization: Bearer ${configPlaceholder(configKey)}`;
 }
 
+const TEMPLATE_PRESETS: Array<{
+  label: string;
+  field: "header" | "query";
+  template: (placeholder: string) => string;
+}> = [
+  { label: "Bearer", field: "header", template: (ph) => `Authorization: Bearer ${ph}` },
+  { label: "X-API-Key", field: "header", template: (ph) => `X-API-Key: ${ph}` },
+  { label: "Basic", field: "header", template: (ph) => `Authorization: Basic ${ph}` },
+  { label: "Query token", field: "query", template: (ph) => `token=${ph}` },
+  { label: "Query api_key", field: "query", template: (ph) => `api_key=${ph}` },
+];
+
 function optionalString(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
@@ -161,10 +174,21 @@ function FieldLabel({ children, tip }: { children: string; tip: string }) {
 function CopyButton({ value, label = "Copy" }: { value: string; label?: string }) {
   const { copied, copy } = useCopyToClipboard();
   return (
-    <Button type="button" size="xs" variant="outline" onClick={() => copy(value)} disabled={!value}>
-      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-      {copied ? "Copied" : label}
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="outline"
+          aria-label={label}
+          onClick={() => copy(value)}
+          disabled={!value}
+        >
+          {copied ? <Check className="size-3 text-status-success" /> : <Copy className="size-3" />}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{copied ? "Copied" : label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -285,18 +309,78 @@ function TemplateCell({ value }: { value?: string }) {
   );
 }
 
-function CredentialChip({ connection }: { connection: ScriptConnection }) {
-  const binding = connection.credentialBinding;
-  if (!binding) return <span className="text-muted-foreground">—</span>;
+const TOKEN_STATUS_TEXT: Record<OAuthBindingTokenStatus, string> = {
+  ok: "text-status-success",
+  expiring: "text-status-active",
+  missing: "text-status-error",
+};
+
+function CredentialChip({
+  connection,
+  bindings,
+}: {
+  connection: ScriptConnection;
+  bindings: ScriptCredentialBinding[];
+}) {
+  const summary = connection.credentialBinding;
+  if (!summary) return <span className="text-muted-foreground">—</span>;
+  const full = bindings.find((binding) => binding.id === summary.id);
+  const keyClass = summary.tokenStatus
+    ? TOKEN_STATUS_TEXT[summary.tokenStatus]
+    : "text-muted-foreground";
   return (
-    <span className="inline-flex items-center gap-1.5 min-w-0">
-      <AuthKindBadge kind={binding.authKind} />
-      <span className="truncate">{binding.configKey}</span>
-      {binding.oauthProvider ? (
-        <span className="truncate text-muted-foreground">({binding.oauthProvider})</span>
-      ) : null}
-      <TokenStatusBadge status={binding.tokenStatus} />
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex max-w-full cursor-default items-center gap-1.5 rounded-md border bg-muted/40 px-1.5 py-0.5 font-mono text-xs">
+          <KeyRound className={cn("size-3 shrink-0", keyClass)} />
+          <span className="truncate">{summary.configKey}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent
+        side="right"
+        align="start"
+        className="max-w-xs px-3 py-2.5 text-left whitespace-normal"
+      >
+        <div className="space-y-1.5 text-xs leading-relaxed">
+          <div className="flex items-center gap-2">
+            <span className="font-mono font-semibold">{summary.configKey}</span>
+            <span className="uppercase opacity-70">{summary.authKind}</span>
+          </div>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 opacity-90">
+            {summary.oauthProvider ? (
+              <>
+                <dt className="opacity-60">Provider</dt>
+                <dd>{summary.oauthProvider}</dd>
+              </>
+            ) : null}
+            {summary.tokenStatus ? (
+              <>
+                <dt className="opacity-60">Token</dt>
+                <dd className="font-medium">{summary.tokenStatus}</dd>
+              </>
+            ) : null}
+            {full?.allowedHosts.length ? (
+              <>
+                <dt className="opacity-60">Hosts</dt>
+                <dd className="break-all">{full.allowedHosts.join(", ")}</dd>
+              </>
+            ) : null}
+            {full?.headerTemplate ? (
+              <>
+                <dt className="opacity-60">Header</dt>
+                <dd className="break-all font-mono">{full.headerTemplate}</dd>
+              </>
+            ) : null}
+            {full?.queryTemplate ? (
+              <>
+                <dt className="opacity-60">Query</dt>
+                <dd className="break-all font-mono">{full.queryTemplate}</dd>
+              </>
+            ) : null}
+          </dl>
+        </div>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -337,6 +421,44 @@ function scoreCatalogEntry(entry: IntegrationsCatalogEntry, query: string): numb
   const text = catalogSearchText(entry);
   const total = tokens.reduce((sum, token) => sum + tokenScore(text, token), 0);
   return tokens.every((token) => tokenScore(text, token) > 0) ? total : 0;
+}
+
+const WELL_KNOWN_DOMAINS = new Set([
+  "github.com",
+  "google.com",
+  "slack.com",
+  "notion.so",
+  "linear.app",
+  "stripe.com",
+  "openai.com",
+  "anthropic.com",
+  "atlassian.com",
+  "gitlab.com",
+  "microsoft.com",
+  "figma.com",
+  "vercel.com",
+  "cloudflare.com",
+  "twilio.com",
+  "sendgrid.com",
+  "hubspot.com",
+  "salesforce.com",
+  "dropbox.com",
+  "shopify.com",
+  "discord.com",
+  "spotify.com",
+  "zoom.us",
+]);
+
+// Rank curated entries above bulk apis.guru imports: boost hand-curated feeds,
+// entries with an icon + description, and well-known provider domains.
+function curationBoost(entry: IntegrationsCatalogEntry): number {
+  let boost = 0;
+  const feeds = entry.feeds ?? [];
+  if (feeds.length > 0 && !feeds.includes("apis-guru")) boost += 30;
+  if (entry.icon) boost += 10;
+  if (entry.description) boost += 10;
+  if (WELL_KNOWN_DOMAINS.has(entry.domain)) boost += 40;
+  return boost;
 }
 
 async function resolveApisGuruOpenApi(domain: string): Promise<{
@@ -398,6 +520,11 @@ export function AddConnectionDialog({
   } = useIntegrationsCatalog();
   const [step, setStep] = useState<"catalog" | "form">(connection ? "form" : "catalog");
   const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogKinds, setCatalogKinds] = useState<ScriptConnectionKind[]>([
+    "mcp",
+    "openapi",
+    "graphql",
+  ]);
   const [catalogHint, setCatalogHint] = useState("");
   const [resolvingCatalogId, setResolvingCatalogId] = useState<string | null>(null);
   const [kind, setKind] = useState<ScriptConnectionKind>("openapi");
@@ -430,6 +557,7 @@ export function AddConnectionDialog({
   useEffect(() => {
     if (!open) return;
     setCatalogSearch("");
+    setCatalogKinds(["mcp", "openapi", "graphql"]);
     setCatalogHint("");
     setStep(connection ? "form" : "catalog");
     setKind(connection?.kind ?? "openapi");
@@ -457,12 +585,22 @@ export function AddConnectionDialog({
 
   const catalogResults = useMemo(() => {
     return catalog
-      .map((entry) => ({ entry, score: scoreCatalogEntry(entry, catalogSearch) }))
+      .filter((entry) => catalogKinds.includes(entry.kind))
+      .map((entry) => {
+        const fuzzy = scoreCatalogEntry(entry, catalogSearch);
+        return { entry, score: fuzzy > 0 ? fuzzy + curationBoost(entry) : 0 };
+      })
       .filter(({ score }) => score > 0)
       .sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name))
-      .slice(0, 50)
+      .slice(0, 60)
       .map(({ entry }) => entry);
-  }, [catalog, catalogSearch]);
+  }, [catalog, catalogSearch, catalogKinds]);
+
+  function toggleCatalogKind(kind: ScriptConnectionKind) {
+    setCatalogKinds((current) =>
+      current.includes(kind) ? current.filter((item) => item !== kind) : [...current, kind],
+    );
+  }
 
   async function selectCatalogEntry(entry: IntegrationsCatalogEntry) {
     setStep("form");
@@ -559,7 +697,7 @@ export function AddConnectionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader className="pb-2">
           <DialogTitle>{isEdit ? "Edit Connection" : "Add Connection"}</DialogTitle>
           <DialogDescription>
@@ -580,58 +718,74 @@ export function AddConnectionDialog({
 
         {step === "catalog" && !isEdit ? (
           <div className="space-y-4">
-            <Input
-              placeholder="Search APIs, MCP servers, domains..."
-              value={catalogSearch}
-              onChange={(event) => setCatalogSearch(event.target.value)}
-            />
-            <div className="max-h-[52vh] space-y-2 overflow-y-auto pr-1">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Input
+                placeholder="Search APIs, MCP servers, domains..."
+                value={catalogSearch}
+                onChange={(event) => setCatalogSearch(event.target.value)}
+                className="flex-1"
+              />
+              <div className="flex items-center gap-1.5">
+                {(["mcp", "openapi", "graphql"] as const).map((kind) => {
+                  const active = catalogKinds.includes(kind);
+                  return (
+                    <Button
+                      key={kind}
+                      type="button"
+                      size="xs"
+                      variant={active ? "secondary" : "outline"}
+                      aria-pressed={active}
+                      className={cn(!active && "text-muted-foreground")}
+                      onClick={() => toggleCatalogKind(kind)}
+                    >
+                      {kind === "mcp" ? "MCP" : kind === "openapi" ? "OpenAPI" : "GraphQL"}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="grid max-h-[52vh] grid-cols-1 content-start gap-2 overflow-y-auto pr-1 md:grid-cols-2 lg:grid-cols-3">
               {catalogLoading ? (
-                <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                <div className="col-span-full rounded-md border border-dashed p-4 text-sm text-muted-foreground">
                   Loading catalog...
                 </div>
               ) : catalogError ? (
-                <InlineError error={catalogError} />
+                <div className="col-span-full">
+                  <InlineError error={catalogError} />
+                </div>
+              ) : catalogResults.length === 0 ? (
+                <div className="col-span-full rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                  No matching integrations.
+                </div>
               ) : (
                 catalogResults.map((entry) => (
                   <button
                     key={entry.id}
                     type="button"
-                    className="grid w-full gap-2 rounded-md border p-3 text-left transition-colors hover:bg-muted/40"
+                    className="flex h-full w-full flex-col gap-1.5 rounded-md border p-2.5 text-left transition-colors hover:bg-muted/40"
                     onClick={() => selectCatalogEntry(entry)}
                     disabled={resolvingCatalogId === entry.id}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex w-full items-center gap-2">
                       {entry.icon ? (
-                        <img src={entry.icon} alt="" className="size-7 rounded-sm" />
+                        <img src={entry.icon} alt="" className="size-6 shrink-0 rounded-sm" />
                       ) : (
-                        <div className="flex size-7 items-center justify-center rounded-sm bg-muted text-xs font-medium">
+                        <div className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-muted text-xs font-medium">
                           {entry.name.slice(0, 1)}
                         </div>
                       )}
                       <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="truncate font-medium">{entry.name}</span>
-                          <KindBadge kind={entry.kind} />
-                        </div>
+                        <div className="truncate text-sm font-medium">{entry.name}</div>
                         <div className="truncate text-xs text-muted-foreground">
                           {entry.domain || entry.slug}
                         </div>
                       </div>
+                      <KindBadge kind={entry.kind} />
                     </div>
                     {entry.description ? (
-                      <p className="line-clamp-2 text-sm text-muted-foreground">
+                      <p className="line-clamp-2 text-xs text-muted-foreground">
                         {entry.description}
                       </p>
-                    ) : null}
-                    {entry.categories.length ? (
-                      <div className="flex flex-wrap gap-1">
-                        {entry.categories.slice(0, 4).map((category) => (
-                          <Badge key={category} variant="outline" size="tag">
-                            {category}
-                          </Badge>
-                        ))}
-                      </div>
                     ) : null}
                   </button>
                 ))
@@ -998,7 +1152,7 @@ function CredentialBindingDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader className="pb-2">
           <DialogTitle>{isEdit ? "Edit Binding" : "Add Binding"}</DialogTitle>
           <DialogDescription>
@@ -1072,6 +1226,29 @@ function CredentialBindingDialog({
               placeholder="api.github.com uploads.github.com"
               ariaLabel="Allowed host"
             />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">Presets:</span>
+            {TEMPLATE_PRESETS.map((preset) => (
+              <Button
+                key={preset.label}
+                type="button"
+                size="xs"
+                variant="outline"
+                onClick={() => {
+                  const value = preset.template(placeholder);
+                  if (preset.field === "header") {
+                    setHeaderTemplate(value);
+                    setHeaderManuallyEdited(true);
+                  } else {
+                    setQueryTemplate(value);
+                  }
+                }}
+              >
+                {preset.label}
+              </Button>
+            ))}
           </div>
 
           <div className="space-y-2">
@@ -1684,7 +1861,7 @@ export function OAuthAppDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader className="pb-2">
           <DialogTitle>{isEdit ? "Edit OAuth App" : "Add OAuth App"}</DialogTitle>
           <DialogDescription>
@@ -2038,10 +2215,10 @@ export default function ConnectionsPage() {
       },
       {
         headerName: "Credential",
-        minWidth: 240,
+        minWidth: 170,
         flex: 1,
         cellRenderer: (params: ICellRendererParams<ScriptConnection>) =>
-          params.data ? <CredentialChip connection={params.data} /> : null,
+          params.data ? <CredentialChip connection={params.data} bindings={bindings} /> : null,
       },
       {
         field: "enabled",
@@ -2095,7 +2272,7 @@ export default function ConnectionsPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
     ],
-    [refreshConnection, setEnabled],
+    [refreshConnection, setEnabled, bindings],
   );
 
   const addTarget = NEW_PARAM_BY_TAB[activeTab];
@@ -2201,6 +2378,8 @@ export default function ConnectionsPage() {
             columnDefs={columnDefs}
             quickFilterText={search}
             onRowClicked={(event) => {
+              const target = event.event?.target as HTMLElement | null;
+              if (target?.closest("a, button")) return;
               if (event.data?.id) navigate(`/connections/${event.data.id}`);
             }}
             loading={isLoading}

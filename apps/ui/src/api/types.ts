@@ -1317,6 +1317,8 @@ export interface IntegrationsCatalogEntry {
   icon: string | null;
   domain: string;
   categories: string[];
+  /** Upstream catalog feeds; "apis-guru" marks bulk-imported entries. */
+  feeds?: string[];
 }
 
 export interface IntegrationsCatalogResponse {

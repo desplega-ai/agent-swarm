@@ -389,6 +389,7 @@ type IntegrationsCatalogEntry = {
   icon: string | null;
   domain: string;
   categories: string[];
+  feeds: string[];
 };
 
 const DISCOVERY_TIMEOUT_MS = 10_000;
@@ -874,6 +875,7 @@ function normalizeCatalogEntry(entry: unknown): IntegrationsCatalogEntry | null 
     icon: stringFromCatalogEntry(record, ["icon", "logo"]) || null,
     domain,
     categories: stringArrayFromCatalogEntry(record, "categories"),
+    feeds: stringArrayFromCatalogEntry(record, "feeds"),
   };
 }
 

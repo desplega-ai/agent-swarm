@@ -435,6 +435,7 @@ describe("/api/script-connections HTTP", () => {
         icon: "https://stripe.com/icon.png",
         domain: "stripe.com",
         categories: ["payments"],
+        feeds: [],
       },
     ]);
   });
