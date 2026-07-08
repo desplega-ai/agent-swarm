@@ -1,10 +1,13 @@
 import type { CheckResult, DeterministicCheck, Scenario, SwarmTask } from "../src/types.ts";
 import {
   apiList,
+  firstStageIndices,
   hasTool,
   rawApiToolCount,
+  type SequenceStage,
   safeStringify,
   scoreResult,
+  stageOrderScore,
   taskToolUses,
 } from "./orchestration-utils.ts";
 
@@ -46,6 +49,46 @@ const routingCheck: DeterministicCheck = {
       `send-task=${sendTask ? "yes" : "no"}`,
       `raw-api-penalty=${rawPenalty.toFixed(2)}`,
     ]);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// dispatch-order: a hop-SEQUENCE structural axis, additive to routingCheck
+// above. routingCheck only grades tool-category PRESENCE ("did you touch
+// memory/kv/get-tasks/send-task at all") — a run that fires them in a
+// scrambled order (e.g. dispatches the follow-up task BEFORE it ever looked up
+// the completed-alpha tasks the follow-up is supposed to build on) scores
+// identically to one that respects the causal order the prompt implies. This
+// is the single-worker analog of "the right hop happened at the right point in
+// the sequence" — Edge-F1-style order fidelity (stageOrderScore) rather than
+// Node-F1-style presence.
+// ---------------------------------------------------------------------------
+const ROUTING_STAGES: SequenceStage[] = [
+  {
+    label: "memory-recall",
+    patterns: ["memory-search", "memory_search", "smart-recall", "task-context-gathering"],
+  },
+  { label: "kv-checkpoint", patterns: ["kv-set", "kv_set", "kv-get", "kv_get"] },
+  { label: "task-lookup", patterns: [/get[-_]tasks/i] },
+  {
+    label: "delegate-followup",
+    patterns: ["send-task", "send_task", "task-action", "task_action"],
+  },
+  { label: "complete", patterns: ["store-progress", "store_progress"] },
+];
+
+const routingSequenceCheck: DeterministicCheck = {
+  name: "tool-routing-hop-order",
+  fn: async (ctx): Promise<CheckResult> => {
+    const tools = await taskToolUses(ctx, ctx.tasks[0]);
+    if (tools.length === 0) return { pass: false, score: 0, detail: "no parsed tool calls" };
+    const indices = firstStageIndices(tools, ROUTING_STAGES);
+    const score = stageOrderScore(indices);
+    return scoreResult(
+      "routing hop order",
+      score,
+      ROUTING_STAGES.map((s, i) => `${s.label}=${indices[i]! >= 0 ? indices[i] : "absent"}`),
+    );
   },
 };
 
@@ -115,10 +158,17 @@ export const toolRouting: Scenario = {
     gates: [routingOutputGate],
     dimensions: [
       { name: "tool-selection", weight: 5, checks: [routingCheck] },
+      { name: "dispatch-order", weight: 2, checks: [routingSequenceCheck] },
       { name: "correctness", weight: 1, checks: [routingCorrectnessCheck] },
     ],
   },
   timeoutMs: 8 * 60_000,
 };
 
-export const __test__ = { routingCheck, routingCorrectnessCheck, routingOutputGate };
+export const __test__ = {
+  routingCheck,
+  routingSequenceCheck,
+  routingCorrectnessCheck,
+  routingOutputGate,
+  ROUTING_STAGES,
+};

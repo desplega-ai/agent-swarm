@@ -93,3 +93,47 @@ export function workerTasks(ctx: JudgeContext, leadAgentId: string | undefined):
       t.creatorAgentId === leadAgentId && typeof t.agentId === "string" && workerIds.has(t.agentId),
   );
 }
+
+/** One named hop in an expected causal/dispatch sequence. */
+export interface SequenceStage {
+  label: string;
+  patterns: Parameters<typeof hasTool>[1];
+}
+
+/**
+ * First transcript-order index in `tools` where each stage's patterns match;
+ * -1 when a stage never occurs. `tools` must already be in transcript order
+ * (parseToolUses guarantees this — see judge/session-log-parse.ts).
+ */
+export function firstStageIndices(tools: ToolUse[], stages: SequenceStage[]): number[] {
+  return stages.map((stage) => tools.findIndex((u) => toolUseMatches(u.toolName, stage.patterns)));
+}
+
+/**
+ * Edge-order fidelity over a declared stage sequence (Edge-F1-style hop-order
+ * metric — structural axis, additive to existing Node-F1-style presence
+ * checks). Presence/absence of a stage is scored elsewhere; this measures
+ * whether stages that DID happen, happened in the expected relative order.
+ *
+ * Score = fraction of stage PAIRS (in declared order, both present) whose
+ * transcript indices are strictly increasing — a Kendall-tau-style rank
+ * concordance over all pairs, not just adjacent ones, so a single
+ * out-of-place stage only costs the pairs it participates in rather than
+ * collapsing the whole sequence. Vacuously 1 when fewer than 2 stages are
+ * present (nothing to order).
+ */
+export function stageOrderScore(indices: number[]): number {
+  const present = indices.filter((i) => i >= 0);
+  if (present.length < 2) return 1;
+  let pairs = 0;
+  let inOrder = 0;
+  for (let i = 0; i < indices.length - 1; i++) {
+    for (let j = i + 1; j < indices.length; j++) {
+      if (indices[i]! >= 0 && indices[j]! >= 0) {
+        pairs++;
+        if (indices[i]! < indices[j]!) inOrder++;
+      }
+    }
+  }
+  return pairs > 0 ? inOrder / pairs : 1;
+}

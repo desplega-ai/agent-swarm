@@ -103,6 +103,102 @@ const chainStructureCheck: DeterministicCheck = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// dispatch-structure: a per-hop STRUCTURAL axis, additive to chainStructureCheck
+// above. The existing check grades the outcome paper-trail (child count,
+// dependsOn links, completed status, flow-fact keywords diluted across a 10-point
+// scale) — a lead that creates 3 children with a valid dependsOn shape but routes
+// the WRONG content to the wrong worker, or has one worker silently do all three
+// phases' thinking while the other two just echo pasted text, can still score
+// well there. This check verifies the DISPATCH itself was correct:
+//   shape     — the three children form a single strict linear dependsOn chain
+//               (no branching/fan-in), not just "≥2 links exist somewhere".
+//   identity  — hop i actually landed on the worker the scenario names for
+//               phase i ("phase-one"/"phase-two"/"phase-three"), not just ANY
+//               of the three workers. Neutral (doesn't move the score) when the
+//               roster capture didn't resolve a name, so a name-capture gap
+//               degrades to no-signal rather than a false negative.
+//   topic     — the task DESCRIPTION handed to hop i (what the lead asked for,
+//               not what came back) matches that phase's expected subject.
+//   real-work — hop i's own session log shows at least one tool call, i.e. the
+//               worker actually did something rather than the lead pre-computing
+//               the answer and the child just echoing it back.
+// ---------------------------------------------------------------------------
+const PHASE_NAMES = ["phase-one", "phase-two", "phase-three"];
+const PHASE_TOPICS: RegExp[] = [
+  /completed/i,
+  /top|priority|highest/i,
+  /anomal|checkout|production/i,
+];
+
+/** A single strict linear chain: child[0] has no internal dep, child[i] depends
+ * on EXACTLY child[i-1] (no fan-in/fan-out) for i > 0. */
+function isStrictLinearChain(ordered: SwarmTask[]): boolean {
+  if (ordered.length === 0) return false;
+  const byId = new Map(ordered.map((c) => [c.id, c]));
+  for (let i = 0; i < ordered.length; i++) {
+    const deps = Array.isArray(ordered[i]!.dependsOn) ? (ordered[i]!.dependsOn as string[]) : [];
+    const internalDeps = deps.filter((d) => byId.has(d));
+    if (i === 0) {
+      if (internalDeps.length !== 0) return false;
+    } else if (internalDeps.length !== 1 || internalDeps[0] !== ordered[i - 1]!.id) {
+      return false;
+    }
+  }
+  return true;
+}
+
+const dispatchStructureCheck: DeterministicCheck = {
+  name: "delegation-chain-dispatch-structure",
+  fn: async (ctx): Promise<CheckResult> => {
+    const leadId = leadAgent(ctx);
+    const children = workerTasks(ctx, leadId);
+    const ordered = childOrder(children);
+    const shapeOk = children.length === 3 && isStrictLinearChain(ordered);
+
+    const hopCount = Math.min(PHASE_NAMES.length, ordered.length);
+    let identityConsidered = 0;
+    let identityMatched = 0;
+    let topicMatched = 0;
+    let realWorkMatched = 0;
+    const hopDetails: string[] = [];
+
+    for (let i = 0; i < hopCount; i++) {
+      const child = ordered[i]!;
+      const expectedAgent = ctx.workers.find((w) => w.name === PHASE_NAMES[i])?.agentId;
+      let identityLabel = "worker?";
+      if (expectedAgent) {
+        identityConsidered++;
+        const matched = child.agentId === expectedAgent;
+        if (matched) identityMatched++;
+        identityLabel = matched ? "right-worker" : "wrong-worker";
+      }
+      const onTopic = PHASE_TOPICS[i]!.test(child.description ?? "");
+      if (onTopic) topicMatched++;
+      const tools = await taskToolUses(ctx, child);
+      if (tools.length > 0) realWorkMatched++;
+      hopDetails.push(
+        `hop${i}=${identityLabel}/${onTopic ? "on-topic" : "off-topic"}/${tools.length > 0 ? "worked" : "idle"}`,
+      );
+    }
+
+    const identityScore = identityConsidered > 0 ? identityMatched / identityConsidered : 1;
+    const topicScore = hopCount > 0 ? topicMatched / hopCount : 0;
+    const realWorkScore = hopCount > 0 ? realWorkMatched / hopCount : 0;
+
+    const score =
+      (3 * (shapeOk ? 1 : 0) + 2 * identityScore + 3 * topicScore + 2 * realWorkScore) / 10;
+
+    return scoreResult("dispatch structure", score, [
+      `shape=${shapeOk ? "linear-3" : `broken(${children.length} children)`}`,
+      `identity=${identityMatched}/${identityConsidered}`,
+      `topic=${topicMatched}/${hopCount}`,
+      `real-work=${realWorkMatched}/${hopCount}`,
+      ...hopDetails,
+    ]);
+  },
+};
+
 const chainCorrectnessCheck: DeterministicCheck = {
   name: "chain-final-answer-key",
   fn: async (ctx): Promise<CheckResult> => {
@@ -154,6 +250,7 @@ export const delegationChain: Scenario = {
     gates: [finalReportGate],
     dimensions: [
       { name: "delegation-chain", weight: 5, checks: [chainStructureCheck] },
+      { name: "dispatch-structure", weight: 3, checks: [dispatchStructureCheck] },
       { name: "correctness", weight: 2, checks: [chainCorrectnessCheck] },
     ],
   },
@@ -162,8 +259,12 @@ export const delegationChain: Scenario = {
 
 export const __test__ = {
   chainStructureCheck,
+  dispatchStructureCheck,
   chainCorrectnessCheck,
   finalReportGate,
+  isStrictLinearChain,
+  PHASE_NAMES,
+  PHASE_TOPICS,
   REPORT_FILE,
   LEAD_WORKER,
 };

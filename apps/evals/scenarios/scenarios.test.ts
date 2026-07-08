@@ -245,7 +245,11 @@ describe("spec'd scenario shapes (v9 orchestration substrate)", () => {
     expect(s.lead?.template).toBe("lead");
     expect(s.seed?.sqlDump).toBe("sql-audit-history.sql");
     expect(s.tasks[0]?.worker).toBe("lead");
-    expect(dimensions.map((d) => d.name)).toEqual(["delegation-chain", "correctness"]);
+    expect(dimensions.map((d) => d.name)).toEqual([
+      "delegation-chain",
+      "dispatch-structure",
+      "correctness",
+    ]);
   });
 
   test("tool-routing grades MCP tool selection from session logs", () => {
@@ -255,7 +259,11 @@ describe("spec'd scenario shapes (v9 orchestration substrate)", () => {
     expect(s).toBeDefined();
     expect(s.workers ?? 1).toBe(1);
     expect((s.seed?.memories ?? []).join("\n")).toMatch(/Project Alpha/);
-    expect(dimensions.map((d) => d.name)).toEqual(["tool-selection", "correctness"]);
+    expect(dimensions.map((d) => d.name)).toEqual([
+      "tool-selection",
+      "dispatch-order",
+      "correctness",
+    ]);
     expect(`${s.tasks[0]?.description}`).toMatch(/KV/);
     expect(`${s.tasks[0]?.description}`).toMatch(/Avoid raw curl/);
   });
