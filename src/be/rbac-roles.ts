@@ -91,6 +91,14 @@ type RbacRoleSummaryRow = {
   attachedUserCount: number;
 };
 
+type RbacSeedSyncStats = {
+  rolesInserted: number;
+  rolesUpdated: number;
+  permissionsInserted: number;
+  permissionsDeleted: number;
+  usersBackfilled: number;
+};
+
 function roleRowToUserRole(row: UserRoleRow): UserRole {
   return {
     id: row.id,
@@ -219,7 +227,7 @@ export function listUserRoles(userId: string): UserRole[] {
     .map(roleRowToUserRole);
 }
 
-export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): void {
+export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): RbacSeedSyncStats {
   const db = getDb();
   const desiredVerbsByRoleId = validatedBuiltinVerbSets();
 
@@ -253,12 +261,24 @@ export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): void {
   const insertRolePermission = db.prepare<null, [string, string]>(
     "INSERT OR IGNORE INTO role_permissions (roleId, verb) VALUES (?, ?)",
   );
+  const backfillDefaultRoleForZeroRoleUsers = db.prepare<null, string>(
+    `INSERT OR IGNORE INTO principal_roles (principalType, principalId, roleId)
+     SELECT 'user', u.id, ?
+     FROM users u
+     WHERE NOT EXISTS (
+       SELECT 1
+       FROM principal_roles pr
+       WHERE pr.principalType = 'user'
+         AND pr.principalId = u.id
+     )`,
+  );
 
-  const stats = {
+  const stats: RbacSeedSyncStats = {
     rolesInserted: 0,
     rolesUpdated: 0,
     permissionsInserted: 0,
     permissionsDeleted: 0,
+    usersBackfilled: 0,
   };
 
   db.transaction(() => {
@@ -315,13 +335,21 @@ export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): void {
     }
 
     db.run(CREATE_USER_DEFAULT_ROLE_TRIGGER_SQL);
+
+    // DES-445 pre-GA heal: zero user roles is never intentional today; users
+    // are deactivated, not stripped. When RBAC reaches GA with real role
+    // management, zero roles becomes a deliberate deny-all posture and this
+    // auto-attach MUST be removed. Keep the CLI as the explicit operator tool.
+    stats.usersBackfilled += backfillDefaultRoleForZeroRoleUsers.run(DEFAULT_ROLE_ID).changes;
   })();
 
   if (!opts?.quiet) {
     console.log(
-      `[rbac] seed sync: roles inserted=${stats.rolesInserted}, updated=${stats.rolesUpdated}; permissions inserted=${stats.permissionsInserted}, deleted=${stats.permissionsDeleted}; trigger=ensured`,
+      `[rbac] seed sync: roles inserted=${stats.rolesInserted}, updated=${stats.rolesUpdated}; permissions inserted=${stats.permissionsInserted}, deleted=${stats.permissionsDeleted}; trigger=ensured; users backfilled=${stats.usersBackfilled}`,
     );
   }
+
+  return stats;
 }
 
 function describeRbacFlag(): string {
@@ -353,26 +381,6 @@ function printRolesTable(rows: RbacRoleSummaryRow[]): void {
   }
 }
 
-function bootstrapDefaultRoles(): number {
-  const db = getDb();
-  return db.transaction(() => {
-    const result = db
-      .prepare<null, string>(
-        `INSERT OR IGNORE INTO principal_roles (principalType, principalId, roleId)
-         SELECT 'user', u.id, ?
-         FROM users u
-         WHERE NOT EXISTS (
-           SELECT 1
-           FROM principal_roles pr
-           WHERE pr.principalType = 'user'
-             AND pr.principalId = u.id
-         )`,
-      )
-      .run(DEFAULT_ROLE_ID);
-    return result.changes;
-  })();
-}
-
 function getRbacRoleSummary(): RbacRoleSummaryRow[] {
   return getDb()
     .prepare<RbacRoleSummaryRow, []>(
@@ -398,13 +406,12 @@ export async function runRbacCliCommand(args: string[]): Promise<void> {
     throw new Error(`Unknown RBAC command: ${args.join(" ") || "(none)"}`);
   }
 
-  ensureRbacSeedsSynced({ quiet: true });
-  const usersBackfilled = bootstrapDefaultRoles();
+  const stats = ensureRbacSeedsSynced({ quiet: true });
   const roles = getRbacRoleSummary();
 
   console.log("RBAC bootstrap complete");
   console.log(`RBAC_ENABLED: ${describeRbacFlag()}`);
-  console.log(`Users backfilled this run: ${usersBackfilled}`);
+  console.log(`Users backfilled this run: ${stats.usersBackfilled}`);
   console.log("");
   printRolesTable(roles);
 }

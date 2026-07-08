@@ -255,6 +255,29 @@ describe("ensureRbacSeedsSynced", () => {
     expect(listUserRoles(user.id).map((role) => role.id)).toEqual([DEFAULT_ROLE_ID]);
   });
 
+  test("backfills the default role for users with zero roles", () => {
+    const user = createUser({ name: "Backfilled User" });
+    detachRole(user.id, "admin");
+    expect(listUserRoles(user.id)).toEqual([]);
+
+    const stats = ensureRbacSeedsSynced({ quiet: true });
+
+    expect(stats.usersBackfilled).toBe(1);
+    expect(listUserRoles(user.id).map((role) => role.id)).toEqual([DEFAULT_ROLE_ID]);
+  });
+
+  test("does not touch users deliberately narrowed to requester-only", () => {
+    const user = createUser({ name: "Requester Only User" });
+    attachRole(user.id, "requester");
+    detachRole(user.id, "admin");
+    expect(listUserRoles(user.id).map((role) => role.id)).toEqual([REQUESTER_ROLE_ID]);
+
+    const stats = ensureRbacSeedsSynced({ quiet: true });
+
+    expect(stats.usersBackfilled).toBe(0);
+    expect(listUserRoles(user.id).map((role) => role.id)).toEqual([REQUESTER_ROLE_ID]);
+  });
+
   test("rejects invalid built-in role verbs before syncing", () => {
     const requester = BUILTIN_ROLES.find((role) => role.id === REQUESTER_ROLE_ID);
     if (!requester) {
@@ -279,5 +302,25 @@ describe("runRbacCliCommand", () => {
     await expect(runRbacCliCommand(["bootstrap", "--bogus"])).rejects.toThrow(
       "Unknown RBAC command: bootstrap --bogus",
     );
+  });
+
+  test("reports users backfilled by bootstrap once", async () => {
+    const user = createUser({ name: "CLI Backfilled User" });
+    detachRole(user.id, "admin");
+    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      await runRbacCliCommand(["bootstrap"]);
+
+      expect(logSpy).toHaveBeenCalledWith("Users backfilled this run: 1");
+      expect(listUserRoles(user.id).map((role) => role.id)).toEqual([DEFAULT_ROLE_ID]);
+
+      logSpy.mockClear();
+      await runRbacCliCommand(["bootstrap"]);
+
+      expect(logSpy).toHaveBeenCalledWith("Users backfilled this run: 0");
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 });
