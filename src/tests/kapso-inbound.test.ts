@@ -147,6 +147,10 @@ describe("routeKapsoInbound", () => {
     const task = getTaskById(routing.taskId);
     expect(task!.requestedByUserId).toBe(user.id);
     expect(getKv("integration:unmapped:kapso", "34679077778:meta")).toBeNull();
+    // The resolved canonical name renders in the task text — never the raw
+    // WhatsApp profile `contact_name` ("Taras" from the fixture payload).
+    expect(task!.task).toContain("Known WhatsApp Sender (kapso:34679077778)");
+    expect(task!.task).not.toContain("Taras");
   });
 
   test("unknown Kapso sender → records unmapped identity and leaves task unowned", () => {
@@ -170,6 +174,9 @@ describe("routeKapsoInbound", () => {
     if (routing.kind !== "task") throw new Error("expected task");
     const task = getTaskById(routing.taskId);
     expect(task!.requestedByUserId).toBeUndefined();
+    // Unresolved -> explicit UNKNOWN sentinel, never the raw contact_name.
+    expect(task!.task).toContain("kapso:34679077779 (unknown user)");
+    expect(task!.task).not.toContain("Taras");
 
     const meta = getKv("integration:unmapped:kapso", "34679077779:meta");
     expect(meta?.valueType).toBe("json");

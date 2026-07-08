@@ -1,6 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { getRequestAuth } from "../utils/request-auth-context";
-import { getTaskById } from "./db";
+import { getAgentCurrentTask, getTaskById } from "./db";
+import { findUserByExternalId } from "./users";
 
 /**
  * Resolve the trusted audit-actor user id for a write to an audited table
@@ -14,6 +15,13 @@ import { getTaskById } from "./db";
  * attribute a write to a task they already own, whose requester is legitimately
  * theirs.
  *
+ * Two fallbacks layer on top of the header, both still gated by ownership:
+ *   1. No header at all → the caller's own current in-progress task (never a
+ *      client-supplied id, so this can't be spoofed).
+ *   2. The resolved task has no `requestedByUserId` but carries a
+ *      machine-recorded provider external id (today: the Slack user field) →
+ *      the same generic reverse lookup used everywhere else.
+ *
  * Returns `null` when no trusted actor can be established — which leaves the
  * audit column untouched on updates and NULL on inserts.
  */
@@ -21,13 +29,29 @@ export function resolveTaskAuditUserId(
   sourceTaskId: string | undefined,
   callerAgentId: string | undefined,
 ): string | null {
-  if (!sourceTaskId || !callerAgentId) return null;
-  const task = getTaskById(sourceTaskId);
+  if (!callerAgentId) return null;
+
+  let resolvedSourceTaskId = sourceTaskId;
+  if (!resolvedSourceTaskId) {
+    const currentTask = getAgentCurrentTask(callerAgentId);
+    if (currentTask) resolvedSourceTaskId = currentTask.id;
+  }
+  if (!resolvedSourceTaskId) return null;
+
+  const task = getTaskById(resolvedSourceTaskId);
   if (!task) return null;
   // Bind the header to the caller's own task — otherwise it is just a
   // client-chosen value and its requester cannot be trusted.
   if (task.agentId !== callerAgentId) return null;
-  return task.requestedByUserId ?? null;
+
+  if (task.requestedByUserId) return task.requestedByUserId;
+
+  if (task.slackUserId) {
+    const user = findUserByExternalId("slack", task.slackUserId);
+    if (user) return user.id;
+  }
+
+  return null;
 }
 
 /**

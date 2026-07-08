@@ -25,6 +25,7 @@ import {
   startTask,
   upsertChannelActivityCursor,
 } from "../be/db";
+import { renderIdentity, resolveIdentity } from "../be/identity";
 import { fetchChannelActivity } from "../slack/channel-activity";
 import { telemetry } from "../telemetry";
 import { route } from "./route-def";
@@ -274,11 +275,19 @@ export async function handlePoll(
               agentId: myAgentId,
             });
 
-            // Resolve requesting user if available
+            // Resolve requesting user if available. If the task carries a
+            // machine-recorded external id (today: the Slack user field) but
+            // no requestedByUserId, render the explicit UNKNOWN sentinel
+            // instead of silently omitting the section — never a substituted
+            // human (Rule 33 / provenance-or-silence).
             const requestedByUser = pendingTask.requestedByUserId
               ? getUserById(pendingTask.requestedByUserId)
               : undefined;
             const requestedByNotes = getRequesterNotes(requestedByUser?.notes);
+            const requestedByUnknownName =
+              !requestedByUser && pendingTask.slackUserId
+                ? renderIdentity(resolveIdentity("slack", pendingTask.slackUserId))
+                : undefined;
 
             return {
               trigger: {
@@ -296,6 +305,9 @@ export async function handlePoll(
                     role: requestedByUser.role,
                     notes: requestedByNotes,
                   },
+                }),
+                ...(requestedByUnknownName && {
+                  requestedBy: { name: requestedByUnknownName },
                 }),
               },
             };

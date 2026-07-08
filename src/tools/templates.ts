@@ -31,7 +31,11 @@ A Kapso webhook fired on the swarm's provisioned WhatsApp number. Load the \`kap
     { name: "conversation_id", description: "Kapso conversation id, or 'unknown'" },
     { name: "inbound_wamid", description: "Inbound message WAMID, or 'unknown'" },
     { name: "sender_phone", description: "Sender phone (E.164 no +), or 'unknown'" },
-    { name: "contact_name", description: "Contact display name, or 'unknown'" },
+    {
+      name: "contact_name",
+      description:
+        "Sender identity — resolved canonical name (e.g. 'Luis (kapso:15551234567)') or the UNKNOWN sentinel — never the raw WhatsApp profile name",
+    },
     { name: "phone_number_id", description: "Provisioned phone-number id, or 'unknown'" },
     {
       name: "test_note",

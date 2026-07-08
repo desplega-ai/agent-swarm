@@ -12,7 +12,7 @@ import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { workflowEventBus } from "../workflows/event-bus";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
-import { enrichSlackUserEmail, resolveSlackUserId } from "./enrich";
+import { enrichSlackUserEmail, resolveSlackUserId, rewriteSlackMentions } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
 import type { SlackFile } from "./files";
 import { extractTaskFromMessage, hasOtherUserMention, routeMessage } from "./router";
@@ -250,23 +250,6 @@ async function wasThreadStartedBySwarm(
   return startedBySwarm;
 }
 
-// Cache for user display names
-const userNameCache = new Map<string, string>();
-
-async function getUserDisplayName(client: WebClient, userId: string): Promise<string> {
-  if (userNameCache.has(userId)) {
-    return userNameCache.get(userId)!;
-  }
-  try {
-    const result = await client.users.info({ user: userId });
-    const name = result.user?.profile?.display_name || result.user?.real_name || userId;
-    userNameCache.set(userId, name);
-    return name;
-  } catch {
-    return userId;
-  }
-}
-
 /**
  * Fetch thread history and format as context for the task.
  * Returns empty string if not in a thread or no previous messages.
@@ -297,7 +280,10 @@ async function getThreadContext(
 
     if (previousMessages.length === 0) return "";
 
-    // Format messages with user names or [Agent] for bot messages
+    // Format messages with user names or [Agent] for bot messages. Author
+    // identity is rendered via the identity primitive (resolved name or the
+    // UNKNOWN sentinel) — never a raw Slack API display name, and no
+    // `users.info` call.
     const formattedMessages: string[] = [];
     for (const m of previousMessages) {
       // Check if this is a bot/agent message (multiple ways to identify)
@@ -310,12 +296,12 @@ async function getThreadContext(
         const truncatedText = text.length > 500 ? `${text.slice(0, 500)}...` : text;
         formattedMessages.push(`[Agent]: ${truncatedText}`);
       } else {
-        const userName = m.user ? await getUserDisplayName(client, m.user) : "Unknown";
-        formattedMessages.push(`${userName}: ${text}`);
+        const authorTag = m.user ? `<@${m.user}>` : "Unknown";
+        formattedMessages.push(`${authorTag}: ${text}`);
       }
     }
 
-    return formattedMessages.join("\n");
+    return rewriteSlackMentions(formattedMessages.join("\n"));
   } catch (error) {
     console.error("[Slack] Failed to fetch thread context:", error);
     return "";

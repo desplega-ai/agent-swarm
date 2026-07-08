@@ -8898,6 +8898,7 @@ export interface ApprovalRequest {
   timeoutSeconds: number | null;
   expiresAt: string | null;
   notificationChannels: unknown[] | null;
+  createdBy?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -8917,6 +8918,7 @@ interface ApprovalRequestRow {
   timeoutSeconds: number | null;
   expiresAt: string | null;
   notificationChannels: string | null;
+  created_by: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -8937,6 +8939,7 @@ function rowToApprovalRequest(row: ApprovalRequestRow): ApprovalRequest {
     timeoutSeconds: row.timeoutSeconds,
     expiresAt: normalizeDate(row.expiresAt),
     notificationChannels: row.notificationChannels ? JSON.parse(row.notificationChannels) : null,
+    createdBy: row.created_by ?? undefined,
     createdAt: normalizeDateRequired(row.createdAt),
     updatedAt: normalizeDateRequired(row.updatedAt),
   };
@@ -8952,6 +8955,7 @@ export function createApprovalRequest(data: {
   sourceTaskId?: string;
   timeoutSeconds?: number;
   notificationChannels?: unknown[];
+  createdBy?: string;
 }): ApprovalRequest {
   const now = new Date().toISOString();
   const expiresAt = data.timeoutSeconds
@@ -8972,12 +8976,13 @@ export function createApprovalRequest(data: {
         number | null,
         string | null,
         string | null,
+        string | null,
         string,
         string,
       ]
     >(
-      `INSERT INTO approval_requests (id, title, questions, workflowRunId, workflowRunStepId, sourceTaskId, approvers, timeoutSeconds, expiresAt, notificationChannels, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO approval_requests (id, title, questions, workflowRunId, workflowRunStepId, sourceTaskId, approvers, timeoutSeconds, expiresAt, notificationChannels, created_by, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     )
     .get(
@@ -8991,6 +8996,7 @@ export function createApprovalRequest(data: {
       data.timeoutSeconds ?? null,
       expiresAt,
       data.notificationChannels ? JSON.stringify(data.notificationChannels) : null,
+      data.createdBy ?? null,
       now,
       now,
     );

@@ -1,6 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, completeTask, createAgent, getDb, getTaskById, initDb } from "../be/db";
+import {
+  closeDb,
+  completeTask,
+  createAgent,
+  createUser,
+  getDb,
+  getTaskById,
+  initDb,
+} from "../be/db";
 import { upsertOAuthApp } from "../be/db-queries/oauth";
 import {
   createTrackerSync,
@@ -8,6 +16,9 @@ import {
   getTrackerSyncByExternalId,
   updateTrackerSync,
 } from "../be/db-queries/tracker";
+import { findUserByExternalId, type IdentityActor, linkIdentity } from "../be/users";
+
+const SYSTEM_ACTOR: IdentityActor = { kind: "system", id: "test" };
 
 const TEST_DB_PATH = "./test-jira-sync.sqlite";
 const BOT_ACCOUNT_ID = "bot-account-12345";
@@ -300,6 +311,93 @@ describe("handleCommentEvent — short-circuits", () => {
       .query("SELECT COUNT(*) AS c FROM agent_tasks WHERE source = 'jira'")
       .get() as { c: number };
     expect(taskCount.c).toBe(2);
+  });
+});
+
+describe("identity resolution — Jira routes through resolveIdentity, never raw displayName", () => {
+  test("issue-assigned: reporter linked by accountId -> requestedByUserId set + rendered pair in task text", async () => {
+    const reporter = createUser({ name: "Zbigniew Reporter", email: "zbigniew-jira@example.com" });
+    linkIdentity(reporter.id, "jira", "reporter-linked-1", SYSTEM_ACTOR);
+
+    const event = makeIssueAssignedEvent("10030", "KAN-30", "Linked reporter issue");
+    event.issue.fields.reporter = {
+      displayName: "Reporter Name",
+      accountId: "reporter-linked-1",
+    };
+    await handleIssueEvent(event);
+
+    const sync = getTrackerSyncByExternalId("jira", "task", "10030");
+    const task = getTaskById(sync?.swarmId ?? "");
+    expect(task).not.toBeNull();
+    expect(task?.requestedByUserId).toBe(reporter.id);
+    expect(task?.task).toContain("Zbigniew Reporter (jira:reporter-linked-1)");
+    expect(task?.task).not.toContain("Reporter Name");
+  });
+
+  test("issue-assigned: reporter with an email but no prior link auto-links via findOrCreateUserByEmail", async () => {
+    const event = makeIssueAssignedEvent("10031", "KAN-31", "Email-cascade issue");
+    event.issue.fields.reporter = {
+      displayName: "Auto Linked",
+      accountId: "reporter-autolink-1",
+      emailAddress: "auto-linked-jira@example.com",
+    };
+    await handleIssueEvent(event);
+
+    const linked = findUserByExternalId("jira", "reporter-autolink-1");
+    expect(linked).not.toBeNull();
+    expect(linked?.name).toBe("Auto Linked");
+
+    const sync = getTrackerSyncByExternalId("jira", "task", "10031");
+    const task = getTaskById(sync?.swarmId ?? "");
+    expect(task?.requestedByUserId).toBe(linked?.id);
+    expect(task?.task).toContain("Auto Linked (jira:reporter-autolink-1)");
+  });
+
+  test("issue-assigned: unlinked reporter with no email renders the UNKNOWN sentinel, never the displayName", async () => {
+    const event = makeIssueAssignedEvent("10032", "KAN-32", "Unknown reporter issue");
+    event.issue.fields.reporter = {
+      displayName: "Never Registered",
+      accountId: "reporter-unknown-1",
+    };
+    await handleIssueEvent(event);
+
+    const sync = getTrackerSyncByExternalId("jira", "task", "10032");
+    const task = getTaskById(sync?.swarmId ?? "");
+    expect(task).not.toBeNull();
+    expect(task?.requestedByUserId ?? null).toBeNull();
+    expect(task?.task).toContain("jira:reporter-unknown-1 (unknown user)");
+    expect(task?.task).not.toContain("Never Registered");
+  });
+
+  test("comment-mention: linked author -> requestedByUserId set + rendered pair as comment_author", async () => {
+    const author = createUser({ name: "Manuel Commenter", email: "manuel-jira@example.com" });
+    linkIdentity(author.id, "jira", "commenter-linked-1", SYSTEM_ACTOR);
+
+    await handleCommentEvent(
+      makeCommentEvent("10033", "KAN-33", "commenter-linked-1", "please take a look", [
+        BOT_ACCOUNT_ID,
+      ]),
+    );
+
+    const sync = getTrackerSyncByExternalId("jira", "task", "10033");
+    const task = getTaskById(sync?.swarmId ?? "");
+    expect(task).not.toBeNull();
+    expect(task?.requestedByUserId).toBe(author.id);
+    expect(task?.task).toContain("Manuel Commenter (jira:commenter-linked-1)");
+    expect(task?.task).not.toContain("Some User");
+  });
+
+  test("comment-mention: unlinked author renders the UNKNOWN sentinel, never the raw displayName", async () => {
+    await handleCommentEvent(
+      makeCommentEvent("10034", "KAN-34", "commenter-unknown-1", "any updates?", [BOT_ACCOUNT_ID]),
+    );
+
+    const sync = getTrackerSyncByExternalId("jira", "task", "10034");
+    const task = getTaskById(sync?.swarmId ?? "");
+    expect(task).not.toBeNull();
+    expect(task?.requestedByUserId ?? null).toBeNull();
+    expect(task?.task).toContain("jira:commenter-unknown-1 (unknown user)");
+    expect(task?.task).not.toContain("Some User");
   });
 });
 

@@ -6,6 +6,7 @@ import {
   createAgent,
   createApprovalRequest,
   createTaskExtended,
+  createUser,
   getAgentCurrentTask,
   getApprovalRequestById,
   getApprovalRequestByStepId,
@@ -256,6 +257,24 @@ describe("Approval Requests", () => {
       const data = makeApprovalData({ questions });
       const result = createApprovalRequest(data);
       expect(result.questions).toEqual(questions);
+    });
+
+    test("stamps createdBy when provided, round-trips through getApprovalRequestById", () => {
+      const requester = createUser({
+        name: "Approval Provenance User",
+        email: "approval-provenance@example.com",
+      });
+      const data = makeApprovalData({ createdBy: requester.id });
+      const created = createApprovalRequest(data);
+      expect(created.createdBy).toBe(requester.id);
+
+      const fetched = getApprovalRequestById(created.id);
+      expect(fetched?.createdBy).toBe(requester.id);
+    });
+
+    test("createdBy is undefined when not provided", () => {
+      const result = createApprovalRequest(makeApprovalData());
+      expect(result.createdBy).toBeUndefined();
     });
   });
 
@@ -586,6 +605,48 @@ describe("Approval Requests", () => {
       expect(created).not.toBeNull();
       expect(created!.title).toBe("Deploy approval");
       expect(created!.workflowRunStepId).toBe(stepId);
+    });
+
+    test("stamps createdBy from meta.requestedByUserId (workflow-run provenance)", async () => {
+      const requester = createUser({
+        name: "HITL Requester",
+        email: "hitl-requester@example.com",
+      });
+      const stepId = crypto.randomUUID();
+      const meta = { ...mockMeta, stepId, requestedByUserId: requester.id };
+      const executor = new HumanInTheLoopExecutor(mockDeps);
+
+      await executor.run({
+        config: {
+          title: "Deploy approval",
+          questions: [{ id: "q1", type: "approval", label: "Approve?", required: true }],
+          approvers: { policy: "any" },
+        },
+        context: {},
+        meta,
+      });
+
+      const created = getApprovalRequestByStepId(stepId);
+      expect(created?.createdBy).toBe(requester.id);
+    });
+
+    test("leaves createdBy unset when the workflow run carries no requester", async () => {
+      const stepId = crypto.randomUUID();
+      const meta = { ...mockMeta, stepId };
+      const executor = new HumanInTheLoopExecutor(mockDeps);
+
+      await executor.run({
+        config: {
+          title: "Deploy approval",
+          questions: [{ id: "q1", type: "approval", label: "Approve?", required: true }],
+          approvers: { policy: "any" },
+        },
+        context: {},
+        meta,
+      });
+
+      const created = getApprovalRequestByStepId(stepId);
+      expect(created?.createdBy).toBeUndefined();
     });
 
     test("idempotency: returns async marker for pending existing request", async () => {

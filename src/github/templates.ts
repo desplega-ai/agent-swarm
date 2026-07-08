@@ -78,7 +78,11 @@ Context:
     { name: "pr_number", description: "Pull request number" },
     { name: "pr_title", description: "Pull request title" },
     { name: "bot_name", description: "GitHub bot username" },
-    { name: "sender_login", description: "Event sender login" },
+    {
+      name: "sender_login",
+      description:
+        "Event sender identity — resolved canonical name (e.g. 'Luis (github:login)') or the UNKNOWN sentinel",
+    },
     { name: "repo_full_name", description: "Repository full name (owner/repo)" },
     { name: "head_ref", description: "Head branch name" },
     { name: "base_ref", description: "Base branch name" },
@@ -107,7 +111,11 @@ Context:
     { name: "pr_number", description: "Pull request number" },
     { name: "pr_title", description: "Pull request title" },
     { name: "bot_name", description: "GitHub bot username" },
-    { name: "sender_login", description: "Event sender login" },
+    {
+      name: "sender_login",
+      description:
+        "Event sender identity — resolved canonical name (e.g. 'Luis (github:login)') or the UNKNOWN sentinel",
+    },
     { name: "repo_full_name", description: "Repository full name (owner/repo)" },
     { name: "head_ref", description: "Head branch name" },
     { name: "base_ref", description: "Base branch name" },
@@ -187,7 +195,11 @@ Context:
   variables: [
     { name: "pr_number", description: "Pull request number" },
     { name: "pr_title", description: "Pull request title" },
-    { name: "sender_login", description: "Event sender login" },
+    {
+      name: "sender_login",
+      description:
+        "Event sender identity — resolved canonical name (e.g. 'Luis (github:login)') or the UNKNOWN sentinel",
+    },
     { name: "repo_full_name", description: "Repository full name (owner/repo)" },
     { name: "head_ref", description: "Head branch name" },
     { name: "base_ref", description: "Base branch name" },
@@ -216,7 +228,11 @@ Context:
     { name: "pr_number", description: "Pull request number" },
     { name: "pr_title", description: "Pull request title" },
     { name: "label_name", description: "Label that was added" },
-    { name: "sender_login", description: "Event sender login" },
+    {
+      name: "sender_login",
+      description:
+        "Event sender identity — resolved canonical name (e.g. 'Luis (github:login)') or the UNKNOWN sentinel",
+    },
     { name: "repo_full_name", description: "Repository full name (owner/repo)" },
     { name: "head_ref", description: "Head branch name" },
     { name: "base_ref", description: "Base branch name" },
@@ -248,7 +264,11 @@ Context:
     { name: "issue_number", description: "Issue number" },
     { name: "issue_title", description: "Issue title" },
     { name: "bot_name", description: "GitHub bot username" },
-    { name: "sender_login", description: "Event sender login" },
+    {
+      name: "sender_login",
+      description:
+        "Event sender identity — resolved canonical name (e.g. 'Luis (github:login)') or the UNKNOWN sentinel",
+    },
     { name: "repo_full_name", description: "Repository full name (owner/repo)" },
     { name: "issue_url", description: "Issue HTML URL" },
     { name: "context", description: "Issue body or title as context" },
@@ -272,7 +292,11 @@ Context:
   variables: [
     { name: "issue_number", description: "Issue number" },
     { name: "issue_title", description: "Issue title" },
-    { name: "sender_login", description: "Event sender login" },
+    {
+      name: "sender_login",
+      description:
+        "Event sender identity — resolved canonical name (e.g. 'Luis (github:login)') or the UNKNOWN sentinel",
+    },
     { name: "repo_full_name", description: "Repository full name (owner/repo)" },
     { name: "issue_url", description: "Issue HTML URL" },
     { name: "context", description: "Extracted mention context or issue title" },
@@ -298,7 +322,11 @@ Context:
     { name: "issue_number", description: "Issue number" },
     { name: "issue_title", description: "Issue title" },
     { name: "label_name", description: "Label that was added" },
-    { name: "sender_login", description: "Event sender login" },
+    {
+      name: "sender_login",
+      description:
+        "Event sender identity — resolved canonical name (e.g. 'Luis (github:login)') or the UNKNOWN sentinel",
+    },
     { name: "repo_full_name", description: "Repository full name (owner/repo)" },
     { name: "issue_url", description: "Issue HTML URL" },
     { name: "context", description: "Issue body or title as context" },
@@ -327,7 +355,11 @@ Comment:
     { name: "target_type", description: "PR or Issue" },
     { name: "target_number", description: "PR or issue number" },
     { name: "target_title", description: "PR or issue title" },
-    { name: "sender_login", description: "Event sender login" },
+    {
+      name: "sender_login",
+      description:
+        "Event sender identity — resolved canonical name (e.g. 'Luis (github:login)') or the UNKNOWN sentinel",
+    },
     { name: "repo_full_name", description: "Repository full name (owner/repo)" },
     { name: "comment_url", description: "Comment HTML URL" },
     { name: "context", description: "Extracted mention context from comment" },
@@ -360,7 +392,11 @@ URL: {{review_url}}{{review_body_section}}{{inline_comments_section}}
     { name: "pr_number", description: "Pull request number" },
     { name: "review_label", description: "Review state label (APPROVED, CHANGES REQUESTED, etc.)" },
     { name: "pr_title", description: "Pull request title" },
-    { name: "sender_login", description: "Reviewer login" },
+    {
+      name: "sender_login",
+      description:
+        "Reviewer identity — resolved canonical name (e.g. 'Luis (github:login)') or the UNKNOWN sentinel",
+    },
     { name: "repo_full_name", description: "Repository full name (owner/repo)" },
     { name: "review_url", description: "Review HTML URL" },
     { name: "review_body_section", description: "Review overall body section or empty string" },

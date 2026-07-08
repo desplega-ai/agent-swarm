@@ -21,6 +21,14 @@ import {
   getTrackerSyncByExternalId,
   updateTrackerSyncSwarmId,
 } from "../be/db-queries/tracker";
+import { renderIdentity, resolveIdentity } from "../be/identity";
+import { recordUnmappedIdentity } from "../be/unmapped-identities";
+import {
+  findOrCreateUserByEmail,
+  findUserByExternalId,
+  type IdentityActor,
+  linkIdentity,
+} from "../be/users";
 import { ensureToken, ensureTokenOrThrow } from "../oauth/ensure-token";
 import { resolveTemplate } from "../prompts/resolver";
 import { buildJiraContextKey } from "../tasks/context-key";
@@ -30,6 +38,66 @@ import { extractMentions, extractText } from "./adf";
 import { getJiraMetadata } from "./metadata";
 // Side-effect import: registers all Jira event templates in the prompt registry
 import "./templates";
+
+// ─── Actor resolution (mirrors resolveLinearActor / resolveSlackUserId) ────
+
+/** Audit-trail actor for the Jira auto-link cascade. */
+const JIRA_WEBHOOK_ACTOR: IdentityActor = { kind: "system", id: "webhook:jira" };
+
+/**
+ * Map a Jira Atlassian `accountId` to a canonical `users.id`:
+ *   1. Existing `(jira, accountId)` mapping — fast path.
+ *   2. No mapping + an email is present on the payload (privacy settings
+ *      permitting) → `findOrCreateUserByEmail` + `linkIdentity`.
+ *   3. No mapping + no email → record into the kv unmapped tracker; caller
+ *      proceeds without a `requestedByUserId`.
+ *
+ * Returns `undefined` when no mapping could be established.
+ */
+function resolveJiraActor(
+  accountId: string | undefined,
+  email: string | undefined,
+  name: string | undefined,
+  sampleEventType: string,
+  sampleContext: string,
+): string | undefined {
+  if (!accountId) return undefined;
+
+  const existing = findUserByExternalId("jira", accountId);
+  if (existing) return existing.id;
+
+  const trimmedEmail = typeof email === "string" ? email.trim() : "";
+  if (trimmedEmail !== "") {
+    const { user } = findOrCreateUserByEmail(
+      trimmedEmail,
+      { name: name?.trim() || undefined },
+      JIRA_WEBHOOK_ACTOR,
+    );
+    try {
+      linkIdentity(user.id, "jira", accountId, JIRA_WEBHOOK_ACTOR);
+    } catch (error) {
+      console.warn(
+        `[Jira Sync] linkIdentity('jira', ${accountId}) failed — likely a concurrent enroll`,
+        error,
+      );
+    }
+    return user.id;
+  }
+
+  recordUnmappedIdentity("jira", accountId, { sampleEventType, sampleContext });
+  return undefined;
+}
+
+/**
+ * Render a Jira actor for agent-visible text: the resolved canonical name or
+ * the explicit UNKNOWN sentinel — never the raw Jira `displayName`. Falls
+ * back to a bare "(unknown user)" when the payload carries no `accountId` at
+ * all (malformed/legacy webhook shape).
+ */
+function renderJiraIdentity(accountId: string | undefined): string {
+  if (!accountId) return "(unknown user)";
+  return renderIdentity(resolveIdentity("jira", accountId));
+}
 
 // ─── Bot identity (Atlassian accountId) ────────────────────────────────────
 
@@ -171,7 +239,7 @@ type IssueShape = {
   fields?: {
     summary?: string;
     description?: unknown;
-    reporter?: { displayName?: string; accountId?: string } | null;
+    reporter?: { displayName?: string; accountId?: string; emailAddress?: string } | null;
   };
 };
 
@@ -218,7 +286,14 @@ export async function handleIssueEvent(event: Record<string, unknown>): Promise<
   const issueId = issue.id;
   const issueKey = issue.key;
   const summary = issue.fields?.summary ?? "(no summary)";
-  const reporterName = issue.fields?.reporter?.displayName ?? "";
+  const reporterAccountId = issue.fields?.reporter?.accountId;
+  const requestedByUserId = resolveJiraActor(
+    reporterAccountId,
+    issue.fields?.reporter?.emailAddress,
+    issue.fields?.reporter?.displayName,
+    "issue_updated",
+    `${issueKey}: ${summary}`,
+  );
   const descriptionText = extractText(issue.fields?.description);
   const issueUrl = buildIssueUrl(issueKey);
 
@@ -241,7 +316,8 @@ export async function handleIssueEvent(event: Record<string, unknown>): Promise<
     await createInitialJiraTask({
       issueKey,
       summary,
-      reporterName,
+      reporterAccountId,
+      requestedByUserId,
       descriptionText,
       issueUrl,
       syncRowId: claim.sync.id,
@@ -265,7 +341,8 @@ export async function handleIssueEvent(event: Record<string, unknown>): Promise<
   await createInitialJiraTask({
     issueKey,
     summary,
-    reporterName,
+    reporterAccountId,
+    requestedByUserId,
     descriptionText,
     issueUrl,
     syncRowId: claim.sync.id,
@@ -280,8 +357,8 @@ export async function handleIssueEvent(event: Record<string, unknown>): Promise<
 type CommentShape = {
   id?: string;
   body?: unknown;
-  author?: { accountId?: string; displayName?: string } | null;
-  updateAuthor?: { accountId?: string; displayName?: string } | null;
+  author?: { accountId?: string; displayName?: string; emailAddress?: string } | null;
+  updateAuthor?: { accountId?: string; displayName?: string; emailAddress?: string } | null;
 };
 
 /**
@@ -345,7 +422,14 @@ export async function handleCommentEvent(event: Record<string, unknown>): Promis
   const summary = issue.fields?.summary ?? "(no summary)";
   const descriptionText = extractText(issue.fields?.description);
   const commentText = extractText(comment.body);
-  const commentAuthor = comment.author?.displayName ?? "";
+  const commentAuthorAccountId = comment.author?.accountId ?? comment.updateAuthor?.accountId;
+  const requestedByUserId = resolveJiraActor(
+    commentAuthorAccountId,
+    comment.author?.emailAddress ?? comment.updateAuthor?.emailAddress,
+    comment.author?.displayName ?? comment.updateAuthor?.displayName,
+    "comment_created",
+    `${issueKey}: ${commentText.slice(0, 80)}`,
+  );
   const issueUrl = buildIssueUrl(issueKey);
 
   if (!existing) {
@@ -372,7 +456,8 @@ export async function handleCommentEvent(event: Record<string, unknown>): Promis
         summary,
         descriptionText,
         commentText,
-        commentAuthor,
+        commentAuthorAccountId,
+        requestedByUserId,
         issueUrl,
         syncRowId: claim.sync.id,
       });
@@ -384,7 +469,8 @@ export async function handleCommentEvent(event: Record<string, unknown>): Promis
       summary,
       issueUrl,
       commentText,
-      commentAuthor,
+      commentAuthorAccountId,
+      requestedByUserId,
       syncRow: claim.sync,
     });
   }
@@ -394,7 +480,8 @@ export async function handleCommentEvent(event: Record<string, unknown>): Promis
     summary,
     issueUrl,
     commentText,
-    commentAuthor,
+    commentAuthorAccountId,
+    requestedByUserId,
     syncRow: existing,
   });
 }
@@ -404,7 +491,8 @@ async function routeCommentOnExistingSync(input: {
   summary: string;
   issueUrl: string;
   commentText: string;
-  commentAuthor: string;
+  commentAuthorAccountId: string | undefined;
+  requestedByUserId: string | undefined;
   syncRow: { id: string; swarmId: string };
 }): Promise<void> {
   const priorTask = input.syncRow.swarmId ? getTaskById(input.syncRow.swarmId) : null;
@@ -417,15 +505,17 @@ async function routeCommentOnExistingSync(input: {
   }
 
   // Terminal or orphan sync row → follow-up.
+  const commentAuthorDisplay = renderJiraIdentity(input.commentAuthorAccountId);
   await createInitialJiraTask({
     issueKey: input.issueKey,
     summary: input.summary,
-    reporterName: input.commentAuthor,
+    reporterAccountId: input.commentAuthorAccountId,
+    requestedByUserId: input.requestedByUserId,
     descriptionText: "",
     issueUrl: input.issueUrl,
     syncRowId: input.syncRow.id,
     followup: true,
-    followupTrigger: `New comment from ${input.commentAuthor || "user"}`,
+    followupTrigger: `New comment from ${commentAuthorDisplay}`,
     followupMessage: input.commentText,
   });
 }
@@ -453,7 +543,8 @@ export async function handleIssueDeleteEvent(event: Record<string, unknown>): Pr
 async function createInitialJiraTask(input: {
   issueKey: string;
   summary: string;
-  reporterName: string;
+  reporterAccountId: string | undefined;
+  requestedByUserId: string | undefined;
   descriptionText: string;
   issueUrl: string;
   syncRowId: string;
@@ -479,7 +570,7 @@ async function createInitialJiraTask(input: {
         issue_key: input.issueKey,
         issue_summary: input.summary,
         issue_url: input.issueUrl,
-        reporter: input.reporterName,
+        reporter: renderJiraIdentity(input.reporterAccountId),
         description_section: descriptionSection,
       };
 
@@ -493,6 +584,7 @@ async function createInitialJiraTask(input: {
     agentId: lead?.id ?? "",
     source: "jira",
     taskType: "jira-issue",
+    requestedByUserId: input.requestedByUserId,
     contextKey: buildJiraContextKey(input.issueKey),
   });
 
@@ -509,7 +601,8 @@ async function createCommentMentionTask(input: {
   summary: string;
   descriptionText: string;
   commentText: string;
-  commentAuthor: string;
+  commentAuthorAccountId: string | undefined;
+  requestedByUserId: string | undefined;
   issueUrl: string;
   syncRowId: string;
 }): Promise<void> {
@@ -522,7 +615,7 @@ async function createCommentMentionTask(input: {
     issue_key: input.issueKey,
     issue_summary: input.summary,
     issue_url: input.issueUrl,
-    comment_author: input.commentAuthor,
+    comment_author: renderJiraIdentity(input.commentAuthorAccountId),
     description_section: descriptionSection,
     comment_text: input.commentText,
   });
@@ -536,6 +629,7 @@ async function createCommentMentionTask(input: {
     agentId: lead?.id ?? "",
     source: "jira",
     taskType: "jira-issue",
+    requestedByUserId: input.requestedByUserId,
     contextKey: buildJiraContextKey(input.issueKey),
   });
 

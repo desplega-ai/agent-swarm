@@ -9,6 +9,7 @@
  */
 
 import { failTask, findTaskByVcs, getAllAgents, incrKv, upsertKv } from "../be/db";
+import { renderIdentity, resolveIdentity } from "../be/identity";
 import { findOrCreateUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { gitlabContextKey } from "../tasks/context-key";
@@ -111,6 +112,14 @@ function resolveGitLabSender(
   return undefined;
 }
 
+/**
+ * Render a GitLab username for agent-visible text: the resolved canonical
+ * name or the explicit UNKNOWN sentinel — never the raw `username`.
+ */
+function renderGitLabIdentity(username: string): string {
+  return renderIdentity(resolveIdentity("gitlab", username));
+}
+
 // ── Event Handlers ──
 
 export async function handleMergeRequest(
@@ -152,7 +161,7 @@ export async function handleMergeRequest(
         mr_iid: mr.iid,
         mr_title: mr.title,
         repo,
-        username: user.username,
+        username: renderGitLabIdentity(user.username),
         source_branch: mr.source_branch,
         target_branch: mr.target_branch,
         mr_url: mr.url,
@@ -260,7 +269,7 @@ export async function handleIssue(
         issue_iid: issue.iid,
         issue_title: issue.title,
         repo,
-        username: user.username,
+        username: renderGitLabIdentity(user.username),
         issue_url: issue.url,
         context_section: contextSection,
       });
@@ -312,10 +321,8 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
   const { user, project, object_attributes: note } = event;
   const repo = project.path_with_namespace;
 
-  // Resolve canonical user from GitLab sender — currently dead-coded
-  // (underscore prefix). Rewired for parity with live sites; if a future
-  // change uses the value, the resolution path is already correct.
-  const _requestedByUserId = resolveGitLabSender(user, "note", note.note);
+  // Resolve canonical user from GitLab sender.
+  const requestedByUserId = resolveGitLabSender(user, "note", note.note);
 
   // Only handle comments with bot mentions
   if (!detectMention(note.note)) {
@@ -362,7 +369,7 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
 
   const noteResult = resolveTemplate("gitlab.comment.mentioned", {
     entity_label: entityLabel,
-    username: user.username,
+    username: renderGitLabIdentity(user.username),
     repo,
     target_url: targetUrl,
     context,
@@ -383,6 +390,7 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
     vcsNumber: targetNumber,
     vcsCommentId: note.id,
     vcsAuthor: user.username,
+    requestedByUserId,
     vcsUrl: targetUrl,
     parentTaskId: existingTask?.id,
     contextKey: targetNumber
@@ -410,8 +418,11 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
 export async function handlePipeline(
   event: PipelineEvent,
 ): Promise<{ created: boolean; taskId?: string }> {
-  const { project, object_attributes: pipeline } = event;
+  const { user, project, object_attributes: pipeline } = event;
   const repo = project.path_with_namespace;
+
+  // Resolve canonical user from GitLab sender — whoever triggered the pipeline.
+  const requestedByUserId = resolveGitLabSender(user, "pipeline", `Pipeline #${pipeline.id}`);
 
   // Only handle failed pipelines that are associated with a merge request
   if (pipeline.status !== "failed") {
@@ -458,6 +469,7 @@ export async function handlePipeline(
     vcsEventType: "pipeline",
     vcsNumber: mrIid,
     vcsAuthor: "",
+    requestedByUserId,
     vcsUrl: event.merge_request.url,
     parentTaskId: existingTask.id,
     contextKey: gitlabContextKey({

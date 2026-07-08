@@ -90,6 +90,7 @@ declare module "swarm-sdk" {
       externalId?: string;
       email?: string;
       userId?: string;
+      name?: string;
     }): Promise<unknown>;
     db_query(args: { sql: string; params?: unknown[] }): Promise<unknown>;
     // --- config ---
