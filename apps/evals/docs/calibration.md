@@ -157,6 +157,72 @@ Pinned frontier model: `claude-opus-4.8`. Fill in after the sweep.
 | `distributed-audit`    |             |           |     |                                     |       |
 | `delegation-probe`     |             |           |     |                                     |       |
 
+## v9 orchestration-substrate catalog — `delegation-chain` N-bump reading (2026-07-08)
+
+`delegation-chain` (v9 catalog, `scenarios/delegation-chain.ts`) is a *different* scenario set from the
+round-11 six above and was never run through the frontier/budget ship gate. It carries its own open
+question, closed here.
+
+### The verdict, leading (not raw pass-rate)
+
+**`claude-haiku` × `delegation-chain` at N=10 is ✗ — confidently BELOW the 0.75 pass threshold, not
+small-N noise.** `scoreCI = [0.03, 0.23]` sits entirely under the bar; `passRateCI = [0, 0.28]` does too.
+The scenario is doing its job (correctly failing a budget-tier config on a task designed to discriminate
+frontier from budget), not miscalibrated.
+
+### What the original "0.74 mean / 0-of-2 pass" reading actually was
+
+The number quoted in the brief traces to `run-202606302342-e283fd` (the 2026-06-30 overnight sweep that
+got orphaned by an E2B sandbox-expiry / server-restart race — fixed by PR #871, "recover orphaned runs on
+restart"). Its `delegation-chain × claude-haiku` cell shows
+`attempts: 2, finished: 1` — **only one of the two attempts ever ran**; the other never got a slot before
+the run died. That lone finished attempt scored `0.7381` (`scoreCI = [0.7381, 0.7381]`, degenerate — a
+single point can't bound itself). "0.74 mean" was **N=1**, not N=2, and the "0-of-2 pass" framing implied
+two comparable samples where there was really one.
+
+### The N=10 re-run (this task)
+
+Re-ran `delegation-chain × claude-haiku` at N=10 via the deployed evals API
+(`run-202607081443-76fc91`, `attemptsPerCell: 10, concurrency: 3`, ~$2.33 total E2B/model spend):
+
+| Metric | Value |
+|---|---|
+| N | 10 (10/10 finished, 0 errors) |
+| meanScore | 0.114 |
+| scoreCI (bootstrap, 95%) | [0.029, 0.229] |
+| passRate | 0/10 (0%) |
+| passRateCI (Wilson, 95%) | [0, 0.278] |
+| passThreshold | 0.75 (`DEFAULT_PASS_THRESHOLD`, unmodified by the scenario) |
+| **CI-aware indicator** | **✗** (`scoreCI.hi = 0.229 < 0.75`) |
+
+The true convergent mean (~0.11) is far below the single lucky N=1 draw (0.74) that originally raised the
+"is 0.75 miscalibrated?" question. At N=10 the picture flips: **the 0.74 reading was itself the noise** —
+an outlier high sample from a one-shot orphaned run — not evidence that the threshold is unfair. With 10x
+the sample, `claude-haiku` fails this scenario hard and consistently (9 of 10 attempts scored ≤ 0.19; one
+outlier attempt hit 0.57, still nowhere near 0.75).
+
+**Conclusion: no threshold change needed.** `delegation-chain`'s 0.75 bar is not miscalibrated for the
+budget cohort — it's discriminating exactly as a v9 orchestration-substrate scenario should.
+
+### Known gap, not fixed here (small follow-up)
+
+`src/cli.ts`'s `show`/`formatShowCell` **already** leads with the CI-aware ✓/~/✗ mark (see
+`formatShowCell`, `apps/evals/src/cli.ts`) — that surface is fine. The gap is in
+**`src/api/analytics.ts`**, which backs the public landing-page analytics + `AnalyticsPage.tsx`: every
+rollup (`finishGroup`, per-model, per-scenario, leaderboard) computes only a raw `passRate = ratio(passed,
+graded)` with **no `scoreCI`/Wilson interval at all**. That's the "canonical baseline" surface a human or
+this doc's own prior guidance would reach for first, and it can still produce exactly this kind of
+misleading single-N read. Adding bootstrap/Wilson CI to the analytics rollups is real work (five call
+sites, plus a UI change to render the indicator) — flagging as a follow-up rather than doing it inline
+here.
+
+### Follow-up: frontier anchors still unread at meaningful N
+
+The same orphaned run left `claude-sonnet-5` (mean 0.595, N=1), `claude-opus-4.8` (mean 0, N=1), and
+`codex-5.4-mini` (mean 0.357, N=2) similarly under-sampled for `delegation-chain`. If a full frontier-vs-
+budget spread is wanted for this scenario (the round-11-style `≥0.2` gate), those need their own N≥8 sweep
+too — scoped out here since the brief's specific question was about the `claude-haiku` "0.74" reading.
+
 ## Swarm-mechanics scenarios — finding (2026-06-14, ACCEPTED) → PRUNED (2026-06-17, Plan A)
 
 `memory-coordination`, `failure-recovery`, `failure-recovery-mixed` were built to test whether a harness+model is a
