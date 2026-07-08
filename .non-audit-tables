@@ -20,9 +20,6 @@ oauth_apps
 oauth_refresh_locks
 oauth_tokens
 permission_audit
-principal_roles
-role_permissions
-roles
 script_embeddings
 seed_state
 session_costs

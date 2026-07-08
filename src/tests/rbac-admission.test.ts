@@ -19,6 +19,7 @@ import { attachRole, detachRole, ensureRbacSeedsSynced } from "../be/rbac-roles"
 import { type IdentityActor, mintToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleFs } from "../http/fs";
+import { handleMcpOAuth } from "../http/mcp-oauth";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { decideAdmission, type PermissionVerb } from "../rbac";
@@ -58,6 +59,7 @@ function createTestServer(): Server {
     if (await handleCore(req, res, myAgentId, API_KEY)) return;
     if (await handleTasks(req, res, pathSegments, queryParams, myAgentId)) return;
     if (await handleFs(req, res, pathSegments, queryParams, myAgentId)) return;
+    if (await handleMcpOAuth(req, res, pathSegments, queryParams)) return;
 
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Not Found" }));
@@ -214,6 +216,30 @@ describe("decideAdmission", () => {
     });
   });
 
+  test("declared GET permissions win over the GET fallback", () => {
+    expect(
+      decideAdmission({
+        method: "GET",
+        rbac: { permission: "mcp-oauth.authorize.any" },
+        routeKnown: true,
+        grant: grant(),
+      }),
+    ).toEqual({
+      allow: false,
+      reason: "admission: missing permission 'mcp-oauth.authorize.any'",
+      verb: "mcp-oauth.authorize.any",
+    });
+
+    expect(
+      decideAdmission({
+        method: "GET",
+        rbac: { permission: "mcp-oauth.authorize.any" },
+        routeKnown: true,
+        grant: grant(["mcp-oauth.authorize.any"]),
+      }),
+    ).toEqual({ allow: true, verb: "mcp-oauth.authorize.any" });
+  });
+
   test("allows GET and HEAD fallback when no permission verb is declared", () => {
     expect(
       decideAdmission({
@@ -286,6 +312,51 @@ describe("handleCore admission wiring", () => {
     expect(res.status).toBe(201);
     flushAuditBuffer();
     expect(admissionAuditRows()).toEqual([]);
+  });
+
+  test("OAuth authorize-url GET uses its declared verb instead of the GET fallback", async () => {
+    const { userId: requesterId, plaintext: requesterToken } =
+      createTokenForUser("OAuth Requester User");
+    narrowUserToRequester(requesterId);
+
+    process.env.RBAC_ENABLED = "true";
+
+    const denied = await api(port, "GET", "/api/mcp-oauth/missing-server/authorize-url", {
+      bearer: requesterToken,
+    });
+    expect(denied.status).toBe(403);
+    expect(denied.body).toEqual({
+      error: "Forbidden: admission: missing permission 'mcp-oauth.authorize.any'",
+    });
+
+    const { plaintext: adminToken } = createTokenForUser("OAuth Admin User");
+    const admin = await api(port, "GET", "/api/mcp-oauth/missing-server/authorize-url", {
+      bearer: adminToken,
+    });
+    expect(admin.status).not.toBe(403);
+    expect(admin.status).toBe(404);
+
+    delete process.env.RBAC_ENABLED;
+
+    const flagOff = await api(port, "GET", "/api/mcp-oauth/missing-server/authorize-url", {
+      bearer: requesterToken,
+    });
+    expect(flagOff.status).not.toBe(403);
+    expect(flagOff.status).toBe(404);
+
+    flushAuditBuffer();
+    expect(
+      admissionAuditRows().find(
+        (row) =>
+          row.principalId === requesterId &&
+          row.resourceId === "GET /api/mcp-oauth/{mcpServerId}/authorize-url",
+      ),
+    ).toMatchObject({
+      verb: "mcp-oauth.authorize.any",
+      decision: "deny",
+      reason: "admission: missing permission 'mcp-oauth.authorize.any'",
+      source: "http",
+    });
   });
 
   test("flag on default-admin users bypass admission and preserve no-op behavior", async () => {

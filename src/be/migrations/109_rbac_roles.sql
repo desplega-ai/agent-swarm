@@ -17,13 +17,19 @@ CREATE TABLE IF NOT EXISTS roles (
   isBuiltin     INTEGER NOT NULL DEFAULT 0,
   grantsAll     INTEGER NOT NULL DEFAULT 0,
   createdAt     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  lastUpdatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  lastUpdatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  -- Future role-management API populates audit users; system writers leave NULL.
+  created_by    TEXT REFERENCES users(id),
+  updated_by    TEXT REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS role_permissions (
   roleId    TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
   verb      TEXT NOT NULL,
   createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  -- Future role-management API populates audit users; system writers leave NULL.
+  created_by TEXT REFERENCES users(id),
+  updated_by TEXT REFERENCES users(id),
   PRIMARY KEY (roleId, verb)
 );
 
@@ -33,6 +39,9 @@ CREATE TABLE IF NOT EXISTS principal_roles (
   principalId   TEXT NOT NULL,
   roleId        TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
   createdAt     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  -- Future role-management API populates audit users; system writers leave NULL.
+  created_by    TEXT REFERENCES users(id),
+  updated_by    TEXT REFERENCES users(id),
   UNIQUE (principalType, principalId, roleId)
 );
 CREATE INDEX IF NOT EXISTS idx_principal_roles_principal
