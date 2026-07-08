@@ -80,7 +80,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
-import { formatSmartTime } from "@/lib/utils";
+import { cn, formatSmartTime } from "@/lib/utils";
 import { PlaygroundPanel } from "./playground-panel";
 
 const KIND_OPTIONS: Array<ScriptConnectionKind | "all"> = ["all", "openapi", "graphql", "mcp"];
