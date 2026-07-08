@@ -207,7 +207,7 @@ export const registerPatchScheduleTool = (server: McpServer) => {
       }
 
       // Validate targetAgentId if provided and not null
-      if (targetAgentId && targetAgentId !== null) {
+      if (targetAgentId) {
         const agent = getAgentById(targetAgentId);
         if (!agent) {
           return {
