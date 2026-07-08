@@ -9,6 +9,7 @@ import {
   ensureRbacSeedsSynced,
   getUserGrant,
   listUserRoles,
+  runRbacCliCommand,
 } from "../be/rbac-roles";
 import type { PermissionVerb } from "../rbac";
 
@@ -270,5 +271,13 @@ describe("ensureRbacSeedsSynced", () => {
     } finally {
       requester.verbs.splice(0, requester.verbs.length, ...originalVerbs);
     }
+  });
+});
+
+describe("runRbacCliCommand", () => {
+  test("rejects trailing bootstrap arguments", async () => {
+    await expect(runRbacCliCommand(["bootstrap", "--bogus"])).rejects.toThrow(
+      "Unknown RBAC command: bootstrap --bogus",
+    );
   });
 });

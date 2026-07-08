@@ -23,9 +23,20 @@ import {
 setDefaultTimeout(120_000);
 
 const REQUESTER_ROLE_ID = "rbac-role-requester";
+const CONFIG_SECRET_READER_ROLE_ID = "rbac-test-config-secret-reader";
+const CONFIG_SECRET_KEY = "RBAC_ADMISSION_SECRET";
+const CONFIG_SECRET_VALUE = "rbac-admission-secret-value";
 
 let dir: string;
 let server: SwarmServer | undefined;
+
+function configValue(
+  body: { configs?: Array<{ key: string; value?: unknown }> },
+  key: string,
+): string | undefined {
+  const row = body.configs?.find((config) => config.key === key);
+  return typeof row?.value === "string" ? row.value : undefined;
+}
 
 function rewriteUserToRequester(dbPath: string, userId: string): void {
   const db = new Database(dbPath);
@@ -39,6 +50,29 @@ function rewriteUserToRequester(dbPath: string, userId: string): void {
         `INSERT INTO principal_roles (principalType, principalId, roleId)
          VALUES ('user', ?, ?)`,
       ).run(userId, REQUESTER_ROLE_ID);
+    })();
+  } finally {
+    db.close();
+  }
+}
+
+function grantUserConfigSecretRead(dbPath: string, userId: string): void {
+  const db = new Database(dbPath);
+  try {
+    db.run("PRAGMA busy_timeout = 5000");
+    db.transaction(() => {
+      db.prepare(
+        `INSERT OR IGNORE INTO roles (id, name, description, isBuiltin, grantsAll)
+         VALUES (?, ?, ?, 0, 0)`,
+      ).run(CONFIG_SECRET_READER_ROLE_ID, "config-secret-reader", "Test config secret reader");
+      db.prepare("INSERT OR IGNORE INTO role_permissions (roleId, verb) VALUES (?, ?)").run(
+        CONFIG_SECRET_READER_ROLE_ID,
+        "config.read.secrets",
+      );
+      db.prepare(
+        `INSERT OR IGNORE INTO principal_roles (principalType, principalId, roleId)
+         VALUES ('user', ?, ?)`,
+      ).run(userId, CONFIG_SECRET_READER_ROLE_ID);
     })();
   } finally {
     db.close();
@@ -77,6 +111,27 @@ describe("RBAC admission over real HTTP", () => {
     const userToken = minted.body.plaintext as string;
     expect(userToken).toStartWith("aswt_");
 
+    const upsertSecret = await api(server.base, "PUT", "/api/config?includeSecrets=true", {
+      body: {
+        scope: "global",
+        key: CONFIG_SECRET_KEY,
+        value: CONFIG_SECRET_VALUE,
+        isSecret: true,
+      },
+    });
+    expect(upsertSecret.status).toBe(200);
+    expect(upsertSecret.body.value).toBe(CONFIG_SECRET_VALUE);
+
+    const grantsAllSecretRead = await api(
+      server.base,
+      "GET",
+      "/api/config?scope=global&includeSecrets=true",
+      { bearer: userToken },
+    );
+    expect(grantsAllSecretRead.status).toBe(200);
+    expect(configValue(grantsAllSecretRead.body, CONFIG_SECRET_KEY)).toBe(CONFIG_SECRET_VALUE);
+    expect(grantsAllSecretRead.body.message).toBeUndefined();
+
     const defaultCreate = await api(server.base, "POST", "/api/tasks", {
       bearer: userToken,
       body: { task: "rbac admission default role no-op" },
@@ -105,6 +160,31 @@ describe("RBAC admission over real HTTP", () => {
     });
     expect(listTasks.status).toBe(200);
 
+    const maskedSecretRead = await api(
+      server.base,
+      "GET",
+      "/api/config?scope=global&includeSecrets=true",
+      { bearer: userToken },
+    );
+    expect(maskedSecretRead.status).toBe(200);
+    expect(configValue(maskedSecretRead.body, CONFIG_SECRET_KEY)).toBe("********");
+    expect(maskedSecretRead.body.message).toContain("secret values masked");
+    expect(maskedSecretRead.body.message).toContain(
+      "reading unmasked secrets requires the lead agent",
+    );
+
+    grantUserConfigSecretRead(dbPath, userId);
+
+    const grantedSecretRead = await api(
+      server.base,
+      "GET",
+      "/api/config?scope=global&includeSecrets=true",
+      { bearer: userToken },
+    );
+    expect(grantedSecretRead.status).toBe(200);
+    expect(configValue(grantedSecretRead.body, CONFIG_SECRET_KEY)).toBe(CONFIG_SECRET_VALUE);
+    expect(grantedSecretRead.body.message).toBeUndefined();
+
     const fsUpload = await api(
       server.base,
       "POST",
@@ -132,6 +212,8 @@ describe("RBAC admission over real HTTP", () => {
       "PUT /api/favorites",
     ]);
 
+    rewriteUserToRequester(dbPath, userId);
+
     await server.stop();
     server = undefined;
 
@@ -145,5 +227,15 @@ describe("RBAC admission over real HTTP", () => {
       body: { task: "rbac admission flag off legacy create" },
     });
     expect(flagOffCreate.status).toBe(201);
+
+    const flagOffSecretRead = await api(
+      server.base,
+      "GET",
+      "/api/config?scope=global&includeSecrets=true",
+      { bearer: userToken },
+    );
+    expect(flagOffSecretRead.status).toBe(200);
+    expect(configValue(flagOffSecretRead.body, CONFIG_SECRET_KEY)).toBe(CONFIG_SECRET_VALUE);
+    expect(flagOffSecretRead.body.message).toBeUndefined();
   });
 });

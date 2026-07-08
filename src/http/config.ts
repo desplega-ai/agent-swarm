@@ -10,12 +10,13 @@ import {
   maskSecrets,
   upsertSwarmConfig,
 } from "../be/db";
+import { getUserGrant } from "../be/rbac-roles";
 import {
   isReservedConfigKey,
   reservedKeyError,
   validateConfigValue,
 } from "../be/swarm-config-guard";
-import { can, type PermissionVerb } from "../rbac";
+import { can, isRbacEnabled, type PermissionVerb } from "../rbac";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
@@ -23,6 +24,8 @@ import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
 const MAX_ENV_PRESENCE_KEYS = 200;
+const SECRETS_FORCE_MASK_NOTE =
+  " (secret values masked: reading unmasked secrets requires the lead agent)";
 
 // Config keys the API server owns for its own use and must NEVER hand out over
 // HTTP — workers/entrypoints read config to build their env, and the agent-fs
@@ -38,6 +41,25 @@ function stripApiOnlyKeys<T extends { key: string }>(configs: T[]): T[] {
 function singleHeader(req: IncomingMessage, name: string): string | undefined {
   const raw = req.headers[name];
   return Array.isArray(raw) ? raw[0] : raw;
+}
+
+function userMayReadSecrets(req: IncomingMessage): boolean {
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "operator") return true;
+  // Agent/no-user HTTP reads keep their pre-RBAC behavior; MCP get-config has
+  // the per-agent config.read.secrets gate.
+  if (auth?.kind !== "user") return true;
+  if (!isRbacEnabled()) return true;
+
+  const grant = getUserGrant(auth.userId);
+  return grant.grantsAll || grant.verbs.has("config.read.secrets");
+}
+
+function resolveSecretsRead(req: IncomingMessage, includeSecrets: boolean) {
+  if (!includeSecrets || userMayReadSecrets(req)) {
+    return { effectiveIncludeSecrets: includeSecrets, secretsNote: "" };
+  }
+  return { effectiveIncludeSecrets: false, secretsNote: SECRETS_FORCE_MASK_NOTE };
 }
 
 /**
@@ -213,18 +235,22 @@ export async function handleConfig(
     const parsed = await getResolvedConfigRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
+    const { effectiveIncludeSecrets, secretsNote } = resolveSecretsRead(req, includeSecrets);
     const configs = stripApiOnlyKeys(
       getResolvedConfig(parsed.query.agentId || undefined, parsed.query.repoId || undefined),
     );
-    const result = includeSecrets ? configs : maskSecrets(configs);
-    if (includeSecrets) {
+    const result = effectiveIncludeSecrets ? configs : maskSecrets(configs);
+    if (effectiveIncludeSecrets) {
       for (const c of result) {
         if (c.isSecret && c.value) {
           registerVolatileSecret(c.value, `config:${c.key}`);
         }
       }
     }
-    json(res, { configs: result });
+    json(res, {
+      configs: result,
+      ...(secretsNote ? { message: `Found ${result.length} config(s).${secretsNote}` } : {}),
+    });
     return true;
   }
 
@@ -271,11 +297,15 @@ export async function handleConfig(
       jsonError(res, "Config not found", 404);
       return true;
     }
-    const singleResult = includeSecrets ? config : maskSecrets([config])[0]!;
-    if (includeSecrets && singleResult.isSecret && singleResult.value) {
+    const { effectiveIncludeSecrets, secretsNote } = resolveSecretsRead(req, includeSecrets);
+    const singleResult = effectiveIncludeSecrets ? config : maskSecrets([config])[0]!;
+    if (effectiveIncludeSecrets && singleResult.isSecret && singleResult.value) {
       registerVolatileSecret(singleResult.value, `config:${singleResult.key}`);
     }
-    json(res, singleResult);
+    json(res, {
+      ...singleResult,
+      ...(secretsNote ? { message: `Found 1 config(s).${secretsNote}` } : {}),
+    });
     return true;
   }
 
@@ -283,21 +313,25 @@ export async function handleConfig(
     const parsed = await listConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
+    const { effectiveIncludeSecrets, secretsNote } = resolveSecretsRead(req, includeSecrets);
     const configs = stripApiOnlyKeys(
       getSwarmConfigs({
         scope: parsed.query.scope || undefined,
         scopeId: parsed.query.scopeId || undefined,
       }),
     );
-    const listResult = includeSecrets ? configs : maskSecrets(configs);
-    if (includeSecrets) {
+    const listResult = effectiveIncludeSecrets ? configs : maskSecrets(configs);
+    if (effectiveIncludeSecrets) {
       for (const c of listResult) {
         if (c.isSecret && c.value) {
           registerVolatileSecret(c.value, `config:${c.key}`);
         }
       }
     }
-    json(res, { configs: listResult });
+    json(res, {
+      configs: listResult,
+      ...(secretsNote ? { message: `Found ${listResult.length} config(s).${secretsNote}` } : {}),
+    });
     return true;
   }
 

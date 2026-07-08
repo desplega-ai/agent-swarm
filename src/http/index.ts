@@ -29,7 +29,7 @@ import {
   withRemoteContext,
   withSpanContext,
 } from "../otel";
-import { clearAuditSink, setAuditSink } from "../rbac";
+import { clearAuditSink, isRbacEnabled, setAuditSink } from "../rbac";
 import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
@@ -509,6 +509,9 @@ try {
   ensureRbacSeedsSynced();
 } catch (err) {
   console.error("[startup] Failed to sync RBAC seed rows:", err);
+  // RBAC flag-on must fail closed; flag-off deployments should not be bricked
+  // by role-catalog drift for a disabled security feature.
+  if (isRbacEnabled()) throw err;
 }
 
 // Seed the built-in entity catalog (scripts today; more kinds later) so

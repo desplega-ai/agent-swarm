@@ -5,6 +5,7 @@ import { startPricingRefreshLoop } from "./be/pricing-refresh";
 import { ensureRbacSeedsSynced } from "./be/rbac-roles";
 import { seedPricingFromModelsDev } from "./be/seed-pricing";
 import { registerGithubTaskReactions } from "./github/task-reactions";
+import { isRbacEnabled } from "./rbac";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";
@@ -186,6 +187,9 @@ export function createServer() {
     ensureRbacSeedsSynced();
   } catch (err) {
     console.error("[startup] Failed to sync RBAC seed rows:", err);
+    // RBAC flag-on must fail closed; flag-off deployments should not be bricked
+    // by role-catalog drift for a disabled security feature.
+    if (isRbacEnabled()) throw err;
   }
 
   // Subscribe API-side integrations to task-lifecycle events. Idempotent.

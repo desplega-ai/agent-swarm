@@ -7,6 +7,8 @@
 -- rename pattern, so any future users-table rebuild must recreate this trigger.
 -- Phase 2's ensureRbacSeedsSynced boot path intentionally self-heals it as a
 -- backstop, but migrations that rebuild users should still recreate it directly.
+-- Built-in seed conflicts are surfaced by ensureRbacSeedsSynced at boot; that
+-- is fatal when RBAC_ENABLED=true and logged/continued when the flag is off.
 
 CREATE TABLE IF NOT EXISTS roles (
   id            TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
@@ -53,7 +55,9 @@ INSERT OR IGNORE INTO role_permissions (roleId, verb) VALUES
 
 -- Backfill: every existing user holds the default role.
 INSERT OR IGNORE INTO principal_roles (principalType, principalId, roleId)
-  SELECT 'user', id, 'rbac-role-admin' FROM users;
+  SELECT 'user', id, 'rbac-role-admin'
+  FROM users
+  WHERE EXISTS (SELECT 1 FROM roles WHERE id = 'rbac-role-admin');
 
 -- Every future user row (createUser, findOrCreateUserByEmail, raw test
 -- INSERTs) gets the default role atomically.
@@ -61,5 +65,6 @@ CREATE TRIGGER IF NOT EXISTS trg_users_default_role
 AFTER INSERT ON users
 BEGIN
   INSERT OR IGNORE INTO principal_roles (principalType, principalId, roleId)
-  VALUES ('user', NEW.id, 'rbac-role-admin');
+  SELECT 'user', NEW.id, 'rbac-role-admin'
+  WHERE EXISTS (SELECT 1 FROM roles WHERE id = 'rbac-role-admin');
 END;

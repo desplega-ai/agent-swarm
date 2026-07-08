@@ -696,9 +696,10 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   console.log("Scripts re-embedded.");
 } else if (args.command === "rbac") {
   const rbacArgs = process.argv.slice(process.argv.indexOf("rbac") + 1);
-  if (args.showHelp || rbacArgs[0] !== "bootstrap") {
+  const isValidRbacCommand = rbacArgs.length === 1 && rbacArgs[0] === "bootstrap";
+  if (args.showHelp || !isValidRbacCommand) {
     printHelp("rbac");
-    process.exit(rbacArgs[0] === "bootstrap" || args.showHelp ? 0 : 1);
+    process.exit(args.showHelp ? 0 : 1);
   }
   const { runRbacCliCommand } = await import("./be/rbac-roles");
   await runRbacCliCommand(rbacArgs);

@@ -50,7 +50,8 @@ CREATE TRIGGER IF NOT EXISTS trg_users_default_role
 AFTER INSERT ON users
 BEGIN
   INSERT OR IGNORE INTO principal_roles (principalType, principalId, roleId)
-  VALUES ('user', NEW.id, 'rbac-role-admin');
+  SELECT 'user', NEW.id, 'rbac-role-admin'
+  WHERE EXISTS (SELECT 1 FROM roles WHERE id = 'rbac-role-admin');
 END;
 `;
 
@@ -393,8 +394,8 @@ function getRbacRoleSummary(): RbacRoleSummaryRow[] {
 
 export async function runRbacCliCommand(args: string[]): Promise<void> {
   const subcommand = args[0];
-  if (subcommand !== "bootstrap") {
-    throw new Error(`Unknown RBAC command: ${subcommand ?? "(none)"}`);
+  if (args.length !== 1 || subcommand !== "bootstrap") {
+    throw new Error(`Unknown RBAC command: ${args.join(" ") || "(none)"}`);
   }
 
   ensureRbacSeedsSynced({ quiet: true });
