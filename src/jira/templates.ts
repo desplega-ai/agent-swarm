@@ -23,7 +23,11 @@ Reporter: {{reporter}}
     { name: "issue_key", description: "Jira issue key (e.g. ENG-123)" },
     { name: "issue_summary", description: "Issue summary / title" },
     { name: "issue_url", description: "Issue URL on the Jira site" },
-    { name: "reporter", description: "Reporter display name (or empty string)" },
+    {
+      name: "reporter",
+      description:
+        "Reporter identity — resolved canonical name (e.g. 'Luis (jira:<accountId>)') or the UNKNOWN sentinel",
+    },
     {
       name: "description_section",
       description: "Description section (extracted from ADF) or empty string",
@@ -46,7 +50,11 @@ Comment:
     { name: "issue_key", description: "Jira issue key (e.g. ENG-123)" },
     { name: "issue_summary", description: "Issue summary / title" },
     { name: "issue_url", description: "Issue URL on the Jira site" },
-    { name: "comment_author", description: "Comment author display name" },
+    {
+      name: "comment_author",
+      description:
+        "Comment author identity — resolved canonical name (e.g. 'Luis (jira:<accountId>)') or the UNKNOWN sentinel",
+    },
     {
       name: "description_section",
       description: "Description section (extracted from ADF) or empty string",
