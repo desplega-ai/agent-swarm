@@ -979,5 +979,130 @@ describe("identity resolution — Note handler", () => {
     expect((meta?.sampleContext as string).length).toBeLessThanOrEqual(100);
     expect((meta?.sampleContext as string).startsWith(`@${GITLAB_BOT_NAME}`)).toBe(true);
     expect(getUnmappedCount("noteghost")).toBe(1);
+
+    // The dead-coded `_requestedByUserId` is now wired: undefined for an
+    // unresolvable sender, and the UNKNOWN sentinel (never the raw
+    // username) is rendered as the comment author in the task text.
+    const task = getTaskById(result.taskId!);
+    expect(task?.requestedByUserId).toBeFalsy();
+    expect(task?.task).toContain("gitlab:noteghost (unknown user)");
+    expect(task?.task).not.toContain("Note Ghost");
+  });
+
+  test("known GitLab user commenting -> requestedByUserId populated + rendered pair, never the raw username", async () => {
+    const known = createUser({ name: "Known Commenter" });
+    linkIdentity(known.id, "gitlab", "knowncommenter", { kind: "system", id: "test" });
+
+    const event = makeNoteEvent({
+      user: { id: 32, name: "Known Commenter", username: "knowncommenter", avatar_url: "" },
+      object_attributes: {
+        id: 961,
+        note: `@${GITLAB_BOT_NAME} please take a look`,
+        noteable_type: "MergeRequest",
+        noteable_id: 101,
+        url: "https://gitlab.com/group/project/-/merge_requests/2#note_961",
+        author_id: 32,
+        type: null,
+      },
+      merge_request: {
+        id: 101,
+        iid: 961,
+        title: "Known Commenter MR",
+        description: "",
+        state: "opened",
+        action: "open",
+        source_branch: "feat-knowncommenter",
+        target_branch: "main",
+        url: "https://gitlab.com/group/project/-/merge_requests/961",
+        last_commit: null,
+        author_id: 32,
+      },
+    });
+
+    const result = await handleNote(event);
+    expect(result.created).toBe(true);
+
+    const task = getTaskById(result.taskId!);
+    expect(task?.requestedByUserId).toBe(known.id);
+    expect(task?.task).toContain("Known Commenter (gitlab:knowncommenter)");
+  });
+});
+
+describe("identity resolution — Pipeline handler", () => {
+  test("known GitLab user triggers pipeline -> requestedByUserId populated on the task", async () => {
+    const known = createUser({ name: "Pipeline Trigger" });
+    linkIdentity(known.id, "gitlab", "pipelinetrigger", { kind: "system", id: "test" });
+
+    createTaskExtended("[GitLab MR #970] Pipeline identity test", {
+      source: "gitlab",
+      vcsProvider: "gitlab",
+      vcsRepo: "group/project",
+      vcsEventType: "merge_request",
+      vcsNumber: 970,
+      vcsUrl: "https://gitlab.com/group/project/-/merge_requests/970",
+      agentId: "lead-gl-001",
+    });
+
+    const event = makePipelineEvent({
+      user: { id: 41, name: "Pipeline Trigger", username: "pipelinetrigger", avatar_url: "" },
+      object_attributes: {
+        id: 500,
+        ref: "feature",
+        status: "failed",
+        source: "push",
+        detailed_status: "failed",
+      },
+      merge_request: {
+        id: 200,
+        iid: 970,
+        title: "MR with known pipeline trigger",
+        url: "https://gitlab.com/group/project/-/merge_requests/970",
+        source_branch: "feature",
+        target_branch: "main",
+      },
+    });
+
+    const result = await handlePipeline(event);
+    expect(result.created).toBe(true);
+
+    const task = getTaskById(result.taskId!);
+    expect(task?.requestedByUserId).toBe(known.id);
+  });
+
+  test("unknown GitLab user triggers pipeline -> requestedByUserId stays undefined", async () => {
+    createTaskExtended("[GitLab MR #971] Pipeline identity test", {
+      source: "gitlab",
+      vcsProvider: "gitlab",
+      vcsRepo: "group/project",
+      vcsEventType: "merge_request",
+      vcsNumber: 971,
+      vcsUrl: "https://gitlab.com/group/project/-/merge_requests/971",
+      agentId: "lead-gl-001",
+    });
+
+    const event = makePipelineEvent({
+      user: { id: 42, name: "Pipeline Ghost", username: "pipelineghost", avatar_url: "" },
+      object_attributes: {
+        id: 501,
+        ref: "feature",
+        status: "failed",
+        source: "push",
+        detailed_status: "failed",
+      },
+      merge_request: {
+        id: 201,
+        iid: 971,
+        title: "MR with unknown pipeline trigger",
+        url: "https://gitlab.com/group/project/-/merge_requests/971",
+        source_branch: "feature",
+        target_branch: "main",
+      },
+    });
+
+    const result = await handlePipeline(event);
+    expect(result.created).toBe(true);
+
+    const task = getTaskById(result.taskId!);
+    expect(task?.requestedByUserId).toBeFalsy();
   });
 });

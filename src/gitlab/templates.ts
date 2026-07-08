@@ -48,7 +48,7 @@ registerTemplate({
   eventType: "gitlab.merge_request.opened",
   header: "[GitLab MR #{{mr_iid}}] {{mr_title}}",
   defaultBody: `Repo: {{repo}}
-Author: @{{username}}
+Author: {{username}}
 Branch: {{source_branch}} \u2192 {{target_branch}}
 URL: {{mr_url}}
 
@@ -57,7 +57,11 @@ URL: {{mr_url}}
     { name: "mr_iid", description: "Merge request IID" },
     { name: "mr_title", description: "Merge request title" },
     { name: "repo", description: "Project path with namespace" },
-    { name: "username", description: "Event sender username" },
+    {
+      name: "username",
+      description:
+        "Author identity \u2014 resolved canonical name (e.g. 'Luis (gitlab:username)') or the UNKNOWN sentinel",
+    },
     { name: "source_branch", description: "Source branch name" },
     { name: "target_branch", description: "Target branch name" },
     { name: "mr_url", description: "Merge request URL" },
@@ -74,7 +78,7 @@ registerTemplate({
   eventType: "gitlab.issue.assigned",
   header: "[GitLab Issue #{{issue_iid}}] {{issue_title}}",
   defaultBody: `Repo: {{repo}}
-Author: @{{username}}
+Author: {{username}}
 URL: {{issue_url}}
 
 {{context_section}}{{@template[common.command_suggestions.gitlab_issue]}}{{@template[common.delegation_instruction.gitlab]}}`,
@@ -82,7 +86,11 @@ URL: {{issue_url}}
     { name: "issue_iid", description: "Issue IID" },
     { name: "issue_title", description: "Issue title" },
     { name: "repo", description: "Project path with namespace" },
-    { name: "username", description: "Event sender username" },
+    {
+      name: "username",
+      description:
+        "Author identity — resolved canonical name (e.g. 'Luis (gitlab:username)') or the UNKNOWN sentinel",
+    },
     { name: "issue_url", description: "Issue URL" },
     { name: "context_section", description: "Context section with description or empty string" },
   ],
@@ -95,7 +103,7 @@ URL: {{issue_url}}
 
 registerTemplate({
   eventType: "gitlab.comment.mentioned",
-  header: "[GitLab Comment on {{entity_label}}] @{{username}} mentioned bot",
+  header: "[GitLab Comment on {{entity_label}}] {{username}} mentioned bot",
   defaultBody: `Repo: {{repo}}
 URL: {{target_url}}
 
@@ -103,7 +111,11 @@ Comment:
 {{context}}{{existing_task_note}}{{@template[common.delegation_instruction.gitlab]}}`,
   variables: [
     { name: "entity_label", description: "Entity label (e.g. 'MR #1' or 'Issue #2')" },
-    { name: "username", description: "Comment author username" },
+    {
+      name: "username",
+      description:
+        "Comment author identity — resolved canonical name (e.g. 'Luis (gitlab:username)') or the UNKNOWN sentinel",
+    },
     { name: "repo", description: "Project path with namespace" },
     { name: "target_url", description: "Target entity URL" },
     { name: "context", description: "Extracted mention context from comment" },
