@@ -9,6 +9,7 @@ import { runMigrations } from "../be/migrations/runner";
 import {
   getScriptApiConnectionDescriptors,
   refreshScriptConnection,
+  setOpenapiSpecFetchForTesting,
   upsertCredentialBinding,
   upsertScriptConnection,
 } from "../be/script-connections";
@@ -87,6 +88,32 @@ function meta(agentId: string) {
     requestInfo: { headers: { "x-agent-id": agentId } },
   };
 }
+
+type OpenapiSpecFixture = {
+  body: string;
+  etag: string;
+  requests: Array<{ accept: string | null; ifNoneMatch: string | null }>;
+};
+
+const openapiSpecFixtures = new Map<string, OpenapiSpecFixture>();
+
+const fixtureOpenapiFetch: typeof fetch = async (input, init) => {
+  const url = new URL(input instanceof Request ? input.url : String(input));
+  const fixture = openapiSpecFixtures.get(url.toString());
+  if (!fixture) return new Response("not found", { status: 404 });
+  const headers = new Headers(input instanceof Request ? input.headers : init?.headers);
+  const ifNoneMatch = headers.get("if-none-match");
+  fixture.requests.push({
+    accept: headers.get("accept"),
+    ifNoneMatch,
+  });
+  if (ifNoneMatch === fixture.etag) {
+    return new Response(null, { status: 304, headers: { ETag: fixture.etag } });
+  }
+  return new Response(fixture.body, {
+    headers: { "Content-Type": "application/json", ETag: fixture.etag },
+  });
+};
 
 const openapiSpec = JSON.stringify({
   openapi: "3.1.0",
@@ -189,38 +216,23 @@ function specWithExtraOperation(operationId: string) {
 }
 
 function serveOpenapiSpec(initialBody: string, initialEtag = '"v1"') {
-  let body = initialBody;
-  let etag = initialEtag;
-  const requests: Array<{ accept: string | null; ifNoneMatch: string | null }> = [];
-  const server = Bun.serve({
-    port: 0,
-    fetch(req) {
-      const url = new URL(req.url);
-      if (url.pathname !== "/openapi.json") {
-        return new Response("not found", { status: 404 });
-      }
-      requests.push({
-        accept: req.headers.get("accept"),
-        ifNoneMatch: req.headers.get("if-none-match"),
-      });
-      if (req.headers.get("if-none-match") === etag) {
-        return new Response(null, { status: 304, headers: { ETag: etag } });
-      }
-      return new Response(body, {
-        headers: { "Content-Type": "application/json", ETag: etag },
-      });
-    },
-  });
+  const fixtureUrl = `http://script-openapi.test/${crypto.randomUUID()}/openapi.json`;
+  const fixture: OpenapiSpecFixture = {
+    body: initialBody,
+    etag: initialEtag,
+    requests: [],
+  };
+  openapiSpecFixtures.set(fixtureUrl, fixture);
   return {
-    requests,
-    url: `http://127.0.0.1:${server.port}/openapi.json`,
-    baseUrl: `http://127.0.0.1:${server.port}`,
+    requests: fixture.requests,
+    url: fixtureUrl,
+    baseUrl: new URL(fixtureUrl).origin,
     setBody(nextBody: string, nextEtag: string) {
-      body = nextBody;
-      etag = nextEtag;
+      fixture.body = nextBody;
+      fixture.etag = nextEtag;
     },
     stop() {
-      server.stop(true);
+      openapiSpecFixtures.delete(fixtureUrl);
     },
   };
 }
@@ -229,9 +241,12 @@ beforeEach(() => {
   process.env.AGENT_SWARM_API_KEY = "script-connections-test-key";
   delete process.env.API_KEY;
   process.env.MCP_BASE_URL = "http://localhost:3013";
+  setOpenapiSpecFetchForTesting(fixtureOpenapiFetch);
 });
 
 afterEach(() => {
+  setOpenapiSpecFetchForTesting(null);
+  openapiSpecFixtures.clear();
   globalThis.fetch = originalFetch;
   for (const key of Object.keys(process.env)) {
     if (!(key in savedEnv)) delete process.env[key];

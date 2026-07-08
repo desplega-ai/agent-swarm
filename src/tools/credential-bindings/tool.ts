@@ -57,22 +57,67 @@ const credentialBindingsInputSchema = z.object({
     .describe(
       "List, add/update, disable, import legacy JSON bindings, or register/authorize OAuth apps.",
     ),
-  id: z.string().uuid().optional(),
-  configKey: z.string().min(1).max(255).optional(),
-  allowedHosts: z.array(z.string().min(1)).min(1).optional(),
-  headerTemplate: z.string().min(1).optional(),
-  queryTemplate: z.string().min(1).optional(),
-  scope: z.enum(["global", "agent", "repo"]).default("global").optional(),
-  scopeId: z.string().uuid().nullable().optional(),
-  authKind: z.enum(["config", "oauth"]).default("config").optional(),
-  oauthProvider: providerSchema.optional(),
-  provider: providerSchema.optional(),
-  clientId: z.string().min(1).optional(),
-  clientSecret: z.string().min(1).optional(),
-  authorizeUrl: z.string().url().optional(),
-  tokenUrl: z.string().url().optional(),
-  scopes: z.array(z.string().min(1)).optional(),
-  extraParams: z.record(z.string(), z.string()).optional(),
+  id: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("Existing credential binding ID for update or disable."),
+  configKey: z
+    .string()
+    .min(1)
+    .max(255)
+    .optional()
+    .describe("Swarm config key whose secret value is injected through templates."),
+  allowedHosts: z
+    .array(z.string().min(1))
+    .min(1)
+    .optional()
+    .describe("Allowed outbound hostnames for this binding."),
+  headerTemplate: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Header template containing the config-key placeholder."),
+  queryTemplate: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Query parameter template containing the config-key placeholder."),
+  scope: z
+    .enum(["global", "agent", "repo"])
+    .default("global")
+    .optional()
+    .describe("Binding visibility scope."),
+  scopeId: z
+    .string()
+    .uuid()
+    .nullable()
+    .optional()
+    .describe("Agent or repo UUID when scope is agent or repo."),
+  authKind: z
+    .enum(["config", "oauth"])
+    .default("config")
+    .optional()
+    .describe("Use config for stored swarm config secrets or oauth for OAuth token resolution."),
+  oauthProvider: providerSchema
+    .optional()
+    .describe("OAuth provider slug required when authKind is oauth."),
+  provider: providerSchema
+    .optional()
+    .describe("OAuth provider slug for oauth-app-upsert and oauth-authorize-url."),
+  clientId: z.string().min(1).optional().describe("OAuth client ID for oauth-app-upsert."),
+  clientSecret: z.string().min(1).optional().describe("OAuth client secret for oauth-app-upsert."),
+  authorizeUrl: z
+    .string()
+    .url()
+    .optional()
+    .describe("OAuth authorization URL for oauth-app-upsert."),
+  tokenUrl: z.string().url().optional().describe("OAuth token URL for oauth-app-upsert."),
+  scopes: z.array(z.string().min(1)).optional().describe("OAuth scopes for oauth-app-upsert."),
+  extraParams: z
+    .record(z.string(), z.string())
+    .optional()
+    .describe("Extra OAuth authorization parameters stored with the OAuth app."),
 });
 
 type BindingWithTokenStatus = ScriptCredentialBindingRecord & {

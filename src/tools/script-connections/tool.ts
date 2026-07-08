@@ -16,21 +16,73 @@ const scriptConnectionsInputSchema = z.object({
   action: z
     .enum(["list", "upsert-openapi", "upsert-mcp", "upsert-graphql", "refresh", "disable"])
     .describe("List, create/update, refresh, or disable a script connection."),
-  id: z.string().uuid().optional(),
-  slug: z.string().min(1).max(80).optional(),
-  displayName: z.string().max(160).optional(),
-  scope: z.enum(["global", "agent", "repo"]).default("global").optional(),
-  scopeId: z.string().uuid().nullable().optional(),
-  mcpServerId: z.string().uuid().optional(),
-  baseUrl: z.string().url().optional(),
-  allowedHosts: z.array(z.string().min(1)).optional(),
-  credentialBindingId: z.string().uuid().nullable().optional(),
-  configKey: z.string().min(1).max(255).optional(),
-  headerTemplate: z.string().min(1).optional(),
-  queryTemplate: z.string().min(1).optional(),
-  openapiSpecUrl: z.string().url().optional(),
-  openapiSpecJson: z.string().optional(),
-  enabled: z.boolean().default(true).optional(),
+  id: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("Existing connection ID for update, refresh, or disable."),
+  slug: z
+    .string()
+    .min(1)
+    .max(80)
+    .optional()
+    .describe("Stable script namespace slug exposed under ctx.api or ctx.mcp."),
+  displayName: z.string().max(160).optional().describe("Human-readable connection name."),
+  scope: z
+    .enum(["global", "agent", "repo"])
+    .default("global")
+    .optional()
+    .describe("Connection visibility scope."),
+  scopeId: z
+    .string()
+    .uuid()
+    .nullable()
+    .optional()
+    .describe("Agent or repo UUID when scope is agent or repo."),
+  mcpServerId: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("Registered MCP server ID for upsert-mcp connections."),
+  baseUrl: z.string().url().optional().describe("Base URL for OpenAPI or GraphQL connections."),
+  allowedHosts: z
+    .array(z.string().min(1))
+    .optional()
+    .describe("Allowed outbound hostnames for credential substitution."),
+  credentialBindingId: z
+    .string()
+    .uuid()
+    .nullable()
+    .optional()
+    .describe("Existing credential binding ID to attach to the connection."),
+  configKey: z
+    .string()
+    .min(1)
+    .max(255)
+    .optional()
+    .describe(
+      "Config key used to create a credential binding when credentialBindingId is omitted.",
+    ),
+  headerTemplate: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Header template containing the config-key placeholder."),
+  queryTemplate: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Query parameter template containing the config-key placeholder."),
+  openapiSpecUrl: z
+    .string()
+    .url()
+    .optional()
+    .describe("URL to fetch and store an OpenAPI spec for upsert-openapi and refresh."),
+  openapiSpecJson: z
+    .string()
+    .optional()
+    .describe("Inline OpenAPI JSON for upsert-openapi. Mutually exclusive with openapiSpecUrl."),
+  enabled: z.boolean().default(true).optional().describe("Whether the connection is enabled."),
 });
 
 const scriptConnectionsOutputSchema = z.object({

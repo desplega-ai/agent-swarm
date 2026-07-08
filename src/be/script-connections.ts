@@ -659,6 +659,12 @@ type OpenapiSpecFetchResult =
       fetchedAt: string;
     };
 
+let openapiSpecFetchForTesting: typeof fetch | null = null;
+
+export function setOpenapiSpecFetchForTesting(fetchImpl: typeof fetch | null): void {
+  openapiSpecFetchForTesting = fetchImpl;
+}
+
 function openapiSpecUrlOptions() {
   const allowDevHosts = process.env.NODE_ENV !== "production";
   return {
@@ -741,7 +747,8 @@ export async function fetchOpenapiSpec(
   try {
     const headers = new Headers({ Accept: "application/json" });
     if (opts.etag) headers.set("If-None-Match", opts.etag);
-    const response = await fetch(parsed, { headers, signal: controller.signal });
+    const fetchImpl = openapiSpecFetchForTesting ?? Bun.fetch;
+    const response = await fetchImpl(parsed, { headers, signal: controller.signal });
     const fetchedAt = new Date().toISOString();
     const etag = response.headers.get("etag");
     if (response.status === 304) {

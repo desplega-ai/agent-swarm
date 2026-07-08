@@ -61,6 +61,7 @@ describe("egress-substitution", () => {
           scope: "global",
           scopeId: null,
           active: true,
+          authKind: "config",
           value: "ghp_test1234567890abcdef",
         },
       ]);

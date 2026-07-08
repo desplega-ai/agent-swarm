@@ -252,8 +252,16 @@ function parseSchemaFields(content: string, fullContent: string): FieldInfo[] {
   const schemaStart = content.indexOf("inputSchema:");
   if (schemaStart === -1) return fields;
 
-  // Find the z.object({ ... }) block
-  const objectStart = content.indexOf("z.object({", schemaStart);
+  const schemaExprStart = schemaStart + "inputSchema:".length;
+  let source = content;
+  let objectStart = findSchemaObjectStart(content, schemaExprStart);
+  if (objectStart === -1) {
+    const schemaRefMatch = /^\s*([A-Za-z_$][\w$]*)/.exec(content.slice(schemaExprStart));
+    if (schemaRefMatch) {
+      objectStart = findSchemaConstantObjectStart(schemaRefMatch[1]!, fullContent);
+      source = fullContent;
+    }
+  }
   if (objectStart === -1) return fields;
 
   // Extract the object content by counting braces
@@ -262,8 +270,8 @@ function parseSchemaFields(content: string, fullContent: string): FieldInfo[] {
   let objectContent = "";
   let i = objectStart + "z.object(".length;
 
-  while (i < content.length) {
-    const char = content[i];
+  while (i < source.length) {
+    const char = source[i];
     if (char === "{") {
       braceCount++;
       inObject = true;
@@ -305,6 +313,19 @@ function parseSchemaFields(content: string, fullContent: string): FieldInfo[] {
   return fields;
 }
 
+function findSchemaObjectStart(source: string, startIdx: number): number {
+  let i = startIdx;
+  while (i < source.length && /\s/.test(source[i]!)) i++;
+  return source.startsWith("z.object({", i) ? i : -1;
+}
+
+function findSchemaConstantObjectStart(constName: string, source: string): number {
+  const re = new RegExp(`(?:const|let|var)\\s+${constName}(?:\\s*:\\s*[^=;]+)?\\s*=\\s*`);
+  const match = re.exec(source);
+  if (!match || match.index === undefined) return -1;
+  return findSchemaObjectStart(source, match.index + match[0].length);
+}
+
 /**
  * Parse a single field definition. `fullContent` is the entire tool-file
  * source; it's used to resolve `.describe(CONST_NAME)` references back to the
@@ -314,10 +335,11 @@ function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
   // Match field name and type chain. Allow whitespace/newlines between `z` and
   // the first `.method(...)` so multi-line zod chains (e.g. `z\n  .string()`)
   // are parsed too.
-  const fieldMatch = fieldStr.match(/^\s*(\w+):\s*z\s*\.([\s\S]+)/);
+  const fieldMatch = fieldStr.match(/^\s*(\w+):\s*([\s\S]+)/);
   if (!fieldMatch) return null;
 
-  const [, name, typeChain] = fieldMatch;
+  const [, name, rawTypeChain] = fieldMatch;
+  const typeChain = rawTypeChain!.trim().replace(/^z\s*\.\s*/, "");
 
   // Determine type
   let type = "unknown";
@@ -328,6 +350,7 @@ function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
   else if (typeChain.startsWith("uuid")) type = "uuid";
   else if (typeChain.startsWith("object")) type = "object";
   else if (typeChain.startsWith("record")) type = "object";
+  else if (typeChain.startsWith("providerSchema")) type = "string";
   else if (typeChain.startsWith("enum")) {
     const enumMatch = typeChain.match(/enum\(\[([\s\S]*?)\]/);
     if (enumMatch) {
