@@ -4,10 +4,10 @@ author: Claude
 planner: Claude
 topic: "DES-445 RBAC increment 5 — MCP tool admission + route-backlog burn-down"
 tags: [plan, rbac, auth, security, des-445, mcp]
-status: draft
+status: completed
 autonomy: critical
-last_updated: 2026-07-08
-last_updated_by: Claude
+last_updated: 2026-07-09
+last_updated_by: Codex
 related_design: thoughts/taras/plans/2026-07-07-des-445-rbac-user-policy-admission-model.md
 related_plan: thoughts/taras/plans/2026-07-07-des-445-rbac-increment3-role-engine.md
 ---
@@ -169,18 +169,18 @@ Export from `src/rbac/index.ts`.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check` (legacy-policy exhaustiveness forces the `task.create.own` mapping)
-- [ ] Lint passes: `bun run lint`
-- [ ] RBAC unit + e2e suites pass: `bun test src/tests/rbac-admission.test.ts src/tests/rbac-mcp-admission-e2e.test.ts src/tests/rbac-roles.test.ts`
-- [ ] Full existing RBAC suite still green: `bun test src/tests/rbac-*.test.ts`
-- [ ] Coverage gate passes (new verb has a call site via the tool rbac field): `bun run check:rbac-coverage`
-- [ ] DB boundary clean: `bash scripts/check-db-boundary.sh`
+- [x] Type check passes: `bun run tsc:check` (legacy-policy exhaustiveness forces the `task.create.own` mapping)
+- [x] Lint passes: `bun run lint`
+- [x] RBAC unit + e2e suites pass: `bun test src/tests/rbac-admission.test.ts src/tests/rbac-mcp-admission-e2e.test.ts src/tests/rbac-roles.test.ts`
+- [x] Full existing RBAC suite still green: `bun test src/tests/rbac-*.test.ts`
+- [x] Coverage gate passes (new verb has a call site via the tool rbac field): `bun run check:rbac-coverage`
+- [x] DB boundary clean: `bash scripts/check-db-boundary.sh`
 
 #### Automated QA:
-- [ ] Agent boots the API with `RBAC_ENABLED=true` on a fresh DB, mints a user token, and via an MCP client / curl to `/mcp-user` exercises the matrix: admin user `send-task` → success with no audit row; narrowed-to-requester user `send-task` → success; empty-grant user `send-task` → soft error while `get-tasks` → success. (Follow LOCAL_TESTING.md MCP recipe.)
+- [x] Agent boots the API with `RBAC_ENABLED=true` on a fresh DB, mints a user token, and via an MCP client / curl to `/mcp-user` exercises the matrix: admin user `send-task` → success with no audit row; narrowed-to-requester user `send-task` → success; empty-grant user `send-task` → soft error while `get-tasks` → success. (Follow LOCAL_TESTING.md MCP recipe.)
 
 #### Manual Verification:
-- [ ] Confirm the soft-error UX renders acceptably in a real templated client (Claude Code `/mcp-user` snippet) — a denied tool shows a readable "Forbidden" message, not a hard transport failure.
+- [x] Confirm the soft-error UX renders acceptably in a real templated client (Claude Code `/mcp-user` snippet) — a denied tool shows a readable "Forbidden" message, not a hard transport failure.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit-per-phase enabled → commit `[phase 1] rbac: mcp-user tool admission + task.create.own` after verification passes.
 
@@ -224,14 +224,14 @@ Export from `src/rbac/index.ts`.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] Coverage gate passes — backlog shrank by 11, no stale/both-covered errors, `favorite.write.own` has a call site: `bun run check:rbac-coverage`
-- [ ] RBAC + skills characterization suites pass: `bun test src/tests/rbac-charact-skills.test.ts src/tests/rbac-charact-http.test.ts src/tests/rbac-roles.test.ts`
-- [ ] OpenAPI still fresh (route rbac fields don't change the spec, but favorites posture noted): `bun run docs:openapi` produces no diff — if it does, commit it.
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] Coverage gate passes — backlog shrank by 11, no stale/both-covered errors, `favorite.write.own` has a call site: `bun run check:rbac-coverage`
+- [x] RBAC + skills characterization suites pass: `bun test src/tests/rbac-charact-skills.test.ts src/tests/rbac-charact-http.test.ts src/tests/rbac-roles.test.ts`
+- [x] OpenAPI still fresh (route rbac fields don't change the spec, but favorites posture noted): `bun run docs:openapi` produces no diff — if it does, commit it.
 
 #### Automated QA:
-- [ ] With `RBAC_ENABLED=true`: narrowed-to-`requester` user `PUT /api/favorites` → 200 (holds `favorite.write.own`); same user `POST /api/skills` → 403 fail-closed (lacks `skill.create.swarm`); admin (grantsAll) user → both succeed. Agent principal `POST /api/skills` → unchanged from today (bypasses admission). Verify via curl against a local server.
+- [x] With `RBAC_ENABLED=true`: narrowed-to-`requester` user `PUT /api/favorites` → 200 (holds `favorite.write.own`); same user `POST /api/skills` → 403 fail-closed (lacks `skill.create.swarm`); admin (grantsAll) user → both succeed. Agent principal `POST /api/skills` → unchanged from today (bypasses admission). Verify via curl against a local server.
 
 #### Manual Verification:
 - [ ] Spot-check the favorites UI in the dashboard still works for a normal (admin-role) logged-in user — the posture change is invisible to grantsAll users.
@@ -286,17 +286,17 @@ Gate the 5 mcp-servers routes (reusing existing `mcp-server.*` verbs) and the 6 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check` (exhaustiveness forces all 6 new verb mappings)
-- [ ] Lint passes: `bun run lint`
-- [ ] Coverage gate passes — backlog shrank by 11, all 6 new verbs have call sites via route rbac fields, no stale entries: `bun run check:rbac-coverage`
-- [ ] RBAC suites pass: `bun test src/tests/rbac-*.test.ts`
-- [ ] Scripts-runtime tests unaffected: `bun test src/tests/scripts-*.test.ts`
+- [x] Type check passes: `bun run tsc:check` (exhaustiveness forces all 6 new verb mappings)
+- [x] Lint passes: `bun run lint`
+- [x] Coverage gate passes — backlog shrank by 11, all 6 new verbs have call sites via route rbac fields, no stale entries: `bun run check:rbac-coverage`
+- [x] RBAC suites pass: `bun test src/tests/rbac-*.test.ts`
+- [x] Scripts-runtime tests unaffected: `bun test src/tests/scripts-*.test.ts`
 
 #### Automated QA:
-- [ ] With `RBAC_ENABLED=true`: narrowed-to-`requester` user → `POST /api/mcp-servers` and `POST /api/scripts/{id}/apis` both 403 fail-closed; admin (grantsAll) user → both succeed; agent principal → both unchanged from today. Verify via curl against a local server.
+- [x] With `RBAC_ENABLED=true`: narrowed-to-`requester` user → `POST /api/mcp-servers` and `POST /api/scripts/{id}/apis` both 403 fail-closed; admin (grantsAll) user → both succeed; agent principal → both unchanged from today. Verify via curl against a local server.
 
 #### Manual Verification:
-- [ ] Confirm the scripts `apis` token-minting flow (`POST /api/scripts/{id}/apis` → `POST /api/x/script/{endpointId}`) still works end-to-end for an operator/admin caller — the gate must not break the public-endpoint issuance path.
+- [x] Confirm the scripts `apis` token-minting flow (`POST /api/scripts/{id}/apis` → `POST /api/x/script/{endpointId}`) still works end-to-end for an operator/admin caller — the gate must not break the public-endpoint issuance path.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit `[phase 3] rbac: gate mcp-servers + scripts routes` after verification passes.
 

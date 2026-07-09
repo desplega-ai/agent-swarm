@@ -74,6 +74,7 @@ const createMcpServerRoute = route({
     201: { description: "MCP server created" },
     400: { description: "Validation error" },
   },
+  rbac: { permission: "mcp-server.create.swarm" },
 });
 
 const updateMcpServerRoute = route({
@@ -89,6 +90,7 @@ const updateMcpServerRoute = route({
     200: { description: "MCP server updated" },
     404: { description: "MCP server not found" },
   },
+  rbac: { permission: "mcp-server.update.any" },
 });
 
 const deleteMcpServerRoute = route({
@@ -103,6 +105,7 @@ const deleteMcpServerRoute = route({
     200: { description: "MCP server deleted" },
     404: { description: "MCP server not found" },
   },
+  rbac: { permission: "mcp-server.delete.any" },
 });
 
 const installMcpServerRoute = route({
@@ -120,6 +123,7 @@ const installMcpServerRoute = route({
     200: { description: "MCP server installed" },
     404: { description: "MCP server not found" },
   },
+  rbac: { permission: "mcp-server.install.any" },
 });
 
 const uninstallMcpServerRoute = route({
@@ -133,6 +137,7 @@ const uninstallMcpServerRoute = route({
   responses: {
     200: { description: "MCP server uninstalled" },
   },
+  rbac: { permission: "mcp-server.uninstall.any" },
 });
 
 const getAgentMcpServersRoute = route({

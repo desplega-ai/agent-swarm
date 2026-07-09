@@ -103,6 +103,7 @@ const bulkUpsertSkillFilesRoute = route({
   summary: "Bulk upsert bundled files for a skill",
   tags: ["Skills"],
   auth: { apiKey: true },
+  rbac: { permission: "skill.update.any" },
   params: z.object({ id: z.string() }),
   body: z.object({
     files: z.array(skillFileWithPathSchema).max(100),
@@ -137,6 +138,7 @@ const upsertSkillFileRoute = route({
   summary: "Upsert a bundled skill file",
   tags: ["Skills"],
   auth: { apiKey: true },
+  rbac: { permission: "skill.update.any" },
   params: z.object({ id: z.string(), path: z.string() }),
   body: skillFileBodySchema,
   responses: {
@@ -154,6 +156,7 @@ const deleteSkillFileRoute = route({
   summary: "Delete a bundled skill file",
   tags: ["Skills"],
   auth: { apiKey: true },
+  rbac: { permission: "skill.update.any" },
   params: z.object({ id: z.string(), path: z.string() }),
   responses: {
     200: { description: "Skill file deleted" },
@@ -168,6 +171,7 @@ const createSkillRoute = route({
   summary: "Create a new skill",
   tags: ["Skills"],
   auth: { apiKey: true },
+  rbac: { permission: "skill.create.swarm" },
   body: z.object({
     content: z.string().min(1),
     type: z.string().optional(),
@@ -188,6 +192,7 @@ const updateSkillRoute = route({
   summary: "Update a skill",
   tags: ["Skills"],
   auth: { apiKey: true },
+  rbac: { permission: "skill.update.any" },
   params: z.object({ id: z.string() }),
   body: z.record(z.string(), z.unknown()),
   responses: {
@@ -204,6 +209,7 @@ const deleteSkillRoute = route({
   summary: "Delete a skill",
   tags: ["Skills"],
   auth: { apiKey: true },
+  rbac: { permission: "skill.delete.any" },
   params: z.object({ id: z.string() }),
   responses: {
     200: { description: "Skill deleted" },
@@ -219,6 +225,7 @@ const installSkillRoute = route({
   summary: "Install skill for an agent",
   tags: ["Skills"],
   auth: { apiKey: true },
+  rbac: { permission: "skill.install.any" },
   params: z.object({ id: z.string() }),
   body: z.object({
     agentId: z.string(),
@@ -236,6 +243,7 @@ const uninstallSkillRoute = route({
   summary: "Uninstall skill for an agent",
   tags: ["Skills"],
   auth: { apiKey: true },
+  rbac: { permission: "skill.uninstall.any" },
   params: z.object({ id: z.string(), agentId: z.string() }),
   responses: {
     200: { description: "Skill uninstalled" },
@@ -249,6 +257,7 @@ const installRemoteRoute = route({
   summary: "Install a remote skill from GitHub",
   tags: ["Skills"],
   auth: { apiKey: true },
+  rbac: { permission: "skill.install.global" },
   body: z.object({
     sourceRepo: z.string(),
     sourcePath: z.string().optional(),
@@ -268,6 +277,7 @@ const syncRemoteRoute = route({
   summary: "Trigger remote skill sync",
   tags: ["Skills"],
   auth: { apiKey: true },
+  rbac: { permission: "skill.update.any" },
   body: z.object({
     skillId: z.string().optional(),
     force: z.boolean().optional(),
@@ -284,6 +294,7 @@ const syncFilesystemRoute = route({
   summary: "Sync installed skills to agent filesystem",
   tags: ["Skills"],
   auth: { apiKey: true, agentId: true },
+  rbac: { ungated: "self-scoped: syncs the caller's own agent FS" },
   responses: {
     200: { description: "Filesystem sync results" },
   },

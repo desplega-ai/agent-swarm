@@ -27,7 +27,14 @@ export const BUILTIN_ROLES = [
     description: "Own-task lifecycle: what legacy policy grants user principals.",
     isBuiltin: true,
     grantsAll: false,
-    verbs: ["task.read.own", "task.cancel.own", "task.action.own", "task.fs.mutate"],
+    verbs: [
+      "task.create.own",
+      "task.read.own",
+      "task.cancel.own",
+      "task.action.own",
+      "task.fs.mutate",
+      "favorite.write.own",
+    ],
   },
 ] satisfies (BuiltinRoleDefinition & { isBuiltin: true })[];
 

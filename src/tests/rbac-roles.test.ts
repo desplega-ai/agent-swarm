@@ -16,8 +16,10 @@ import type { PermissionVerb } from "../rbac";
 const TEST_DB_PATH = "./test-rbac-roles.sqlite";
 const REQUESTER_ROLE_ID = "rbac-role-requester";
 const REQUESTER_VERBS = [
+  "favorite.write.own",
   "task.action.own",
   "task.cancel.own",
+  "task.create.own",
   "task.fs.mutate",
   "task.read.own",
 ] satisfies PermissionVerb[];

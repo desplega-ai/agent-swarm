@@ -1,6 +1,15 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
 import pkg from "../package.json";
+import { enqueueAdmissionRow } from "./be/rbac-audit";
+import { getUserGrant } from "./be/rbac-roles";
+import {
+  type AdmissionRbac,
+  decideToolAdmission,
+  isRbacEnabled,
+  type PermissionVerb,
+} from "./rbac";
 import {
   cancelTaskHandler,
   cancelTaskInputSchema,
@@ -22,6 +31,11 @@ import { userCtx } from "./tools/task-tool-ctx";
 import { createToolRegistrar } from "./tools/utils";
 import { ModelTierSchema, type User } from "./types";
 
+type UserToolAdmissionConfig = {
+  annotations?: ToolAnnotations;
+  rbac?: AdmissionRbac;
+};
+
 const userSendTaskInputSchema = z.object({
   task: z.string().min(1).describe("The task description to send."),
   taskType: z.string().max(50).optional().describe("Task type (e.g., 'bug', 'feature', 'review')."),
@@ -37,6 +51,40 @@ const userSendTaskInputSchema = z.object({
     "Portable model tier: 'smol', 'regular', 'smart', or 'ultra'. Resolved by the assignee's harness/provider.",
   ),
 });
+
+function permission(verb: PermissionVerb): AdmissionRbac {
+  return { permission: verb };
+}
+
+async function maybeDenyUserToolAdmission(
+  user: User,
+  toolName: string,
+  config: UserToolAdmissionConfig,
+): Promise<CallToolResult | undefined> {
+  if (!isRbacEnabled()) return undefined;
+
+  const grant = getUserGrant(user.id);
+  if (grant.grantsAll) return undefined;
+
+  const decision = decideToolAdmission({
+    rbac: config.rbac,
+    readOnly: config.annotations?.readOnlyHint ?? false,
+    grant,
+  });
+  enqueueAdmissionRow({
+    userId: user.id,
+    decision,
+    source: "mcp",
+    toolName,
+  });
+
+  if (decision.allow) return undefined;
+
+  return {
+    isError: true,
+    content: [{ type: "text", text: `Forbidden: ${decision.reason}` }],
+  };
+}
 
 export function createUserServer(user: User): McpServer {
   const server = new McpServer(
@@ -54,69 +102,76 @@ export function createUserServer(user: User): McpServer {
 
   const registerTool = createToolRegistrar(server);
 
-  registerTool(
-    "send-task",
-    {
-      title: "Send a task",
-      annotations: { destructiveHint: false },
-      description: "Creates an unassigned task requested by the authenticated user.",
-      inputSchema: userSendTaskInputSchema,
-      outputSchema: sendTaskOutputSchema,
-    },
-    async (args, info, _meta) =>
-      sendTaskHandler(userCtx(user, info.sessionId), {
-        offerMode: false,
-        allowDuplicate: false,
-        ...args,
-      }),
-  );
+  const sendTaskConfig = {
+    title: "Send a task",
+    annotations: { destructiveHint: false },
+    rbac: permission("task.create.own"),
+    description: "Creates an unassigned task requested by the authenticated user.",
+    inputSchema: userSendTaskInputSchema,
+    outputSchema: sendTaskOutputSchema,
+  };
+  registerTool("send-task", sendTaskConfig, async (args, info, _meta) => {
+    const denied = await maybeDenyUserToolAdmission(user, "send-task", sendTaskConfig);
+    if (denied) return denied;
+    return sendTaskHandler(userCtx(user, info.sessionId), {
+      offerMode: false,
+      allowDuplicate: false,
+      ...args,
+    });
+  });
 
-  registerTool(
-    "get-tasks",
-    {
-      title: "Get tasks",
-      description: "Returns tasks requested by the authenticated user.",
-      annotations: { readOnlyHint: true },
-      inputSchema: getTasksInputSchema,
-      outputSchema: getTasksOutputSchema,
-    },
-    async (args, info, _meta) => getTasksHandler(userCtx(user, info.sessionId), args),
-  );
+  const getTasksConfig = {
+    title: "Get tasks",
+    description: "Returns tasks requested by the authenticated user.",
+    annotations: { readOnlyHint: true },
+    inputSchema: getTasksInputSchema,
+    outputSchema: getTasksOutputSchema,
+  };
+  registerTool("get-tasks", getTasksConfig, async (args, info, _meta) => {
+    const denied = await maybeDenyUserToolAdmission(user, "get-tasks", getTasksConfig);
+    if (denied) return denied;
+    return getTasksHandler(userCtx(user, info.sessionId), args);
+  });
 
-  registerTool(
-    "get-task-details",
-    {
-      title: "Get task details",
-      description: "Returns detailed information about one of your tasks.",
-      annotations: { readOnlyHint: true },
-      inputSchema: getTaskDetailsInputSchema,
-      outputSchema: getTaskDetailsOutputSchema,
-    },
-    async (args, info, _meta) => getTaskDetailsHandler(userCtx(user, info.sessionId), args),
-  );
+  const getTaskDetailsConfig = {
+    title: "Get task details",
+    description: "Returns detailed information about one of your tasks.",
+    annotations: { readOnlyHint: true },
+    inputSchema: getTaskDetailsInputSchema,
+    outputSchema: getTaskDetailsOutputSchema,
+  };
+  registerTool("get-task-details", getTaskDetailsConfig, async (args, info, _meta) => {
+    const denied = await maybeDenyUserToolAdmission(user, "get-task-details", getTaskDetailsConfig);
+    if (denied) return denied;
+    return getTaskDetailsHandler(userCtx(user, info.sessionId), args);
+  });
 
-  registerTool(
-    "cancel-task",
-    {
-      title: "Cancel Task",
-      description: "Cancel one of your pending or in-progress tasks.",
-      annotations: { destructiveHint: true },
-      inputSchema: cancelTaskInputSchema,
-      outputSchema: cancelTaskOutputSchema,
-    },
-    async (args, info, _meta) => cancelTaskHandler(userCtx(user, info.sessionId), args),
-  );
+  const cancelTaskConfig = {
+    title: "Cancel Task",
+    description: "Cancel one of your pending or in-progress tasks.",
+    annotations: { destructiveHint: true },
+    rbac: permission("task.cancel.own"),
+    inputSchema: cancelTaskInputSchema,
+    outputSchema: cancelTaskOutputSchema,
+  };
+  registerTool("cancel-task", cancelTaskConfig, async (args, info, _meta) => {
+    const denied = await maybeDenyUserToolAdmission(user, "cancel-task", cancelTaskConfig);
+    if (denied) return denied;
+    return cancelTaskHandler(userCtx(user, info.sessionId), args);
+  });
 
-  registerTool(
-    "task-action",
-    {
-      title: "Task Pool Action",
-      description: "Move one of your tasks to or from backlog.",
-      inputSchema: taskActionInputSchema,
-      outputSchema: taskActionOutputSchema,
-    },
-    async (args, info, _meta) => taskActionHandler(userCtx(user, info.sessionId), args),
-  );
+  const taskActionConfig = {
+    title: "Task Pool Action",
+    description: "Move one of your tasks to or from backlog.",
+    rbac: permission("task.action.own"),
+    inputSchema: taskActionInputSchema,
+    outputSchema: taskActionOutputSchema,
+  };
+  registerTool("task-action", taskActionConfig, async (args, info, _meta) => {
+    const denied = await maybeDenyUserToolAdmission(user, "task-action", taskActionConfig);
+    if (denied) return denied;
+    return taskActionHandler(userCtx(user, info.sessionId), args);
+  });
 
   return server;
 }

@@ -148,12 +148,12 @@ describe("RBAC admission over real HTTP", () => {
     expect(deniedTaskCreate.status).toBe(403);
     expect(deniedTaskCreate.body.error).toContain("admission: route has no permission verb");
 
-    const deniedFavorite = await api(server.base, "PUT", "/api/favorites", {
+    const allowedFavorite = await api(server.base, "PUT", "/api/favorites", {
       bearer: userToken,
       body: { itemType: "workflow", itemId: "wf-rbac-admission", favorite: true },
     });
-    expect(deniedFavorite.status).toBe(403);
-    expect(deniedFavorite.body.error).toContain("admission: route has no permission verb");
+    expect(allowedFavorite.status).toBe(200);
+    expect(allowedFavorite.body.favorite).toBe(true);
 
     const listTasks = await api(server.base, "GET", `/api/tasks?requestedByUserId=${userId}`, {
       bearer: userToken,
@@ -199,18 +199,23 @@ describe("RBAC admission over real HTTP", () => {
     expect(operatorCreate.status).toBe(201);
 
     expect(await waitForAuditCount(dbPath, 2)).toBeGreaterThanOrEqual(2);
-    const denyRows = readAuditRows(dbPath).filter(
+    const userHttpRows = readAuditRows(dbPath).filter(
       (row) =>
         row.principalType === "user" &&
         row.principalId === userId &&
         row.source === "http" &&
-        row.resourceType === "http-route" &&
-        row.decision === "deny",
+        row.resourceType === "http-route",
     );
-    expect(denyRows.map((row) => row.resourceId).sort()).toEqual([
-      "POST /api/tasks",
-      "PUT /api/favorites",
-    ]);
+    const denyRows = userHttpRows.filter((row) => row.decision === "deny");
+    expect(denyRows.map((row) => row.resourceId).sort()).toEqual(["POST /api/tasks"]);
+    expect(
+      userHttpRows.some(
+        (row) =>
+          row.resourceId === "PUT /api/favorites" &&
+          row.verb === "favorite.write.own" &&
+          row.decision === "allow",
+      ),
+    ).toBe(true);
 
     rewriteUserToRequester(dbPath, userId);
 

@@ -114,25 +114,36 @@ export function enqueueAuditRow(check: RbacCheck, decision: RbacDecision): void 
   }
 }
 
-export function enqueueAdmissionRow(input: {
+type AdmissionAuditInput = {
   userId: string;
   decision: AdmissionDecision;
-  method: string | undefined;
-  route: string;
-}): void {
+} & (
+  | {
+      source?: "http";
+      method: string | undefined;
+      route: string;
+    }
+  | {
+      source: "mcp";
+      toolName: string;
+    }
+);
+
+export function enqueueAdmissionRow(input: AdmissionAuditInput): void {
   if (isAuditDisabled()) return;
   try {
-    const method = (input.method ?? "UNKNOWN").toUpperCase();
+    const isMcp = input.source === "mcp";
+    const method = isMcp ? undefined : (input.method ?? "UNKNOWN").toUpperCase();
     enqueueRow({
       principalType: "user",
       principalId: input.userId,
       originatorUserId: null,
       verb: input.decision.verb ?? "(admission:no-verb)",
-      resourceType: "http-route",
-      resourceId: `${method} ${input.route}`,
+      resourceType: isMcp ? "mcp-tool" : "http-route",
+      resourceId: isMcp ? input.toolName : `${method} ${input.route}`,
       decision: input.decision.allow ? "allow" : "deny",
       reason: input.decision.allow ? null : input.decision.reason,
-      source: "http",
+      source: isMcp ? "mcp" : "http",
     });
   } catch (err) {
     console.warn("[rbac-audit] enqueue failed, dropping admission row:", (err as Error).message);

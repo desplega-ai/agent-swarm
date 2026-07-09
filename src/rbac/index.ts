@@ -4,8 +4,8 @@
  * Import from here at call sites: `import { can } from "@/rbac"`.
  */
 
-export type { AdmissionDecision } from "./admission";
-export { decideAdmission, isRbacEnabled } from "./admission";
+export type { AdmissionDecision, AdmissionGrant, AdmissionRbac } from "./admission";
+export { decideAdmission, decideToolAdmission, isRbacEnabled } from "./admission";
 export type { AuditSink } from "./can";
 export { can, clearAuditSink, setAuditSink } from "./can";
 export type { LegacyRule } from "./legacy-policy";

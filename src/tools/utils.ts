@@ -13,6 +13,7 @@ import type {
   ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
 import { withSpan } from "../otel";
+import type { PermissionVerb } from "../rbac/permissions";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;
@@ -117,6 +118,7 @@ type ToolConfig<
   inputSchema?: InputArgs;
   outputSchema?: OutputArgs;
   annotations?: ToolAnnotations;
+  rbac?: { permission: PermissionVerb } | { ungated: string };
   _meta?: Record<string, unknown>;
 };
 

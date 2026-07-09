@@ -33,6 +33,10 @@ export const PERMISSIONS = {
     description: "Cancel any task (beyond tasks the caller created).",
     namespace: "task",
   },
+  "task.create.own": {
+    description: "Create a task the caller owns.",
+    namespace: "task",
+  },
   "task.read.own": {
     description: "Read details of a task the principal requested.",
     namespace: "task",
@@ -48,6 +52,10 @@ export const PERMISSIONS = {
   "task.fs.mutate": {
     description: "Mutate a task's filesystem artifacts and attachments.",
     namespace: "task",
+  },
+  "favorite.write.own": {
+    description: "Set a favorite the caller owns.",
+    namespace: "favorite",
   },
   "memory.learning.inject": {
     description: "Inject a learning into another agent's memory.",
@@ -183,6 +191,30 @@ export const PERMISSIONS = {
   },
   "script.global.delete": {
     description: "Delete a global-scope script.",
+    namespace: "script",
+  },
+  "script.run": {
+    description: "Run a reusable or inline script as the caller's agent.",
+    namespace: "script",
+  },
+  "script.search": {
+    description: "Search reusable scripts visible to the caller.",
+    namespace: "script",
+  },
+  "script.api.create": {
+    description: "Expose a script as an external HTTP API endpoint.",
+    namespace: "script",
+  },
+  "script.api.update": {
+    description: "Update an external script API endpoint.",
+    namespace: "script",
+  },
+  "script.api.rotate": {
+    description: "Rotate an external script API endpoint bearer token.",
+    namespace: "script",
+  },
+  "script.api.delete": {
+    description: "Delete an external script API endpoint.",
     namespace: "script",
   },
 } as const satisfies Record<string, { description: string; namespace: string }>;

@@ -22,7 +22,7 @@ import { handleFs } from "../http/fs";
 import { handleMcpOAuth } from "../http/mcp-oauth";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
-import { decideAdmission, type PermissionVerb } from "../rbac";
+import { decideAdmission, decideToolAdmission, type PermissionVerb } from "../rbac";
 
 const TEST_DB_PATH = "./test-rbac-admission.sqlite";
 const API_KEY = "test-api-key";
@@ -296,6 +296,65 @@ describe("decideAdmission", () => {
         grant: grant([], true),
       }),
     ).toEqual({ allow: true });
+  });
+});
+
+describe("decideToolAdmission", () => {
+  test("grantsAll allows before permission or read-only checks", () => {
+    expect(
+      decideToolAdmission({
+        rbac: undefined,
+        readOnly: false,
+        grant: grant([], true),
+      }),
+    ).toEqual({ allow: true });
+  });
+
+  test("allows a declared permission when the grant contains the verb", () => {
+    expect(
+      decideToolAdmission({
+        rbac: { permission: "task.create.own" },
+        readOnly: false,
+        grant: grant(["task.create.own"]),
+      }),
+    ).toEqual({ allow: true, verb: "task.create.own" });
+  });
+
+  test("denies a declared permission when the grant lacks the verb", () => {
+    expect(
+      decideToolAdmission({
+        rbac: { permission: "task.create.own" },
+        readOnly: false,
+        grant: grant(["task.read.own"]),
+      }),
+    ).toEqual({
+      allow: false,
+      reason: "admission: missing permission 'task.create.own'",
+      verb: "task.create.own",
+    });
+  });
+
+  test("allows read-only tools without a permission verb", () => {
+    expect(
+      decideToolAdmission({
+        rbac: undefined,
+        readOnly: true,
+        grant: grant(),
+      }),
+    ).toEqual({ allow: true });
+  });
+
+  test("denies non-read-only tools without a permission verb", () => {
+    expect(
+      decideToolAdmission({
+        rbac: { ungated: "self scoped" },
+        readOnly: false,
+        grant: grant(),
+      }),
+    ).toEqual({
+      allow: false,
+      reason: "admission: tool has no permission verb (operator-only)",
+    });
   });
 });
 
