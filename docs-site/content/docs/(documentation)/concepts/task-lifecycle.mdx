@@ -107,6 +107,7 @@ A task with dependencies won't be offered or claimable until all dependencies ar
 | `model` | Model override: `haiku`, `sonnet`, or `opus`. Priority: task > `MODEL_OVERRIDE` config > `opus` |
 | `scheduleId` | Back-reference to the originating schedule (set automatically for schedule-created tasks) |
 | `contextKey` | Uniform ingress-scoped key populated automatically at every ingress site. See [Context Keys](#context-keys) below |
+| `requiredCapabilities` | Optional (`send-task`/`task-action create`) — capabilities a claiming agent must have to be pool-eligible. See [Routing Affinity](#routing-affinity) below |
 
 ## Context Keys
 
@@ -179,6 +180,21 @@ If the agent never returns, the resume stays `pending`. After `HEARTBEAT_RESUME_
   - `HEARTBEAT_RESUME_PIN_GRACE_MIN` (default `10`) — minutes a pinned resume waits to be reclaimed before the reaper escalates it to the Lead. Set to `0` to disable the reaper.
   - `HEARTBEAT_PIN_CRASH_RESUME` (default on) — set to `0` to restore the previous behavior, where crash-recovery resumes fall back to the unassigned pool instead of pinning to their original agent.
   - `HEARTBEAT_PIN_GRACEFUL_RESUME` (default on) — set to `0` to restore the previous behavior for graceful-shutdown resumes, sending them back through the pool instead of pinning them to the original agent.
+</Callout>
+
+### Routing Affinity
+
+Every path that puts an interrupted task back into the unassigned pool — a resume that falls off its same-agent pin (agent offline, gone, or at capacity), or a reboot-sweep retry child — stamps a `routingAffinity` snapshot (`{ sourceAgentId, role, capabilities }`) taken from the original agent. A single eligibility check, `isAgentEligibleForTask`, gates every consumer of the pool (worker poll auto-claim, `task-action claim`, and the heartbeat's `autoAssignPoolTasks`): an agent is eligible if it's the task's own `sourceAgentId`, or if its `role` exactly matches the snapshot's `role` **and** its `capabilities` are a superset of the snapshot's. Missing role data on either side means ineligible — there's no fail-open to "any idle worker".
+
+A task with a `routingAffinity` and zero currently-registered agents that satisfy it (regardless of status — an offline-but-matching agent still counts) is escalated to the Lead after `POOL_AFFINITY_ESCALATION_MIN` minutes, the same way an unreclaimed pin is escalated above. Fresh pool tasks can also declare a capability requirement directly via `send-task`'s or `task-action create`'s `requiredCapabilities` param, without a role — such a task always escalates to the Lead (since only its own creator could ever match with no `role` set), making it a way to hand the Lead a capability hint rather than to auto-route.
+
+Tasks without a `routingAffinity` are completely unaffected — the pool behaves exactly as before.
+
+<Callout type="info">
+  Two more environment variables:
+
+  - `POOL_AFFINITY_ENFORCEMENT` (default on) — set to `0` to disable the eligibility gate entirely and restore role-blind pool assignment.
+  - `POOL_AFFINITY_ESCALATION_MIN` (default `15`) — minutes an affinity-tagged pool task waits with zero eligible agents before escalating to the Lead.
 </Callout>
 
 ## Related

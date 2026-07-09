@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Routing affinity gates every pool consumer against the original assignee's role/capabilities** — resumes, reboot-sweep retry children, and fresh tasks declaring `requiredCapabilities` (`send-task`/`task-action create`) carry a `routingAffinity` snapshot; worker poll auto-claim, `task-action claim`, and the heartbeat's pool auto-assign all gate on the same `isAgentEligibleForTask` check. A reboot-retry child now pins back to its original agent when it looks recoverable, and an affinity-tagged pool task with zero eligible registered agents escalates to the Lead instead of landing on an arbitrary idle worker. Kill-switch: `POOL_AFFINITY_ENFORCEMENT=0` restores the prior role-blind pool behavior; untagged tasks are unaffected.
+
 ### Fixed
 - **Per-agent setupScript failures are non-fatal by default after the v1.106.0 privilege hardening** — `STARTUP_SCRIPT_STRICT` now defaults to `false`, so worker pods continue booting when a per-agent `/workspace/start-up.*` script still contains root-only commands. Set `STARTUP_SCRIPT_STRICT=true` to keep fail-fast behavior.
 
