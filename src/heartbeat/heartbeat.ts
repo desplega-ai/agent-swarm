@@ -25,8 +25,8 @@ import {
   getUnassignedPoolTasks,
   hasNonTerminalResumeChild,
   isAgentEligibleForTask,
+  isPoolAffinityEnforcementEnabled,
   MAX_EMPTY_POLLS,
-  POOL_AFFINITY_ENFORCEMENT,
   releaseStaleMentionProcessing,
   releaseStaleProcessingInbox,
   releaseStaleReviewingTasks,
@@ -839,7 +839,7 @@ function escalateUnreclaimedResumes(findings: HeartbeatFindings): void {
  * shares with `createRerouteDecisionTask`.
  */
 function escalateStarvedPoolTasks(findings: HeartbeatFindings): void {
-  if (!POOL_AFFINITY_ENFORCEMENT) return;
+  if (!isPoolAffinityEnforcementEnabled()) return;
 
   const cutoff = new Date(Date.now() - POOL_AFFINITY_ESCALATION_MIN * 60 * 1000).toISOString();
   const candidates = getStaleUnassignedAffinityTasks(cutoff);

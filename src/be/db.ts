@@ -1039,9 +1039,13 @@ export function updateAgentStatusFromCapacity(agentId: string): void {
  * callers: `claimTask`, `assignUnassignedTaskPending`,
  * `getUnassignedTaskIdsForAgent`). ON by default. Set to `0` to restore
  * pre-affinity behavior verbatim — mirrors the `HEARTBEAT_PIN_*_RESUME`
- * rollback convention.
+ * rollback convention. A function (read dynamically), not a module-load-time
+ * const, so it can be toggled mid-test (see `isGracefulResumePinEnabled` in
+ * src/tasks/worker-follow-up.ts for the same pattern).
  */
-export const POOL_AFFINITY_ENFORCEMENT = process.env.POOL_AFFINITY_ENFORCEMENT !== "0";
+export function isPoolAffinityEnforcementEnabled(): boolean {
+  return process.env.POOL_AFFINITY_ENFORCEMENT !== "0";
+}
 
 /**
  * Snapshot an agent's role/harness/capabilities into a `RoutingAffinity`
@@ -1076,7 +1080,7 @@ export function isAgentEligibleForTask(
   agent: Pick<Agent, "id" | "role" | "capabilities">,
   task: Pick<AgentTask, "routingAffinity">,
 ): boolean {
-  if (!POOL_AFFINITY_ENFORCEMENT) return true;
+  if (!isPoolAffinityEnforcementEnabled()) return true;
 
   const affinity = task.routingAffinity;
   if (!affinity) return true; // Untagged task — unchanged behavior.
@@ -1452,7 +1456,7 @@ export function assignUnassignedTaskPending(taskId: string, agentId: string): Ag
   // heartbeat's `autoAssignPoolTasks`, which already filters candidates via
   // `isAgentEligibleForTask` before calling this, but any other caller gets
   // the same guard for free.
-  if (POOL_AFFINITY_ENFORCEMENT) {
+  if (isPoolAffinityEnforcementEnabled()) {
     const task = getTaskById(taskId);
     const agent = getAgentById(agentId);
     if (task && agent && !isAgentEligibleForTask(agent, task)) {
@@ -3690,7 +3694,7 @@ export function claimTask(taskId: string, agentId: string): AgentTask | null {
   // Eligibility pre-check (routing affinity): static per (agent, task), so
   // pre-filtering here does NOT reopen the claim race — the atomic UPDATE
   // below still arbitrates concurrent claims by eligible agents.
-  if (POOL_AFFINITY_ENFORCEMENT) {
+  if (isPoolAffinityEnforcementEnabled()) {
     const task = getTaskById(taskId);
     const agent = getAgentById(agentId);
     if (task && agent && !isAgentEligibleForTask(agent, task)) {
