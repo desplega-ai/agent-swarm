@@ -658,6 +658,28 @@ describe("script connections", () => {
     ]);
   });
 
+  test("OpenAPI spec fetch fails closed when NODE_ENV is unset", async () => {
+    // Production images often run with NODE_ENV undefined — the SSRF guard
+    // must NOT treat that as development.
+    delete process.env.NODE_ENV;
+    delete process.env.ALLOW_PRIVATE_NETWORK_URLS;
+    setOpenapiSpecFetchForTesting((async () => {
+      throw new Error("fetch should not be reached for unsafe URLs");
+    }) as unknown as typeof fetch);
+
+    await expect(fetchOpenapiSpec("http://127.0.0.1/openapi.json")).rejects.toThrow(
+      /private IPv4|insecure/,
+    );
+
+    // ...and the explicit override re-enables local fetches for dev setups.
+    process.env.ALLOW_PRIVATE_NETWORK_URLS = "true";
+    setOpenapiSpecFetchForTesting(
+      (async () => new Response(openapiSpec, { status: 200 })) as unknown as typeof fetch,
+    );
+    const fetched = await fetchOpenapiSpec("http://127.0.0.1/openapi.json");
+    expect(fetched.status).toBe("fetched");
+  });
+
   test("YAML specs are accepted from a URL and canonicalized to JSON", async () => {
     const yamlSpec = [
       "openapi: 3.0.0",

@@ -33,6 +33,14 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 
 `AGENT_SWARM_API_KEY` / `API_KEY` and `SECRETS_ENCRYPTION_KEY` are reserved — they cannot be stored in `swarm_config`.
 
+SSRF guards on script-connection URL fetches (OpenAPI spec URLs, OAuth
+discovery, authorize/token URLs) **fail closed**: private/loopback and plain
+`http://` endpoints are rejected unless `NODE_ENV` is `development`/`test` or
+`ALLOW_PRIVATE_NETWORK_URLS=true` is set. The `dev:http` / `start:http` npm
+scripts set `NODE_ENV=development` for you; anything that boots `src/http.ts`
+another way (custom scripts, containers pointed at local endpoints) needs the
+flag to register localhost connections.
+
 RBAC admission design: [DES-445 user policy/admission model](../thoughts/taras/plans/2026-07-07-des-445-rbac-user-policy-admission-model.md). The happy path does not require manual bootstrapping: migrations backfill existing users, the users-table trigger grants the default role to new users, and server boot self-heals built-in role seeds plus users that somehow have zero roles. Use `bun run src/cli.tsx rbac bootstrap` as an explicit audit/verification and on-demand repair tool before enabling `RBAC_ENABLED=true` without rebooting, after manual DB surgery or a restore that stripped user roles, and periodically if you want a drift check. It only attaches the default role to users with zero roles, so deliberately narrowed users keep their existing role set.
 
 ## Tracker integrations (Linear & Jira)
