@@ -67,8 +67,10 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
   "mcp-server.create.swarm",
   "mcp-server.install.any",
   "mcp-server.uninstall.any",
+  "mcp-server.read.secrets",
   "script.global.write",
   "script.global.delete",
+  "script.api.read.secrets",
   "script.api.create",
   "script.api.update",
   "script.api.rotate",
@@ -92,7 +94,6 @@ const ANY_AUTHENTICATED_VERBS: PermissionVerb[] = [
   "mcp-oauth.authorize.any",
   "task.create.own",
   "favorite.write.own",
-  "script.run",
   "script.search",
 ];
 

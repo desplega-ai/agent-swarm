@@ -52,15 +52,15 @@ The admission decision (`src/rbac/admission.ts:20-43`): `grant.grantsAll` → al
 - **Favorites** — `PUT /api/favorites` (`src/http/favorites.ts:25`) is **already** `rbac: { ungated }` (self-scoped, **not** backlogged). Under admission its ungated+non-GET posture fail-closes narrowed users. We convert it to `favorite.write.own` (decision below).
 - **Skills** (`src/http/skills.ts`) — 11 non-GET routes, all backlogged; verbs `skill.*` **already exist** and are `leadOnly`/`leadOrResourceOwner` in legacy-policy (`:170-176`). Skills are agent-owned (`ownerAgentId`+`scope`), no `.own` variant.
 - **MCP-servers** (`src/http/mcp-servers.ts`) — 5 non-GET routes, all backlogged; verbs `mcp-server.*` **already exist** (`legacy-policy.ts:177-181`). Agent-owned.
-- **Scripts** (`src/http/scripts.ts`) — `upsert`/`delete` already gated (`script.global.write`/`script.global.delete`, `leadOnly`). 6 backlogged: `run`, `search`, and 4 `apis` token-minting routes → **need 6 new verbs**.
+- **Scripts** (`src/http/scripts.ts`) — `upsert`/`delete` already gated (`script.global.write`/`script.global.delete`, `leadOnly`). `run` stays backlogged/operator-only until trusted user-token-to-agent binding exists; `search`, the 4 `apis` token-minting routes, and the secret reveal GET get explicit verbs.
 
 ## Desired End State
 
 - **`RBAC_ENABLED` OFF (prod default until Taras flips)**: byte-for-byte today's behavior everywhere, including `/mcp-user`.
 - **`RBAC_ENABLED` ON, grantsAll (admin) user** — every user today: MCP tool calls and the newly-gated HTTP routes behave **byte-for-byte as today** (admission bypassed, zero audit rows). The no-op guarantee holds on both surfaces.
 - **`RBAC_ENABLED` ON, narrowed `requester` user**: on `/mcp-user` can `send-task` / `get-tasks` / `get-task-details` / `cancel-task` / `task-action` (requester now holds `task.create.own` + the pre-existing task verbs; reads pass via the readOnly fallback). Can `PUT /api/favorites` (holds `favorite.write.own`). Is **fail-closed** (403 / soft MCP error) on admin/lead routes (skills/mcp-servers/scripts writes) — matching increment 3.
-- **`ROUTE_RBAC_BACKLOG` shrinks by 22 entries** (11 skills + 5 mcp-servers + 6 scripts); favorites was never backlogged.
-- **Agent/operator behavior on every touched HTTP route is unchanged** — we add only the `rbac` admission field (user-principal layer), no new `can()` calls, so agents keep bypassing admission.
+- **`ROUTE_RBAC_BACKLOG` shrinks by 21 entries** (11 skills + 5 mcp-servers + 5 scripts); favorites was never backlogged.
+- **Agent/operator behavior on every touched HTTP route is unchanged** — route admission is still user-principal-only. Post-review, the `script-apis` MCP tool also gets explicit lead-only `can()` checks so it cannot bypass the new token-management verbs via the global API key proxy.
 - Verified by: `bun run tsc:check`, `bun test src/tests/rbac-*.test.ts`, `bun run check:rbac-coverage`, plus new MCP-admission unit + e2e cases proving the no-op and the narrowed-user matrix.
 
 ## What We're NOT Doing
@@ -81,9 +81,9 @@ The admission decision (`src/rbac/admission.ts:20-43`): `grant.grantsAll` → al
 - **Mirror, don't fork, the admission engine.** The MCP-user gate reuses `getUserGrant` + `isRbacEnabled` + `enqueueAdmissionRow` and a new sibling `decideToolAdmission()` next to `decideAdmission()`. Same short-circuit order → the no-op and fail-closed postures are identical by construction.
 - **Gate at the closure seam, not the shared registrar.** The check lives in `src/server-user.ts` (where `user` is in scope), wrapping the 5 tool registrations — never in the shared `createToolRegistrar`, so the agent `/mcp` surface is untouched.
 - **readOnly tools = the GET-fallback analog.** `readOnlyHint` tools with no `rbac` verb auto-pass; write tools declare a verb. (Decision: mirror HTTP GET fallback.)
-- **Route burn-down is admission-field-only.** Add `rbac: { permission }` (or `{ ungated }`) to each `route()` def and delete its backlog line. **No `can()` calls added** → agent/operator behavior byte-for-byte. (Decision: rbac field only.)
-- **Reuse existing verbs where they exist** (skills `skill.*`, mcp-servers `mcp-server.*`); register **8 new verbs total** — `task.create.own`, `favorite.write.own` (both → requester role), and `script.{run,search,api.create,api.update,api.rotate,api.delete}` (none → requester).
-- **Sequencing**: Phase 1 = MCP surface (highest value, self-contained, new own-verb). Phase 2 = favorites + skills (reuse + one new user-verb). Phase 3 = mcp-servers + scripts (reuse + 6 new lead/self verbs). Each phase is an independent, QA-able session; the coverage gate stays green after every phase.
+- **Route burn-down is mostly admission-field-only.** Add `rbac: { permission }` (or `{ ungated }`) to each route being admitted and delete its backlog line. The exception is query-gated secret resolution (`resolveSecrets=true`), which stays conditionally gated in the handler so harmless non-secret GETs remain readable.
+- **Reuse existing verbs where they exist** (skills `skill.*`, mcp-servers write verbs); register **8 new verbs total** — `task.create.own`, `favorite.write.own` (both → requester role), `mcp-server.read.secrets`, and `script.{search,api.read.secrets,api.create,api.update,api.rotate,api.delete}` (none → requester).
+- **Sequencing**: Phase 1 = MCP surface (highest value, self-contained, new own-verb). Phase 2 = favorites + skills (reuse + one new user-verb). Phase 3 = mcp-servers + scripts (reuse + secret-read verbs + 5 script backlog routes). Each phase is an independent, QA-able session; the coverage gate stays green after every phase.
 
 ### New verbs & role membership (decision summary)
 
@@ -91,8 +91,9 @@ The admission decision (`src/rbac/admission.ts:20-43`): `grant.grantsAll` → al
 |---|---|---|---|---|
 | `task.create.own` | 1 | `any-authenticated` | **Yes** | `send-task` tool rbac field |
 | `favorite.write.own` | 2 | `any-authenticated` | **Yes** | `PUT /api/favorites` rbac field |
-| `script.run` | 3 | `any-authenticated` | No | `POST /api/scripts/run` rbac field |
+| `mcp-server.read.secrets` | 3 | `lead-only` | No | `GET /api/agents/{id}/mcp-servers?resolveSecrets=true` conditional handler gate |
 | `script.search` | 3 | `any-authenticated` | No | `POST /api/scripts/search` rbac field |
+| `script.api.read.secrets` | 3 | `lead-only` | No | `GET /api/scripts/{id}/apis/{endpointId}/secret` rbac field + `script-apis` MCP tool |
 | `script.api.create` | 3 | `lead-only` | No | `POST /api/scripts/{id}/apis` rbac field |
 | `script.api.update` | 3 | `lead-only` | No | `PATCH .../apis/{endpointId}` rbac field |
 | `script.api.rotate` | 3 | `lead-only` | No | `POST .../apis/{endpointId}/rotate` rbac field |
@@ -244,7 +245,7 @@ Export from `src/rbac/index.ts`.
 
 ### Overview
 
-Gate the 5 mcp-servers routes (reusing existing `mcp-server.*` verbs) and the 6 scripts backlog routes (registering 6 new `script.*` verbs). Deliverable: `ROUTE_RBAC_BACKLOG` shrinks by a further 11 (5 mcp-servers + 6 scripts); the token-minting `apis` surface is lead-gated for user principals; agent behavior unchanged.
+Gate the 5 mcp-servers routes (reusing existing `mcp-server.*` verbs), conditionally gate MCP-server secret resolution, and gate 5 scripts backlog routes plus the script API secret reveal GET. Deliverable: `ROUTE_RBAC_BACKLOG` shrinks by a further 10 (5 mcp-servers + 5 scripts); `POST /api/scripts/run` remains backlogged/operator-only until trusted user-token-to-agent binding exists.
 
 ### Changes Required:
 
@@ -257,11 +258,12 @@ Gate the 5 mcp-servers routes (reusing existing `mcp-server.*` verbs) and the 6 
 - `POST /api/mcp-servers/{id}/install` (:108) → `mcp-server.install.any`
 - `DELETE /api/mcp-servers/{id}/install/{agentId}` (:125) → `mcp-server.uninstall.any`
 
-#### 2. Register + map 6 new `script.*` verbs
+#### 2. Register + map secret-read + script API verbs
 **Files**: `src/rbac/permissions.ts`, `src/rbac/legacy-policy.ts`
 **Changes**: add to `PERMISSIONS` and map in `LEGACY_POLICY`:
-- `script.run` → `any-authenticated` (self-scoped execution as caller's agent)
+- `mcp-server.read.secrets` → `lead-only`
 - `script.search` → `any-authenticated` (read over own + global scope)
+- `script.api.read.secrets` → `lead-only`
 - `script.api.create` → `lead-only`
 - `script.api.update` → `lead-only`
 - `script.api.rotate` → `lead-only`
@@ -269,31 +271,33 @@ Gate the 5 mcp-servers routes (reusing existing `mcp-server.*` verbs) and the 6 
 
 (`lead-only` mirrors the existing `script.global.*` privilege level; these routes mint/rotate public bearer tokens for `POST /api/x/script/{endpointId}`.) None join the `requester` role → narrowed users fail-closed here (accepted).
 
-#### 3. Gate the 6 scripts routes
+#### 3. Gate the 5 admitted scripts backlog routes plus secret reveal GET
 **File**: `src/http/scripts.ts`
 **Changes**: add `rbac: { permission }` to each backlog route (leave `upsert`/`delete` as-is, already gated):
-- `POST /api/scripts/run` (:103) → `script.run`
 - `POST /api/scripts/search` (:121) → `script.search`
 - `POST /api/scripts/{id}/apis` (:256) → `script.api.create`
+- `GET /api/scripts/{id}/apis/{endpointId}/secret` (:295) → `script.api.read.secrets`
 - `PATCH /api/scripts/{id}/apis/{endpointId}` (:301) → `script.api.update`
 - `POST /api/scripts/{id}/apis/{endpointId}/rotate` (:316) → `script.api.rotate`
 - `DELETE /api/scripts/{id}/apis/{endpointId}` (:331) → `script.api.delete`
 
+`POST /api/scripts/run` remains in `ROUTE_RBAC_BACKLOG` because user tokens can still self-assert `X-Agent-ID`; admitting `script.run` before trusted agent binding would let a narrowed user execute as any agent.
+
 #### 4. Shrink the backlog
 **File**: `scripts/check-rbac-coverage.ts`
-**Changes**: delete the 5 mcp-servers + 6 scripts lines from `ROUTE_RBAC_BACKLOG`.
+**Changes**: delete the 5 mcp-servers + 5 admitted scripts lines from `ROUTE_RBAC_BACKLOG`; keep `POST /api/scripts/run`.
 
 ### Success Criteria:
 
 #### Automated Verification:
-- [x] Type check passes: `bun run tsc:check` (exhaustiveness forces all 6 new verb mappings)
+- [x] Type check passes: `bun run tsc:check` (exhaustiveness forces all new verb mappings)
 - [x] Lint passes: `bun run lint`
-- [x] Coverage gate passes — backlog shrank by 11, all 6 new verbs have call sites via route rbac fields, no stale entries: `bun run check:rbac-coverage`
+- [x] Coverage gate passes — backlog shrank by 10 in phase 3, all new verbs have call sites, no stale entries: `bun run check:rbac-coverage`
 - [x] RBAC suites pass: `bun test src/tests/rbac-*.test.ts`
 - [x] Scripts-runtime tests unaffected: `bun test src/tests/scripts-*.test.ts`
 
 #### Automated QA:
-- [x] With `RBAC_ENABLED=true`: narrowed-to-`requester` user → `POST /api/mcp-servers` and `POST /api/scripts/{id}/apis` both 403 fail-closed; admin (grantsAll) user → both succeed; agent principal → both unchanged from today. Verify via curl against a local server.
+- [x] With `RBAC_ENABLED=true`: narrowed-to-`requester` user → `POST /api/mcp-servers`, `POST /api/scripts/{id}/apis`, `GET /api/scripts/{id}/apis/{endpointId}/secret`, and `GET /api/agents/{id}/mcp-servers?resolveSecrets=true` fail closed; admin (grantsAll) user → succeeds; non-secret MCP-server list stays readable.
 
 #### Manual Verification:
 - [x] Confirm the scripts `apis` token-minting flow (`POST /api/scripts/{id}/apis` → `POST /api/x/script/{endpointId}`) still works end-to-end for an operator/admin caller — the gate must not break the public-endpoint issuance path.
@@ -310,9 +314,8 @@ Gate the 5 mcp-servers routes (reusing existing `mcp-server.*` verbs) and the 6 
   - **Remaining `ROUTE_RBAC_BACKLOG`** (~127 after this increment) — notably `POST /api/tasks` and all `/api/users/*` writes; and the ~76 `UNGATED_TOOL_FILES` on the agent MCP surface.
 - **Derail notes**:
   - `POST /api/tasks` (HTTP task creation) stays backlogged this increment — it's hit by many principal kinds and is out of the stated scope. `task.create.own` is used only at the MCP `send-task` site for now; gating the HTTP route with it is a future tranche (mind the cross-principal implications).
-  - The `can()`-hardening pass (gating agent principals on skills/mcp-servers/scripts HTTP routes to match their MCP-tool twins) was **deliberately deferred** — it changes non-lead agent behavior and belongs with increment 4's trusted agent identity.
-  - §8.3 open question (sensitive GET reads needing explicit `*.read.secrets`-style verbs so the read-fallback stops being "all reads allowed") remains open and now applies symmetrically to the MCP readOnly fallback introduced here.
-  - The `script_apis` `lead-only` mapping is a legacy-policy entry with **no `can()` caller** this increment (admission-field-only) — it documents intended agent semantics for when the hardening pass wires `can()`.
+  - The broader `can()`-hardening pass (gating agent principals on skills/mcp-servers/scripts HTTP routes to match their MCP-tool twins) is still deferred to increment 4's trusted agent identity work. This increment only hardens the `script-apis` MCP tool because it could otherwise bypass the new token-management REST gates by proxying with the global API key.
+  - §8.3 sensitive-read follow-up is partially handled here for known secret-returning GETs; remaining readOnly/GET surfaces still need a broader inventory.
 - **References**:
   - Design authority: `thoughts/taras/plans/2026-07-07-des-445-rbac-user-policy-admission-model.md` (§7 increment map, §4 backlog burn-down, §8.3 read verbs)
   - Increment 3 (shipped): `thoughts/taras/plans/2026-07-07-des-445-rbac-increment3-role-engine.md`

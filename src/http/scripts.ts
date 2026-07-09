@@ -121,7 +121,6 @@ const runRoute = route({
     404: { description: "Script not found" },
     501: { description: "workspace-rw scripts are not supported in v1" },
   },
-  rbac: { permission: "script.run" },
 });
 
 const searchRoute = route({
@@ -304,6 +303,7 @@ const revealScriptApiSecretRoute = route({
     200: { description: "Decrypted token (null when authMode is 'none')" },
     404: { description: "Endpoint not found" },
   },
+  rbac: { permission: "script.api.read.secrets" },
 });
 
 const patchScriptApiRoute = route({

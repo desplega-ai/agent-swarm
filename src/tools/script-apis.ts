@@ -1,10 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
+import { getAgentById } from "@/be/db";
+import { can, type PermissionVerb } from "@/rbac";
+import type { RequestInfo } from "@/tools/utils";
 import { createToolRegistrar } from "@/tools/utils";
 import type { ScriptApiRecord, ScriptApiWithSecret } from "@/types";
 import { registerVolatileSecret } from "@/utils/secret-scrubber";
-import { proxyScriptsApi, scriptToolOutputSchema } from "./script-common";
+import { proxyScriptsApi, SCRIPT_TRANSPORT_ERROR, scriptToolOutputSchema } from "./script-common";
 
 const scriptApisInputSchema = z.object({
   action: z
@@ -41,12 +44,33 @@ function maskToken(endpoint: RawEndpoint): RawEndpoint {
   return { ...rest, token: endpoint.authMode === "bearer" ? "********" : null };
 }
 
-function errorResult(message: string): CallToolResult {
+function errorResult(message: string, status = 400): CallToolResult {
   return {
     isError: true,
     content: [{ type: "text", text: message }],
-    structuredContent: { success: false, status: 400, error: message },
+    structuredContent: { success: false, status, error: message },
   };
+}
+
+function requireScriptApiPermission(
+  requestInfo: RequestInfo,
+  verb: PermissionVerb,
+  message: string,
+): CallToolResult | null {
+  if (!requestInfo.agentId) return errorResult(SCRIPT_TRANSPORT_ERROR);
+
+  const agent = getAgentById(requestInfo.agentId);
+  const decision = can({
+    principal: {
+      kind: "agent",
+      agentId: requestInfo.agentId,
+      isLead: agent?.isLead ?? false,
+    },
+    verb,
+    resource: { kind: "none" },
+    source: "mcp",
+  });
+  return decision.allow ? null : errorResult(message, 403);
 }
 
 export const registerScriptApisTool = (server: McpServer) => {
@@ -73,6 +97,13 @@ export const registerScriptApisTool = (server: McpServer) => {
         let endpoints = (raw?.apis ?? []).map(maskToken);
 
         if (args.includeSecrets) {
+          const denied = requireScriptApiPermission(
+            requestInfo,
+            "script.api.read.secrets",
+            "Only lead agents can reveal script API bearer tokens.",
+          );
+          if (denied) return denied;
+
           endpoints = await Promise.all(
             endpoints.map(async (endpoint) => {
               if (endpoint.authMode !== "bearer") return endpoint;
@@ -98,6 +129,13 @@ export const registerScriptApisTool = (server: McpServer) => {
       }
 
       if (args.action === "create") {
+        const denied = requireScriptApiPermission(
+          requestInfo,
+          "script.api.create",
+          "Only lead agents can create script API endpoints.",
+        );
+        if (denied) return denied;
+
         const result = await proxyScriptsApi({
           method: "POST",
           path: `/api/scripts/${args.scriptId}/apis`,
@@ -118,6 +156,13 @@ export const registerScriptApisTool = (server: McpServer) => {
 
       if (args.action === "rotate") {
         if (!args.endpointId) return errorResult("endpointId is required for rotate.");
+        const denied = requireScriptApiPermission(
+          requestInfo,
+          "script.api.rotate",
+          "Only lead agents can rotate script API bearer tokens.",
+        );
+        if (denied) return denied;
+
         const result = await proxyScriptsApi({
           method: "POST",
           path: `/api/scripts/${args.scriptId}/apis/${args.endpointId}/rotate`,
@@ -133,6 +178,13 @@ export const registerScriptApisTool = (server: McpServer) => {
 
       if (args.action === "update") {
         if (!args.endpointId) return errorResult("endpointId is required for update.");
+        const denied = requireScriptApiPermission(
+          requestInfo,
+          "script.api.update",
+          "Only lead agents can update script API endpoints.",
+        );
+        if (denied) return denied;
+
         return proxyScriptsApi({
           method: "PATCH",
           path: `/api/scripts/${args.scriptId}/apis/${args.endpointId}`,
@@ -144,6 +196,13 @@ export const registerScriptApisTool = (server: McpServer) => {
 
       if (args.action === "delete") {
         if (!args.endpointId) return errorResult("endpointId is required for delete.");
+        const denied = requireScriptApiPermission(
+          requestInfo,
+          "script.api.delete",
+          "Only lead agents can delete script API endpoints.",
+        );
+        if (denied) return denied;
+
         return proxyScriptsApi({
           method: "DELETE",
           path: `/api/scripts/${args.scriptId}/apis/${args.endpointId}`,

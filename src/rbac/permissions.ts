@@ -173,6 +173,10 @@ export const PERMISSIONS = {
     description: "Update an MCP server the caller does not own.",
     namespace: "mcp-server",
   },
+  "mcp-server.read.secrets": {
+    description: "Read resolved MCP server secret env/header values.",
+    namespace: "mcp-server",
+  },
   "mcp-oauth.authorize.any": {
     description: "Start an MCP-server OAuth authorize flow for a caller-supplied user scope.",
     namespace: "mcp-oauth",
@@ -193,12 +197,12 @@ export const PERMISSIONS = {
     description: "Delete a global-scope script.",
     namespace: "script",
   },
-  "script.run": {
-    description: "Run a reusable or inline script as the caller's agent.",
-    namespace: "script",
-  },
   "script.search": {
     description: "Search reusable scripts visible to the caller.",
+    namespace: "script",
+  },
+  "script.api.read.secrets": {
+    description: "Reveal an external script API endpoint bearer token.",
     namespace: "script",
   },
   "script.api.create": {

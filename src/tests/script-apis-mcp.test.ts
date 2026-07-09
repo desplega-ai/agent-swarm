@@ -114,6 +114,7 @@ async function dispatchScriptsApi(url: string, init: RequestInit = {}): Promise<
 }
 
 let workerId: string;
+let leadId: string;
 let scriptId: string;
 let savedEnv: NodeJS.ProcessEnv;
 let savedFetch: typeof globalThis.fetch;
@@ -136,6 +137,7 @@ beforeAll(async () => {
   refreshSecretScrubberCache();
   setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
   workerId = createAgent({ name: "script-apis-mcp-worker", isLead: false, status: "idle" }).id;
+  leadId = createAgent({ name: "script-apis-mcp-lead", isLead: true, status: "idle" }).id;
   process.env.MCP_BASE_URL = "http://script-apis-mcp.test";
   globalThis.fetch = (async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -185,18 +187,43 @@ describe("script-apis MCP tool", () => {
     const tools = buildToolServer();
     const result = (await tools.scriptApis.handler(
       { action: "create", scriptId, authMode: "bearer", label: "demo" },
-      meta(workerId),
+      meta(leadId),
     )) as StructuredResult<{ id: string; token: string; authMode: string }>;
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.data?.token).toMatch(/^xsk_/);
     expect(result.structuredContent.data?.authMode).toBe("bearer");
   });
 
+  test("non-lead agents cannot mint or reveal bearer tokens", async () => {
+    const tools = buildToolServer();
+    const createDenied = (await tools.scriptApis.handler(
+      { action: "create", scriptId, authMode: "bearer", label: "demo" },
+      meta(workerId),
+    )) as StructuredResult<unknown>;
+    expect(createDenied.structuredContent.success).toBe(false);
+    expect(createDenied.structuredContent.status).toBe(403);
+    expect(createDenied.structuredContent.error).toContain("Only lead agents can create");
+
+    const created = (await tools.scriptApis.handler(
+      { action: "create", scriptId, authMode: "bearer" },
+      meta(leadId),
+    )) as StructuredResult<{ id: string; token: string }>;
+    expect(created.structuredContent.success).toBe(true);
+
+    const revealDenied = (await tools.scriptApis.handler(
+      { action: "list", scriptId, includeSecrets: true },
+      meta(workerId),
+    )) as StructuredResult<unknown>;
+    expect(revealDenied.structuredContent.success).toBe(false);
+    expect(revealDenied.structuredContent.status).toBe(403);
+    expect(revealDenied.structuredContent.error).toContain("Only lead agents can reveal");
+  });
+
   test("list masks bearer tokens by default and reveals with includeSecrets", async () => {
     const tools = buildToolServer();
     const created = (await tools.scriptApis.handler(
       { action: "create", scriptId, authMode: "bearer" },
-      meta(workerId),
+      meta(leadId),
     )) as StructuredResult<{ id: string; token: string }>;
     const realToken = created.structuredContent.data?.token;
     expect(realToken).toBeTruthy();
@@ -209,17 +236,14 @@ describe("script-apis MCP tool", () => {
 
     const revealed = (await tools.scriptApis.handler(
       { action: "list", scriptId, includeSecrets: true },
-      meta(workerId),
+      meta(leadId),
     )) as StructuredResult<{ apis: Array<{ id: string; token: string | null }> }>;
     expect(revealed.structuredContent.data?.apis[0]?.token).toBe(realToken);
   });
 
   test("list returns a null token for authMode 'none'", async () => {
     const tools = buildToolServer();
-    await tools.scriptApis.handler(
-      { action: "create", scriptId, authMode: "none" },
-      meta(workerId),
-    );
+    await tools.scriptApis.handler({ action: "create", scriptId, authMode: "none" }, meta(leadId));
     const listed = (await tools.scriptApis.handler(
       { action: "list", scriptId },
       meta(workerId),
@@ -231,14 +255,14 @@ describe("script-apis MCP tool", () => {
     const tools = buildToolServer();
     const created = (await tools.scriptApis.handler(
       { action: "create", scriptId, authMode: "bearer" },
-      meta(workerId),
+      meta(leadId),
     )) as StructuredResult<{ id: string; token: string }>;
     const endpointId = created.structuredContent.data?.id as string;
     const oldToken = created.structuredContent.data?.token;
 
     const rotated = (await tools.scriptApis.handler(
       { action: "rotate", scriptId, endpointId },
-      meta(workerId),
+      meta(leadId),
     )) as StructuredResult<{ token: string }>;
     expect(rotated.structuredContent.success).toBe(true);
     expect(rotated.structuredContent.data?.token).toBeTruthy();
@@ -249,13 +273,13 @@ describe("script-apis MCP tool", () => {
     const tools = buildToolServer();
     const created = (await tools.scriptApis.handler(
       { action: "create", scriptId, authMode: "none" },
-      meta(workerId),
+      meta(leadId),
     )) as StructuredResult<{ id: string }>;
     const endpointId = created.structuredContent.data?.id as string;
 
     const updated = (await tools.scriptApis.handler(
       { action: "update", scriptId, endpointId, enabled: false, label: "renamed" },
-      meta(workerId),
+      meta(leadId),
     )) as StructuredResult<{ enabled: boolean; label: string | null }>;
     expect(updated.structuredContent.success).toBe(true);
     expect(updated.structuredContent.data?.enabled).toBe(false);
@@ -266,13 +290,13 @@ describe("script-apis MCP tool", () => {
     const tools = buildToolServer();
     const created = (await tools.scriptApis.handler(
       { action: "create", scriptId, authMode: "none" },
-      meta(workerId),
+      meta(leadId),
     )) as StructuredResult<{ id: string }>;
     const endpointId = created.structuredContent.data?.id as string;
 
     const deleted = (await tools.scriptApis.handler(
       { action: "delete", scriptId, endpointId },
-      meta(workerId),
+      meta(leadId),
     )) as StructuredResult<{ deleted: boolean }>;
     expect(deleted.structuredContent.success).toBe(true);
     expect(deleted.structuredContent.data?.deleted).toBe(true);
