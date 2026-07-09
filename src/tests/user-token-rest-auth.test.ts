@@ -139,12 +139,12 @@ describe("normal REST API user-bound token auth", () => {
     expect(body.requestedByUserId).not.toBe(attacker.id);
   });
 
-  test("global API key caller + valid body requestedByUserId (no owned task context) → attributed to that user", async () => {
-    // Fork-specific divergence from upstream #939: this org's UI shares one
-    // operator key across all users, so there is no ownership-gated task
-    // context to fall back to — the body-supplied id is the only signal
-    // available, and it is trusted once validated against a real user row.
-    const uiUser = createUser({ name: "UI Picker User" });
+  test("global API key caller + body requestedByUserId, flag OFF (default) → stays unattributed, body ignored", async () => {
+    // Default posture: the body fallback is off, so an operator/global-key
+    // caller cannot spoof attribution via the request body. This is the
+    // anti-spoofing behavior upstream #939 introduced.
+    expect(process.env.TRUST_BODY_REQUESTED_BY_USER_ID).toBeUndefined();
+    const someUser = createUser({ name: "Some User (flag off)" });
 
     const res = await fetch(`http://localhost:${port}/api/tasks`, {
       method: "POST",
@@ -153,32 +153,100 @@ describe("normal REST API user-bound token auth", () => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        task: "created from the UI session view",
-        requestedByUserId: uiUser.id,
-      }),
-    });
-
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as { id: string; requestedByUserId?: string };
-    expect(body.requestedByUserId).toBe(uiUser.id);
-  });
-
-  test("global API key caller + bogus body requestedByUserId → stays unattributed (NULL), not a crash", async () => {
-    const res = await fetch(`http://localhost:${port}/api/tasks`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        task: "created with a nonexistent requestedByUserId",
-        requestedByUserId: "does-not-exist",
+        task: "created from the UI session view, flag off",
+        requestedByUserId: someUser.id,
       }),
     });
 
     expect(res.status).toBe(201);
     const body = (await res.json()) as { id: string; requestedByUserId?: string };
     expect(body.requestedByUserId).toBeUndefined();
+  });
+
+  describe("TRUST_BODY_REQUESTED_BY_USER_ID=true (opt-in for shared-key deployments)", () => {
+    beforeAll(() => {
+      process.env.TRUST_BODY_REQUESTED_BY_USER_ID = "true";
+    });
+
+    afterAll(() => {
+      delete process.env.TRUST_BODY_REQUESTED_BY_USER_ID;
+    });
+
+    test("global API key caller + valid body requestedByUserId (no owned task context) → attributed to that user", async () => {
+      // Fork-specific opt-in: this org's UI shares one operator key across
+      // all users, so there is no ownership-gated task context to fall back
+      // to — the body-supplied id is the only signal available, and it is
+      // trusted once validated against a real user row, but only when the
+      // deployment has explicitly opted into this flag.
+      const uiUser = createUser({ name: "UI Picker User" });
+
+      const res = await fetch(`http://localhost:${port}/api/tasks`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          task: "created from the UI session view",
+          requestedByUserId: uiUser.id,
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { id: string; requestedByUserId?: string };
+      expect(body.requestedByUserId).toBe(uiUser.id);
+    });
+
+    test("global API key caller + bogus body requestedByUserId → stays unattributed (NULL), not a crash", async () => {
+      const res = await fetch(`http://localhost:${port}/api/tasks`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          task: "created with a nonexistent requestedByUserId",
+          requestedByUserId: "does-not-exist",
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { id: string; requestedByUserId?: string };
+      expect(body.requestedByUserId).toBeUndefined();
+    });
+
+    test("owned task context still takes precedence over body even when flag is on", async () => {
+      const legitRequester = createUser({ name: "Legit Requester (flag on)" });
+      const attacker = createUser({ name: "Attacker (flag on)" });
+      const agent = createAgent({
+        name: "spoof-test-agent-flag-on",
+        isLead: false,
+        status: "idle",
+      });
+      const ownedTask = createTaskExtended("owned task for spoof test, flag on", {
+        agentId: agent.id,
+        requestedByUserId: legitRequester.id,
+      });
+
+      const res = await fetch(`http://localhost:${port}/api/tasks`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${API_KEY}`,
+          "Content-Type": "application/json",
+          "x-agent-id": agent.id,
+          "x-source-task-id": ownedTask.id,
+        },
+        body: JSON.stringify({
+          task: "created through global key with spoofed requestedByUserId, flag on",
+          requestedByUserId: attacker.id,
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { id: string; requestedByUserId?: string };
+      expect(body.requestedByUserId).toBe(legitRequester.id);
+      expect(body.requestedByUserId).not.toBe(attacker.id);
+    });
   });
 
   test("revoked user token is unauthorized for normal API", async () => {
