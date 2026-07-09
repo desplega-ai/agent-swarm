@@ -368,18 +368,21 @@ export async function handleTasks(
 
     // Prefer trusted server-side identity: an authenticated request user, or
     // the caller's own ownership-gated task context (`X-Source-Task-Id` /
-    // ambient current task) — same as every other audited write site.
-    // Fork-specific divergence from upstream #939: this org's UI authenticates
-    // every user with the SAME shared operator key, so a caller can never be
-    // classified as `auth.kind === "user"` and the anti-spoofing rationale for
-    // ignoring the body field doesn't hold here. As a last resort, fall back
-    // to a body-supplied `requestedByUserId`, but only after validating it
-    // names a real user — an unresolvable id (typo/garbage) is dropped rather
-    // than trusted, so it can't land a bad FK or a false attribution. This
-    // restores UI task-attribution in the shared-operator-key deployment and
-    // should NOT be upstreamed.
+    // ambient current task) — same as every other audited write site. This
+    // is the upstream #939 anti-spoofing behavior and stays the default.
+    //
+    // Fork-specific opt-in: in a single-tenant deployment where every caller
+    // shares ONE operator key (so `auth.kind` is never "user" and there's no
+    // way to bind a caller to a user), TRUST_BODY_REQUESTED_BY_USER_ID=true
+    // re-enables a body-supplied `requestedByUserId` as a last resort, after
+    // validating it names a real user. This is safe ONLY because every
+    // holder of that shared key is already trusted org-wide — it must stay
+    // off (default) anywhere callers of the shared/global key are not all
+    // equally trusted, since it lets any such caller attribute a task to any
+    // user. Must NOT be upstreamed as a default-on behavior.
     let requestedByUserId = resolveHttpAuditUserId(req, myAgentId) ?? undefined;
-    if (!requestedByUserId && parsed.body.requestedByUserId) {
+    const trustBodyRequestedByUserId = process.env.TRUST_BODY_REQUESTED_BY_USER_ID === "true";
+    if (trustBodyRequestedByUserId && !requestedByUserId && parsed.body.requestedByUserId) {
       const candidate = findUserById(parsed.body.requestedByUserId);
       if (candidate) requestedByUserId = candidate.id;
     }
