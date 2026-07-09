@@ -293,6 +293,21 @@ export const FollowUpConfigSchema = z.object({
 });
 export type FollowUpConfig = z.infer<typeof FollowUpConfigSchema>;
 
+// Routing-affinity snapshot for interrupted/pooled tasks (routing-affinity
+// follow-up to DES-523). Always written/read as a whole JSON blob — never
+// three separate scalar columns. `role` is snapshotted from the ORIGINAL
+// assignee at interruption time (or omitted for a fresh pool task that only
+// declares `capabilities`); `harnessProvider` is informational only (native
+// session resume is deprecated, so it is never enforced by the eligibility
+// gate). See `isAgentEligibleForTask` in `src/be/db.ts`.
+export const RoutingAffinitySchema = z.object({
+  sourceAgentId: z.uuid().optional(),
+  role: z.string().max(100).optional(),
+  harnessProvider: ProviderNameSchema.optional(),
+  capabilities: z.array(z.string()).default([]),
+});
+export type RoutingAffinity = z.infer<typeof RoutingAffinitySchema>;
+
 export const AgentTaskSchema = z.object({
   id: z.uuid(),
   agentId: z.uuid().nullable(), // Nullable for unassigned tasks
@@ -419,6 +434,12 @@ export const AgentTaskSchema = z.object({
   // Aggregated session cost for task list/read models. Undefined means no
   // session cost rows have been recorded for this task.
   totalCostUsd: z.number().min(0).optional(),
+
+  // Routing-affinity snapshot (nullable) — gates which agents may claim/
+  // auto-claim this task via the pool. Undefined = untagged, unchanged
+  // behavior. Inherited from parentTaskId when not explicitly set (see
+  // `createTaskExtended` in src/be/db.ts). See `isAgentEligibleForTask`.
+  routingAffinity: RoutingAffinitySchema.optional(),
 });
 
 // ============================================================================
@@ -902,6 +923,7 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_accepted",
   "task_rejected",
   "task_claimed",
+  "task_claim_rejected_affinity",
   "task_released",
   "channel_message",
   // Service registry events

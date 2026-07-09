@@ -62,6 +62,7 @@ import type {
   ProviderName,
   ReasoningEffort,
   RepoGuidelines,
+  RoutingAffinity,
   ScheduledTask,
   ScheduledTaskSummary,
   ScriptRun,
@@ -108,6 +109,7 @@ import {
   type ModelTier,
   parseModelTier,
   ReasoningEffortSchema,
+  RoutingAffinitySchema,
 } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
@@ -1029,6 +1031,71 @@ export function updateAgentStatusFromCapacity(agentId: string): void {
 }
 
 // ============================================================================
+// Routing Affinity (interrupted/pooled task role & capability gating)
+// ============================================================================
+
+/**
+ * Kill-switch for the pool eligibility gate (`isAgentEligibleForTask` and its
+ * callers: `claimTask`, `assignUnassignedTaskPending`,
+ * `getUnassignedTaskIdsForAgent`). ON by default. Set to `0` to restore
+ * pre-affinity behavior verbatim — mirrors the `HEARTBEAT_PIN_*_RESUME`
+ * rollback convention.
+ */
+export const POOL_AFFINITY_ENFORCEMENT = process.env.POOL_AFFINITY_ENFORCEMENT !== "0";
+
+/**
+ * Snapshot an agent's role/harness/capabilities into a `RoutingAffinity`
+ * blob, for stamping onto a continuation task (resume, retry) at the moment
+ * of interruption. Returns `null` when the agent row is already gone —
+ * callers fall back to the parent's own (inherited) `routingAffinity` via
+ * `createTaskExtended`'s parentTaskId inheritance block.
+ */
+export function buildRoutingAffinityFromAgent(agentId: string): RoutingAffinity | null {
+  const agent = getAgentById(agentId);
+  if (!agent) return null;
+  return {
+    sourceAgentId: agent.id,
+    role: agent.role,
+    harnessProvider: agent.harnessProvider ?? agent.provider ?? undefined,
+    capabilities: agent.capabilities ?? [],
+  };
+}
+
+/**
+ * The single eligibility gate every pool consumer (poll auto-claim,
+ * `task-action claim`, `autoAssignPoolTasks`) MUST use before handing a task
+ * to an agent. Exact-match on the snapshotted role string (no keyword
+ * taxonomy in v1); `harnessProvider` is informational only and never
+ * enforced (native session resume is deprecated). Missing role data on
+ * either side is treated as INELIGIBLE — never fail-open to "anyone" — so a
+ * capability-only requirement (no `role` set) can only ever be claimed by
+ * its `sourceAgentId`, and otherwise queues until the starvation escalation
+ * hands it to the Lead.
+ */
+export function isAgentEligibleForTask(
+  agent: Pick<Agent, "id" | "role" | "capabilities">,
+  task: Pick<AgentTask, "routingAffinity">,
+): boolean {
+  if (!POOL_AFFINITY_ENFORCEMENT) return true;
+
+  const affinity = task.routingAffinity;
+  if (!affinity) return true; // Untagged task — unchanged behavior.
+
+  if (affinity.sourceAgentId && affinity.sourceAgentId === agent.id) return true; // Own work.
+
+  if (!agent.role || !affinity.role) return false; // Missing role data — no fail-open.
+  if (agent.role !== affinity.role) return false;
+
+  const requiredCapabilities = affinity.capabilities ?? [];
+  if (requiredCapabilities.length > 0) {
+    const agentCapabilities = new Set(agent.capabilities ?? []);
+    if (!requiredCapabilities.every((cap) => agentCapabilities.has(cap))) return false;
+  }
+
+  return true;
+}
+
+// ============================================================================
 // AgentTask Queries
 // ============================================================================
 
@@ -1100,6 +1167,7 @@ type AgentTaskRow = {
   harnessVariant: string | null;
   harnessVariantMeta: string | null;
   totalCostUsd?: number | null;
+  routingAffinity: string | null;
 };
 
 function rowToAgentTask(row: AgentTaskRow): AgentTask {
@@ -1121,6 +1189,26 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
         error instanceof Error ? error.message : String(error),
       );
       followUpConfig = undefined;
+    }
+  }
+
+  let routingAffinity: RoutingAffinity | undefined;
+  if (row.routingAffinity) {
+    try {
+      const parsed = RoutingAffinitySchema.safeParse(JSON.parse(row.routingAffinity));
+      if (parsed.success) {
+        routingAffinity = parsed.data;
+      } else {
+        console.warn(
+          `[db] Ignoring invalid agent_tasks.routingAffinity for task ${row.id}:`,
+          parsed.error.message,
+        );
+      }
+    } catch (error) {
+      console.warn(
+        `[db] Ignoring malformed agent_tasks.routingAffinity for task ${row.id}:`,
+        error instanceof Error ? error.message : String(error),
+      );
     }
   }
 
@@ -1194,6 +1282,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     harnessVariant: row.harnessVariant ?? undefined,
     harnessVariantMeta: row.harnessVariantMeta ? JSON.parse(row.harnessVariantMeta) : undefined,
     totalCostUsd: row.totalCostUsd ?? undefined,
+    routingAffinity,
   };
 }
 
@@ -1359,6 +1448,29 @@ export function getPendingTaskForAgent(agentId: string): AgentTask | null {
 }
 
 export function assignUnassignedTaskPending(taskId: string, agentId: string): AgentTask | null {
+  // Eligibility pre-check (routing affinity) — defense in depth for the
+  // heartbeat's `autoAssignPoolTasks`, which already filters candidates via
+  // `isAgentEligibleForTask` before calling this, but any other caller gets
+  // the same guard for free.
+  if (POOL_AFFINITY_ENFORCEMENT) {
+    const task = getTaskById(taskId);
+    const agent = getAgentById(agentId);
+    if (task && agent && !isAgentEligibleForTask(agent, task)) {
+      try {
+        createLogEntry({
+          eventType: "task_claim_rejected_affinity",
+          agentId,
+          taskId,
+          metadata: {
+            agentRole: agent.role ?? null,
+            requiredRole: task.routingAffinity?.role ?? null,
+          },
+        });
+      } catch {}
+      return null;
+    }
+  }
+
   const now = new Date().toISOString();
   const row = getDb()
     .prepare<AgentTaskRow, [string, string, string]>(
@@ -3266,6 +3378,12 @@ export interface CreateTaskOptions {
   followUpConfig?: FollowUpConfig;
   requestedByUserId?: string;
   contextKey?: string;
+  /**
+   * Routing-affinity snapshot gating pool eligibility (see
+   * `isAgentEligibleForTask`). Inherited from the parent (via `parentTaskId`)
+   * when not explicitly set — same treatment as `vcsRepo`/`contextKey`.
+   */
+  routingAffinity?: RoutingAffinity;
 }
 
 /**
@@ -3437,6 +3555,9 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       if (parent.followUpConfig && !options.followUpConfig) {
         options.followUpConfig = parent.followUpConfig;
       }
+      if (parent.routingAffinity && !options.routingAffinity) {
+        options.routingAffinity = parent.routingAffinity;
+      }
     }
   }
 
@@ -3471,8 +3592,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, scheduleId,
-        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, contextKey, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -3516,6 +3637,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.followUpConfig ? JSON.stringify(options.followUpConfig) : null,
       options?.requestedByUserId ?? null,
       options?.contextKey ?? null,
+      options?.routingAffinity ? JSON.stringify(options.routingAffinity) : null,
       pkg.version,
       now,
       now,
@@ -3565,6 +3687,28 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
 }
 
 export function claimTask(taskId: string, agentId: string): AgentTask | null {
+  // Eligibility pre-check (routing affinity): static per (agent, task), so
+  // pre-filtering here does NOT reopen the claim race — the atomic UPDATE
+  // below still arbitrates concurrent claims by eligible agents.
+  if (POOL_AFFINITY_ENFORCEMENT) {
+    const task = getTaskById(taskId);
+    const agent = getAgentById(agentId);
+    if (task && agent && !isAgentEligibleForTask(agent, task)) {
+      try {
+        createLogEntry({
+          eventType: "task_claim_rejected_affinity",
+          agentId,
+          taskId,
+          metadata: {
+            agentRole: agent.role ?? null,
+            requiredRole: task.routingAffinity?.role ?? null,
+          },
+        });
+      } catch {}
+      return null;
+    }
+  }
+
   // Atomic claim: single UPDATE with WHERE guard ensures exactly-once claiming.
   // No pre-read needed — the WHERE clause handles the race condition.
   // Status goes directly to 'in_progress' because the claiming session is
@@ -3827,6 +3971,36 @@ export function getUnassignedTaskIds(limit = 10): string[] {
     )
     .all(limit);
   return rows.map((r) => r.id);
+}
+
+/**
+ * Same ordering as `getUnassignedTaskIds`, filtered through
+ * `isAgentEligibleForTask` for the requesting agent. Used by the poll
+ * auto-claim path so an ineligible candidate is never even offered to the
+ * budget gate / claim loop. Fetches a wider candidate window than `limit`
+ * (the pool is small) and filters in JS to avoid JSON-parsing `routingAffinity`
+ * in SQL.
+ */
+export function getUnassignedTaskIdsForAgent(agentId: string, limit = 10): string[] {
+  const agent = getAgentById(agentId);
+  if (!agent) return [];
+
+  const candidateWindow = Math.max(limit * 5, 25);
+  const rows = getDb()
+    .prepare<AgentTaskRow, [number]>(
+      "SELECT * FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ?",
+    )
+    .all(candidateWindow);
+
+  const eligible: string[] = [];
+  for (const row of rows) {
+    const task = rowToAgentTask(row);
+    if (isAgentEligibleForTask(agent, task)) {
+      eligible.push(task.id);
+      if (eligible.length >= limit) break;
+    }
+  }
+  return eligible;
 }
 
 // ============================================================================
