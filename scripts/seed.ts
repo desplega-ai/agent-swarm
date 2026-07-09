@@ -120,10 +120,6 @@ function daysAgo(n: number): string {
   return d.toISOString();
 }
 
-function minutesAgo(n: number): string {
-  return new Date(Date.now() - n * 60_000).toISOString();
-}
-
 function secondsAgo(n: number): string {
   return new Date(Date.now() - n * 1_000).toISOString();
 }
