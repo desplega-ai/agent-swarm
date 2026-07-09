@@ -16,6 +16,8 @@
  * unsupported version.
  */
 
+import { AlertTriangle } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { AgentActivityTimeline } from "@/components/dashboard/agent-activity-timeline";
 import { AlertCallout } from "@/components/ui/alert-callout";
@@ -24,7 +26,7 @@ import { useCurrentUser } from "@/contexts/current-user-context";
 
 export function UnifiedHome() {
   const { user } = useCurrentUser();
-  const { supported, currentVersion } = useFeatureGate("1.76.0");
+  const { supported, currentVersion, isError, error } = useFeatureGate("1.76.0");
 
   const welcome = user?.name ? `Welcome back, ${user.name}` : "Welcome to Agent Swarm";
 
@@ -38,7 +40,12 @@ export function UnifiedHome() {
         <h1 className="text-2xl font-semibold tracking-tight">{welcome}</h1>
       </div>
       <div className="flex-1 min-h-0 px-4 pb-4 pt-4 md:px-6 md:pb-6">
-        <TimelineRegion versionResolved={versionResolved} supported={supported} />
+        <TimelineRegion
+          versionResolved={versionResolved}
+          supported={supported}
+          isError={isError}
+          error={error}
+        />
       </div>
     </div>
   );
@@ -47,10 +54,29 @@ export function UnifiedHome() {
 function TimelineRegion({
   versionResolved,
   supported,
+  isError,
+  error,
 }: {
   versionResolved: boolean;
   supported: boolean;
+  isError: boolean;
+  error: Error | null;
 }) {
+  // The version probe failed outright (dead apiUrl, bad key, CORS, network) —
+  // stop spinning a skeleton forever and tell the user why, with a way out.
+  if (!versionResolved && isError) {
+    return (
+      <AlertCallout tone="error" icon={AlertTriangle} title="Can't reach the API server">
+        {error?.message ? `${error.message}.` : "The health check failed."} Check your connection
+        under{" "}
+        <Link to="/settings/connections" className="underline underline-offset-2">
+          Settings → Connections
+        </Link>
+        .
+      </AlertCallout>
+    );
+  }
+
   // Version query still in flight — placeholder, no premature notice.
   if (!versionResolved) {
     return <Skeleton className="h-full w-full rounded-lg" />;

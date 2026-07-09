@@ -26,14 +26,18 @@ const HEALTH_LABEL: Record<StatusHealth, string> = {
 
 export function AppHeader() {
   const { theme, toggleTheme } = useTheme();
-  const { data: health, isError } = useHealth();
-  const { data: status } = useStatusContext();
+  const { data: health, isError, error: healthError } = useHealth();
+  const { data: status, error: statusError } = useStatusContext();
   const { activeConnection } = useConfig();
   const navigate = useNavigate();
 
   const isHealthy = health && !isError;
   // `/status` 404 (older API) → fall back to the binary /health probe.
   const aggregateHealth: StatusHealth | null = status?.health ?? null;
+  // Both `/status` and `/health` share the same failure (unreachable host, bad
+  // key, CORS, ...) — prefer the `/status` error since it's the richer probe,
+  // fall back to `/health`'s. `null` here means "still loading", not "ok".
+  const connectionErrorMessage = statusError?.message || healthError?.message || null;
 
   return (
     <header className="flex h-14 items-center gap-2 border-b border-border px-4">
@@ -72,21 +76,35 @@ export function AppHeader() {
           </Tooltip>
         ) : (
           // Fallback for older API servers that don't expose /status — keep
-          // the binary green/red dot driven by /health alone.
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <div
-              className={cn(
-                "size-2 rounded-full",
-                isHealthy ? "bg-status-success" : "bg-status-error",
-              )}
-            />
-            {activeConnection && (
-              <span className="hidden sm:inline font-medium">{activeConnection.name}</span>
-            )}
-            {activeConnection && <span className="hidden sm:inline">&mdash;</span>}
-            <span className="hidden sm:inline">{isHealthy ? "Connected" : "Disconnected"}</span>
-            {health?.version && <span>v{health.version}</span>}
-          </div>
+          // the binary green/red dot driven by /health alone, but surface the
+          // actual fetch error on hover instead of a bare "Disconnected" —
+          // a silent badge left users staring at an empty dashboard with no
+          // signal of *why* (dead apiUrl, bad key, CORS, ...).
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground cursor-default">
+                <div
+                  className={cn(
+                    "size-2 rounded-full",
+                    isHealthy ? "bg-status-success" : "bg-status-error",
+                  )}
+                />
+                {activeConnection && (
+                  <span className="hidden sm:inline font-medium">{activeConnection.name}</span>
+                )}
+                {activeConnection && <span className="hidden sm:inline">&mdash;</span>}
+                <span className="hidden sm:inline">{isHealthy ? "Connected" : "Disconnected"}</span>
+                {health?.version && <span>v{health.version}</span>}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-xs text-balance">
+              {isHealthy
+                ? "Connected"
+                : connectionErrorMessage
+                  ? `Connection failed: ${connectionErrorMessage}${activeConnection ? ` (${activeConnection.apiUrl})` : ""}`
+                  : "Connecting…"}
+            </TooltipContent>
+          </Tooltip>
         )}
 
         {/* GitHub repo link */}
