@@ -9,6 +9,7 @@ import { typecheckScript } from "../be/scripts/typecheck";
 import { runSeeder } from "../be/seed";
 import { SEED_SCRIPTS, scriptsSeeder } from "../be/seed-scripts";
 import bootTriage from "../be/seed-scripts/catalog/boot-triage";
+import { renderCatalogReportPage } from "../be/seed-scripts/catalog/catalog-report";
 import compoundInsights from "../be/seed-scripts/catalog/compound-insights";
 import opsCatalogAudit, {
   renderPage as renderOpsCatalogAuditPage,
@@ -708,6 +709,41 @@ describe("seed-scripts catalog", () => {
     expect(html).toContain('<div class="sample-table"');
     expect(html).toContain("@media (max-width: 860px)");
     expect(html).not.toContain("<ul>");
+  });
+
+  test("catalog report renders complex checks as main-column data panels", () => {
+    const html = renderCatalogReportPage({
+      title: "Compound Insights Audit",
+      slug: "compound-insights",
+      description: "Daily ops snapshot.",
+      generatedAt: "2026-07-09T12:00:00.000Z",
+      lede: "Swarm-wide 3-day snapshot.",
+      metrics: [["Tasks", 12]],
+      sections: [
+        {
+          key: "script-usage",
+          goal: "Track script execution without dumping JSON into sidebars.",
+          findingCount: 0,
+          checks: {
+            total: 10,
+            perScript: [
+              { scriptName: "compound-insights", runs: 3, successRate: 100 },
+              { scriptName: "smart-recall", runs: 2, successRate: 100 },
+            ],
+          },
+          findings: [],
+        },
+      ],
+      appendix: { ok: true },
+    });
+
+    expect(html).toContain('class="report-nav"');
+    expect(html).toContain('class="data-panel"');
+    expect(html).toContain("<h3>Per Script</h3>");
+    expect(html).toContain("<th>Script Name</th>");
+    expect(html).toContain("<td>compound-insights</td>");
+    expect(html).toContain("<span>Total</span>");
+    expect(html).not.toContain("<strong>[{&quot;scriptName&quot;");
   });
 
   test("boot-triage returns one read-only post-restart snapshot", async () => {
