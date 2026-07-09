@@ -238,7 +238,10 @@ RUN mkdir -p /home/worker/.wts \
 RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
     && echo '{"hasCompletedOnboarding":true,"bypassPermissionsModeAccepted":true}' > /home/worker/.claude.json \
     && echo '{ \
-  "permissions": { "allow": ["mcp__agent-swarm__*", "mcp__context-mode__*"] }, \
+  "permissions": { "allow": ["mcp__agent-swarm__*", "mcp__context-mode__*"], "deny": ["AskUserQuestion", "NotebookEdit", "EnterPlanMode", "ExitPlanMode"] }, \
+  "disableBundledSkills": true, \
+  "disableRemoteControl": true, \
+  "disableClaudeAiConnectors": true, \
   "enableAllProjectMcpServers": true, \
   "enabledMcpjsonServers": ["agent-swarm", "context-mode"], \
   "hooks": { \
