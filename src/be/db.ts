@@ -3978,32 +3978,57 @@ export function getUnassignedTaskIds(limit = 10): string[] {
 }
 
 /**
+ * Batch size and hard cap for the paginated eligibility scans in
+ * `getUnassignedTaskIdsForAgent` (and `autoAssignPoolTasks` in
+ * src/heartbeat/heartbeat.ts, which mirrors this pattern). A fixed single
+ * window used to mean N ineligible affinity-tagged tasks at the head of the
+ * priority order could hide all eligible work behind them forever — see
+ * PR #954 review. Scanning continues page-by-page until `limit` eligible
+ * candidates are found or the pool is exhausted; the cap bounds worst-case
+ * DB load when eligible work is buried deep or genuinely absent.
+ */
+const ELIGIBILITY_SCAN_BATCH_SIZE = Number(process.env.ELIGIBILITY_SCAN_BATCH_SIZE) || 25;
+const ELIGIBILITY_SCAN_CAP = Number(process.env.ELIGIBILITY_SCAN_CAP) || 500;
+
+/**
  * Same ordering as `getUnassignedTaskIds`, filtered through
  * `isAgentEligibleForTask` for the requesting agent. Used by the poll
  * auto-claim path so an ineligible candidate is never even offered to the
- * budget gate / claim loop. Fetches a wider candidate window than `limit`
- * (the pool is small) and filters in JS to avoid JSON-parsing `routingAffinity`
- * in SQL.
+ * budget gate / claim loop. Paginates through the unassigned pool in
+ * `ELIGIBILITY_SCAN_BATCH_SIZE`-row windows (filtering in JS to avoid
+ * JSON-parsing `routingAffinity` in SQL) until `limit` eligible tasks are
+ * found or the pool is exhausted, capped at `ELIGIBILITY_SCAN_CAP` rows
+ * scanned so a pool full of ineligible tasks can't turn every poll into an
+ * unbounded scan.
  */
 export function getUnassignedTaskIdsForAgent(agentId: string, limit = 10): string[] {
   const agent = getAgentById(agentId);
   if (!agent) return [];
 
-  const candidateWindow = Math.max(limit * 5, 25);
-  const rows = getDb()
-    .prepare<AgentTaskRow, [number]>(
-      "SELECT * FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ?",
-    )
-    .all(candidateWindow);
-
+  const batchSize = Math.max(limit * 5, ELIGIBILITY_SCAN_BATCH_SIZE);
   const eligible: string[] = [];
-  for (const row of rows) {
-    const task = rowToAgentTask(row);
-    if (isAgentEligibleForTask(agent, task)) {
-      eligible.push(task.id);
-      if (eligible.length >= limit) break;
+  let offset = 0;
+
+  while (eligible.length < limit && offset < ELIGIBILITY_SCAN_CAP) {
+    const rows = getDb()
+      .prepare<AgentTaskRow, [number, number]>(
+        "SELECT * FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ? OFFSET ?",
+      )
+      .all(batchSize, offset);
+    if (rows.length === 0) break;
+
+    for (const row of rows) {
+      const task = rowToAgentTask(row);
+      if (isAgentEligibleForTask(agent, task)) {
+        eligible.push(task.id);
+        if (eligible.length >= limit) break;
+      }
     }
+
+    offset += rows.length;
+    if (rows.length < batchSize) break; // Exhausted the pool.
   }
+
   return eligible;
 }
 
@@ -7247,18 +7272,22 @@ export function getIdleWorkersWithCapacity(): Agent[] {
 }
 
 /**
- * Get unassigned pool tasks ordered by priority (DESC) then creation time (ASC).
- * Used by the heartbeat for auto-assignment.
+ * Get unassigned pool tasks ordered by priority (DESC), creation time (ASC),
+ * then `rowid` (ASC) as a stable tiebreaker. The `rowid` tiebreaker matters
+ * once `offset` is used for pagination (`autoAssignPoolTasks` in
+ * src/heartbeat/heartbeat.ts) — without it, rows sharing a `createdAt` could
+ * be skipped or repeated across pages. Used by the heartbeat for
+ * auto-assignment and status reporting.
  */
-export function getUnassignedPoolTasks(limit: number = 10): AgentTask[] {
+export function getUnassignedPoolTasks(limit: number = 10, offset: number = 0): AgentTask[] {
   return getDb()
-    .prepare<AgentTaskRow, [number]>(
+    .prepare<AgentTaskRow, [number, number]>(
       `SELECT * FROM agent_tasks
        WHERE status = 'unassigned'
-       ORDER BY priority DESC, createdAt ASC
-       LIMIT ?`,
+       ORDER BY priority DESC, createdAt ASC, rowid ASC
+       LIMIT ? OFFSET ?`,
     )
-    .all(limit)
+    .all(limit, offset)
     .map(rowToAgentTask);
 }
 

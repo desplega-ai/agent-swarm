@@ -293,6 +293,32 @@ describe("Pool Affinity", () => {
       createTaskExtended("Untagged task");
       expect(getUnassignedTaskIdsForAgent("00000000-0000-0000-0000-000000000000", 10)).toEqual([]);
     });
+
+    test("paginates past a wall of ineligible affinity tasks larger than the old fixed scan window", () => {
+      // PR #954 review: the old implementation fetched a single fixed window
+      // (max(limit * 5, 25) = 50 rows for limit=10) and filtered in JS, so an
+      // eligible task sorted past row 50 was invisible no matter how many
+      // times this was called. This seeds 55 high-priority ineligible tasks
+      // ahead of one low-priority eligible task — more than the old window —
+      // to prove the scan now pages through rather than stopping at row 50.
+      const coder = createAgent({ name: "coder-9-pagination", isLead: false, status: "idle" });
+      updateAgentProfile(coder.id, { role: "coder" });
+
+      for (let i = 0; i < 55; i++) {
+        createTaskExtended(`Ineligible research task ${i}`, {
+          routingAffinity: affinity({ role: "researcher" }),
+          priority: 100,
+        });
+      }
+      const eligibleTask = createTaskExtended("Eligible coder task buried behind the wall", {
+        routingAffinity: affinity({ role: "coder" }),
+        priority: 1,
+      });
+
+      const ids = getUnassignedTaskIdsForAgent(coder.id, 10);
+
+      expect(ids).toContain(eligibleTask.id);
+    });
   });
 
   // ==========================================================================
@@ -338,6 +364,38 @@ describe("Pool Affinity", () => {
       expect(findings.autoAssigned.length).toBe(1);
       expect(findings.autoAssigned[0]!.agentId).toBe(worker.id);
       expect(getTaskById(task.id)?.agentId).toBe(worker.id);
+    });
+
+    test("paginates past a wall of ineligible affinity tasks larger than the old fixed sweep window", async () => {
+      // PR #954 review: the old implementation fetched only
+      // getUnassignedPoolTasks(MAX_AUTO_ASSIGN_PER_SWEEP) — a single bounded
+      // window (default 5) — so a high-priority run of affinity-tagged tasks
+      // for another role could hide all eligible work behind it forever,
+      // across every sweep, since the same ineligible head-of-line rows were
+      // re-fetched every time. This seeds 55 ineligible high-priority tasks
+      // (more than the default POOL_SCAN_BATCH_SIZE of 50) ahead of one
+      // low-priority eligible task, to prove the scan now pages through the
+      // pool rather than stopping at the first window.
+      const coder = createAgent({ name: "idle-coder-pagination", isLead: false, status: "idle" });
+      updateAgentProfile(coder.id, { role: "coder" });
+
+      for (let i = 0; i < 55; i++) {
+        createTaskExtended(`Ineligible research task ${i}`, {
+          routingAffinity: affinity({ role: "researcher" }),
+          priority: 100,
+        });
+      }
+      const eligibleTask = createTaskExtended("Eligible coder task buried behind the wall", {
+        routingAffinity: affinity({ role: "coder" }),
+        priority: 1,
+      });
+
+      const findings = await codeLevelTriage();
+
+      expect(findings.autoAssigned.length).toBe(1);
+      expect(findings.autoAssigned[0]!.taskId).toBe(eligibleTask.id);
+      expect(findings.autoAssigned[0]!.agentId).toBe(coder.id);
+      expect(getTaskById(eligibleTask.id)?.agentId).toBe(coder.id);
     });
   });
 });

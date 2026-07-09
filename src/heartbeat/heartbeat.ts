@@ -90,6 +90,18 @@ const STALE_CLEANUP_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALE_CLEAN
 /** Max pool tasks to auto-assign per sweep */
 const MAX_AUTO_ASSIGN_PER_SWEEP = Number(process.env.HEARTBEAT_MAX_AUTO_ASSIGN) || 5;
 
+/**
+ * Page size for `autoAssignPoolTasks`' paginated pool scan and the hard cap on
+ * total rows scanned per sweep. A single bounded fetch used to mean N
+ * ineligible affinity-tagged tasks at the head of the priority order could
+ * hide all eligible work behind them indefinitely (see PR #954 review) — the
+ * scan now pages through the pool until it has assigned `MAX_AUTO_ASSIGN_PER_SWEEP`
+ * tasks or exhausted the pool, capped so a pool full of ineligible tasks can't
+ * turn every sweep into an unbounded scan.
+ */
+const POOL_SCAN_BATCH_SIZE = Number(process.env.HEARTBEAT_POOL_SCAN_BATCH_SIZE) || 50;
+const POOL_SCAN_CAP = Number(process.env.HEARTBEAT_POOL_SCAN_CAP) || 500;
+
 /** Max crash-recovery resume generations before failing for lead triage */
 export const MAX_RESUME_GENERATIONS = Number(process.env.HEARTBEAT_MAX_RESUME_GENERATIONS) || 3;
 
@@ -672,6 +684,16 @@ function checkWorkerHealth(findings: HeartbeatFindings): void {
  * it either gets picked up on a later sweep once a matching worker frees up,
  * or is escalated to the Lead by `escalateStarvedPoolTasks` once it's been
  * stale long enough with zero eligible agents at all.
+ *
+ * The pool scan itself is paginated (Phase 3.1): a single bounded fetch of
+ * `MAX_AUTO_ASSIGN_PER_SWEEP` tasks used to mean that if the highest-priority
+ * rows were all affinity-tagged for a role with no idle match this sweep,
+ * lower-priority eligible work behind them was never even looked at — it
+ * would starve indefinitely regardless of how many sweeps ran, since the same
+ * ineligible head-of-line rows were re-fetched every time. This now pages
+ * through the pool in `POOL_SCAN_BATCH_SIZE` windows until it has assigned
+ * `MAX_AUTO_ASSIGN_PER_SWEEP` tasks or exhausted the pool (capped at
+ * `POOL_SCAN_CAP` rows scanned).
  */
 function autoAssignPoolTasks(findings: HeartbeatFindings): void {
   getDb().transaction(() => {
@@ -683,9 +705,6 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
       (w) => (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS,
     );
     if (idleWorkers.length === 0) return;
-
-    const poolTasks = getUnassignedPoolTasks(MAX_AUTO_ASSIGN_PER_SWEEP);
-    if (poolTasks.length === 0) return;
 
     const reservedByWorker = new Map<string, number>();
     const reservedForWorker = (agentId: string): number => {
@@ -701,17 +720,31 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
       return reserved;
     };
 
-    for (const task of poolTasks) {
-      const worker = idleWorkers.find(
-        (w) => reservedForWorker(w.id) < (w.maxTasks ?? 1) && isAgentEligibleForTask(w, task),
-      );
-      if (!worker) continue; // No eligible worker with capacity this sweep — leave queued.
+    let assignedCount = 0;
+    let offset = 0;
 
-      const assigned = assignUnassignedTaskPending(task.id, worker.id);
-      if (assigned) {
-        findings.autoAssigned.push({ taskId: task.id, agentId: worker.id });
-        reservedByWorker.set(worker.id, reservedForWorker(worker.id) + 1);
+    while (assignedCount < MAX_AUTO_ASSIGN_PER_SWEEP && offset < POOL_SCAN_CAP) {
+      const batch = getUnassignedPoolTasks(POOL_SCAN_BATCH_SIZE, offset);
+      if (batch.length === 0) break;
+
+      for (const task of batch) {
+        if (assignedCount >= MAX_AUTO_ASSIGN_PER_SWEEP) break;
+
+        const worker = idleWorkers.find(
+          (w) => reservedForWorker(w.id) < (w.maxTasks ?? 1) && isAgentEligibleForTask(w, task),
+        );
+        if (!worker) continue; // No eligible worker with capacity this sweep — leave queued.
+
+        const assigned = assignUnassignedTaskPending(task.id, worker.id);
+        if (assigned) {
+          findings.autoAssigned.push({ taskId: task.id, agentId: worker.id });
+          reservedByWorker.set(worker.id, reservedForWorker(worker.id) + 1);
+          assignedCount++;
+        }
       }
+
+      offset += batch.length;
+      if (batch.length < POOL_SCAN_BATCH_SIZE) break; // Exhausted the pool.
     }
   })();
 }
