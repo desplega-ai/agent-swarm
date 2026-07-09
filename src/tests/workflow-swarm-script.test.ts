@@ -10,6 +10,7 @@ import {
   getWorkflowRunStepsByRunId,
   initDb,
 } from "../be/db";
+import { upsertScriptConnection } from "../be/script-connections";
 import { upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import type { Workflow, WorkflowDefinition } from "../types";
@@ -143,6 +144,7 @@ beforeEach(() => {
   getDb().run("DELETE FROM workflow_run_steps");
   getDb().run("DELETE FROM workflow_runs");
   getDb().run("DELETE FROM scripts");
+  getDb().run("DELETE FROM script_connections");
   getDb().run("DELETE FROM workflows");
 });
 
@@ -202,6 +204,48 @@ describe("SwarmScriptExecutor", () => {
     expect(result.status).toBe("success");
     expect(result.output?.result).toEqual({ value: 7 });
     expect(result.output?.scriptName).toBe("add-one");
+  });
+
+  test("swarm-script executor includes API connection descriptors in ctx.api", async () => {
+    await upsertScriptConnection({
+      slug: "workflowVendor",
+      kind: "openapi",
+      scope: "global",
+      baseUrl: "https://api.workflow-vendor.test",
+      openapiSpecJson: JSON.stringify({
+        openapi: "3.0.0",
+        info: { title: "WorkflowVendor", version: "1.0.0" },
+        paths: {
+          "/items": {
+            get: {
+              operationId: "listItems",
+              responses: { "200": { description: "ok" } },
+            },
+          },
+        },
+      }),
+    });
+    await saveScript(
+      "ctx-api-keys",
+      `export default async (_args, ctx) => ({ apiKeys: Object.keys(ctx.api).sort() });`,
+    );
+
+    const executor = new SwarmScriptExecutor(deps);
+    const wf = makeWorkflow({ nodes: [] });
+    const result = await executor.run({
+      config: { scriptName: "ctx-api-keys" },
+      context: {},
+      meta: {
+        runId: crypto.randomUUID(),
+        stepId: crypto.randomUUID(),
+        nodeId: "script",
+        workflowId: wf.id,
+        dryRun: false,
+      },
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.output?.result).toEqual({ apiKeys: ["workflowVendor"] });
   });
 
   test("pinHash correctly resolves to a historic script_versions row", async () => {

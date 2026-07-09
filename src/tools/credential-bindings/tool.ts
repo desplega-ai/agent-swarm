@@ -14,6 +14,7 @@ import {
   type ScriptCredentialBindingRecord,
   upsertCredentialBinding,
 } from "@/be/script-connections";
+import { assertOAuthAppUrlsSafe, assertOAuthProviderIsNotReserved } from "@/oauth/app-validation";
 import { buildAuthorizationUrl } from "@/oauth/wrapper";
 import { can } from "@/rbac";
 import {
@@ -22,6 +23,7 @@ import {
 } from "@/scripts-runtime/credential-broker";
 import { createToolRegistrar } from "@/tools/utils";
 import { getPublicMcpBaseUrl } from "@/utils/constants";
+import { resolveScopedResourceId, scopedResourceScopeIdSchema } from "@/utils/scoped-resource";
 
 const providerSchema = z
   .string()
@@ -88,12 +90,10 @@ const credentialBindingsInputSchema = z.object({
     .default("global")
     .optional()
     .describe("Binding visibility scope."),
-  scopeId: z
-    .string()
-    .uuid()
+  scopeId: scopedResourceScopeIdSchema
     .nullable()
     .optional()
-    .describe("Agent or repo UUID when scope is agent or repo."),
+    .describe("Agent UUID for agent scope or repo id (owner/name) for repo scope."),
   authKind: z
     .enum(["config", "oauth"])
     .default("config")
@@ -219,6 +219,25 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
               success: false,
               message:
                 "provider, clientId, clientSecret, authorizeUrl, tokenUrl, and scopes are required for oauth-app-upsert.",
+              bindings,
+            },
+          };
+        }
+
+        try {
+          assertOAuthProviderIsNotReserved(args.provider);
+          assertOAuthAppUrlsSafe({
+            authorizeUrl: args.authorizeUrl,
+            tokenUrl: args.tokenUrl,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return {
+            content: [{ type: "text", text: message }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message,
               bindings,
             },
           };
@@ -379,14 +398,17 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
       }
 
       const scope = args.scope ?? "global";
-      const scopeId = scope === "global" ? null : (args.scopeId ?? null);
-      if (scope !== "global" && !scopeId) {
+      let scopeId: string | null;
+      try {
+        scopeId = resolveScopedResourceId(scope, args.scopeId, "bindings");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
         return {
-          content: [{ type: "text", text: `scopeId is required for ${scope} bindings.` }],
+          content: [{ type: "text", text: message }],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
-            message: `scopeId is required for ${scope} bindings.`,
+            message,
             bindings,
           },
         };

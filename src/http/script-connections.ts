@@ -26,7 +26,9 @@ import {
   upsertCredentialBinding,
   upsertScriptConnection,
 } from "@/be/script-connections";
+import { assertOAuthAppUrlsSafe, assertOAuthProviderIsNotReserved } from "@/oauth/app-validation";
 import { forceRefreshTokenOrThrow } from "@/oauth/ensure-token";
+import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
 import { buildAuthorizationUrl } from "@/oauth/wrapper";
 import { can } from "@/rbac";
 import {
@@ -36,6 +38,7 @@ import {
 import type { OAuthApp } from "@/tracker/types";
 import { getPublicMcpBaseUrl } from "@/utils/constants";
 import { getRequestAuth } from "@/utils/request-auth-context";
+import { resolveScopedResourceId, scopedResourceScopeIdSchema } from "@/utils/scoped-resource";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -62,16 +65,16 @@ const connectionBaseBodySchema = z.object({
   id: z.string().uuid().optional(),
   slug: z.string().min(1).max(80),
   displayName: z.string().max(160).optional(),
-  scope: scopeSchema.default("global").optional(),
-  scopeId: z.string().uuid().nullable().optional(),
+  scope: scopeSchema.optional(),
+  scopeId: scopedResourceScopeIdSchema.nullable().optional(),
   allowedHosts: z.array(z.string().min(1)).optional(),
   credentialBindingId: z.string().uuid().nullable().optional(),
   configKey: z.string().min(1).max(255).optional(),
   headerTemplate: z.string().min(1).optional(),
   queryTemplate: z.string().min(1).optional(),
-  authKind: z.enum(["config", "oauth"]).default("config").optional(),
+  authKind: z.enum(["config", "oauth"]).optional(),
   oauthProvider: providerSchema.optional(),
-  enabled: z.boolean().default(true).optional(),
+  enabled: z.boolean().optional(),
 });
 
 const upsertConnectionBodySchema = z.discriminatedUnion("kind", [
@@ -101,7 +104,7 @@ const credentialBindingBodySchema = z.object({
   headerTemplate: z.string().min(1).optional(),
   queryTemplate: z.string().min(1).optional(),
   scope: scopeSchema.default("global").optional(),
-  scopeId: z.string().uuid().nullable().optional(),
+  scopeId: scopedResourceScopeIdSchema.nullable().optional(),
   active: z.boolean().default(true).optional(),
   authKind: z.enum(["config", "oauth"]).default("config").optional(),
   oauthProvider: providerSchema.optional(),
@@ -719,6 +722,7 @@ function decorateConnections(connections: ScriptConnectionRecord[]): DecoratedCo
 function listConnections(query: z.infer<typeof listConnectionsQuerySchema>): DecoratedConnection[] {
   const connections = listScriptConnections({
     includeDisabled: true,
+    allScopes: true,
     kind: query.kind as ScriptConnectionKind | undefined,
   }).filter((connection) => {
     if (query.scope && connection.scope !== query.scope) return false;
@@ -731,8 +735,9 @@ function listConnections(query: z.infer<typeof listConnectionsQuerySchema>): Dec
 function connectionScopeId(
   scope: "global" | "agent" | "repo" | undefined,
   scopeId?: string | null,
+  subject = "connections",
 ) {
-  return scope === "global" || !scope ? null : (scopeId ?? null);
+  return resolveScopedResourceId(scope, scopeId, subject);
 }
 
 function validateCredentialTemplate(input: {
@@ -753,11 +758,18 @@ function validateCredentialTemplate(input: {
   }
 }
 
-function maybeCreateInlineBinding(data: z.infer<typeof upsertConnectionBodySchema>) {
+function maybeCreateInlineBinding(
+  data: z.infer<typeof upsertConnectionBodySchema>,
+  resolvedScope?: "global" | "agent" | "repo",
+  resolvedScopeId?: string | null,
+) {
   if (data.credentialBindingId || !data.configKey) return data.credentialBindingId ?? null;
 
-  const scope = data.scope ?? "global";
-  const scopeId = connectionScopeId(scope, data.scopeId);
+  const scope = resolvedScope ?? data.scope ?? "global";
+  const scopeId =
+    resolvedScopeId !== undefined
+      ? resolvedScopeId
+      : connectionScopeId(scope, data.scopeId, "bindings");
   const allowedHosts =
     data.allowedHosts ?? ("baseUrl" in data ? [new URL(data.baseUrl).hostname] : []);
   const authKind = data.authKind ?? "config";
@@ -913,10 +925,23 @@ function oauthDiscoveryUrls(inputUrl: string): string[] {
 }
 
 async function fetchJsonMetadata(url: string, signal: AbortSignal): Promise<unknown> {
-  const response = await fetch(url, {
-    headers: { accept: "application/json" },
-    signal,
-  });
+  let current = assertUrlSafe(url, publicEndpointSsrfOptions());
+  let response: Response | null = null;
+  for (let hop = 0; hop <= 5; hop += 1) {
+    response = await fetch(current, {
+      headers: { accept: "application/json" },
+      signal,
+      redirect: "manual",
+    });
+    if (response.status < 300 || response.status >= 400 || response.status === 304) break;
+    const location = response.headers.get("location");
+    if (!location) {
+      throw new Error(`HTTP ${response.status} redirect missing Location header`);
+    }
+    current = assertUrlSafe(new URL(location, current).toString(), publicEndpointSsrfOptions());
+    if (hop === 5) throw new Error("OAuth discovery exceeded 5 redirects.");
+  }
+  if (!response) throw new Error("OAuth discovery failed before receiving a response.");
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }
@@ -956,12 +981,16 @@ async function discoverOAuthApp(url: string) {
       try {
         const metadata = await fetchJsonMetadata(candidate, controller.signal);
         const discovered = extractOAuthDiscovery(metadata);
-        if (discovered) return { ...discovered, sourceUrl: candidate };
+        if (discovered) {
+          assertOAuthAppUrlsSafe(discovered);
+          return { ...discovered, sourceUrl: candidate };
+        }
         failures.push(`${candidate}: missing authorization_endpoint or token_endpoint`);
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           throw new Error("OAuth discovery timed out after 10s.");
         }
+        if (isUrlSafetyError(error)) throw error;
         failures.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
@@ -969,6 +998,15 @@ async function discoverOAuthApp(url: string) {
     clearTimeout(timeout);
   }
   throw new Error(`OAuth discovery failed. ${failures.join(" ")}`);
+}
+
+function isUrlSafetyError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.message.startsWith("Refusing ") ||
+    error.message.startsWith("Invalid URL:") ||
+    error.message.startsWith("Missing hostname:")
+  );
 }
 
 function stringFromCatalogEntry(entry: Record<string, unknown>, keys: string[]): string {
@@ -1197,26 +1235,7 @@ async function refreshHttpConnection(
   userId: string | null,
   agentId: string | undefined,
 ): Promise<ScriptConnectionRecord | null> {
-  const connection = getScriptConnectionById(id);
-  if (!connection) return null;
-  if (connection.kind !== "mcp") {
-    return refreshScriptConnection(id, userId);
-  }
-  if (!connection.mcpServerId) {
-    throw new Error("mcpServerId is required for MCP connections.");
-  }
-  return upsertScriptConnection({
-    id: connection.id,
-    slug: connection.slug,
-    displayName: connection.displayName,
-    kind: "mcp",
-    scope: connection.scope,
-    scopeId: connection.scopeId,
-    mcpServerId: connection.mcpServerId,
-    enabled: connection.enabled,
-    agentId,
-    userId,
-  });
+  return refreshScriptConnection(id, userId, agentId);
 }
 
 export async function handleScriptConnections(
@@ -1236,7 +1255,10 @@ export async function handleScriptConnections(
   if (getConnectionRoute.match(req.method, pathSegments)) {
     const parsed = await getConnectionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const connection = getScriptConnectionById(parsed.params.id);
+    const connection =
+      listScriptConnections({ includeDisabled: true, allScopes: true }).find(
+        (candidate) => candidate.id === parsed.params.id,
+      ) ?? null;
     if (!connection) {
       jsonError(res, "Script connection not found.", 404);
       return true;
@@ -1260,20 +1282,46 @@ export async function handleScriptConnections(
         return true;
       }
       const existingConnection = parsed.body.id ? getScriptConnectionById(parsed.body.id) : null;
+      const existingOpenapiConnection =
+        existingConnection?.kind === "openapi" ? existingConnection : null;
       if (
         parsed.body.kind === "openapi" &&
         !parsed.body.openapiSpecJson &&
         !parsed.body.openapiSpecUrl &&
-        !existingConnection
+        !existingOpenapiConnection
       ) {
         jsonError(res, "Provide exactly one of openapiSpecJson or openapiSpecUrl.", 400);
         return true;
       }
 
-      const credentialBindingId = maybeCreateInlineBinding(parsed.body);
-      const scope = parsed.body.scope ?? "global";
-      const scopeId = connectionScopeId(scope, parsed.body.scopeId);
+      const scopeWasProvided = Object.hasOwn(parsed.body, "scope");
+      const scopeIdWasProvided = Object.hasOwn(parsed.body, "scopeId");
+      const enabledWasProvided = Object.hasOwn(parsed.body, "enabled");
+      const scope = (scopeWasProvided ? parsed.body.scope : existingConnection?.scope) ?? "global";
+      const scopeIdInput = scopeIdWasProvided
+        ? parsed.body.scopeId
+        : existingConnection && scope === existingConnection.scope
+          ? existingConnection.scopeId
+          : null;
+      const scopeId = connectionScopeId(scope, scopeIdInput);
+      const enabled = enabledWasProvided
+        ? parsed.body.enabled !== false
+        : (existingConnection?.enabled ?? true);
+      const credentialBindingId = maybeCreateInlineBinding(parsed.body, scope, scopeId);
       const userId = resolveHttpAuditUserId(req, agentId);
+      const openapiSpecUrl =
+        parsed.body.kind === "openapi" ? parsed.body.openapiSpecUrl : undefined;
+      const openapiSpecJson =
+        parsed.body.kind === "openapi" ? parsed.body.openapiSpecJson : undefined;
+      const openapiSpecUrlChanged =
+        parsed.body.kind === "openapi" &&
+        Boolean(openapiSpecUrl) &&
+        openapiSpecUrl !== existingOpenapiConnection?.openapiSpecSource;
+      const reuseExistingOpenapiSpec =
+        parsed.body.kind === "openapi" &&
+        Boolean(existingOpenapiConnection) &&
+        openapiSpecJson === undefined &&
+        !openapiSpecUrlChanged;
 
       const connection = await upsertScriptConnection({
         id: parsed.body.id,
@@ -1288,36 +1336,29 @@ export async function handleScriptConnections(
           ("baseUrl" in parsed.body ? [new URL(parsed.body.baseUrl).hostname] : []),
         credentialBindingId,
         openapiSpecSourceKind:
-          parsed.body.kind === "openapi" &&
-          !parsed.body.openapiSpecJson &&
-          !parsed.body.openapiSpecUrl
-            ? existingConnection?.openapiSpecSourceKind
+          reuseExistingOpenapiSpec && !openapiSpecUrl
+            ? existingOpenapiConnection?.openapiSpecSourceKind
             : undefined,
         openapiSpecSource:
-          parsed.body.kind === "openapi" &&
-          !parsed.body.openapiSpecJson &&
-          !parsed.body.openapiSpecUrl
-            ? existingConnection?.openapiSpecSource
+          reuseExistingOpenapiSpec && !openapiSpecUrl
+            ? existingOpenapiConnection?.openapiSpecSource
             : undefined,
-        openapiSpecUrl: parsed.body.kind === "openapi" ? parsed.body.openapiSpecUrl : undefined,
+        openapiSpecUrl,
         openapiSpecJson:
           parsed.body.kind === "openapi"
-            ? (parsed.body.openapiSpecJson ?? existingConnection?.openapiSpecJson ?? undefined)
+            ? (openapiSpecJson ??
+              (reuseExistingOpenapiSpec
+                ? (existingOpenapiConnection?.openapiSpecJson ?? undefined)
+                : undefined))
             : undefined,
-        openapiSpecEtag:
-          parsed.body.kind === "openapi" &&
-          !parsed.body.openapiSpecJson &&
-          !parsed.body.openapiSpecUrl
-            ? existingConnection?.openapiSpecEtag
-            : undefined,
-        openapiSpecFetchedAt:
-          parsed.body.kind === "openapi" &&
-          !parsed.body.openapiSpecJson &&
-          !parsed.body.openapiSpecUrl
-            ? existingConnection?.openapiSpecFetchedAt
-            : undefined,
+        openapiSpecEtag: reuseExistingOpenapiSpec
+          ? existingOpenapiConnection?.openapiSpecEtag
+          : undefined,
+        openapiSpecFetchedAt: reuseExistingOpenapiSpec
+          ? existingOpenapiConnection?.openapiSpecFetchedAt
+          : undefined,
         mcpServerId: parsed.body.kind === "mcp" ? parsed.body.mcpServerId : null,
-        enabled: parsed.body.enabled !== false,
+        enabled,
         agentId,
         userId,
       });
@@ -1381,11 +1422,7 @@ export async function handleScriptConnections(
 
     try {
       const scope = parsed.body.scope ?? "global";
-      const scopeId = connectionScopeId(scope, parsed.body.scopeId);
-      if (scope !== "global" && !scopeId) {
-        jsonError(res, `scopeId is required for ${scope} bindings.`, 400);
-        return true;
-      }
+      const scopeId = connectionScopeId(scope, parsed.body.scopeId, "bindings");
       if (!parsed.body.headerTemplate && !parsed.body.queryTemplate) {
         jsonError(res, "At least one of headerTemplate or queryTemplate is required.", 400);
         return true;
@@ -1441,35 +1478,43 @@ export async function handleScriptConnections(
     if (!parsed) return true;
     if (!ensureConnectionAdmin(req, res, agentId)) return true;
 
-    const existing = getOAuthApp(parsed.body.provider);
-    const clientSecret = parsed.body.clientSecret ?? existing?.clientSecret;
-    if (!clientSecret) {
-      jsonError(res, "clientSecret is required when creating a new OAuth app.", 400);
-      return true;
-    }
+    try {
+      assertOAuthProviderIsNotReserved(parsed.body.provider);
+      assertOAuthAppUrlsSafe(parsed.body);
+      const existing = getOAuthApp(parsed.body.provider);
+      const clientSecret = parsed.body.clientSecret ?? existing?.clientSecret;
+      if (!clientSecret) {
+        jsonError(res, "clientSecret is required when creating a new OAuth app.", 400);
+        return true;
+      }
 
-    const redirectUri = genericOAuthRedirectUri(parsed.body.provider);
-    upsertOAuthApp(parsed.body.provider, {
-      clientId: parsed.body.clientId,
-      clientSecret,
-      authorizeUrl: parsed.body.authorizeUrl,
-      tokenUrl: parsed.body.tokenUrl,
-      redirectUri,
-      scopes: (parsed.body.scopes ?? []).join(","),
-      ...(parsed.body.extraParams || parsed.body.tokenAuthStyle || parsed.body.tokenBodyFormat
-        ? {
-            metadata: JSON.stringify({
-              ...(parsed.body.extraParams ? { extraParams: parsed.body.extraParams } : {}),
-              ...(parsed.body.tokenAuthStyle ? { tokenAuthStyle: parsed.body.tokenAuthStyle } : {}),
-              ...(parsed.body.tokenBodyFormat
-                ? { tokenBodyFormat: parsed.body.tokenBodyFormat }
-                : {}),
-            }),
-          }
-        : {}),
-    });
-    const app = listOAuthApps().find((row) => row.provider === parsed.body.provider);
-    json(res, { oauthApp: app });
+      const redirectUri = genericOAuthRedirectUri(parsed.body.provider);
+      upsertOAuthApp(parsed.body.provider, {
+        clientId: parsed.body.clientId,
+        clientSecret,
+        authorizeUrl: parsed.body.authorizeUrl,
+        tokenUrl: parsed.body.tokenUrl,
+        redirectUri,
+        scopes: (parsed.body.scopes ?? []).join(","),
+        ...(parsed.body.extraParams || parsed.body.tokenAuthStyle || parsed.body.tokenBodyFormat
+          ? {
+              metadata: JSON.stringify({
+                ...(parsed.body.extraParams ? { extraParams: parsed.body.extraParams } : {}),
+                ...(parsed.body.tokenAuthStyle
+                  ? { tokenAuthStyle: parsed.body.tokenAuthStyle }
+                  : {}),
+                ...(parsed.body.tokenBodyFormat
+                  ? { tokenBodyFormat: parsed.body.tokenBodyFormat }
+                  : {}),
+              }),
+            }
+          : {}),
+      });
+      const app = listOAuthApps().find((row) => row.provider === parsed.body.provider);
+      json(res, { oauthApp: app });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : String(err), 400);
+    }
     return true;
   }
 

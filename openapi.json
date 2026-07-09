@@ -9573,15 +9573,15 @@
                           "global",
                           "agent",
                           "repo"
-                        ],
-                        "default": "global"
+                        ]
                       },
                       "scopeId": {
                         "type": [
                           "string",
                           "null"
                         ],
-                        "format": "uuid"
+                        "minLength": 1,
+                        "maxLength": 255
                       },
                       "allowedHosts": {
                         "type": "array",
@@ -9615,8 +9615,7 @@
                         "enum": [
                           "config",
                           "oauth"
-                        ],
-                        "default": "config"
+                        ]
                       },
                       "oauthProvider": {
                         "type": "string",
@@ -9625,8 +9624,7 @@
                         "pattern": "^[A-Za-z0-9_-]+$"
                       },
                       "enabled": {
-                        "type": "boolean",
-                        "default": true
+                        "type": "boolean"
                       },
                       "kind": {
                         "type": "string",
@@ -9674,15 +9672,15 @@
                           "global",
                           "agent",
                           "repo"
-                        ],
-                        "default": "global"
+                        ]
                       },
                       "scopeId": {
                         "type": [
                           "string",
                           "null"
                         ],
-                        "format": "uuid"
+                        "minLength": 1,
+                        "maxLength": 255
                       },
                       "allowedHosts": {
                         "type": "array",
@@ -9717,8 +9715,7 @@
                         "enum": [
                           "config",
                           "oauth"
-                        ],
-                        "default": "config"
+                        ]
                       },
                       "oauthProvider": {
                         "type": "string",
@@ -9727,8 +9724,7 @@
                         "pattern": "^[A-Za-z0-9_-]+$"
                       },
                       "enabled": {
-                        "type": "boolean",
-                        "default": true
+                        "type": "boolean"
                       },
                       "kind": {
                         "type": "string",
@@ -9770,15 +9766,15 @@
                           "global",
                           "agent",
                           "repo"
-                        ],
-                        "default": "global"
+                        ]
                       },
                       "scopeId": {
                         "type": [
                           "string",
                           "null"
                         ],
-                        "format": "uuid"
+                        "minLength": 1,
+                        "maxLength": 255
                       },
                       "allowedHosts": {
                         "type": "array",
@@ -9812,8 +9808,7 @@
                         "enum": [
                           "config",
                           "oauth"
-                        ],
-                        "default": "config"
+                        ]
                       },
                       "oauthProvider": {
                         "type": "string",
@@ -9822,8 +9817,7 @@
                         "pattern": "^[A-Za-z0-9_-]+$"
                       },
                       "enabled": {
-                        "type": "boolean",
-                        "default": true
+                        "type": "boolean"
                       },
                       "kind": {
                         "type": "string",
@@ -10059,7 +10053,8 @@
                       "string",
                       "null"
                     ],
-                    "format": "uuid"
+                    "minLength": 1,
+                    "maxLength": 255
                   },
                   "active": {
                     "type": "boolean",

@@ -408,12 +408,15 @@ export async function handleMcpServers(
     const parsed = await deleteMcpServerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const deleted = deleteMcpServer(parsed.params.id);
-    if (!deleted) {
+    const result = deleteMcpServer(parsed.params.id);
+    if (!result.deleted) {
       jsonError(res, "MCP server not found", 404);
       return true;
     }
-    json(res, { success: true });
+    json(res, {
+      success: true,
+      deletedScriptConnectionCount: result.deletedScriptConnectionCount,
+    });
     return true;
   }
 

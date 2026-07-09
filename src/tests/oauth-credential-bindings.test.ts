@@ -8,7 +8,12 @@ import {
 } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, getDb, initDb } from "../be/db";
-import { getOAuthTokens, storeOAuthTokens, upsertOAuthApp } from "../be/db-queries/oauth";
+import {
+  getOAuthApp,
+  getOAuthTokens,
+  storeOAuthTokens,
+  upsertOAuthApp,
+} from "../be/db-queries/oauth";
 import { getOAuthProviderConfig } from "../be/oauth-credential-bindings";
 import {
   listRelationalCredentialBindings,
@@ -301,6 +306,62 @@ describe("OAuth credential bindings", () => {
     const { url } = await buildAuthorizationUrl(config);
     expect(url).toContain("scope=read+write");
     expect(url).not.toContain("scope=read%2Cwrite");
+  });
+
+  test("credential-bindings tool rejects reserved tracker OAuth providers", async () => {
+    const result = (await credentialBindingsTool().handler(
+      {
+        action: "oauth-app-upsert",
+        provider: "jira",
+        clientId: "jira-client",
+        clientSecret: "jira-secret",
+        authorizeUrl: "https://oauth.example.test/authorize",
+        tokenUrl: "https://oauth.example.test/token",
+        scopes: [],
+      },
+      meta(),
+    )) as ToolResult;
+
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("dedicated tracker");
+    expect(getOAuthApp("jira")).toBeNull();
+  });
+
+  test("credential-bindings tool validates OAuth app URLs in production", async () => {
+    process.env.NODE_ENV = "production";
+
+    const rejected = (await credentialBindingsTool().handler(
+      {
+        action: "oauth-app-upsert",
+        provider: "phase2-tool-unsafe",
+        clientId: "unsafe-client",
+        clientSecret: "unsafe-secret",
+        authorizeUrl: "https://oauth.example.test/authorize",
+        tokenUrl: "http://127.0.0.1/token",
+        scopes: [],
+      },
+      meta(),
+    )) as ToolResult;
+
+    expect(rejected.structuredContent.success).toBe(false);
+    expect(rejected.structuredContent.message).toMatch(/private IPv4|insecure/);
+    expect(getOAuthApp("phase2-tool-unsafe")).toBeNull();
+
+    const accepted = (await credentialBindingsTool().handler(
+      {
+        action: "oauth-app-upsert",
+        provider: "phase2-tool-safe",
+        clientId: "safe-client",
+        clientSecret: "safe-secret",
+        authorizeUrl: "https://oauth.example.test/authorize",
+        tokenUrl: "https://oauth.example.test/token",
+        scopes: ["read"],
+      },
+      meta(),
+    )) as ToolResult;
+
+    expect(accepted.structuredContent.success).toBe(true);
+    expect(getOAuthApp("phase2-tool-safe")?.clientId).toBe("safe-client");
   });
 
   test("failed OAuth token refresh skips only that binding, others still resolve", async () => {

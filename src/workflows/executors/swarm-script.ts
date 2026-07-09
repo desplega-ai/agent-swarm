@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { getScriptMcpConnectionDescriptors } from "../../be/script-connections";
+import {
+  getScriptApiConnectionDescriptors,
+  getScriptMcpConnectionDescriptors,
+} from "../../be/script-connections";
 import { buildScriptCredentialBindings } from "../../be/script-credential-broker";
 import { getScript, getScriptVersion } from "../../be/scripts/db";
 import { DEFAULT_SCRIPT_RESOURCES } from "../../scripts-runtime/executors/types";
@@ -75,6 +78,7 @@ export class SwarmScriptExecutor extends BaseExecutor<
       fsMode: "none",
       agentId: agentId ?? "workflow",
       egressSecrets: await buildScriptCredentialBindings({ agentId: agentId ?? undefined }),
+      apiConnections: getScriptApiConnectionDescriptors({ agentId: agentId ?? undefined }),
       mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agentId ?? undefined }),
       timeoutMs: config.timeoutMs,
     });

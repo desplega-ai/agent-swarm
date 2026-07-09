@@ -10298,9 +10298,29 @@ export function updateMcpServer(
   return row ? rowToMcpServer(row) : null;
 }
 
-export function deleteMcpServer(id: string): boolean {
-  const result = getDb().prepare("DELETE FROM mcp_servers WHERE id = ?").run(id);
-  return result.changes > 0;
+export type DeleteMcpServerResult = {
+  deleted: boolean;
+  deletedScriptConnectionCount: number;
+};
+
+export function deleteMcpServer(id: string): DeleteMcpServerResult {
+  const db = getDb();
+  const existing = db
+    .prepare<{ id: string }, [string]>("SELECT id FROM mcp_servers WHERE id = ?")
+    .get(id);
+  if (!existing) return { deleted: false, deletedScriptConnectionCount: 0 };
+
+  const tx = db.transaction(() => {
+    const deletedConnections = db
+      .prepare("DELETE FROM script_connections WHERE mcp_server_id = ?")
+      .run(id);
+    const deletedServer = db.prepare("DELETE FROM mcp_servers WHERE id = ?").run(id);
+    return {
+      deleted: deletedServer.changes > 0,
+      deletedScriptConnectionCount: deletedConnections.changes,
+    };
+  });
+  return tx();
 }
 
 export function getMcpServerById(id: string): McpServer | null {

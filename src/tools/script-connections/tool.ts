@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import {
+  getScriptConnectionById,
   listScriptConnections,
   refreshScriptConnection,
   setScriptConnectionEnabled,
@@ -11,6 +12,7 @@ import {
 import { can } from "@/rbac";
 import { placeholderForConfigKey } from "@/scripts-runtime/credential-broker";
 import { createToolRegistrar } from "@/tools/utils";
+import { resolveScopedResourceId, scopedResourceScopeIdSchema } from "@/utils/scoped-resource";
 
 const scriptConnectionsInputSchema = z.object({
   action: z
@@ -28,17 +30,11 @@ const scriptConnectionsInputSchema = z.object({
     .optional()
     .describe("Stable script namespace slug exposed under ctx.api or ctx.mcp."),
   displayName: z.string().max(160).optional().describe("Human-readable connection name."),
-  scope: z
-    .enum(["global", "agent", "repo"])
-    .default("global")
-    .optional()
-    .describe("Connection visibility scope."),
-  scopeId: z
-    .string()
-    .uuid()
+  scope: z.enum(["global", "agent", "repo"]).optional().describe("Connection visibility scope."),
+  scopeId: scopedResourceScopeIdSchema
     .nullable()
     .optional()
-    .describe("Agent or repo UUID when scope is agent or repo."),
+    .describe("Agent UUID for agent scope or repo id (owner/name) for repo scope."),
   mcpServerId: z
     .string()
     .uuid()
@@ -82,7 +78,7 @@ const scriptConnectionsInputSchema = z.object({
     .string()
     .optional()
     .describe("Inline OpenAPI JSON for upsert-openapi. Mutually exclusive with openapiSpecUrl."),
-  enabled: z.boolean().default(true).optional().describe("Whether the connection is enabled."),
+  enabled: z.boolean().optional().describe("Whether the connection is enabled."),
 });
 
 const scriptConnectionsOutputSchema = z.object({
@@ -91,6 +87,34 @@ const scriptConnectionsOutputSchema = z.object({
   message: z.string(),
   connections: z.array(z.unknown()),
 });
+
+type ScriptConnectionsArgs = z.infer<typeof scriptConnectionsInputSchema>;
+type ExistingConnection = NonNullable<ReturnType<typeof getScriptConnectionById>>;
+
+function resolveConnectionScope(
+  args: ScriptConnectionsArgs,
+  existing: ExistingConnection | null,
+): { scope: "global" | "agent" | "repo"; scopeId: string | null } {
+  const scopeWasProvided = Object.hasOwn(args, "scope");
+  const scopeIdWasProvided = Object.hasOwn(args, "scopeId");
+  const scope = (scopeWasProvided ? args.scope : existing?.scope) ?? "global";
+  const scopeIdInput = scopeIdWasProvided
+    ? args.scopeId
+    : existing && scope === existing.scope
+      ? existing.scopeId
+      : null;
+  return {
+    scope,
+    scopeId: resolveScopedResourceId(scope, scopeIdInput, "connections"),
+  };
+}
+
+function resolveConnectionEnabled(
+  args: ScriptConnectionsArgs,
+  existing: ExistingConnection | null,
+): boolean {
+  return Object.hasOwn(args, "enabled") ? args.enabled !== false : (existing?.enabled ?? true);
+}
 
 export const registerScriptConnectionsTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -139,7 +163,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
       }
 
       if (args.action === "list") {
-        const connections = listScriptConnections({ includeDisabled: true });
+        const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
         return {
           content: [{ type: "text", text: `Found ${connections.length} script connection(s).` }],
           structuredContent: {
@@ -159,12 +183,12 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
               yourAgentId: requestInfo.agentId,
               success: false,
               message: "id is required for disable.",
-              connections: listScriptConnections({ includeDisabled: true }),
+              connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
             },
           };
         }
         setScriptConnectionEnabled(args.id, false);
-        const connections = listScriptConnections({ includeDisabled: true });
+        const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
         return {
           content: [{ type: "text", text: "Script connection disabled." }],
           structuredContent: {
@@ -184,12 +208,12 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
               yourAgentId: requestInfo.agentId,
               success: false,
               message: "id is required for refresh.",
-              connections: listScriptConnections({ includeDisabled: true }),
+              connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
             },
           };
         }
-        const refreshed = await refreshScriptConnection(args.id);
-        const connections = listScriptConnections({ includeDisabled: true });
+        const refreshed = await refreshScriptConnection(args.id, null, requestInfo.agentId);
+        const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
         if (!refreshed) {
           return {
             content: [{ type: "text", text: "Script connection not found." }],
@@ -222,24 +246,26 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
               yourAgentId: requestInfo.agentId,
               success: false,
               message: "slug and mcpServerId are required.",
-              connections: listScriptConnections({ includeDisabled: true }),
+              connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
             },
           };
         }
 
+        const existing = args.id ? getScriptConnectionById(args.id) : null;
+        const { scope, scopeId } = resolveConnectionScope(args, existing);
         const connection = await upsertScriptConnection({
           id: args.id,
           slug: args.slug,
           displayName: args.displayName,
           kind: "mcp",
-          scope: args.scope ?? "global",
-          scopeId: args.scope === "global" ? null : (args.scopeId ?? null),
+          scope,
+          scopeId,
           mcpServerId: args.mcpServerId,
-          enabled: args.enabled !== false,
+          enabled: resolveConnectionEnabled(args, existing),
           agentId: requestInfo.agentId,
         });
 
-        const connections = listScriptConnections({ includeDisabled: true });
+        const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
         return {
           content: [{ type: "text", text: `Script MCP connection ${connection.slug} saved.` }],
           structuredContent: {
@@ -261,7 +287,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
               yourAgentId: requestInfo.agentId,
               success: false,
               message: "slug, baseUrl, and allowedHosts are required.",
-              connections: listScriptConnections({ includeDisabled: true }),
+              connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
             },
           };
         }
@@ -269,31 +295,34 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         let credentialBindingId = args.credentialBindingId ?? null;
         if (!credentialBindingId && args.configKey) {
           const placeholder = placeholderForConfigKey(args.configKey);
+          const bindingScope = args.scope ?? "global";
           const binding = upsertCredentialBinding({
             configKey: args.configKey,
             allowedHosts: args.allowedHosts,
             headerTemplate: args.headerTemplate ?? `Authorization: Bearer ${placeholder}`,
             queryTemplate: args.queryTemplate,
-            scope: args.scope ?? "global",
-            scopeId: args.scope === "global" ? null : (args.scopeId ?? null),
+            scope: bindingScope,
+            scopeId: resolveScopedResourceId(bindingScope, args.scopeId, "bindings"),
           });
           credentialBindingId = binding.id;
         }
 
+        const existing = args.id ? getScriptConnectionById(args.id) : null;
+        const { scope, scopeId } = resolveConnectionScope(args, existing);
         const connection = await upsertScriptConnection({
           id: args.id,
           slug: args.slug,
           displayName: args.displayName,
           kind: "graphql",
-          scope: args.scope ?? "global",
-          scopeId: args.scope === "global" ? null : (args.scopeId ?? null),
+          scope,
+          scopeId,
           baseUrl: args.baseUrl,
           allowedHosts: args.allowedHosts,
           credentialBindingId,
-          enabled: args.enabled !== false,
+          enabled: resolveConnectionEnabled(args, existing),
         });
 
-        const connections = listScriptConnections({ includeDisabled: true });
+        const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
         return {
           content: [{ type: "text", text: `Script GraphQL connection ${connection.slug} saved.` }],
           structuredContent: {
@@ -319,7 +348,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
             yourAgentId: requestInfo.agentId,
             success: false,
             message: "slug, baseUrl, and either openapiSpecJson or openapiSpecUrl are required.",
-            connections: listScriptConnections({ includeDisabled: true }),
+            connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
           },
         };
       }
@@ -335,7 +364,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
             yourAgentId: requestInfo.agentId,
             success: false,
             message: "Provide either openapiSpecJson or openapiSpecUrl, not both.",
-            connections: listScriptConnections({ includeDisabled: true }),
+            connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
           },
         };
       }
@@ -343,33 +372,36 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
       let credentialBindingId = args.credentialBindingId ?? null;
       if (!credentialBindingId && args.configKey) {
         const placeholder = placeholderForConfigKey(args.configKey);
+        const bindingScope = args.scope ?? "global";
         const binding = upsertCredentialBinding({
           configKey: args.configKey,
           allowedHosts: args.allowedHosts ?? [new URL(args.baseUrl).hostname],
           headerTemplate: args.headerTemplate ?? `Authorization: Bearer ${placeholder}`,
           queryTemplate: args.queryTemplate,
-          scope: args.scope ?? "global",
-          scopeId: args.scope === "global" ? null : (args.scopeId ?? null),
+          scope: bindingScope,
+          scopeId: resolveScopedResourceId(bindingScope, args.scopeId, "bindings"),
         });
         credentialBindingId = binding.id;
       }
 
+      const existing = args.id ? getScriptConnectionById(args.id) : null;
+      const { scope, scopeId } = resolveConnectionScope(args, existing);
       const connection = await upsertScriptConnection({
         id: args.id,
         slug: args.slug,
         displayName: args.displayName,
         kind: "openapi",
-        scope: args.scope ?? "global",
-        scopeId: args.scope === "global" ? null : (args.scopeId ?? null),
+        scope,
+        scopeId,
         baseUrl: args.baseUrl,
         allowedHosts: args.allowedHosts ?? [new URL(args.baseUrl).hostname],
         credentialBindingId,
         openapiSpecUrl: args.openapiSpecUrl,
         openapiSpecJson: args.openapiSpecJson,
-        enabled: args.enabled !== false,
+        enabled: resolveConnectionEnabled(args, existing),
       });
 
-      const connections = listScriptConnections({ includeDisabled: true });
+      const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
       return {
         content: [{ type: "text", text: `Script connection ${connection.slug} saved.` }],
         structuredContent: {

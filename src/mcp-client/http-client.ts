@@ -27,6 +27,11 @@ export type McpToolCallEnvelope =
   | { ok: true; result: McpToolCallResult }
   | { ok: false; error: McpJsonRpcError | string };
 
+function jsonRpcErrorMessage(error: McpJsonRpcError | string): string {
+  if (typeof error === "string") return error;
+  return error.message ?? JSON.stringify(error);
+}
+
 type McpHttpClientOptions = {
   protocolVersion?: string;
   clientInfo?: { name: string; version: string };
@@ -154,7 +159,10 @@ export class McpHttpClient {
       params: {},
     });
 
-    const result = data as { result?: { tools?: McpTool[] } };
+    const result = data as { result?: { tools?: McpTool[] }; error?: McpJsonRpcError | string };
+    if (result?.error) {
+      throw new Error(`MCP tools/list failed: ${jsonRpcErrorMessage(result.error)}`);
+    }
     return result?.result?.tools ?? [];
   }
 

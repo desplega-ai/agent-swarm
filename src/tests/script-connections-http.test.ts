@@ -9,7 +9,13 @@ import {
   storeOAuthTokens,
   upsertOAuthApp,
 } from "../be/db-queries/oauth";
-import { upsertCredentialBinding } from "../be/script-connections";
+import {
+  getScriptConnectionById,
+  setOpenapiSpecFetchForTesting,
+  setScriptConnectionEnabled,
+  upsertCredentialBinding,
+  upsertScriptConnection,
+} from "../be/script-connections";
 import { handleScriptConnections } from "../http/script-connections";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 
@@ -124,12 +130,14 @@ beforeAll(async () => {
 
 afterAll(async () => {
   globalThis.fetch = originalFetch;
+  setOpenapiSpecFetchForTesting(null);
   closeDb();
   await removeDbFiles(TEST_DB_PATH);
 });
 
 beforeEach(() => {
   globalThis.fetch = originalFetch;
+  setOpenapiSpecFetchForTesting(null);
   getDb().run("DELETE FROM script_connections");
   getDb().run("DELETE FROM script_credential_bindings");
   getDb().run("DELETE FROM oauth_tokens");
@@ -221,6 +229,131 @@ describe("/api/script-connections HTTP", () => {
     expect(body.connections[0]?.generatedTypes).toBeUndefined();
     expect(JSON.stringify(body)).not.toContain(SECRET_VALUE);
     expect(JSON.stringify(body)).not.toContain("[REDACTED:VENDOR_TOKEN]");
+  });
+
+  test("unfiltered dashboard list includes agent-scoped connections", async () => {
+    const connection = await upsertScriptConnection({
+      slug: "agentScopedVisible",
+      kind: "openapi",
+      scope: "agent",
+      scopeId: workerAgentId,
+      baseUrl: "https://api.vendor.test",
+      openapiSpecJson: inlineOpenApiSpec(),
+    });
+
+    const res = await dispatch("/api/script-connections");
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { connections: Array<{ id: string; scope: string }> };
+    expect(body.connections).toContainEqual(
+      expect.objectContaining({ id: connection.id, scope: "agent" }),
+    );
+  });
+
+  test("id update preserves omitted scope and disabled state", async () => {
+    const connection = await upsertScriptConnection({
+      slug: "agentScopedDisabled",
+      displayName: "Original",
+      kind: "openapi",
+      scope: "agent",
+      scopeId: workerAgentId,
+      baseUrl: "https://api.vendor.test",
+      openapiSpecJson: inlineOpenApiSpec(),
+      enabled: false,
+    });
+    setScriptConnectionEnabled(connection.id, false);
+
+    const res = await dispatch("/api/script-connections", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        id: connection.id,
+        kind: "openapi",
+        slug: connection.slug,
+        displayName: "Renamed",
+        baseUrl: "https://api.vendor.test",
+        allowedHosts: ["api.vendor.test"],
+        openapiSpecJson: inlineOpenApiSpec(),
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const stored = getScriptConnectionById(connection.id);
+    expect(stored?.displayName).toBe("Renamed");
+    expect(stored?.scope).toBe("agent");
+    expect(stored?.scopeId).toBe(workerAgentId);
+    expect(stored?.enabled).toBe(false);
+  });
+
+  test("repo-scoped connection upsert accepts owner/name scope IDs", async () => {
+    const res = await dispatch("/api/script-connections", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        kind: "openapi",
+        slug: "repoScopedVendor",
+        baseUrl: "https://api.vendor.test",
+        allowedHosts: ["api.vendor.test"],
+        scope: "repo",
+        scopeId: "desplega-ai/agent-swarm",
+        openapiSpecJson: inlineOpenApiSpec(),
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      connection: { scope: string; scopeId: string | null };
+    };
+    expect(body.connection.scope).toBe("repo");
+    expect(body.connection.scopeId).toBe("desplega-ai/agent-swarm");
+  });
+
+  test("id update with a changed OpenAPI spec URL fetches the new URL", async () => {
+    const firstUrl = "https://spec.vendor.test/one.json";
+    const secondUrl = "https://spec.vendor.test/two.json";
+    const requests: string[] = [];
+    setOpenapiSpecFetchForTesting((async (input) => {
+      const url = input instanceof Request ? input.url : String(input);
+      requests.push(url);
+      return new Response(inlineOpenApiSpec(), {
+        status: 200,
+        headers: { etag: url === firstUrl ? '"one"' : '"two"' },
+      });
+    }) as typeof fetch);
+
+    const created = await dispatch("/api/script-connections", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        kind: "openapi",
+        slug: "urlEditVendor",
+        baseUrl: "https://api.vendor.test",
+        allowedHosts: ["api.vendor.test"],
+        openapiSpecUrl: firstUrl,
+      },
+    });
+    expect(created.status).toBe(200);
+    const createdBody = (await created.json()) as { connection: { id: string; slug: string } };
+
+    const updated = await dispatch("/api/script-connections", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        id: createdBody.connection.id,
+        kind: "openapi",
+        slug: createdBody.connection.slug,
+        displayName: "URL changed",
+        baseUrl: "https://api.vendor.test",
+        allowedHosts: ["api.vendor.test"],
+        openapiSpecUrl: secondUrl,
+      },
+    });
+
+    expect(updated.status).toBe(200);
+    expect(requests).toEqual([firstUrl, secondUrl]);
+    const stored = getScriptConnectionById(createdBody.connection.id);
+    expect(stored?.openapiSpecSource).toBe(secondUrl);
+    expect(stored?.openapiSpecEtag).toBe('"two"');
   });
 
   test("oauth-apps GET never includes clientSecret", async () => {
@@ -395,6 +528,65 @@ describe("/api/script-connections HTTP", () => {
     expect(JSON.stringify(await res.json())).not.toContain("existing-client-secret");
   });
 
+  test("oauth app upsert rejects reserved tracker providers", async () => {
+    const res = await dispatch("/api/oauth-apps", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        provider: "linear",
+        clientId: "linear-client",
+        clientSecret: "linear-secret",
+        authorizeUrl: "https://oauth.vendor.test/authorize",
+        tokenUrl: "https://oauth.vendor.test/token",
+        scopes: [],
+      },
+    });
+
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("dedicated tracker");
+    expect(getOAuthApp("linear")).toBeNull();
+  });
+
+  test("oauth app upsert rejects unsafe endpoint URLs in production and accepts public HTTPS", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      const rejected = await dispatch("/api/oauth-apps", {
+        method: "POST",
+        agentId: leadAgentId,
+        body: {
+          provider: "unsafe_vendor",
+          clientId: "unsafe-client",
+          clientSecret: "unsafe-secret",
+          authorizeUrl: "https://oauth.vendor.test/authorize",
+          tokenUrl: "http://127.0.0.1/token",
+          scopes: [],
+        },
+      });
+      expect(rejected.status).toBe(400);
+      expect(((await rejected.json()) as { error: string }).error).toMatch(/private IPv4|insecure/);
+      expect(getOAuthApp("unsafe_vendor")).toBeNull();
+
+      const accepted = await dispatch("/api/oauth-apps", {
+        method: "POST",
+        agentId: leadAgentId,
+        body: {
+          provider: "safe_vendor",
+          clientId: "safe-client",
+          clientSecret: "safe-secret",
+          authorizeUrl: "https://oauth.vendor.test/authorize",
+          tokenUrl: "https://oauth.vendor.test/token",
+          scopes: [],
+        },
+      });
+      expect(accepted.status).toBe(200);
+      expect(getOAuthApp("safe_vendor")?.clientId).toBe("safe-client");
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+    }
+  });
+
   test("discover endpoint parses mocked well-known OAuth JSON", async () => {
     const requested: string[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -428,6 +620,37 @@ describe("/api/script-connections HTTP", () => {
     expect(requested).toEqual([
       "https://issuer.vendor.test/.well-known/oauth-authorization-server",
     ]);
+  });
+
+  test("discover endpoint rejects redirects to unsafe hosts in production", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    const requested: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requested.push(url);
+      return new Response(null, {
+        status: 302,
+        headers: { location: "http://127.0.0.1/.well-known/oauth-authorization-server" },
+      });
+    }) as typeof fetch;
+
+    try {
+      const res = await dispatch("/api/oauth-apps/discover", {
+        method: "POST",
+        agentId: leadAgentId,
+        body: { url: "https://issuer.vendor.test" },
+      });
+
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(/private IPv4|insecure/);
+      expect(requested).toEqual([
+        "https://issuer.vendor.test/.well-known/oauth-authorization-server",
+      ]);
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+    }
   });
 
   test("integrations catalog proxy filters cli entries", async () => {

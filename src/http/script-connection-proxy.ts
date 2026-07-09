@@ -31,10 +31,18 @@ const mcpCallRoute = route({
 function connectionScopeMatches(
   connection: { scope: string; scopeId: string | null },
   agentId: string,
+  syntheticPrincipal: boolean,
 ): boolean {
   if (connection.scope === "global") return true;
-  if (connection.scope === "agent") return connection.scopeId === agentId;
+  if (connection.scope === "agent") return !syntheticPrincipal && connection.scopeId === agentId;
+  // Repo-scoped descriptors are only handed to scripts with matching repo context at generation time.
+  // The proxy receives only a connection id + tool call from that descriptor, so allow the call here.
+  if (connection.scope === "repo") return true;
   return false;
+}
+
+function isSyntheticScriptPrincipal(agentId: string): boolean {
+  return agentId === "schedule" || agentId === "workflow";
 }
 
 export async function handleScriptConnectionProxy(
@@ -53,14 +61,15 @@ export async function handleScriptConnectionProxy(
     jsonError(res, "X-Agent-ID required for script connection MCP proxy", 400);
     return true;
   }
-  const agent = getAgentById(agentId);
-  if (!agent) {
+  const syntheticPrincipal = isSyntheticScriptPrincipal(agentId);
+  const agent = syntheticPrincipal ? null : getAgentById(agentId);
+  if (!agent && !syntheticPrincipal) {
     jsonError(res, "Agent not found", 404);
     return true;
   }
 
   const decision = can({
-    principal: { kind: "agent", agentId, isLead: agent.isLead },
+    principal: { kind: "agent", agentId, isLead: agent?.isLead ?? false },
     verb: "script-connection.invoke",
     resource: { kind: "none" },
     source: "http",
@@ -83,7 +92,7 @@ export async function handleScriptConnectionProxy(
     jsonError(res, "Script connection is not an MCP connection", 400);
     return true;
   }
-  if (!connectionScopeMatches(connection, agentId)) {
+  if (!connectionScopeMatches(connection, agentId, syntheticPrincipal)) {
     jsonError(res, "Script connection is not available to this agent", 403);
     return true;
   }

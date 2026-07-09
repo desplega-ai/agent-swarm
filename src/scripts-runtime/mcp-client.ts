@@ -12,6 +12,26 @@ function methodName(name: string): string {
   return `${cleaned[0]?.toLowerCase()}${cleaned.slice(1)}`;
 }
 
+function methodNames(
+  tools: Array<{ name: string }>,
+): Array<{ tool: { name: string }; methodName: string }> {
+  const used = new Set<string>();
+  const baseCounts = new Map<string, number>();
+  return tools.map((tool) => {
+    const base = methodName(tool.name);
+    const count = baseCounts.get(base) ?? 0;
+    baseCounts.set(base, count + 1);
+    let toolMethod = count === 0 ? base : `${base}${count + 1}`;
+    let suffix = count + 2;
+    while (used.has(toolMethod)) {
+      toolMethod = `${base}${suffix}`;
+      suffix += 1;
+    }
+    used.add(toolMethod);
+    return { tool, methodName: toolMethod };
+  });
+}
+
 function headers(config: SwarmConfig): Record<string, string> {
   return {
     Authorization: `Bearer ${Redacted.value(config.apiKey)}`,
@@ -37,8 +57,7 @@ export function createMcpRegistryClient(
 
   for (const descriptor of descriptors) {
     const client: ScriptMcpRegistryClient[string] = {};
-    for (const tool of descriptor.tools) {
-      const toolMethod = methodName(tool.name);
+    for (const { tool, methodName: toolMethod } of methodNames(descriptor.tools)) {
       client[toolMethod] = async (rawArgs = {}) => {
         const response = await fetch(
           `${baseUrl}/api/script-connections/${encodeURIComponent(descriptor.connectionId)}/mcp-call`,

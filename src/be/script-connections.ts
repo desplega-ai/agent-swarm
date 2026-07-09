@@ -1,5 +1,5 @@
 import { getDb, getSwarmConfigs } from "@/be/db";
-import { assertUrlSafe } from "@/oauth/mcp-wrapper";
+import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
 import type {
   ScriptApiConnectionDescriptor,
   ScriptApiJsonSchema,
@@ -406,6 +406,7 @@ export function listScriptConnections(context?: {
   repoId?: string;
   kind?: ScriptConnectionKind;
   includeDisabled?: boolean;
+  allScopes?: boolean;
 }): ScriptConnectionRecord[] {
   const rows = getDb()
     .prepare<ConnectionRow, []>("SELECT * FROM script_connections ORDER BY slug ASC")
@@ -414,7 +415,12 @@ export function listScriptConnections(context?: {
     .map(connectionFromRow)
     .filter((connection) => !context?.kind || connection.kind === context.kind)
     .filter((connection) => context?.includeDisabled || connection.enabled)
-    .filter((connection) => !context || applies(connection.scope, connection.scopeId, context));
+    .filter(
+      (connection) =>
+        !context ||
+        context.allScopes === true ||
+        applies(connection.scope, connection.scopeId, context),
+    );
 }
 
 export function getScriptConnectionById(id: string): ScriptConnectionRecord | null {
@@ -669,15 +675,35 @@ export function setOpenapiSpecFetchForTesting(fetchImpl: typeof fetch | null): v
 }
 
 function openapiSpecUrlOptions() {
-  const allowDevHosts = process.env.NODE_ENV !== "production";
-  return {
-    allowPrivateHosts: allowDevHosts,
-    allowInsecure: allowDevHosts,
-  };
+  return publicEndpointSsrfOptions();
+}
+
+function isRedirectStatus(status: number): boolean {
+  return status >= 300 && status < 400 && status !== 304;
 }
 
 function mcpToolMethodName(name: string): string {
   return normalizeSlug(name);
+}
+
+function mcpToolMethodNames<T extends { name: string }>(
+  tools: T[],
+): Array<{ tool: T; methodName: string }> {
+  const used = new Set<string>();
+  const baseCounts = new Map<string, number>();
+  return tools.map((tool) => {
+    const base = mcpToolMethodName(tool.name);
+    const count = baseCounts.get(base) ?? 0;
+    baseCounts.set(base, count + 1);
+    let methodName = count === 0 ? base : `${base}${count + 1}`;
+    let suffix = count + 2;
+    while (used.has(methodName)) {
+      methodName = `${base}${suffix}`;
+      suffix += 1;
+    }
+    used.add(methodName);
+    return { tool, methodName };
+  });
 }
 
 function mcpToolArgsType(inputSchema: unknown): string {
@@ -694,6 +720,7 @@ export function buildMcpGeneratedArtifacts(input: {
   tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;
 }): { generatedTypes: string; generatedRuntimeJson: string } {
   const slug = normalizeSlug(input.slug);
+  const methodNames = mcpToolMethodNames(input.tools);
   const tools: ScriptMcpToolDescriptor[] = input.tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
@@ -701,9 +728,9 @@ export function buildMcpGeneratedArtifacts(input: {
   }));
   const generatedTypes = [
     `export interface ${pascal(slug)}Mcp {`,
-    ...input.tools.map(
-      (tool) =>
-        `  ${mcpToolMethodName(tool.name)}(args: ${mcpToolArgsType(tool.inputSchema)}): Promise<JsonValue>;`,
+    ...methodNames.map(
+      ({ tool, methodName }) =>
+        `  ${methodName}(args: ${mcpToolArgsType(tool.inputSchema)}): Promise<JsonValue>;`,
     ),
     "}",
   ].join("\n");
@@ -744,7 +771,7 @@ export async function fetchOpenapiSpec(
   url: string,
   opts: { etag?: string | null } = {},
 ): Promise<OpenapiSpecFetchResult> {
-  const parsed = assertUrlSafe(url, openapiSpecUrlOptions());
+  let parsed = assertUrlSafe(url, openapiSpecUrlOptions());
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
@@ -753,7 +780,22 @@ export async function fetchOpenapiSpec(
     });
     if (opts.etag) headers.set("If-None-Match", opts.etag);
     const fetchImpl = openapiSpecFetchForTesting ?? Bun.fetch;
-    const response = await fetchImpl(parsed, { headers, signal: controller.signal });
+    let response: Response | null = null;
+    for (let hop = 0; hop <= 5; hop += 1) {
+      response = await fetchImpl(parsed, {
+        headers,
+        signal: controller.signal,
+        redirect: "manual",
+      });
+      if (!isRedirectStatus(response.status)) break;
+      const location = response.headers.get("location");
+      if (!location) {
+        throw new Error(`OpenAPI spec redirect missing Location header: HTTP ${response.status}`);
+      }
+      parsed = assertUrlSafe(new URL(location, parsed).toString(), openapiSpecUrlOptions());
+      if (hop === 5) throw new Error("OpenAPI spec fetch exceeded 5 redirects.");
+    }
+    if (!response) throw new Error("OpenAPI spec fetch failed before receiving a response.");
     const fetchedAt = new Date().toISOString();
     const etag = response.headers.get("etag");
     if (response.status === 304) {
@@ -975,6 +1017,7 @@ export async function upsertScriptConnection(data: {
 export async function refreshScriptConnection(
   id: string,
   userId?: string | null,
+  callerAgentId?: string,
 ): Promise<ScriptConnectionRecord | null> {
   const row = getDb()
     .prepare<ConnectionRow, [string]>("SELECT * FROM script_connections WHERE id = ?")
@@ -1000,6 +1043,7 @@ export async function refreshScriptConnection(
       credentialBindingId: connection.credentialBindingId,
       mcpServerId: connection.mcpServerId,
       enabled: connection.enabled,
+      agentId: callerAgentId,
       userId,
     });
   }

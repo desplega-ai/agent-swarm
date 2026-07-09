@@ -93,8 +93,11 @@ async function createMcpServerClient(
   const server = getMcpServerById(serverId);
   if (!server) throw new Error("MCP server not found");
   if (!server.isEnabled) throw new Error("MCP server is disabled");
-  if (server.transport !== "http" && server.transport !== "sse") {
-    throw new Error("Only HTTP/SSE MCP servers are supported by script connections");
+  if (server.transport === "sse") {
+    throw new Error("SSE MCP servers are not supported yet — use a streamable HTTP server");
+  }
+  if (server.transport !== "http") {
+    throw new Error("Only streamable HTTP MCP servers are supported by script connections");
   }
   if (!server.url) throw new Error("MCP server URL is required");
 

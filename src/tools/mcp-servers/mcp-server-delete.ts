@@ -64,18 +64,21 @@ export const registerMcpServerDeleteTool = (server: McpServer) => {
         };
       }
 
-      const deleted = deleteMcpServer(args.id);
+      const result = deleteMcpServer(args.id);
+      const message = result.deleted
+        ? `Deleted MCP server "${existing.name}" and ${result.deletedScriptConnectionCount} script connection(s).`
+        : "Delete failed.";
       return {
         content: [
           {
             type: "text",
-            text: deleted ? `Deleted MCP server "${existing.name}".` : "Delete failed.",
+            text: message,
           },
         ],
         structuredContent: {
           yourAgentId: requestInfo.agentId,
-          success: deleted,
-          message: deleted ? `Deleted MCP server "${existing.name}".` : "Delete failed.",
+          success: result.deleted,
+          message,
         },
       };
     },

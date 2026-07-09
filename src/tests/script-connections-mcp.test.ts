@@ -3,8 +3,18 @@ import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, createMcpServer, getDb, initDb, upsertSwarmConfig } from "../be/db";
 import {
+  closeDb,
+  createAgent,
+  createMcpServer,
+  deleteMcpServer,
+  getDb,
+  getMcpServerById,
+  initDb,
+  upsertSwarmConfig,
+} from "../be/db";
+import {
+  getScriptConnectionById,
   getScriptMcpConnectionDescriptors,
   refreshScriptConnection,
   setScriptConnectionEnabled,
@@ -67,7 +77,7 @@ function meta(agentId: string) {
   };
 }
 
-function startFakeMcpServer(opts: { failList?: boolean } = {}) {
+function startFakeMcpServer(opts: { failList?: boolean; jsonRpcListError?: boolean } = {}) {
   const requests: CapturedMcpRequest[] = [];
   const extraTools: Array<{ name: string; description: string; inputSchema: unknown }> = [];
   const server = Bun.serve({
@@ -105,6 +115,13 @@ function startFakeMcpServer(opts: { failList?: boolean } = {}) {
       if (body.method === "tools/list") {
         if (opts.failList) {
           return Response.json({ error: "list failed" }, { status: 500 });
+        }
+        if (opts.jsonRpcListError) {
+          return Response.json({
+            jsonrpc: "2.0",
+            id: body.id,
+            error: { code: -32000, message: "list failed inside envelope" },
+          });
         }
         return Response.json({
           jsonrpc: "2.0",
@@ -333,6 +350,30 @@ describe("script MCP connections", () => {
     }
   });
 
+  test("MCP generated types suffix normalized tool name collisions deterministically", async () => {
+    const fake = startFakeMcpServer();
+    try {
+      fake.addExtraTool("foo-bar", "Hyphenated");
+      fake.addExtraTool("foo_bar", "Underscored");
+      const lead = createAgent({ name: "mcp-collision-lead", isLead: true, status: "idle" });
+      const mcpServer = seedExternalMcpServer(fake.url);
+
+      const connection = await upsertScriptConnection({
+        slug: "collisionExternal",
+        kind: "mcp",
+        mcpServerId: mcpServer.id,
+        agentId: lead.id,
+      });
+
+      expect(connection.generationError).toBeNull();
+      expect(connection.generatedTypes).toContain("fooBar(args:");
+      expect(connection.generatedTypes).toContain("fooBar2(args:");
+      expect(connection.generatedTypes?.match(/fooBar\(args:/g) ?? []).toHaveLength(1);
+    } finally {
+      fake.stop();
+    }
+  });
+
   test("agent-scoped registration resolves discovery auth with the target agent's scoped config", async () => {
     const fake = startFakeMcpServer();
     try {
@@ -366,6 +407,48 @@ describe("script MCP connections", () => {
       expect(connection.generationError).toBeNull();
       const listRequest = fake.requests.find((request) => request.method === "tools/list");
       expect(listRequest?.secretHeader).toBe("owner-only-secret");
+    } finally {
+      fake.stop();
+    }
+  });
+
+  test("refresh uses caller agent context for global MCP discovery auth", async () => {
+    const fake = startFakeMcpServer();
+    try {
+      const lead = createAgent({ name: "mcp-refresh-context-lead", isLead: true, status: "idle" });
+      upsertSwarmConfig({
+        scope: "agent",
+        scopeId: lead.id,
+        key: "MCP_CALLER_ONLY_SECRET",
+        value: "caller-only-secret",
+        isSecret: true,
+      });
+      const mcpServer = createMcpServer({
+        name: `external-caller-${crypto.randomUUID()}`,
+        transport: "http",
+        scope: "global",
+        url: fake.url,
+        headerConfigKeys: JSON.stringify({ "X-Test-Secret": "MCP_CALLER_ONLY_SECRET" }),
+      });
+      const connection = await upsertScriptConnection({
+        slug: "callerScopedRefresh",
+        kind: "mcp",
+        scope: "global",
+        mcpServerId: mcpServer.id,
+        agentId: lead.id,
+      });
+      expect(connection.generationError).toBeNull();
+
+      fake.requests.length = 0;
+      fake.addExtraTool("after-refresh", "Added during refresh");
+      const result = (await scriptConnectionsTool().handler(
+        { action: "refresh", id: connection.id },
+        meta(lead.id),
+      )) as ToolResult;
+
+      expect(result.structuredContent.success).toBe(true);
+      const listRequest = fake.requests.find((request) => request.method === "tools/list");
+      expect(listRequest?.secretHeader).toBe("caller-only-secret");
     } finally {
       fake.stop();
     }
@@ -415,6 +498,93 @@ describe("script MCP connections", () => {
         },
       );
       expect(unauthenticated.status).toBe(401);
+    } finally {
+      fake.stop();
+    }
+  });
+
+  test("proxy route lets synthetic schedule/workflow principals invoke global MCP connections only", async () => {
+    const fake = startFakeMcpServer();
+    try {
+      const lead = createAgent({ name: "mcp-synthetic-lead", isLead: true, status: "idle" });
+      const owner = createAgent({ name: "mcp-synthetic-owner", isLead: false, status: "idle" });
+      const mcpServer = seedExternalMcpServer(fake.url);
+      const globalConnection = await upsertScriptConnection({
+        slug: "syntheticGlobal",
+        kind: "mcp",
+        scope: "global",
+        mcpServerId: mcpServer.id,
+        agentId: lead.id,
+      });
+
+      const scheduleCall = await dispatchProxyApi(
+        `/api/script-connections/${globalConnection.id}/mcp-call`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${API_KEY}`,
+            "X-Agent-ID": "schedule",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ tool: "echo-tool", arguments: { message: "scheduled" } }),
+        },
+      );
+      expect(scheduleCall.status).toBe(200);
+      expect(((await scheduleCall.json()) as { ok: boolean }).ok).toBe(true);
+
+      const scopedConnection = await upsertScriptConnection({
+        slug: "syntheticScoped",
+        kind: "mcp",
+        scope: "agent",
+        scopeId: owner.id,
+        mcpServerId: mcpServer.id,
+        agentId: lead.id,
+      });
+      const scopedCall = await dispatchProxyApi(
+        `/api/script-connections/${scopedConnection.id}/mcp-call`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${API_KEY}`,
+            "X-Agent-ID": "workflow",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ tool: "echo-tool", arguments: {} }),
+        },
+      );
+      expect(scopedCall.status).toBe(403);
+    } finally {
+      fake.stop();
+    }
+  });
+
+  test("proxy route allows repo-scoped MCP connections after descriptor-time gating", async () => {
+    const fake = startFakeMcpServer();
+    try {
+      const lead = createAgent({ name: "mcp-repo-lead", isLead: true, status: "idle" });
+      const worker = createAgent({ name: "mcp-repo-worker", isLead: false, status: "idle" });
+      const mcpServer = seedExternalMcpServer(fake.url);
+      const connection = await upsertScriptConnection({
+        slug: "repoExternal",
+        kind: "mcp",
+        scope: "repo",
+        scopeId: "desplega-ai/agent-swarm",
+        mcpServerId: mcpServer.id,
+        agentId: lead.id,
+      });
+
+      const response = await dispatchProxyApi(`/api/script-connections/${connection.id}/mcp-call`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${API_KEY}`,
+          "X-Agent-ID": worker.id,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ tool: "echo-tool", arguments: { message: "repo" } }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(((await response.json()) as { ok: boolean }).ok).toBe(true);
     } finally {
       fake.stop();
     }
@@ -544,6 +714,85 @@ describe("script MCP connections", () => {
     }
   });
 
+  test("tools/list JSON-RPC error envelopes are recorded as generation_error", async () => {
+    const fake = startFakeMcpServer({ jsonRpcListError: true });
+    try {
+      const lead = createAgent({ name: "mcp-jsonrpc-error-lead", isLead: true, status: "idle" });
+      const mcpServer = seedExternalMcpServer(fake.url);
+
+      const connection = await upsertScriptConnection({
+        slug: "jsonRpcBrokenExternal",
+        kind: "mcp",
+        scope: "global",
+        mcpServerId: mcpServer.id,
+        agentId: lead.id,
+      });
+
+      expect(connection.generationError).toContain("list failed inside envelope");
+      expect(connection.generatedRuntimeJson).toBeNull();
+      expect(connection.generatedTypes).toBeNull();
+    } finally {
+      fake.stop();
+    }
+  });
+
+  test("SSE MCP servers fail early with a clear unsupported transport error", async () => {
+    const lead = createAgent({ name: "mcp-sse-lead", isLead: true, status: "idle" });
+    const mcpServer = createMcpServer({
+      name: `sse-${crypto.randomUUID()}`,
+      transport: "sse",
+      scope: "global",
+      url: "https://mcp.vendor.test/sse",
+    });
+
+    const connection = await upsertScriptConnection({
+      slug: "sseExternal",
+      kind: "mcp",
+      scope: "global",
+      mcpServerId: mcpServer.id,
+      agentId: lead.id,
+    });
+
+    expect(connection.generationError).toContain("SSE MCP servers are not supported yet");
+
+    const response = await dispatchProxyApi(`/api/script-connections/${connection.id}/mcp-call`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        "X-Agent-ID": lead.id,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ tool: "echo-tool", arguments: {} }),
+    });
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { ok: boolean; error: string }).error).toContain(
+      "SSE MCP servers are not supported yet",
+    );
+  });
+
+  test("deleteMcpServer deletes dependent MCP script connections before deleting the server", async () => {
+    const fake = startFakeMcpServer();
+    try {
+      const lead = createAgent({ name: "mcp-delete-cascade-lead", isLead: true, status: "idle" });
+      const mcpServer = seedExternalMcpServer(fake.url);
+      const connection = await upsertScriptConnection({
+        slug: "deleteCascadeExternal",
+        kind: "mcp",
+        scope: "global",
+        mcpServerId: mcpServer.id,
+        agentId: lead.id,
+      });
+
+      const result = deleteMcpServer(mcpServer.id);
+
+      expect(result).toEqual({ deleted: true, deletedScriptConnectionCount: 1 });
+      expect(getMcpServerById(mcpServer.id)).toBeNull();
+      expect(getScriptConnectionById(connection.id)).toBeNull();
+    } finally {
+      fake.stop();
+    }
+  });
+
   test("runtime ctx.mcp registry posts the expected proxy request shape", async () => {
     const calls: Array<{ url: string; headers: Record<string, string>; body: unknown }> = [];
     const savedFetch = globalThis.fetch;
@@ -591,6 +840,52 @@ describe("script MCP connections", () => {
           },
           body: { tool: "echo-tool", arguments: { message: "hi" } },
         },
+      ]);
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  test("runtime ctx.mcp registry suffixes normalized tool name collisions", async () => {
+    const calls: Array<{ body: unknown }> = [];
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input, init) => {
+      calls.push({
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+      });
+      return Response.json({ ok: true, result: { content: [{ type: "text", text: "ok" }] } });
+    }) as typeof globalThis.fetch;
+
+    try {
+      const config = new SwarmConfig({
+        system: {
+          apiKey: { value: API_KEY, isSecret: true },
+          agentId: { value: "agent-runtime", isSecret: false },
+          mcpBaseUrl: { value: "http://swarm.test/", isSecret: false },
+        },
+        user: {},
+      });
+      const registry = createMcpRegistryClient(
+        [
+          {
+            slug: "external",
+            kind: "mcp",
+            connectionId: "conn-1",
+            tools: [
+              { name: "foo-bar", inputSchema: {} },
+              { name: "foo_bar", inputSchema: {} },
+            ],
+          },
+        ],
+        config,
+      );
+
+      await registry.external!.fooBar({});
+      await registry.external!.fooBar2({});
+
+      expect(calls.map((call) => call.body)).toEqual([
+        { tool: "foo-bar", arguments: {} },
+        { tool: "foo_bar", arguments: {} },
       ]);
     } finally {
       globalThis.fetch = savedFetch;

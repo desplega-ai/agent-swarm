@@ -96,6 +96,13 @@ export function assertUrlSafe(rawUrl: string, opts: SsrfGuardOptions = {}): URL 
   return parsed;
 }
 
+export function publicEndpointSsrfOptions(): SsrfGuardOptions {
+  return {
+    allowPrivateHosts: process.env.NODE_ENV !== "production",
+    allowInsecure: process.env.NODE_ENV !== "production",
+  };
+}
+
 function defaultSsrfOptions(): SsrfGuardOptions {
   return {
     allowPrivateHosts: process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS === "true",

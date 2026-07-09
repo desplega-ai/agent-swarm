@@ -7,6 +7,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createAgent, deleteSwarmConfig, getDb, upsertSwarmConfig } from "../be/db";
 import { runMigrations } from "../be/migrations/runner";
 import {
+  fetchOpenapiSpec,
   getScriptApiConnectionDescriptors,
   refreshScriptConnection,
   setOpenapiSpecFetchForTesting,
@@ -632,6 +633,29 @@ describe("script connections", () => {
     } finally {
       server.stop();
     }
+  });
+
+  test("OpenAPI spec fetch rejects redirects to unsafe hosts in production", async () => {
+    process.env.NODE_ENV = "production";
+    const requests: Array<{ url: string; redirect?: RequestRedirect }> = [];
+    setOpenapiSpecFetchForTesting((async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      requests.push({ url, redirect: init?.redirect });
+      if (url === "https://spec.vendor.test/openapi.json") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "http://127.0.0.1/spec.json" },
+        });
+      }
+      return new Response(openapiSpec, { status: 200 });
+    }) as typeof fetch);
+
+    await expect(fetchOpenapiSpec("https://spec.vendor.test/openapi.json")).rejects.toThrow(
+      /private IPv4|insecure/,
+    );
+    expect(requests).toEqual([
+      { url: "https://spec.vendor.test/openapi.json", redirect: "manual" },
+    ]);
   });
 
   test("YAML specs are accepted from a URL and canonicalized to JSON", async () => {
