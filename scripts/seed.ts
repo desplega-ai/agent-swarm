@@ -120,6 +120,28 @@ function daysAgo(n: number): string {
   return d.toISOString();
 }
 
+function secondsAgo(n: number): string {
+  return new Date(Date.now() - n * 1_000).toISOString();
+}
+
+/**
+ * Task runtime, in seconds, drawn to match production.
+ *
+ * Measured 2026-07-09 over 22,852 finished tasks on the prod DB:
+ * p10 0.5min · p50 1.8min · p75 3.7min · p90 8.4min · p99 31min.
+ * Real work is short and heavily right-skewed; a uniform draw over hours
+ * (which this used to be) produces bars nothing like the real thing.
+ */
+function sampleRunSeconds(): number {
+  const r = faker.number.float({ min: 0, max: 1 });
+  if (r < 0.1) return faker.number.int({ min: 10, max: 31 });
+  if (r < 0.5) return faker.number.int({ min: 31, max: 108 });
+  if (r < 0.75) return faker.number.int({ min: 108, max: 222 });
+  if (r < 0.9) return faker.number.int({ min: 222, max: 504 });
+  if (r < 0.99) return faker.number.int({ min: 504, max: 1871 });
+  return faker.number.int({ min: 1871, max: 7200 });
+}
+
 function pick<T>(arr: T[]): T {
   return faker.helpers.arrayElement(arr);
 }
@@ -466,7 +488,10 @@ const TASK_STATUSES: Array<{
   { status: "completed", needsAgent: true, needsFinish: true },
   { status: "failed", needsAgent: true, needsFinish: true },
   { status: "unassigned", needsAgent: false, needsFinish: false },
-  { status: "cancelled", needsAgent: false, needsFinish: true },
+  // Cancelled tasks keep their agent: cancellation happens after a claim. In
+  // prod all 286 cancelled tasks have an agentId, and just 4 of 22.8k tasks
+  // overall are agentless.
+  { status: "cancelled", needsAgent: true, needsFinish: true },
 ];
 
 // ---------------------------------------------------------------------------
@@ -596,7 +621,7 @@ function seedTasks(
     VALUES (?, ?, ?, ?, ?, ?)
   `);
 
-  const seededTasks: { id: string; agentId: string | null }[] = [];
+  const seededTasks: { id: string; agentId: string | null; createdAt: string }[] = [];
 
   for (let i = 0; i < count; i++) {
     const template = generateTaskDescription();
@@ -605,10 +630,24 @@ function seedTasks(
     const agent = statusInfo.needsAgent ? pick(agents) : null;
     const creator = pick(agents);
     const priority = faker.number.int({ min: 20, max: 80 });
-    const createdAt = daysAgo(faker.number.int({ min: 0, max: 14 }));
-    const finishedAt = statusInfo.needsFinish
-      ? daysAgo(faker.number.int({ min: 0, max: 3 }))
-      : null;
+    // Second-resolution start, and a finish derived from it. Drawing the two
+    // independently (as this used to) produced tasks that finished before they
+    // started, and multi-day bars on any duration-aware view. Starts are spread
+    // over 3 days so an 8h default window still lands on real activity.
+    // A task still marked in_progress started recently — anything else is a
+    // stalled run, not the common case, and would draw a days-long live bar.
+    const startedSecondsAgo =
+      statusInfo.status === "in_progress"
+        ? faker.number.int({ min: 30, max: 90 * 60 })
+        : faker.number.int({ min: 30, max: 3 * 24 * 60 * 60 });
+    const createdAt = secondsAgo(startedSecondsAgo);
+    const runSeconds = Math.min(sampleRunSeconds(), startedSecondsAgo);
+    const finishedAt = statusInfo.needsFinish ? secondsAgo(startedSecondsAgo - runSeconds) : null;
+    // Only a live task has been touched "now"; a queued one was last touched
+    // when it was created. Views that infer an end time from lastUpdatedAt
+    // otherwise stretch every pending task from its creation to the present.
+    const lastUpdatedAt =
+      finishedAt ?? (statusInfo.status === "in_progress" ? now() : createdAt);
 
     let failureReason: string | null = null;
     let output: string | null = null;
@@ -640,10 +679,13 @@ function seedTasks(
         ])
       : null;
 
-    // ~15% get a parentTaskId (only if we have previous tasks)
+    // ~35% get a parentTaskId (prod: 36.4% of 22.8k tasks), drawn only from
+    // tasks that started earlier — a child that predates its parent is not a
+    // shape the swarm can produce.
+    const parentCandidates = seededTasks.filter((prev) => prev.createdAt < createdAt);
     const parentTaskId =
-      seededTasks.length >= 3 && faker.datatype.boolean(0.15)
-        ? seededTasks[faker.number.int({ min: 0, max: seededTasks.length - 1 })].id
+      parentCandidates.length >= 3 && faker.datatype.boolean(0.35)
+        ? parentCandidates[faker.number.int({ min: 0, max: parentCandidates.length - 1 })].id
         : null;
 
     // ~25% of in_progress/completed tasks get a claudeSessionId
@@ -693,7 +735,7 @@ function seedTasks(
       priority,
       "[]",
       createdAt,
-      now(),
+      lastUpdatedAt,
       finishedAt,
       failureReason,
       output,
@@ -711,7 +753,7 @@ function seedTasks(
     );
 
     logStmt.run(seedId("log", `task:${i}`), "task_created", creator.id, id, statusInfo.status, createdAt);
-    seededTasks.push({ id, agentId: agent?.id ?? null });
+    seededTasks.push({ id, agentId: agent?.id ?? null, createdAt });
   }
 
   console.log(`  ✓ Seeded ${count} tasks`);
@@ -1342,7 +1384,7 @@ function seedContextSnapshots(
 
   const updateTaskStmt = db.prepare(`
     UPDATE agent_tasks
-    SET compactionCount = ?, peakContextPercent = ?, totalContextTokensUsed = ?, contextWindowSize = ?
+    SET compactionCount = ?, peakContextPercent = ?, peakContextTokens = ?, contextWindowSize = ?
     WHERE id = ?
   `);
 

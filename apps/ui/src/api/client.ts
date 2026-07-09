@@ -279,6 +279,10 @@ class ApiClient {
     offset?: number;
     /** Phase 2 (≥1.76.0): ISO 8601 timestamp; backend filters createdAt >= value. */
     createdAfter?: string;
+    /** Timeline paging: ISO 8601 timestamp; backend filters createdAt < value. */
+    createdBefore?: string;
+    /** Timeline paging can request stable created-time ordering. */
+    orderBy?: "lastUpdatedAt" | "createdAt";
     /** Filter to tasks whose `source` is in this list. Empty/undefined → all. */
     source?: string[];
   }): Promise<TasksResponse> {
@@ -291,6 +295,8 @@ class ApiClient {
     if (filters?.limit != null) params.set("limit", String(filters.limit));
     if (filters?.offset != null) params.set("offset", String(filters.offset));
     if (filters?.createdAfter) params.set("createdAfter", filters.createdAfter);
+    if (filters?.createdBefore) params.set("createdBefore", filters.createdBefore);
+    if (filters?.orderBy) params.set("orderBy", filters.orderBy);
     if (filters?.source && filters.source.length > 0)
       params.set("source", filters.source.join(","));
     const queryString = params.toString();

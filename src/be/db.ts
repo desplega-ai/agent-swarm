@@ -1636,8 +1636,12 @@ export interface TaskFilters {
   source?: AgentTaskSource[];
   /** ISO 8601 timestamp; only return tasks where createdAt >= this. */
   createdAfter?: string;
+  /** ISO 8601 timestamp; only return tasks where createdAt < this. */
+  createdBefore?: string;
   /** Only return tasks requested by this canonical user. NULL rows are excluded. */
   requestedByUserId?: string;
+  /** Sort list rows for either table freshness or timeline paging. */
+  orderBy?: "lastUpdatedAt" | "createdAt";
   limit?: number;
   offset?: number;
   includeHeartbeat?: boolean;
@@ -1721,6 +1725,11 @@ export function getAllTasks(
     params.push(filters.createdAfter);
   }
 
+  if (filters?.createdBefore) {
+    conditions.push("createdAt < ?");
+    params.push(filters.createdBefore);
+  }
+
   if (filters?.requestedByUserId) {
     conditions.push("requestedByUserId = ?");
     params.push(filters.requestedByUserId);
@@ -1739,10 +1748,14 @@ export function getAllTasks(
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const limit = filters?.limit ?? 25;
   const offset = filters?.offset ?? 0;
+  const orderBy =
+    filters?.orderBy === "createdAt"
+      ? "createdAt DESC, rowid DESC"
+      : "lastUpdatedAt DESC, priority DESC";
   const query = `SELECT agent_tasks.*,
     (SELECT SUM(totalCostUsd) FROM session_costs WHERE session_costs.taskId = agent_tasks.id) AS totalCostUsd
     FROM agent_tasks ${whereClause}
-    ORDER BY lastUpdatedAt DESC, priority DESC LIMIT ${limit} OFFSET ${offset}`;
+    ORDER BY ${orderBy} LIMIT ${limit} OFFSET ${offset}`;
 
   const rows = getDb()
     .prepare<AgentTaskRow, (string | AgentTaskStatus)[]>(query)
@@ -1836,6 +1849,16 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
   if (filters?.createdAfter) {
     conditions.push("createdAt >= ?");
     params.push(filters.createdAfter);
+  }
+
+  if (filters?.createdBefore) {
+    conditions.push("createdAt < ?");
+    params.push(filters.createdBefore);
+  }
+
+  if (filters?.requestedByUserId) {
+    conditions.push("requestedByUserId = ?");
+    params.push(filters.requestedByUserId);
   }
 
   // Exclude system/heartbeat tasks by default. The flag is still called

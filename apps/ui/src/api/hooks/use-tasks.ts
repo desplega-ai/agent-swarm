@@ -1,4 +1,10 @@
-import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "../client";
 import type { AgentTask, AgentTaskSource, AgentTaskStatus, TaskWithLogs } from "../types";
@@ -13,15 +19,30 @@ export interface TaskFilters {
   offset?: number;
   /** Phase 2 (≥1.76.0): ISO 8601 timestamp; backend filters createdAt >= value. */
   createdAfter?: string;
+  /** Timeline paging: ISO 8601 timestamp; backend filters createdAt < value. */
+  createdBefore?: string;
+  /** Timeline paging can request stable created-time ordering. */
+  orderBy?: "lastUpdatedAt" | "createdAt";
   /** Filter to tasks whose `source` is in this list. Empty/undefined → all. */
   source?: string[];
 }
 
-export function useTasks(filters?: TaskFilters) {
+export interface UseTasksOptions {
+  /**
+   * Keep serving the previous key's data while a new key resolves, instead of
+   * dropping to `undefined`. Callers whose filters are time-derived (and so
+   * mint a fresh query key on a timer) need this — otherwise every key change
+   * flashes their whole view back to its loading state.
+   */
+  keepPreviousData?: boolean;
+}
+
+export function useTasks(filters?: TaskFilters, opts?: UseTasksOptions) {
   return useQuery({
     queryKey: ["tasks", filters],
     queryFn: () => api.fetchTasks(filters),
     select: (data) => ({ tasks: data.tasks, total: data.total }),
+    ...(opts?.keepPreviousData ? { placeholderData: keepPreviousData } : {}),
   });
 }
 
@@ -92,6 +113,7 @@ function matchesTaskFilters(task: AgentTask, filters?: TaskFilters): boolean {
   if (filters.agentId && task.agentId !== filters.agentId) return false;
   if (filters.scheduleId && task.scheduleId !== filters.scheduleId) return false;
   if (filters.createdAfter && task.createdAt < filters.createdAfter) return false;
+  if (filters.createdBefore && task.createdAt >= filters.createdBefore) return false;
   if (filters.source && filters.source.length > 0 && !filters.source.includes(task.source)) {
     return false;
   }

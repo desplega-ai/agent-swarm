@@ -5,8 +5,6 @@ import { SettingsLayout } from "@/pages/settings/settings-layout";
 import { UsageLayout } from "@/pages/usage/usage-layout";
 import { RouteRedirect } from "./route-redirect";
 
-const DashboardPage = lazy(() => import("@/pages/dashboard/page"));
-const HomePage = lazy(() => import("@/pages/home/page"));
 const UnifiedHome = lazy(() => import("@/pages/home/unified-home"));
 const AgentsPage = lazy(() => import("@/pages/agents/page"));
 const AgentDetailPage = lazy(() => import("@/pages/agents/[id]/page"));
@@ -93,9 +91,9 @@ export const router = createBrowserRouter([
     path: "/",
     element: <RootLayout />,
     children: [
+      // `/` is served by `UnifiedHome` (pages/home/unified-home.tsx) — the sole
+      // home surface. The former `/old-home` and `/old-dashboard` pages are gone.
       { index: true, element: <UnifiedHome /> },
-      { path: "old-home", element: <HomePage /> },
-      { path: "old-dashboard", element: <DashboardPage /> },
       { path: "agents", element: <AgentsPage /> },
       { path: "agents/:id", element: <AgentDetailPage /> },
       { path: "tasks", element: <TasksPage /> },

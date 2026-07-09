@@ -14412,10 +14412,31 @@
           },
           {
             "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "createdBefore",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "required": false,
             "name": "source",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "lastUpdatedAt",
+                "createdAt"
+              ]
+            },
+            "required": false,
+            "name": "orderBy",
             "in": "query"
           },
           {

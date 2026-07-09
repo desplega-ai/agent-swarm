@@ -59,8 +59,12 @@ const listTasks = route({
     includeHeartbeat: z.enum(["true", "false"]).optional(),
     /** ISO 8601 — return only tasks created on/after this timestamp. */
     createdAfter: z.string().datetime().optional(),
+    /** ISO 8601 — return only tasks created before this timestamp. */
+    createdBefore: z.string().datetime().optional(),
     /** Comma-separated source filter (e.g. `ui,slack`). Omit to include all. */
     source: z.string().optional(),
+    /** `createdAt` enables stable time-axis paging; default preserves table freshness ordering. */
+    orderBy: z.enum(["lastUpdatedAt", "createdAt"]).optional(),
     limit: z.coerce.number().int().optional(),
     offset: z.coerce.number().int().optional(),
     /** `full` restores the legacy shape (full `task` text + all fields); default is slim. */
@@ -342,7 +346,9 @@ export async function handleTasks(
       search: parsed.query.search || undefined,
       includeHeartbeat: parsed.query.includeHeartbeat === "true" || undefined,
       createdAfter: parsed.query.createdAfter || undefined,
+      createdBefore: parsed.query.createdBefore || undefined,
       source,
+      orderBy: parsed.query.orderBy,
       limit: parsed.query.limit,
       offset: parsed.query.offset,
     };

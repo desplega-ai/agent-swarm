@@ -157,6 +157,9 @@ export interface AgentTask {
   providerMeta?: DevinProviderMeta | Record<string, never>;
   harnessVariant?: string;
   harnessVariantMeta?: { version?: string; failureArtifact?: string };
+  peakContextPercent?: number;
+  peakContextTokens?: number;
+  contextWindowSize?: number;
   /** Sum of recorded session costs for this task. Missing when no cost rows exist. */
   totalCostUsd?: number;
   /** Phase 1 (≥1.76.0): canonical user who requested this task. */
