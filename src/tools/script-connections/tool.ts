@@ -299,7 +299,9 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
           const binding = upsertCredentialBinding({
             configKey: args.configKey,
             allowedHosts: args.allowedHosts,
-            headerTemplate: args.headerTemplate ?? `Authorization: Bearer ${placeholder}`,
+            headerTemplate:
+              args.headerTemplate ??
+              (args.queryTemplate ? undefined : `Authorization: Bearer ${placeholder}`),
             queryTemplate: args.queryTemplate,
             scope: bindingScope,
             scopeId: resolveScopedResourceId(bindingScope, args.scopeId, "bindings"),
@@ -376,7 +378,9 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         const binding = upsertCredentialBinding({
           configKey: args.configKey,
           allowedHosts: args.allowedHosts ?? [new URL(args.baseUrl).hostname],
-          headerTemplate: args.headerTemplate ?? `Authorization: Bearer ${placeholder}`,
+          headerTemplate:
+            args.headerTemplate ??
+            (args.queryTemplate ? undefined : `Authorization: Bearer ${placeholder}`),
           queryTemplate: args.queryTemplate,
           scope: bindingScope,
           scopeId: resolveScopedResourceId(bindingScope, args.scopeId, "bindings"),
