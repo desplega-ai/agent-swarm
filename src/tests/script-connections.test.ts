@@ -497,6 +497,7 @@ describe("script connections", () => {
     try {
       database.run("CREATE TABLE users (id TEXT PRIMARY KEY)");
       database.run("CREATE TABLE mcp_servers (id TEXT PRIMARY KEY)");
+      database.run("CREATE TABLE agent_tasks (id TEXT PRIMARY KEY)");
       database.exec(migrationSql("101_script_connections.sql"));
       database.exec(migrationSql("111_oauth_credential_bindings.sql"));
       markMigrationsAppliedThrough(database, 111);
