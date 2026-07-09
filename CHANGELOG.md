@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+- **claude-bridge fully removed** — the `SWARM_USE_CLAUDE_BRIDGE` opt-in, the pinned `@desplega.ai/claude-bridge` worker-image dependency, the legacy `tmux`-driven compatibility path (trust-dialog pre-seed, tmux fail-fast), the bridge-failure tmux-pane diagnostics, and the `claude-bridge-experimental` docs guide are all gone. It had been disabled fleet-wide for a while; `stock` `claude` is now the only claude harness path.
+
 ### Fixed
 - **Per-agent setupScript failures are non-fatal by default after the v1.106.0 privilege hardening** — `STARTUP_SCRIPT_STRICT` now defaults to `false`, so worker pods continue booting when a per-agent `/workspace/start-up.*` script still contains root-only commands. Set `STARTUP_SCRIPT_STRICT=true` to keep fail-fast behavior.
 

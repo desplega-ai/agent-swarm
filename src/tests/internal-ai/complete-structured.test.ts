@@ -290,11 +290,9 @@ describe("defaultSpawnClaudeCli", () => {
     );
     const savedBinary = process.env.CLAUDE_BINARY;
     const savedSkip = process.env.SKIP_SESSION_SUMMARY;
-    const savedBridge = process.env.SWARM_USE_CLAUDE_BRIDGE;
     process.env.CLAUDE_BINARY = `bash ${fakeBinary}`;
     // Ensure a false-pass via inheritance is impossible.
     delete process.env.SKIP_SESSION_SUMMARY;
-    delete process.env.SWARM_USE_CLAUDE_BRIDGE;
     try {
       const out = await defaultSpawnClaudeCli("prompt", "haiku");
       expect(out).toBe("SKIP_SESSION_SUMMARY=1");
@@ -302,7 +300,6 @@ describe("defaultSpawnClaudeCli", () => {
       if (savedBinary === undefined) delete process.env.CLAUDE_BINARY;
       else process.env.CLAUDE_BINARY = savedBinary;
       if (savedSkip !== undefined) process.env.SKIP_SESSION_SUMMARY = savedSkip;
-      if (savedBridge !== undefined) process.env.SWARM_USE_CLAUDE_BRIDGE = savedBridge;
       await Bun.$`rm -f ${fakeBinary}`.quiet();
     }
   });

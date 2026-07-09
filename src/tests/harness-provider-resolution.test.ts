@@ -206,16 +206,6 @@ describe("validateConfigValue", () => {
     }
   });
 
-  test("accepts only boolean-like SWARM_USE_CLAUDE_BRIDGE values", () => {
-    for (const value of ["true", "false", "1", "0", " TRUE "]) {
-      expect(validateConfigValue("SWARM_USE_CLAUDE_BRIDGE", value)).toBeNull();
-    }
-    expect(validateConfigValue("SWARM_USE_CLAUDE_BRIDGE", "yes")).toMatch(
-      /SWARM_USE_CLAUDE_BRIDGE/,
-    );
-    expect(validateConfigValue("SWARM_USE_CLAUDE_BRIDGE", true)).toMatch(/SWARM_USE_CLAUDE_BRIDGE/);
-  });
-
   test("accepts valid BEDROCK_AUTH_MODE values: sdk, bearer", () => {
     expect(validateConfigValue("BEDROCK_AUTH_MODE", "sdk")).toBeNull();
     expect(validateConfigValue("BEDROCK_AUTH_MODE", "bearer")).toBeNull();

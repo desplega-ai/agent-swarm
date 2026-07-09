@@ -658,7 +658,6 @@ const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "MODEL_OVERRIDE",
   "REASONING_EFFORT_OVERRIDE",
   "AGENT_FS_SHARED_ORG_ID",
-  "SWARM_USE_CLAUDE_BRIDGE",
   "BEDROCK_AUTH_MODE",
 ]);
 
@@ -1100,7 +1099,6 @@ export async function ensureTaskFinished(
    * from the resolved swarm_config value. Falls back to env when omitted.
    */
   provider?: ProviderName,
-  failureDiagnostics?: string,
 ): Promise<void> {
   const headers: Record<string, string> = {
     "X-Agent-ID": config.agentId,
@@ -1117,9 +1115,6 @@ export async function ensureTaskFinished(
 
   if (status === "failed") {
     body.failureReason = failureReason || `Claude process exited with code ${exitCode}`;
-    if (failureDiagnostics) {
-      body.failureReason = `${body.failureReason}\n\n${failureDiagnostics}`;
-    }
   } else if (providerOutput) {
     const validation = await validateProviderOutputIfNeeded(config, taskId, providerOutput);
     if (validation.ok) {
@@ -1777,7 +1772,7 @@ interface RunningTask {
    * provider before it completed, and vice versa).
    */
   hasLocalEnvironment: boolean;
-  /** Harness variant captured on session_init (e.g. "bridge" or "stock") */
+  /** Harness variant captured on session_init (e.g. "stock") */
   harnessVariant?: string;
   /** Harness metadata captured on session_init (currently includes provider package version) */
   harnessVariantMeta?: Record<string, unknown>;
@@ -1918,62 +1913,6 @@ async function saveProviderSessionId(
     method: "PUT",
     headers,
     body: JSON.stringify(body),
-  });
-}
-
-async function findBridgeFailureArtifact(cwd: string): Promise<string | undefined> {
-  try {
-    const bridgeDir = `${cwd}/.claude-bridge/runs`;
-    const dir = await Array.fromAsync(
-      new Bun.Glob("*/tmux-pane-final.txt").scan({ cwd: bridgeDir, absolute: true }),
-    );
-    if (dir.length === 0) return undefined;
-    dir.sort();
-    return dir[dir.length - 1];
-  } catch {
-    return undefined;
-  }
-}
-
-async function readBridgeFailureTail(
-  artifactPath: string,
-  maxLines = 40,
-  maxChars = 4000,
-): Promise<string | undefined> {
-  try {
-    const text = await Bun.file(artifactPath).text();
-    const tail = text.split(/\r?\n/).slice(-maxLines).join("\n").trim();
-    if (!tail) return undefined;
-    return tail.length > maxChars ? tail.slice(-maxChars) : tail;
-  } catch {
-    return undefined;
-  }
-}
-
-export async function getBridgeFailureDiagnostics(
-  cwd: string,
-): Promise<{ artifactPath: string; paneTail?: string } | undefined> {
-  const artifactPath = await findBridgeFailureArtifact(cwd);
-  if (!artifactPath) return undefined;
-  return {
-    artifactPath,
-    paneTail: await readBridgeFailureTail(artifactPath),
-  };
-}
-
-async function updateHarnessVariantMeta(
-  apiUrl: string,
-  apiKey: string,
-  taskId: string,
-  claudeSessionId: string,
-  meta: Record<string, unknown>,
-): Promise<void> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-  await fetch(`${apiUrl}/api/tasks/${taskId}/session`, {
-    method: "PUT",
-    headers,
-    body: JSON.stringify({ claudeSessionId, harnessVariantMeta: meta }),
   });
 }
 
@@ -3841,20 +3780,6 @@ async function checkCompletedProcesses(
           result.rateLimitWindows,
         ).catch(() => {});
       }
-      let bridgeDiagnostics: Awaited<ReturnType<typeof getBridgeFailureDiagnostics>> | undefined;
-      if (result.exitCode !== 0 && harnessProvider === "claude" && workingDir) {
-        bridgeDiagnostics = await getBridgeFailureDiagnostics(workingDir);
-        if (bridgeDiagnostics?.artifactPath && result.sessionId) {
-          console.log(`[${role}] Bridge failure artifact found: ${bridgeDiagnostics.artifactPath}`);
-          updateHarnessVariantMeta(apiConfig.apiUrl, apiConfig.apiKey, taskId, result.sessionId, {
-            failureArtifact: bridgeDiagnostics.artifactPath,
-          }).catch((err) => console.warn(`[runner] Failed to update harness variant meta: ${err}`));
-        }
-      }
-      const bridgeFailureDiagnostics =
-        bridgeDiagnostics?.paneTail != null
-          ? `Claude bridge final tmux pane tail (${bridgeDiagnostics.artifactPath}):\n${bridgeDiagnostics.paneTail}`
-          : undefined;
       await ensureTaskFinished(
         apiConfig,
         role,
@@ -3863,7 +3788,6 @@ async function checkCompletedProcesses(
         failureReason,
         result.output,
         harnessProvider,
-        bridgeFailureDiagnostics,
       );
 
       telemetry.taskEvent("session_completed", {

@@ -77,7 +77,6 @@ bunx @desplega.ai/agent-swarm onboard
 |----------|----------|---------|-------------|
 | `CLAUDE_CODE_OAUTH_TOKEN` | Yes* | — | OAuth token from `claude setup-token`. Supports [multi-credential pools](#multi-credential-pools) |
 | `ANTHROPIC_API_KEY` | Alt* | — | Anthropic API key (alternative to OAuth). Also supports multi-credential pools |
-| `SWARM_USE_CLAUDE_BRIDGE` | No | `false` | Enables the bundled `@desplega.ai/claude-bridge` path for interactive Claude sessions. Requires `CLAUDE_CODE_OAUTH_TOKEN`; if only `ANTHROPIC_API_KEY` is available, the worker falls back to stock `claude` |
 | `CLAUDE_BINARY` | No | `claude` | Path to the Claude CLI binary (if not in `$PATH`) |
 
 \* One of `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` is required.

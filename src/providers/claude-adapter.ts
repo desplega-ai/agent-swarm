@@ -1,5 +1,4 @@
-import { readFile, unlink, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { type Span, trace } from "@opentelemetry/api";
 import {
@@ -106,162 +105,6 @@ export function resolveClaudeBinary(
 ): string {
   const candidate = resolvedEnv.CLAUDE_BINARY?.trim() || fallbackEnv.CLAUDE_BINARY?.trim();
   return candidate || "claude";
-}
-
-const CLAUDE_BRIDGE_BINARY = "claude-bridge";
-const CLAUDE_BRIDGE_LOCAL_AUTH_ARG = "--desplega-local-auth";
-const LEGACY_CLAUDE_BRIDGE_COMPAT_BINARY = "shan" + "non";
-const CLAUDE_BRIDGE_LOCAL_AUTH_ENV_VARS = [
-  "ANTHROPIC_API_KEY",
-  "ANTHROPIC_AUTH_TOKEN",
-  "ANTHROPIC_BASE_URL",
-  "ANTHROPIC_CUSTOM_HEADERS",
-  "ANTHROPIC_MODEL",
-] as const;
-
-/**
- * Parse a boolean env toggle. Only true/1 enable and false/0 disable; unset
- * and invalid values are treated as disabled.
- *
- * Exported for unit testing.
- */
-export function parseClaudeBridgeEnabled(raw: string | undefined): boolean {
-  const normalized = raw?.trim().toLowerCase();
-  return normalized === "true" || normalized === "1";
-}
-
-/**
- * Resolve the reloadable claude-bridge toggle from the same resolved-env
- * overlay used for `CLAUDE_BINARY`.
- *
- * Exported for unit testing.
- */
-export function resolveClaudeBridgeEnabled(
-  resolvedEnv: Record<string, string | undefined>,
-  fallbackEnv: Record<string, string | undefined> = process.env,
-): boolean {
-  const candidate =
-    resolvedEnv.SWARM_USE_CLAUDE_BRIDGE?.trim() || fallbackEnv.SWARM_USE_CLAUDE_BRIDGE?.trim();
-  return parseClaudeBridgeEnabled(candidate);
-}
-
-/**
- * Resolve the claude binary argv, gating claude-bridge on an OAuth token.
- *
- * claude-bridge exists to keep subscription/OAuth billing correct by driving
- * the real interactive Claude TUI in tmux. It authenticates the child claude
- * from `CLAUDE_CODE_OAUTH_TOKEN` only — it deliberately strips `ANTHROPIC_*`
- * from the launched process — so it cannot run on an Anthropic API key. And
- * API-key billing is identical headless vs interactive, so there's no reason to
- * pay the bridge's complexity/footguns when only an API key is available.
- *
- * Therefore: only route through claude-bridge when an OAuth token is present.
- * If the bridge is requested (`SWARM_USE_CLAUDE_BRIDGE`) but no OAuth token is
- * set, fall back to stock `claude`, which Claude Code authenticates fine from
- * the API key. `bridgeRequestedWithoutOAuth` lets the caller log why.
- *
- * Exported for unit testing.
- */
-export function resolveClaudeBinaryArgv(
-  resolvedEnv: Record<string, string | undefined>,
-  fallbackEnv: Record<string, string | undefined> = process.env,
-): {
-  raw: string;
-  argv: string[];
-  useClaudeBridge: boolean;
-  bridgeRequestedWithoutOAuth: boolean;
-} {
-  const bridgeRequested = resolveClaudeBridgeEnabled(resolvedEnv, fallbackEnv);
-  const hasOAuthToken = Boolean(
-    (resolvedEnv.CLAUDE_CODE_OAUTH_TOKEN ?? fallbackEnv.CLAUDE_CODE_OAUTH_TOKEN)?.trim(),
-  );
-  const useClaudeBridge = bridgeRequested && hasOAuthToken;
-  const raw = useClaudeBridge
-    ? CLAUDE_BRIDGE_BINARY
-    : resolveClaudeBinary(resolvedEnv, fallbackEnv);
-  return {
-    raw,
-    argv: parseClaudeBinary(raw),
-    useClaudeBridge,
-    bridgeRequestedWithoutOAuth: bridgeRequested && !hasOAuthToken,
-  };
-}
-
-function isLegacyClaudeBridgeCompatBinary(raw: string): boolean {
-  return raw.toLowerCase().includes(LEGACY_CLAUDE_BRIDGE_COMPAT_BINARY);
-}
-
-function withClaudeBridgeAuthArgs(
-  argv: readonly string[],
-  sourceEnv: Record<string, string | undefined>,
-): string[] {
-  if (sourceEnv.CLAUDE_CODE_OAUTH_TOKEN) {
-    return [...argv];
-  }
-
-  if (CLAUDE_BRIDGE_LOCAL_AUTH_ENV_VARS.some((name) => sourceEnv[name])) {
-    return [...argv, CLAUDE_BRIDGE_LOCAL_AUTH_ARG];
-  }
-
-  return [...argv];
-}
-
-/**
- * Pre-seed `~/.claude.json` so the per-project trust-dialog ("Quick safety
- * check: Is this a project you trust?") doesn't block on first run.
- *
- * Mirrors the onboarding-skip hack in `Dockerfile.worker` (which writes
- * `hasCompletedOnboarding` and `bypassPermissionsModeAccepted`). When the
- * resolved binary runs interactive claude inside tmux, claude does NOT
- * reliably auto-accept the dialog, so the pane can hang forever. Writing
- * `projects[cwd].hasTrustDialogAccepted = true` (and `hasCompletedProjectOnboarding`)
- * tells claude-code the cwd is pre-trusted.
- *
- * Idempotent (no-op when already true), read-merge-write (never clobbers
- * other keys), graceful on missing / malformed file.
- *
- * Exported for unit testing.
- */
-export async function preseedClaudeTrustDialog(
-  cwd: string,
-  // Prefer `$HOME` over `homedir()` so callers in tests / sandboxed envs that
-  // override HOME get the override. Bun's `os.homedir()` caches the real
-  // passwd entry at process boot and ignores HOME mutations.
-  homeDir: string = process.env.HOME ?? homedir(),
-): Promise<void> {
-  const claudeJsonPath = join(homeDir, ".claude.json");
-  let data: Record<string, unknown> = {};
-  try {
-    const raw = await readFile(claudeJsonPath, "utf-8");
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      data = parsed as Record<string, unknown>;
-    }
-  } catch {
-    // missing or malformed — start from {}
-    console.warn(
-      `\x1b[33m[claude]\x1b[0m Starting with empty .claude.json for trust pre-seed at ${claudeJsonPath}`,
-    );
-  }
-
-  const projects = (data.projects ?? {}) as Record<string, Record<string, unknown>>;
-  const existing = projects[cwd] ?? {};
-  if (existing.hasTrustDialogAccepted === true) {
-    // Already trusted — no-op, no write.
-    return;
-  }
-
-  projects[cwd] = {
-    ...existing,
-    hasTrustDialogAccepted: true,
-    hasCompletedProjectOnboarding: true,
-  };
-  data.projects = projects;
-
-  await writeFile(claudeJsonPath, `${JSON.stringify(data, null, 2)}\n`);
-  console.log(
-    `\x1b[2m[claude]\x1b[0m Pre-seeded trust dialog acceptance for ${cwd} in ${claudeJsonPath}`,
-  );
 }
 
 /**
@@ -927,68 +770,19 @@ export class ClaudeAdapter implements ProviderAdapter {
     console.log(`\x1b[2m[claude]\x1b[0m Using credential: ${credType}`);
 
     // Resolve the argv prefix. Same flags (`-p`, `--model`, ...) work across
-    // alternates; only argv[0..n] changes. Prefer SWARM_USE_CLAUDE_BRIDGE=true
-    // for the Desplega-owned bridge. CLAUDE_BINARY remains as the low-level
-    // override for custom binaries and the legacy third-party bridge path.
+    // alternates; only argv[0..n] changes. CLAUDE_BINARY is the low-level
+    // override for custom binaries.
     //
     // `config.env` carries the swarm_config overlay (resolved repo > agent > global
     // by `fetchResolvedEnv` in src/commands/runner.ts), so operators can flip
     // a worker's binary via `set-config CLAUDE_BINARY=...` without a restart.
     // Falls back to process.env, then "claude". See `resolveClaudeBinary` above.
-    //
-    // See `docs-site/.../claude-bridge-experimental.mdx` for the user-facing guide
-    // and `runbooks/harness-providers.md` for engineering notes.
-    const {
-      raw: claudeBinaryRaw,
-      argv: claudeBinaryArgv,
-      useClaudeBridge,
-      bridgeRequestedWithoutOAuth,
-    } = resolveClaudeBinaryArgv(sourceEnv);
-    if (bridgeRequestedWithoutOAuth) {
-      console.warn(
-        `\x1b[33m[claude]\x1b[0m SWARM_USE_CLAUDE_BRIDGE is set but no CLAUDE_CODE_OAUTH_TOKEN is present — falling back to stock 'claude'. claude-bridge requires a subscription/OAuth token (it forwards only the OAuth token to claude and strips ANTHROPIC_*); API-key billing is identical headless vs interactive, so the bridge isn't needed.`,
-      );
-    }
-    const isLegacyBridgeCompat = isLegacyClaudeBridgeCompatBinary(claudeBinaryRaw);
-    const effectiveClaudeBinaryArgv = useClaudeBridge
-      ? withClaudeBridgeAuthArgs(claudeBinaryArgv, sourceEnv)
-      : claudeBinaryArgv;
-    const isInteractiveTmuxClaude = isLegacyBridgeCompat || useClaudeBridge;
-    const configuredClaudeBinaryRaw = resolveClaudeBinary(sourceEnv);
-    if (isLegacyClaudeBridgeCompatBinary(configuredClaudeBinaryRaw)) {
-      console.warn(
-        `\x1b[33m[claude]\x1b[0m CLAUDE_BINARY=${LEGACY_CLAUDE_BRIDGE_COMPAT_BINARY} is deprecated; set SWARM_USE_CLAUDE_BRIDGE=true to use @desplega.ai/claude-bridge.`,
-      );
-    }
+    const claudeBinaryRaw = resolveClaudeBinary(sourceEnv);
+    const claudeBinaryArgv = parseClaudeBinary(claudeBinaryRaw);
 
     console.log(
-      `\x1b[2m[${config.role}]\x1b[0m Resolved claude binary: ${effectiveClaudeBinaryArgv.join(" ")} (useClaudeBridge: ${useClaudeBridge}, legacyBridgeCompat: ${isLegacyBridgeCompat})`,
+      `\x1b[2m[${config.role}]\x1b[0m Resolved claude binary: ${claudeBinaryArgv.join(" ")}`,
     );
-
-    // Fail fast: claude-bridge and its legacy compatibility path both shell
-    // out to tmux. If it's
-    // missing, surface a clear error here rather than letting startup fail
-    // opaquely.
-    if (isInteractiveTmuxClaude && !Bun.which("tmux")) {
-      const label = useClaudeBridge
-        ? "SWARM_USE_CLAUDE_BRIDGE=true"
-        : `CLAUDE_BINARY=${LEGACY_CLAUDE_BRIDGE_COMPAT_BINARY}`;
-      throw new Error(
-        `${label} requires 'tmux' on PATH (install via apt/brew). See runbooks/harness-providers.md.`,
-      );
-    }
-
-    // Claude Bridge and its legacy compatibility path drive interactive
-    // `claude` in tmux, where the first-run trust dialog can block startup.
-    if (isInteractiveTmuxClaude) {
-      try {
-        await preseedClaudeTrustDialog(config.cwd);
-      } catch (err) {
-        console.warn(
-          `\x1b[33m[claude]\x1b[0m Failed to pre-seed trust dialog for ${config.cwd}: ${err}`,
-        );
-      }
-    }
 
     const taskFilePid = process.pid;
     const taskFilePath = await writeTaskFile(taskFilePid, {
@@ -1040,26 +834,15 @@ export class ClaudeAdapter implements ProviderAdapter {
       }
     }
 
-    const harnessVariant = useClaudeBridge ? "bridge" : "stock";
+    const harnessVariant = "stock";
     let harnessVariantMeta: Record<string, unknown> | undefined;
-    if (useClaudeBridge) {
-      try {
-        const bin = effectiveClaudeBinaryArgv[0] ?? "claude-bridge";
-        const result = await Bun.$`${bin} --version`.quiet();
-        const trimmed = result.text().trim();
-        if (trimmed) harnessVariantMeta = { version: trimmed };
-      } catch {
-        // bridge version is best-effort
-      }
-    } else {
-      try {
-        const bin = effectiveClaudeBinaryArgv[0] ?? "claude";
-        const result = await Bun.$`${bin} --version`.quiet();
-        const trimmed = result.text().trim();
-        if (trimmed) harnessVariantMeta = { version: trimmed };
-      } catch {
-        // stock version is best-effort
-      }
+    try {
+      const bin = claudeBinaryArgv[0] ?? "claude";
+      const result = await Bun.$`${bin} --version`.quiet();
+      const trimmed = result.text().trim();
+      if (trimmed) harnessVariantMeta = { version: trimmed };
+    } catch {
+      // version is best-effort
     }
 
     return new ClaudeSession(
@@ -1068,7 +851,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       taskFilePath,
       taskFilePid,
       sessionMcpConfig,
-      effectiveClaudeBinaryArgv,
+      claudeBinaryArgv,
       systemPromptFile,
       harnessVariant,
       harnessVariantMeta,
