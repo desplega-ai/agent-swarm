@@ -5,6 +5,28 @@ import type {
   ScriptApiRegistryClient,
 } from "./api-types";
 
+type FetchResponse = Awaited<ReturnType<typeof fetch>>;
+type TextResponse = {
+  headers: { get(name: string): string | null };
+  text(): Promise<string>;
+};
+
+type ScriptApiRawResult = {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  headers: Record<string, string>;
+  url: string;
+  response: FetchResponse;
+};
+
+type ScriptApiError = Error & {
+  status?: number;
+  statusText?: string;
+  body?: unknown;
+  response?: FetchResponse;
+};
+
 function applyTemplate(template: string): [string, string] | null {
   const idx = template.indexOf("=");
   if (idx >= 0) return [template.slice(0, idx), template.slice(idx + 1)];
@@ -75,9 +97,63 @@ function graphqlErrorMessage(errors: unknown): string {
     .join("; ");
 }
 
+function isRawOptions(value: unknown): value is { raw: true } {
+  return Boolean(value && typeof value === "object" && (value as { raw?: unknown }).raw === true);
+}
+
+function headersRecord(headers: Headers): Record<string, string> {
+  return Object.fromEntries(headers.entries());
+}
+
+function rawResult(response: FetchResponse): ScriptApiRawResult {
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    headers: headersRecord(response.headers),
+    url: response.url,
+    response,
+  };
+}
+
+async function parseResponseBody(response: TextResponse): Promise<unknown> {
+  const text = await response.text();
+  if (!text) return "";
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  }
+  return text;
+}
+
+async function throwApiResponseError(
+  slug: string,
+  operationName: string,
+  response: FetchResponse,
+): Promise<never> {
+  const error = new Error(
+    `ctx.api.${slug}.${operationName} failed with ${response.status}`,
+  ) as ScriptApiError;
+  error.status = response.status;
+  error.statusText = response.statusText;
+  error.response = response;
+  try {
+    error.body = await parseResponseBody(response.clone());
+  } catch {
+    error.body = undefined;
+  }
+  throw error;
+}
+
 export function createApiRegistryClient(
   descriptors: ScriptApiConnectionDescriptor[] = [],
+  options: { fetch?: typeof fetch } = {},
 ): ScriptApiRegistryClient {
+  const fetchImpl = options.fetch ?? fetch;
   const registry: ScriptApiRegistryClient = {};
   for (const descriptor of descriptors) {
     const client: ScriptApiRegistryClient[string] = {};
@@ -89,7 +165,7 @@ export function createApiRegistryClient(
         const url = new URL(descriptor.baseUrl);
         const headers = new Headers({ "content-type": "application/json" });
         applyCredential(descriptor.credential, url, headers);
-        const response = await fetch(url, {
+        const response = await fetchImpl(url, {
           method: "POST",
           headers,
           body: JSON.stringify({ query, variables }),
@@ -114,7 +190,8 @@ export function createApiRegistryClient(
     }
 
     for (const operation of descriptor.operations) {
-      client[operation.name] = async (rawArgs = {}) => {
+      client[operation.name] = async (rawArgs = {}, options?: unknown) => {
+        const raw = isRawOptions(options);
         const args = rawArgs as Record<string, unknown>;
         const url = operationUrl(descriptor.baseUrl, operation, args);
         const headers = new Headers();
@@ -140,11 +217,10 @@ export function createApiRegistryClient(
           headers.set("content-type", headers.get("content-type") ?? "application/json");
           init.body = JSON.stringify(args.body ?? null);
         }
-        const response = await fetch(url, init);
+        const response = await fetchImpl(url, init);
+        if (raw) return rawResult(response);
         if (!response.ok) {
-          throw new Error(
-            `ctx.api.${descriptor.slug}.${operation.name} failed with ${response.status}`,
-          );
+          await throwApiResponseError(descriptor.slug, operation.name, response);
         }
         const contentType = response.headers.get("content-type") ?? "";
         return contentType.includes("application/json") ? response.json() : response.text();

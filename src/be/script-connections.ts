@@ -615,10 +615,10 @@ export function buildGeneratedArtifacts(input: {
   const generatedTypes = [
     types,
     `export interface ${pascal(slug)}Api {`,
-    ...operations.map(
-      (operation) =>
-        `  ${operation.name}(args: ${operation.requestType}): Promise<${operation.responseType}>;`,
-    ),
+    ...operations.flatMap((operation) => [
+      `  ${operation.name}(args: ${operation.requestType}): Promise<${operation.responseType}>;`,
+      `  ${operation.name}(args: ${operation.requestType}, options: ScriptApiRawOptions): Promise<ScriptApiRawResult>;`,
+    ]),
     "}",
   ].join("\n");
   return { generatedTypes, generatedRuntimeJson: JSON.stringify(descriptor) };
