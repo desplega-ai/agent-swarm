@@ -23,6 +23,7 @@ import {
   updateTaskProgress,
   updateTaskVcs,
 } from "../be/db";
+import { findUserById } from "../be/users";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import {
@@ -365,15 +366,23 @@ export async function handleTasks(
     const parsed = await createTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    // Attribution must not be spoofable by a client-supplied body field: a
-    // non-user-authenticated caller (agent/API key) could otherwise attribute
-    // a task to any existing userId (previously existence-checked only).
-    // Mirror the pattern already used at every other audited write site
-    // (schedules, workflows, approvals, pages, stats) — trust the
-    // authenticated request user directly, otherwise derive the actor from
-    // the caller's own task context (ownership-gated `X-Source-Task-Id` /
-    // ambient current task), never the request body.
-    const requestedByUserId = resolveHttpAuditUserId(req, myAgentId) ?? undefined;
+    // Prefer trusted server-side identity: an authenticated request user, or
+    // the caller's own ownership-gated task context (`X-Source-Task-Id` /
+    // ambient current task) — same as every other audited write site.
+    // Fork-specific divergence from upstream #939: this org's UI authenticates
+    // every user with the SAME shared operator key, so a caller can never be
+    // classified as `auth.kind === "user"` and the anti-spoofing rationale for
+    // ignoring the body field doesn't hold here. As a last resort, fall back
+    // to a body-supplied `requestedByUserId`, but only after validating it
+    // names a real user — an unresolvable id (typo/garbage) is dropped rather
+    // than trusted, so it can't land a bad FK or a false attribution. This
+    // restores UI task-attribution in the shared-operator-key deployment and
+    // should NOT be upstreamed.
+    let requestedByUserId = resolveHttpAuditUserId(req, myAgentId) ?? undefined;
+    if (!requestedByUserId && parsed.body.requestedByUserId) {
+      const candidate = findUserById(parsed.body.requestedByUserId);
+      if (candidate) requestedByUserId = candidate.id;
+    }
 
     // Default agent for ingress-created tasks: when no explicit `agentId` is
     // provided, route to the lead so the task has an owner immediately

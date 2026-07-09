@@ -139,6 +139,48 @@ describe("normal REST API user-bound token auth", () => {
     expect(body.requestedByUserId).not.toBe(attacker.id);
   });
 
+  test("global API key caller + valid body requestedByUserId (no owned task context) → attributed to that user", async () => {
+    // Fork-specific divergence from upstream #939: this org's UI shares one
+    // operator key across all users, so there is no ownership-gated task
+    // context to fall back to — the body-supplied id is the only signal
+    // available, and it is trusted once validated against a real user row.
+    const uiUser = createUser({ name: "UI Picker User" });
+
+    const res = await fetch(`http://localhost:${port}/api/tasks`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        task: "created from the UI session view",
+        requestedByUserId: uiUser.id,
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string; requestedByUserId?: string };
+    expect(body.requestedByUserId).toBe(uiUser.id);
+  });
+
+  test("global API key caller + bogus body requestedByUserId → stays unattributed (NULL), not a crash", async () => {
+    const res = await fetch(`http://localhost:${port}/api/tasks`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        task: "created with a nonexistent requestedByUserId",
+        requestedByUserId: "does-not-exist",
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string; requestedByUserId?: string };
+    expect(body.requestedByUserId).toBeUndefined();
+  });
+
   test("revoked user token is unauthorized for normal API", async () => {
     const user = createUser({ name: "Revoked REST User" });
     const { tokenId, plaintext } = mintToken(user.id, "revoked", ACTOR);
