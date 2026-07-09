@@ -774,7 +774,9 @@ function maybeCreateInlineBinding(
     data.allowedHosts ?? ("baseUrl" in data ? [new URL(data.baseUrl).hostname] : []);
   const authKind = data.authKind ?? "config";
   const placeholder = placeholderForConfigKey(data.configKey);
-  const headerTemplate = data.headerTemplate ?? `Authorization: Bearer ${placeholder}`;
+  const headerTemplate =
+    data.headerTemplate ??
+    (data.queryTemplate ? undefined : `Authorization: Bearer ${placeholder}`);
 
   validateCredentialTemplate({
     configKey: data.configKey,
