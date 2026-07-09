@@ -1,4 +1,10 @@
-import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "../client";
 import type { AgentTask, AgentTaskSource, AgentTaskStatus, TaskWithLogs } from "../types";
@@ -21,11 +27,22 @@ export interface TaskFilters {
   source?: string[];
 }
 
-export function useTasks(filters?: TaskFilters) {
+export interface UseTasksOptions {
+  /**
+   * Keep serving the previous key's data while a new key resolves, instead of
+   * dropping to `undefined`. Callers whose filters are time-derived (and so
+   * mint a fresh query key on a timer) need this — otherwise every key change
+   * flashes their whole view back to its loading state.
+   */
+  keepPreviousData?: boolean;
+}
+
+export function useTasks(filters?: TaskFilters, opts?: UseTasksOptions) {
   return useQuery({
     queryKey: ["tasks", filters],
     queryFn: () => api.fetchTasks(filters),
     select: (data) => ({ tasks: data.tasks, total: data.total }),
+    ...(opts?.keepPreviousData ? { placeholderData: keepPreviousData } : {}),
   });
 }
 

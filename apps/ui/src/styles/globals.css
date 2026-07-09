@@ -245,11 +245,33 @@ body {
   }
 }
 
+/* Shimmer bar — sibling of .shimmer-text for block surfaces (e.g. live task
+ * bars on the activity timeline). A soft highlight sweeps across the element
+ * to signal "running right now". Host must be positioned. */
+.shimmer-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--color-background) 45%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer-slide 1.8s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .shimmer-text {
     animation: none;
     -webkit-text-fill-color: var(--color-foreground);
     color: var(--color-foreground);
+  }
+  .shimmer-bar::after {
+    content: none;
   }
 }
 
