@@ -169,6 +169,36 @@ describe("/api/script-connections HTTP", () => {
     expect(body.connection.operationCount).toBe(1);
   });
 
+  test("POST upsert with configKey and queryTemplate creates a query-only binding", async () => {
+    const res = await dispatch("/api/script-connections", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        kind: "openapi",
+        slug: "queryAuthVendor",
+        baseUrl: "https://api.vendor.test",
+        allowedHosts: ["api.vendor.test"],
+        configKey: "QUERY_AUTH_VENDOR_KEY",
+        queryTemplate: "api_key=[REDACTED:QUERY_AUTH_VENDOR_KEY]",
+        openapiSpecJson: inlineOpenApiSpec(),
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { connection: { id: string } };
+    const bindingRow = getDb()
+      .prepare<{ header_template: string | null; query_template: string | null }, [string]>(
+        `SELECT b.header_template, b.query_template
+         FROM script_credential_bindings b
+         JOIN script_connections c ON c.credential_binding_id = b.id
+         WHERE c.id = ?`,
+      )
+      .get(body.connection.id);
+
+    expect(bindingRow?.header_template).toBeNull();
+    expect(bindingRow?.query_template).toBe("api_key=[REDACTED:QUERY_AUTH_VENDOR_KEY]");
+  });
+
   test("POST upsert is forbidden for non-lead agent principal", async () => {
     const res = await dispatch("/api/script-connections", {
       method: "POST",
