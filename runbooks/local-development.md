@@ -22,6 +22,7 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 | `PUBLIC_MCP_BASE_URL` | falls back to `MCP_BASE_URL` | Public origin for OAuth redirect URIs + webhook URLs. No action needed locally — leave unset and it defaults to `MCP_BASE_URL`. Only relevant in split deploys where `MCP_BASE_URL` is an internal/cluster address. |
 | `APP_URL` | `http://localhost:5274` | Dashboard URL |
 | `SLACK_DISABLE` / `GITHUB_DISABLE` / `JIRA_DISABLE` / `LINEAR_DISABLE` | unset | Set `=true` to disable each integration |
+| `TRUST_BODY_REQUESTED_BY_USER_ID` | unset (off) | Set `=true` to let `POST /api/tasks` attribute a task to a body-supplied `requestedByUserId` (validated against a real user row) when no authenticated/owned-task identity is available. **Only safe in a single-tenant deployment where every caller of the shared/operator API key is already trusted** — it lets any such caller attribute a task to any user by choosing that body value. Upstream default (off) keeps PR #939's anti-spoofing behavior: the body field is ignored for operator/global-key callers. |
 | `CONTEXT_MODE_DISABLED` | unset (enabled) | Set `=true` to opt a worker out of context-mode. Default-enabled — the worker image bakes in context-mode, and the Claude/Codex/OpenCode adapters wire it in unless this is `true`. |
 | `HARNESS_PROVIDER` | `claude` | `claude`, `pi`, `codex`, `devin`, or `claude-managed` |
 | `TEMPLATE_ID` | unset | e.g. `official/coder` |
