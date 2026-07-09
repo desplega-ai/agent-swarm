@@ -462,6 +462,193 @@ describe("runScript", () => {
     expect(observedUrl).toBe("https://petstore.vendor.test/api/v3/store/inventory");
   });
 
+  test("ctx.api OpenAPI client default path still parses 2xx bodies", async () => {
+    const client = createApiRegistryClient(
+      [
+        {
+          slug: "repos",
+          kind: "openapi",
+          baseUrl: "https://api.vendor.test",
+          credential: null,
+          operations: [
+            {
+              name: "getRepo",
+              method: "GET",
+              path: "/repos/{owner}/{repo}",
+              parameters: [
+                { name: "owner", in: "path", required: true, schema: {} },
+                { name: "repo", in: "path", required: true, schema: {} },
+              ],
+              hasBody: false,
+              successStatus: "200",
+              responseSchema: {},
+              requestType: "ReposGetRepoArgs",
+              responseType: "ReposGetRepoResponse",
+            },
+          ],
+        },
+      ],
+      {
+        fetch: (async () =>
+          Response.json({ full_name: "desplega-ai/agent-swarm" })) as typeof fetch,
+      },
+    );
+
+    await expect(
+      client.repos.getRepo({ path: { owner: "desplega-ai", repo: "agent-swarm" } }),
+    ).resolves.toEqual({ full_name: "desplega-ai/agent-swarm" });
+  });
+
+  test("ctx.api OpenAPI client enriches default non-2xx errors", async () => {
+    const client = createApiRegistryClient(
+      [
+        {
+          slug: "repos",
+          kind: "openapi",
+          baseUrl: "https://api.vendor.test",
+          credential: null,
+          operations: [
+            {
+              name: "getRepo",
+              method: "GET",
+              path: "/repos/{owner}/{repo}",
+              parameters: [
+                { name: "owner", in: "path", required: true, schema: {} },
+                { name: "repo", in: "path", required: true, schema: {} },
+              ],
+              hasBody: false,
+              successStatus: "200",
+              responseSchema: {},
+              requestType: "ReposGetRepoArgs",
+              responseType: "ReposGetRepoResponse",
+            },
+          ],
+        },
+      ],
+      {
+        fetch: (async () =>
+          Response.json(
+            { error: "missing" },
+            { status: 404, statusText: "Not Found" },
+          )) as typeof fetch,
+      },
+    );
+
+    try {
+      await client.repos.getRepo({ path: { owner: "desplega-ai", repo: "missing" } });
+      throw new Error("expected request to throw");
+    } catch (error) {
+      const err = error as Error & {
+        status?: number;
+        statusText?: string;
+        body?: unknown;
+        response?: Response;
+      };
+      expect(err.message).toBe("ctx.api.repos.getRepo failed with 404");
+      expect(err.status).toBe(404);
+      expect(err.statusText).toBe("Not Found");
+      expect(err.body).toEqual({ error: "missing" });
+      expect(err.response?.status).toBe(404);
+      expect(await err.response?.json()).toEqual({ error: "missing" });
+    }
+  });
+
+  test("ctx.api OpenAPI client raw mode returns binary 2xx responses without parsing", async () => {
+    let observedAuthorization: string | null = null;
+    const client = createApiRegistryClient(
+      [
+        {
+          slug: "studioApi",
+          kind: "openapi",
+          baseUrl: "https://studio.vendor.test",
+          credential: {
+            configKey: "STUDIO_API_KEY",
+            headerTemplate: "Authorization: Bearer [REDACTED:STUDIO_API_KEY]",
+          },
+          operations: [
+            {
+              name: "downloadRenderFile",
+              method: "GET",
+              path: "/renders/{id}/file",
+              parameters: [{ name: "id", in: "path", required: true, schema: {} }],
+              hasBody: false,
+              successStatus: "200",
+              responseSchema: {},
+              requestType: "StudioApiDownloadRenderFileArgs",
+              responseType: "StudioApiDownloadRenderFileResponse",
+            },
+          ],
+        },
+      ],
+      {
+        fetch: (async (_input, init) => {
+          observedAuthorization = new Headers(init?.headers).get("authorization");
+          return new Response(new Uint8Array([0, 1, 255]), {
+            status: 200,
+            headers: { "content-type": "application/octet-stream", "x-render-id": "render-123" },
+          });
+        }) as typeof fetch,
+      },
+    );
+
+    const result = (await client.studioApi.downloadRenderFile(
+      { path: { id: "render-123" } },
+      { raw: true },
+    )) as { ok: boolean; status: number; headers: Record<string, string>; response: Response };
+
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe(200);
+    expect(result.headers).toBeTypeOf("object");
+    expect(Array.from(new Uint8Array(await result.response.arrayBuffer()))).toEqual([0, 1, 255]);
+    expect(observedAuthorization).toBe("Bearer [REDACTED:STUDIO_API_KEY]");
+  });
+
+  test("ctx.api OpenAPI client raw mode returns non-2xx responses without throwing", async () => {
+    const client = createApiRegistryClient(
+      [
+        {
+          slug: "repos",
+          kind: "openapi",
+          baseUrl: "https://api.vendor.test",
+          credential: null,
+          operations: [
+            {
+              name: "getRepo",
+              method: "GET",
+              path: "/repos/{owner}/{repo}",
+              parameters: [
+                { name: "owner", in: "path", required: true, schema: {} },
+                { name: "repo", in: "path", required: true, schema: {} },
+              ],
+              hasBody: false,
+              successStatus: "200",
+              responseSchema: {},
+              requestType: "ReposGetRepoArgs",
+              responseType: "ReposGetRepoResponse",
+            },
+          ],
+        },
+      ],
+      {
+        fetch: (async () =>
+          Response.json(
+            { error: "rate limited" },
+            { status: 429, statusText: "Too Many Requests" },
+          )) as typeof fetch,
+      },
+    );
+
+    const result = (await client.repos.getRepo(
+      { path: { owner: "desplega-ai", repo: "agent-swarm" } },
+      { raw: true },
+    )) as { ok: boolean; status: number; statusText: string; response: Response };
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(429);
+    expect(result.statusText).toBe("Too Many Requests");
+    expect(await result.response.json()).toEqual({ error: "rate limited" });
+  });
+
   test("ctx.api GraphQL client throws on errors-only responses", async () => {
     globalThis.fetch = (async () =>
       Response.json({ errors: [{ message: "Cannot query field nope" }] })) as typeof fetch;

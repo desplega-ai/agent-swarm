@@ -341,15 +341,23 @@ describe("script connections", () => {
         const created = await ctx.api.vendorApi.createRepo({
           body: { name: "agent-swarm", private: false },
         });
+        const raw = await ctx.api.vendorApi.getRepo({
+          path: { owner: "desplega-ai", repo: "agent-swarm" },
+        }, { raw: true });
         const name: string = repo.full_name;
         const createdName: string = created.full_name;
         const isPrivate: boolean | undefined = repo.private;
-        return { name, createdName, isPrivate };
+        const rawStatus: number = raw.status;
+        const rawBody: ArrayBuffer = await raw.response.arrayBuffer();
+        return { name, createdName, isPrivate, rawStatus, rawBody };
       };
       export default main;
     `;
 
     expect(typecheckScript(source)).toEqual({ ok: true });
+    expect(connection.generatedTypes).toContain(
+      "getRepo(args: VendorApiGetRepoArgs, options: ScriptApiRawOptions): Promise<ScriptApiRawResult>;",
+    );
     const descriptor = getScriptApiConnectionDescriptors().find(
       (candidate) => candidate.slug === "vendorApi",
     );

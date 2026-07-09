@@ -30,6 +30,17 @@ export const SCRIPT_SDK_TYPES = `
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type ScriptScope = "agent" | "global";
 export type ScriptFsMode = "none" | "workspace-rw";
+export type ScriptApiRawOptions = { raw: true };
+export type ScriptApiDefaultOptions = { raw?: false };
+
+export interface ScriptApiRawResult {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  headers: Record<string, string>;
+  url: string;
+  response: Response;
+}
 
 export interface Redacted<T> {
   readonly __redactedBrand?: T;
