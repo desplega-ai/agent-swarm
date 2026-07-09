@@ -190,6 +190,7 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `offerMode` | `boolean` | No | false | If true, offer the task instead of direct assign (agent must accept/reject). |
 | `taskType` | `string` | No | - | Task type (e.g., 'bug', 'feature', 'review'). |
 | `tags` | `array` | No | - | Tags for filtering (e.g., ['urgent', 'frontend']). |
+| `requiredCapabilities` | `array` | No | - | Capabilities a claiming agent must have (declared via join-swarm/update-profile) to be pool-eligible for this task. Written into the created task's routingAffinity (role is left unset — only enforced when the pool auto-claim/claim-tool paths check it). Most useful when omitting agentId (unassigned pool task); a no-op for a task with an explicit agentId, which bypasses the pool gate entirely. |
 | `priority` | `number` | No | - | Priority 0-100 (default: 50). |
 | `dependsOn` | `array` | No | - | Task IDs this task depends on. |
 | `parentTaskId` | `uuid` | No | - | Parent task ID for session continuity. Child task will resume the parent's Claude session. Auto-routes to the same worker unless agentId is explicitly provided. |
@@ -776,6 +777,7 @@ Perform task pool operations: create unassigned tasks, claim/release tasks from 
 | `model` | `string` | No | - | Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action. |
 | `modelTier` | `unknown` | No | - | Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action. |
 | `effort` | `unknown` | No | - | Reasoning effort for the created task: 'off', 'low', 'medium', 'high', or 'xhigh'. Only used with 'create' action. |
+| `requiredCapabilities` | `array` | No | - | Capabilities a claiming agent must have (declared via join-swarm/update-profile) to be pool-eligible for this task. Written into the created task's routingAffinity (role is left unset). Only used with 'create' action. |
 
 ## Messaging Tools
 

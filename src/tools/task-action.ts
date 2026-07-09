@@ -17,6 +17,7 @@ import {
   getDb,
   getTaskById,
   hasCapacity,
+  isAgentEligibleForTask,
   moveTaskFromBacklog,
   moveTaskToBacklog,
   reassociateSessionLogs,
@@ -85,6 +86,12 @@ export const taskActionInputSchema = z.object({
   effort: ReasoningEffortSchema.optional().describe(
     "Reasoning effort for the created task: 'off', 'low', 'medium', 'high', or 'xhigh'. Only used with 'create' action.",
   ),
+  requiredCapabilities: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Capabilities a claiming agent must have (declared via join-swarm/update-profile) to be pool-eligible for this task. Written into the created task's routingAffinity (role is left unset). Only used with 'create' action.",
+    ),
 });
 
 export const taskActionOutputSchema = z.object({
@@ -157,7 +164,19 @@ export async function taskActionHandler(
   ctx: ToolCtx,
   input: TaskActionArgs,
 ): Promise<CallToolResult> {
-  const { action, task, taskType, tags, priority, dependsOn, taskId, reason, dir, model } = input;
+  const {
+    action,
+    task,
+    taskType,
+    tags,
+    priority,
+    dependsOn,
+    taskId,
+    reason,
+    dir,
+    model,
+    requiredCapabilities,
+  } = input;
   const normalizedModel = splitLegacyModelAlias({ model, modelTier: input.modelTier });
 
   if (ctx.kind === "user") {
@@ -247,6 +266,9 @@ export async function taskActionHandler(
           model: normalizedModel.model,
           modelTier: normalizedModel.modelTier,
           effort: input.effort,
+          routingAffinity: requiredCapabilities?.length
+            ? { capabilities: requiredCapabilities }
+            : undefined,
         });
         return {
           success: true,
@@ -286,6 +308,16 @@ export async function taskActionHandler(
           return {
             success: false,
             message: `Task "${taskId}" has unmet dependencies: ${blockedBy.join(", ")}. Cannot claim until dependencies are completed.`,
+          };
+        }
+        // Routing-affinity pre-check for an informative rejection (the gate
+        // inside claimTask below is the real guard — this just lets the
+        // agent self-correct instead of retry-looping on a silent null).
+        const claimingAgent = getAgentById(agentId);
+        if (claimingAgent && !isAgentEligibleForTask(claimingAgent, existingTask)) {
+          return {
+            success: false,
+            message: `Task "${taskId}" requires role "${existingTask.routingAffinity?.role ?? "(unspecified)"}"; yours is "${claimingAgent.role ?? "(unspecified)"}". Cannot claim.`,
           };
         }
         // Atomic claim — only one agent can win this race

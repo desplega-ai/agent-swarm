@@ -257,10 +257,14 @@ This work will NOT fall back to the unassigned pool — you are the only re-dele
   variables: [
     { name: "original_task_id", description: "ID of the starved pool task" },
     { name: "task_desc", description: "Original task description (truncated to 200 chars)" },
-    { name: "required_role", description: "Role declared on the task's routingAffinity, or a placeholder" },
+    {
+      name: "required_role",
+      description: "Role declared on the task's routingAffinity, or a placeholder",
+    },
     {
       name: "required_capabilities",
-      description: "Comma-joined capabilities declared on the task's routingAffinity, or a placeholder",
+      description:
+        "Comma-joined capabilities declared on the task's routingAffinity, or a placeholder",
     },
     {
       name: "artifacts_block",

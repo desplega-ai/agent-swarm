@@ -40,6 +40,12 @@ export const sendTaskInputSchema = z.object({
     .array(z.string())
     .optional()
     .describe("Tags for filtering (e.g., ['urgent', 'frontend'])."),
+  requiredCapabilities: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Capabilities a claiming agent must have (declared via join-swarm/update-profile) to be pool-eligible for this task. Written into the created task's routingAffinity (role is left unset — only enforced when the pool auto-claim/claim-tool paths check it). Most useful when omitting agentId (unassigned pool task); a no-op for a task with an explicit agentId, which bypasses the pool gate entirely.",
+    ),
   priority: z.number().int().min(0).max(100).optional().describe("Priority 0-100 (default: 50)."),
   dependsOn: z.array(z.uuid()).optional().describe("Task IDs this task depends on."),
   parentTaskId: z
@@ -156,6 +162,7 @@ export async function sendTaskHandler(
     offerMode,
     taskType,
     tags,
+    requiredCapabilities,
     priority,
     dependsOn,
     dir,
@@ -339,6 +346,13 @@ export async function sendTaskHandler(
         slackThreadTs,
         slackUserId,
         followUpConfig,
+        // Only meaningful here: a pool task's routingAffinity gates
+        // claimTask/autoAssignPoolTasks. offer/direct-assign below bypass the
+        // pool gate entirely via an explicit agentId, so requiredCapabilities
+        // is a no-op there.
+        routingAffinity: requiredCapabilities?.length
+          ? { capabilities: requiredCapabilities }
+          : undefined,
       });
       transferTrackerSyncToResumeChild({
         parentTaskId: effectiveParentTaskId,

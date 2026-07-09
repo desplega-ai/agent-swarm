@@ -851,9 +851,7 @@ function escalateStarvedPoolTasks(findings: HeartbeatFindings): void {
   const registeredAgents = getAllAgents().filter((a) => !a.isLead);
 
   for (const task of candidates) {
-    const hasEligibleAgent = registeredAgents.some((agent) =>
-      isAgentEligibleForTask(agent, task),
-    );
+    const hasEligibleAgent = registeredAgents.some((agent) => isAgentEligibleForTask(agent, task));
     if (hasEligibleAgent) continue; // Someone (any status) matches — keep queued.
 
     const decision = createPoolStarvationDecisionTask({ original: task });

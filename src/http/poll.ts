@@ -18,7 +18,7 @@ import {
   getPendingTaskForAgent,
   getTaskAttachments,
   getTaskById,
-  getUnassignedTaskIds,
+  getUnassignedTaskIdsForAgent,
   getUserById,
   hasCapacity,
   recordBudgetRefusalNotification,
@@ -345,8 +345,13 @@ export async function handlePoll(
           // one worker wins if multiple poll simultaneously.
           // This ensures session logs are correctly associated with the real task ID
           // from the start (no reassociation needed).
+          //
+          // Routing affinity: `getUnassignedTaskIdsForAgent` (not the plain
+          // `getUnassignedTaskIds`) pre-filters candidates through
+          // `isAgentEligibleForTask`, so an ineligible task is never even
+          // offered to the budget gate below or the claim loop.
           if (hasCapacity(myAgentId)) {
-            const unassignedIds = getUnassignedTaskIds(5);
+            const unassignedIds = getUnassignedTaskIdsForAgent(myAgentId, 5);
             // Budget admission gate (Phase 3). Pool path is workers-only —
             // per-agent budgets matter most here, but we still check global.
             // Only run the gate when there's at least one candidate task; an
