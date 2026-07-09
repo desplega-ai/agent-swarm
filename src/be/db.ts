@@ -7133,16 +7133,22 @@ export function getStalledInProgressTasks(thresholdMinutes: number = 30): AgentT
 }
 
 /**
- * Genuine same-agent protected resume PINS (tagged `crash-recovery-pin` or
- * `graceful-shutdown-pin`) that are still `pending` `graceMin` minutes after
- * creation — the heartbeat reaper escalates these to a Lead reroute-decision.
+ * Genuine same-agent protected pins — resumes tagged `crash-recovery-pin` /
+ * `graceful-shutdown-pin`, OR a reboot-retry child tagged `reboot-retry-pin`
+ * (routing-affinity Phase 3) — that are still `pending` `graceMin` minutes
+ * after creation. The heartbeat reaper escalates these to a Lead
+ * reroute-decision.
  *
- * Three scoping clauses, each load-bearing:
- *  - pin tags — restricts to resumes actually pinned to their original agent on
- *    protected paths. Without this, a *pooled* resume that `autoAssignPoolTasks`
- *    flips to `pending` earlier in the SAME sweep (keeping its old `createdAt`)
- *    would be reaped and cancelled before the assigned worker polls; it also
- *    keeps `context_limits` / `manual_supersede` pins from being escalated under
+ * Scoping clauses, each load-bearing:
+ *  - `taskType = 'resume' AND (crash/graceful pin tags)` OR `reboot-retry-pin`
+ *    tag alone — restricts to work actually pinned to its original agent on a
+ *    protected path. A reboot-retry-pin task is a FRESH task (`taskType`
+ *    mirrors the original work, not `'resume'`), so it needs its own
+ *    disjunct rather than reusing the `taskType = 'resume'` gate. Without
+ *    this, a *pooled* resume that `autoAssignPoolTasks` flips to `pending`
+ *    earlier in the SAME sweep (keeping its old `createdAt`) would be reaped
+ *    and cancelled before the assigned worker polls; it also keeps
+ *    `context_limits` / `manual_supersede` pins from being escalated under
  *    the protected-pin label. (Literals must match the pin tag constants in
  *    src/tasks/worker-follow-up.ts.)
  *  - `status = 'pending'` — the "currently unreclaimed" discriminator: when the
@@ -7163,8 +7169,11 @@ export function getStalePinnedResumes(graceMin: number): AgentTask[] {
   return getDb()
     .prepare<AgentTaskRow, [string]>(
       `SELECT * FROM agent_tasks
-       WHERE taskType = 'resume' AND status = 'pending'
-         AND (tags LIKE '%"crash-recovery-pin"%' OR tags LIKE '%"graceful-shutdown-pin"%')
+       WHERE status = 'pending'
+         AND (
+           (taskType = 'resume' AND (tags LIKE '%"crash-recovery-pin"%' OR tags LIKE '%"graceful-shutdown-pin"%'))
+           OR tags LIKE '%"reboot-retry-pin"%'
+         )
          AND createdAt < ?
        ORDER BY createdAt ASC`,
     )
@@ -7246,6 +7255,23 @@ export function getUnassignedPoolTasks(limit: number = 10): AgentTask[] {
        LIMIT ?`,
     )
     .all(limit)
+    .map(rowToAgentTask);
+}
+
+/**
+ * Affinity-tagged pool tasks that have sat `unassigned` past `cutoffIso` —
+ * the starvation-escalation candidate set (routing-affinity Phase 3). Callers
+ * MUST separately confirm zero registered agents satisfy
+ * `isAgentEligibleForTask` before escalating; this only narrows by tag age.
+ */
+export function getStaleUnassignedAffinityTasks(cutoffIso: string): AgentTask[] {
+  return getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE status = 'unassigned' AND routingAffinity IS NOT NULL AND createdAt < ?
+       ORDER BY createdAt ASC`,
+    )
+    .all(cutoffIso)
     .map(rowToAgentTask);
 }
 

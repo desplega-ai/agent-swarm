@@ -1,4 +1,5 @@
 import {
+  buildRoutingAffinityFromAgent,
   createTaskExtended,
   getActiveTaskCount,
   getAgentById,
@@ -10,7 +11,7 @@ import {
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { resolveTemplate } from "../prompts/resolver";
-import type { AgentTask, ResumeReason, TaskAttachment } from "../types";
+import type { Agent, AgentTask, ResumeReason, TaskAttachment } from "../types";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
 import "../tools/templates";
@@ -68,6 +69,26 @@ export const CRASH_RECOVERY_PIN_TAG = "crash-recovery-pin";
  * path produced the pin. Keep the literal in sync with `getStalePinnedResumes`.
  */
 export const GRACEFUL_SHUTDOWN_PIN_TAG = "graceful-shutdown-pin";
+
+/**
+ * Tag set on a reboot-sweep retry child that was pinned back to its
+ * original agent (routing-affinity Phase 3). Same reaper-scoping purpose as
+ * `CRASH_RECOVERY_PIN_TAG`/`GRACEFUL_SHUTDOWN_PIN_TAG` — kept in sync with
+ * the literal duplicated in `getStalePinnedResumes` (src/be/db.ts).
+ */
+export const REBOOT_RETRY_PIN_TAG = "reboot-retry-pin";
+
+/**
+ * Shared "is this agent even a pin candidate" gate: the row still exists and
+ * is not `offline`. Used identically by `createResumeFollowUp`'s same-agent
+ * pin and the heartbeat's reboot-retry pin (`runRebootSweep`) — both then
+ * apply their own capacity (and, for resumes, freshness) rules on top.
+ */
+export function getPinCandidateAgent(agentId: string): Agent | null {
+  const candidate = getAgentById(agentId);
+  if (!candidate || candidate.status === "offline") return null;
+  return candidate;
+}
 
 export function getResumeGeneration(task: Pick<AgentTask, "tags">): number {
   const tag = task.tags.find((value) => value.startsWith(RESUME_GENERATION_TAG_PREFIX));
@@ -264,8 +285,8 @@ export function createResumeFollowUp(args: {
   //     responsive, so keep requiring `fresh`.
   let preferredAgentId: string | undefined;
   if (parent.agentId) {
-    const candidate = getAgentById(parent.agentId);
-    if (candidate && candidate.status !== "offline") {
+    const candidate = getPinCandidateAgent(parent.agentId);
+    if (candidate) {
       const lastActivity = candidate.lastActivityAt ? Date.parse(candidate.lastActivityAt) : 0;
       const fresh =
         Number.isFinite(lastActivity) &&
@@ -328,6 +349,17 @@ export function createResumeFollowUp(args: {
   // deliberately excluded there so the resume task resolves to the claiming
   // agent's own provider/model — never the parent's concrete model string.
   // We only override what's SPECIFIC to the resume task here.
+  //
+  // Routing affinity: stamp a FRESH snapshot from the parent's own agent —
+  // this covers every leg (pinned AND the pool-fallback legs) so a resume
+  // that falls to the unassigned pool is still role/capability-gated. When
+  // the agent row is already gone, `buildRoutingAffinityFromAgent` returns
+  // `null` and we pass `undefined`, letting `createTaskExtended`'s
+  // parentTaskId inheritance block fall back to the parent's OWN
+  // (already-inherited) `routingAffinity` instead.
+  const routingAffinity = parent.agentId
+    ? (buildRoutingAffinityFromAgent(parent.agentId) ?? undefined)
+    : undefined;
   const created = createTaskExtended(followUpDescription, {
     agentId: preferredAgentId,
     creatorAgentId: parent.creatorAgentId,
@@ -336,6 +368,7 @@ export function createResumeFollowUp(args: {
     tags,
     priority,
     parentTaskId: parent.id,
+    routingAffinity,
   });
 
   // Repoint Linear / Jira `tracker_sync` rows from the (now terminal) parent
@@ -442,6 +475,70 @@ export function createRerouteDecisionTask(args: {
     // not by producing the original work's structured output. Inheriting it would
     // make store-progress reject the Lead's completion and strand the decision
     // (blocking further escalation via the duplicate-decision guard) — DES-523.
+    inheritParentOutputSchema: false,
+  });
+
+  return { kind: "created", task: created };
+}
+
+/** Result of `createPoolStarvationDecisionTask`. */
+export type CreatePoolStarvationDecisionResult =
+  | { kind: "created"; task: AgentTask }
+  | { kind: "skipped"; reason: "lead_not_found" | "duplicate_exists" };
+
+/**
+ * Hand the Lead a re-delegation DECISION task for a pooled, affinity-tagged
+ * task that has sat `unassigned` past `POOL_AFFINITY_ESCALATION_MIN` with
+ * ZERO eligible registered agents (routing affinity Phase 3). This is the
+ * "queue, then escalate" fallback for the pool legs (7/8) that `createResumeFollowUp`
+ * and the reboot-retry pin can fall to — mirrors `createRerouteDecisionTask`'s
+ * shape (same `taskType: "reroute-decision"` discriminator, so it reuses the
+ * same idempotency check and Slack re-delegation carve-out) but for a task
+ * that was never pinned in the first place, so there is no `staleResume` /
+ * resume-generation budget to derive.
+ *
+ * Invoked by the heartbeat (`escalateStarvedPoolTasks`), which has already
+ * confirmed no registered agent (any status) satisfies `isAgentEligibleForTask`
+ * for this task.
+ */
+export function createPoolStarvationDecisionTask(args: {
+  original: AgentTask;
+}): CreatePoolStarvationDecisionResult {
+  const { original } = args;
+
+  const leadAgent = getLeadAgent();
+  if (!leadAgent) return { kind: "skipped", reason: "lead_not_found" };
+
+  if (hasNonTerminalRerouteDecisionChild(original.id)) {
+    return { kind: "skipped", reason: "duplicate_exists" };
+  }
+
+  const affinity = original.routingAffinity;
+  const requiredRole = affinity?.role ?? "(none declared)";
+  const requiredCapabilities =
+    affinity?.capabilities && affinity.capabilities.length > 0
+      ? affinity.capabilities.join(", ")
+      : "(none declared)";
+  const attachmentsBlock = formatAttachmentsBlock(getTaskAttachments(original.id));
+
+  const decision = resolveTemplate("task.pool.starved.decision", {
+    original_task_id: original.id,
+    task_desc: original.task.slice(0, 200),
+    required_role: requiredRole,
+    required_capabilities: requiredCapabilities,
+    artifacts_block: attachmentsBlock,
+  });
+
+  const created = createTaskExtended(decision.text, {
+    agentId: leadAgent.id,
+    creatorAgentId: original.creatorAgentId,
+    source: "system",
+    taskType: "reroute-decision",
+    tags: ["reroute-decision", "pool-starvation"],
+    priority: Math.min(100, (original.priority ?? 50) + 10),
+    parentTaskId: original.id,
+    // Same rationale as createRerouteDecisionTask: don't hold the Lead's
+    // re-delegation decision to the original work's output contract.
     inheritParentOutputSchema: false,
   });
 

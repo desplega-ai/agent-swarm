@@ -225,3 +225,47 @@ This work will NOT fall back to the unassigned pool — you are the only re-dele
   ],
   category: "task_lifecycle",
 });
+
+// ============================================================================
+// Pool-starvation decision (routing-affinity Phase 3)
+//
+// Created by the heartbeat when an affinity-tagged pool task has sat
+// `unassigned` past POOL_AFFINITY_ESCALATION_MIN with ZERO eligible
+// registered agents (no worker of the required role/capabilities exists at
+// all — not merely "busy right now"). Hands the Lead the same kind of
+// re-delegation DECISION as task.reroute.decision, but for a task that was
+// never pinned to anyone in the first place.
+// ============================================================================
+
+registerTemplate({
+  eventType: "task.pool.starved.decision",
+  header: "",
+  defaultBody: `Reroute decision: a pooled task has no eligible worker.
+
+Original task ID: {{original_task_id}}
+Task: "{{task_desc}}"
+Required role: {{required_role}}
+Required capabilities: {{required_capabilities}}{{artifacts_block}}
+
+## Your job
+
+This task has been sitting unassigned because no currently-registered agent matches its required role/capabilities. Pick an agent to take this work over and RE-DELEGATE it — do NOT execute it yourself.
+
+Dispatch via \`send-task\` with an explicit \`agentId\` (REQUIRED — omitting it re-pools the work under the same affinity tag and it will starve again) and \`parentTaskId: {{original_task_id}}\`.
+
+This work will NOT fall back to the unassigned pool — you are the only re-delegation path.`,
+  variables: [
+    { name: "original_task_id", description: "ID of the starved pool task" },
+    { name: "task_desc", description: "Original task description (truncated to 200 chars)" },
+    { name: "required_role", description: "Role declared on the task's routingAffinity, or a placeholder" },
+    {
+      name: "required_capabilities",
+      description: "Comma-joined capabilities declared on the task's routingAffinity, or a placeholder",
+    },
+    {
+      name: "artifacts_block",
+      description: "Formatted attachment list from the original task, or empty string",
+    },
+  ],
+  category: "task_lifecycle",
+});

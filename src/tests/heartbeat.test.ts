@@ -559,7 +559,7 @@ describe("Heartbeat Triage", () => {
       expect(affected.length).toBe(0);
     });
 
-    test("auto-fails in_progress task with no session and creates retry", async () => {
+    test("auto-fails in_progress task with no session and pins retry to the recovered agent", async () => {
       const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
       const task = createTaskExtended("Interrupted task", { agentId: agent.id });
       startTask(task.id);
@@ -586,8 +586,13 @@ describe("Heartbeat Triage", () => {
       expect(retryTask).not.toBeNull();
       expect(retryTask!.parentTaskId).toBe(task.id);
       expect(retryTask!.task).toBe(task.task);
-      // No agentId → goes to pool as "unassigned", auto-assign will route it
-      expect(retryTask!.status).toBe("unassigned");
+      // Routing affinity (Phase 3): the failed task frees up the agent's only
+      // slot, so it looks recoverable (row exists, not offline, has capacity)
+      // by retry-creation time — the retry pins back to it instead of the
+      // role-blind pool.
+      expect(retryTask!.status).toBe("pending");
+      expect(retryTask!.agentId).toBe(agent.id);
+      expect(retryTask!.routingAffinity?.sourceAgentId).toBe(agent.id);
 
       // Verify retry has correct tags
       const retryRow = getDb()
@@ -596,6 +601,46 @@ describe("Heartbeat Triage", () => {
       const tags = JSON.parse(retryRow.tags);
       expect(tags).toContain("reboot-retry");
       expect(tags).toContain("auto-generated");
+      expect(tags).toContain("reboot-retry-pin");
+    });
+
+    test("falls back to an affinity-stamped pool retry when the agent is at capacity", async () => {
+      const agent = createAgent({
+        name: "full-worker",
+        isLead: false,
+        status: "busy",
+        maxTasks: 1,
+      });
+      const task = createTaskExtended("Interrupted task", { agentId: agent.id });
+      startTask(task.id);
+      // A second in-progress task with a LIVE session survives the same sweep
+      // (session-exists → skip, never reaped) and keeps the agent at capacity
+      // by the time `task`'s retry is evaluated — so `task`'s retry does NOT
+      // look recoverable and must fall to the affinity-gated pool.
+      const other = createTaskExtended("Other in-progress task", { agentId: agent.id });
+      startTask(other.id);
+      insertActiveSession({ agentId: agent.id, taskId: other.id, triggerType: "task_assigned" });
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      const affected = getRebootAffectedTasks();
+      expect(affected.length).toBe(1);
+      const retryTask = getTaskById(affected[0]!.retryTaskId!);
+      expect(retryTask).not.toBeNull();
+      // No agentId → falls to the pool as "unassigned", but still carries the
+      // routing-affinity snapshot so it's gated (not role-blind).
+      expect(retryTask!.status).toBe("unassigned");
+      expect(retryTask!.agentId).toBeNull();
+      expect(retryTask!.routingAffinity?.sourceAgentId).toBe(agent.id);
+
+      const retryRow = getDb()
+        .query("SELECT tags FROM agent_tasks WHERE id = ?")
+        .get(affected[0]!.retryTaskId!) as { tags: string };
+      const tags = JSON.parse(retryRow.tags);
+      expect(tags).not.toContain("reboot-retry-pin");
     });
 
     test("skips in_progress task that has an active session", async () => {
