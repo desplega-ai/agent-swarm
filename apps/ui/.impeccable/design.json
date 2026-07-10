@@ -9,78 +9,187 @@
         "displayName": "Hive Amber",
         "canonical": "oklch(0.555 0.163 48.998)",
         "darkValue": "oklch(0.769 0.188 70.08)",
-        "tonalRamp": ["oklch(0.2 0.09 49)", "oklch(0.3 0.12 49)", "oklch(0.42 0.15 49)", "oklch(0.555 0.163 49)", "oklch(0.666 0.179 58)", "oklch(0.769 0.188 70)", "oklch(0.87 0.12 78)", "oklch(0.95 0.05 84)"]
+        "tonalRamp": [
+          "oklch(0.2 0.09 49)",
+          "oklch(0.3 0.12 49)",
+          "oklch(0.42 0.15 49)",
+          "oklch(0.555 0.163 49)",
+          "oklch(0.666 0.179 58)",
+          "oklch(0.769 0.188 70)",
+          "oklch(0.87 0.12 78)",
+          "oklch(0.95 0.05 84)"
+        ]
       },
       "background": {
         "role": "neutral",
         "displayName": "Field",
         "canonical": "oklch(1 0 0)",
         "darkValue": "oklch(0.141 0.005 285.823)",
-        "tonalRamp": ["oklch(0.141 0.005 286)", "oklch(0.21 0.006 286)", "oklch(0.274 0.006 286)", "oklch(0.442 0.01 286)", "oklch(0.552 0.016 286)", "oklch(0.705 0.015 286)", "oklch(0.92 0.004 286)", "oklch(1 0 0)"]
+        "tonalRamp": [
+          "oklch(0.141 0.005 286)",
+          "oklch(0.21 0.006 286)",
+          "oklch(0.274 0.006 286)",
+          "oklch(0.442 0.01 286)",
+          "oklch(0.552 0.016 286)",
+          "oklch(0.705 0.015 286)",
+          "oklch(0.92 0.004 286)",
+          "oklch(1 0 0)"
+        ]
       },
       "surface": {
         "role": "neutral",
         "displayName": "Recessed Surface",
         "canonical": "oklch(0.985 0.0015 286)",
         "darkValue": "oklch(0.185 0.006 286)",
-        "tonalRamp": ["oklch(0.185 0.006 286)", "oklch(0.25 0.005 286)", "oklch(0.35 0.005 286)", "oklch(0.5 0.004 286)", "oklch(0.65 0.003 286)", "oklch(0.8 0.002 286)", "oklch(0.92 0.002 286)", "oklch(0.985 0.0015 286)"]
+        "tonalRamp": [
+          "oklch(0.185 0.006 286)",
+          "oklch(0.25 0.005 286)",
+          "oklch(0.35 0.005 286)",
+          "oklch(0.5 0.004 286)",
+          "oklch(0.65 0.003 286)",
+          "oklch(0.8 0.002 286)",
+          "oklch(0.92 0.002 286)",
+          "oklch(0.985 0.0015 286)"
+        ]
       },
       "muted-foreground": {
         "role": "neutral",
         "displayName": "Quiet Ink",
         "canonical": "oklch(0.552 0.016 285.938)",
         "darkValue": "oklch(0.705 0.015 286.067)",
-        "tonalRamp": ["oklch(0.2 0.016 286)", "oklch(0.3 0.016 286)", "oklch(0.4 0.016 286)", "oklch(0.552 0.016 286)", "oklch(0.65 0.015 286)", "oklch(0.705 0.015 286)", "oklch(0.85 0.01 286)", "oklch(0.95 0.005 286)"]
+        "tonalRamp": [
+          "oklch(0.2 0.016 286)",
+          "oklch(0.3 0.016 286)",
+          "oklch(0.4 0.016 286)",
+          "oklch(0.552 0.016 286)",
+          "oklch(0.65 0.015 286)",
+          "oklch(0.705 0.015 286)",
+          "oklch(0.85 0.01 286)",
+          "oklch(0.95 0.005 286)"
+        ]
       },
       "border": {
         "role": "neutral",
         "displayName": "Structural Line",
         "canonical": "oklch(0.92 0.004 286.32)",
         "darkValue": "oklch(1 0 0 / 10%)",
-        "tonalRamp": ["oklch(0.25 0.004 286)", "oklch(0.35 0.004 286)", "oklch(0.5 0.004 286)", "oklch(0.65 0.004 286)", "oklch(0.78 0.004 286)", "oklch(0.86 0.004 286)", "oklch(0.92 0.004 286)", "oklch(0.97 0.002 286)"]
+        "tonalRamp": [
+          "oklch(0.25 0.004 286)",
+          "oklch(0.35 0.004 286)",
+          "oklch(0.5 0.004 286)",
+          "oklch(0.65 0.004 286)",
+          "oklch(0.78 0.004 286)",
+          "oklch(0.86 0.004 286)",
+          "oklch(0.92 0.004 286)",
+          "oklch(0.97 0.002 286)"
+        ]
       },
       "status-success": {
         "role": "secondary",
         "displayName": "Success Emerald",
         "canonical": "oklch(0.696 0.17 162.48)",
         "darkValue": "oklch(0.765 0.177 163.223)",
-        "tonalRamp": ["oklch(0.25 0.08 162)", "oklch(0.38 0.11 162)", "oklch(0.5 0.14 162)", "oklch(0.596 0.145 163)", "oklch(0.696 0.17 162)", "oklch(0.765 0.177 163)", "oklch(0.87 0.12 163)", "oklch(0.95 0.05 163)"]
+        "tonalRamp": [
+          "oklch(0.25 0.08 162)",
+          "oklch(0.38 0.11 162)",
+          "oklch(0.5 0.14 162)",
+          "oklch(0.596 0.145 163)",
+          "oklch(0.696 0.17 162)",
+          "oklch(0.765 0.177 163)",
+          "oklch(0.87 0.12 163)",
+          "oklch(0.95 0.05 163)"
+        ]
       },
       "status-error": {
         "role": "secondary",
         "displayName": "Failure Red",
         "canonical": "oklch(0.637 0.237 25.331)",
         "darkValue": "oklch(0.704 0.191 22.216)",
-        "tonalRamp": ["oklch(0.25 0.1 25)", "oklch(0.38 0.15 25)", "oklch(0.5 0.2 26)", "oklch(0.577 0.245 27)", "oklch(0.637 0.237 25)", "oklch(0.704 0.191 22)", "oklch(0.85 0.09 22)", "oklch(0.95 0.03 22)"]
+        "tonalRamp": [
+          "oklch(0.25 0.1 25)",
+          "oklch(0.38 0.15 25)",
+          "oklch(0.5 0.2 26)",
+          "oklch(0.577 0.245 27)",
+          "oklch(0.637 0.237 25)",
+          "oklch(0.704 0.191 22)",
+          "oklch(0.85 0.09 22)",
+          "oklch(0.95 0.03 22)"
+        ]
       },
       "status-info": {
         "role": "secondary",
         "displayName": "Info Sky",
         "canonical": "oklch(0.685 0.169 237.323)",
         "darkValue": "oklch(0.746 0.16 232.661)",
-        "tonalRamp": ["oklch(0.25 0.08 237)", "oklch(0.38 0.11 237)", "oklch(0.5 0.14 240)", "oklch(0.588 0.158 242)", "oklch(0.685 0.169 237)", "oklch(0.746 0.16 233)", "oklch(0.87 0.09 233)", "oklch(0.95 0.03 233)"]
+        "tonalRamp": [
+          "oklch(0.25 0.08 237)",
+          "oklch(0.38 0.11 237)",
+          "oklch(0.5 0.14 240)",
+          "oklch(0.588 0.158 242)",
+          "oklch(0.685 0.169 237)",
+          "oklch(0.746 0.16 233)",
+          "oklch(0.87 0.09 233)",
+          "oklch(0.95 0.03 233)"
+        ]
       },
       "status-paused": {
         "role": "secondary",
         "displayName": "Paused Blue",
         "canonical": "oklch(0.623 0.214 259.815)",
         "darkValue": "oklch(0.707 0.165 254.624)",
-        "tonalRamp": ["oklch(0.25 0.1 260)", "oklch(0.38 0.15 260)", "oklch(0.5 0.2 261)", "oklch(0.546 0.245 263)", "oklch(0.623 0.214 260)", "oklch(0.707 0.165 255)", "oklch(0.87 0.08 255)", "oklch(0.95 0.03 255)"]
+        "tonalRamp": [
+          "oklch(0.25 0.1 260)",
+          "oklch(0.38 0.15 260)",
+          "oklch(0.5 0.2 261)",
+          "oklch(0.546 0.245 263)",
+          "oklch(0.623 0.214 260)",
+          "oklch(0.707 0.165 255)",
+          "oklch(0.87 0.08 255)",
+          "oklch(0.95 0.03 255)"
+        ]
       }
     },
     "typographyMeta": {
-      "headline": { "displayName": "Headline", "purpose": "Route-page titles via PageHeader (text-xl font-semibold). Fixed rem scale, never fluid." },
-      "body": { "displayName": "Body", "purpose": "Default reading size (text-sm) for descriptions, forms, cells. Prose caps at 65-75ch." },
-      "label": { "displayName": "Label", "purpose": "InfoRow uppercase tracked labels and quiet metadata (text-xs)." },
-      "mono": { "displayName": "Machine Voice", "purpose": "Space Mono for IDs, logs, code, costs — anything the system produced." }
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Route-page titles via PageHeader (text-xl font-semibold). Fixed rem scale, never fluid."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default reading size (text-sm) for descriptions, forms, cells. Prose caps at 65-75ch."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "InfoRow uppercase tracked labels and quiet metadata (text-xs)."
+      },
+      "mono": {
+        "displayName": "Machine Voice",
+        "purpose": "Space Mono for IDs, logs, code, costs — anything the system produced."
+      }
     },
     "shadows": [
-      { "name": "whisper", "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)", "purpose": "shadow-xs on buttons and inputs — barely-there lift on interactive controls." },
-      { "name": "resting-card", "value": "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)", "purpose": "shadow-sm on Card containers at rest. Borders, not shadows, define structure." }
+      {
+        "name": "whisper",
+        "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+        "purpose": "shadow-xs on buttons and inputs — barely-there lift on interactive controls."
+      },
+      {
+        "name": "resting-card",
+        "value": "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
+        "purpose": "shadow-sm on Card containers at rest. Borders, not shadows, define structure."
+      }
     ],
     "motion": [
-      { "name": "control-transition", "value": "all 150ms ease", "purpose": "Default state transitions on buttons/inputs (transition-all)." },
-      { "name": "shimmer-slide", "value": "shimmer-slide 2s linear infinite", "purpose": "Liveness indicator on in-progress agent work only. Must degrade to a static indicator under prefers-reduced-motion." }
+      {
+        "name": "control-transition",
+        "value": "all 150ms ease",
+        "purpose": "Default state transitions on buttons/inputs (transition-all)."
+      },
+      {
+        "name": "shimmer-slide",
+        "value": "shimmer-slide 2s linear infinite",
+        "purpose": "Liveness indicator on in-progress agent work only. Must degrade to a static indicator under prefers-reduced-motion."
+      }
     ],
     "breakpoints": [
       { "name": "sm", "value": "640px" },
@@ -157,10 +266,26 @@
       "Dual-theme by design: every token has a light and dark value; nothing is hardcoded to either."
     ],
     "rules": [
-      { "name": "The Token-Only Rule", "body": "Raw Tailwind palette literals (bg-emerald-500, text-amber-400, bg-[#0d1117]) are forbidden in app code — the check:tokens lint gate fails the build on them. New colors enter the system only as named tokens in globals.css.", "section": "colors" },
-      { "name": "The One Voice Rule", "body": "Hive Amber speaks for interaction and liveness only. If amber appears on something that is neither actionable nor currently active, it is wrong.", "section": "colors" },
-      { "name": "The Machine-Voice Rule", "body": "If a human wrote it, it's Space Grotesk; if the system produced it (IDs, logs, code, raw payloads), it's Space Mono. Never mix within one value.", "section": "typography" },
-      { "name": "The Border-First Rule", "body": "If a container needs definition, reach for border-border or a tonal step (surface/card), never a bigger shadow. A shadow that reads as 'elevation strategy' is a bug.", "section": "elevation" }
+      {
+        "name": "The Token-Only Rule",
+        "body": "Raw Tailwind palette literals (bg-emerald-500, text-amber-400, bg-[#0d1117]) are forbidden in app code — the check:tokens lint gate fails the build on them. New colors enter the system only as named tokens in globals.css.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Voice Rule",
+        "body": "Hive Amber speaks for interaction and liveness only. If amber appears on something that is neither actionable nor currently active, it is wrong.",
+        "section": "colors"
+      },
+      {
+        "name": "The Machine-Voice Rule",
+        "body": "If a human wrote it, it's Space Grotesk; if the system produced it (IDs, logs, code, raw payloads), it's Space Mono. Never mix within one value.",
+        "section": "typography"
+      },
+      {
+        "name": "The Border-First Rule",
+        "body": "If a container needs definition, reach for border-border or a tonal step (surface/card), never a bigger shadow. A shadow that reads as 'elevation strategy' is a bug.",
+        "section": "elevation"
+      }
     ],
     "dos": [
       "Do use named tokens for every color: bg-status-success, text-status-error-strong, bg-action-script/10. The lint gate enforces it.",
