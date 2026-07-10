@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../client";
+import { fetchAllPages } from "../fetch-all-pages";
 
 export interface PagesFilters {
   agentId?: string;
@@ -16,6 +17,19 @@ export function usePages(filters?: PagesFilters) {
   return useQuery({
     queryKey: ["pages", filters],
     queryFn: () => api.listPages(filters),
+    refetchInterval: 5000,
+  });
+}
+
+/**
+ * Complete page catalog for list surfaces that apply client-side predicates.
+ * The API caps each request, so walk its offset pagination until every row in
+ * the reported result set has been loaded.
+ */
+export function useAllPages(filters?: Pick<PagesFilters, "agentId">) {
+  return useQuery({
+    queryKey: ["pages", "all", filters],
+    queryFn: () => fetchAllPages((batch) => api.listPages(batch), filters),
     refetchInterval: 5000,
   });
 }

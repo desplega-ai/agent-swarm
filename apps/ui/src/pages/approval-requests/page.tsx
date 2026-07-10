@@ -64,6 +64,7 @@ export default function ApprovalRequestsPage() {
   const navigate = useNavigate();
 
   const { data: requests, isLoading } = useApprovalRequests({
+    status: statusFilter === "all" ? undefined : statusFilter,
     limit: APPROVAL_REQUESTS_LIST_LIMIT,
   });
   const filteredRequests = useMemo(() => {

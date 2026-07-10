@@ -5,7 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
-import { usePages } from "@/api/hooks/use-pages";
+import { useAllPages } from "@/api/hooks/use-pages";
 import type { PageAuthMode, PageListItem } from "@/api/types";
 import { UpgradeRequired } from "@/components/feature-gate/upgrade-required";
 import { AgentLink } from "@/components/shared/agent-link";
@@ -68,7 +68,7 @@ export default function PagesListingPage() {
   // but we still need all hooks declared unconditionally, so just gate the
   // EARLY-RETURN below; the data hook runs harmlessly on older servers (it
   // will 404, react-query swallows). Cheap, keeps hook order stable.
-  const { data, isLoading } = usePages();
+  const { data, isLoading } = useAllPages();
   const { data: agents } = useAgents();
   const favoriteToggle = useFavoriteToggle("page");
   const agentNameById = useMemo(
