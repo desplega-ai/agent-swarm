@@ -405,6 +405,7 @@ export async function sendTaskHandler(
         slackChannelId,
         slackThreadTs,
         slackUserId,
+        overrideSlackContext,
         followUpConfig,
         // Only meaningful here: a pool task's routingAffinity gates
         // claimTask/autoAssignPoolTasks. offer/direct-assign below bypass the
@@ -472,6 +473,7 @@ export async function sendTaskHandler(
         slackChannelId,
         slackThreadTs,
         slackUserId,
+        overrideSlackContext,
         followUpConfig,
       });
       transferTrackerSyncToResumeChild({
@@ -506,6 +508,7 @@ export async function sendTaskHandler(
       slackChannelId,
       slackThreadTs,
       slackUserId,
+      overrideSlackContext,
       followUpConfig,
     });
     transferTrackerSyncToResumeChild({

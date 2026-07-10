@@ -3339,6 +3339,16 @@ export interface CreateTaskOptions {
   slackChannelId?: string;
   slackThreadTs?: string;
   slackUserId?: string;
+  /**
+   * Opt out of the residual Slack/contextKey normalization below (see the
+   * "Residual-mismatch guard" comment near the INSERT): a deliberate
+   * cross-channel/thread dispatch (e.g. `send-task`'s
+   * `overrideSlackContext: true`) sets this so its explicit slackChannelId/
+   * slackThreadTs survive even when they disagree with a slack-family
+   * `contextKey`/parent. Trusted callers that don't set this get normalized —
+   * this boundary must not let a caller silently persist a mismatch.
+   */
+  overrideSlackContext?: boolean;
   vcsProvider?: "github" | "gitlab";
   vcsRepo?: string;
   vcsEventType?: string;
@@ -3620,21 +3630,44 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
     }
   }
 
-  // Residual-mismatch telemetry: after all inheritance/backfill above, a final
+  // Residual-mismatch guard: after all inheritance/backfill above, a final
   // slackChannelId/slackThreadTs that still disagrees with a slack-family
-  // contextKey is a code bug in a caller we trust not to throw on (ingress
-  // handlers building both from the same event). Never throw here — log
-  // loudly so it's visible.
+  // contextKey would misroute delivery — src/slack/responses.ts,
+  // src/slack/watcher.ts, and src/tools/slack-reply.ts all read these fields
+  // directly, so logging a warning and inserting the mismatch unchanged does
+  // NOT prevent misdelivery. This boundary is reachable by untrusted-ish
+  // callers too (e.g. POST /api/tasks accepts client-supplied parentTaskId +
+  // contextKey), so a non-override caller must not be able to persist a
+  // mismatch: the durable contextKey wins and the Slack fields are
+  // normalized to match it. `overrideSlackContext` (set by `send-task` when
+  // the caller passed `overrideSlackContext: true`) opts out, preserving the
+  // deliberately divergent lineage. Never throw here — this also runs on
+  // trusted ingress hot paths that must not fail task creation.
   const finalSlackContext = slackChannelFromContextKey(options?.contextKey);
   if (finalSlackContext && options?.slackChannelId) {
     if (options.slackChannelId !== finalSlackContext.channelId) {
-      console.warn(
-        `[slack-routing] MISMATCH task creation: slackChannelId="${options.slackChannelId}" disagrees with contextKey channel "${finalSlackContext.channelId}" (contextKey=${options.contextKey}, sourceTaskId=${options.sourceTaskId ?? "n/a"}, parentTaskId=${options.parentTaskId ?? "n/a"})`,
-      );
+      if (options.overrideSlackContext) {
+        console.log(
+          `[slack-routing] override: keeping slackChannelId="${options.slackChannelId}" despite disagreeing with contextKey channel "${finalSlackContext.channelId}" (contextKey=${options.contextKey}, sourceTaskId=${options.sourceTaskId ?? "n/a"}, parentTaskId=${options.parentTaskId ?? "n/a"})`,
+        );
+      } else {
+        console.warn(
+          `[slack-routing] MISMATCH task creation: normalizing slackChannelId="${options.slackChannelId}" to contextKey channel "${finalSlackContext.channelId}" (contextKey=${options.contextKey}, sourceTaskId=${options.sourceTaskId ?? "n/a"}, parentTaskId=${options.parentTaskId ?? "n/a"})`,
+        );
+        options.slackChannelId = finalSlackContext.channelId;
+        options.slackThreadTs = finalSlackContext.threadTs;
+      }
     } else if (options.slackThreadTs && options.slackThreadTs !== finalSlackContext.threadTs) {
-      console.warn(
-        `[slack-routing] MISMATCH task creation: slackThreadTs="${options.slackThreadTs}" disagrees with contextKey thread "${finalSlackContext.threadTs}" (contextKey=${options.contextKey}, sourceTaskId=${options.sourceTaskId ?? "n/a"}, parentTaskId=${options.parentTaskId ?? "n/a"})`,
-      );
+      if (options.overrideSlackContext) {
+        console.log(
+          `[slack-routing] override: keeping slackThreadTs="${options.slackThreadTs}" despite disagreeing with contextKey thread "${finalSlackContext.threadTs}" (contextKey=${options.contextKey}, sourceTaskId=${options.sourceTaskId ?? "n/a"}, parentTaskId=${options.parentTaskId ?? "n/a"})`,
+        );
+      } else {
+        console.warn(
+          `[slack-routing] MISMATCH task creation: normalizing slackThreadTs="${options.slackThreadTs}" to contextKey thread "${finalSlackContext.threadTs}" (contextKey=${options.contextKey}, sourceTaskId=${options.sourceTaskId ?? "n/a"}, parentTaskId=${options.parentTaskId ?? "n/a"})`,
+        );
+        options.slackThreadTs = finalSlackContext.threadTs;
+      }
     }
   }
 

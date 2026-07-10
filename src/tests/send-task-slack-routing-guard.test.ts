@@ -124,6 +124,37 @@ describe("send-task: Slack-routing coherence guard", () => {
     expect(created?.slackThreadTs).toBe("222.222");
   });
 
+  test("overrideSlackContext survives the DB residual-mismatch guard when the parent carries a contextKey", async () => {
+    const contextKey = slackContextKey({ channelId: "C_ORIGINAL_CTX", threadTs: "111.111" });
+    const parentTask = createTaskExtended("parent task with contextKey", {
+      slackChannelId: "C_ORIGINAL_CTX",
+      slackThreadTs: "111.111",
+      contextKey,
+    });
+
+    const result = await callSendTask(
+      server,
+      {
+        task: "deliberate escalation to another channel, parent has a contextKey",
+        slackChannelId: "C_ESCALATION_CTX",
+        slackThreadTs: "222.222",
+        overrideSlackContext: true,
+        allowDuplicate: true,
+      },
+      LEAD_ID,
+      parentTask.id,
+    );
+
+    const s = structuredOf(result);
+    expect(s.success).toBe(true);
+    const created = getTaskById(s.task!.id);
+    // Without overrideSlackContext propagating into createTaskExtended, the
+    // DB's residual-mismatch normalization would silently pull this back to
+    // the parent's contextKey channel — defeating the deliberate override.
+    expect(created?.slackChannelId).toBe("C_ESCALATION_CTX");
+    expect(created?.slackThreadTs).toBe("222.222");
+  });
+
   test("explicit Slack unit identical to parent's → accepted, no behavior change", async () => {
     const parentTask = createTaskExtended("parent task same channel", {
       slackChannelId: "C_SAME",
