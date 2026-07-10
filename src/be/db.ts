@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { parseProviderMeta } from "@/utils/provider-metadata.ts";
 import pkg from "../../package.json";
 import { configureDbResolver } from "../prompts/resolver";
+import { slackChannelFromContextKey } from "../tasks/slack-routing";
 import { telemetry } from "../telemetry";
 import type {
   ActiveSession,
@@ -3450,14 +3451,24 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       // is the single source of truth — `createResumeFollowUp` and the other
       // follow-up creators rely on this block instead of re-listing fields.
 
-      // Slack context
+      // Slack context — inherited as an atomic unit. A foreign channelId's
+      // thread ts is meaningless to Slack's API, so an explicit slackChannelId
+      // that DIFFERS from the parent's must not pull in the parent's
+      // slackThreadTs/slackUserId (that combination misroutes/fails to thread —
+      // see swarm memory dispatch-slack-channel-must-match-parent-context-2026-07-10).
+      // When the explicit channel matches the parent's (or is unset), per-field
+      // fill-in proceeds as before.
+      const explicitForeignChannel =
+        !!options.slackChannelId &&
+        !!parent.slackChannelId &&
+        options.slackChannelId !== parent.slackChannelId;
       if (parent.slackChannelId && !options.slackChannelId) {
         options.slackChannelId = parent.slackChannelId;
       }
-      if (parent.slackThreadTs && !options.slackThreadTs) {
+      if (parent.slackThreadTs && !options.slackThreadTs && !explicitForeignChannel) {
         options.slackThreadTs = parent.slackThreadTs;
       }
-      if (parent.slackUserId && !options.slackUserId) {
+      if (parent.slackUserId && !options.slackUserId && !explicitForeignChannel) {
         options.slackUserId = parent.slackUserId;
       }
 
@@ -3583,6 +3594,36 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options.slackThreadTs = sourceTask.slackThreadTs;
       options.slackUserId = sourceTask.slackUserId;
     }
+  }
+
+  // contextKey → Slack-fields backfill: a slack-family contextKey is the
+  // durable record of where this task belongs, but delivery code
+  // (src/slack/responses.ts, src/slack/watcher.ts, src/tools/slack-reply.ts)
+  // reads slackChannelId/slackThreadTs exclusively. Without this, a task that
+  // inherited only a slack contextKey (no Slack fields) would silently never
+  // deliver. Deliberately does NOT backfill slackUserId — the key doesn't
+  // encode it.
+  if (!options?.slackChannelId) {
+    const backfill = slackChannelFromContextKey(options?.contextKey);
+    if (backfill && options) {
+      options.slackChannelId = backfill.channelId;
+      options.slackThreadTs = backfill.threadTs;
+    }
+  }
+
+  // Residual-mismatch telemetry: after all inheritance/backfill above, a final
+  // slackChannelId that still disagrees with a slack-family contextKey is a
+  // code bug in a caller we trust not to throw on (ingress handlers building
+  // both from the same event). Never throw here — log loudly so it's visible.
+  const finalSlackContext = slackChannelFromContextKey(options?.contextKey);
+  if (
+    finalSlackContext &&
+    options?.slackChannelId &&
+    options.slackChannelId !== finalSlackContext.channelId
+  ) {
+    console.warn(
+      `[slack-routing] MISMATCH task creation: slackChannelId="${options.slackChannelId}" disagrees with contextKey channel "${finalSlackContext.channelId}" (contextKey=${options.contextKey}, sourceTaskId=${options.sourceTaskId ?? "n/a"}, parentTaskId=${options.parentTaskId ?? "n/a"})`,
+    );
   }
 
   const auditUserId = getCurrentRequestUserId() ?? null;
