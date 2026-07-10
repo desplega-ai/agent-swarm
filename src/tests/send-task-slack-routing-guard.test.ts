@@ -98,6 +98,57 @@ describe("send-task: Slack-routing coherence guard", () => {
     expect(s.message).toContain("D0ATCHCQR4M");
   });
 
+  test("explicit channel matches the parent's but explicit thread diverges → rejected, names both threads", async () => {
+    const parentTask = createTaskExtended("parent task in a channel", {
+      slackChannelId: "C_SAME_CHANNEL",
+      slackThreadTs: "111.111",
+    });
+
+    const result = await callSendTask(
+      server,
+      {
+        task: "same-channel dispatch to the wrong thread",
+        slackChannelId: "C_SAME_CHANNEL",
+        slackThreadTs: "999.999", // wrong thread — parent's is 111.111
+        allowDuplicate: true,
+      },
+      LEAD_ID,
+      parentTask.id,
+    );
+
+    const s = structuredOf(result);
+    expect(s.success).toBe(false);
+    expect(s.message).toContain("Slack routing mismatch");
+    expect(s.message).toContain("999.999");
+    expect(s.message).toContain("111.111");
+  });
+
+  test("overrideSlackContext: true allows a deliberate same-channel, different-thread dispatch", async () => {
+    const parentTask = createTaskExtended("parent task in a channel", {
+      slackChannelId: "C_SAME_CHANNEL_OVERRIDE",
+      slackThreadTs: "111.111",
+    });
+
+    const result = await callSendTask(
+      server,
+      {
+        task: "deliberate same-channel escalation to a new thread",
+        slackChannelId: "C_SAME_CHANNEL_OVERRIDE",
+        slackThreadTs: "999.999",
+        overrideSlackContext: true,
+        allowDuplicate: true,
+      },
+      LEAD_ID,
+      parentTask.id,
+    );
+
+    const s = structuredOf(result);
+    expect(s.success).toBe(true);
+    const created = getTaskById(s.task!.id);
+    expect(created?.slackChannelId).toBe("C_SAME_CHANNEL_OVERRIDE");
+    expect(created?.slackThreadTs).toBe("999.999");
+  });
+
   test("overrideSlackContext: true allows the deliberate cross-channel dispatch", async () => {
     const parentTask = createTaskExtended("parent task", {
       slackChannelId: "C_ORIGINAL",
