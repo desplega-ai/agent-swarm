@@ -356,6 +356,44 @@ describe("Slack-routing coherence guard: createTaskExtended normalization (Phase
     warnSpy.mockRestore();
   });
 
+  test("channel matches contextKey + missing thread → thread gets backfilled from contextKey", () => {
+    const contextKey = slackContextKey({ channelId: "C_THREAD_BACKFILL", threadTs: "8000.0001" });
+
+    const childTask = createTaskExtended("child with matching channel but no thread", {
+      agentId: workerAgent.id,
+      contextKey,
+      slackChannelId: "C_THREAD_BACKFILL",
+    });
+
+    expect(childTask.slackChannelId).toBe("C_THREAD_BACKFILL");
+    expect(childTask.slackThreadTs).toBe("8000.0001");
+  });
+
+  test("channel matches + explicit thread diverges from contextKey → warns but does not throw", () => {
+    const contextKey = slackContextKey({ channelId: "C_THREAD_DIVERGE", threadTs: "9000.0001" });
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+
+    let childTask: ReturnType<typeof createTaskExtended> | undefined;
+    expect(() => {
+      childTask = createTaskExtended("child with matching channel but diverging thread", {
+        agentId: workerAgent.id,
+        contextKey,
+        slackChannelId: "C_THREAD_DIVERGE",
+        slackThreadTs: "9999.9999",
+      });
+    }).not.toThrow();
+
+    // Explicit thread is respected — never silently overwritten.
+    expect(childTask?.slackChannelId).toBe("C_THREAD_DIVERGE");
+    expect(childTask?.slackThreadTs).toBe("9999.9999");
+    const warned = warnSpy.mock.calls.some((call) =>
+      String(call[0]).includes("[slack-routing] MISMATCH"),
+    );
+    expect(warned).toBe(true);
+
+    warnSpy.mockRestore();
+  });
+
   test("non-slack contextKey → no backfill, no telemetry", () => {
     const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
 

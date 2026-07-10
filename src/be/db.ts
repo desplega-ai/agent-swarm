@@ -3609,21 +3609,33 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options.slackChannelId = backfill.channelId;
       options.slackThreadTs = backfill.threadTs;
     }
+  } else if (!options.slackThreadTs) {
+    // Channel present but no thread: a trusted caller supplied slackChannelId
+    // without slackThreadTs. If it matches the slack-family contextKey's
+    // channel, fill the thread from there too — otherwise delivery (which
+    // reads slackThreadTs directly) silently fails to thread.
+    const backfill = slackChannelFromContextKey(options.contextKey);
+    if (backfill && backfill.channelId === options.slackChannelId) {
+      options.slackThreadTs = backfill.threadTs;
+    }
   }
 
   // Residual-mismatch telemetry: after all inheritance/backfill above, a final
-  // slackChannelId that still disagrees with a slack-family contextKey is a
-  // code bug in a caller we trust not to throw on (ingress handlers building
-  // both from the same event). Never throw here — log loudly so it's visible.
+  // slackChannelId/slackThreadTs that still disagrees with a slack-family
+  // contextKey is a code bug in a caller we trust not to throw on (ingress
+  // handlers building both from the same event). Never throw here — log
+  // loudly so it's visible.
   const finalSlackContext = slackChannelFromContextKey(options?.contextKey);
-  if (
-    finalSlackContext &&
-    options?.slackChannelId &&
-    options.slackChannelId !== finalSlackContext.channelId
-  ) {
-    console.warn(
-      `[slack-routing] MISMATCH task creation: slackChannelId="${options.slackChannelId}" disagrees with contextKey channel "${finalSlackContext.channelId}" (contextKey=${options.contextKey}, sourceTaskId=${options.sourceTaskId ?? "n/a"}, parentTaskId=${options.parentTaskId ?? "n/a"})`,
-    );
+  if (finalSlackContext && options?.slackChannelId) {
+    if (options.slackChannelId !== finalSlackContext.channelId) {
+      console.warn(
+        `[slack-routing] MISMATCH task creation: slackChannelId="${options.slackChannelId}" disagrees with contextKey channel "${finalSlackContext.channelId}" (contextKey=${options.contextKey}, sourceTaskId=${options.sourceTaskId ?? "n/a"}, parentTaskId=${options.parentTaskId ?? "n/a"})`,
+      );
+    } else if (options.slackThreadTs && options.slackThreadTs !== finalSlackContext.threadTs) {
+      console.warn(
+        `[slack-routing] MISMATCH task creation: slackThreadTs="${options.slackThreadTs}" disagrees with contextKey thread "${finalSlackContext.threadTs}" (contextKey=${options.contextKey}, sourceTaskId=${options.sourceTaskId ?? "n/a"}, parentTaskId=${options.parentTaskId ?? "n/a"})`,
+      );
+    }
   }
 
   const auditUserId = getCurrentRequestUserId() ?? null;
