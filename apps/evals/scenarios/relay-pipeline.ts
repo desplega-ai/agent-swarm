@@ -6,7 +6,7 @@ import type { CheckResult, DeterministicCheck, Scenario } from "../src/types.ts"
  * relay-pipeline (v8.0 round-11, Multi-worker, 3 workers)
  * ------------------------------------------------------
  * Calibrated spread: TODO(calibration) — fill frontierAvg / budgetAvg / gap from
- * the round-11 sweep (anchors: claude-opus-4.8, codex-5.5 vs pi-deepseek-flash,
+ * the round-11 sweep (anchors: claude-opus-4.8, codex-5.6-sol vs pi-deepseek-flash,
  * claude-haiku). Ship gate: frontierAvg − budgetAvg ≥ 0.2. Target ~0.4 → 0.9.
  *
  * Three workers form a CHAINED TRANSFORM PIPELINE. Worker A (worker 0) reads a

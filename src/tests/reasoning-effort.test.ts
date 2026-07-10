@@ -17,7 +17,7 @@ import {
 
 describe("REASONING_EFFORT_LEVELS", () => {
   test("is the closed normalized enum", () => {
-    expect(REASONING_EFFORT_LEVELS).toEqual(["off", "low", "medium", "high", "xhigh"]);
+    expect(REASONING_EFFORT_LEVELS).toEqual(["off", "low", "medium", "high", "xhigh", "max"]);
   });
 });
 
@@ -25,8 +25,14 @@ describe("reasoningCapability — cache-sourced levels", () => {
   test("claude claude-opus-4-8: levels come from reasoning_options.effort, not the fallback", () => {
     const cap = reasoningCapability("claude", "claude-opus-4-8");
     expect(cap.supported).toBe(true);
-    // Cache lists [low, medium, high, xhigh, max]; "max" is dropped (out of scope).
+    // Cache lists [low, medium, high, xhigh, max]; "max" is not a Claude CLI effort.
     expect(cap.levels).toEqual(["low", "medium", "high", "xhigh"]);
+  });
+
+  test("codex gpt-5.6-sol supports the new max effort", () => {
+    const cap = reasoningCapability("codex", "gpt-5.6-sol");
+    expect(cap.supported).toBe(true);
+    expect(cap.levels).toEqual(["off", "low", "medium", "high", "xhigh", "max"]);
   });
 
   test("codex gpt-5.1-codex-max: cache already includes xhigh", () => {
@@ -154,6 +160,13 @@ describe("applyReasoningEffort — codex-config shape", () => {
     expect(applyReasoningEffort("codex", "gpt-5.1-codex-max", "xhigh")).toEqual({
       kind: "codex-config",
       config: { model_reasoning_effort: "xhigh" },
+    });
+  });
+
+  test("max on gpt-5.6-sol is applied", () => {
+    expect(applyReasoningEffort("codex", "gpt-5.6-sol", "max")).toEqual({
+      kind: "codex-config",
+      config: { model_reasoning_effort: "max" },
     });
   });
 });

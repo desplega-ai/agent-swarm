@@ -485,7 +485,10 @@ describe("Model Control - Priority Resolution Logic", () => {
 
   test("task.modelTier resolves using the claiming worker harness", () => {
     expect(resolveModelTier({ tier: "smol", harnessProvider: "claude" })).toBe("haiku");
-    expect(resolveModelTier({ tier: "smol", harnessProvider: "codex" })).toBe("gpt-5.4-mini");
+    expect(resolveModelTier({ tier: "smol", harnessProvider: "codex" })).toBe("gpt-5.6-luna");
+    expect(resolveModelTier({ tier: "regular", harnessProvider: "codex" })).toBe("gpt-5.6-terra");
+    expect(resolveModelTier({ tier: "smart", harnessProvider: "codex" })).toBe("gpt-5.6-sol");
+    expect(resolveModelTier({ tier: "ultra", harnessProvider: "codex" })).toBe("gpt-5.6-sol");
     expect(resolveModelTier({ tier: "smart", harnessProvider: "opencode" })).toBe(
       "openrouter/deepseek/deepseek-v4-pro",
     );
@@ -561,11 +564,14 @@ describe("Model Control - Zod Validation Schema", () => {
       sendTaskInputSchema.parse({ agentId: crypto.randomUUID(), task: "x", effort: "xhigh" })
         .effort,
     ).toBe("xhigh");
+    expect(
+      sendTaskInputSchema.parse({ agentId: crypto.randomUUID(), task: "x", effort: "max" }).effort,
+    ).toBe("max");
     expect(taskActionInputSchema.parse({ action: "create", task: "x", effort: "off" }).effort).toBe(
       "off",
     );
     expect(() =>
-      sendTaskInputSchema.parse({ agentId: crypto.randomUUID(), task: "x", effort: "max" }),
+      sendTaskInputSchema.parse({ agentId: crypto.randomUUID(), task: "x", effort: "ultra" }),
     ).toThrow();
   });
 

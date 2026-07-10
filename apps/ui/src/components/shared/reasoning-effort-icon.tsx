@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * Signal-strength metaphor, mirroring the agents-list badge's "more bars =
- * more effort" gradient: off has zero bars, xhigh has full bars. `Sparkles`
+ * more effort" gradient: off has zero bars, max has full bars. `Sparkles`
  * is reserved for the unset/"Auto" state (no override — harness default),
  * which isn't a `ReasoningEffortLevel` at all.
  */
@@ -14,6 +14,7 @@ export const REASONING_EFFORT_ICONS: Record<ReasoningEffortLevel, typeof Signal>
   medium: SignalMedium,
   high: SignalHigh,
   xhigh: Signal,
+  max: Signal,
 };
 
 export const REASONING_EFFORT_LABEL: Record<ReasoningEffortLevel, string> = {
@@ -22,6 +23,7 @@ export const REASONING_EFFORT_LABEL: Record<ReasoningEffortLevel, string> = {
   medium: "Medium",
   high: "High",
   xhigh: "X-High",
+  max: "Max",
 };
 
 export const REASONING_EFFORT_DESCRIPTION: Record<ReasoningEffortLevel, string> = {
@@ -29,7 +31,8 @@ export const REASONING_EFFORT_DESCRIPTION: Record<ReasoningEffortLevel, string> 
   low: "Light reasoning effort",
   medium: "Balanced reasoning effort",
   high: "Deep reasoning effort",
-  xhigh: "Maximum reasoning effort",
+  xhigh: "Extra-high reasoning effort",
+  max: "Maximum reasoning effort",
 };
 
 export const AUTO_LABEL = "Auto";

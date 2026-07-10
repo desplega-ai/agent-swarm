@@ -80,7 +80,7 @@ export const sendTaskInputSchema = z.object({
     "Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim/run time using the assignee's harness/provider. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra.",
   ),
   effort: ReasoningEffortSchema.optional().describe(
-    "Reasoning effort for this task: 'off', 'low', 'medium', 'high', or 'xhigh'. If omitted, the assignee's REASONING_EFFORT_OVERRIDE/default applies.",
+    "Reasoning effort for this task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. If omitted, the assignee's REASONING_EFFORT_OVERRIDE/default applies.",
   ),
   allowDuplicate: z
     .boolean()

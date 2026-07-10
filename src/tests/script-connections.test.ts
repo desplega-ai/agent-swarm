@@ -83,6 +83,19 @@ function markMigrationsAppliedThrough(database: Database, throughVersion: number
   }
 }
 
+function markMigrationApplied(database: Database, file: string) {
+  const sql = migrationSql(file);
+  const version = Number.parseInt(file.split("_")[0] ?? "0", 10);
+  database
+    .prepare("INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)")
+    .run(
+      version,
+      file.replace(".sql", ""),
+      new Date().toISOString(),
+      createHash("sha256").update(sql).digest("hex"),
+    );
+}
+
 function meta(agentId: string) {
   return {
     sessionId: "script-connections-test-session",
@@ -509,6 +522,10 @@ describe("script connections", () => {
       database.exec(migrationSql("101_script_connections.sql"));
       database.exec(migrationSql("111_oauth_credential_bindings.sql"));
       markMigrationsAppliedThrough(database, 111);
+      // This fixture intentionally starts from a partial schema to exercise the
+      // 112 rebuild only; unrelated later migrations may depend on tables that
+      // do not exist in the fixture.
+      markMigrationApplied(database, "114_backfill_gpt_5_6_pricing.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

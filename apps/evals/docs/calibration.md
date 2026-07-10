@@ -32,7 +32,7 @@ when they land near the `0.2` line.)
 | Cohort   | Anchor config id     | Notes |
 |----------|----------------------|-------|
 | Frontier | `claude-opus-4.8`    | **Pinned** to the explicit 4.8 build (NOT the floating `claude-opus` alias) so the recorded baseline stays reproducible as "latest opus" advances. Record the concrete model id below regardless. |
-| Frontier | `codex-5.5`          | codex harness, frontier tier. |
+| Frontier | `codex-5.6-sol`          | codex harness, frontier tier. |
 | Budget   | `pi-deepseek-flash`  | deepseek via the pi harness — the pi-side budget anchor. |
 | Budget   | `claude-haiku`       | haiku via the claude harness — the claude-side budget anchor. |
 
@@ -106,7 +106,7 @@ Run all at once, or per scenario (so one scenario's failure doesn't abort the ba
 cd evals && bun src/cli.ts run \
   --name "round11-calibration" \
   --scenarios sql-audit,memory-distractor,bug-ladder,relay-pipeline,distributed-audit,delegation-probe \
-  --configs claude-opus-4.8,codex-5.5,pi-deepseek-flash,claude-haiku \
+  --configs claude-opus-4.8,codex-5.6-sol,pi-deepseek-flash,claude-haiku \
   --attempts 3 --concurrency 4 --max-retries 1
 ```
 

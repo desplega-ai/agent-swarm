@@ -1,6 +1,6 @@
 /**
- * Codex API-addressable models, verified from https://developers.openai.com/codex/models
- * and https://developers.openai.com/api/docs/deprecations as of 2026-05-28.
+ * Codex API-addressable models, verified from https://developers.openai.com/api/docs/models
+ * and https://developers.openai.com/api/docs/deprecations as of 2026-07-10.
  *
  * NOTE: `gpt-5.3-codex-spark` is intentionally excluded. It is a ChatGPT Pro
  * research preview and is NOT API-addressable via the Codex SDK at launch.
@@ -10,6 +10,7 @@
  * adapter so the onboarding UI and model selector can import it without
  * pulling in the SDK.
  */
+import modelsDevCache from "../be/modelsdev-cache.json";
 
 /**
  * List of Codex models we know about (drives the onboarding model selector,
@@ -18,17 +19,20 @@
  * SDK, so new OpenAI models work without a code change.
  */
 export const CODEX_MODELS = [
-  "gpt-5.5", // newest frontier coding/professional-work model, 1.05M context
-  "gpt-5.4", // default — mainline reasoning model w/ frontier coding
+  "gpt-5.6-sol", // frontier GPT-5.6 tier for complex reasoning/coding
+  "gpt-5.6-terra", // balanced GPT-5.6 tier
+  "gpt-5.6-luna", // fast/cheap GPT-5.6 tier for high-volume workloads
+  "gpt-5.5", // previous frontier coding/professional-work model
+  "gpt-5.4", // previous mainline reasoning model w/ frontier coding
   "gpt-5.4-mini", // faster/cheaper
-  "gpt-5.3-codex", // coding-specialized, 1M context
+  "gpt-5.3-codex", // coding-specialized legacy model
   "gpt-5.2-codex", // legacy — scheduled for retirement, see openai deprecations page
 ] as const;
 
 export type CodexModel = (typeof CODEX_MODELS)[number];
 
 /** The baseline default when neither MODEL_OVERRIDE nor task.model is set. */
-export const CODEX_DEFAULT_MODEL: CodexModel = "gpt-5.4";
+export const CODEX_DEFAULT_MODEL: CodexModel = "gpt-5.6-terra";
 
 /**
  * Map claude-style shortnames (that flow through MODEL_OVERRIDE / task.model)
@@ -36,10 +40,10 @@ export const CODEX_DEFAULT_MODEL: CodexModel = "gpt-5.4";
  * a task authored for Claude works unchanged when pointed at a Codex worker.
  */
 const CLAUDE_SHORTNAMES: Record<string, CodexModel> = {
-  fable: "gpt-5.5",
-  opus: "gpt-5.4",
-  sonnet: "gpt-5.4",
-  haiku: "gpt-5.4-mini",
+  fable: "gpt-5.6-sol",
+  opus: "gpt-5.6-sol",
+  sonnet: "gpt-5.6-terra",
+  haiku: "gpt-5.6-luna",
 };
 
 /**
@@ -56,21 +60,50 @@ export function resolveCodexModel(modelStr: string | undefined): string {
   return CLAUDE_SHORTNAMES[normalized] ?? normalized;
 }
 
-/**
- * Per-model approximate context window (tokens). The Codex SDK does not
- * expose these at runtime, so we maintain a static map derived from
- * https://developers.openai.com/codex/models. The values are used by the
- * `context_usage` percent calculation inside `CodexSession`.
- *
- * Update this map whenever a model's context window changes.
- */
-export const CODEX_MODEL_CONTEXT_WINDOWS: Record<CodexModel, number> = {
+interface ModelsDevOpenAiModel {
+  limit?: {
+    context?: number;
+  };
+  cost?: {
+    input?: number;
+    cache_read?: number;
+    output?: number;
+  };
+}
+
+const MODELSDEV_OPENAI_MODELS =
+  (
+    modelsDevCache as {
+      openai?: {
+        models?: Record<string, ModelsDevOpenAiModel>;
+      };
+    }
+  ).openai?.models ?? {};
+
+const FALLBACK_CODEX_MODEL_CONTEXT_WINDOWS: Record<CodexModel, number> = {
+  "gpt-5.6-sol": 1_050_000,
+  "gpt-5.6-terra": 1_050_000,
+  "gpt-5.6-luna": 1_050_000,
   "gpt-5.5": 1_050_000,
-  "gpt-5.4": 200_000,
-  "gpt-5.4-mini": 200_000,
-  "gpt-5.3-codex": 1_000_000, // 1M context per plan Key Discoveries
+  "gpt-5.4": 1_050_000,
+  "gpt-5.4-mini": 400_000,
+  "gpt-5.3-codex": 400_000,
   "gpt-5.2-codex": 200_000,
 };
+
+/**
+ * Per-model approximate context window (tokens). The Codex SDK does not
+ * expose these at runtime, so we read the vendored models.dev cache used by
+ * the pricing seeder and fall back only for legacy/incomplete cache entries.
+ * The values are used by the `context_usage` percent calculation inside
+ * `CodexSession`.
+ */
+export const CODEX_MODEL_CONTEXT_WINDOWS: Record<CodexModel, number> = Object.fromEntries(
+  CODEX_MODELS.map((model) => [
+    model,
+    MODELSDEV_OPENAI_MODELS[model]?.limit?.context ?? FALLBACK_CODEX_MODEL_CONTEXT_WINDOWS[model],
+  ]),
+) as Record<CodexModel, number>;
 
 /**
  * Return the context window in tokens for a given Codex model. Unknown models
@@ -82,15 +115,14 @@ export function getCodexContextWindow(model: string): number {
 }
 
 /**
- * Per-model pricing in USD per million tokens, sourced from
- * https://developers.openai.com/api/docs/pricing on 2026-05-28 (Standard tier,
- * short-context column — long-context multipliers and Batch / Flex / Priority
- * tiers exist but the Codex SDK does not expose which tier was used so we
- * default to the headline rate).
+ * Per-model pricing in USD per million tokens, sourced from the vendored
+ * models.dev cache (`src/be/modelsdev-cache.json`). The fallback below mirrors
+ * that snapshot for known models and covers legacy models that models.dev no
+ * longer lists.
  *
  * The Codex SDK does NOT report dollar cost in `Usage`, so this map is what
- * powers `totalCostUsd` on the `result` event. Update whenever OpenAI changes
- * the pricing page or adds new models.
+ * powers `totalCostUsd` on the `result` event. Refresh models.dev whenever
+ * OpenAI changes pricing or adds new models.
  *
  * `gpt-5.2-codex` is not on the current pricing page (legacy / retired); it
  * inherits the `gpt-5.3-codex` rate as a best-effort fallback so old tasks
@@ -105,7 +137,22 @@ export interface CodexModelPricing {
   outputPerMillion: number;
 }
 
-export const CODEX_MODEL_PRICING: Record<CodexModel, CodexModelPricing> = {
+const FALLBACK_CODEX_MODEL_PRICING: Record<CodexModel, CodexModelPricing> = {
+  "gpt-5.6-sol": {
+    inputPerMillion: 5.0,
+    cachedInputPerMillion: 0.5,
+    outputPerMillion: 30.0,
+  },
+  "gpt-5.6-terra": {
+    inputPerMillion: 2.5,
+    cachedInputPerMillion: 0.25,
+    outputPerMillion: 15.0,
+  },
+  "gpt-5.6-luna": {
+    inputPerMillion: 1.0,
+    cachedInputPerMillion: 0.1,
+    outputPerMillion: 6.0,
+  },
   "gpt-5.5": {
     inputPerMillion: 5.0,
     cachedInputPerMillion: 0.5,
@@ -133,6 +180,29 @@ export const CODEX_MODEL_PRICING: Record<CodexModel, CodexModelPricing> = {
     outputPerMillion: 14.0,
   },
 };
+
+function getModelsDevCodexPricing(model: CodexModel): CodexModelPricing | undefined {
+  const cost = MODELSDEV_OPENAI_MODELS[model]?.cost;
+  if (
+    typeof cost?.input !== "number" ||
+    typeof cost.cache_read !== "number" ||
+    typeof cost.output !== "number"
+  ) {
+    return undefined;
+  }
+  return {
+    inputPerMillion: cost.input,
+    cachedInputPerMillion: cost.cache_read,
+    outputPerMillion: cost.output,
+  };
+}
+
+export const CODEX_MODEL_PRICING: Record<CodexModel, CodexModelPricing> = Object.fromEntries(
+  CODEX_MODELS.map((model) => [
+    model,
+    getModelsDevCodexPricing(model) ?? FALLBACK_CODEX_MODEL_PRICING[model],
+  ]),
+) as Record<CodexModel, CodexModelPricing>;
 
 /**
  * Phase 6 — one-warning-per-process tracking so unknown models log once

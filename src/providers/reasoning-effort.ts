@@ -14,8 +14,8 @@
 
 import reasoningSnapshotJson from "./modelsdev-reasoning.json";
 
-/** Closed, normalized enum. `minimal` and `max` are intentionally out of scope for v1 (see plan). */
-export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh"] as const;
+/** Closed, normalized enum. `minimal` remains out of scope; GPT-5.6 Codex adds `max`. */
+export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh", "max"] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORT_LEVELS)[number];
 
 /** The four local harnesses this feature covers (Devin / claude-managed are out of scope). */
@@ -74,13 +74,14 @@ const SNAPSHOT = reasoningSnapshotJson as ReasoningSnapshot;
 /** Shared-safe subset accepted by all four harnesses on at least their default models (see research doc). */
 const FALLBACK_LEVELS: ReasoningEffort[] = ["low", "medium", "high"];
 
-/** models.dev `reasoning_options[].type === "effort"` value → our normalized enum. `minimal`/`max` intentionally dropped. */
+/** models.dev `reasoning_options[].type === "effort"` value → our normalized enum. `minimal` intentionally dropped. */
 const EFFORT_VALUE_MAP: Partial<Record<string, ReasoningEffort>> = {
   none: "off",
   low: "low",
   medium: "medium",
   high: "high",
   xhigh: "xhigh",
+  max: "max",
 };
 
 function splitProviderModel(model: string): { providerId: string; modelId: string } {
@@ -143,6 +144,10 @@ function applyHarnessOverrides(
     }
   }
 
+  if (harness !== "codex") {
+    result = result.filter((l) => l !== "max");
+  }
+
   if (harness === "codex") {
     // The cache already tends to encode this correctly per model (verified:
     // `gpt-5.1-codex` excludes xhigh, `gpt-5.1-codex-max` includes it). This
@@ -173,7 +178,7 @@ function pickDefault(levels: ReasoningEffort[]): ReasoningEffort | null {
  *     models absent from the snapshot) → unsupported.
  *  2. `reasoning: false` → unsupported, regardless of the override table.
  *  3. `reasoning_options` has a usable `type: "effort"` entry → levels come
- *     from its `values` (mapped/filtered — `none`→`off`, `minimal`/`max` dropped).
+ *     from its `values` (mapped/filtered — `none`→`off`, `minimal` dropped).
  *  4. Otherwise (`reasoning: true`, no usable effort entry) → the shared-safe
  *     fallback subset `{low, medium, high}`.
  *  5. Harness-specific override table applied on top for known quirks.
@@ -222,7 +227,7 @@ function applyPiEffort(level: ReasoningEffort): ReasoningEffortApplication {
 }
 
 /** Level → numeric thinking budget, only used for Opencode's Anthropic provider (see below). Internal transport detail, not a user-facing knob. */
-const ANTHROPIC_BUDGET_TOKENS_BY_LEVEL: Record<Exclude<ReasoningEffort, "off">, number> = {
+const ANTHROPIC_BUDGET_TOKENS_BY_LEVEL: Record<Exclude<ReasoningEffort, "off" | "max">, number> = {
   low: 4096,
   medium: 10240,
   high: 32768,
@@ -238,6 +243,7 @@ function buildOpencodeReasoningOptions(
     // qualitative level — translate internally (see "What We're NOT Doing" in
     // the plan: no numeric budget surface for operators, only this
     // adapter-internal transport detail).
+    if (level === "max") return { reasoningEffort: level };
     return { thinking: { type: "enabled", budgetTokens: ANTHROPIC_BUDGET_TOKENS_BY_LEVEL[level] } };
   }
   if (providerId === "openrouter") {

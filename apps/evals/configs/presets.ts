@@ -22,7 +22,7 @@ export const CONFIG_PRESETS: ConfigPreset[] = [
       // Round-9 expansion: top proprietary-API additions (AA II 57 / 55).
       "pi-qwen3.7-max",
       "pi-minimax-m3",
-      "codex-5.5",
+      "codex-5.6-sol",
     ],
   },
   {
@@ -98,7 +98,7 @@ export const CONFIG_PRESETS: ConfigPreset[] = [
     id: "budget",
     label: "Budget",
     description: "Cheap smoke set for quick sanity runs.",
-    configIds: ["claude-haiku", "pi-deepseek-flash", "pi-gemini-flash", "codex-5.4-mini"],
+    configIds: ["claude-haiku", "pi-deepseek-flash", "pi-gemini-flash", "codex-5.6-luna"],
   },
 ];
 

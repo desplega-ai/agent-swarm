@@ -327,7 +327,7 @@ describe("expandPresetSelection — CLI --preset expansion (v7.7 item 1)", () =>
       "claude-haiku",
       "pi-deepseek-flash",
       "pi-gemini-flash",
-      "codex-5.4-mini",
+      "codex-5.6-luna",
     ]);
   });
 
@@ -338,7 +338,7 @@ describe("expandPresetSelection — CLI --preset expansion (v7.7 item 1)", () =>
       "claude-haiku",
       "pi-deepseek-flash",
       "pi-gemini-flash",
-      "codex-5.4-mini",
+      "codex-5.6-luna",
       // …then frontier minus nothing (no overlap with budget)…
       "claude-fable",
       "claude-opus",
@@ -347,7 +347,7 @@ describe("expandPresetSelection — CLI --preset expansion (v7.7 item 1)", () =>
       "pi-gemini-pro",
       "pi-qwen3.7-max",
       "pi-minimax-m3",
-      "codex-5.5",
+      "codex-5.6-sol",
       // …then explicit --configs extras; the duplicate claude-haiku is dropped.
       "codex-5.4",
     ]);

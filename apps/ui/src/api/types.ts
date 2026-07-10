@@ -28,7 +28,7 @@ export type AgentTaskSource =
 export type ChannelType = "public" | "dm";
 export type ModelTier = "smol" | "regular" | "smart" | "ultra";
 /** Mirrors `REASONING_EFFORT_LEVELS` in `src/providers/reasoning-effort.ts` (backend). */
-export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh"] as const;
+export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh", "max"] as const;
 export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
 
 export interface Agent {

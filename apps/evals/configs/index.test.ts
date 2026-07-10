@@ -5,8 +5,8 @@ import { configs, DEFAULT_CONFIG_IDS } from "./index.ts";
 const NAMING_RE = /^(claude|pi|opencode|codex)-[a-z0-9][a-z0-9.-]*$/;
 
 describe("config catalog invariants (v6 §0.14 / §10)", () => {
-  test("catalog has exactly 81 entries (12 legacy + 14 round-6 + pi-gemini-pro + 10 round-8 OSS refresh + 17 round-9 expansion + 12 round-10 leaderboard additions + 14 round-11 June 2026 refresh + Claude Sonnet 5)", () => {
-    expect(configs.length).toBe(81);
+  test("catalog has exactly 84 entries (12 legacy + 14 round-6 + pi-gemini-pro + 10 round-8 OSS refresh + 17 round-9 expansion + 12 round-10 leaderboard additions + 14 round-11 June 2026 refresh + Claude Sonnet 5 + 3 GPT-5.6 Codex tiers)", () => {
+    expect(configs.length).toBe(84);
   });
 
   test("ids are unique", () => {
