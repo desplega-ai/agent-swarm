@@ -335,13 +335,16 @@ describe("Slack-routing coherence guard: createTaskExtended normalization (Phase
   test("overrideSlackContext: true retains a deliberately divergent explicit slackChannelId against the contextKey", () => {
     const contextKey = slackContextKey({ channelId: "C_KEY", threadTs: "4000.0001" });
 
-    const childTask = createTaskExtended("child with explicit channel and different key, override set", {
-      agentId: workerAgent.id,
-      contextKey,
-      slackChannelId: "C_EXPLICIT_OVERRIDE",
-      slackThreadTs: "5000.0001",
-      overrideSlackContext: true,
-    });
+    const childTask = createTaskExtended(
+      "child with explicit channel and different key, override set",
+      {
+        agentId: workerAgent.id,
+        contextKey,
+        slackChannelId: "C_EXPLICIT_OVERRIDE",
+        slackThreadTs: "5000.0001",
+        overrideSlackContext: true,
+      },
+    );
 
     expect(childTask.slackChannelId).toBe("C_EXPLICIT_OVERRIDE");
     expect(childTask.slackThreadTs).toBe("5000.0001");
@@ -375,7 +378,10 @@ describe("Slack-routing coherence guard: createTaskExtended normalization (Phase
   });
 
   test("residual-mismatch guard: overrideSlackContext: true keeps a divergent channel against the contextKey", () => {
-    const contextKey = slackContextKey({ channelId: "C_KEY_MISMATCH_OVERRIDE", threadTs: "6100.0001" });
+    const contextKey = slackContextKey({
+      channelId: "C_KEY_MISMATCH_OVERRIDE",
+      threadTs: "6100.0001",
+    });
 
     const childTask = createTaskExtended("child with mismatched channel and key, override set", {
       agentId: workerAgent.id,
@@ -429,15 +435,21 @@ describe("Slack-routing coherence guard: createTaskExtended normalization (Phase
   });
 
   test("channel matches + explicit thread diverges, overrideSlackContext: true → explicit thread retained", () => {
-    const contextKey = slackContextKey({ channelId: "C_THREAD_DIVERGE_OVERRIDE", threadTs: "9200.0001" });
-
-    const childTask = createTaskExtended("child with matching channel but diverging thread, override set", {
-      agentId: workerAgent.id,
-      contextKey,
-      slackChannelId: "C_THREAD_DIVERGE_OVERRIDE",
-      slackThreadTs: "9999.0002",
-      overrideSlackContext: true,
+    const contextKey = slackContextKey({
+      channelId: "C_THREAD_DIVERGE_OVERRIDE",
+      threadTs: "9200.0001",
     });
+
+    const childTask = createTaskExtended(
+      "child with matching channel but diverging thread, override set",
+      {
+        agentId: workerAgent.id,
+        contextKey,
+        slackChannelId: "C_THREAD_DIVERGE_OVERRIDE",
+        slackThreadTs: "9999.0002",
+        overrideSlackContext: true,
+      },
+    );
 
     expect(childTask.slackChannelId).toBe("C_THREAD_DIVERGE_OVERRIDE");
     expect(childTask.slackThreadTs).toBe("9999.0002");
