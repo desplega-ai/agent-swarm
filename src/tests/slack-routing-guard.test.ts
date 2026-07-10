@@ -51,12 +51,26 @@ describe("checkSlackRoutingCoherence", () => {
     expect(result.verdict).toBe("ok");
   });
 
-  test("explicit unit matches parent's slackChannelId → ok", () => {
+  test("explicit unit matches parent's slackChannelId and slackThreadTs → ok", () => {
     const result = checkSlackRoutingCoherence({
       explicit: { channelId: "C_PARENT", threadTs: "111.222" },
-      parent: { slackChannelId: "C_PARENT", slackThreadTs: "999.999", contextKey: null },
+      parent: { slackChannelId: "C_PARENT", slackThreadTs: "111.222", contextKey: null },
     });
     expect(result.verdict).toBe("ok");
+  });
+
+  test("explicit channelId matches parent's but threadTs diverges → mismatch (source: parent)", () => {
+    const result = checkSlackRoutingCoherence({
+      explicit: { channelId: "C_PARENT", threadTs: "999.999" },
+      parent: { slackChannelId: "C_PARENT", slackThreadTs: "111.222", contextKey: null },
+    });
+    expect(result.verdict).toBe("mismatch");
+    if (result.verdict === "mismatch") {
+      expect(result.field).toBe("slackThreadTs");
+      expect(result.expectedSource).toBe("parent");
+      expect(result.expected).toBe("111.222");
+      expect(result.got).toBe("999.999");
+    }
   });
 
   test("explicit channelId mismatches parent's slackChannelId → mismatch (source: parent)", () => {
@@ -134,7 +148,7 @@ describe("checkSlackRoutingCoherence", () => {
   test("malformed inherited contextKey degrades to parent-only comparison, no throw", () => {
     const result = checkSlackRoutingCoherence({
       explicit: { channelId: "C_PARENT", threadTs: "111.222" },
-      parent: { slackChannelId: "C_PARENT", slackThreadTs: "999.999", contextKey: "garbage" },
+      parent: { slackChannelId: "C_PARENT", slackThreadTs: "111.222", contextKey: "garbage" },
       inheritedContextKey: "garbage",
     });
     expect(result.verdict).toBe("ok");

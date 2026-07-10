@@ -61,10 +61,12 @@ export function slackChannelFromContextKey(
  * Check whether an explicit Slack unit is coherent with the parent task and
  * the contextKey the new task will carry. `channelId`/`threadTs` must be
  * both-or-neither (delivery requires both); when a channel is present it
- * must agree with the parent's `slackChannelId` (if set) and with the
- * channel/thread encoded in a slack-family `inheritedContextKey` (if any).
- * `userId` is attribution only and is never checked — it is harmless on its
- * own.
+ * must agree with the parent's `slackChannelId` AND `slackThreadTs` (if set)
+ * and with the channel/thread encoded in a slack-family `inheritedContextKey`
+ * (if any). `userId` is attribution only and is never checked — it is
+ * harmless on its own. Callers that want a deliberate cross-channel/thread
+ * dispatch skip this check entirely (see `overrideSlackContext` at the
+ * `send-task` boundary) rather than passing a bypass flag into this helper.
  */
 export function checkSlackRoutingCoherence(input: {
   explicit: SlackUnit;
@@ -99,6 +101,21 @@ export function checkSlackRoutingCoherence(input: {
       expectedSource: "parent",
       got: channelId,
       detail: `explicit slackChannelId "${channelId}" does not match the parent task's slackChannelId "${parent.slackChannelId}".`,
+    };
+  }
+
+  // Same channel as the parent, but a different thread: the DB still
+  // preserves an explicit slackThreadTs verbatim and delivery reads it
+  // directly, so this would post to the wrong thread in the parent's own
+  // channel. Only meaningful once we know the channel agrees (above).
+  if (parent?.slackThreadTs && threadTs !== parent.slackThreadTs) {
+    return {
+      verdict: "mismatch",
+      field: "slackThreadTs",
+      expected: parent.slackThreadTs,
+      expectedSource: "parent",
+      got: threadTs,
+      detail: `explicit slackThreadTs "${threadTs}" does not match the parent task's slackThreadTs "${parent.slackThreadTs}" (same channel "${parent.slackChannelId}").`,
     };
   }
 
