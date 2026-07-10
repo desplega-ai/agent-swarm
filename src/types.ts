@@ -22,7 +22,7 @@ export const MODEL_TIERS = ModelTierSchema.options;
  * Keep the two lists in sync — see
  * `thoughts/taras/plans/2026-07-01-agent-reasoning-effort-runtime-control.md`.
  */
-export const ReasoningEffortSchema = z.enum(["off", "low", "medium", "high", "xhigh"]);
+export const ReasoningEffortSchema = z.enum(["off", "low", "medium", "high", "xhigh", "max"]);
 export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
 
 export const LEGACY_MODEL_TO_TIER: Record<string, ModelTier> = {
@@ -53,10 +53,10 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     ultra: "claude-fable-5",
   },
   codex: {
-    smol: "gpt-5.4-mini",
-    regular: "gpt-5.4",
-    smart: "gpt-5.5",
-    ultra: "gpt-5.5",
+    smol: "gpt-5.6-luna",
+    regular: "gpt-5.6-terra",
+    smart: "gpt-5.6-sol",
+    ultra: "gpt-5.6-sol",
   },
   pi: {
     smol: "openrouter/deepseek/deepseek-v4-flash",

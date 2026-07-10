@@ -5,7 +5,7 @@ import type { CheckResult, DeterministicCheck, Scenario } from "../src/types.ts"
  * distributed-audit (v8.0 round-11, Data + Multi-worker, lead + 2 workers)
  * -----------------------------------------------------------------------
  * Calibrated spread: TODO(calibration) — fill frontierAvg / budgetAvg / gap from
- * the round-11 sweep (anchors: claude-opus-4.8, codex-5.5 vs pi-deepseek-flash,
+ * the round-11 sweep (anchors: claude-opus-4.8, codex-5.6-sol vs pi-deepseek-flash,
  * claude-haiku). Ship gate: frontierAvg − budgetAvg ≥ 0.2. Target ~0.25 → 0.75.
  *
  * The same audit history as `sql-audit` (the `sql-audit-history.sql` dump: 30

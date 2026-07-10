@@ -397,6 +397,9 @@ export const AA_UNMATCHED_CONFIG_IDS: Record<string, string> = {
   "pi-kimi-k2.5": "TSV has Kimi K2.6 only — no K2.5",
   "opencode-kimi-k2.5": "TSV has Kimi K2.6 only — no K2.5",
   "codex-5.4": "TSV has no plain GPT-5.4 rows — only mini/nano",
+  "codex-5.6-sol": "GPT-5.6 was released after the 2026-06-12 AA snapshot",
+  "codex-5.6-terra": "GPT-5.6 was released after the 2026-06-12 AA snapshot",
+  "codex-5.6-luna": "GPT-5.6 was released after the 2026-06-12 AA snapshot",
   // Round-10 leaderboard additions.
   "pi-grok-build-0.1": "no Grok Build row in the 2026-06-12 snapshot — only Grok 4.3 effort rows",
   "opencode-grok-build-0.1":

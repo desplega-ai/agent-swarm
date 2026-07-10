@@ -16,6 +16,7 @@ const REASONING_EFFORT_LEVELS: readonly ReasoningEffortLevel[] = [
   "medium",
   "high",
   "xhigh",
+  "max",
 ];
 
 export type LocalHarnessProvider = "claude" | "codex" | "pi" | "opencode";
@@ -86,13 +87,14 @@ const CACHE = modelsCache as Record<SnapshotProviderId, CachedProvider | undefin
 /** Shared-safe subset accepted by all four harnesses on at least their default models (see research doc). */
 const REASONING_FALLBACK_LEVELS: ReasoningEffortLevel[] = ["low", "medium", "high"];
 
-/** models.dev `reasoning_options[].type === "effort"` value → our normalized enum. `minimal`/`max` intentionally dropped. */
+/** models.dev `reasoning_options[].type === "effort"` value → our normalized enum. `minimal` intentionally dropped. */
 const REASONING_EFFORT_VALUE_MAP: Partial<Record<string, ReasoningEffortLevel>> = {
   none: "off",
   low: "low",
   medium: "medium",
   high: "high",
   xhigh: "xhigh",
+  max: "max",
 };
 
 function levelsFromReasoningOptions(
@@ -130,6 +132,10 @@ function applyReasoningHarnessOverrides(
 
   if (harness === "claude" && hasBudgetTokensOption(model) && !result.includes("off")) {
     result = ["off", ...result];
+  }
+
+  if (harness !== "codex") {
+    result = result.filter((l) => l !== "max");
   }
 
   if (harness === "codex") {
@@ -215,6 +221,9 @@ const DIRECT_MODELS: Record<"claude" | "codex", ModelOption[]> = {
     directModel("claude", "claude-haiku-4-5", "Claude Haiku 4.5", ANTHROPIC_META),
   ],
   codex: [
+    directModel("codex", "gpt-5.6-sol", "GPT-5.6 Sol", OPENAI_META),
+    directModel("codex", "gpt-5.6-terra", "GPT-5.6 Terra", OPENAI_META),
+    directModel("codex", "gpt-5.6-luna", "GPT-5.6 Luna", OPENAI_META),
     directModel("codex", "gpt-5.5", "GPT-5.5", OPENAI_META),
     directModel("codex", "gpt-5.4", "GPT-5.4", OPENAI_META),
     directModel("codex", "gpt-5.4-mini", "GPT-5.4 Mini", OPENAI_META),
@@ -263,7 +272,7 @@ const SNAPSHOT_META: Record<
 
 const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
   claude: "claude-opus-4-8",
-  codex: "gpt-5.4",
+  codex: "gpt-5.6-terra",
   pi: "openrouter/google/gemini-3-flash-preview",
   opencode: "openrouter/qwen/qwen3-coder-flash",
 };

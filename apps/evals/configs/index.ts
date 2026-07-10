@@ -527,6 +527,24 @@ export const configs: HarnessConfig[] = [
     model: "openrouter/meta-llama/llama-4-maverick",
   },
   {
+    id: "codex-5.6-sol",
+    label: "Codex / gpt-5.6-sol",
+    provider: "codex",
+    model: "gpt-5.6-sol",
+  },
+  {
+    id: "codex-5.6-terra",
+    label: "Codex / gpt-5.6-terra",
+    provider: "codex",
+    model: "gpt-5.6-terra",
+  },
+  {
+    id: "codex-5.6-luna",
+    label: "Codex / gpt-5.6-luna",
+    provider: "codex",
+    model: "gpt-5.6-luna",
+  },
+  {
     id: "codex-5.4-mini",
     label: "Codex / gpt-5.4-mini",
     provider: "codex",

@@ -9,7 +9,7 @@
  *   frontierAvg - budgetAvg >= 0.2   → PASS
  *   gap 0.1 .. 0.3                    → BORDERLINE (run +2 attempts/anchor before verdict)
  *
- *   frontier anchors = { claude-opus-4.8, codex-5.5 }
+ *   frontier anchors = { claude-opus-4.8, codex-5.6-sol }
  *   budget   anchors = { pi-deepseek-flash, claude-haiku }
  *
  * The gap math is a pure function (`computeScenarioGaps`) that consumes a
@@ -25,7 +25,7 @@ import { bootstrapDiffCI } from "../src/stats.ts";
 import type { AttemptRow } from "../src/types.ts";
 
 /** Frontier calibration anchors (resolved — opus pinned to the 4.8 build). */
-export const FRONTIER_ANCHORS = ["claude-opus-4.8", "codex-5.5"] as const;
+export const FRONTIER_ANCHORS = ["claude-opus-4.8", "codex-5.6-sol"] as const;
 /** Budget calibration anchors (1 pi + 1 claude, symmetric with frontier). */
 export const BUDGET_ANCHORS = ["pi-deepseek-flash", "claude-haiku"] as const;
 

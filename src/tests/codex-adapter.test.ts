@@ -255,8 +255,8 @@ describe("CodexSession event mapping", () => {
     expect(contextUsage).toBeDefined();
     if (contextUsage && contextUsage.type === "context_usage") {
       expect(contextUsage.contextUsedTokens).toBe(150);
-      expect(contextUsage.contextTotalTokens).toBe(200_000);
-      expect(contextUsage.contextPercent).toBeCloseTo((150 / 200_000) * 100, 6);
+      expect(contextUsage.contextTotalTokens).toBe(1_050_000);
+      expect(contextUsage.contextPercent).toBeCloseTo((150 / 1_050_000) * 100, 6);
       expect(contextUsage.contextFormula).toBe("input-cache-output");
     }
 
@@ -282,7 +282,7 @@ describe("CodexSession event mapping", () => {
     expect(result.sessionId).toBe("thread-abc");
   });
 
-  test("Phase 9: chatty turn clamps contextPercent to 100% under the unified formula", async () => {
+  test("Phase 9: chatty turn uses the models.dev context window under the unified formula", async () => {
     // Phase 9 deliberately swapped Codex's per-adapter peak-proxy formula
     // (`(input - cached) + output`) for the unified `input + output` formula
     // shared with every other provider. The trade-off: a chatty Codex turn
@@ -303,7 +303,7 @@ describe("CodexSession event mapping", () => {
       {
         type: "turn.completed",
         usage: {
-          input_tokens: 357142, // total > 200k window — would clamp pre-fix
+          input_tokens: 357142, // total exceeded the old hardcoded 200k window
           cached_input_tokens: 278912, // most of input is cache reuse
           output_tokens: 2156,
         },
@@ -320,11 +320,10 @@ describe("CodexSession event mapping", () => {
     const contextUsage = emitted.find((e) => e.type === "context_usage");
     expect(contextUsage).toBeDefined();
     if (contextUsage && contextUsage.type === "context_usage") {
-      // Phase 9 unified: input + output = 357142 + 2156 = 359298 (above 200k).
+      // Phase 9 unified: input + output = 357142 + 2156 = 359298.
       expect(contextUsage.contextUsedTokens).toBe(359298);
-      expect(contextUsage.contextTotalTokens).toBe(200_000);
-      // Above 100% raw → clamped to exactly 100.
-      expect(contextUsage.contextPercent).toBe(100);
+      expect(contextUsage.contextTotalTokens).toBe(1_050_000);
+      expect(contextUsage.contextPercent).toBeCloseTo((359298 / 1_050_000) * 100, 6);
       expect(contextUsage.contextFormula).toBe("input-cache-output");
     }
 
@@ -438,7 +437,7 @@ describe("CodexSession event mapping", () => {
     if (errorEvent && errorEvent.type === "error") {
       expect(errorEvent.message).toContain("[context-overflow]");
       expect(errorEvent.message).toContain("gpt-5.4");
-      expect(errorEvent.message).toContain("200,000 tokens");
+      expect(errorEvent.message).toContain("1,050,000 tokens");
       // original error preserved at the end
       expect(errorEvent.message).toContain("context length exceeded");
     }
@@ -748,16 +747,16 @@ describe("resolveCodexModel", () => {
     expect(resolveCodexModel("")).toBe(CODEX_DEFAULT_MODEL);
   });
 
-  test("claude shortname 'opus' → gpt-5.4", () => {
-    expect(resolveCodexModel("opus")).toBe("gpt-5.4");
+  test("claude shortname 'opus' → gpt-5.6-sol", () => {
+    expect(resolveCodexModel("opus")).toBe("gpt-5.6-sol");
   });
 
-  test("claude shortname 'sonnet' → gpt-5.4", () => {
-    expect(resolveCodexModel("sonnet")).toBe("gpt-5.4");
+  test("claude shortname 'sonnet' → gpt-5.6-terra", () => {
+    expect(resolveCodexModel("sonnet")).toBe("gpt-5.6-terra");
   });
 
-  test("claude shortname 'haiku' → gpt-5.4-mini", () => {
-    expect(resolveCodexModel("haiku")).toBe("gpt-5.4-mini");
+  test("claude shortname 'haiku' → gpt-5.6-luna", () => {
+    expect(resolveCodexModel("haiku")).toBe("gpt-5.6-luna");
   });
 
   test("passthrough 'gpt-5.4-mini' → gpt-5.4-mini", () => {
@@ -766,6 +765,12 @@ describe("resolveCodexModel", () => {
 
   test("passthrough 'gpt-5.5' → gpt-5.5", () => {
     expect(resolveCodexModel("gpt-5.5")).toBe("gpt-5.5");
+  });
+
+  test("passthrough GPT-5.6 Codex models", () => {
+    expect(resolveCodexModel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
+    expect(resolveCodexModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");
+    expect(resolveCodexModel("gpt-5.6-luna")).toBe("gpt-5.6-luna");
   });
 
   test("passthrough 'gpt-5.3-codex' → gpt-5.3-codex", () => {
@@ -787,24 +792,30 @@ describe("resolveCodexModel", () => {
 });
 
 describe("getCodexContextWindow", () => {
-  test("gpt-5.4 → 200_000", () => {
-    expect(getCodexContextWindow("gpt-5.4")).toBe(200_000);
+  test("gpt-5.4 → models.dev context", () => {
+    expect(getCodexContextWindow("gpt-5.4")).toBe(1_050_000);
   });
 
-  test("gpt-5.4-mini → 200_000", () => {
-    expect(getCodexContextWindow("gpt-5.4-mini")).toBe(200_000);
+  test("gpt-5.4-mini → models.dev context", () => {
+    expect(getCodexContextWindow("gpt-5.4-mini")).toBe(400_000);
   });
 
   test("gpt-5.5 → 1_050_000", () => {
     expect(getCodexContextWindow("gpt-5.5")).toBe(1_050_000);
   });
 
-  test("gpt-5.3-codex → 1_000_000 (1M context)", () => {
-    expect(getCodexContextWindow("gpt-5.3-codex")).toBe(1_000_000);
+  test("GPT-5.6 Codex models → 1_050_000", () => {
+    expect(getCodexContextWindow("gpt-5.6-sol")).toBe(1_050_000);
+    expect(getCodexContextWindow("gpt-5.6-terra")).toBe(1_050_000);
+    expect(getCodexContextWindow("gpt-5.6-luna")).toBe(1_050_000);
   });
 
-  test("gpt-5.2-codex → 200_000", () => {
-    expect(getCodexContextWindow("gpt-5.2-codex")).toBe(200_000);
+  test("gpt-5.3-codex → models.dev context", () => {
+    expect(getCodexContextWindow("gpt-5.3-codex")).toBe(400_000);
+  });
+
+  test("gpt-5.2-codex → models.dev context", () => {
+    expect(getCodexContextWindow("gpt-5.2-codex")).toBe(400_000);
   });
 });
 
@@ -819,6 +830,12 @@ describe("computeCodexCostUsd", () => {
   test("gpt-5.5 with 1M uncached input + 1M output = $5 + $30 = $35", () => {
     const cost = computeCodexCostUsd("gpt-5.5", 1_000_000, 0, 1_000_000);
     expect(cost).toBeCloseTo(35, 4);
+  });
+
+  test("GPT-5.6 Codex model pricing matches OpenAI model docs", () => {
+    expect(computeCodexCostUsd("gpt-5.6-sol", 1_000_000, 0, 1_000_000)).toBeCloseTo(35, 4);
+    expect(computeCodexCostUsd("gpt-5.6-terra", 1_000_000, 0, 1_000_000)).toBeCloseTo(17.5, 4);
+    expect(computeCodexCostUsd("gpt-5.6-luna", 1_000_000, 0, 1_000_000)).toBeCloseTo(7, 4);
   });
 
   test("gpt-5.4 with cached input applies the cached discount", () => {
@@ -1131,6 +1148,12 @@ describe("buildCodexConfig", () => {
       () => {},
     );
     expect(merged.model_reasoning_effort).toBe("xhigh");
+  });
+
+  test("reasoningEffort: 'max' on gpt-5.6-sol is applied", async () => {
+    globalThis.fetch = stubFetch({ servers: [] });
+    const merged = await buildCodexConfig(cfg({ reasoningEffort: "max" }), "gpt-5.6-sol", () => {});
+    expect(merged.model_reasoning_effort).toBe("max");
   });
 
   test("reasoningEffort: 'xhigh' on gpt-5.1-codex (non-max) is rejected — noop, no model_reasoning_effort key", async () => {

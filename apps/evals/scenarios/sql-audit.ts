@@ -5,7 +5,7 @@ import type { CheckResult, DeterministicCheck, Scenario } from "../src/types.ts"
  * sql-audit (v8.0 round-11, Data, 1 worker)
  * ------------------------------------------
  * Calibrated spread: TODO(calibration) — fill frontierAvg / budgetAvg / gap from
- * the round-11 sweep (anchors: claude-opus-4.8, codex-5.5 vs pi-deepseek-flash,
+ * the round-11 sweep (anchors: claude-opus-4.8, codex-5.6-sol vs pi-deepseek-flash,
  * claude-haiku). Ship gate: frontierAvg − budgetAvg ≥ 0.2. Target ~0.4 → 0.9.
  *
  * The API DB is pre-seeded from `sql-audit-history.sql` — a full dev-DB dump

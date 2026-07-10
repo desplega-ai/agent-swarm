@@ -67,7 +67,7 @@ describe("computeScenarioGaps — round-11 ship gate", () => {
   test("3 frontier ~0.9, 3 budget ~0.4 → gap 0.5 PASS", () => {
     const attempts = [
       ...cohort("sql-audit", "claude-opus-4.8", [0.88, 0.9, 0.92]),
-      ...cohort("sql-audit", "codex-5.5", [0.89, 0.91, 0.9]),
+      ...cohort("sql-audit", "codex-5.6-sol", [0.89, 0.91, 0.9]),
       ...cohort("sql-audit", "pi-deepseek-flash", [0.38, 0.4, 0.42]),
       ...cohort("sql-audit", "claude-haiku", [0.41, 0.4, 0.39]),
     ];
@@ -86,7 +86,7 @@ describe("computeScenarioGaps — round-11 ship gate", () => {
   test("gap below 0.2 → FAIL, not borderline", () => {
     const attempts = [
       ...cohort("sql-audit", "claude-opus-4.8", [0.5, 0.5, 0.5]),
-      ...cohort("sql-audit", "codex-5.5", [0.5, 0.5, 0.5]),
+      ...cohort("sql-audit", "codex-5.6-sol", [0.5, 0.5, 0.5]),
       ...cohort("sql-audit", "pi-deepseek-flash", [0.46, 0.46, 0.46]),
       ...cohort("sql-audit", "claude-haiku", [0.46, 0.46, 0.46]),
     ];
@@ -99,7 +99,7 @@ describe("computeScenarioGaps — round-11 ship gate", () => {
   test("gap in [0.1, 0.3] flagged borderline (still not PASS)", () => {
     const attempts = [
       ...cohort("sql-audit", "claude-opus-4.8", [0.7, 0.7, 0.7]),
-      ...cohort("sql-audit", "codex-5.5", [0.7, 0.7, 0.7]),
+      ...cohort("sql-audit", "codex-5.6-sol", [0.7, 0.7, 0.7]),
       ...cohort("sql-audit", "pi-deepseek-flash", [0.55, 0.55, 0.55]),
       ...cohort("sql-audit", "claude-haiku", [0.55, 0.55, 0.55]),
     ];
@@ -112,7 +112,7 @@ describe("computeScenarioGaps — round-11 ship gate", () => {
   test("missing budget anchor scores → gap null, INCOMPLETE (never NaN)", () => {
     const attempts = [
       ...cohort("sql-audit", "claude-opus-4.8", [0.9, 0.9, 0.9]),
-      ...cohort("sql-audit", "codex-5.5", [0.9, 0.9, 0.9]),
+      ...cohort("sql-audit", "codex-5.6-sol", [0.9, 0.9, 0.9]),
       // budget anchors absent from the run entirely
     ];
     const g = computeScenarioGaps(summarizeRun(run(), attempts))[0]!;
@@ -126,7 +126,7 @@ describe("computeScenarioGaps — round-11 ship gate", () => {
   test("formatGapReport renders a PASS verdict and the anchor legend", () => {
     const attempts = [
       ...cohort("sql-audit", "claude-opus-4.8", [0.9, 0.9, 0.9]),
-      ...cohort("sql-audit", "codex-5.5", [0.9, 0.9, 0.9]),
+      ...cohort("sql-audit", "codex-5.6-sol", [0.9, 0.9, 0.9]),
       ...cohort("sql-audit", "pi-deepseek-flash", [0.4, 0.4, 0.4]),
       ...cohort("sql-audit", "claude-haiku", [0.4, 0.4, 0.4]),
     ];
@@ -143,7 +143,7 @@ describe("computeScenarioGaps — gap significance (bootstrap diff CI)", () => {
   // Frontier ~0.9 vs budget ~0.4, tight within-cohort spread → significant gap.
   const clearGap = (): AttemptRow[] => [
     ...cohort("sql-audit", "claude-opus-4.8", [0.88, 0.9, 0.92]),
-    ...cohort("sql-audit", "codex-5.5", [0.89, 0.91, 0.9]),
+    ...cohort("sql-audit", "codex-5.6-sol", [0.89, 0.91, 0.9]),
     ...cohort("sql-audit", "pi-deepseek-flash", [0.38, 0.4, 0.42]),
     ...cohort("sql-audit", "claude-haiku", [0.41, 0.4, 0.39]),
   ];

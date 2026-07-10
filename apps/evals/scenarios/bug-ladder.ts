@@ -6,7 +6,7 @@ import type { CheckResult, DeterministicCheck, Scenario } from "../src/types.ts"
  * bug-ladder (v8.0 round-11, Code, 1 worker, budgetUsd: 1.5)
  * ---------------------------------------------------------
  * Calibrated spread: TODO(calibration) — fill frontierAvg / budgetAvg / gap from
- * the round-11 sweep (anchors: claude-opus-4.8, codex-5.5 vs pi-deepseek-flash,
+ * the round-11 sweep (anchors: claude-opus-4.8, codex-5.6-sol vs pi-deepseek-flash,
  * claude-haiku). Ship gate: frontierAvg − budgetAvg ≥ 0.2. Target ~0.35 → 0.9.
  *
  * Round-11 hardening: the original five-bug ladder SATURATED — budget models tied
