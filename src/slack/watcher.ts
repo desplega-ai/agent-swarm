@@ -12,8 +12,10 @@ import { getSlackApp } from "./app";
 import type { TreeNode } from "./blocks";
 import { buildTreeBlocks, formatDuration } from "./blocks";
 import {
+  sendInlineTaskOutput,
   sendProgressUpdate,
   sendTaskResponse,
+  shouldPostInlineCompletionOutput,
   updateProgressInPlace,
   updateToFinal,
   updateTreeMessage,
@@ -704,11 +706,11 @@ export function startTaskWatcher(intervalMs = 3000): void {
         if (lastSent && now - lastSent < MIN_SEND_INTERVAL) continue;
 
         // Tasks tracked in a tree are still rendered by processTreeMessages().
-        // Successful tasks without their own slack-reply also get a full
-        // threaded completion message so the tree's compact preview is not the
-        // only place their output appears.
+        // For prose-only completions, add one inline output reply so the user
+        // sees the actual answer instead of only the compact tree preview.
         if (taskToTree.has(task.id)) {
-          if (task.status !== "completed" || task.slackReplySent) {
+          const attachments = task.status === "completed" ? getTaskAttachments(task.id) : [];
+          if (!shouldPostInlineCompletionOutput(task, attachments)) {
             notifiedCompletions.set(task.id, now);
             continue;
           }
@@ -717,9 +719,10 @@ export function startTaskWatcher(intervalMs = 3000): void {
           notifiedCompletions.set(task.id, now);
           lastSendTime.set(completionKey, now);
           try {
-            await sendTaskResponse(task);
+            const sent = await sendInlineTaskOutput(task);
+            if (!sent) throw new Error("sendInlineTaskOutput returned false");
             console.log(
-              `[Slack] Sent full tree-tracked completion for task ${task.id.slice(0, 8)}`,
+              `[Slack] Sent inline output for tree-tracked completion ${task.id.slice(0, 8)}`,
             );
           } catch (error) {
             notifiedCompletions.delete(task.id);
