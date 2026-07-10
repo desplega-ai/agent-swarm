@@ -29,7 +29,7 @@ import {
   User,
   Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import "streamdown/styles.css";
 import { useAgents } from "@/api/hooks/use-agents";
@@ -58,7 +58,9 @@ import { MarkdownView } from "@/components/shared/markdown-view";
 import { SessionId } from "@/components/shared/session-id";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { TaskActivityStatus } from "@/components/shared/task-activity-status";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
+import { AlertCallout } from "@/components/ui/alert-callout";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -85,7 +87,12 @@ import { formatTokens } from "@/lib/format-tokens";
 import { modelTierLabel } from "@/lib/model-tiers";
 import { progressBarTone } from "@/lib/percent-progress-tone";
 import { statusTextClass } from "@/lib/status-tone";
-import { taskIsRunning } from "@/lib/task-activity";
+import {
+  classifyTaskActivity,
+  formatTaskActivityAge,
+  getTaskLastActivityAt,
+  taskIsRunning,
+} from "@/lib/task-activity";
 import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
 
 const TASK_DETAIL_TABS = new Set(["details", "outcome", "logs"]);
@@ -94,10 +101,10 @@ function coerceTaskDetailTab(value: string): string {
   return TASK_DETAIL_TABS.has(value) ? value : "details";
 }
 
-function readStoredRailCollapsed(): boolean {
-  if (typeof window === "undefined") return true;
+function readStoredRailCollapsed(): boolean | null {
+  if (typeof window === "undefined") return null;
   const stored = window.localStorage.getItem("agent-swarm-task-rail-collapsed-v2");
-  return stored === null ? true : stored === "1";
+  return stored === null ? null : stored === "1";
 }
 
 function logDotColor(eventType: string, newValue?: string): string {
@@ -493,6 +500,7 @@ export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: task, isLoading } = useTask(id!);
+  const [activityNowMs, setActivityNowMs] = useState(Date.now);
   const { data: sessionLogs } = useTaskSessionLogs(id!);
   const { data: agents } = useAgents();
   const { data: users } = useUsers();
@@ -504,8 +512,14 @@ export default function TaskDetailPage() {
   const { searchParams, setParam } = useUrlSearchState();
   const activeTab = coerceTaskDetailTab(readStringParam(searchParams, "tab", "details"));
   const railParam = readStringParam(searchParams, "rail");
+  const storedRailCollapsed = readStoredRailCollapsed();
+  const hasRailParam = railParam === "expanded" || railParam === "collapsed";
   const railCollapsed =
-    railParam === "expanded" ? false : railParam === "collapsed" ? true : readStoredRailCollapsed();
+    railParam === "expanded"
+      ? false
+      : railParam === "collapsed"
+        ? true
+        : (storedRailCollapsed ?? task?.status !== "in_progress");
   const setActiveTab = useCallback(
     (tab: string) => setParam("tab", coerceTaskDetailTab(tab), { defaultValue: "details" }),
     [setParam],
@@ -529,13 +543,20 @@ export default function TaskDetailPage() {
     return users.find((u) => u.id === task.requestedByUserId)?.name ?? null;
   }, [task, users]);
 
-  // Phase 17 — collapsible right rail (Activity feed). The URL is the primary
-  // source for shareable state; localStorage remains the fallback preference
-  // when the `rail` query param is absent.
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    const interval = window.setInterval(() => setActivityNowMs(Date.now()), 10_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  // The URL remains the primary shareable choice and localStorage remains the
+  // fallback preference. Do not persist a derived default: without either
+  // explicit choice, active tasks open the rail and every other status keeps
+  // the established collapsed default.
+  useEffect(() => {
+    if (typeof window === "undefined" || !task) return;
+    if (!hasRailParam && storedRailCollapsed === null) return;
     window.localStorage.setItem("agent-swarm-task-rail-collapsed-v2", railCollapsed ? "1" : "0");
-  }, [railCollapsed]);
+  }, [hasRailParam, railCollapsed, storedRailCollapsed, task]);
 
   if (isLoading) {
     return (
@@ -550,6 +571,9 @@ export default function TaskDetailPage() {
   if (!task) {
     return <p className="text-muted-foreground">Task not found.</p>;
   }
+
+  const lastActivityAt = getTaskLastActivityAt(task);
+  const taskActivity = classifyTaskActivity(task.status, lastActivityAt, activityNowMs);
 
   const terminalStatuses = ["completed", "failed", "cancelled"];
   const canCancel = !terminalStatuses.includes(task.status) && task.status !== "paused";
@@ -801,17 +825,29 @@ export default function TaskDetailPage() {
   // z-30 keeps the heading above both the timeline rows (no z) and the
   // chevron toggle (z-20), so the heading visually covers everything that
   // scrolls past it.
-  const rightRailContent = hasEvents ? (
+  const rightRailContent = (
     <div>
-      <h4 className="sticky top-0 z-30 bg-background -mx-3 px-3 pt-3 pb-3 pr-10 font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-muted-foreground border-b border-border">
-        <Activity className="h-3 w-3 inline-block mr-1 -mt-0.5 text-muted-foreground" />
-        Activity ({task.logs!.length})
-      </h4>
+      <div className="sticky top-0 z-30 bg-background -mx-3 px-3 pt-3 pb-3 pr-10 border-b border-border">
+        <div className="font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+          <Activity className="h-3 w-3 inline-block mr-1 -mt-0.5 text-muted-foreground" />
+          Activity ({task.logs?.length ?? 0})
+        </div>
+        <TaskActivityStatus
+          status={task.status}
+          lastActivityAt={lastActivityAt}
+          nowMs={activityNowMs}
+          className="mt-2"
+        />
+      </div>
       <div className="pt-3">
-        <LogTimeline logs={task.logs!} />
+        {hasEvents ? (
+          <LogTimeline logs={task.logs!} />
+        ) : (
+          <p className="text-xs text-muted-foreground">No activity events yet.</p>
+        )}
       </div>
     </div>
-  ) : null;
+  );
 
   const outcomeContent = (
     <div className="space-y-2">
@@ -965,6 +1001,12 @@ export default function TaskDetailPage() {
         ) : null}
       </div>
       <CollapsibleDescription text={task.task} />
+      {taskActivity.mayBeStuck ? (
+        <AlertCallout tone="warning" icon={AlertTriangle} title="May be stuck">
+          Last activity was {formatTaskActivityAge(taskActivity.ageMs)} while this task is still in
+          progress.
+        </AlertCallout>
+      ) : null}
       <div className="flex items-center gap-2">
         {(canCancel || canPause || canResume) && (
           <div className="flex items-center gap-1.5 shrink-0">

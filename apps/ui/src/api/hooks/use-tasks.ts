@@ -6,6 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { getTaskDetailPollInterval } from "@/lib/task-activity";
 import { api } from "../client";
 import type { AgentTask, AgentTaskSource, AgentTaskStatus, TaskWithLogs } from "../types";
 
@@ -51,12 +52,11 @@ export function useTask(id: string, opts?: { refetchInterval?: number | false })
     queryKey: ["task", id],
     queryFn: () => api.fetchTask(id),
     enabled: !!id,
-    // Only set `refetchInterval` when a caller explicitly opts in. Passing
-    // `refetchInterval: undefined` here would clobber the QueryClient's global
-    // 10s default (object-spread merge keeps the present-but-undefined key),
-    // freezing task status/output until window refocus. Omitting the key lets
-    // the default apply, while an explicit `false`/number still overrides.
-    ...(opts?.refetchInterval !== undefined ? { refetchInterval: opts.refetchInterval } : {}),
+    // The detail row is the source for status, progress, output, and Activity.
+    // Keep non-terminal tasks fresh, then stop this endpoint once the server
+    // returns a final lifecycle state. Explicit callers retain their override.
+    refetchInterval:
+      opts?.refetchInterval ?? ((query) => getTaskDetailPollInterval(query.state.data?.status)),
   });
 }
 

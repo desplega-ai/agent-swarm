@@ -39,6 +39,7 @@ import { DataGrid } from "@/components/shared/data-grid";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { TaskActivityStatus } from "@/components/shared/task-activity-status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,6 +61,7 @@ import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 export type TasksTableColumnId =
   | "description"
   | "status"
+  | "activity"
   | "source"
   | "cost"
   | "model"
@@ -80,6 +82,7 @@ export type TasksTableColumnId =
 // connected server has the People page + composeUser pipeline). When the
 // server is older, the table strips the column AND the menu omits the entry.
 export const TOGGLEABLE_COLUMNS: { id: TasksTableColumnId; label: string }[] = [
+  { id: "activity", label: "Activity" },
   { id: "source", label: "Source" },
   { id: "cost", label: "Cost" },
   { id: "model", label: "Model" },
@@ -597,6 +600,17 @@ export function TasksTable({
         width: 130,
         ...fixed,
         cellRenderer: (p: { data?: AgentTask }) => (p.data ? <StatusCell task={p.data} /> : null),
+      },
+      {
+        _id: "activity",
+        field: "lastUpdatedAt",
+        headerName: "Activity",
+        width: 170,
+        ...fixed,
+        cellRenderer: (p: { data?: AgentTask }) =>
+          p.data ? (
+            <TaskActivityStatus status={p.data.status} lastActivityAt={p.data.lastUpdatedAt} />
+          ) : null,
       },
       {
         _id: "source",
