@@ -1,12 +1,4 @@
 <p align="center">
-  <a href="https://www.producthunt.com/products/agent-swarm?launch=agent-swarm&utm_source=github&utm_medium=readme" target="_blank">
-    <img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=agent-swarm&theme=light" alt="agent-swarm - AI Native engine for your company | Product Hunt" width="250" height="54" />
-  </a>
-  <br/>
-  <sub>🚀 We're live on Product Hunt today — the swarm is running its own launch. An upvote helps.</sub>
-</p>
-
-<p align="center">
   <a href="https://github.com/desplega-ai/agent-swarm/stargazers"><img src="https://img.shields.io/github/stars/desplega-ai/agent-swarm?style=flat-square&color=yellow" alt="GitHub Stars"></a>
   <a href="https://github.com/desplega-ai/agent-swarm/blob/main/LICENSE"><img src="https://img.shields.io/github/license/desplega-ai/agent-swarm?style=flat-square" alt="MIT License"></a>
   <a href="https://github.com/desplega-ai/agent-swarm/pulls"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs Welcome"></a>

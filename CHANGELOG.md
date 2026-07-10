@@ -6,11 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.115.0] - 2026-07-10
+
 ### Added
-- **Routing affinity gates every pool consumer against the original assignee's role/capabilities** — resumes, reboot-sweep retry children, and fresh tasks declaring `requiredCapabilities` (`send-task`/`task-action create`) carry a `routingAffinity` snapshot; worker poll auto-claim, `task-action claim`, and the heartbeat's pool auto-assign all gate on the same `isAgentEligibleForTask` check. A reboot-retry child now pins back to its original agent when it looks recoverable, and an affinity-tagged pool task with zero eligible registered agents escalates to the Lead instead of landing on an arbitrary idle worker. Kill-switch: `POOL_AFFINITY_ENFORCEMENT=0` restores the prior role-blind pool behavior; untagged tasks are unaffected.
+- **Routing affinity now gates every pool consumer against the original assignee's role/capabilities** (#954) — resumes, reboot-sweep retry children, and fresh tasks declaring `requiredCapabilities` (`send-task`/`task-action create`) carry a `routingAffinity` snapshot; worker poll auto-claim, `task-action claim`, and the heartbeat's pool auto-assign all use the same eligibility gate, and affinity-tagged pool tasks with zero eligible registered agents escalate to the Lead instead of landing on an arbitrary idle worker.
+- **Script API connections can now return raw HTTP responses on demand** (#952) — `ctx.api.*` callers can opt into raw status/header/body access for binary payloads and non-2xx inspection instead of always getting parsed JSON or thrown HTTP errors.
+
+### Changed
+- **User-token RBAC admission now covers more MCP-user and route-backlog surfaces** (#951) — favorites, skills, MCP servers, scripts, and related tool admission paths are now wired through the role engine with tighter secret access posture.
+- **The dashboard home now centers on an activity timeline instead of the legacy graph stack** (#945) — overlapping task lanes, parent/child hover links, burst clustering, zoom controls, and a unified home surface replace the older canvas/table/dashboard split.
+- **The worker image trims extra Claude-side surfaces by default** (#943) — bundled skills, remote control, Claude AI connectors, and several unneeded built-in tools are disabled in the default Claude config to reduce context/tooling bloat inside worker sessions.
 
 ### Fixed
+- **UI-created tasks can attribute `requestedByUserId` correctly in trusted shared-key deployments** (#953) — operators can opt into a body-field fallback with `TRUST_BODY_REQUESTED_BY_USER_ID=true` without reopening the default anti-spoofing path.
 - **Per-agent setupScript failures are non-fatal by default after the v1.106.0 privilege hardening** — `STARTUP_SCRIPT_STRICT` now defaults to `false`, so worker pods continue booting when a per-agent `/workspace/start-up.*` script still contains root-only commands. Set `STARTUP_SCRIPT_STRICT=true` to keep fail-fast behavior.
+- **Playwright and browser-automation tasks now have the Chromium runtime libraries they need in the worker image** (#946) — the bundled browser can launch without per-agent `apt` bootstrap workarounds.
 
 ### Migration notes
 - **v1.106.0 setupScript privilege boundary:** per-agent `setupScript` and `/workspace/start-up.*` hooks now run as the unprivileged `worker` user after the container drops privileges, and the worker image no longer includes blanket passwordless sudo (#865, #866). Move root-requiring steps such as system package installs, `/usr/lib` global npm writes, service ownership changes, or local database bootstrap into the admin-controlled global `SETUP_SCRIPT` config, into the worker image, or into the built-in optional service toggles. Keep per-agent setup user-level, for example `bun i -g` or `npm config set prefix "$HOME/.npm-global"`.

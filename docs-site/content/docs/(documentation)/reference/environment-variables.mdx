@@ -20,6 +20,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SWARM_URL` | `localhost` | Base domain for service discovery |
 | `APP_URL` | — | Dashboard URL for Slack message links. `DASHBOARD_URL` is a deprecated alias of `APP_URL`. |
 | `SWARM_DASHBOARD_URL` | Falls back to `APP_URL` | Optional override for the dashboard base URL used to build the "View in Agent Swarm" link posted back to a Linear `AgentSession`. |
+| `TRUST_BODY_REQUESTED_BY_USER_ID` | `false` (unset/off) | Set to `true` only in single-tenant/shared-operator-key deployments where every `POST /api/tasks` caller is already trusted. When enabled, the server may honor a body-supplied `requestedByUserId` (validated against a real user row) if no authenticated/owned-task identity is available. Leave it off in multi-tenant or upstream-safe deployments to preserve the default anti-spoofing behavior. |
 | `ENV` | — | Environment mode (`development` adds prefix to Slack agent names) |
 | `DATABASE_PATH` | `./agent-swarm-db.sqlite` | SQLite database file path |
 | `SQLITE_VEC_EXTENSION_PATH` | — | Path to `vec0.so` native extension for sqlite-vec vector search. Set automatically in the Docker image (`/app/extensions/vec0.so`). Only needed for non-Docker deployments. |
