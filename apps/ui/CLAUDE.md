@@ -2,6 +2,10 @@
 
 React + Vite + shadcn/ui + Tailwind + AG Grid + react-query dashboard for the Agent Swarm API.
 
+## Design Context
+
+Strategic design context lives in [PRODUCT.md](./PRODUCT.md) (register, users, positioning, brand personality, design principles) and the visual system in [DESIGN.md](./DESIGN.md) (tokens, typography, elevation, component doctrine). Read them before designing or restyling any UI surface.
+
 <important if="you are running the ui dev server, building it, or setting up ui locally">
 
 ## Quick start

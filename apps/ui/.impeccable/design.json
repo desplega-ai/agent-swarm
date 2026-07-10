@@ -1,0 +1,181 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-10T00:00:00Z",
+  "title": "Design System: Agent Swarm Dashboard",
+  "extensions": {
+    "colorMeta": {
+      "hive-amber": {
+        "role": "primary",
+        "displayName": "Hive Amber",
+        "canonical": "oklch(0.555 0.163 48.998)",
+        "darkValue": "oklch(0.769 0.188 70.08)",
+        "tonalRamp": ["oklch(0.2 0.09 49)", "oklch(0.3 0.12 49)", "oklch(0.42 0.15 49)", "oklch(0.555 0.163 49)", "oklch(0.666 0.179 58)", "oklch(0.769 0.188 70)", "oklch(0.87 0.12 78)", "oklch(0.95 0.05 84)"]
+      },
+      "background": {
+        "role": "neutral",
+        "displayName": "Field",
+        "canonical": "oklch(1 0 0)",
+        "darkValue": "oklch(0.141 0.005 285.823)",
+        "tonalRamp": ["oklch(0.141 0.005 286)", "oklch(0.21 0.006 286)", "oklch(0.274 0.006 286)", "oklch(0.442 0.01 286)", "oklch(0.552 0.016 286)", "oklch(0.705 0.015 286)", "oklch(0.92 0.004 286)", "oklch(1 0 0)"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Recessed Surface",
+        "canonical": "oklch(0.985 0.0015 286)",
+        "darkValue": "oklch(0.185 0.006 286)",
+        "tonalRamp": ["oklch(0.185 0.006 286)", "oklch(0.25 0.005 286)", "oklch(0.35 0.005 286)", "oklch(0.5 0.004 286)", "oklch(0.65 0.003 286)", "oklch(0.8 0.002 286)", "oklch(0.92 0.002 286)", "oklch(0.985 0.0015 286)"]
+      },
+      "muted-foreground": {
+        "role": "neutral",
+        "displayName": "Quiet Ink",
+        "canonical": "oklch(0.552 0.016 285.938)",
+        "darkValue": "oklch(0.705 0.015 286.067)",
+        "tonalRamp": ["oklch(0.2 0.016 286)", "oklch(0.3 0.016 286)", "oklch(0.4 0.016 286)", "oklch(0.552 0.016 286)", "oklch(0.65 0.015 286)", "oklch(0.705 0.015 286)", "oklch(0.85 0.01 286)", "oklch(0.95 0.005 286)"]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Structural Line",
+        "canonical": "oklch(0.92 0.004 286.32)",
+        "darkValue": "oklch(1 0 0 / 10%)",
+        "tonalRamp": ["oklch(0.25 0.004 286)", "oklch(0.35 0.004 286)", "oklch(0.5 0.004 286)", "oklch(0.65 0.004 286)", "oklch(0.78 0.004 286)", "oklch(0.86 0.004 286)", "oklch(0.92 0.004 286)", "oklch(0.97 0.002 286)"]
+      },
+      "status-success": {
+        "role": "secondary",
+        "displayName": "Success Emerald",
+        "canonical": "oklch(0.696 0.17 162.48)",
+        "darkValue": "oklch(0.765 0.177 163.223)",
+        "tonalRamp": ["oklch(0.25 0.08 162)", "oklch(0.38 0.11 162)", "oklch(0.5 0.14 162)", "oklch(0.596 0.145 163)", "oklch(0.696 0.17 162)", "oklch(0.765 0.177 163)", "oklch(0.87 0.12 163)", "oklch(0.95 0.05 163)"]
+      },
+      "status-error": {
+        "role": "secondary",
+        "displayName": "Failure Red",
+        "canonical": "oklch(0.637 0.237 25.331)",
+        "darkValue": "oklch(0.704 0.191 22.216)",
+        "tonalRamp": ["oklch(0.25 0.1 25)", "oklch(0.38 0.15 25)", "oklch(0.5 0.2 26)", "oklch(0.577 0.245 27)", "oklch(0.637 0.237 25)", "oklch(0.704 0.191 22)", "oklch(0.85 0.09 22)", "oklch(0.95 0.03 22)"]
+      },
+      "status-info": {
+        "role": "secondary",
+        "displayName": "Info Sky",
+        "canonical": "oklch(0.685 0.169 237.323)",
+        "darkValue": "oklch(0.746 0.16 232.661)",
+        "tonalRamp": ["oklch(0.25 0.08 237)", "oklch(0.38 0.11 237)", "oklch(0.5 0.14 240)", "oklch(0.588 0.158 242)", "oklch(0.685 0.169 237)", "oklch(0.746 0.16 233)", "oklch(0.87 0.09 233)", "oklch(0.95 0.03 233)"]
+      },
+      "status-paused": {
+        "role": "secondary",
+        "displayName": "Paused Blue",
+        "canonical": "oklch(0.623 0.214 259.815)",
+        "darkValue": "oklch(0.707 0.165 254.624)",
+        "tonalRamp": ["oklch(0.25 0.1 260)", "oklch(0.38 0.15 260)", "oklch(0.5 0.2 261)", "oklch(0.546 0.245 263)", "oklch(0.623 0.214 260)", "oklch(0.707 0.165 255)", "oklch(0.87 0.08 255)", "oklch(0.95 0.03 255)"]
+      }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Headline", "purpose": "Route-page titles via PageHeader (text-xl font-semibold). Fixed rem scale, never fluid." },
+      "body": { "displayName": "Body", "purpose": "Default reading size (text-sm) for descriptions, forms, cells. Prose caps at 65-75ch." },
+      "label": { "displayName": "Label", "purpose": "InfoRow uppercase tracked labels and quiet metadata (text-xs)." },
+      "mono": { "displayName": "Machine Voice", "purpose": "Space Mono for IDs, logs, code, costs — anything the system produced." }
+    },
+    "shadows": [
+      { "name": "whisper", "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)", "purpose": "shadow-xs on buttons and inputs — barely-there lift on interactive controls." },
+      { "name": "resting-card", "value": "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)", "purpose": "shadow-sm on Card containers at rest. Borders, not shadows, define structure." }
+    ],
+    "motion": [
+      { "name": "control-transition", "value": "all 150ms ease", "purpose": "Default state transitions on buttons/inputs (transition-all)." },
+      { "name": "shimmer-slide", "value": "shimmer-slide 2s linear infinite", "purpose": "Liveness indicator on in-progress agent work only. Must degrade to a static indicator under prefers-reduced-motion." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Hive Amber primary action — one per surface.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Create Task</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 8px 16px; border: none; border-radius: 0.5rem; font-family: 'Space Grotesk', sans-serif; font-size: 0.875rem; font-weight: 500; cursor: pointer; transition: all 150ms ease; white-space: nowrap; } .ds-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-ring, oklch(0.555 0.163 49)) 50%, transparent); } .ds-btn-primary { background: var(--color-primary, oklch(0.555 0.163 48.998)); color: var(--color-primary-foreground, oklch(0.985 0 0)); } .ds-btn-primary:hover { background: color-mix(in oklab, var(--color-primary, oklch(0.555 0.163 48.998)) 90%, transparent); }"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Secondary bordered action.",
+      "html": "<button class=\"ds-btn ds-btn-outline\">Cancel</button>",
+      "css": ".ds-btn-outline { background: var(--color-background, oklch(1 0 0)); color: var(--color-foreground, oklch(0.141 0.005 285.823)); border: 1px solid var(--color-border, oklch(0.92 0.004 286.32)); box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); } .ds-btn-outline:hover { background: var(--color-accent, oklch(0.967 0.001 286.375)); }"
+    },
+    {
+      "name": "Destructive Outline Button",
+      "kind": "button",
+      "refersTo": "button-destructive-outline",
+      "description": "Red-outlined destructive action (delete/remove/disconnect); always confirms via dialog.",
+      "html": "<button class=\"ds-btn ds-btn-destructive-outline\">Delete</button>",
+      "css": ".ds-btn-destructive-outline { background: var(--color-background, oklch(1 0 0)); color: var(--color-status-error, oklch(0.637 0.237 25.331)); border: 1px solid color-mix(in oklab, var(--color-status-error, oklch(0.637 0.237 25.331)) 30%, transparent); box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); } .ds-btn-destructive-outline:hover { background: color-mix(in oklab, var(--color-status-error, oklch(0.637 0.237 25.331)) 10%, transparent); }"
+    },
+    {
+      "name": "Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "36px transparent-bg field with the shared amber focus ring.",
+      "html": "<input class=\"ds-input\" placeholder=\"Search tasks...\" />",
+      "css": ".ds-input { height: 36px; width: 100%; min-width: 0; padding: 4px 12px; background: transparent; border: 1px solid var(--color-input, oklch(0.92 0.004 286.32)); border-radius: 0.5rem; font-family: 'Space Grotesk', sans-serif; font-size: 0.875rem; color: var(--color-foreground, oklch(0.141 0.005 285.823)); box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); transition: color 150ms ease, box-shadow 150ms ease; outline: none; } .ds-input::placeholder { color: var(--color-muted-foreground, oklch(0.552 0.016 285.938)); } .ds-input:focus-visible { border-color: var(--color-ring, oklch(0.555 0.163 48.998)); box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-ring, oklch(0.555 0.163 48.998)) 50%, transparent); }"
+    },
+    {
+      "name": "Tag Badge",
+      "kind": "chip",
+      "refersTo": "badge-tag",
+      "description": "The system status chip — 9px uppercase, semantically toned.",
+      "html": "<span class=\"ds-tag ds-tag-info\">QUEUED</span> <span class=\"ds-tag ds-tag-active\">RUNNING</span> <span class=\"ds-tag ds-tag-success\">COMPLETED</span>",
+      "css": ".ds-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; margin-right: 4px; border: 1px solid var(--color-border, oklch(0.92 0.004 286.32)); border-radius: 0.375rem; font-family: 'Space Grotesk', sans-serif; font-size: 9px; font-weight: 500; line-height: 1; letter-spacing: 0.02em; text-transform: uppercase; color: var(--color-foreground, oklch(0.141 0.005 285.823)); } .ds-tag-info { border-color: color-mix(in oklab, var(--color-status-info, oklch(0.685 0.169 237.323)) 30%, transparent); color: var(--color-status-info-strong, oklch(0.588 0.158 241.966)); } .ds-tag-active { border-color: color-mix(in oklab, var(--color-status-active, oklch(0.769 0.188 70.08)) 30%, transparent); color: var(--color-status-active-strong, oklch(0.666 0.179 58.318)); } .ds-tag-success { border-color: color-mix(in oklab, var(--color-status-success, oklch(0.696 0.17 162.48)) 30%, transparent); color: var(--color-status-success-strong, oklch(0.596 0.145 163.225)); }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Bordered section container, border-first depth.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-title\">Agent Fleet</div><p class=\"ds-card-body\">4 agents idle, 2 busy. Memory compounds with every run.</p></div>",
+      "css": ".ds-card { display: flex; flex-direction: column; gap: 12px; padding: 24px; background: var(--color-card, oklch(1 0 0)); color: var(--color-foreground, oklch(0.141 0.005 285.823)); border: 1px solid var(--color-border, oklch(0.92 0.004 286.32)); border-radius: 0.75rem; box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1); font-family: 'Space Grotesk', sans-serif; } .ds-card-title { font-size: 1rem; font-weight: 600; line-height: 1; } .ds-card-body { margin: 0; font-size: 0.875rem; line-height: 1.5; color: var(--color-muted-foreground, oklch(0.552 0.016 285.938)); }"
+    },
+    {
+      "name": "Info Row",
+      "kind": "custom",
+      "refersTo": "badge-tag",
+      "description": "Uppercase label + value pair used across detail pages and rails.",
+      "html": "<div class=\"ds-info-row\"><span class=\"ds-info-label\">Harness</span><p class=\"ds-info-value\">claude-code v2.1</p></div>",
+      "css": ".ds-info-row { display: flex; flex-direction: column; gap: 4px; font-family: 'Space Grotesk', sans-serif; } .ds-info-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.025em; color: var(--color-muted-foreground, oklch(0.552 0.016 285.938)); } .ds-info-value { margin: 0; font-size: 0.875rem; color: var(--color-foreground, oklch(0.141 0.005 285.823)); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Mission Control",
+    "overview": "This is the console an operator trusts while a fleet of autonomous coding agents does real work. The system is flight-deck steady: a quiet zinc neutral field in light and dark, dense-but-ordered readouts, and one voice of color — Hive Amber — reserved for what is interactive or alive right now. Status is a language here, not decoration: eight semantic status tones and eleven workflow action tones carry all meaning-bearing color, so a screen full of running agents reads as an ordered fleet, not an alarm board. The system explicitly rejects enterprise admin sprawl and AI-startup gradient slop. Nothing shimmers unless something is genuinely running. Composure comes from borders and tonal layering rather than shadow drama; utility comes from crisp, small-radius controls that recede until needed.",
+    "keyCharacteristics": [
+      "One accent (Hive Amber) for interaction and liveness; everything else is zinc neutral or a named status tone.",
+      "Flat, border-defined depth; shadows are whispers (shadow-xs/shadow-sm), never structure.",
+      "Utilitarian and crisp controls: 36px-tall inputs/buttons, 6-8px radii, exact state vocabulary.",
+      "Single-family typography (Space Grotesk) with Space Mono for IDs, logs, and machine output.",
+      "Dual-theme by design: every token has a light and dark value; nothing is hardcoded to either."
+    ],
+    "rules": [
+      { "name": "The Token-Only Rule", "body": "Raw Tailwind palette literals (bg-emerald-500, text-amber-400, bg-[#0d1117]) are forbidden in app code — the check:tokens lint gate fails the build on them. New colors enter the system only as named tokens in globals.css.", "section": "colors" },
+      { "name": "The One Voice Rule", "body": "Hive Amber speaks for interaction and liveness only. If amber appears on something that is neither actionable nor currently active, it is wrong.", "section": "colors" },
+      { "name": "The Machine-Voice Rule", "body": "If a human wrote it, it's Space Grotesk; if the system produced it (IDs, logs, code, raw payloads), it's Space Mono. Never mix within one value.", "section": "typography" },
+      { "name": "The Border-First Rule", "body": "If a container needs definition, reach for border-border or a tonal step (surface/card), never a bigger shadow. A shadow that reads as 'elevation strategy' is a bug.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do use named tokens for every color: bg-status-success, text-status-error-strong, bg-action-script/10. The lint gate enforces it.",
+      "Do compose from the primitives catalog (Button, Badge size=\"tag\", StatusBadge, DataGrid, DetailPageBody, SettingsRow, EmptyState) before writing a raw <div> layout.",
+      "Do keep one focus language: 3px ring-ring/50 amber ring on every focusable control.",
+      "Do use skeletons (Skeleton, PageSkeleton) for loading and EmptyState (icon + title + description + action) for empty lists — empty states teach the interface.",
+      "Do hold WCAG 2.1 AA in both themes: ≥4.5:1 body contrast, keyboard access, prefers-reduced-motion alternatives (the shimmer must degrade to a static indicator)."
+    ],
+    "donts": [
+      "Don't hardcode theme colors — no bg-zinc-950, no dark: palette variants, no hex literals. Both themes are first-class.",
+      "Don't drift toward 'AI-startup gradient slop': no purple gradients, no glassmorphism, no sparkle theater around agent work.",
+      "Don't rebuild 'enterprise admin sprawl': no nested config mazes; primary actions live in the PageHeader, destructive ones confirm via AlertDialog, not click-again.",
+      "Don't use HTML <Table> for data lists — DataGrid is a hard rule.",
+      "Don't spend Hive Amber on decoration or inactive states; if it's not actionable or alive, it isn't amber.",
+      "Don't animate anything that isn't conveying state. No orchestrated page loads, no decorative motion — the operator is in a task."
+    ]
+  }
+}
