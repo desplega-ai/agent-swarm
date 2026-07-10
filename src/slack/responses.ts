@@ -1,6 +1,6 @@
 import type { WebClient } from "@slack/web-api";
 import { getAgentById, getTaskAttachments } from "../be/db";
-import type { Agent, AgentTask } from "../types";
+import type { Agent, AgentTask, TaskAttachment } from "../types";
 import { getSlackApp } from "./app";
 import {
   buildCancelledBlocks,
@@ -10,7 +10,9 @@ import {
   buildProgressBlocks,
   formatAttachmentsBlockForSlack,
   formatDuration,
+  getTaskLink,
   markdownToSlack,
+  splitSlackSectionText,
 } from "./blocks";
 
 // Re-export for backward compatibility
@@ -31,12 +33,100 @@ function classifySlackUpdateError(error: unknown): SlackUpdateResult {
 }
 
 const isDev = process.env.ENV === "development";
+const MIN_INLINE_OUTPUT_LENGTH = 20;
+export const MAX_INLINE_OUTPUT_MESSAGE_LENGTH = 4000;
+const INLINE_OUTPUT_FALLBACKS = new Set([
+  "done",
+  "completed",
+  "complete",
+  "task completed",
+  "process completed successfully",
+  "process completed successfully (no output captured)",
+]);
 
 /**
  * Get the display name for an agent, with (dev) prefix if in development mode.
  */
 function getAgentDisplayName(agent: Agent): string {
   return isDev ? `(dev) ${agent.name}` : agent.name;
+}
+
+export function shouldPostInlineCompletionOutput(
+  task: AgentTask,
+  attachments: readonly TaskAttachment[],
+): boolean {
+  if (task.status !== "completed") return false;
+  if (!task.slackChannelId || !task.slackThreadTs) return false;
+  if (task.slackReplySent) return false;
+
+  const output = task.output?.trim();
+  if (!output || output.length < MIN_INLINE_OUTPUT_LENGTH) return false;
+  if (INLINE_OUTPUT_FALLBACKS.has(output.toLowerCase())) return false;
+
+  return !attachments.some((attachment) => attachment.isPrimary);
+}
+
+export function formatInlineCompletionOutputText(opts: {
+  agentName: string;
+  taskId: string;
+  output: string;
+}): string {
+  const header = `✅ *${opts.agentName}* completed with output (${getTaskLink(opts.taskId)}):\n\n`;
+  const tail = `\n\n…(full output in task ${getTaskLink(opts.taskId)})`;
+  const slackOutput = markdownToSlack(opts.output.trim());
+  const maxBodyLength = MAX_INLINE_OUTPUT_MESSAGE_LENGTH - header.length;
+
+  if (slackOutput.length <= maxBodyLength) {
+    return header + slackOutput;
+  }
+
+  const maxTruncatedBodyLength = Math.max(0, maxBodyLength - tail.length);
+  let cut = slackOutput.lastIndexOf("\n", maxTruncatedBodyLength);
+  if (cut < maxTruncatedBodyLength / 2) {
+    cut = slackOutput.lastIndexOf(" ", maxTruncatedBodyLength);
+  }
+  if (cut < maxTruncatedBodyLength / 2) {
+    cut = maxTruncatedBodyLength;
+  }
+
+  return header + slackOutput.slice(0, cut).trimEnd() + tail;
+}
+
+export async function sendInlineTaskOutput(task: AgentTask): Promise<boolean> {
+  const app = getSlackApp();
+  if (!app || !task.slackChannelId || !task.slackThreadTs || !task.agentId || !task.output) {
+    return false;
+  }
+
+  const agent = getAgentById(task.agentId);
+  if (!agent) {
+    console.error(`[Slack] Agent not found for task ${task.id}`);
+    return false;
+  }
+
+  const text = formatInlineCompletionOutputText({
+    agentName: agent.name,
+    taskId: task.id,
+    output: task.output,
+  });
+
+  try {
+    await sendWithPersona(app.client, {
+      channel: task.slackChannelId,
+      thread_ts: task.slackThreadTs,
+      text,
+      username: getAgentDisplayName(agent),
+      icon_emoji: getAgentEmoji(agent),
+      blocks: splitSlackSectionText(text).map((chunk) => ({
+        type: "section",
+        text: { type: "mrkdwn", text: chunk },
+      })),
+    });
+    return true;
+  } catch (error) {
+    console.error(`[Slack] Failed to send inline output for task ${task.id}:`, error);
+    return false;
+  }
 }
 
 /**
