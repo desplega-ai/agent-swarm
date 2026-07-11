@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import { closeDb, createAgent, createTaskExtended, getDb, initDb } from "../be/db";
+import { slackContextKey } from "../tasks/context-key";
 
 const TEST_DB_PATH = "./test-slack-metadata-inheritance.sqlite";
 
@@ -239,5 +240,282 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
     // No fallback — sourceTaskId is the only path, and it points to a non-existent task
     expect(childTask.slackChannelId).toBeFalsy();
     expect(childTask.slackThreadTs).toBeFalsy();
+  });
+});
+
+describe("Slack-routing coherence guard: createTaskExtended normalization (Phase 3)", () => {
+  const lead = {
+    name: "routing-norm-lead",
+    isLead: true,
+    status: "idle" as const,
+    capabilities: [],
+  };
+  const worker = {
+    name: "routing-norm-worker",
+    isLead: false,
+    status: "idle" as const,
+    capabilities: [],
+  };
+
+  let leadAgent: ReturnType<typeof createAgent>;
+  let workerAgent: ReturnType<typeof createAgent>;
+
+  beforeAll(() => {
+    leadAgent = createAgent(lead);
+    workerAgent = createAgent(worker);
+  });
+
+  test("frankenstein-prevention: explicit foreign channel does not pull in the parent's threadTs/userId", () => {
+    const parentTask = createTaskExtended("parent with slack unit", {
+      agentId: leadAgent.id,
+      slackChannelId: "C_PARENT",
+      slackThreadTs: "1000.0001",
+      slackUserId: "U_PARENT",
+    });
+
+    const childTask = createTaskExtended("child with foreign channel", {
+      agentId: workerAgent.id,
+      parentTaskId: parentTask.id,
+      slackChannelId: "C_FOREIGN",
+    });
+
+    expect(childTask.slackChannelId).toBe("C_FOREIGN");
+    // Parent's threadTs/userId belong to a DIFFERENT channel — must not inherit.
+    expect(childTask.slackThreadTs).toBeFalsy();
+    expect(childTask.slackUserId).toBeFalsy();
+  });
+
+  test("matching explicit channel still fills in threadTs/userId from the parent (per-field, unaffected)", () => {
+    const parentTask = createTaskExtended("parent with slack unit b", {
+      agentId: leadAgent.id,
+      slackChannelId: "C_MATCH",
+      slackThreadTs: "2000.0001",
+      slackUserId: "U_MATCH",
+    });
+
+    const childTask = createTaskExtended("child with matching channel", {
+      agentId: workerAgent.id,
+      parentTaskId: parentTask.id,
+      slackChannelId: "C_MATCH",
+    });
+
+    expect(childTask.slackChannelId).toBe("C_MATCH");
+    expect(childTask.slackThreadTs).toBe("2000.0001");
+    expect(childTask.slackUserId).toBe("U_MATCH");
+  });
+
+  test("contextKey backfill: slack-family contextKey with no Slack fields populates slackChannelId/slackThreadTs", () => {
+    const contextKey = slackContextKey({ channelId: "C_BACKFILL", threadTs: "3000.0001" });
+
+    const childTask = createTaskExtended("child from contextKey only", {
+      agentId: workerAgent.id,
+      contextKey,
+    });
+
+    expect(childTask.slackChannelId).toBe("C_BACKFILL");
+    expect(childTask.slackThreadTs).toBe("3000.0001");
+    // Backfill deliberately does not populate slackUserId — the key doesn't encode it.
+    expect(childTask.slackUserId).toBeFalsy();
+  });
+
+  test("contextKey backfill does not override an explicit slackChannelId that agrees with it", () => {
+    const contextKey = slackContextKey({ channelId: "C_KEY", threadTs: "4000.0001" });
+
+    const childTask = createTaskExtended("child with explicit channel matching the key", {
+      agentId: workerAgent.id,
+      contextKey,
+      slackChannelId: "C_KEY",
+      slackThreadTs: "4000.0001",
+    });
+
+    expect(childTask.slackChannelId).toBe("C_KEY");
+    expect(childTask.slackThreadTs).toBe("4000.0001");
+  });
+
+  test("overrideSlackContext: true retains a deliberately divergent explicit slackChannelId against the contextKey", () => {
+    const contextKey = slackContextKey({ channelId: "C_KEY", threadTs: "4000.0001" });
+
+    const childTask = createTaskExtended(
+      "child with explicit channel and different key, override set",
+      {
+        agentId: workerAgent.id,
+        contextKey,
+        slackChannelId: "C_EXPLICIT_OVERRIDE",
+        slackThreadTs: "5000.0001",
+        overrideSlackContext: true,
+      },
+    );
+
+    expect(childTask.slackChannelId).toBe("C_EXPLICIT_OVERRIDE");
+    expect(childTask.slackThreadTs).toBe("5000.0001");
+  });
+
+  test("residual-mismatch guard: normalizes slackChannelId (and slackThreadTs) to the contextKey when it disagrees, without throwing", () => {
+    const contextKey = slackContextKey({ channelId: "C_KEY_MISMATCH", threadTs: "6000.0001" });
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+
+    let childTask: ReturnType<typeof createTaskExtended> | undefined;
+    expect(() => {
+      childTask = createTaskExtended("child with mismatched channel and key", {
+        agentId: workerAgent.id,
+        contextKey,
+        slackChannelId: "C_DIFFERENT",
+        slackThreadTs: "7000.0001",
+      });
+    }).not.toThrow();
+
+    // The durable contextKey wins — a non-override caller cannot persist a
+    // channel mismatch (delivery reads slackChannelId/slackThreadTs directly).
+    expect(childTask?.slackChannelId).toBe("C_KEY_MISMATCH");
+    expect(childTask?.slackThreadTs).toBe("6000.0001");
+    expect(warnSpy).toHaveBeenCalled();
+    const warned = warnSpy.mock.calls.some((call) =>
+      String(call[0]).includes("[slack-routing] MISMATCH"),
+    );
+    expect(warned).toBe(true);
+
+    warnSpy.mockRestore();
+  });
+
+  test("residual-mismatch guard: overrideSlackContext: true keeps a divergent channel against the contextKey", () => {
+    const contextKey = slackContextKey({
+      channelId: "C_KEY_MISMATCH_OVERRIDE",
+      threadTs: "6100.0001",
+    });
+
+    const childTask = createTaskExtended("child with mismatched channel and key, override set", {
+      agentId: workerAgent.id,
+      contextKey,
+      slackChannelId: "C_DIFFERENT_OVERRIDE",
+      slackThreadTs: "7100.0001",
+      overrideSlackContext: true,
+    });
+
+    expect(childTask.slackChannelId).toBe("C_DIFFERENT_OVERRIDE");
+    expect(childTask.slackThreadTs).toBe("7100.0001");
+  });
+
+  test("channel matches contextKey + missing thread → thread gets backfilled from contextKey", () => {
+    const contextKey = slackContextKey({ channelId: "C_THREAD_BACKFILL", threadTs: "8000.0001" });
+
+    const childTask = createTaskExtended("child with matching channel but no thread", {
+      agentId: workerAgent.id,
+      contextKey,
+      slackChannelId: "C_THREAD_BACKFILL",
+    });
+
+    expect(childTask.slackChannelId).toBe("C_THREAD_BACKFILL");
+    expect(childTask.slackThreadTs).toBe("8000.0001");
+  });
+
+  test("channel matches + explicit thread diverges from contextKey → normalized to the contextKey's thread, no throw", () => {
+    const contextKey = slackContextKey({ channelId: "C_THREAD_DIVERGE", threadTs: "9000.0001" });
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+
+    let childTask: ReturnType<typeof createTaskExtended> | undefined;
+    expect(() => {
+      childTask = createTaskExtended("child with matching channel but diverging thread", {
+        agentId: workerAgent.id,
+        contextKey,
+        slackChannelId: "C_THREAD_DIVERGE",
+        slackThreadTs: "9999.9999",
+      });
+    }).not.toThrow();
+
+    // A non-override caller cannot persist a thread mismatch either — the
+    // contextKey's thread wins.
+    expect(childTask?.slackChannelId).toBe("C_THREAD_DIVERGE");
+    expect(childTask?.slackThreadTs).toBe("9000.0001");
+    const warned = warnSpy.mock.calls.some((call) =>
+      String(call[0]).includes("[slack-routing] MISMATCH"),
+    );
+    expect(warned).toBe(true);
+
+    warnSpy.mockRestore();
+  });
+
+  test("channel matches + explicit thread diverges, overrideSlackContext: true → explicit thread retained", () => {
+    const contextKey = slackContextKey({
+      channelId: "C_THREAD_DIVERGE_OVERRIDE",
+      threadTs: "9200.0001",
+    });
+
+    const childTask = createTaskExtended(
+      "child with matching channel but diverging thread, override set",
+      {
+        agentId: workerAgent.id,
+        contextKey,
+        slackChannelId: "C_THREAD_DIVERGE_OVERRIDE",
+        slackThreadTs: "9999.0002",
+        overrideSlackContext: true,
+      },
+    );
+
+    expect(childTask.slackChannelId).toBe("C_THREAD_DIVERGE_OVERRIDE");
+    expect(childTask.slackThreadTs).toBe("9999.0002");
+  });
+
+  test("parentTaskId inheritance + explicit contextKey mismatch → normalized to the contextKey, not the parent (non-override callers cannot persist route/contextKey divergence)", () => {
+    const parentTask = createTaskExtended("parent with slack channel A", {
+      agentId: leadAgent.id,
+      slackChannelId: "C_INHERIT_MISMATCH_PARENT",
+      slackThreadTs: "10000.0001",
+    });
+
+    const contextKeyB = slackContextKey({
+      channelId: "C_INHERIT_MISMATCH_KEY",
+      threadTs: "20000.0002",
+    });
+    const childTask = createTaskExtended(
+      "child inheriting the parent's Slack unit but carrying a different contextKey",
+      {
+        agentId: workerAgent.id,
+        parentTaskId: parentTask.id,
+        contextKey: contextKeyB,
+      },
+    );
+
+    // This is exactly the POST /api/tasks shape (client-supplied parentTaskId
+    // + contextKey): the parent-inherited Slack unit must not silently win
+    // over the durable contextKey.
+    expect(childTask.slackChannelId).toBe("C_INHERIT_MISMATCH_KEY");
+    expect(childTask.slackThreadTs).toBe("20000.0002");
+  });
+
+  test("parentTaskId inheritance + contextKey mismatch, overrideSlackContext: true → parent-inherited Slack unit retained", () => {
+    const parentTask = createTaskExtended("parent with slack channel A (override case)", {
+      agentId: leadAgent.id,
+      slackChannelId: "C_OVERRIDE_INHERIT_PARENT",
+      slackThreadTs: "30000.0003",
+    });
+
+    const contextKeyB = slackContextKey({
+      channelId: "C_OVERRIDE_INHERIT_KEY",
+      threadTs: "40000.0004",
+    });
+    const childTask = createTaskExtended("child with deliberate override", {
+      agentId: workerAgent.id,
+      parentTaskId: parentTask.id,
+      contextKey: contextKeyB,
+      overrideSlackContext: true,
+    });
+
+    expect(childTask.slackChannelId).toBe("C_OVERRIDE_INHERIT_PARENT");
+    expect(childTask.slackThreadTs).toBe("30000.0003");
+  });
+
+  test("non-slack contextKey → no backfill, no telemetry", () => {
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+
+    const childTask = createTaskExtended("child with linear contextKey", {
+      agentId: workerAgent.id,
+      contextKey: "task:trackers:linear:DES-99",
+    });
+
+    expect(childTask.slackChannelId).toBeFalsy();
+    expect(childTask.slackThreadTs).toBeFalsy();
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
   });
 });

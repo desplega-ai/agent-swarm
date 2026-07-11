@@ -198,11 +198,12 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `vcsRepo` | `string` | No | - | VCS repo identifier (e.g., 'desplega-ai/agent-swarm' for GitHub or 'group/project' for GitLab). Links the task to a registered repo for workspace context. |
 | `model` | `string` | No | - | Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer modelTier for portable intent. |
 | `modelTier` | `unknown` | No | - | Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim/run time using the assignee's harness/provider. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra. |
-| `effort` | `unknown` | No | - | Reasoning effort for this task: 'off', 'low', 'medium', 'high', or 'xhigh'. If omitted, the assignee's REASONING_EFFORT_OVERRIDE/default applies. |
+| `effort` | `unknown` | No | - | Reasoning effort for this task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. If omitted, the assignee's REASONING_EFFORT_OVERRIDE/default applies. |
 | `allowDuplicate` | `boolean` | No | false | If true, skip duplicate detection and create the task even if a similar one exists. |
 | `slackChannelId` | `string` | No | - | Slack channel ID to post progress updates to. Use this to propagate Slack context when delegating from a Slack thread. |
 | `slackThreadTs` | `string` | No | - | Slack thread timestamp. Required with slackChannelId for thread-level updates. |
 | `slackUserId` | `string` | No | - | Slack user ID of the original requester. |
+| `overrideSlackContext` | `boolean` | No | false | Explicitly route this task's Slack updates to a different channel/thread than its parent/contextKey. Requires slackChannelId AND slackThreadTs. Use only for deliberate cross-channel dispatch (e.g. escalation to another human's DM); logged for audit. Without this flag, a slackChannelId/slackThreadTs that disagrees with the parent task or inherited contextKey is rejected — omit the three Slack fields to inherit them from the parent as a unit instead. |
 | `requestedByUserId` | `string` | No | - | ID of the human user who originally requested this task chain. When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically. |
 | `followUpConfig` | `unknown` | No | - | Control the lead follow-up created when this task finishes. When to use `followUpConfig`: set `disabled: true` when you'll wait for this task to complete inline and no follow-up is needed; set `onCompleted` / `onFailed` with specific instructions when you need to follow up effectively on a particular outcome of a long-running flow; for normal one-shot tasks, leave it unset because defaults are fine. It is most valuable for long-running / complex flows. |
 
@@ -257,7 +258,13 @@ Cancel a task that is pending or in progress. Only the lead or task creator can 
 
 Provider-agnostic reverse lookup: (kind, externalId) → user, e.g. {kind: 'slack', externalId: 'U016H7XKZGS'} or {kind: 'github', externalId: 'octocat'} — the same shape for every provider, no per-provider keys. Also accepts email (primary or alias), userId (reverse lookup of all linked identities), or name (exact/prefix search). A miss returns a structured {status: 'unknown', ...} payload, never prose; an ambiguous name search returns {status: 'ambiguous', candidates: [...]}.
 
-*No parameters*
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `kind` | `string` | No | - | Identity kind — e.g. 'slack', 'linear', 'github', 'gitlab', 'jira', 'kapso', 'whatsapp', or a custom value. Must be paired with externalId. |
+| `externalId` | `string` | No | - | Platform-specific identifier for the given kind (e.g. Slack user ID 'U08NR6QD6CS', Linear user UUID, GitHub login, Jira accountId). |
+| `email` | `string` | No | - | Email address (primary or alias). |
+| `userId` | `string` | No | - | Canonical swarm user ID. Use this to reverse-look up all external identities for a known user (e.g. find their GitHub handle from a requestedByUserId). |
+| `name` | `string` | No | - | Human display name to search for (exact, or first-token prefix). Convenience only — ambiguous matches return all candidates rather than picking one. |
 
 ### manage-user
 
@@ -287,7 +294,11 @@ Create, update, delete, or list user profiles in the user registry. Identities a
 
 Execute a read-only SQL query against the swarm database. Available to all authenticated agents — be aware results may include secrets (oauth_tokens, configs). Results capped at 100 rows.
 
-*No parameters*
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `sql` | `string` | No | - | SQL query (read-only only — writes are rejected) |
+| `query` | `string` | No | - | Deprecated runtime alias for sql. |
+| `params` | `array` | No | [] | Query parameters |
 
 ### get-oauth-access-token
 
@@ -776,7 +787,7 @@ Perform task pool operations: create unassigned tasks, claim/release tasks from 
 | `dependsOn` | `array` | No | - | Task IDs this task depends on. |
 | `model` | `string` | No | - | Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action. |
 | `modelTier` | `unknown` | No | - | Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action. |
-| `effort` | `unknown` | No | - | Reasoning effort for the created task: 'off', 'low', 'medium', 'high', or 'xhigh'. Only used with 'create' action. |
+| `effort` | `unknown` | No | - | Reasoning effort for the created task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. Only used with 'create' action. |
 | `requiredCapabilities` | `array` | No | - | Capabilities a claiming agent must have (declared via join-swarm/update-profile) to be pool-eligible for this task. Written into the created task's routingAffinity (role is left unset). Only used with 'create' action. |
 
 ## Messaging Tools

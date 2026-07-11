@@ -77,7 +77,7 @@ For cases where auto-inheritance isn't available (e.g., programmatic task creati
 - `slackThreadTs` — Thread timestamp for thread-level updates
 - `slackUserId` — Original requester's Slack user ID
 
-Explicit params override auto-inherited values when both are present.
+Treat Slack channel/thread metadata as one routing unit. When a parent task or Slack-family context key already defines the route, `send-task` rejects a different explicit channel or thread instead of silently sending updates elsewhere. Omit the explicit Slack fields to inherit the existing route. For an intentional cross-channel handoff, provide both `slackChannelId` and `slackThreadTs` and set `overrideSlackContext: true`; the override is logged for audit.
 
 ### Additive Slack Buffer
 

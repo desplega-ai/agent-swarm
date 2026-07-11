@@ -1,16 +1,18 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
-import { Search, Workflow as WorkflowIcon } from "lucide-react";
+import { Workflow as WorkflowIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
 import { useAllWorkflowRuns, useUpdateWorkflow, useWorkflows } from "@/api/hooks/use-workflows";
 import type { WorkflowRun, WorkflowRunStatus, WorkflowSummary } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { FavoriteButton } from "@/components/shared/favorite-button";
+import { ListFilterBar } from "@/components/shared/list-filter-bar";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Select,
   SelectContent,
@@ -20,7 +22,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 function formatDuration(startedAt: string, finishedAt?: string): string {
@@ -28,16 +30,25 @@ function formatDuration(startedAt: string, finishedAt?: string): string {
   return formatElapsed(startedAt, finishedAt);
 }
 
+const ENABLED_FILTERS = ["all", "enabled", "disabled"] as const;
+
 export default function WorkflowsPage() {
   const navigate = useNavigate();
   const { searchParams, setParam, setParams } = useUrlSearchState();
   const activeTab =
     readStringParam(searchParams, "tab", "workflows") === "runs" ? "runs" : "workflows";
   const search = readStringParam(searchParams, "search");
+  const enabledParam = readStringParam(searchParams, "enabled", "all");
+  const enabledFilter = ENABLED_FILTERS.includes(enabledParam as (typeof ENABLED_FILTERS)[number])
+    ? (enabledParam as (typeof ENABLED_FILTERS)[number])
+    : "all";
+  const creatorFilter = readStringParam(searchParams, "creator", "all");
+  const favoritesOnly = readBooleanParam(searchParams, "favorites");
   const statusFilter = readStringParam(searchParams, "runStatus", "all");
   const workflowFilter = readStringParam(searchParams, "workflow", "all");
 
   const { data: workflows, isLoading: wfLoading } = useWorkflows();
+  const { data: agents } = useAgents();
   const { data: allRuns, isLoading: runsLoading } = useAllWorkflowRuns();
   const updateWorkflow = useUpdateWorkflow();
   const favoriteToggle = useFavoriteToggle("workflow");
@@ -47,6 +58,17 @@ export default function WorkflowsPage() {
       return new Date(b.lastUpdatedAt).getTime() - new Date(a.lastUpdatedAt).getTime();
     });
   }, [workflows]);
+  const filteredWorkflowRows = useMemo(
+    () =>
+      workflowRows.filter((workflow) => {
+        if (enabledFilter === "enabled" && !workflow.enabled) return false;
+        if (enabledFilter === "disabled" && workflow.enabled) return false;
+        if (creatorFilter !== "all" && workflow.createdByAgentId !== creatorFilter) return false;
+        if (favoritesOnly && !workflow.favorite) return false;
+        return true;
+      }),
+    [creatorFilter, enabledFilter, favoritesOnly, workflowRows],
+  );
 
   const workflowMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -205,6 +227,19 @@ export default function WorkflowsPage() {
   );
 
   const isEmpty = !wfLoading && workflowRows.length === 0;
+  const hasActiveWorkflowFilters =
+    search !== "" || enabledFilter !== "all" || creatorFilter !== "all" || favoritesOnly;
+
+  const clearWorkflowFilters = useCallback(() => {
+    setParams(
+      { search: "", enabled: "all", creator: "all", favorites: "" },
+      {
+        defaultValues: { enabled: "all", creator: "all" },
+        replace: false,
+        reset: ["workflowsPage"],
+      },
+    );
+  }, [setParams]);
 
   if (isEmpty) {
     return (
@@ -235,24 +270,79 @@ export default function WorkflowsPage() {
         </TabsList>
 
         <TabsContent value="workflows" className="flex flex-col flex-1 min-h-0 mt-2 gap-3">
-          <div className="flex items-center gap-3">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search workflows…"
-                value={search}
-                onChange={(e) => setParam("search", e.target.value, { reset: ["workflowsPage"] })}
-                className="pl-9"
-              />
-            </div>
-          </div>
+          <ListFilterBar
+            searchValue={search}
+            onSearchChange={(value) =>
+              setParam("search", value, {
+                replace: false,
+                reset: ["workflowsPage"],
+              })
+            }
+            searchPlaceholder="Search workflows…"
+            hasActiveFilters={hasActiveWorkflowFilters}
+            onClear={clearWorkflowFilters}
+          >
+            <Select
+              value={enabledFilter}
+              onValueChange={(value) =>
+                setParam("enabled", value, {
+                  defaultValue: "all",
+                  replace: false,
+                  reset: ["workflowsPage"],
+                })
+              }
+            >
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Enabled" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All states</SelectItem>
+                <SelectItem value="enabled">Enabled</SelectItem>
+                <SelectItem value="disabled">Disabled</SelectItem>
+              </SelectContent>
+            </Select>
+            <SearchableSelect
+              value={creatorFilter}
+              onChange={(value) =>
+                setParam("creator", value, {
+                  defaultValue: "all",
+                  replace: false,
+                  reset: ["workflowsPage"],
+                })
+              }
+              triggerClassName="w-[200px]"
+              placeholder="Creator agent"
+              searchPlaceholder="Search creator agents…"
+              options={[
+                { value: "all", label: "All creator agents" },
+                ...(agents ?? []).map((agent) => ({ value: agent.id, label: agent.name })),
+              ]}
+            />
+            <Select
+              value={favoritesOnly ? "favorites" : "all"}
+              onValueChange={(value) =>
+                setParam("favorites", value === "favorites" ? "true" : "", {
+                  replace: false,
+                  reset: ["workflowsPage"],
+                })
+              }
+            >
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Favorites" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All workflows</SelectItem>
+                <SelectItem value="favorites">Favorites only</SelectItem>
+              </SelectContent>
+            </Select>
+          </ListFilterBar>
           <DataGrid
-            rowData={workflowRows}
+            rowData={filteredWorkflowRows}
             columnDefs={workflowColumns}
             quickFilterText={search}
             onRowClicked={onWorkflowRowClicked}
             loading={wfLoading}
-            emptyMessage="No workflows configured"
+            emptyMessage="No workflows match the current filters"
             paginationQueryKey="workflows"
           />
         </TabsContent>

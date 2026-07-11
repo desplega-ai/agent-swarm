@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { rm, unlink } from "node:fs/promises";
 import type { Subprocess } from "bun";
 import { Webhook } from "svix";
+import { slackContextKey } from "../tasks/context-key";
 
 const TEST_PORT = 19876;
 const TEST_DB_PATH = `/tmp/test-http-integration-${Date.now()}.sqlite`;
@@ -430,6 +431,43 @@ describe("Tasks", () => {
   test("GET /api/tasks/:id — non-existent returns 404", async () => {
     const { status } = await get(`/api/tasks/${randomUUID()}`);
     expect(status).toBe(404);
+  });
+
+  test("POST /api/tasks — client-supplied parentTaskId + contextKey cannot persist a Slack route/contextKey mismatch", async () => {
+    // POST /api/tasks doesn't accept slackChannelId/slackThreadTs directly,
+    // but a slack-family contextKey backfills them (src/be/db.ts). Build a
+    // parent whose Slack unit lives in channel A this way.
+    const contextKeyA = slackContextKey({ channelId: "HTTP_CHAN_A", threadTs: "1111.1111" });
+    const parent = await post("/api/tasks", {
+      agentId: ids.leadAgent,
+      body: {
+        task: "HTTP parent task in channel A",
+        contextKey: contextKeyA,
+      },
+    });
+    expect(parent.status).toBe(201);
+    expect(parent.body.slackChannelId).toBe("HTTP_CHAN_A");
+
+    // A child that inherits the parent's Slack unit (via parentTaskId) but
+    // carries an explicit contextKey for a DIFFERENT channel B — exactly the
+    // client-supplied parentTaskId + contextKey shape the reviewer flagged.
+    const contextKeyB = slackContextKey({ channelId: "HTTP_CHAN_B", threadTs: "2222.2222" });
+    const child = await post("/api/tasks", {
+      agentId: ids.leadAgent,
+      body: {
+        task: "HTTP child task claiming a different channel via contextKey",
+        parentTaskId: parent.body.id,
+        contextKey: contextKeyB,
+      },
+    });
+    expect(child.status).toBe(201);
+
+    // The durable contextKey (channel B) must win over the parent-inherited
+    // Slack unit (channel A) — a non-override HTTP caller cannot persist the
+    // mismatch that misroutes delivery.
+    expect(child.body.slackChannelId).toBe("HTTP_CHAN_B");
+    expect(child.body.slackThreadTs).toBe("2222.2222");
+    expect(child.body.contextKey).toBe(contextKeyB);
   });
 
   test("PUT /api/tasks/:id/session — update session ID", async () => {

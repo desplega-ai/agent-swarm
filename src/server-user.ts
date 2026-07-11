@@ -116,6 +116,7 @@ export function createUserServer(user: User): McpServer {
     return sendTaskHandler(userCtx(user, info.sessionId), {
       offerMode: false,
       allowDuplicate: false,
+      overrideSlackContext: false,
       ...args,
     });
   });

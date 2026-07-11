@@ -268,7 +268,7 @@ function parseSchemaFields(content: string, fullContent: string): FieldInfo[] {
   let braceCount = 0;
   let inObject = false;
   let objectContent = "";
-  let i = objectStart + "z.object(".length;
+  let i = objectStart;
 
   while (i < source.length) {
     const char = source[i];
@@ -316,7 +316,8 @@ function parseSchemaFields(content: string, fullContent: string): FieldInfo[] {
 function findSchemaObjectStart(source: string, startIdx: number): number {
   let i = startIdx;
   while (i < source.length && /\s/.test(source[i]!)) i++;
-  return source.startsWith("z.object({", i) ? i : -1;
+  const objectCall = /^z\s*\.\s*object\s*\(/.exec(source.slice(i));
+  return objectCall ? i + objectCall[0].length : -1;
 }
 
 function findSchemaConstantObjectStart(constName: string, source: string): number {

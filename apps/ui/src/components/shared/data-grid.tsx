@@ -118,6 +118,10 @@ export function DataGrid<TData>({
       `<div class="flex items-center justify-center p-8 text-muted-foreground">${emptyMessage}</div>`,
     [emptyMessage],
   );
+  const overlayComponentParams = useMemo(
+    () => ({ noMatchingRows: { overlayText: emptyMessage } }),
+    [emptyMessage],
+  );
 
   const writePaginationParams = useCallback(
     (page: number, pageSize: number) => {
@@ -228,6 +232,7 @@ export function DataGrid<TData>({
         domLayout={domLayout}
         loading={loading}
         overlayNoRowsTemplate={overlayNoRowsTemplate}
+        overlayComponentParams={overlayComponentParams}
         onGridReady={onGridReady}
         onPaginationChanged={onPaginationChanged}
         getRowId={getRowId ?? defaultGetRowId}

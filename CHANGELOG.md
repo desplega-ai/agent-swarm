@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.117.0] - 2026-07-11
+
+### Added
+- **Dashboard catalogs now have URL-backed search and composable filters** (#961) — Pages, Approval Requests, and workflow definitions gained consistent filter bars, list-specific facets, clear actions, pagination reset, and distinct no-match states while preserving existing sorting behavior.
+- **Task dispatch now guards Slack routing coherence before work starts** (#960) — `send-task` validates channel/thread pairs against the parent task and Slack context key, rejects accidental cross-thread delivery, and exposes an audited `overrideSlackContext` escape hatch for intentional handoffs.
+
+### Changed
+- **The worker image now ships Codex CLI and SDK 0.144.1** (#959) — the pinned runtime supports GPT-5.6 models, aligns the baseline config with `gpt-5.6-terra`, and uses the current `codex plugin add` command so bundled context-mode installation remains active.
+
+### Fixed
+- **Dashboard filtering now queries the complete candidate set** (#964) — Approval Request status filtering happens before the row limit, and Pages are fetched in bounded batches so older or later matching records are not hidden from search and facets.
+- **Inherited Slack routes are normalized atomically at persistence boundaries** (#960) — channel/thread backfill follows the Slack context key as a unit and residual divergence is corrected and surfaced through telemetry instead of risking a misdirected completion.
+
 ## [1.115.0] - 2026-07-10
 
 ### Added

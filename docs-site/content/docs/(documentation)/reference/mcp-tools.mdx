@@ -71,13 +71,15 @@ Send a task to a specific agent, create an unassigned task, or offer a task for 
 | `dir` | string | No | Working directory (absolute path) for the agent to start in |
 | `model` | string | No | Concrete model override for this task. Interpreted by the assignee's harness/provider and wins over `modelTier` when both are present. |
 | `modelTier` | string | No | Portable model intent for this task: `smol`, `regular`, `smart`, or `ultra`. Resolved at claim/run time by the assignee's harness/provider. Legacy shortnames map as `haiku→smol`, `sonnet→regular`, `opus→smart`, `fable→ultra`. |
+| `effort` | string | No | Reasoning effort for this task: `off`, `low`, `medium`, `high`, `xhigh`, or Codex-only `max` when the selected model supports it. |
 | `slackChannelId` | string | No | Slack channel ID for progress updates (auto-inherited if omitted) |
 | `slackThreadTs` | string | No | Slack thread timestamp (auto-inherited if omitted) |
 | `slackUserId` | string | No | Slack user ID of the original requester (auto-inherited if omitted) |
+| `overrideSlackContext` | boolean | No | Set with both channel and thread fields for an intentional audited cross-channel handoff. Without it, routes conflicting with the parent or Slack context key are rejected. |
 | `requestedByUserId` | uuid | No | ID of the human user who originally requested this task chain. Auto-inherited from the caller's current task so attribution flows through multi-hop delegation (lead → worker → child tasks). |
 | `followUpConfig` | object | No | Control the lead follow-up created when this task finishes. Use `disabled: true` to suppress it, or `onCompleted` / `onFailed` to inject outcome-specific instructions for long-running flows. |
 
-Slack metadata and `requestedByUserId` are auto-inherited from the creator's current task via `X-Source-Task-Id` header. Explicit params override auto-inherited values when provided.
+Slack metadata and `requestedByUserId` are auto-inherited from the creator's current task via the `X-Source-Task-Id` header. Slack channel/thread fields inherit as one route: explicit values that conflict with the parent or Slack context key are rejected unless both fields are provided with `overrideSlackContext: true` for an intentional audited handoff.
 
 ### get-task-details
 
@@ -346,6 +348,8 @@ Manage tasks in the pool: create, claim, release, accept, reject, or move to/fro
 | `dir` | string | No | Working directory (absolute path) for the agent to start in (only used with `create` action) |
 | `model` | string | No | Concrete model override for the created task (only used with `create` action) |
 | `modelTier` | string | No | Portable model tier for the created task: `smol`, `regular`, `smart`, or `ultra` (only used with `create` action) |
+| `effort` | string | No | Reasoning effort for the created task: `off`, `low`, `medium`, `high`, `xhigh`, or Codex-only `max` when supported |
+| `requiredCapabilities` | array | No | Capability requirements recorded on a newly pooled task for routing-affinity triage |
 
 ## Messaging Tools
 
@@ -921,7 +925,8 @@ Execute a read-only SQL query against the swarm database. Available to all authe
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `sql` | string | Yes | SQL query (read-only only — writes are rejected) |
+| `sql` | string | Conditional | SQL query (read-only only — writes are rejected). Required unless the deprecated `query` alias is provided |
+| `query` | string | Conditional | Deprecated runtime alias for `sql` |
 | `params` | array | No | Query parameters |
 
 ### get-oauth-access-token
@@ -1001,7 +1006,7 @@ Tools for managing the canonical user registry across platforms.
 
 ### resolve-user
 
-Look up a canonical user profile by an `(kind, externalId)` pair (e.g. `{kind: "slack", externalId: "U_X"}`), by email (primary or alias), or by the canonical swarm `userId`. Caller MUST supply one of: (`kind` + `externalId`), `email`, or `userId` — empty input is rejected by the validator. Response includes `externalIds: Array<{kind, externalId}>` so callers can reverse-look up platform handles (GitHub, Slack, etc.) from a canonical user ID.
+Look up a canonical user profile by a `(kind, externalId)` pair (e.g. `{kind: "slack", externalId: "U_X"}`), email (primary or alias), canonical swarm `userId`, or display name. Caller must supply exactly one lookup mode; empty input is rejected. Name lookup uses exact/first-token prefix matching and returns structured ambiguous candidates instead of guessing. Responses for resolved users include `externalIds: Array<{kind, externalId}>` so callers can reverse-look up platform handles (GitHub, Slack, etc.) from a canonical user ID.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1009,8 +1014,9 @@ Look up a canonical user profile by an `(kind, externalId)` pair (e.g. `{kind: "
 | `externalId` | string | Conditional | Platform-specific identifier for the given kind (Slack user ID, Linear UUID, GitHub login, etc.). Pair with `kind`. |
 | `email` | string | Conditional | Email address (primary or alias). Used when `kind` + `externalId` is not supplied. |
 | `userId` | uuid | Conditional | Canonical swarm user ID. Useful when a child task receives `requestedByUserId` and needs to reverse-resolve the platform handle (e.g. GitHub login for `gh pr create --assignee`). |
+| `name` | string | Conditional | Human display-name search (exact or first-token prefix). Ambiguous matches return candidates rather than selecting one. |
 
-> **Migration note (2026-05)**: the old field names `slackUserId`, `linearUserId`, `githubUsername`, `gitlabUsername`, and the `name` fuzzy-match parameter were removed. Use `{kind, externalId}`, `email`, or `userId` instead. Old payloads fail validation at runtime — no compatibility shim.
+> **Migration note (2026-05)**: provider-specific fields such as `slackUserId`, `linearUserId`, `githubUsername`, and `gitlabUsername` were removed. Use the provider-agnostic `{kind, externalId}` pair instead. Name search is a convenience lookup only and must not be used to stamp identity when multiple candidates are returned.
 
 ### manage-user
 

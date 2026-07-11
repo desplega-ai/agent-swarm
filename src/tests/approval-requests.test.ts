@@ -10,6 +10,7 @@ import {
   getAgentCurrentTask,
   getApprovalRequestById,
   getApprovalRequestByStepId,
+  getDb,
   getExpiredPendingApprovals,
   initDb,
   listApprovalRequests,
@@ -439,6 +440,41 @@ describe("Approval Requests", () => {
       for (const r of data.approvalRequests) {
         expect(r.status).toBe("pending");
       }
+    });
+
+    test("applies status before limiting newer rows", async () => {
+      const pending = createApprovalRequest(makeApprovalData({ title: "Older pending request" }));
+      getDb()
+        .prepare("UPDATE approval_requests SET createdAt = ? WHERE id = ?")
+        .run("2099-01-01T00:00:00.000Z", pending.id);
+
+      for (const index of [1, 2]) {
+        const resolved = createApprovalRequest(
+          makeApprovalData({ title: `Newer resolved request ${index}` }),
+        );
+        resolveApprovalRequest(resolved.id, {
+          status: "approved",
+          responses: { q1: { approved: true } },
+        });
+        getDb()
+          .prepare("UPDATE approval_requests SET createdAt = ? WHERE id = ?")
+          .run(`2100-01-0${index}T00:00:00.000Z`, resolved.id);
+      }
+
+      const unfiltered = await fetch(`${baseUrl}/api/approval-requests?limit=1`);
+      const unfilteredData = (await unfiltered.json()) as {
+        approvalRequests: Array<{ id: string }>;
+      };
+      expect(unfilteredData.approvalRequests[0]?.id).not.toBe(pending.id);
+
+      const filtered = await fetch(`${baseUrl}/api/approval-requests?status=pending&limit=1`);
+      expect(filtered.status).toBe(200);
+      const filteredData = (await filtered.json()) as {
+        approvalRequests: Array<{ id: string; status: string }>;
+      };
+      expect(filteredData.approvalRequests).toEqual([
+        expect.objectContaining({ id: pending.id, status: "pending" }),
+      ]);
     });
 
     test("filters by workflowRunId", async () => {
