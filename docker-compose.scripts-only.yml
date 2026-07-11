@@ -1,0 +1,227 @@
+# Scripts-only MCP experiment ("code-mode") — builds from source
+#
+# Runs 1 lead + 2 Claude workers (analyst, marketer) against an API where the
+# external MCP surface is trimmed to the script tools only (SCRIPTS_ONLY_MCP).
+# Every swarm operation (delegation, progress, completion, messaging) must go
+# through script-run + the scripts SDK bridge.
+#
+# Prerequisites:
+#   .env must contain: API_KEY, CLAUDE_CODE_OAUTH_TOKEN
+#
+# Usage:
+#   docker compose -f docker-compose.scripts-only.yml up --build
+#   docker compose -f docker-compose.scripts-only.yml down -v   # -v = clean DB/volumes
+
+services:
+  minio:
+    container_name: so-agent-fs-minio
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - so_agent_fs_minio:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/agentfs
+      "
+
+  agent-fs:
+    container_name: so-agent-fs
+    image: ghcr.io/desplega-ai/agent-fs:0.9.0
+    platform: linux/amd64
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      - AGENT_FS_HOME=/data
+      - HOST=0.0.0.0
+      - SERVER_HOST=0.0.0.0
+      - PORT=7433
+      - SERVER_PORT=7433
+      - S3_ENDPOINT=http://minio:9000
+      - S3_PUBLIC_ENDPOINT=http://localhost:9000
+      - S3_BUCKET=agentfs
+      - S3_ACCESS_KEY_ID=minioadmin
+      - S3_SECRET_ACCESS_KEY=minioadmin
+      - S3_REGION=us-east-1
+      - S3_PROVIDER=minio
+      - EMBEDDING_PROVIDER=${AGENT_FS_EMBEDDING_PROVIDER:-local}
+      - EMBEDDING_MODEL=${AGENT_FS_EMBEDDING_MODEL:-}
+      - EMBEDDING_API_KEY=${AGENT_FS_EMBEDDING_API_KEY:-}
+    ports:
+      - "7433:7433"
+    volumes:
+      - so_agent_fs:/data
+    healthcheck:
+      # The agent-fs image ships node/bun but no curl/wget; probe with node fetch.
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:7433/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
+  api:
+    container_name: so-api
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile
+    stop_grace_period: 60s
+    depends_on:
+      agent-fs:
+        condition: service_healthy
+
+    environment:
+      - API_KEY=${API_KEY}
+      - SCRIPTS_ONLY_MCP=true
+      - AGENT_FS_API_URL=http://agent-fs:7433
+      - API_AGENT_FS_API_KEY=${API_AGENT_FS_API_KEY:-}
+      - AGENT_FS_REGISTER_EMAIL=${AGENT_FS_REGISTER_EMAIL:-swarm-admin@agent-fs.local}
+      - SLACK_DISABLE=true
+      - GITHUB_DISABLE=true
+
+    ports:
+      - "3013:3013"
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3013/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+    restart: unless-stopped
+
+  lead:
+    container_name: so-lead
+    platform: linux/amd64
+    image: swarm-worker:local
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    stop_grace_period: 60s
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - API_KEY=${API_KEY}
+      - SCRIPTS_ONLY_MCP=true
+      - AGENT_ID=7a1e0000-0000-4000-8000-000000000001
+      - AGENT_ROLE=lead
+      - AGENT_NAME=lead
+      - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
+      - YOLO=true
+
+    ports:
+      - "3020:3000"
+
+    volumes:
+      - so_logs:/logs
+      - so_shared:/workspace/shared
+      - so_lead:/workspace/personal
+
+    restart: unless-stopped
+
+  analyst-worker:
+    container_name: so-analyst
+    platform: linux/amd64
+    image: swarm-worker:local
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    depends_on:
+      api:
+        condition: service_healthy
+    stop_grace_period: 60s
+
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - API_KEY=${API_KEY}
+      - SCRIPTS_ONLY_MCP=true
+      - AGENT_ID=7a1e0000-0000-4000-8000-000000000002
+      - AGENT_ROLE=worker
+      - AGENT_NAME=analyst
+      - SYSTEM_PROMPT=You are the swarm's analyst — a data-oriented light coder. You excel at writing small TypeScript scripts to gather, aggregate, and summarize data. Return compact, structured results.
+      - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
+      - YOLO=true
+
+    ports:
+      - "3021:3000"
+
+    volumes:
+      - so_logs:/logs
+      - so_shared:/workspace/shared
+      - so_analyst:/workspace/personal
+
+    restart: unless-stopped
+
+  marketer-worker:
+    container_name: so-marketer
+    platform: linux/amd64
+    image: swarm-worker:local
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    depends_on:
+      api:
+        condition: service_healthy
+    stop_grace_period: 60s
+
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - API_KEY=${API_KEY}
+      - SCRIPTS_ONLY_MCP=true
+      - AGENT_ID=7a1e0000-0000-4000-8000-000000000003
+      - AGENT_ROLE=worker
+      - AGENT_NAME=marketer
+      - SYSTEM_PROMPT=You are the swarm's marketer. You turn analysis and data into crisp, compelling copy. Keep outputs short and punchy.
+      - MCP_BASE_URL=http://api:3013
+      - AGENT_FS_API_URL=http://agent-fs:7433
+      - YOLO=true
+
+    ports:
+      - "3022:3000"
+
+    volumes:
+      - so_logs:/logs
+      - so_shared:/workspace/shared
+      - so_marketer:/workspace/personal
+
+    restart: unless-stopped
+
+volumes:
+  so_agent_fs_minio:
+  so_agent_fs:
+  so_logs:
+  so_shared:
+  so_lead:
+  so_analyst:
+  so_marketer:

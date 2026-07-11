@@ -175,7 +175,18 @@ export function getEnabledCapabilities(): string[] {
   return Array.from(CAPABILITIES);
 }
 
-export function createServer() {
+/**
+ * Experimental "code-mode" surface: when SCRIPTS_ONLY_MCP=true, the externally
+ * exposed MCP server registers ONLY the reusable-script tools. Agents perform
+ * every other swarm operation (task lifecycle, messaging, memory, kv, …) from
+ * inside scripts via the SDK bridge (src/http/mcp-bridge.ts), which builds its
+ * own full-surface server instance and is NOT affected by this flag.
+ */
+export function isScriptsOnlyMcp(): boolean {
+  return process.env.SCRIPTS_ONLY_MCP === "true";
+}
+
+export function createServer(opts: { scriptsOnly?: boolean } = {}) {
   // Initialize database with WAL mode
   // Uses DATABASE_PATH env var for Docker volume compatibility (WAL needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
   initDb(process.env.DATABASE_PATH);
@@ -210,6 +221,19 @@ export function createServer() {
       },
     },
   );
+
+  // Scripts-only surface (experimental code-mode): register just the script
+  // catalog tools and stop. script-connections / script-apis stay out — they
+  // are lead-only security admin and excluded from the scripts SDK too.
+  if (opts.scriptsOnly ?? isScriptsOnlyMcp()) {
+    registerScriptSearchTool(server);
+    registerScriptRunTool(server);
+    registerScriptUpsertTool(server);
+    registerScriptDeleteTool(server);
+    registerScriptQueryTypesTool(server);
+    registerScriptRunsTools(server);
+    return server;
+  }
 
   // Core tools - always registered
   registerJoinSwarmTool(server);

@@ -10,7 +10,9 @@ import { json, jsonError } from "./utils";
 let _bridgeServer: McpServer | null = null;
 function getBridgeServer(): McpServer {
   if (!_bridgeServer) {
-    _bridgeServer = createServer();
+    // Always full tool surface: the bridge is how scripts reach every SDK
+    // tool, including when SCRIPTS_ONLY_MCP trims the external MCP server.
+    _bridgeServer = createServer({ scriptsOnly: false });
   }
   return _bridgeServer;
 }

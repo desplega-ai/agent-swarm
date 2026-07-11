@@ -114,6 +114,15 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   const compositeResult = await resolveTemplateAsync(compositeEventType, vars);
   let prompt = compositeResult.text;
 
+  // Experimental scripts-only MCP surface (code-mode): the composite templates
+  // reference named swarm tools that are not registered when the server runs
+  // with SCRIPTS_ONLY_MCP=true, so tell the agent everything goes through
+  // script-run. Worker containers opt in via the same env var.
+  if (hasMcp && process.env.SCRIPTS_ONLY_MCP === "true") {
+    const scriptsOnlyResult = await resolveTemplateAsync("system.agent.scripts_only_mode", {});
+    prompt += `\n${scriptsOnlyResult.text}`;
+  }
+
   const slackPromptToolsEnabled = areSlackPromptToolsEnabled();
 
   if (hasMcp && slackPromptToolsEnabled) {

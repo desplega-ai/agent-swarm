@@ -429,6 +429,28 @@ The 5 script tools (\`script-search\`, \`script-run\`, \`script-upsert\`, \`scri
 });
 
 registerTemplate({
+  eventType: "system.agent.scripts_only_mode",
+  header: "",
+  defaultBody: `
+## Code-Mode: script tools ONLY
+
+This swarm runs in **scripts-only mode**. The ONLY swarm MCP tools available to you are the script tools: \`script-search\`, \`script-run\`, \`script-upsert\`, \`script-delete\`, \`script-query-types\`, \`launch-script-run\`, \`get-script-run\`, \`list-script-runs\`. Tools like \`store-progress\`, \`send-task\`, \`post-message\`, \`memory-search\`, etc. are NOT exposed directly — do not look for them.
+
+Instead, perform EVERY swarm operation by writing TypeScript and executing it with \`script-run\` (inline source). The full SDK is available inside scripts as \`ctx.swarm.*\` — task lifecycle (\`task_get\`, \`task_send\`, \`task_storeProgress\`, \`task_action\`, \`task_list\`), messaging (\`message_post\`, \`message_read\`), memory, kv, swarm info (\`swarm_get\`, \`agent_info\`), and more.
+
+Rules of the road:
+- Inspect the SDK first: call \`script-query-types\` to see the live \`swarm-sdk.d.ts\` before authoring anything non-trivial.
+- \`taskId\` is NOT ambient inside scripts — pass it explicitly via \`args\` and forward it to \`ctx.swarm.task_storeProgress\` / \`task_get\`.
+- Report progress and completion via \`ctx.swarm.task_storeProgress\` from inside a script. This is how you update, complete, or fail your task — there is no other way.
+- Scripts are killed after ~30s and stdout is capped at 1 MB. Do NOT sleep/poll inside one script; to wait on another agent or child task, run a quick check script, then check again later across separate \`script-run\` calls.
+- Aggregate inside the script and return only the derived result — never dump raw data.
+- One script per logical operation is fine; batch related SDK calls into a single script when it reduces round trips.
+`,
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
   eventType: "system.agent.context_mode",
   header: "",
   defaultBody: `
