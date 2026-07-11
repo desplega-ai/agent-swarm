@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Swarm MCP surface: scripts-only vs full — comparison</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root { --so:#6366f1; --fu:#f59e0b; --bg:#0f1117; --card:#181b25; --txt:#e5e7eb; --mut:#9ca3af; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--txt); padding:32px 16px; }
+  .wrap { max-width:1080px; margin:0 auto; }
+  h1 { font-size:26px; margin:0 0 4px; } h2 { font-size:19px; margin:36px 0 12px; border-bottom:1px solid #2a2e3d; padding-bottom:6px; }
+  .sub { color:var(--mut); margin-bottom:24px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; } @media(max-width:860px){ .grid{grid-template-columns:1fr;} }
+  .card { background:var(--card); border:1px solid #262a38; border-radius:12px; padding:18px; }
+  .card h3 { margin:0 0 10px; font-size:14px; color:var(--mut); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  .hero { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:20px 0; } @media(max-width:860px){ .hero{grid-template-columns:repeat(2,1fr);} }
+  .hero .card { text-align:center; } .hero .n { font-size:26px; font-weight:700; } .hero .l { font-size:12px; color:var(--mut); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th,td { text-align:left; padding:7px 10px; border-bottom:1px solid #262a38; }
+  th { color:var(--mut); font-weight:600; font-size:12.5px; text-transform:uppercase; letter-spacing:.03em; }
+  td.so { color:var(--so); font-weight:600; } td.fu { color:var(--fu); font-weight:600; }
+  tr.bad td { opacity:.45; }
+  .legend span { display:inline-block; margin-right:16px; font-size:13px; color:var(--mut); }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:6px; vertical-align:middle; }
+  .analysis p { margin:10px 0; } .analysis li { margin:6px 0; }
+  code { background:#232736; padding:1px 5px; border-radius:4px; font-size:13px; }
+  canvas { max-height:280px; }
+</style></head><body><div class="wrap">
+<h1>Swarm MCP surface: <span style="color:var(--so)">scripts-only</span> vs <span style="color:var(--fu)">full</span></h1>
+<div class="sub">Same task ("collaborative marketing blurb": lead → analyst → marketer), same images, fresh DB per run · Claude harness · generated 2026-07-11T18:11:06.895Z</div>
+<div class="legend"><span><i class="dot" style="background:var(--so)"></i>scripts-only (8 MCP tools, everything via script-run)</span><span><i class="dot" style="background:var(--fu)"></i>full (118 MCP tools)</span></div>
+
+<div class="hero">
+  <div class="card"><div class="n">8 vs 118</div><div class="l">MCP tools exposed</div></div>
+  <div class="card"><div class="n">~2.2K vs ~80K</div><div class="l">tool-schema tokens (35x)</div></div>
+  <div class="card"><div class="n">3/4 · 3/3</div><div class="l">runs completed (so · full)</div></div>
+  <div class="card"><div class="n">$3.13 vs $1.83</div><div class="l">mean cost / run</div></div>
+</div>
+
+<div class="grid">
+  <div class="card"><h3>Cost per run (USD)</h3><canvas id="cCost"></canvas></div>
+  <div class="card"><h3>Parent wall time (min)</h3><canvas id="cWall"></canvas></div>
+  <div class="card"><h3>Mean tool calls per run, by category</h3><canvas id="cTools"></canvas></div>
+  <div class="card"><h3>End-of-session context (tokens)</h3><canvas id="cCtx"></canvas></div>
+</div>
+
+<h2>Mode comparison (means over completed runs)</h2>
+<div class="card"><table>
+  <tr><th>Metric</th><th style="color:var(--so)">scripts-only</th><th style="color:var(--fu)">full</th></tr>
+  
+  <tr><td>Completed / attempts</td><td class="so">3/4</td><td class="fu">3/3</td></tr>
+  
+  <tr><td>Cost per run (USD)</td><td class="so">$3.13</td><td class="fu">$1.83</td></tr>
+  
+  <tr><td>Parent wall time (min)</td><td class="so">9.23</td><td class="fu">3.9</td></tr>
+  
+  <tr><td>Tool calls per run</td><td class="so">48.67</td><td class="fu">24.67</td></tr>
+  
+  <tr><td>SDK-probing script runs</td><td class="so">5.67</td><td class="fu">0</td></tr>
+  
+  <tr><td>Tool errors per run</td><td class="so">3.67</td><td class="fu">0.33</td></tr>
+  
+  <tr><td>Worker context @ end (mean)</td><td class="so">27K</td><td class="fu">29K</td></tr>
+  
+  <tr><td>Lead context @ end (mean)</td><td class="so">37K</td><td class="fu">39K</td></tr>
+  
+  <tr><td>Output tokens per run</td><td class="so">21862</td><td class="fu">8904</td></tr>
+</table></div>
+
+<h2>All runs</h2>
+<div class="card"><table>
+  <tr><th>Run</th><th>Result</th><th>Wall (min)</th><th>Cost</th><th>Sessions</th><th>Tool calls</th><th>Probes</th><th>Errors</th><th>Worker ctx</th></tr>
+  
+  <tr class="">
+    <td>full-1</td><td>completed</td><td>3.7</td>
+    <td>$1.72</td><td>4</td><td>22</td>
+    <td>0</td><td>0</td>
+    <td>marketer:27K analyst:34K</td>
+  </tr>
+  <tr class="">
+    <td>full-2</td><td>completed</td><td>3.3</td>
+    <td>$1.75</td><td>4</td><td>25</td>
+    <td>0</td><td>1</td>
+    <td>marketer:21K analyst:37K</td>
+  </tr>
+  <tr class="">
+    <td>full-3</td><td>completed</td><td>4.7</td>
+    <td>$2.02</td><td>4</td><td>27</td>
+    <td>0</td><td>0</td>
+    <td>marketer:28K analyst:26K</td>
+  </tr>
+  <tr class="bad">
+    <td>scripts-only-1</td><td>BOOT_TIMEOUT</td><td>—</td>
+    <td>$0.00</td><td>0</td><td>0</td>
+    <td>0</td><td>0</td>
+    <td></td>
+  </tr>
+  <tr class="">
+    <td>scripts-only-2</td><td>completed</td><td>17.3</td>
+    <td>$3.31</td><td>6</td><td>56</td>
+    <td>8</td><td>5</td>
+    <td>marketer:26K analyst:42K</td>
+  </tr>
+  <tr class="">
+    <td>scripts-only-3</td><td>completed</td><td>5.7</td>
+    <td>$3.07</td><td>6</td><td>48</td>
+    <td>5</td><td>2</td>
+    <td>marketer:21K analyst:21K</td>
+  </tr>
+  <tr class="">
+    <td>scripts-only-4</td><td>completed</td><td>4.7</td>
+    <td>$2.99</td><td>6</td><td>42</td>
+    <td>4</td><td>4</td>
+    <td>marketer:22K analyst:31K</td>
+  </tr>
+</table></div>
+
+<h2>Analysis</h2>
+<div class="card analysis"><p><strong>Verdict: for a simple delegation task on the Claude harness, the full tool surface wins decisively.</strong> Scripts-only cost +71% ($3.13 vs $1.83), took 2.4x longer (9.2 vs 3.9 min), made 2x the tool calls (49 vs 25), and hit 11x more tool errors (3.7 vs 0.3 per run). Every scripts-only run completed correctly — the architecture works — but it pays a steep boilerplate tax.</p>
+
+<p><strong>The expected context win did not materialize on Claude.</strong> End-of-session context was a wash (workers ~27K scripts-only vs ~29K full; leads ~37K vs ~39K). Claude's ToolSearch already defers the 118 tool schemas (~80K tokens) out of context, so trimming the surface to 8 tools saved little in practice. Worse, scripts-only agents <em>write TypeScript as output</em>: 2.5x the output tokens (21.9K vs 8.9K) — and output tokens are the most expensive kind. That, plus SDK-probing (5.7 scratch scripts per run discovering the <code>(args, ctx)</code> signature and response envelopes) and hand-rolled sleep/poll loops, fully explains the cost gap.</p>
+
+<p><strong>Where the 35x schema reduction still matters:</strong></p>
+<ul>
+  <li><strong>Harnesses without tool-search</strong> (pi, codex, opencode) eat the full ~80K schema payload in every session. Scripts-only is likely a genuine context/cost win there — untested in this matrix, worth a follow-up.</li>
+  <li><strong>Bulk/fan-out work.</strong> This scenario had zero bulk operations; every SDK call was 1:1 with a tool call, which is exactly where code-mode is weakest. The existing script rubric (scripts for 10+ item pipelines) remains the right call.</li>
+</ul>
+
+<p><strong>The gap is boilerplate-shaped, not architecture-shaped.</strong> Probing, storeProgress/delegation boilerplate, and wait loops account for roughly half of scripts-only tool calls and most of the extra output tokens. All are addressable: document the entry signature in the prompt, add typed returns to <code>swarm-sdk.d.ts</code>, and ship default seed scripts (<code>delegate</code>, <code>wait-for-task</code>, <code>get-child-outputs</code>, <code>complete-task</code>, <code>swarm-overview</code>). A re-run with that pack would show whether the gap closes.</p>
+
+<p><strong>Recommendation:</strong> don't strip the named tools for Claude agents — keep the hybrid (full surface + script rubric for bulk work). Revisit scripts-only as the default surface for non-tool-search harnesses once the seed-script pack + typed SDK land, and consider a middle surface (8 script tools + the ~10 core task-lifecycle tools) as the best of both.</p>
+
+<p style="color:#9ca3af;font-size:13px"><strong>Caveats:</strong> n=3 per mode, one simple task, Claude harness only, cost figures are harness-reported estimates; one scripts-only attempt lost to an infra boot timeout (excluded, $0 spent). Scripts-only run 2 included a ~10 min wait-loop stall (lead polling a finished child on a slow cadence) — its wall time is a fair reflection of the pattern, not an outlier artifact.</p>
+</div>
+
+<script>
+const runs = [{"mode":"full","runId":"1","result":"completed","wallMin":3.7,"costUsd":1.7195735,"sessions":4,"outputTokens":8664,"cacheReadTokens":875822,"toolCalls":{"swarm MCP tools":11,"ToolSearch":9,"Bash":2},"totalToolCalls":22,"errors":0,"probes":0,"perTask":[{"id":"c888ba30","agent":"lead","kind":"parent","status":"completed","ctxTokens":39420,"toolCalls":13,"errors":0},{"id":"081d2b53","agent":"marketer","kind":"work","status":"completed","ctxTokens":26557,"toolCalls":3,"errors":0},{"id":"67a0df53","agent":"analyst","kind":"work","status":"completed","ctxTokens":33734,"toolCalls":6,"errors":0}]},{"mode":"full","runId":"2","result":"completed","wallMin":3.3,"costUsd":1.74594975,"sessions":4,"outputTokens":8235,"cacheReadTokens":896987,"toolCalls":{"ToolSearch":12,"swarm MCP tools":10,"Bash":2,"other":1},"totalToolCalls":25,"errors":1,"probes":0,"perTask":[{"id":"6cc8cca5","agent":"lead","kind":"parent","status":"completed","ctxTokens":33062,"toolCalls":13,"errors":1},{"id":"f905615f","agent":"marketer","kind":"work","status":"completed","ctxTokens":20605,"toolCalls":3,"errors":0},{"id":"13d36671","agent":"analyst","kind":"work","status":"completed","ctxTokens":37391,"toolCalls":9,"errors":0}]},{"mode":"full","runId":"3","result":"completed","wallMin":4.7,"costUsd":2.02198925,"sessions":4,"outputTokens":9812,"cacheReadTokens":1235741,"toolCalls":{"ToolSearch":12,"swarm MCP tools":12,"Bash":3},"totalToolCalls":27,"errors":0,"probes":0,"perTask":[{"id":"de7b5130","agent":"lead","kind":"parent","status":"completed","ctxTokens":44943,"toolCalls":17,"errors":0},{"id":"aaa3061a","agent":"marketer","kind":"work","status":"completed","ctxTokens":27880,"toolCalls":3,"errors":0},{"id":"a7e9897a","agent":"analyst","kind":"work","status":"completed","ctxTokens":26076,"toolCalls":7,"errors":0}]},{"mode":"scripts-only","runId":"1","result":"BOOT_TIMEOUT","wallMin":null,"costUsd":0,"sessions":0,"outputTokens":0,"cacheReadTokens":0,"toolCalls":{},"totalToolCalls":0,"errors":0,"probes":0,"perTask":[]},{"mode":"scripts-only","runId":"2","result":"completed","wallMin":17.3,"costUsd":3.3149444999999997,"sessions":6,"outputTokens":23620,"cacheReadTokens":2257889,"toolCalls":{"ToolSearch":11,"script tools":42,"Bash":3},"totalToolCalls":56,"errors":5,"probes":8,"perTask":[{"id":"a8ab4311","agent":"lead","kind":"parent","status":"completed","ctxTokens":44013,"toolCalls":21,"errors":1},{"id":"bf94698d","agent":"lead","kind":"review","status":"completed","ctxTokens":42495,"toolCalls":8,"errors":1},{"id":"227c412a","agent":"lead","kind":"review","status":"completed","ctxTokens":23121,"toolCalls":10,"errors":1},{"id":"da246150","agent":"marketer","kind":"work","status":"completed","ctxTokens":26053,"toolCalls":8,"errors":1},{"id":"ecadc24e","agent":"analyst","kind":"work","status":"completed","ctxTokens":41539,"toolCalls":9,"errors":1}]},{"mode":"scripts-only","runId":"3","result":"completed","wallMin":5.7,"costUsd":3.0727135,"sessions":6,"outputTokens":22219,"cacheReadTokens":1935552,"toolCalls":{"ToolSearch":11,"script tools":34,"Bash":3},"totalToolCalls":48,"errors":2,"probes":5,"perTask":[{"id":"3a989b08","agent":"lead","kind":"review","status":"completed","ctxTokens":25189,"toolCalls":7,"errors":0},{"id":"51cf600b","agent":"lead","kind":"parent","status":"completed","ctxTokens":43624,"toolCalls":19,"errors":0},{"id":"3b65e80b","agent":"marketer","kind":"work","status":"completed","ctxTokens":21113,"toolCalls":7,"errors":0},{"id":"af5bbe1b","agent":"lead","kind":"review","status":"completed","ctxTokens":23174,"toolCalls":8,"errors":1},{"id":"a9bca889","agent":"analyst","kind":"work","status":"completed","ctxTokens":21123,"toolCalls":7,"errors":1}]},{"mode":"scripts-only","runId":"4","result":"completed","wallMin":4.7,"costUsd":2.99196225,"sessions":6,"outputTokens":19746,"cacheReadTokens":1844662,"toolCalls":{"ToolSearch":10,"script tools":30,"Bash":2},"totalToolCalls":42,"errors":4,"probes":4,"perTask":[{"id":"6992e196","agent":"lead","kind":"review","status":"completed","ctxTokens":23271,"toolCalls":8,"errors":1},{"id":"7d48450a","agent":"lead","kind":"parent","status":"completed","ctxTokens":22574,"toolCalls":17,"errors":1},{"id":"af1f04c6","agent":"marketer","kind":"work","status":"completed","ctxTokens":21580,"toolCalls":7,"errors":1},{"id":"0ab6c81f","agent":"lead","kind":"review","status":"completed","ctxTokens":22942,"toolCalls":4,"errors":0},{"id":"eae047f8","agent":"analyst","kind":"work","status":"completed","ctxTokens":30986,"toolCalls":6,"errors":1}]}];
+const cats = ["swarm MCP tools","ToolSearch","Bash","other","script tools"];
+const SO='#6366f1', FU='#f59e0b';
+Chart.defaults.color='#9ca3af'; Chart.defaults.borderColor='#262a38';
+const byMode = m => runs.filter(r=>r.mode===m);
+const labels = [...new Set(runs.map(r=>'run '+r.runId))].sort();
+function series(m, f){ return labels.map(l=>{ const r=byMode(m).find(r=>'run '+r.runId===l); return r&&r.result==='completed'?f(r):null; }); }
+new Chart(cCost,{type:'bar',data:{labels,datasets:[
+  {label:'scripts-only',data:series('scripts-only',r=>r.costUsd),backgroundColor:SO},
+  {label:'full',data:series('full',r=>r.costUsd),backgroundColor:FU}]},options:{plugins:{legend:{display:false}}}});
+new Chart(cWall,{type:'bar',data:{labels,datasets:[
+  {label:'scripts-only',data:series('scripts-only',r=>r.wallMin),backgroundColor:SO},
+  {label:'full',data:series('full',r=>r.wallMin),backgroundColor:FU}]},options:{plugins:{legend:{display:false}}}});
+const meanCat=(m,c)=>{const rs=byMode(m).filter(r=>r.result==='completed');return rs.length?rs.reduce((s,r)=>s+(r.toolCalls[c]||0),0)/rs.length:0;};
+new Chart(cTools,{type:'bar',data:{labels:cats,datasets:[
+  {label:'scripts-only',data:cats.map(c=>meanCat('scripts-only',c)),backgroundColor:SO},
+  {label:'full',data:cats.map(c=>meanCat('full',c)),backgroundColor:FU}]},options:{plugins:{legend:{display:false}}}});
+const agg=[{"mode":"scripts-only","attempts":4,"completed":3,"meanCost":3.13,"meanWallMin":9.23,"meanToolCalls":48.67,"meanErrors":3.67,"meanProbes":5.67,"meanWorkerCtx":27066,"meanLeadCtx":36737,"meanOutputTokens":21861.67},{"mode":"full","attempts":3,"completed":3,"meanCost":1.83,"meanWallMin":3.9,"meanToolCalls":24.67,"meanErrors":0.33,"meanProbes":0,"meanWorkerCtx":28707,"meanLeadCtx":39142,"meanOutputTokens":8903.67}];
+new Chart(cCtx,{type:'bar',data:{labels:['worker (mean)','lead (mean)'],datasets:[
+  {label:'scripts-only',data:[agg[0].meanWorkerCtx,agg[0].meanLeadCtx],backgroundColor:SO},
+  {label:'full',data:[agg[1].meanWorkerCtx,agg[1].meanLeadCtx],backgroundColor:FU}]},options:{plugins:{legend:{display:false}}}});
+</script>
+</div></body></html>

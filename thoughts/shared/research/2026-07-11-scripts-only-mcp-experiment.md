@@ -64,6 +64,23 @@ Context note: for Claude workers, ToolSearch already defers most schemas, so the
 - `MAX_CONCURRENT_TASKS≥2` for leads whenever auto review follow-ups are enabled, else parent+review deadlocks.
 - Seed-script seeding must run for fresh DBs (compose/local bootstrap), or the prompt must stop referencing them.
 
+## Matrix results (2 modes × 3 completed runs, added later same day)
+
+Same task, same images (`SCRIPTS_ONLY_MCP` env toggle only), fresh DB/volumes per run. Full data + charts: `scripts-only-vs-full-report.html` (generated from `/tmp/matrix/`).
+
+| Mean over completed runs | scripts-only | full |
+|---|---|---|
+| Completed / attempts | 3/4 (1 infra boot timeout, $0) | 3/3 |
+| Cost / run | **$3.13** | **$1.83** |
+| Parent wall time | 9.2 min | 3.9 min |
+| Tool calls / run | 49 | 25 |
+| SDK-probing scripts / run | 5.7 | 0 |
+| Tool errors / run | 3.7 | 0.3 |
+| Worker ctx @ end | ~27K | ~29K |
+| Output tokens / run | 21.9K | 8.9K |
+
+**Measured verdict:** on the Claude harness, for a simple delegation task, full surface wins decisively — the anticipated context saving is neutralized by ToolSearch deferral, while scripts-only pays 2.5x output tokens (writing TS source) plus probing/boilerplate overhead. The scripts-only case remains promising for (a) non-tool-search harnesses (pi/codex/opencode — untested here) and (b) bulk/fan-out work; and the overhead is boilerplate-shaped (seed scripts + typed SDK + signature docs would remove most of it). Recommended default: keep hybrid for Claude; revisit scripts-only for pi/opencode after the seed-script pack lands; consider a middle surface (script tools + core task-lifecycle tools).
+
 ## Verdict
 
 Full code-mode is viable **today** on the Claude harness with zero SDK changes — agents figured everything out with a one-paragraph prompt note, and the friction observed is boilerplate, not architecture. The base-context reduction (~35x on schemas) matters most for non-tool-search harnesses. The five seed scripts + prompt signature note would likely cut the observed probing/wait overhead (~40% of tool calls in these sessions) to near zero.

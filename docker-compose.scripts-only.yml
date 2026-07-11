@@ -96,7 +96,7 @@ services:
 
     environment:
       - API_KEY=${API_KEY}
-      - SCRIPTS_ONLY_MCP=true
+      - SCRIPTS_ONLY_MCP=${SCRIPTS_ONLY_MCP:-true}
       - AGENT_FS_API_URL=http://agent-fs:7433
       - API_AGENT_FS_API_KEY=${API_AGENT_FS_API_KEY:-}
       - AGENT_FS_REGISTER_EMAIL=${AGENT_FS_REGISTER_EMAIL:-swarm-admin@agent-fs.local}
@@ -132,7 +132,7 @@ services:
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
-      - SCRIPTS_ONLY_MCP=true
+      - SCRIPTS_ONLY_MCP=${SCRIPTS_ONLY_MCP:-true}
       - AGENT_ID=7a1e0000-0000-4000-8000-000000000001
       - AGENT_ROLE=lead
       - AGENT_NAME=lead
@@ -166,7 +166,7 @@ services:
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
-      - SCRIPTS_ONLY_MCP=true
+      - SCRIPTS_ONLY_MCP=${SCRIPTS_ONLY_MCP:-true}
       - AGENT_ID=7a1e0000-0000-4000-8000-000000000002
       - AGENT_ROLE=worker
       - AGENT_NAME=analyst
@@ -201,7 +201,7 @@ services:
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
-      - SCRIPTS_ONLY_MCP=true
+      - SCRIPTS_ONLY_MCP=${SCRIPTS_ONLY_MCP:-true}
       - AGENT_ID=7a1e0000-0000-4000-8000-000000000003
       - AGENT_ROLE=worker
       - AGENT_NAME=marketer
