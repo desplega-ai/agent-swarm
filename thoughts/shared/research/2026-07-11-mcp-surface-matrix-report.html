@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Swarm MCP surface matrix — scripts-only vs full × claude/pi/opencode</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root { --bg:#0f1117; --card:#181b25; --txt:#e5e7eb; --mut:#9ca3af; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--txt); padding:32px 16px; }
+  .wrap { max-width:1160px; margin:0 auto; }
+  h1 { font-size:25px; margin:0 0 4px; } h2 { font-size:19px; margin:36px 0 12px; border-bottom:1px solid #2a2e3d; padding-bottom:6px; }
+  .sub { color:var(--mut); margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; } @media(max-width:900px){ .grid{grid-template-columns:1fr;} }
+  .card { background:var(--card); border:1px solid #262a38; border-radius:12px; padding:18px; }
+  .card h3 { margin:0 0 10px; font-size:13.5px; color:var(--mut); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  .hero { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:18px 0; } @media(max-width:900px){ .hero{grid-template-columns:1fr;} }
+  .hero .card { text-align:center; } .hero .n { font-size:21px; font-weight:700; } .hero .l { font-size:12.5px; color:var(--mut); margin-top:4px; }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  th,td { text-align:left; padding:7px 9px; border-bottom:1px solid #262a38; }
+  th { color:var(--mut); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.03em; }
+  tr.bad td { opacity:.45; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:7px; vertical-align:baseline; }
+  .analysis p { margin:10px 0; } .analysis li { margin:6px 0; } .analysis h4 { margin:18px 0 6px; }
+  code { background:#232736; padding:1px 5px; border-radius:4px; font-size:12.5px; }
+  canvas { max-height:270px; }
+  .note { font-size:12.5px; color:var(--mut); margin-top:8px; }
+</style></head><body><div class="wrap">
+<h1>Swarm MCP surface matrix</h1>
+<div class="sub">scripts-only ("code-mode", 8 tools) vs full surface (118 tools) × claude / pi / opencode — same collaborative task, fresh stack per run, same images.<br>
+pi + opencode run <code>deepseek-v4-flash</code> via OpenRouter (all 3 agents). "+seeds" = 6 default scripts (delegate, wait-for-task, get-child-outputs, complete-task, report-progress, swarm-overview) + code-mode prompt. Generated 2026-07-11T21:08:51.034Z.</div>
+
+<div class="hero">
+  <div class="card"><div class="n">Claude: seeds close the gap</div><div class="l">$1.85 vs $1.83 · faster (3.3 vs 3.9 min) · lead context −37%</div></div>
+  <div class="card"><div class="n">opencode/full ctx ≈ 80K</div><div class="l">the 118-tool schema really enters context without tool-search; scripts-only cuts lead ctx to ~38K</div></div>
+  <div class="card"><div class="n">Weak models break in code-mode</div><div class="l">deepseek delegation fidelity: full 5/5 · scripts-only 1/3 (leads skip collaboration)</div></div>
+</div>
+
+<div class="grid">
+  <div class="card"><h3>Completion & correct delegation (of attempts)</h3><canvas id="cDone"></canvas></div>
+  <div class="card"><h3>Mean cost per run (USD, log scale)</h3><canvas id="cCost"></canvas><div class="note">Claude = subscription-estimated; deepseek = OpenRouter metered. Compare within provider, not across.</div></div>
+  <div class="card"><h3>Mean parent wall time (min)</h3><canvas id="cWall"></canvas></div>
+  <div class="card"><h3>Peak context — lead session (tokens)</h3><canvas id="cCtx"></canvas><div class="note">pi does not report context usage (adapter gap — worth fixing). </div></div>
+  <div class="card"><h3>Mean tool calls per run, by category</h3><canvas id="cTools"></canvas></div>
+  <div class="card"><h3>Seed-script adoption (calls/run) & tool errors</h3><canvas id="cSeed"></canvas></div>
+</div>
+
+<h2>Aggregate (means over completed runs)</h2>
+<div class="card"><table>
+  <tr><th>Group</th><th>Done</th><th>Delegated</th><th>Cost</th><th>Wall min</th><th>Calls</th><th>Seed calls</th><th>Errors</th><th>Lead ctx</th><th>Worker ctx</th><th>Out tok</th></tr>
+  
+  <tr>
+    <td><i class="dot" style="background:#f59e0b"></i>claude/full</td>
+    <td>3/3</td><td>3/3</td>
+    <td>$1.83</td><td>3.9</td><td>24.67</td>
+    <td>0</td><td>0.33</td>
+    <td>39K</td>
+    <td>29K</td>
+    <td>9K</td>
+  </tr>
+  <tr>
+    <td><i class="dot" style="background:#818cf8"></i>claude/scripts-only</td>
+    <td>3/4</td><td>3/3</td>
+    <td>$3.13</td><td>9.23</td><td>48.67</td>
+    <td>0</td><td>3.67</td>
+    <td>37K</td>
+    <td>27K</td>
+    <td>22K</td>
+  </tr>
+  <tr>
+    <td><i class="dot" style="background:#6366f1"></i>claude/scripts-only+seeds</td>
+    <td>3/3</td><td>3/3</td>
+    <td>$1.85</td><td>3.33</td><td>34</td>
+    <td>16</td><td>5</td>
+    <td>25K</td>
+    <td>22K</td>
+    <td>12K</td>
+  </tr>
+  <tr>
+    <td><i class="dot" style="background:#fbbf24"></i>pi/full</td>
+    <td>3/3</td><td>3/3</td>
+    <td>$0.04</td><td>1.9</td><td>42</td>
+    <td>0</td><td>2.67</td>
+    <td>n/a</td>
+    <td>n/a</td>
+    <td>10K</td>
+  </tr>
+  <tr>
+    <td><i class="dot" style="background:#4f46e5"></i>pi/scripts-only+seeds</td>
+    <td>2/2</td><td>1/2</td>
+    <td>$0.06</td><td>5.5</td><td>151.5</td>
+    <td>0</td><td>26</td>
+    <td>n/a</td>
+    <td>n/a</td>
+    <td>38K</td>
+  </tr>
+  <tr>
+    <td><i class="dot" style="background:#fcd34d"></i>opencode/full</td>
+    <td>2/3</td><td>2/2</td>
+    <td>$0.10</td><td>2.5</td><td>40.5</td>
+    <td>0</td><td>1</td>
+    <td>83K</td>
+    <td>76K</td>
+    <td>14K</td>
+  </tr>
+  <tr>
+    <td><i class="dot" style="background:#4338ca"></i>opencode/scripts-only+seeds</td>
+    <td>1/3</td><td>0/1</td>
+    <td>$0.01</td><td>2.7</td><td>41</td>
+    <td>0</td><td>5</td>
+    <td>38K</td>
+    <td>n/a</td>
+    <td>3K</td>
+  </tr>
+</table></div>
+
+<h2>All runs</h2>
+<div class="card"><table>
+  <tr><th>Run</th><th>Result</th><th>Wall</th><th>Cost</th><th>Calls</th><th>Seeds</th><th>Errs</th><th>Call breakdown</th></tr>
+  
+  <tr class="">
+    <td>claude/scripts-only+seeds #1</td><td>completed</td><td>3</td>
+    <td>$1.41</td><td>29</td><td>15</td><td>4</td>
+    <td>script tools:19 · ToolSearch:10</td>
+  </tr>
+  <tr class="">
+    <td>claude/scripts-only+seeds #2</td><td>completed</td><td>4</td>
+    <td>$2.15</td><td>39</td><td>19</td><td>6</td>
+    <td>ToolSearch:12 · script tools:24 · other:1 · Bash:2</td>
+  </tr>
+  <tr class="">
+    <td>claude/scripts-only+seeds #3</td><td>completed</td><td>3</td>
+    <td>$2.00</td><td>34</td><td>14</td><td>5</td>
+    <td>ToolSearch:11 · script tools:23</td>
+  </tr>
+  <tr class="">
+    <td>claude/full #1</td><td>completed</td><td>3.7</td>
+    <td>$1.72</td><td>22</td><td>0</td><td>0</td>
+    <td>swarm MCP tools:11 · ToolSearch:9 · Bash:2</td>
+  </tr>
+  <tr class="">
+    <td>claude/full #2</td><td>completed</td><td>3.3</td>
+    <td>$1.75</td><td>25</td><td>0</td><td>1</td>
+    <td>ToolSearch:12 · swarm MCP tools:11 · Bash:2</td>
+  </tr>
+  <tr class="">
+    <td>claude/full #3</td><td>completed</td><td>4.7</td>
+    <td>$2.02</td><td>27</td><td>0</td><td>0</td>
+    <td>ToolSearch:12 · swarm MCP tools:12 · Bash:3</td>
+  </tr>
+  <tr class="bad">
+    <td>opencode/full #1</td><td>superseded</td><td>30</td>
+    <td>$0.00</td><td>0</td><td>0</td><td>0</td>
+    <td>—</td>
+  </tr>
+  <tr class="">
+    <td>opencode/full #2</td><td>completed</td><td>2.3</td>
+    <td>$0.11</td><td>41</td><td>0</td><td>1</td>
+    <td>swarm MCP tools:35 · other:6</td>
+  </tr>
+  <tr class="">
+    <td>opencode/full #3</td><td>completed</td><td>2.7</td>
+    <td>$0.09</td><td>40</td><td>0</td><td>1</td>
+    <td>swarm MCP tools:26 · Bash:6 · other:8</td>
+  </tr>
+  <tr class="">
+    <td>opencode/scripts-only+seeds #1</td><td>completed</td><td>2.7</td>
+    <td>$0.01</td><td>41</td><td>0</td><td>5</td>
+    <td>script tools:29 · Bash:7 · other:5</td>
+  </tr>
+  <tr class="bad">
+    <td>opencode/scripts-only+seeds #2</td><td>BOOT_TIMEOUT</td><td>—</td>
+    <td>$0.00</td><td>0</td><td>0</td><td>0</td>
+    <td>—</td>
+  </tr>
+  <tr class="bad">
+    <td>opencode/scripts-only+seeds #3</td><td>superseded</td><td>30</td>
+    <td>$0.36</td><td>76</td><td>0</td><td>2</td>
+    <td>script tools:67 · other:9</td>
+  </tr>
+  <tr class="">
+    <td>pi/full #1</td><td>completed</td><td>2.7</td>
+    <td>$0.06</td><td>44</td><td>0</td><td>3</td>
+    <td>swarm MCP tools:30 · other:8 · Bash:6</td>
+  </tr>
+  <tr class="">
+    <td>pi/full #2</td><td>completed</td><td>1.7</td>
+    <td>$0.04</td><td>52</td><td>0</td><td>3</td>
+    <td>swarm MCP tools:31 · other:21</td>
+  </tr>
+  <tr class="">
+    <td>pi/full #3</td><td>completed</td><td>1.3</td>
+    <td>$0.02</td><td>30</td><td>0</td><td>2</td>
+    <td>swarm MCP tools:20 · other:6 · Bash:4</td>
+  </tr>
+  <tr class="">
+    <td>pi/scripts-only+seeds #2</td><td>completed</td><td>5</td>
+    <td>$0.06</td><td>182</td><td>0</td><td>37</td>
+    <td>other:31 · script tools:46 · Bash:103 · swarm MCP tools:2</td>
+  </tr>
+  <tr class="">
+    <td>pi/scripts-only+seeds #3</td><td>completed</td><td>6</td>
+    <td>$0.06</td><td>121</td><td>0</td><td>15</td>
+    <td>Bash:52 · other:13 · script tools:56</td>
+  </tr>
+  <tr class="bad">
+    <td>claude/scripts-only #1</td><td>BOOT_TIMEOUT</td><td>—</td>
+    <td>$0.00</td><td>0</td><td>0</td><td>0</td>
+    <td>—</td>
+  </tr>
+  <tr class="">
+    <td>claude/scripts-only #2</td><td>completed</td><td>17.3</td>
+    <td>$3.31</td><td>56</td><td>0</td><td>5</td>
+    <td>ToolSearch:11 · script tools:42 · Bash:3</td>
+  </tr>
+  <tr class="">
+    <td>claude/scripts-only #3</td><td>completed</td><td>5.7</td>
+    <td>$3.07</td><td>48</td><td>0</td><td>2</td>
+    <td>ToolSearch:11 · script tools:34 · Bash:3</td>
+  </tr>
+  <tr class="">
+    <td>claude/scripts-only #4</td><td>completed</td><td>4.7</td>
+    <td>$2.99</td><td>42</td><td>0</td><td>4</td>
+    <td>ToolSearch:10 · script tools:30 · Bash:2</td>
+  </tr>
+</table></div>
+
+<h2>Analysis & recommendations</h2>
+<div class="card analysis"><h4>1 · The seed pack closed the Claude gap completely</h4>
+<p>Unseeded code-mode cost <strong>$3.13 / 9.2 min</strong>; with the 6 seed scripts + fixed prompt it dropped to <strong>$1.85 / 3.3 min</strong> — cost parity with the full surface ($1.83) and <em>faster</em> wall time (3.3 vs 3.9 min), with 3/3 runs completing and delegating correctly. Claude agents adopted the seeds heavily (16 seed invocations/run) and SDK-probing vanished. Context is where code-mode now wins outright: lead sessions peaked at <strong>~25K vs ~39K tokens (−37%)</strong>, workers ~22K vs ~29K, because coordination logic lives in scripts instead of conversation turns.</p>
+<p>The remaining 5 "errors"/run are one trivial bug: the prompt tells agents to call <code>script-run</code>, but Claude Code registers it as <code>mcp__agent-swarm__script-run</code> — agents try the bare name once, fail, adapt. One prompt line ("tool ids may carry an <code>mcp__agent-swarm__</code> prefix") removes them.</p>
+
+<h4>2 · The schema-bloat hypothesis confirmed on opencode</h4>
+<p>Without tool-search, the 118-tool surface genuinely enters context: opencode/full sessions peaked at <strong>~75–83K tokens</strong> — roughly the predicted ~80K of schema. Scripts-only cut the (one completed) lead session to <strong>~38K (−55%)</strong>. The context win is real exactly where it was predicted to be. (pi doesn't report context usage at all — an adapter gap worth fixing regardless of this experiment.)</p>
+
+<h4>3 · But small models break <em>as agents</em> in code-mode</h4>
+<p>deepseek-v4-flash handled the full surface fine: pi/full went 3/3 completed <em>and</em> correctly delegated, in 1.9 min at $0.04/run. In scripts-only mode the same model kept "completing" tasks while quietly dropping the actual job: across pi+opencode scripts-only runs, only <strong>1 of 3 completed runs delegated to both workers</strong> — leads did the work solo, skipped the marketer, or lost parent-task lineage (children created without <code>parentTaskId</code>). pi's lead also ballooned to ~150 tool calls/run (including 103 bash calls) and ignored the seed catalog entirely (0 seed invocations). Writing correct coordination <em>code</em> on the fly is a capability threshold that deepseek-flash-class models don't clear, even though they operate named tools perfectly well.</p>
+
+<h4>Recommendations</h4>
+<ul>
+  <li><strong>Claude agents:</strong> scripts-only + seeds is now a legitimate default — cost parity, faster, and ~37% more context headroom for long sessions. At minimum, ship the seeds: they help the hybrid mode too.</li>
+  <li><strong>pi/opencode with small models:</strong> keep the full surface for now. The 80K schema tax is real, but code-mode currently trades it for broken delegation fidelity — a worse failure mode. Revisit with a stronger model or with coordination seeds hardened into the task protocol itself.</li>
+  <li><strong>Ship regardless:</strong> the 6 seed scripts as global defaults, the code-mode prompt (with exact prefixed tool ids), typed returns in <code>swarm-sdk.d.ts</code>, and pi context-usage reporting.</li>
+  <li><strong>Grade delegation, not just completion:</strong> "parent completed" was a misleading success signal in 2 runs — the delegation-fidelity check (both workers received non-review tasks) belongs in the evals harness.</li>
+</ul>
+
+<p style="color:#9ca3af;font-size:12.5px"><strong>Caveats:</strong> n=3 per cell (n=2 for pi/scripts-only after one docker-compose flake; opencode had 1 boot timeout + 2 "superseded" crash-recovery outcomes), single simple task, one small model for pi/opencode, Claude costs are subscription estimates while deepseek is metered — compare within provider only.</p>
+</div>
+
+<script>
+const agg = [{"group":"claude/full","provider":"claude","mode":"full","seeds":false,"attempts":3,"completed":3,"delegatedOk":3,"meanCost":1.83,"meanWallMin":3.9,"meanToolCalls":24.67,"meanErrors":0.33,"meanProbes":0,"meanSeedCalls":0,"meanWorkerCtx":28707,"meanLeadCtx":39142,"meanOutputTokens":8903.67},{"group":"claude/scripts-only","provider":"claude","mode":"scripts-only","seeds":false,"attempts":4,"completed":3,"delegatedOk":3,"meanCost":3.13,"meanWallMin":9.23,"meanToolCalls":48.67,"meanErrors":3.67,"meanProbes":5.67,"meanSeedCalls":0,"meanWorkerCtx":27066,"meanLeadCtx":36737,"meanOutputTokens":21861.67},{"group":"claude/scripts-only+seeds","provider":"claude","mode":"scripts-only","seeds":true,"attempts":3,"completed":3,"delegatedOk":3,"meanCost":1.85,"meanWallMin":3.33,"meanToolCalls":34,"meanErrors":5,"meanProbes":0.67,"meanSeedCalls":16,"meanWorkerCtx":21643,"meanLeadCtx":24619,"meanOutputTokens":12194},{"group":"pi/full","provider":"pi","mode":"full","seeds":false,"attempts":3,"completed":3,"delegatedOk":3,"meanCost":0.04,"meanWallMin":1.9,"meanToolCalls":42,"meanErrors":2.67,"meanProbes":0,"meanSeedCalls":0,"meanWorkerCtx":0,"meanLeadCtx":0,"meanOutputTokens":9639},{"group":"pi/scripts-only+seeds","provider":"pi","mode":"scripts-only","seeds":true,"attempts":2,"completed":2,"delegatedOk":1,"meanCost":0.06,"meanWallMin":5.5,"meanToolCalls":151.5,"meanErrors":26,"meanProbes":2.5,"meanSeedCalls":0,"meanWorkerCtx":0,"meanLeadCtx":0,"meanOutputTokens":38292},{"group":"opencode/full","provider":"opencode","mode":"full","seeds":false,"attempts":3,"completed":2,"delegatedOk":2,"meanCost":0.1,"meanWallMin":2.5,"meanToolCalls":40.5,"meanErrors":1,"meanProbes":0,"meanSeedCalls":0,"meanWorkerCtx":75503,"meanLeadCtx":82594,"meanOutputTokens":14284},{"group":"opencode/scripts-only+seeds","provider":"opencode","mode":"scripts-only","seeds":true,"attempts":3,"completed":1,"delegatedOk":0,"meanCost":0.01,"meanWallMin":2.7,"meanToolCalls":41,"meanErrors":5,"meanProbes":0,"meanSeedCalls":0,"meanWorkerCtx":0,"meanLeadCtx":37684,"meanOutputTokens":3034}];
+const COLORS = {"claude/full":"#f59e0b","claude/scripts-only":"#818cf8","claude/scripts-only+seeds":"#6366f1","pi/full":"#fbbf24","pi/scripts-only+seeds":"#4f46e5","opencode/full":"#fcd34d","opencode/scripts-only+seeds":"#4338ca"};
+Chart.defaults.color='#9ca3af'; Chart.defaults.borderColor='#262a38';
+const labels = agg.map(a=>a.group);
+const colors = agg.map(a=>COLORS[a.group] ?? '#888');
+const opts = { plugins:{legend:{display:false}}, scales:{x:{ticks:{autoSkip:false,maxRotation:45,minRotation:30}}} };
+new Chart(cDone,{type:'bar',data:{labels,datasets:[
+  {label:'completed %',data:agg.map(a=>100*a.completed/a.attempts),backgroundColor:colors},
+  {label:'delegated %',data:agg.map(a=>100*(a.delegatedOk??0)/a.attempts),backgroundColor:colors.map(c=>c+'66')}]},
+  options:{...opts, plugins:{legend:{display:true}}, scales:{...opts.scales, y:{max:100}}}});
+new Chart(cCost,{type:'bar',data:{labels,datasets:[{data:agg.map(a=>a.meanCost),backgroundColor:colors}]},options:{...opts, scales:{...opts.scales, y:{type:'logarithmic'}}}});
+new Chart(cWall,{type:'bar',data:{labels,datasets:[{data:agg.map(a=>a.meanWallMin),backgroundColor:colors}]},options:opts});
+new Chart(cCtx,{type:'bar',data:{labels,datasets:[{data:agg.map(a=>a.meanLeadCtx||null),backgroundColor:colors}]},options:opts});
+const cats=[...new Set(agg.flatMap(a=>Object.keys(([{"group":"claude/scripts-only+seeds","provider":"claude","mode":"scripts-only","seeds":true,"runId":"1","result":"completed","wallMin":3,"costUsd":1.407313,"sessions":4,"outputTokens":8593,"toolCalls":{"script tools":19,"ToolSearch":10},"totalToolCalls":29,"errors":4,"probes":0,"seedCalls":15,"perTask":[{"id":"e65d6d57","agent":"lead","kind":"review","status":"completed","ctxTokens":23113,"toolCalls":4,"errors":1},{"id":"5734cc60","agent":"lead","kind":"parent","status":"completed","ctxTokens":28002,"toolCalls":10,"errors":0},{"id":"d252ed0a","agent":"marketer","kind":"work","status":"completed","ctxTokens":21843,"toolCalls":4,"errors":1},{"id":"4e905ff3","agent":"lead","kind":"review","status":"completed","ctxTokens":22926,"toolCalls":4,"errors":1},{"id":"5c1e81c6","agent":"analyst","kind":"work","status":"completed","ctxTokens":21610,"toolCalls":7,"errors":1}]},{"group":"claude/scripts-only+seeds","provider":"claude","mode":"scripts-only","seeds":true,"runId":"2","result":"completed","wallMin":4,"costUsd":2.1511649999999998,"sessions":5,"outputTokens":14032,"toolCalls":{"ToolSearch":12,"script tools":24,"other":1,"Bash":2},"totalToolCalls":39,"errors":6,"probes":1,"seedCalls":19,"perTask":[{"id":"8976b210","agent":"lead","kind":"review","status":"completed","ctxTokens":23091,"toolCalls":4,"errors":1},{"id":"b55f3252","agent":"lead","kind":"parent","status":"completed","ctxTokens":22877,"toolCalls":14,"errors":1},{"id":"cc8e80e5","agent":"marketer","kind":"work","status":"completed","ctxTokens":21333,"toolCalls":9,"errors":2},{"id":"2f18148f","agent":"lead","kind":"review","status":"completed","ctxTokens":22855,"toolCalls":5,"errors":1},{"id":"75acddbc","agent":"analyst","kind":"work","status":"completed","ctxTokens":21716,"toolCalls":7,"errors":1}]},{"group":"claude/scripts-only+seeds","provider":"claude","mode":"scripts-only","seeds":true,"runId":"3","result":"completed","wallMin":3,"costUsd":2.0008705,"sessions":6,"outputTokens":13957,"toolCalls":{"ToolSearch":11,"script tools":23},"totalToolCalls":34,"errors":5,"probes":1,"seedCalls":14,"perTask":[{"id":"a7408204","agent":"lead","kind":"review","status":"completed","ctxTokens":39648,"toolCalls":8,"errors":1},{"id":"a785932a","agent":"lead","kind":"parent","status":"completed","ctxTokens":22977,"toolCalls":10,"errors":0},{"id":"1c96a215","agent":"marketer","kind":"work","status":"completed","ctxTokens":21749,"toolCalls":4,"errors":1},{"id":"4b7331a3","agent":"lead","kind":"review","status":"completed","ctxTokens":23302,"toolCalls":4,"errors":1},{"id":"c5ab8d82","agent":"analyst","kind":"work","status":"completed","ctxTokens":21608,"toolCalls":8,"errors":2}]},{"group":"claude/full","provider":"claude","mode":"full","seeds":false,"runId":"1","result":"completed","wallMin":3.7,"costUsd":1.7195735,"sessions":4,"outputTokens":8664,"toolCalls":{"swarm MCP tools":11,"ToolSearch":9,"Bash":2},"totalToolCalls":22,"errors":0,"probes":0,"seedCalls":0,"perTask":[{"id":"c888ba30","agent":"lead","kind":"parent","status":"completed","ctxTokens":39420,"toolCalls":13,"errors":0},{"id":"081d2b53","agent":"marketer","kind":"work","status":"completed","ctxTokens":26557,"toolCalls":3,"errors":0},{"id":"67a0df53","agent":"analyst","kind":"work","status":"completed","ctxTokens":33734,"toolCalls":6,"errors":0}]},{"group":"claude/full","provider":"claude","mode":"full","seeds":false,"runId":"2","result":"completed","wallMin":3.3,"costUsd":1.74594975,"sessions":4,"outputTokens":8235,"toolCalls":{"ToolSearch":12,"swarm MCP tools":11,"Bash":2},"totalToolCalls":25,"errors":1,"probes":0,"seedCalls":0,"perTask":[{"id":"6cc8cca5","agent":"lead","kind":"parent","status":"completed","ctxTokens":33062,"toolCalls":13,"errors":1},{"id":"f905615f","agent":"marketer","kind":"work","status":"completed","ctxTokens":20605,"toolCalls":3,"errors":0},{"id":"13d36671","agent":"analyst","kind":"work","status":"completed","ctxTokens":37391,"toolCalls":9,"errors":0}]},{"group":"claude/full","provider":"claude","mode":"full","seeds":false,"runId":"3","result":"completed","wallMin":4.7,"costUsd":2.02198925,"sessions":4,"outputTokens":9812,"toolCalls":{"ToolSearch":12,"swarm MCP tools":12,"Bash":3},"totalToolCalls":27,"errors":0,"probes":0,"seedCalls":0,"perTask":[{"id":"de7b5130","agent":"lead","kind":"parent","status":"completed","ctxTokens":44943,"toolCalls":17,"errors":0},{"id":"aaa3061a","agent":"marketer","kind":"work","status":"completed","ctxTokens":27880,"toolCalls":3,"errors":0},{"id":"a7e9897a","agent":"analyst","kind":"work","status":"completed","ctxTokens":26076,"toolCalls":7,"errors":0}]},{"group":"opencode/full","provider":"opencode","mode":"full","seeds":false,"runId":"1","result":"superseded","wallMin":30,"costUsd":0,"sessions":0,"outputTokens":0,"toolCalls":{},"totalToolCalls":0,"errors":0,"probes":0,"seedCalls":0,"perTask":[{"id":"d0b59955","agent":"lead","kind":"work","status":"pending","ctxTokens":null,"toolCalls":0,"errors":0},{"id":"480aa222","agent":"lead","kind":"work","status":"cancelled","ctxTokens":null,"toolCalls":0,"errors":0},{"id":"8146b593","agent":"lead","kind":"parent","status":"superseded","ctxTokens":null,"toolCalls":0,"errors":0}]},{"group":"opencode/full","provider":"opencode","mode":"full","seeds":false,"runId":"2","result":"completed","wallMin":2.3,"costUsd":0.1085080304,"sessions":6,"outputTokens":15036,"toolCalls":{"swarm MCP tools":35,"other":6},"totalToolCalls":41,"errors":1,"probes":0,"seedCalls":0,"perTask":[{"id":"d697db46","agent":"lead","kind":"review","status":"completed","ctxTokens":79097,"toolCalls":3,"errors":0},{"id":"2f30ceb5","agent":"lead","kind":"parent","status":"completed","ctxTokens":75491,"toolCalls":27,"errors":0},{"id":"eee4656a","agent":"marketer","kind":"work","status":"completed","ctxTokens":75543,"toolCalls":2,"errors":0},{"id":"849dd2bd","agent":"lead","kind":"review","status":"completed","ctxTokens":81827,"toolCalls":3,"errors":0},{"id":"529c4946","agent":"analyst","kind":"work","status":"completed","ctxTokens":75646,"toolCalls":6,"errors":1}]},{"group":"opencode/full","provider":"opencode","mode":"full","seeds":false,"runId":"3","result":"completed","wallMin":2.7,"costUsd":0.094730328,"sessions":6,"outputTokens":13532,"toolCalls":{"swarm MCP tools":26,"Bash":6,"other":8},"totalToolCalls":40,"errors":1,"probes":0,"seedCalls":0,"perTask":[{"id":"8b06f61d","agent":"lead","kind":"review","status":"completed","ctxTokens":78018,"toolCalls":2,"errors":0},{"id":"10975153","agent":"lead","kind":"parent","status":"completed","ctxTokens":89697,"toolCalls":25,"errors":1},{"id":"27f937b2","agent":"marketer","kind":"work","status":"completed","ctxTokens":74940,"toolCalls":2,"errors":0},{"id":"872d1c11","agent":"lead","kind":"review","status":"completed","ctxTokens":76257,"toolCalls":5,"errors":0},{"id":"191e649c","agent":"analyst","kind":"work","status":"completed","ctxTokens":75882,"toolCalls":6,"errors":0}]},{"group":"opencode/scripts-only+seeds","provider":"opencode","mode":"scripts-only","seeds":true,"runId":"1","result":"completed","wallMin":2.7,"costUsd":0.011608458400000002,"sessions":1,"outputTokens":3034,"toolCalls":{"script tools":29,"Bash":7,"other":5},"totalToolCalls":41,"errors":5,"probes":0,"seedCalls":0,"perTask":[{"id":"255f1e0b","agent":"lead","kind":"parent","status":"completed","ctxTokens":37684,"toolCalls":41,"errors":5}]},{"group":"opencode/scripts-only+seeds","provider":"opencode","mode":"scripts-only","seeds":true,"runId":"2","result":"BOOT_TIMEOUT","wallMin":null,"costUsd":0,"sessions":0,"outputTokens":0,"toolCalls":{},"totalToolCalls":0,"errors":0,"probes":0,"seedCalls":0,"perTask":[]},{"group":"opencode/scripts-only+seeds","provider":"opencode","mode":"scripts-only","seeds":true,"runId":"3","result":"superseded","wallMin":30,"costUsd":0.3609710104,"sessions":4,"outputTokens":36314,"toolCalls":{"script tools":67,"other":9},"totalToolCalls":76,"errors":2,"probes":0,"seedCalls":0,"perTask":[{"id":"30ec6f2b","agent":"lead","kind":"work","status":"pending","ctxTokens":null,"toolCalls":0,"errors":0},{"id":"a5d25da0","agent":"lead","kind":"work","status":"cancelled","ctxTokens":null,"toolCalls":0,"errors":0},{"id":"09f4870b","agent":"lead","kind":"parent","status":"superseded","ctxTokens":30326,"toolCalls":43,"errors":2},{"id":"e52e9417","agent":"lead","kind":"review","status":"pending","ctxTokens":null,"toolCalls":0,"errors":0},{"id":"a5048a4c","agent":"analyst","kind":"parent","status":"completed","ctxTokens":33144,"toolCalls":14,"errors":0},{"id":"6981c422","agent":"marketer","kind":"parent","status":"completed","ctxTokens":31379,"toolCalls":11,"errors":0},{"id":"6585d103","agent":"lead","kind":"review","status":"pending","ctxTokens":null,"toolCalls":0,"errors":0},{"id":"b6de76bb","agent":"lead","kind":"review","status":"pending","ctxTokens":null,"toolCalls":0,"errors":0},{"id":"4d08cf04","agent":"marketer","kind":"parent","status":"completed","ctxTokens":30373,"toolCalls":8,"errors":0}]},{"group":"pi/full","provider":"pi","mode":"full","seeds":false,"runId":"1","result":"completed","wallMin":2.7,"costUsd":0.0596012802,"sessions":6,"outputTokens":11261,"toolCalls":{"swarm MCP tools":30,"other":8,"Bash":6},"totalToolCalls":44,"errors":3,"probes":0,"seedCalls":0,"perTask":[{"id":"b44f186f","agent":"lead","kind":"review","status":"completed","ctxTokens":null,"toolCalls":2,"errors":0},{"id":"3054e62a","agent":"lead","kind":"parent","status":"completed","ctxTokens":null,"toolCalls":25,"errors":0},{"id":"1d03f2a8","agent":"marketer","kind":"work","status":"completed","ctxTokens":null,"toolCalls":2,"errors":0},{"id":"6e3bd176","agent":"lead","kind":"review","status":"completed","ctxTokens":null,"toolCalls":4,"errors":0},{"id":"7c279c6e","agent":"analyst","kind":"work","status":"completed","ctxTokens":null,"toolCalls":11,"errors":3}]},{"group":"pi/full","provider":"pi","mode":"full","seeds":false,"runId":"2","result":"completed","wallMin":1.7,"costUsd":0.043037764,"sessions":6,"outputTokens":12714,"toolCalls":{"swarm MCP tools":31,"other":21},"totalToolCalls":52,"errors":3,"probes":0,"seedCalls":0,"perTask":[{"id":"b476845c","agent":"lead","kind":"review","status":"completed","ctxTokens":null,"toolCalls":4,"errors":0},{"id":"6481dc1a","agent":"lead","kind":"parent","status":"completed","ctxTokens":null,"toolCalls":24,"errors":0},{"id":"f5c9d967","agent":"marketer","kind":"work","status":"completed","ctxTokens":null,"toolCalls":1,"errors":0},{"id":"5ec356ac","agent":"lead","kind":"review","status":"completed","ctxTokens":null,"toolCalls":2,"errors":0},{"id":"78c600ff","agent":"analyst","kind":"work","status":"completed","ctxTokens":null,"toolCalls":21,"errors":3}]},{"group":"pi/full","provider":"pi","mode":"full","seeds":false,"runId":"3","result":"completed","wallMin":1.3,"costUsd":0.022132818399999997,"sessions":3,"outputTokens":4942,"toolCalls":{"swarm MCP tools":20,"other":6,"Bash":4},"totalToolCalls":30,"errors":2,"probes":0,"seedCalls":0,"perTask":[{"id":"6bb78309","agent":"lead","kind":"parent","status":"completed","ctxTokens":null,"toolCalls":19,"errors":0},{"id":"fb755a9b","agent":"marketer","kind":"work","status":"completed","ctxTokens":null,"toolCalls":1,"errors":0},{"id":"220b1a44","agent":"analyst","kind":"work","status":"completed","ctxTokens":null,"toolCalls":10,"errors":2}]},{"group":"pi/scripts-only+seeds","provider":"pi","mode":"scripts-only","seeds":true,"runId":"2","result":"completed","wallMin":5,"costUsd":0.0554893416,"sessions":6,"outputTokens":43194,"toolCalls":{"other":31,"script tools":46,"Bash":103,"swarm MCP tools":2},"totalToolCalls":182,"errors":37,"probes":3,"seedCalls":0,"perTask":[{"id":"2e9ba7fa","agent":"lead","kind":"parent","status":"completed","ctxTokens":null,"toolCalls":96,"errors":11},{"id":"236f3d1b","agent":"lead","kind":"review","status":"completed","ctxTokens":null,"toolCalls":4,"errors":2},{"id":"9400cca4","agent":"analyst","kind":"parent","status":"completed","ctxTokens":null,"toolCalls":49,"errors":21},{"id":"f67bfddb","agent":"lead","kind":"review","status":"completed","ctxTokens":null,"toolCalls":7,"errors":2},{"id":"9c4f66b5","agent":"marketer","kind":"parent","status":"completed","ctxTokens":null,"toolCalls":26,"errors":1}]},{"group":"pi/scripts-only+seeds","provider":"pi","mode":"scripts-only","seeds":true,"runId":"3","result":"completed","wallMin":6,"costUsd":0.0620584888,"sessions":2,"outputTokens":33390,"toolCalls":{"Bash":52,"other":13,"script tools":56},"totalToolCalls":121,"errors":15,"probes":2,"seedCalls":0,"perTask":[{"id":"899ba9f9","agent":"lead","kind":"parent","status":"completed","ctxTokens":null,"toolCalls":121,"errors":15}]},{"group":"claude/scripts-only","provider":"claude","mode":"scripts-only","seeds":false,"runId":"1","result":"BOOT_TIMEOUT","wallMin":null,"costUsd":0,"sessions":0,"outputTokens":0,"toolCalls":{},"totalToolCalls":0,"errors":0,"probes":0,"seedCalls":0,"perTask":[]},{"group":"claude/scripts-only","provider":"claude","mode":"scripts-only","seeds":false,"runId":"2","result":"completed","wallMin":17.3,"costUsd":3.3149444999999997,"sessions":6,"outputTokens":23620,"toolCalls":{"ToolSearch":11,"script tools":42,"Bash":3},"totalToolCalls":56,"errors":5,"probes":8,"seedCalls":0,"perTask":[{"id":"a8ab4311","agent":"lead","kind":"parent","status":"completed","ctxTokens":44013,"toolCalls":21,"errors":1},{"id":"bf94698d","agent":"lead","kind":"review","status":"completed","ctxTokens":42495,"toolCalls":8,"errors":1},{"id":"227c412a","agent":"lead","kind":"review","status":"completed","ctxTokens":23121,"toolCalls":10,"errors":1},{"id":"da246150","agent":"marketer","kind":"work","status":"completed","ctxTokens":26053,"toolCalls":8,"errors":1},{"id":"ecadc24e","agent":"analyst","kind":"work","status":"completed","ctxTokens":41539,"toolCalls":9,"errors":1}]},{"group":"claude/scripts-only","provider":"claude","mode":"scripts-only","seeds":false,"runId":"3","result":"completed","wallMin":5.7,"costUsd":3.0727135,"sessions":6,"outputTokens":22219,"toolCalls":{"ToolSearch":11,"script tools":34,"Bash":3},"totalToolCalls":48,"errors":2,"probes":5,"seedCalls":0,"perTask":[{"id":"3a989b08","agent":"lead","kind":"review","status":"completed","ctxTokens":25189,"toolCalls":7,"errors":0},{"id":"51cf600b","agent":"lead","kind":"parent","status":"completed","ctxTokens":43624,"toolCalls":19,"errors":0},{"id":"3b65e80b","agent":"marketer","kind":"work","status":"completed","ctxTokens":21113,"toolCalls":7,"errors":0},{"id":"af5bbe1b","agent":"lead","kind":"review","status":"completed","ctxTokens":23174,"toolCalls":8,"errors":1},{"id":"a9bca889","agent":"analyst","kind":"work","status":"completed","ctxTokens":21123,"toolCalls":7,"errors":1}]},{"group":"claude/scripts-only","provider":"claude","mode":"scripts-only","seeds":false,"runId":"4","result":"completed","wallMin":4.7,"costUsd":2.99196225,"sessions":6,"outputTokens":19746,"toolCalls":{"ToolSearch":10,"script tools":30,"Bash":2},"totalToolCalls":42,"errors":4,"probes":4,"seedCalls":0,"perTask":[{"id":"6992e196","agent":"lead","kind":"review","status":"completed","ctxTokens":23271,"toolCalls":8,"errors":1},{"id":"7d48450a","agent":"lead","kind":"parent","status":"completed","ctxTokens":22574,"toolCalls":17,"errors":1},{"id":"af1f04c6","agent":"marketer","kind":"work","status":"completed","ctxTokens":21580,"toolCalls":7,"errors":1},{"id":"0ab6c81f","agent":"lead","kind":"review","status":"completed","ctxTokens":22942,"toolCalls":4,"errors":0},{"id":"eae047f8","agent":"analyst","kind":"work","status":"completed","ctxTokens":30986,"toolCalls":6,"errors":1}]}]).filter(r=>r.group===a.group&&r.result==='completed').reduce((acc,r)=>Object.assign(acc,r.toolCalls),{}))))];
+const runsAll=[{"group":"claude/scripts-only+seeds","provider":"claude","mode":"scripts-only","seeds":true,"runId":"1","result":"completed","wallMin":3,"costUsd":1.407313,"sessions":4,"outputTokens":8593,"toolCalls":{"script tools":19,"ToolSearch":10},"totalToolCalls":29,"errors":4,"probes":0,"seedCalls":15,"perTask":[{"id":"e65d6d57","agent":"lead","kind":"review","status":"completed","ctxTokens":23113,"toolCalls":4,"errors":1},{"id":"5734cc60","agent":"lead","kind":"parent","status":"completed","ctxTokens":28002,"toolCalls":10,"errors":0},{"id":"d252ed0a","agent":"marketer","kind":"work","status":"completed","ctxTokens":21843,"toolCalls":4,"errors":1},{"id":"4e905ff3","agent":"lead","kind":"review","status":"completed","ctxTokens":22926,"toolCalls":4,"errors":1},{"id":"5c1e81c6","agent":"analyst","kind":"work","status":"completed","ctxTokens":21610,"toolCalls":7,"errors":1}]},{"group":"claude/scripts-only+seeds","provider":"claude","mode":"scripts-only","seeds":true,"runId":"2","result":"completed","wallMin":4,"costUsd":2.1511649999999998,"sessions":5,"outputTokens":14032,"toolCalls":{"ToolSearch":12,"script tools":24,"other":1,"Bash":2},"totalToolCalls":39,"errors":6,"probes":1,"seedCalls":19,"perTask":[{"id":"8976b210","agent":"lead","kind":"review","status":"completed","ctxTokens":23091,"toolCalls":4,"errors":1},{"id":"b55f3252","agent":"lead","kind":"parent","status":"completed","ctxTokens":22877,"toolCalls":14,"errors":1},{"id":"cc8e80e5","agent":"marketer","kind":"work","status":"completed","ctxTokens":21333,"toolCalls":9,"errors":2},{"id":"2f18148f","agent":"lead","kind":"review","status":"completed","ctxTokens":22855,"toolCalls":5,"errors":1},{"id":"75acddbc","agent":"analyst","kind":"work","status":"completed","ctxTokens":21716,"toolCalls":7,"errors":1}]},{"group":"claude/scripts-only+seeds","provider":"claude","mode":"scripts-only","seeds":true,"runId":"3","result":"completed","wallMin":3,"costUsd":2.0008705,"sessions":6,"outputTokens":13957,"toolCalls":{"ToolSearch":11,"script tools":23},"totalToolCalls":34,"errors":5,"probes":1,"seedCalls":14,"perTask":[{"id":"a7408204","agent":"lead","kind":"review","status":"completed","ctxTokens":39648,"toolCalls":8,"errors":1},{"id":"a785932a","agent":"lead","kind":"parent","status":"completed","ctxTokens":22977,"toolCalls":10,"errors":0},{"id":"1c96a215","agent":"marketer","kind":"work","status":"completed","ctxTokens":21749,"toolCalls":4,"errors":1},{"id":"4b7331a3","agent":"lead","kind":"review","status":"completed","ctxTokens":23302,"toolCalls":4,"errors":1},{"id":"c5ab8d82","agent":"analyst","kind":"work","status":"completed","ctxTokens":21608,"toolCalls":8,"errors":2}]},{"group":"claude/full","provider":"claude","mode":"full","seeds":false,"runId":"1","result":"completed","wallMin":3.7,"costUsd":1.7195735,"sessions":4,"outputTokens":8664,"toolCalls":{"swarm MCP tools":11,"ToolSearch":9,"Bash":2},"totalToolCalls":22,"errors":0,"probes":0,"seedCalls":0,"perTask":[{"id":"c888ba30","agent":"lead","kind":"parent","status":"completed","ctxTokens":39420,"toolCalls":13,"errors":0},{"id":"081d2b53","agent":"marketer","kind":"work","status":"completed","ctxTokens":26557,"toolCalls":3,"errors":0},{"id":"67a0df53","agent":"analyst","kind":"work","status":"completed","ctxTokens":33734,"toolCalls":6,"errors":0}]},{"group":"claude/full","provider":"claude","mode":"full","seeds":false,"runId":"2","result":"completed","wallMin":3.3,"costUsd":1.74594975,"sessions":4,"outputTokens":8235,"toolCalls":{"ToolSearch":12,"swarm MCP tools":11,"Bash":2},"totalToolCalls":25,"errors":1,"probes":0,"seedCalls":0,"perTask":[{"id":"6cc8cca5","agent":"lead","kind":"parent","status":"completed","ctxTokens":33062,"toolCalls":13,"errors":1},{"id":"f905615f","agent":"marketer","kind":"work","status":"completed","ctxTokens":20605,"toolCalls":3,"errors":0},{"id":"13d36671","agent":"analyst","kind":"work","status":"completed","ctxTokens":37391,"toolCalls":9,"errors":0}]},{"group":"claude/full","provider":"claude","mode":"full","seeds":false,"runId":"3","result":"completed","wallMin":4.7,"costUsd":2.02198925,"sessions":4,"outputTokens":9812,"toolCalls":{"ToolSearch":12,"swarm MCP tools":12,"Bash":3},"totalToolCalls":27,"errors":0,"probes":0,"seedCalls":0,"perTask":[{"id":"de7b5130","agent":"lead","kind":"parent","status":"completed","ctxTokens":44943,"toolCalls":17,"errors":0},{"id":"aaa3061a","agent":"marketer","kind":"work","status":"completed","ctxTokens":27880,"toolCalls":3,"errors":0},{"id":"a7e9897a","agent":"analyst","kind":"work","status":"completed","ctxTokens":26076,"toolCalls":7,"errors":0}]},{"group":"opencode/full","provider":"opencode","mode":"full","seeds":false,"runId":"1","result":"superseded","wallMin":30,"costUsd":0,"sessions":0,"outputTokens":0,"toolCalls":{},"totalToolCalls":0,"errors":0,"probes":0,"seedCalls":0,"perTask":[{"id":"d0b59955","agent":"lead","kind":"work","status":"pending","ctxTokens":null,"toolCalls":0,"errors":0},{"id":"480aa222","agent":"lead","kind":"work","status":"cancelled","ctxTokens":null,"toolCalls":0,"errors":0},{"id":"8146b593","agent":"lead","kind":"parent","status":"superseded","ctxTokens":null,"toolCalls":0,"errors":0}]},{"group":"opencode/full","provider":"opencode","mode":"full","seeds":false,"runId":"2","result":"completed","wallMin":2.3,"costUsd":0.1085080304,"sessions":6,"outputTokens":15036,"toolCalls":{"swarm MCP tools":35,"other":6},"totalToolCalls":41,"errors":1,"probes":0,"seedCalls":0,"perTask":[{"id":"d697db46","agent":"lead","kind":"review","status":"completed","ctxTokens":79097,"toolCalls":3,"errors":0},{"id":"2f30ceb5","agent":"lead","kind":"parent","status":"completed","ctxTokens":75491,"toolCalls":27,"errors":0},{"id":"eee4656a","agent":"marketer","kind":"work","status":"completed","ctxTokens":75543,"toolCalls":2,"errors":0},{"id":"849dd2bd","agent":"lead","kind":"review","status":"completed","ctxTokens":81827,"toolCalls":3,"errors":0},{"id":"529c4946","agent":"analyst","kind":"work","status":"completed","ctxTokens":75646,"toolCalls":6,"errors":1}]},{"group":"opencode/full","provider":"opencode","mode":"full","seeds":false,"runId":"3","result":"completed","wallMin":2.7,"costUsd":0.094730328,"sessions":6,"outputTokens":13532,"toolCalls":{"swarm MCP tools":26,"Bash":6,"other":8},"totalToolCalls":40,"errors":1,"probes":0,"seedCalls":0,"perTask":[{"id":"8b06f61d","agent":"lead","kind":"review","status":"completed","ctxTokens":78018,"toolCalls":2,"errors":0},{"id":"10975153","agent":"lead","kind":"parent","status":"completed","ctxTokens":89697,"toolCalls":25,"errors":1},{"id":"27f937b2","agent":"marketer","kind":"work","status":"completed","ctxTokens":74940,"toolCalls":2,"errors":0},{"id":"872d1c11","agent":"lead","kind":"review","status":"completed","ctxTokens":76257,"toolCalls":5,"errors":0},{"id":"191e649c","agent":"analyst","kind":"work","status":"completed","ctxTokens":75882,"toolCalls":6,"errors":0}]},{"group":"opencode/scripts-only+seeds","provider":"opencode","mode":"scripts-only","seeds":true,"runId":"1","result":"completed","wallMin":2.7,"costUsd":0.011608458400000002,"sessions":1,"outputTokens":3034,"toolCalls":{"script tools":29,"Bash":7,"other":5},"totalToolCalls":41,"errors":5,"probes":0,"seedCalls":0,"perTask":[{"id":"255f1e0b","agent":"lead","kind":"parent","status":"completed","ctxTokens":37684,"toolCalls":41,"errors":5}]},{"group":"opencode/scripts-only+seeds","provider":"opencode","mode":"scripts-only","seeds":true,"runId":"2","result":"BOOT_TIMEOUT","wallMin":null,"costUsd":0,"sessions":0,"outputTokens":0,"toolCalls":{},"totalToolCalls":0,"errors":0,"probes":0,"seedCalls":0,"perTask":[]},{"group":"opencode/scripts-only+seeds","provider":"opencode","mode":"scripts-only","seeds":true,"runId":"3","result":"superseded","wallMin":30,"costUsd":0.3609710104,"sessions":4,"outputTokens":36314,"toolCalls":{"script tools":67,"other":9},"totalToolCalls":76,"errors":2,"probes":0,"seedCalls":0,"perTask":[{"id":"30ec6f2b","agent":"lead","kind":"work","status":"pending","ctxTokens":null,"toolCalls":0,"errors":0},{"id":"a5d25da0","agent":"lead","kind":"work","status":"cancelled","ctxTokens":null,"toolCalls":0,"errors":0},{"id":"09f4870b","agent":"lead","kind":"parent","status":"superseded","ctxTokens":30326,"toolCalls":43,"errors":2},{"id":"e52e9417","agent":"lead","kind":"review","status":"pending","ctxTokens":null,"toolCalls":0,"errors":0},{"id":"a5048a4c","agent":"analyst","kind":"parent","status":"completed","ctxTokens":33144,"toolCalls":14,"errors":0},{"id":"6981c422","agent":"marketer","kind":"parent","status":"completed","ctxTokens":31379,"toolCalls":11,"errors":0},{"id":"6585d103","agent":"lead","kind":"review","status":"pending","ctxTokens":null,"toolCalls":0,"errors":0},{"id":"b6de76bb","agent":"lead","kind":"review","status":"pending","ctxTokens":null,"toolCalls":0,"errors":0},{"id":"4d08cf04","agent":"marketer","kind":"parent","status":"completed","ctxTokens":30373,"toolCalls":8,"errors":0}]},{"group":"pi/full","provider":"pi","mode":"full","seeds":false,"runId":"1","result":"completed","wallMin":2.7,"costUsd":0.0596012802,"sessions":6,"outputTokens":11261,"toolCalls":{"swarm MCP tools":30,"other":8,"Bash":6},"totalToolCalls":44,"errors":3,"probes":0,"seedCalls":0,"perTask":[{"id":"b44f186f","agent":"lead","kind":"review","status":"completed","ctxTokens":null,"toolCalls":2,"errors":0},{"id":"3054e62a","agent":"lead","kind":"parent","status":"completed","ctxTokens":null,"toolCalls":25,"errors":0},{"id":"1d03f2a8","agent":"marketer","kind":"work","status":"completed","ctxTokens":null,"toolCalls":2,"errors":0},{"id":"6e3bd176","agent":"lead","kind":"review","status":"completed","ctxTokens":null,"toolCalls":4,"errors":0},{"id":"7c279c6e","agent":"analyst","kind":"work","status":"completed","ctxTokens":null,"toolCalls":11,"errors":3}]},{"group":"pi/full","provider":"pi","mode":"full","seeds":false,"runId":"2","result":"completed","wallMin":1.7,"costUsd":0.043037764,"sessions":6,"outputTokens":12714,"toolCalls":{"swarm MCP tools":31,"other":21},"totalToolCalls":52,"errors":3,"probes":0,"seedCalls":0,"perTask":[{"id":"b476845c","agent":"lead","kind":"review","status":"completed","ctxTokens":null,"toolCalls":4,"errors":0},{"id":"6481dc1a","agent":"lead","kind":"parent","status":"completed","ctxTokens":null,"toolCalls":24,"errors":0},{"id":"f5c9d967","agent":"marketer","kind":"work","status":"completed","ctxTokens":null,"toolCalls":1,"errors":0},{"id":"5ec356ac","agent":"lead","kind":"review","status":"completed","ctxTokens":null,"toolCalls":2,"errors":0},{"id":"78c600ff","agent":"analyst","kind":"work","status":"completed","ctxTokens":null,"toolCalls":21,"errors":3}]},{"group":"pi/full","provider":"pi","mode":"full","seeds":false,"runId":"3","result":"completed","wallMin":1.3,"costUsd":0.022132818399999997,"sessions":3,"outputTokens":4942,"toolCalls":{"swarm MCP tools":20,"other":6,"Bash":4},"totalToolCalls":30,"errors":2,"probes":0,"seedCalls":0,"perTask":[{"id":"6bb78309","agent":"lead","kind":"parent","status":"completed","ctxTokens":null,"toolCalls":19,"errors":0},{"id":"fb755a9b","agent":"marketer","kind":"work","status":"completed","ctxTokens":null,"toolCalls":1,"errors":0},{"id":"220b1a44","agent":"analyst","kind":"work","status":"completed","ctxTokens":null,"toolCalls":10,"errors":2}]},{"group":"pi/scripts-only+seeds","provider":"pi","mode":"scripts-only","seeds":true,"runId":"2","result":"completed","wallMin":5,"costUsd":0.0554893416,"sessions":6,"outputTokens":43194,"toolCalls":{"other":31,"script tools":46,"Bash":103,"swarm MCP tools":2},"totalToolCalls":182,"errors":37,"probes":3,"seedCalls":0,"perTask":[{"id":"2e9ba7fa","agent":"lead","kind":"parent","status":"completed","ctxTokens":null,"toolCalls":96,"errors":11},{"id":"236f3d1b","agent":"lead","kind":"review","status":"completed","ctxTokens":null,"toolCalls":4,"errors":2},{"id":"9400cca4","agent":"analyst","kind":"parent","status":"completed","ctxTokens":null,"toolCalls":49,"errors":21},{"id":"f67bfddb","agent":"lead","kind":"review","status":"completed","ctxTokens":null,"toolCalls":7,"errors":2},{"id":"9c4f66b5","agent":"marketer","kind":"parent","status":"completed","ctxTokens":null,"toolCalls":26,"errors":1}]},{"group":"pi/scripts-only+seeds","provider":"pi","mode":"scripts-only","seeds":true,"runId":"3","result":"completed","wallMin":6,"costUsd":0.0620584888,"sessions":2,"outputTokens":33390,"toolCalls":{"Bash":52,"other":13,"script tools":56},"totalToolCalls":121,"errors":15,"probes":2,"seedCalls":0,"perTask":[{"id":"899ba9f9","agent":"lead","kind":"parent","status":"completed","ctxTokens":null,"toolCalls":121,"errors":15}]},{"group":"claude/scripts-only","provider":"claude","mode":"scripts-only","seeds":false,"runId":"1","result":"BOOT_TIMEOUT","wallMin":null,"costUsd":0,"sessions":0,"outputTokens":0,"toolCalls":{},"totalToolCalls":0,"errors":0,"probes":0,"seedCalls":0,"perTask":[]},{"group":"claude/scripts-only","provider":"claude","mode":"scripts-only","seeds":false,"runId":"2","result":"completed","wallMin":17.3,"costUsd":3.3149444999999997,"sessions":6,"outputTokens":23620,"toolCalls":{"ToolSearch":11,"script tools":42,"Bash":3},"totalToolCalls":56,"errors":5,"probes":8,"seedCalls":0,"perTask":[{"id":"a8ab4311","agent":"lead","kind":"parent","status":"completed","ctxTokens":44013,"toolCalls":21,"errors":1},{"id":"bf94698d","agent":"lead","kind":"review","status":"completed","ctxTokens":42495,"toolCalls":8,"errors":1},{"id":"227c412a","agent":"lead","kind":"review","status":"completed","ctxTokens":23121,"toolCalls":10,"errors":1},{"id":"da246150","agent":"marketer","kind":"work","status":"completed","ctxTokens":26053,"toolCalls":8,"errors":1},{"id":"ecadc24e","agent":"analyst","kind":"work","status":"completed","ctxTokens":41539,"toolCalls":9,"errors":1}]},{"group":"claude/scripts-only","provider":"claude","mode":"scripts-only","seeds":false,"runId":"3","result":"completed","wallMin":5.7,"costUsd":3.0727135,"sessions":6,"outputTokens":22219,"toolCalls":{"ToolSearch":11,"script tools":34,"Bash":3},"totalToolCalls":48,"errors":2,"probes":5,"seedCalls":0,"perTask":[{"id":"3a989b08","agent":"lead","kind":"review","status":"completed","ctxTokens":25189,"toolCalls":7,"errors":0},{"id":"51cf600b","agent":"lead","kind":"parent","status":"completed","ctxTokens":43624,"toolCalls":19,"errors":0},{"id":"3b65e80b","agent":"marketer","kind":"work","status":"completed","ctxTokens":21113,"toolCalls":7,"errors":0},{"id":"af5bbe1b","agent":"lead","kind":"review","status":"completed","ctxTokens":23174,"toolCalls":8,"errors":1},{"id":"a9bca889","agent":"analyst","kind":"work","status":"completed","ctxTokens":21123,"toolCalls":7,"errors":1}]},{"group":"claude/scripts-only","provider":"claude","mode":"scripts-only","seeds":false,"runId":"4","result":"completed","wallMin":4.7,"costUsd":2.99196225,"sessions":6,"outputTokens":19746,"toolCalls":{"ToolSearch":10,"script tools":30,"Bash":2},"totalToolCalls":42,"errors":4,"probes":4,"seedCalls":0,"perTask":[{"id":"6992e196","agent":"lead","kind":"review","status":"completed","ctxTokens":23271,"toolCalls":8,"errors":1},{"id":"7d48450a","agent":"lead","kind":"parent","status":"completed","ctxTokens":22574,"toolCalls":17,"errors":1},{"id":"af1f04c6","agent":"marketer","kind":"work","status":"completed","ctxTokens":21580,"toolCalls":7,"errors":1},{"id":"0ab6c81f","agent":"lead","kind":"review","status":"completed","ctxTokens":22942,"toolCalls":4,"errors":0},{"id":"eae047f8","agent":"analyst","kind":"work","status":"completed","ctxTokens":30986,"toolCalls":6,"errors":1}]}];
+const catMean=(g,c)=>{const rs=runsAll.filter(r=>r.group===g&&r.result==='completed');return rs.length?rs.reduce((s,r)=>s+(r.toolCalls[c]||0),0)/rs.length:0;};
+new Chart(cTools,{type:'bar',data:{labels,datasets:cats.map((c,i)=>({label:c,data:agg.map(a=>catMean(a.group,c)),backgroundColor:['#6366f1','#f59e0b','#10b981','#ef4444','#8b5cf6'][i%5],stack:'s'}))},
+  options:{...opts, plugins:{legend:{display:true}}, scales:{x:{stacked:true,ticks:{autoSkip:false,maxRotation:45,minRotation:30}},y:{stacked:true}}}});
+new Chart(cSeed,{type:'bar',data:{labels,datasets:[
+  {label:'seed calls/run',data:agg.map(a=>a.meanSeedCalls),backgroundColor:'#10b981'},
+  {label:'tool errors/run',data:agg.map(a=>a.meanErrors),backgroundColor:'#ef4444'}]},
+  options:{...opts, plugins:{legend:{display:true}}}});
+</script>
+</div></body></html>

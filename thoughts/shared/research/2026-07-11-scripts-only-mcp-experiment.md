@@ -81,6 +81,24 @@ Same task, same images (`SCRIPTS_ONLY_MCP` env toggle only), fresh DB/volumes pe
 
 **Measured verdict:** on the Claude harness, for a simple delegation task, full surface wins decisively — the anticipated context saving is neutralized by ToolSearch deferral, while scripts-only pays 2.5x output tokens (writing TS source) plus probing/boilerplate overhead. The scripts-only case remains promising for (a) non-tool-search harnesses (pi/codex/opencode — untested here) and (b) bulk/fan-out work; and the overhead is boilerplate-shaped (seed scripts + typed SDK + signature docs would remove most of it). Recommended default: keep hybrid for Claude; revisit scripts-only for pi/opencode after the seed-script pack lands; consider a middle surface (script tools + core task-lifecycle tools).
 
+## Phase 2: seeds + pi/opencode matrix (same day, later)
+
+6 seed scripts (delegate / wait-for-task / get-child-outputs / complete-task / report-progress / swarm-overview) + rewritten code-mode prompt, injected at runtime (script-upsert API + prompt-template override — no image rebuilds). pi/opencode ran deepseek-v4-flash for all 3 agents. Full data: [2026-07-11-mcp-surface-matrix-report.html](./2026-07-11-mcp-surface-matrix-report.html), tooling in [matrix-tools/](./matrix-tools/).
+
+| Group | Done | Delegated | Cost | Wall | Lead ctx |
+|---|---|---|---|---|---|
+| claude/full | 3/3 | 3/3 | $1.83 | 3.9m | 39K |
+| claude/scripts-only (unseeded) | 3/4 | 3/3 | $3.13 | 9.2m | 37K |
+| **claude/scripts-only+seeds** | **3/3** | **3/3** | **$1.85** | **3.3m** | **25K** |
+| pi/full | 3/3 | 3/3 | $0.04 | 1.9m | n/a |
+| pi/scripts-only+seeds | 2/2 | 1/2 | $0.06 | 5.5m | n/a |
+| opencode/full | 2/3 | 2/2 | $0.10 | 2.5m | **83K** |
+| opencode/scripts-only+seeds | 1/3 | 0/1 | $0.01 | 2.7m | 38K |
+
+Key findings: (1) **seeds fully closed the Claude gap** — cost parity, faster, lead context −37%, 16 seed calls/run; remaining errors are just bare-vs-prefixed tool names in the prompt. (2) **Schema bloat confirmed on opencode**: full surface peaks ~80K ctx; scripts-only −55%. (3) **Small models break as coordinators in code-mode**: deepseek delegates perfectly with named tools (5/5) but skips/degrades delegation when coordination goes through scripts (1/3), ignores the seed catalog, and drops parentTaskId lineage. (4) pi adapter doesn't report context usage — fix independently. (5) Delegation-fidelity (not just parent completion) belongs in the evals harness as a graded check.
+
+Recommendation: Claude → scripts-only+seeds is now a legitimate default (or at least ship seeds into hybrid); pi/opencode small models → keep full surface; ship seeds + prefixed-tool-id prompt + typed SDK returns regardless.
+
 ## Verdict
 
 Full code-mode is viable **today** on the Claude harness with zero SDK changes — agents figured everything out with a one-paragraph prompt note, and the friction observed is boilerplate, not architecture. The base-context reduction (~35x on schemas) matters most for non-tool-search harnesses. The five seed scripts + prompt signature note would likely cut the observed probing/wait overhead (~40% of tool calls in these sessions) to near zero.

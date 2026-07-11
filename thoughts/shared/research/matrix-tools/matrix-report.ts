@@ -17,10 +17,14 @@ const SCRIPT_TOOLS = /script-run|script-upsert|script-search|script-query-types|
 const PROBE_PAT = /Object\.keys\(ctx|argCount|ctxKeys|swarmKeys|shapes?\s*[:=(]|globalKeys|ctxType/;
 const SEED_NAMES = new Set(["delegate", "wait-for-task", "get-child-outputs", "complete-task", "report-progress", "swarm-overview"]);
 
-function categorize(name: string): string {
-  if (name === "ToolSearch") return "ToolSearch";
-  if (name.startsWith("mcp__agent-swarm")) return SCRIPT_TOOLS.test(name) ? "script tools" : "swarm MCP tools";
-  if (name === "Bash") return "Bash";
+const SWARM_TOOLS = /^(get-task-details|store-progress|send-task|get-tasks|poll-task|task-action|cancel-task|post-message|read-messages|memory-search|memory-get|memory-edit|memory-delete|memory_rate|get-swarm|my-agent-info|join-swarm|request-human-input|kv-|get-repos|update-repo|list-schedules|get-metrics|resolve-user|slack-|list-workflows|skill-)/;
+
+function categorize(rawName: string): string {
+  const name = rawName.replace(/^mcp__agent-swarm(-user)?__/, "").replace(/^swarm_/, "");
+  if (rawName === "ToolSearch") return "ToolSearch";
+  if (SCRIPT_TOOLS.test(name)) return "script tools";
+  if (SWARM_TOOLS.test(name)) return "swarm MCP tools";
+  if (/^bash$/i.test(name)) return "Bash";
   return "other";
 }
 
@@ -75,28 +79,47 @@ function analyzeRun(dir: string): RunMetrics | null {
         if (c.type === "user" && Array.isArray(c.message?.content)) {
           for (const b of c.message.content) if (b.type === "tool_result" && b.is_error) { m.errors++; pt.errors++; }
         }
-        // pi / opencode formats: generic best-effort — tool events
-        if ((e.cli === "pi" || e.cli === "opencode") && c) {
-          const tn = c.tool ?? c.toolName ?? c.name ?? (c.type === "tool_use" ? c.name : null);
-          const isToolEvent = ["tool_use", "tool-start", "tool_call", "tool.execute.start"].includes(c.type ?? "") || (tn && (c.args !== undefined || c.input !== undefined));
-          if (isToolEvent && tn) {
-            m.toolCalls[categorize(String(tn))] = (m.toolCalls[categorize(String(tn))] ?? 0) + 1;
+        // opencode event stream: tool_start / tool_end / context_usage
+        if (e.cli === "opencode" && c) {
+          if (c.type === "tool_start" && c.toolName) {
+            m.toolCalls[categorize(String(c.toolName))] = (m.toolCalls[categorize(String(c.toolName))] ?? 0) + 1;
             m.totalToolCalls++; pt.toolCalls++;
-            const src = JSON.stringify(c.args ?? c.input ?? {});
+            const src = JSON.stringify(c.args ?? {});
             if (PROBE_PAT.test(src)) m.probes++;
-            for (const sn of SEED_NAMES) if (src.includes(`"${sn}"`)) { m.seedCalls++; break; }
+            const argName = c.args?.name;
+            if (typeof argName === "string" && SEED_NAMES.has(argName)) m.seedCalls++;
           }
-          if ((c.type === "tool_result" || c.type === "tool-end") && (c.is_error || c.error)) { m.errors++; pt.errors++; }
-          if (c.usage || c.tokens) lastUsage = c.usage ?? c.tokens;
+          if (c.type === "tool_end" && typeof c.result === "string" && /not found|error:|failed/i.test(c.result.slice(0, 120))) { m.errors++; pt.errors++; }
+          if (c.type === "context_usage" && c.contextUsedTokens) {
+            pt.ctxTokens = c.contextUsedTokens;
+          }
+        }
+        // pi tool errors surface as text results: "Tool X not found"
+        if (e.cli === "pi" && c.type === "assistant" && Array.isArray(c.message?.content)) {
+          for (const b of c.message.content) {
+            if (b.type === "tool_result") {
+              const txt = JSON.stringify(b.content ?? "").slice(0, 200);
+              if (/not found|error/i.test(txt)) { m.errors++; pt.errors++; }
+            }
+          }
         }
       }
-      if (lastUsage) {
+      if (pt.ctxTokens == null && lastUsage) {
         pt.ctxTokens = (lastUsage.input_tokens ?? lastUsage.input ?? 0) + (lastUsage.cache_read_input_tokens ?? lastUsage.cache_read ?? 0) + (lastUsage.cache_creation_input_tokens ?? lastUsage.cache_write ?? 0) + (lastUsage.output_tokens ?? lastUsage.output ?? 0);
       }
+      // provider-uniform context metric recorded by the runner on the task row
+      if (t.peakContextTokens) pt.ctxTokens = t.peakContextTokens;
     }
     m.perTask.push(pt);
   }
   return m;
+}
+
+function delegatedOk(m: RunMetrics): boolean {
+  // Real delegation = both workers got a non-review task (parent linkage optional:
+  // weak models in code-mode sometimes create children without parentTaskId).
+  const workAgents = new Set(m.perTask.filter((t) => t.kind !== "review" && t.agent !== "lead").map((t) => t.agent));
+  return workAgents.has("analyst") && workAgents.has("marketer");
 }
 
 const runs = readdirSync(ROOT).filter((d) => DIR_RE.test(d)).sort().map(analyzeRun).filter((r): r is RunMetrics => r != null);
@@ -110,7 +133,7 @@ const agg = groups.map((g) => {
   const leadCtx = ok.flatMap((r) => r.perTask.filter((t) => t.kind === "parent" && t.ctxTokens).map((t) => t.ctxTokens!));
   return {
     group: g, provider: all[0].provider, mode: all[0].mode, seeds: all[0].seeds,
-    attempts: all.length, completed: ok.length,
+    attempts: all.length, completed: ok.length, delegatedOk: ok.filter(delegatedOk).length,
     meanCost: mean((r) => r.costUsd), meanWallMin: mean((r) => r.wallMin ?? 0),
     meanToolCalls: mean((r) => r.totalToolCalls), meanErrors: mean((r) => r.errors),
     meanProbes: mean((r) => r.probes), meanSeedCalls: mean((r) => r.seedCalls),
