@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.118.0] - 2026-07-12
+
+### Added
+- **Canonical asset namespace keys now group related swarm resources across their lifecycle** (#963) — tasks, workflows, schedules, pages, and provider-backed files support shared or personal namespace keys, inheritance, exact/prefix filtering, audited metadata-only moves, and cross-entity discovery without replacing their existing IDs or routing context.
+
+### Fixed
+- **Favorites now work with hosted dashboard operator authentication** (#967) — page, workflow, and schedule favorites resolve to a stable operator principal scope, persist across API-key rotation, and remain isolated from user-scoped favorites.
+
 ## [1.117.0] - 2026-07-11
 
 ### Added
