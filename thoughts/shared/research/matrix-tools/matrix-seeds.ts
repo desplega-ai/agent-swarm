@@ -1,5 +1,7 @@
 // @ts-nocheck — research artifact (scripts-only MCP experiment), not product code
 // Seed scripts + prompt override for the scripts-only ("code-mode") experiment.
+// SUPERSEDED: these now ship as real seed-catalog defaults in src/be/seed-scripts/catalog/
+// (with fixes: progress-vs-output field, failureReason on failed, task_list slim-row caveat).
 // Import { applySeeds } from matrix-run.ts, or run directly:
 //   bun /tmp/matrix-seeds.ts apply     — upsert seeds + prompt override on live stack (:3113)
 //   bun /tmp/matrix-seeds.ts validate  — apply, then execute each seed and print results
@@ -60,7 +62,7 @@ export const SEED_SCRIPTS: Array<{ name: string; description: string; source: st
     name: "complete-task",
     description: "Mark a task completed (or failed) with final output. Args: {taskId, output, status?}. THE way to finish your task.",
     source: `export default async function (args: any, ctx: any) {
-  await ctx.swarm.task_storeProgress({ taskId: args.taskId, status: args.status ?? "completed", output: args.output });
+  await ctx.swarm.task_storeProgress({ taskId: args.taskId, status: args.status ?? "completed", output: args.output, ...(args.status === "failed" ? { failureReason: args.output } : {}) });
   return { ok: true, taskId: args.taskId, status: args.status ?? "completed" };
 }`,
   },
@@ -68,7 +70,7 @@ export const SEED_SCRIPTS: Array<{ name: string; description: string; source: st
     name: "report-progress",
     description: "Post an in-progress note on a task. Args: {taskId, note}.",
     source: `export default async function (args: any, ctx: any) {
-  await ctx.swarm.task_storeProgress({ taskId: args.taskId, status: "in_progress", output: args.note });
+  await ctx.swarm.task_storeProgress({ taskId: args.taskId, status: "in_progress", progress: args.note });
   return { ok: true };
 }`,
   },

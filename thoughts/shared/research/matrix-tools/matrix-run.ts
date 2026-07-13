@@ -5,7 +5,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { applySeeds } from "./matrix-seeds.ts";
 
-const REPO = "/Users/taras/Documents/code/agent-swarm";
+const REPO = process.env.SWARM_REPO ?? process.cwd(); // run from the repo root or set SWARM_REPO
 const BASE = "http://localhost:3113";
 const KEY = (await Bun.file(`${REPO}/.env`).text()).match(/^API_KEY=(.*)$/m)![1].trim();
 const H = { Authorization: `Bearer ${KEY}` };

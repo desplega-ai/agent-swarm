@@ -118,24 +118,31 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   // reference named swarm tools that are not registered when the server runs
   // with SCRIPTS_ONLY_MCP=true, so tell the agent everything goes through
   // script-run. Worker containers opt in via the same env var.
-  if (hasMcp && process.env.SCRIPTS_ONLY_MCP === "true") {
+  const scriptsOnlyMode = hasMcp && process.env.SCRIPTS_ONLY_MCP === "true";
+  if (scriptsOnlyMode) {
     const scriptsOnlyResult = await resolveTemplateAsync("system.agent.scripts_only_mode", {});
     prompt += `\n${scriptsOnlyResult.text}`;
   }
 
   const slackPromptToolsEnabled = areSlackPromptToolsEnabled();
 
-  if (hasMcp && slackPromptToolsEnabled) {
+  // The named-Slack-tool templates would instruct tools that don't exist in
+  // scripts-only mode; the scripts_only_mode(.slack) templates cover Slack via
+  // ctx.swarm.slack_* instead.
+  if (hasMcp && slackPromptToolsEnabled && !scriptsOnlyMode) {
     const slackResult = await resolveTemplateAsync("system.agent.slack", {});
     prompt += slackResult.text;
   }
 
   // Conditionally inject Slack instructions for workers with Slack-originated tasks
   if (role !== "lead" && args.slackContext && hasMcp && slackPromptToolsEnabled) {
-    const slackResult = await resolveTemplateAsync("system.agent.worker.slack", {
-      slackChannelId: args.slackContext.channelId,
-      slackThreadTs: args.slackContext.threadTs ?? "",
-    });
+    const slackResult = await resolveTemplateAsync(
+      scriptsOnlyMode ? "system.agent.scripts_only_mode.slack" : "system.agent.worker.slack",
+      {
+        slackChannelId: args.slackContext.channelId,
+        slackThreadTs: args.slackContext.threadTs ?? "",
+      },
+    );
     prompt += slackResult.text;
   }
 

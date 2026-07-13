@@ -2,7 +2,7 @@
 // Phase 0: boot scripts-only claude stack, apply + validate seed scripts, leave stack up for inspection.
 import { applySeeds } from "./matrix-seeds.ts";
 
-const REPO = "/Users/taras/Documents/code/agent-swarm";
+const REPO = process.env.SWARM_REPO ?? process.cwd(); // run from the repo root or set SWARM_REPO
 const BASE = "http://localhost:3113";
 const KEY = (await Bun.file(`${REPO}/.env`).text()).match(/^API_KEY=(.*)$/m)![1].trim();
 const LEAD = "7a1e0000-0000-4000-8000-000000000001";
@@ -38,7 +38,7 @@ const run = async (name: string, args: unknown) => {
   try { return JSON.parse(txt); } catch { return null; }
 };
 
-const ov = await run("swarm-overview", {});
+await run("swarm-overview", {});
 const del: any = await run("delegate", { agentName: "analyst", task: "VALIDATION: complete this task with the single word ok as output. Do nothing else." });
 const childId = del?.result?.taskId ?? del?.taskId ?? del?.data?.taskId ?? del?.output?.taskId;
 console.log("\nchildId:", childId);

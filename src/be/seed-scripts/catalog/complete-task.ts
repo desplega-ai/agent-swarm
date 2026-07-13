@@ -14,6 +14,13 @@ export default async function completeTask(args: any, ctx: any) {
   const parsed = argsSchema.safeParse(args);
   if (!parsed.success) return { ok: false, error: "invalid args: " + parsed.error.message };
   const { taskId, output, status = "completed" } = parsed.data;
-  await ctx.swarm.task_storeProgress({ taskId, status, output });
+  // The failed path reads `failureReason`, not `output` — forward the text to
+  // both so the caller's explanation survives either way.
+  await ctx.swarm.task_storeProgress({
+    taskId,
+    status,
+    output,
+    ...(status === "failed" ? { failureReason: output } : {}),
+  });
   return { ok: true, taskId, status };
 }

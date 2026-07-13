@@ -442,7 +442,7 @@ This swarm runs in **scripts-only mode**. The ONLY swarm MCP tools available are
 export default async function (args: any, ctx: any) { /* ... */ }
 \`\`\`
 
-The full SDK is \`ctx.swarm.*\` — task lifecycle (\`task_get\`, \`task_send\`, \`task_storeProgress\`, \`task_action\`, \`task_list\`), messaging (\`message_post\`, \`message_read\`), memory, kv, swarm info (\`swarm_get\`, \`agent_info\`), and more. Responses are usually wrapped — prefer \`res?.data ?? res\`.
+The full SDK is \`ctx.swarm.*\` — task lifecycle (\`task_get\`, \`task_send\`, \`task_storeProgress\`, \`task_action\`, \`task_list\`), messaging (\`message_post\`, \`message_read\`), Slack (\`slack_reply\`, \`slack_post\`, \`slack_read\`), memory, kv, swarm info (\`swarm_get\`, \`agent_info\`), and more. Responses are usually wrapped — prefer \`res?.data ?? res\`.
 
 **Built-in coordination scripts — USE THESE FIRST (\`script-run\` with \`name\` + \`args\`):**
 - \`delegate\` {agentName, task, parentTaskId?} → subtask for an agent by name; returns {taskId}
@@ -461,6 +461,24 @@ Rules of the road:
 - Batch related SDK calls into a single script when it reduces round trips.
 `,
   variables: [],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.scripts_only_mode.slack",
+  header: "",
+  defaultBody: `
+#### Slack Thread Updates (scripts-only)
+
+This task originated from Slack (channel: \`{{slackChannelId}}\`). You MUST keep the originating Slack thread informed — named Slack tools are not exposed in scripts-only mode, so reply via \`script-run\` with inline source calling \`ctx.swarm.slack_reply({ taskId, message })\` (your taskId carries the thread context):
+- **On start**: post a brief note that you picked up the task
+- **On completion**: post a summary of the result
+- **On failure**: post what went wrong so the requester knows immediately
+`,
+  variables: [
+    { name: "slackChannelId", description: "The Slack channel ID for the originating thread" },
+    { name: "slackThreadTs", description: "The Slack thread timestamp" },
+  ],
   category: "system",
 });
 

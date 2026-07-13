@@ -10,6 +10,7 @@ export default async function reportProgress(args: any, ctx: any) {
   const parsed = argsSchema.safeParse(args);
   if (!parsed.success) return { ok: false, error: "invalid args: " + parsed.error.message };
   const { taskId, note } = parsed.data;
-  await ctx.swarm.task_storeProgress({ taskId, status: "in_progress", output: note });
+  // Non-terminal updates persist the `progress` field; `output` is ignored until completion.
+  await ctx.swarm.task_storeProgress({ taskId, status: "in_progress", progress: note });
   return { ok: true };
 }
