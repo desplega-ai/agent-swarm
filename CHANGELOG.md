@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.118.1] - 2026-07-13
+
+### Changed
+- **Daily release metadata now follows the v1.118.0 documentation release** (#968) — synchronized the package, Helm chart, OpenAPI specification, generated API reference, and docs landing version for the patch release.
+
 ## [1.118.0] - 2026-07-12
 
 ### Added
