@@ -15,8 +15,8 @@ progress, completion, messaging, memory — by executing TypeScript through
 
 ## Enabling it
 
-Set on the **API server** (controls tool registration) and on each **agent
-container** (controls the system-prompt note):
+Set on the **API server** and agent containers to make a global environment
+override (it controls both tool registration and the system-prompt note):
 
 ```bash
 SCRIPTS_ONLY_MCP=true
@@ -25,6 +25,35 @@ SCRIPTS_ONLY_MCP=true
 Nothing else changes: the worker runner's own dispatch machinery talks plain
 HTTP and is unaffected, and task completion via `ctx.swarm.task_storeProgress`
 hits the same handlers as the `store-progress` tool.
+
+## Per-agent enablement
+
+Use a config row when only one agent should use code-mode. For example:
+
+```bash
+curl -X PUT "$MCP_BASE_URL/api/config" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"scope":"agent","scopeId":"<agentId>","key":"SCRIPTS_ONLY_MCP","value":"true"}'
+```
+
+Resolution is deterministic:
+
+| Priority | Source | Result |
+| --- | --- | --- |
+| 1 | Non-empty `SCRIPTS_ONLY_MCP` environment variable | Global override |
+| 2 | Repository config | Applies to agents working in that repository |
+| 3 | Agent config | Applies to that agent |
+| 4 | Global config | Applies swarm-wide when no narrower row exists |
+| 5 | No value | Off: the default full tool surface |
+
+The tool surface changes on the agent's next MCP session initialization. The
+worker prompt changes on its next harness reconciliation (normally within ten
+seconds) or worker boot; in-flight sessions retain their existing prompt.
+
+For a mixed fleet, use code-mode for strong models and keep the full tool
+surface for small models. PR #969 found that small models can lose delegation
+fidelity under code-mode even when parent tasks complete.
 
 <Callout type="info">
 The scripts SDK bridge (`/api/mcp-bridge`) always builds a **full-surface**

@@ -54,6 +54,7 @@ import {
 } from "../utils/error-tracker.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
+import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
 import { interpolate } from "../utils/template.ts";
@@ -518,6 +519,9 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
 interface ResolvedEnvResult {
   env: Record<string, string | undefined>;
   credentialSelections: CredentialSelection[];
+  /** Raw config-row value, kept separate from the merged environment so an
+   * actual worker environment variable retains precedence. */
+  scriptsOnlyConfigValue?: string;
   /**
    * Effective `HARNESS_PROVIDER` after layering swarm_config over the base
    * env. Callers should prefer this over `process.env.HARNESS_PROVIDER` so
@@ -535,6 +539,7 @@ async function fetchResolvedEnv(
   taskModel?: string,
 ): Promise<ResolvedEnvResult> {
   const env: Record<string, string | undefined> = { ...baseEnv };
+  let scriptsOnlyConfigValue: string | undefined;
 
   if (apiUrl && agentId) {
     try {
@@ -552,6 +557,9 @@ async function fetchResolvedEnv(
         };
 
         if (data.configs?.length) {
+          scriptsOnlyConfigValue = data.configs.find(
+            (config) => config.key === "SCRIPTS_ONLY_MCP",
+          )?.value;
           for (const config of data.configs) {
             env[config.key] = config.value;
           }
@@ -585,7 +593,7 @@ async function fetchResolvedEnv(
     model: effectiveModel,
   });
 
-  return { env, credentialSelections, resolvedProvider };
+  return { env, credentialSelections, resolvedProvider, scriptsOnlyConfigValue };
 }
 
 async function ensureAgentFsCredentials(
@@ -642,7 +650,7 @@ async function ensureAgentFsCredentials(
  *   task* from a comma-separated pool. Persisting the picked value into
  *   process.env freezes the rotation. Re-resolution happens per spawn anyway,
  *   so we deliberately leave these alone.
- * - **Coordinated values with paired state** (HARNESS_PROVIDER): swapping
+ * - **Coordinated values with paired state** (HARNESS_PROVIDER, SCRIPTS_ONLY_MCP): swapping
  *   the env without also swapping the adapter and rebuilding the system
  *   prompt produces an inconsistent worker. Handled by its own reconcile
  *   path that updates state.harnessProvider + adapter atomically.
@@ -4072,6 +4080,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // so a swarm_config outage cannot wedge boot.
   let bootProvider: ProviderName;
   let bootModel = process.env.MODEL_OVERRIDE || "";
+  let resolvedScriptsOnly = resolveScriptsOnlyMode({ env: process.env.SCRIPTS_ONLY_MCP });
   // Codex credits-exhausted cooldown is sourced solely from the global swarm_config
   // (key `CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS`). Initialize to the default constant
   // for the case where it is unset, then apply the swarm_config value below; on a
@@ -4082,6 +4091,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     await ensureAgentFsCredentials(apiUrl, apiKey, agentId);
     const bootEnv = await fetchResolvedEnv(apiUrl, apiKey, agentId);
     bootProvider = bootEnv.resolvedProvider;
+    resolvedScriptsOnly = resolveScriptsOnlyMode({
+      env: process.env.SCRIPTS_ONLY_MCP,
+      configValue: bootEnv.scriptsOnlyConfigValue,
+    });
     bootModel = (bootEnv.env.MODEL_OVERRIDE as string | undefined) || bootModel;
     bootCooldownMs = resolveCodexCreditsExhaustedCooldownMs(
       bootEnv.env.CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
@@ -4185,6 +4198,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       capabilities,
       traits,
       provider: adapter.name as ProviderName,
+      scriptsOnly: resolvedScriptsOnly,
       name: agentProfileName,
       description: agentDescription,
       ...(traits.hasLocalEnvironment && {
@@ -4355,8 +4369,12 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const applySwarmConfigDrift = async (
     freshEnv: Record<string, string | undefined>,
     resolvedProvider: ProviderName,
+    nextScriptsOnly: boolean,
   ): Promise<{ agentVisibleChanged: boolean }> => {
     let agentVisibleChanged = false;
+    let promptRebuiltForProvider = false;
+    const scriptsOnlyChanged = nextScriptsOnly !== resolvedScriptsOnly;
+    resolvedScriptsOnly = nextScriptsOnly;
 
     // (1) Harness provider — swap adapter + rebuild prompt atomically.
     if (resolvedProvider !== state.harnessProvider) {
@@ -4369,6 +4387,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         resolvedSystemPrompt = additionalSystemPrompt
           ? `${basePrompt}\n\n${additionalSystemPrompt}`
           : basePrompt;
+        promptRebuiltForProvider = true;
         cachedCredHarnessProvider = null;
         agentVisibleChanged = true;
         console.log(
@@ -4379,6 +4398,19 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           `[${role}] [harness] Failed to swap to ${resolvedProvider} (staying on ${previous}): ${err}`,
         );
       }
+    }
+
+    // Scripts-only mode changes the prompt independently of the provider.
+    // Keep it runner-local: config overlays must not be written into process.env
+    // or they would mask the worker environment's global override on the next fetch.
+    if (scriptsOnlyChanged && !promptRebuiltForProvider) {
+      basePrompt = await buildSystemPrompt();
+      resolvedSystemPrompt = additionalSystemPrompt
+        ? `${basePrompt}\n\n${additionalSystemPrompt}`
+        : basePrompt;
+      console.log(
+        `[${role}] [config] Rebuilt system prompt for scripts-only mode: ${resolvedScriptsOnly}`,
+      );
     }
 
     // (2) Max concurrency — operator can tune from the dashboard live.
@@ -4467,11 +4499,23 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // the wait pivots the credential predicate (and onwards).
         getProvider: () => state.harnessProvider,
         refreshEnv: async () => {
-          const { env, resolvedProvider } = await fetchResolvedEnv(apiUrl, apiKey, agentId);
+          const { env, resolvedProvider, scriptsOnlyConfigValue } = await fetchResolvedEnv(
+            apiUrl,
+            apiKey,
+            agentId,
+          );
+          const nextScriptsOnly = resolveScriptsOnlyMode({
+            env: process.env.SCRIPTS_ONLY_MCP,
+            configValue: scriptsOnlyConfigValue,
+          });
           // Apply drift inside the wait so adapter/prompt/state stay in
           // sync if the operator flips HARNESS_PROVIDER mid-loop. The
           // helper is idempotent when nothing changed.
-          const { agentVisibleChanged } = await applySwarmConfigDrift(env, resolvedProvider);
+          const { agentVisibleChanged } = await applySwarmConfigDrift(
+            env,
+            resolvedProvider,
+            nextScriptsOnly,
+          );
           if (agentVisibleChanged) {
             // Fire-and-forget — dashboard reflects the live values, the
             // wait loop doesn't block on it.
@@ -5051,8 +5095,20 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     if (Date.now() - lastHarnessReconcileAt > HARNESS_RECONCILE_INTERVAL_MS) {
       lastHarnessReconcileAt = Date.now();
       try {
-        const { env: freshEnv, resolvedProvider } = await fetchResolvedEnv(apiUrl, apiKey, agentId);
-        const { agentVisibleChanged } = await applySwarmConfigDrift(freshEnv, resolvedProvider);
+        const {
+          env: freshEnv,
+          resolvedProvider,
+          scriptsOnlyConfigValue,
+        } = await fetchResolvedEnv(apiUrl, apiKey, agentId);
+        const nextScriptsOnly = resolveScriptsOnlyMode({
+          env: process.env.SCRIPTS_ONLY_MCP,
+          configValue: scriptsOnlyConfigValue,
+        });
+        const { agentVisibleChanged } = await applySwarmConfigDrift(
+          freshEnv,
+          resolvedProvider,
+          nextScriptsOnly,
+        );
         if (agentVisibleChanged) {
           // Re-register so the agents row + dashboard reflect the live
           // harness_provider / maxTasks. Idempotent: only writes columns

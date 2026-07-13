@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { getAgentById } from "@/be/db";
+import { getAgentById, getResolvedConfig } from "@/be/db";
 import { createServer } from "@/server";
+import { resolveScriptsOnlyMode } from "@/utils/scripts-only-mode";
 
 export type McpTransportActivity = Record<string, number>;
 export type McpSessionAgents = Record<string, string>;
@@ -148,7 +149,15 @@ export async function handleMcp(
         }
       };
 
-      const server = createServer();
+      const configValue = getResolvedConfig(agentId).find(
+        (config) => config.key === "SCRIPTS_ONLY_MCP",
+      )?.value;
+      const server = createServer({
+        scriptsOnly: resolveScriptsOnlyMode({
+          env: process.env.SCRIPTS_ONLY_MCP,
+          configValue,
+        }),
+      });
       await server.connect(transport);
     } else {
       res.writeHead(400, { "Content-Type": "application/json" });

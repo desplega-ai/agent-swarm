@@ -158,6 +158,7 @@ import {
   registerTriggerWorkflowTool,
   registerUpdateWorkflowTool,
 } from "./tools/workflows";
+import { resolveScriptsOnlyMode } from "./utils/scripts-only-mode";
 
 // Capability-based feature flags
 // Default: all capabilities enabled
@@ -183,7 +184,7 @@ export function getEnabledCapabilities(): string[] {
  * own full-surface server instance and is NOT affected by this flag.
  */
 export function isScriptsOnlyMcp(): boolean {
-  return process.env.SCRIPTS_ONLY_MCP === "true";
+  return resolveScriptsOnlyMode({ env: process.env.SCRIPTS_ONLY_MCP });
 }
 
 export function createServer(opts: { scriptsOnly?: boolean } = {}) {

@@ -62,6 +62,11 @@ export type BasePromptArgs = {
    * context-mode MCP wiring yet).
    */
   provider?: ProviderName;
+  /**
+   * Resolved by the runner from the worker environment and raw config row.
+   * Direct callers retain the process-env fallback below during migration.
+   */
+  scriptsOnly?: boolean;
   name?: string;
   description?: string;
   soulMd?: string;
@@ -117,8 +122,10 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   // Experimental scripts-only MCP surface (code-mode): the composite templates
   // reference named swarm tools that are not registered when the server runs
   // with SCRIPTS_ONLY_MCP=true, so tell the agent everything goes through
-  // script-run. Worker containers opt in via the same env var.
-  const scriptsOnlyMode = hasMcp && process.env.SCRIPTS_ONLY_MCP === "true";
+  // script-run. The runner owns config/env precedence; the environment fallback
+  // remains only for direct callers during the migration.
+  const scriptsOnly = args.scriptsOnly ?? process.env.SCRIPTS_ONLY_MCP === "true";
+  const scriptsOnlyMode = hasMcp && scriptsOnly;
   if (scriptsOnlyMode) {
     const scriptsOnlyResult = await resolveTemplateAsync("system.agent.scripts_only_mode", {});
     prompt += `\n${scriptsOnlyResult.text}`;
