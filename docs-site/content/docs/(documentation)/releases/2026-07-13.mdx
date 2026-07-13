@@ -1,0 +1,72 @@
+---
+title: "Release Notes — Week of July 6-12, 2026"
+description: "Script Connections MVP, asset namespaces, RBAC rollout, memory usefulness, model tiers and UI refinements land this week."
+---
+
+## Highlights
+
+### Script Connections MVP
+
+Scripts now have first-class, typed access to external APIs and MCP servers without ever seeing raw credentials. The connections MVP (`c159a1a0`, #934) plus follow-ups (`0b2a5e00`, `248daf5b`, `41ef7111`) introduce:
+
+- OpenAPI-by-URL registration and generated `ctx.api.<slug>` clients
+- OAuth and GraphQL support via `ctx.mcp`
+- Credential broker + bindings at egress time; nothing in source or logs
+- Authored typechecking and scope control (global/agent/repo)
+
+Agents can now call Stripe, Notion, custom services, and other swarms from script nodes with auditability and safety by default.
+
+### Asset Namespace Keys
+
+A new canonical addressing scheme for swarm resources rolled out (`9fc74c7e`, #963). Tasks, workflows, schedules, pages and files now have stable namespace-qualified identifiers usable across the SDK, tools, UI, and skills. This removes ad-hoc string hacks and sets the foundation for safer cross-agent and cross-drive operations.
+
+### RBAC and Access Controls (DES-445)
+
+Major RBAC surface arrived this week across multiple increments (`80614625`, `672f7f01`, `1aa25c93`, `b1a05246`, `31c77c1b`):
+
+- Central `can()` check + audit logging
+- Role engine with default auto-backfill for new users
+- Gates on MCP user admission, swarm-config write/delete/secret-read, route backlog
+- RBAC_ENABLED flag and import-completeness guards for favorites
+
+Operators gain fine-grained control; AI agents get explicit permission boundaries instead of broad access.
+
+### Memory Retrieval v2 + Usefulness
+
+Memory system received update (`24798ed8`, #894; polish `9015e5be`, #915):
+
+- Usefulness ratings on recall
+- Memory link side for read paths
+- New UI panel with tooltips, axes, legend improvements
+
+Agents and operators can now give feedback on what memories were actually useful, improving future retrieval quality.
+
+## Improvements
+
+* **Model support and guidance**: gpt-5.6 tiers added (`9eafd225`, #958) along with portable `modelTier` + `effort` controls. Coders can now steer between fast and deep reasoning explicitly.
+* **UI & product polish**:
+  - Activity timeline replaces dashboard graph (`286e5647`, #945)
+  - List search + filters completed (`6a7964f0`, `e0cd9b33`, #961/#964)
+  - Connection errors surfaced rather than silent "Disconnected" (`34bbb21f`, #950)
+  - Prose outputs shown in Slack completions (`f1d32324`, #957)
+* **New tooling**:
+  - Workflow and schedule triage (`ccabfb50`, #933)
+  - Single-page delete (`5bc1397d`, #940)
+  - Lead-gated slack-delete and slack-update tools (`7f4dd929`, #918)
+* **Workflows & scripts**: Configurable webhook verification formats (timestamped, token, legacy) (`24998dfa`, #941). Raw ctx API responses available for scripting (`248daf5b`, #952). Tightened script-usage and target-type prompts (`93481dc8`, `033b9247`).
+* **Evals & CI**: Dispatch/hop structural scoring (`b1e8fb84`, #937). Docs clarification on delegation thresholds (`2a6dc1bd`, #938).
+* **Daily releases + docs** updates (multiple #9xx release commits) keep the site current.
+* **Worker & infra**: Chromium runtime deps fixed, pgvector added to worker images, graceful shutdown pinning (`2c7d5d5b`, `ac8dc86c`, `03722a2c`).
+
+## Bug Fixes
+
+* Slack DM file upload threading fixed (`dc335bb3`, #912)
+* Routing coherence + affinity gates for interrupted/pooled tasks prevent misrouted work (`bc1efcc6`, `cb0a41df`, #960/#954)
+* GitHub inline PR comments no longer dropped silently (`669e2050`, #917)
+* Identity "confabulation" eliminated via provider-agnostic resolve-user (`b8aa7321`, #939)
+* Connection state and favorites supported under hosted auth (`966ead0a`, #967; `5e5f28a5`, #926)
+* Stale FTS flags and memory leaks fixed in delete paths (`ba5fdbb5`, #924)
+* UI list candidates now complete when filtered (`e0cd9b33`, #964)
+* Script connections preserve query-only bindings (`0b2a5e00`, #942)
+
+Great week for foundations and developer/agent power. Next weeks will focus on polishing these new surfaces and adding more discoverability paths.
