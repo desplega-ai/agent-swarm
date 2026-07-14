@@ -278,7 +278,8 @@ export interface NormalizedOutcome {
  *   name         → AGENT_NAME    (registered agent name; precedence over the
  *                  template displayName and the worker-<idx> fallback)
  *   systemPrompt → SYSTEM_PROMPT (extra system prompt appended to the base)
- *   env          → merged LAST over config.env (validated; see validateScenario)
+ *   env          → merged over config.env before fixed eval-only runtime tags
+ *                  (validated; see validateScenario)
  *
  * Heterogeneous rosters (v7 §12): a member may override the matrix cell's
  * HarnessConfig. Frozen resolution rule:

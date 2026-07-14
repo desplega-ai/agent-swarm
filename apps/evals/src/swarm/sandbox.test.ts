@@ -66,6 +66,23 @@ describe("workerRuntimeEnv credential gating (v7.6 §A2 — interim claude OPENR
 });
 
 describe("workerRuntimeEnv v7 member env (§9.3 frozen merge order)", () => {
+  test("pins eval telemetry to the test cohort after config and spec env merges", () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-test";
+    const env = workerRuntimeEnv({
+      swarmKey: "k",
+      apiUrl: "https://api.example",
+      agentId: "agent-1",
+      config: {
+        id: "claude-haiku",
+        provider: "claude",
+        model: "haiku",
+        env: { DESPLEGA_TELEMETRY_ENV: "production" },
+      },
+      spec: { env: { DESPLEGA_TELEMETRY_ENV: "production" } },
+    });
+    expect(env.DESPLEGA_TELEMETRY_ENV).toBe("test");
+  });
+
   test("identity envs map from the typed spec fields (TEMPLATE_ID / AGENT_NAME / SYSTEM_PROMPT)", () => {
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-test";
     const env = workerRuntimeEnv({
@@ -193,7 +210,13 @@ describe("workerRuntimeEnv v7 member env (§9.3 frozen merge order)", () => {
   });
 });
 
-describe("apiRuntimeEnv embedding envs (v7.6 §A2 — EMBEDDING_*-differentiated)", () => {
+describe("apiRuntimeEnv", () => {
+  test("keeps production runtime behavior while tagging telemetry as test", () => {
+    const env = apiRuntimeEnv("k");
+    expect(env.NODE_ENV).toBe("production");
+    expect(env.DESPLEGA_TELEMETRY_ENV).toBe("test");
+  });
+
   test("no EMBEDDING_DIMENSIONS pin (≤1.85-template NaN workaround removed; 1.97.0 defaults the dimension server-side)", () => {
     expect(apiRuntimeEnv("k").EMBEDDING_DIMENSIONS).toBeUndefined();
   });

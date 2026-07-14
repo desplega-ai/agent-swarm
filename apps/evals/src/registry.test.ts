@@ -151,6 +151,7 @@ describe("validateScenario — WorkerSpec[] + lead (v7 §9/§12 frozen rules)", 
       "TEMPLATE_ID",
       "AGENT_NAME",
       "SYSTEM_PROMPT",
+      "DESPLEGA_TELEMETRY_ENV",
     ]) {
       expect(validateScenario(scenario({ workers: [{ env: { [key]: "x" } }] }))).not.toEqual([]);
     }

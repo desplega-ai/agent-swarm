@@ -180,6 +180,7 @@ export function apiRuntimeEnv(swarmKey: string): Record<string, string> {
     AGENT_SWARM_API_KEY: swarmKey,
     PORT: String(API_PORT),
     NODE_ENV: "production",
+    DESPLEGA_TELEMETRY_ENV: "test",
     DATABASE_PATH: "/app/data/agent-swarm-db.sqlite",
     MIGRATIONS_DIR: "/app/migrations",
     SQLITE_VEC_EXTENSION_PATH: "/app/extensions/vec0.so",
@@ -225,6 +226,8 @@ export function apiRuntimeEnv(swarmKey: string): Record<string, string> {
  *      registering as the entrypoint's `worker-<hash>` fallback), and
  *      SYSTEM_PROMPT (spec.systemPrompt, unchanged);
  *   5. spec.env ?? {} (validated non-reserved at registry load).
+ *   6. DESPLEGA_TELEMETRY_ENV="test" (eval traffic must never enter the
+ *      production telemetry cohort).
  */
 export function workerRuntimeEnv(opts: {
   swarmKey: string;
@@ -285,6 +288,7 @@ export function workerRuntimeEnv(opts: {
     AGENT_NAME: identity.agentName,
     ...(spec.systemPrompt ? { SYSTEM_PROMPT: spec.systemPrompt } : {}),
     ...(spec.env ?? {}),
+    DESPLEGA_TELEMETRY_ENV: "test",
   };
 }
 
