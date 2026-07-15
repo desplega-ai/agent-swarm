@@ -1,0 +1,57 @@
+name: Refresh star history chart
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: star-history-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: github.repository == 'desplega-ai/agent-swarm'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # A repository token is required so the generated PR triggers the normal CI workflows.
+          token: ${{ secrets.STAR_HISTORY_TOKEN }}
+
+      - name: Generate charts
+        env:
+          GITHUB_TOKEN: ${{ secrets.STAR_HISTORY_TOKEN }}
+        run: node scripts/generate-star-history.mjs
+
+      - name: Open refresh pull request
+        env:
+          GH_TOKEN: ${{ secrets.STAR_HISTORY_TOKEN }}
+        run: |
+          if git diff --quiet -- assets/star-history-light.svg assets/star-history-dark.svg; then
+            echo "Star history charts are already current."
+            exit 0
+          fi
+
+          existing_pr=$(gh pr list --state open --search 'in:title "docs: refresh star history chart"' --json url --jq '.[0].url // ""')
+          if [ -n "$existing_pr" ]; then
+            echo "A star history refresh pull request is already open: $existing_pr"
+            exit 0
+          fi
+
+          branch="automation/star-history-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add assets/star-history-light.svg assets/star-history-dark.svg
+          git commit -m "docs: refresh star history chart"
+          git push --set-upstream origin "$branch"
+          gh pr create \
+            --base "${{ github.event.repository.default_branch }}" \
+            --head "$branch" \
+            --title "docs: refresh star history chart" \
+            --body $'## Summary\n\n- refresh the committed light and dark star history charts from the authenticated GitHub stargazers API\n\n## Validation\n\n- `node scripts/generate-star-history.mjs`'
