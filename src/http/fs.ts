@@ -8,7 +8,10 @@ import {
   getTaskById,
   insertTaskAttachment,
 } from "../be/db";
-import { ensureAgentFsCredentialsForAgent } from "../be/seed/agent-fs-provision";
+import {
+  ensureAgentFsCredentialsForAgent,
+  inviteEmailToSharedOrg,
+} from "../be/seed/agent-fs-provision";
 import { type FileObject, type FileScope, FilesError, normalizeFilesError } from "../fs/provider";
 import { getFileStorageProvider } from "../fs/registry";
 import { can, type RbacPrincipal, type RbacResource } from "../rbac";
@@ -61,6 +64,30 @@ const ensureAgentCredentialsRoute = route({
     500: { description: "Provisioning failed" },
   },
   auth: { apiKey: true, agentId: true },
+});
+
+const inviteMemberRoute = route({
+  method: "post",
+  path: "/api/fs/members/invite",
+  pattern: ["api", "fs", "members", "invite"],
+  summary: "Invite an external member into the agent-fs shared org",
+  description:
+    "The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. No keys are returned; the invitee obtains their own key via agent-fs registration.",
+  tags: ["FS"],
+  body: z.object({
+    email: z.email(),
+    role: z.enum(["viewer", "editor", "admin"]).default("editor"),
+  }),
+  responses: {
+    200: { description: "Invite state ({ orgId, invited })" },
+    400: { description: "Invalid body" },
+    500: { description: "Provisioning or invite failed" },
+  },
+  auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "Tenant API key is the org-owner credential; the invite runs under the API server's own bootstrap identity, no per-agent principal applies.",
+  },
 });
 
 const listTaskFilesRoute = route({
@@ -178,6 +205,19 @@ export async function handleFs(
     } catch (error) {
       const message = scrubSecrets(error instanceof Error ? error.message : String(error));
       jsonError(res, `Failed to provision agent-fs credentials: ${message}`, 500);
+    }
+    return true;
+  }
+
+  if (inviteMemberRoute.match(req.method, pathSegments)) {
+    const parsed = await inviteMemberRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    try {
+      const result = await inviteEmailToSharedOrg(parsed.body.email, parsed.body.role);
+      json(res, result);
+    } catch (error) {
+      const message = scrubSecrets(error instanceof Error ? error.message : String(error));
+      jsonError(res, `Failed to invite member to agent-fs shared org: ${message}`, 500);
     }
     return true;
   }

@@ -12,6 +12,7 @@ import {
 } from "../be/db";
 import { enqueueAdmissionRow } from "../be/rbac-audit";
 import { getUserGrant } from "../be/rbac-roles";
+import { resetFileStorageProvider } from "../fs/registry";
 import { initGitHub, resetGitHub } from "../github";
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
@@ -63,6 +64,12 @@ export type ReloadConfigResult = {
  */
 export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfigResult> {
   const updated = loadGlobalConfigsIntoEnv(true);
+
+  // File-storage provider selection reads process.env once and memoizes; the
+  // env we just (re)hydrated may flip it (local-fs → agent-fs after late
+  // provisioning, or a rotated bootstrap key). Reset so the next fs request
+  // re-selects — provider construction is cheap and stateless.
+  resetFileStorageProvider();
 
   const integrations: string[] = [];
 

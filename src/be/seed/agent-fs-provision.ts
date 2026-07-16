@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { resetFileStorageProvider } from "../../fs/registry";
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import {
   deleteSwarmConfigByKey,
@@ -19,7 +20,7 @@ const PROVISION_HASH_KEY = "AGENT_FS_PROVISION_HASH";
 const API_KEY_CONFIG = "API_AGENT_FS_API_KEY";
 const LEGACY_SHARED_KEY_CONFIG = "AGENT_FS_API_KEY";
 
-type Role = "viewer" | "editor" | "admin";
+export type Role = "viewer" | "editor" | "admin";
 
 type AgentFsSeedItem = SeedItem & {
   apiUrl: string;
@@ -181,7 +182,45 @@ export async function ensureAgentFsSharedProvisioning(options?: {
     upsertSwarmConfig({ scope: "global", key, value, isSecret: false, description });
   }
 
+  // Export the URL and re-run provider selection: when provisioning lands
+  // lazily (first /api/fs/agent-credentials call instead of the boot seeder),
+  // the file-storage provider may already be memoized as local-fs — without
+  // this, agent-fs stays inactive until a process restart even though every
+  // credential it needs now exists.
+  process.env.AGENT_FS_API_URL = apiUrl;
+  resetFileStorageProvider();
+
   return { apiUrl, apiKey, orgId, driveId, authHeaders };
+}
+
+/**
+ * Invite an external (non-agent) member into the shared org using the
+ * API-owned bootstrap credentials. Powers `POST /api/fs/members/invite` so
+ * callers holding the tenant API key (e.g. the cloud control plane's
+ * Connect-to-Drive flow) never need the bootstrap key itself — it is
+ * API-only and never served over HTTP.
+ */
+export async function inviteEmailToSharedOrg(
+  email: string,
+  role: Role,
+): Promise<{ orgId: string; invited: boolean }> {
+  const shared = await ensureAgentFsSharedProvisioning();
+  const currentRoles = await getCurrentOrgMemberRoles(
+    shared.apiUrl,
+    shared.authHeaders,
+    shared.orgId,
+  );
+  const currentRole = currentRoles.get(email.trim().toLowerCase());
+  if (currentRole && roleRank(currentRole) >= roleRank(role)) {
+    return { orgId: shared.orgId, invited: false };
+  }
+  await agentFsRequest(shared.apiUrl, `/orgs/${encodeURIComponent(shared.orgId)}/members/invite`, {
+    method: "POST",
+    headers: shared.authHeaders,
+    body: { email: email.trim(), role },
+    allowConflict: true,
+  });
+  return { orgId: shared.orgId, invited: true };
 }
 
 export async function ensureAgentFsCredentialsForAgent(agentId: string): Promise<{
