@@ -30,6 +30,10 @@ The harness boots a fresh stack for every attempt:
 5. Persist artifacts, transcripts, task records, costs, and sandbox metadata.
 6. Tear the sandboxes down, even on failure.
 
+<Callout type="info">
+Eval-launched API and worker sandboxes pin `DESPLEGA_TELEMETRY_ENV=test`, so their activity stays out of production telemetry cohorts. The API still runs with `NODE_ENV=production` to preserve its production runtime and security behavior.
+</Callout>
+
 ## What It Stores
 
 The harness is designed for post-run inspection, not just a pass/fail bit. Each attempt can persist:

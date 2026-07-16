@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.119.2] - 2026-07-16
+
+### Fixed
+- **Evaluation sandboxes no longer pollute production telemetry cohorts** (#974) — API and worker sandboxes pin `DESPLEGA_TELEMETRY_ENV=test` while the API keeps `NODE_ENV=production`, preserving production runtime behavior without counting eval traffic as production usage.
+- **The README star-history chart is self-hosted and refreshable again** (#975) — committed light and dark SVGs replace the broken third-party embed, with an authenticated weekly workflow that opens a normal reviewable update PR.
+
 ## [1.119.1] - 2026-07-15
 
 ### Changed

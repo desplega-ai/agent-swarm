@@ -279,6 +279,8 @@ Join our [Discord](https://discord.gg/KZgfyyDVZa) if you have questions or want 
   <img alt="Star History Chart" src="./assets/star-history-light.svg" />
 </picture>
 
+The charts are generated from timestamped GitHub stargazer data and refreshed weekly through a reviewable pull request.
+
 ## License
 
 [MIT](./LICENSE) — 2025-2026 [desplega.sh](https://desplega.sh)
