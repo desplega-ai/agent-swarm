@@ -1,6 +1,27 @@
 import { Database } from "bun:sqlite";
+import { afterEach } from "bun:test";
 import { existsSync } from "node:fs";
 import { closeDb, getDb, initDb } from "../be/db";
+
+// @hono/node-server (pulled in transitively by @modelcontextprotocol/sdk's
+// streamableHttp transport) replaces globalThis.Response/Request with its own
+// lightweight Node-adapter classes the first time getRequestListener() runs.
+// Bun.serve rejects those ("Expected a Response object, but received
+// '_Response'"), so every suite that constructs a `new Response()` AFTER an
+// MCP-HTTP test fails — but only under file orders where the MCP tests run
+// first, which is why this bites Linux CI and not macOS (bun's test-file order
+// is platform-dependent and not controllable via CLI args). Pin the natives
+// back after every test.
+const nativeResponse = globalThis.Response;
+const nativeRequest = globalThis.Request;
+afterEach(() => {
+  if (globalThis.Response !== nativeResponse) {
+    globalThis.Response = nativeResponse;
+  }
+  if (globalThis.Request !== nativeRequest) {
+    globalThis.Request = nativeRequest;
+  }
+});
 
 // macOS ships a system libsqlite3 compiled WITHOUT dynamic extension loading, so
 // `require("sqlite-vec").load(db)` throws and the hybrid-search vector arm is

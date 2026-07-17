@@ -12,9 +12,11 @@ import { runSeeder } from "../be/seed";
 import {
   agentFsProvisionSeeder,
   ensureAgentFsCredentialsForAgent,
+  inviteEmailToSharedOrg,
   resetAgentFsProvisionFetchForTests,
   setAgentFsProvisionFetchForTests,
 } from "../be/seed/agent-fs-provision";
+import { getFileStorageProvider, resetFileStorageProviderForTests } from "../fs/registry";
 
 const TEST_DB_PATH = `./test-agent-fs-provision-seeder-${process.pid}.sqlite`;
 const ORIGINAL_ENV = {
@@ -143,6 +145,11 @@ describe("agent-fs provisioning seeder", () => {
   afterEach(() => {
     resetAgentFsProvisionFetchForTests();
     restoreEnv();
+    // ensureAgentFsSharedProvisioning now resets the fs-provider memo as a
+    // side effect; re-select under the restored env so no provider state
+    // leaks into later test files.
+    resetFileStorageProviderForTests();
+    getFileStorageProvider();
   });
 
   afterAll(async () => {
@@ -490,5 +497,38 @@ describe("agent-fs provisioning seeder", () => {
 
     expect(second.created).toBe(false);
     expect(records).toEqual([]);
+  });
+
+  test("invites an external email into the shared org with the requested role", async () => {
+    process.env.AGENT_FS_API_URL = "https://agent-fs.example.test/";
+    process.env.AGENT_FS_REGISTER_EMAIL = "admin@example.test";
+
+    const records: RequestRecord[] = [];
+    setAgentFsProvisionFetchForTests(createFetchStub(records));
+
+    const result = await inviteEmailToSharedOrg("Customer@Example.test ", "admin");
+
+    expect(result).toEqual({ orgId: "shared-org", invited: true });
+    const invite = records.find((r) => r.path === "/orgs/shared-org/members/invite");
+    expect(invite?.method).toBe("POST");
+    expect(invite?.body).toEqual({ email: "Customer@Example.test", role: "admin" });
+    expect(invite?.authorization).toBe("Bearer afs-admin-key");
+  });
+
+  test("does not re-invite an external email whose current role already covers the request", async () => {
+    process.env.AGENT_FS_API_URL = "https://agent-fs.example.test/";
+    process.env.AGENT_FS_REGISTER_EMAIL = "admin@example.test";
+
+    const records: RequestRecord[] = [];
+    setAgentFsProvisionFetchForTests(
+      createFetchStub(records, {
+        members: [{ email: "customer@example.test", role: "admin" }],
+      }),
+    );
+
+    const result = await inviteEmailToSharedOrg("customer@example.test", "editor");
+
+    expect(result).toEqual({ orgId: "shared-org", invited: false });
+    expect(records.filter((r) => r.path === "/orgs/shared-org/members/invite")).toEqual([]);
   });
 });

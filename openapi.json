@@ -3836,6 +3836,58 @@
         }
       }
     },
+    "/api/fs/members/invite": {
+      "post": {
+        "summary": "Invite an external member into the agent-fs shared org",
+        "description": "The API server performs the invite with its own bootstrap credentials (which are API-only and never served over HTTP), provisioning the shared org/drive first when needed. Intended for the cloud control plane's Connect-to-Drive flow. No keys are returned; the invitee obtains their own key via agent-fs registration.",
+        "tags": [
+          "FS"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "viewer",
+                      "editor",
+                      "admin"
+                    ],
+                    "default": "editor"
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Invite state ({ orgId, invited })"
+          },
+          "400": {
+            "description": "Invalid body"
+          },
+          "500": {
+            "description": "Provisioning or invite failed"
+          }
+        }
+      }
+    },
     "/api/fs/tasks/{taskId}/files": {
       "get": {
         "summary": "List task file attachments",

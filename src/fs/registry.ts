@@ -21,6 +21,18 @@ export function selectProvider(): FileStorageProvider {
   return new LocalFsProvider();
 }
 
-export function resetFileStorageProviderForTests(): void {
+/**
+ * Drop the memoized provider so the next `getFileStorageProvider()` re-runs
+ * selection against current `process.env`. Needed by the config reload path:
+ * agent-fs provisioning can land AFTER the first fs request memoized
+ * `local-fs` (e.g. cloud swarms where the boot seeder had no
+ * AGENT_FS_API_URL yet), and without a reset the process is stuck on the
+ * wrong provider until restart.
+ */
+export function resetFileStorageProvider(): void {
   memoizedProvider = null;
+}
+
+export function resetFileStorageProviderForTests(): void {
+  resetFileStorageProvider();
 }

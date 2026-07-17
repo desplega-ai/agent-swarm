@@ -9,6 +9,7 @@ import {
   registerTemplate,
 } from "../prompts/registry";
 import { resolveTemplate } from "../prompts/resolver";
+import { restoreAllTemplateDefinitions } from "./template-registry-helpers";
 
 const TEST_DB_PATH = "./test-prompt-resolver.sqlite";
 
@@ -36,6 +37,11 @@ describe("Prompt Template Resolver", () => {
         // File doesn't exist
       }
     }
+    // This file clears the process-wide registry; heal it so later test files
+    // (whose import graphs already evaluated the template modules) don't
+    // resolve empty templates. CI(Linux)-only breakage otherwise — see
+    // template-registry-helpers.ts.
+    await restoreAllTemplateDefinitions();
   });
 
   // ============================================================================
