@@ -16,6 +16,7 @@ import {
   resetAgentFsProvisionFetchForTests,
   setAgentFsProvisionFetchForTests,
 } from "../be/seed/agent-fs-provision";
+import { getFileStorageProvider, resetFileStorageProviderForTests } from "../fs/registry";
 
 const TEST_DB_PATH = `./test-agent-fs-provision-seeder-${process.pid}.sqlite`;
 const ORIGINAL_ENV = {
@@ -144,6 +145,11 @@ describe("agent-fs provisioning seeder", () => {
   afterEach(() => {
     resetAgentFsProvisionFetchForTests();
     restoreEnv();
+    // ensureAgentFsSharedProvisioning now resets the fs-provider memo as a
+    // side effect; re-select under the restored env so no provider state
+    // leaks into later test files.
+    resetFileStorageProviderForTests();
+    getFileStorageProvider();
   });
 
   afterAll(async () => {
