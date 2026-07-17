@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { resetFileStorageProvider } from "../../fs/registry";
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import {
   deleteSwarmConfigByKey,
@@ -186,8 +185,10 @@ export async function ensureAgentFsSharedProvisioning(options?: {
   // lazily (first /api/fs/agent-credentials call instead of the boot seeder),
   // the file-storage provider may already be memoized as local-fs — without
   // this, agent-fs stays inactive until a process restart even though every
-  // credential it needs now exists.
+  // credential it needs now exists. Lazy import: a static be/seed → fs edge
+  // shifts module-init order for the whole seed graph.
   process.env.AGENT_FS_API_URL = apiUrl;
+  const { resetFileStorageProvider } = await import("../../fs/registry");
   resetFileStorageProvider();
 
   return { apiUrl, apiKey, orgId, driveId, authHeaders };
