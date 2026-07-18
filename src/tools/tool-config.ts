@@ -53,6 +53,10 @@ export const DEFERRED_TOOLS = new Set([
   "patch-subscription",
   "delete-subscription",
 
+  // Script-backed tools management (1) — the published tools themselves are
+  // dynamic (script_tools table) and intentionally not in this static set
+  "script-tools",
+
   // Workflows (11)
   "create-workflow",
   "list-workflows",

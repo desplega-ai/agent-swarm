@@ -16,6 +16,7 @@ import { registerCredentialBindingsTool } from "./tools/credential-bindings";
 import { registerDbQueryTool } from "./tools/db-query";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
 import { registerDeletePageTool } from "./tools/delete-page";
+import { registerDynamicScriptTools } from "./tools/dynamic-script-tools";
 import { registerGetMetricsTool } from "./tools/get-metrics";
 import { registerGetSwarmTool } from "./tools/get-swarm";
 import { registerGetTaskDetailsTool } from "./tools/get-task-details";
@@ -90,6 +91,7 @@ import { registerScriptQueryTypesTool } from "./tools/script-query-types";
 import { registerScriptRunTool } from "./tools/script-run";
 import { registerScriptRunsTools } from "./tools/script-runs";
 import { registerScriptSearchTool } from "./tools/script-search";
+import { registerScriptToolsTool } from "./tools/script-tools";
 import { registerScriptUpsertTool } from "./tools/script-upsert";
 import { registerSendTaskTool } from "./tools/send-task";
 // Skills capability
@@ -354,11 +356,15 @@ export function createServer(opts: { scriptsOnly?: boolean } = {}) {
     registerRunScheduleNowTool(server);
   }
 
-  // Event subscriptions (extension-system spike): event → script/workflow bindings
+  // Event subscriptions (extension system): event → script/workflow bindings
   registerCreateSubscriptionTool(server);
   registerListSubscriptionsTool(server);
   registerPatchSubscriptionTool(server);
   registerDeleteSubscriptionTool(server);
+
+  // Script-backed tools (extension system): management tool + dynamic registrations
+  registerScriptToolsTool(server);
+  registerDynamicScriptTools(server);
 
   // Memory capability - persistent memory with vector search
   if (hasCapability("memory")) {

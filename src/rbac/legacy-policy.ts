@@ -195,4 +195,5 @@ export const LEGACY_POLICY = {
   "script.api.rotate": leadOnly,
   "script.api.delete": leadOnly,
   "subscription.write": anyAuthenticated,
+  "tool.publish": leadOnly,
 } as const satisfies Record<PermissionVerb, LegacyRule>;

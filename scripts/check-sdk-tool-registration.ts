@@ -31,6 +31,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   "skill-install-remote": "admin-only remote skill management",
   "skill-sync-remote": "admin-only remote skill management",
   "swarm_x": "external command router — dispatches to third-party services",
+  "script-tools": "script-backed tool publishing — lead-only admin surface; scripts already invoke scripts directly via script_run",
 };
 
 const sdkToolNames = new Set(Object.values(SDK_TOOL_NAME_MAP));

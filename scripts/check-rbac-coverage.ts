@@ -60,6 +60,8 @@ const PIN_REASON =
 const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/subscriptions/list-subscriptions.ts":
     "read-only listing of event subscriptions — no mutation, mirrors list-schedules posture",
+  "src/tools/dynamic-script-tools.ts":
+    "dynamic registration of published script-backed tools — publishing is lead-gated via tool.publish in script-tools.ts; execution is open to agents by design (scripts run sandboxed)",
   "src/tools/create-channel.ts": PIN_REASON,
   "src/tools/create-metric.ts": PIN_REASON,
   "src/tools/create-page.ts": PIN_REASON,

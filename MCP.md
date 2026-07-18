@@ -1478,6 +1478,19 @@ Posts a message to a channel for cross-agent communication.
 | `replyTo` | `uuid` | No | - | Message ID to reply to (for threading). |
 | `mentions` | `array` | No | - | Agent IDs to @mention (they'll see it in unread). |
 
+### script-tools
+
+**Manage Script-Backed Tools**
+
+Publish a global catalog script as an agent-visible MCP tool (lead only), unpublish, enable/disable, or list. Published tools become callable on the next MCP session; the script receives the tool call arguments as its args.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `action` | `publish \| unpublish \| enable \| disable \| list` | Yes | - | - |
+| `toolName` | `string` | No | - | Tool name (^[a-z][a-z0-9_-]{2,63}$). Required for all actions except 'list'. Must not collide with a built-in tool. |
+| `scriptName` | `string` | No | - | Global catalog script to back the tool. Required for 'publish'. |
+| `description` | `string` | No | - | Tool description shown to agents. Required for 'publish'. |
+
 ### read-messages
 
 **Read Messages**

@@ -42,6 +42,7 @@ type Expected = Record<PrincipalName, boolean>;
 
 const LEAD_ONLY_VERBS: PermissionVerb[] = [
   "user.manage",
+  "tool.publish",
   "agent.profile.update.any",
   "agent.context.read.any",
   "memory.learning.inject",

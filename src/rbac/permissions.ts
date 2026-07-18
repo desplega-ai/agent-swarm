@@ -225,6 +225,10 @@ export const PERMISSIONS = {
     description: "Create, modify, pause, or delete event subscriptions.",
     namespace: "subscription",
   },
+  "tool.publish": {
+    description: "Publish, unpublish, or toggle script-backed MCP tools.",
+    namespace: "tool",
+  },
 } as const satisfies Record<string, { description: string; namespace: string }>;
 
 export type PermissionVerb = keyof typeof PERMISSIONS;

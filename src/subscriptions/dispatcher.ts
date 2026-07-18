@@ -1,10 +1,5 @@
 import { getWorkflow } from "@/be/db";
-import {
-  getScriptApiConnectionDescriptors,
-  getScriptMcpConnectionDescriptors,
-} from "@/be/script-connections";
-import { buildScriptCredentialBindings } from "@/be/script-credential-broker";
-import { getScript } from "@/be/scripts/db";
+import { runGlobalScriptByName } from "@/be/scripts/run-global";
 import {
   claimPendingDeliveries,
   createDelivery,
@@ -15,7 +10,6 @@ import {
   pruneSubscriptionJournal,
   recordSwarmBusEvent,
 } from "@/be/subscriptions-db";
-import { runScript } from "@/scripts-runtime/loader";
 import { getExecutorRegistry as getWorkflowExecutorRegistry } from "@/workflows";
 import { startWorkflowExecution } from "@/workflows/engine";
 import { workflowEventBus } from "@/workflows/event-bus";
@@ -97,33 +91,16 @@ async function executeScriptTarget(sub: Subscription, event: SwarmBusEvent): Pro
   if (!sub.scriptName) {
     throw new Error(`Subscription "${sub.name}" has no scriptName (targetType=script)`);
   }
-  const script = getScript({ name: sub.scriptName, scope: "global" });
-  if (!script) {
-    throw new Error(`Script '${sub.scriptName}' not found`);
-  }
-  const agentId = sub.createdByAgentId ?? "subscription";
-  const output = await runScript({
-    source: script.source,
+  await runGlobalScriptByName({
+    scriptName: sub.scriptName,
     args: {
       ...(sub.scriptArgs ?? {}),
       event: { id: event.id, name: event.name, data: event.data, emittedAt: event.emittedAt },
     },
-    fsMode: "none",
-    agentId,
-    egressSecrets: await buildScriptCredentialBindings({ agentId }),
-    apiConnections: getScriptApiConnectionDescriptors({ agentId }),
-    mcpConnections: getScriptMcpConnectionDescriptors({ agentId }),
+    agentId: sub.createdByAgentId ?? "subscription",
     timeoutMs: SCRIPT_TIMEOUT_MS,
   });
-  if (output.exitCode !== 0 || output.error) {
-    throw new Error(
-      output.stderr ||
-        `Script '${sub.scriptName}' exited with code ${output.exitCode}${
-          output.error ? ` (${output.error})` : ""
-        }`,
-    );
-  }
-  return { scriptName: sub.scriptName, exitCode: output.exitCode };
+  return { scriptName: sub.scriptName, exitCode: 0 };
 }
 
 async function executeWorkflowTarget(sub: Subscription, event: SwarmBusEvent): Promise<unknown> {

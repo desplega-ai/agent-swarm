@@ -2591,3 +2591,18 @@ export const SubscriptionDeliverySchema = z.object({
   createdAt: z.string(),
 });
 export type SubscriptionDelivery = z.infer<typeof SubscriptionDeliverySchema>;
+
+// ── Script-backed tools (extension system, Layer 3) ─────────────────────────
+// Keep in sync with src/be/migrations/118_script_tools.sql.
+
+export const ScriptToolSchema = z.object({
+  id: z.string(),
+  toolName: z.string(),
+  scriptName: z.string(),
+  description: z.string(),
+  enabled: z.boolean(),
+  createdByAgentId: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type ScriptTool = z.infer<typeof ScriptToolSchema>;
