@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.119.3] - 2026-07-18
+
+### Fixed
+- **Late agent-fs provisioning now activates shared storage without an API restart** (#978) — provisioning and config reloads re-select the filesystem provider, while the new tenant-authenticated shared-org invite endpoint lets control planes add customers through the API-owned bootstrap identity without exposing its key.
+
 ## [1.119.2] - 2026-07-16
 
 ### Fixed

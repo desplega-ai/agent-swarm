@@ -52,6 +52,21 @@ EMBEDDING_PROVIDER=local
 
 Set `API_AGENT_FS_API_KEY` if you want to pre-provision a stable API-owned bootstrap key. Otherwise, the API seeder calls `/auth/register`, stores the generated key as an encrypted global swarm config secret, creates the shared org and drive, and persists `AGENT_FS_DEFAULT_ORG_ID` plus `AGENT_FS_DEFAULT_DRIVE_ID`. Workers do not receive this bootstrap key; the runner asks the API to create an agent-scoped `AGENT_FS_API_KEY` for each agent.
 
+## Late Provisioning and Shared-Org Invitations
+
+If agent-fs is provisioned after the first filesystem request, provisioning now exports `AGENT_FS_API_URL` and clears the cached provider selection. `POST /api/config/reload` does the same after reloading global config. The next filesystem request can therefore switch from `local-fs` to `agent-fs` without restarting the API process.
+
+A tenant-authenticated control plane can invite a customer into the shared organization without reading the API-owned bootstrap key:
+
+```bash
+curl -s -X POST "$MCP_BASE_URL/api/fs/members/invite" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"customer@example.com","role":"editor"}'
+```
+
+`role` accepts `viewer`, `editor`, or `admin` and defaults to `editor`. The API performs the invite with its bootstrap identity, never returns a key, and handles repeat calls by skipping the invite when the member's existing role already satisfies the request. See the [`POST /api/fs/members/invite` API reference](/docs/api-reference/fs#post-api-fs-members-invite) for the response schema.
+
 ## Helm
 
 Enable the co-deployed service with `agentFs.enabled=true`:
@@ -102,4 +117,4 @@ curl http://localhost:3013/api/fs/capabilities \
   -H "Authorization: Bearer $API_KEY"
 ```
 
-The response should show `providerId: "agent-fs"` when the provider is active. If it shows `local-fs`, check `AGENT_FS_API_URL`, the stored `API_AGENT_FS_API_KEY`, and the API boot logs for the provisioning seeder.
+The response should show `providerId: "agent-fs"` when the provider is active. If it shows `local-fs`, check `AGENT_FS_API_URL`, the stored `API_AGENT_FS_API_KEY`, and the API boot logs for the provisioning seeder. After late provisioning or a config reload, repeat this request; a process restart is no longer required to re-select the provider.
