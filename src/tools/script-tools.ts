@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getAgentById } from "@/be/db";
 import {
   createScriptTool,
@@ -111,6 +112,8 @@ export const registerScriptToolsTool = (server: McpServer) => {
             scriptName: args.scriptName,
             description: args.description,
             createdByAgentId: requestInfo.agentId,
+            createdBy:
+              resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined,
           });
           return respond(
             true,
@@ -127,7 +130,9 @@ export const registerScriptToolsTool = (server: McpServer) => {
         }
         case "enable":
         case "disable": {
-          if (!setScriptToolEnabled(args.toolName, args.action === "enable")) {
+          const updatedBy =
+            resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined;
+          if (!setScriptToolEnabled(args.toolName, args.action === "enable", updatedBy)) {
             return respond(false, `Tool '${args.toolName}' not found`);
           }
           return respond(true, `Tool '${args.toolName}' ${args.action}d.`);

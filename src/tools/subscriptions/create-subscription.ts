@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getAgentById, getWorkflow } from "@/be/db";
 import { getScript } from "@/be/scripts/db";
 import { createSubscription, getSubscriptionByName } from "@/be/subscriptions-db";
@@ -109,6 +110,8 @@ export const registerCreateSubscriptionTool = (server: McpServer) => {
           workflowId: args.workflowId,
           enabled: args.enabled,
           createdByAgentId: requestInfo.agentId,
+          createdBy:
+            resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined,
         });
 
         return {

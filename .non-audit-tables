@@ -25,6 +25,8 @@ script_embeddings
 seed_state
 session_costs
 session_logs
+subscription_deliveries
+swarm_events
 task_context_snapshots
 tracker_agent_mapping
 tracker_sync

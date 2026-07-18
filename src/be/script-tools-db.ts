@@ -8,6 +8,8 @@ interface ScriptToolRow {
   description: string;
   enabled: number;
   createdByAgentId: string | null;
+  created_by: string | null;
+  updated_by: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -20,6 +22,8 @@ function rowToScriptTool(row: ScriptToolRow): ScriptTool {
     description: row.description,
     enabled: row.enabled === 1,
     createdByAgentId: row.createdByAgentId ?? undefined,
+    createdBy: row.created_by ?? undefined,
+    updatedBy: row.updated_by ?? undefined,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -31,14 +35,15 @@ export function createScriptTool(args: {
   description: string;
   enabled?: boolean;
   createdByAgentId?: string;
+  createdBy?: string;
 }): ScriptTool {
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   getDb()
     .prepare(
       `INSERT INTO script_tools
-         (id, toolName, scriptName, description, enabled, createdByAgentId, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, toolName, scriptName, description, enabled, createdByAgentId, created_by, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -47,6 +52,7 @@ export function createScriptTool(args: {
       args.description,
       args.enabled === false ? 0 : 1,
       args.createdByAgentId ?? null,
+      args.createdBy ?? null,
       now,
       now,
     );
@@ -76,9 +82,15 @@ export function deleteScriptTool(toolName: string): boolean {
   return res.changes > 0;
 }
 
-export function setScriptToolEnabled(toolName: string, enabled: boolean): boolean {
+export function setScriptToolEnabled(
+  toolName: string,
+  enabled: boolean,
+  updatedBy?: string,
+): boolean {
   const res = getDb()
-    .prepare("UPDATE script_tools SET enabled = ?, updatedAt = ? WHERE toolName = ?")
-    .run(enabled ? 1 : 0, new Date().toISOString(), toolName);
+    .prepare(
+      "UPDATE script_tools SET enabled = ?, updated_by = COALESCE(?, updated_by), updatedAt = ? WHERE toolName = ?",
+    )
+    .run(enabled ? 1 : 0, updatedBy ?? null, new Date().toISOString(), toolName);
   return res.changes > 0;
 }

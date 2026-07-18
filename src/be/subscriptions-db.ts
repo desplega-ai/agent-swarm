@@ -22,6 +22,8 @@ interface SubscriptionRow {
   workflowId: string | null;
   enabled: number;
   createdByAgentId: string | null;
+  created_by: string | null;
+  updated_by: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -39,6 +41,8 @@ function rowToSubscription(row: SubscriptionRow): Subscription {
     workflowId: row.workflowId ?? undefined,
     enabled: row.enabled === 1,
     createdByAgentId: row.createdByAgentId ?? undefined,
+    createdBy: row.created_by ?? undefined,
+    updatedBy: row.updated_by ?? undefined,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -55,6 +59,7 @@ export function createSubscription(args: {
   workflowId?: string;
   enabled?: boolean;
   createdByAgentId?: string;
+  createdBy?: string;
 }): Subscription {
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
@@ -62,8 +67,8 @@ export function createSubscription(args: {
     .prepare(
       `INSERT INTO subscriptions
          (id, name, description, eventPattern, filter, targetType, scriptName,
-          scriptArgs, workflowId, enabled, createdByAgentId, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          scriptArgs, workflowId, enabled, createdByAgentId, created_by, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -77,6 +82,7 @@ export function createSubscription(args: {
       args.workflowId ?? null,
       args.enabled === false ? 0 : 1,
       args.createdByAgentId ?? null,
+      args.createdBy ?? null,
       now,
       now,
     );
@@ -123,6 +129,7 @@ export function updateSubscription(
     filter?: unknown | null;
     scriptArgs?: Record<string, unknown> | null;
     enabled?: boolean;
+    updatedBy?: string;
   },
 ): Subscription | null {
   const sets: string[] = [];
@@ -148,6 +155,10 @@ export function updateSubscription(
     values.push(patch.enabled ? 1 : 0);
   }
   if (sets.length === 0) return getSubscriptionById(id);
+  if (patch.updatedBy !== undefined) {
+    sets.push("updated_by = ?");
+    values.push(patch.updatedBy);
+  }
   sets.push("updatedAt = ?");
   values.push(new Date().toISOString());
   values.push(id);

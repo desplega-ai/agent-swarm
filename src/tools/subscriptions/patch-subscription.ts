@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getAgentById } from "@/be/db";
 import { getSubscriptionByName, updateSubscription } from "@/be/subscriptions-db";
 import { can } from "@/rbac";
@@ -66,6 +67,8 @@ export const registerPatchSubscriptionTool = (server: McpServer) => {
         filter: args.filter,
         scriptArgs: args.scriptArgs,
         enabled: args.enabled,
+        updatedBy:
+          resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined,
       });
       return {
         content: [{ type: "text", text: `Updated subscription '${args.name}'.` }],

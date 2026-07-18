@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     workflowId TEXT,
     enabled INTEGER NOT NULL DEFAULT 1,
     createdByAgentId TEXT,
+    created_by TEXT,
+    updated_by TEXT,
     createdAt TEXT NOT NULL,
     updatedAt TEXT NOT NULL,
     CHECK (targetType != 'script' OR scriptName IS NOT NULL),

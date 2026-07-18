@@ -2557,6 +2557,8 @@ export const SubscriptionSchema = z.object({
   workflowId: z.string().optional(),
   enabled: z.boolean(),
   createdByAgentId: z.string().optional(),
+  createdBy: z.string().optional(),
+  updatedBy: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -2602,6 +2604,8 @@ export const ScriptToolSchema = z.object({
   description: z.string(),
   enabled: z.boolean(),
   createdByAgentId: z.string().optional(),
+  createdBy: z.string().optional(),
+  updatedBy: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS script_tools (
     description TEXT NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1,
     createdByAgentId TEXT,
+    created_by TEXT,
+    updated_by TEXT,
     createdAt TEXT NOT NULL,
     updatedAt TEXT NOT NULL
 );
