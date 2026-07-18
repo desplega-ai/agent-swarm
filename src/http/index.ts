@@ -616,6 +616,13 @@ httpServer
       });
     }
 
+    // Start event-subscription dispatcher (extension-system spike; unless disabled)
+    if (process.env.SUBSCRIPTIONS_DISABLE !== "true") {
+      const { startSubscriptionDispatcher } = await import("../subscriptions/dispatcher");
+      const subIntervalMs = Number(process.env.SUBSCRIPTIONS_INTERVAL_MS) || 2000;
+      startSubscriptionDispatcher(subIntervalMs);
+    }
+
     // Start heartbeat triage (unless disabled)
     if (process.env.HEARTBEAT_DISABLE !== "true") {
       const { startHeartbeat } = await import("../heartbeat");

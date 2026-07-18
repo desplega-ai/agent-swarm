@@ -28,7 +28,7 @@ const MAX_STEPS_PER_RUN = Number(process.env.WORKFLOW_MAX_STEPS_PER_RUN) || 500;
 
 export interface WorkflowExecutionOptions {
   requestedByUserId?: string;
-  triggerType?: "schedule" | "manual" | "event" | "api";
+  triggerType?: "schedule" | "manual" | "event" | "api" | "subscription";
 }
 
 /**
