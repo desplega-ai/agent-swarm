@@ -14,6 +14,7 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { hasTrackerDelivery, markTrackerDelivery } from "../be/db-queries/tracker";
+import { workflowEventBus } from "../workflows/event-bus";
 import { handleCommentEvent, handleIssueDeleteEvent, handleIssueEvent } from "./sync";
 
 /**
@@ -115,6 +116,12 @@ export async function handleJiraWebhook(
   }
 
   const event = String(parsed.webhookEvent ?? "");
+
+  // Surface on the workflow event bus (wait nodes + subscriptions),
+  // e.g. "jira.issue_updated", "jira.comment_created".
+  if (event) {
+    workflowEventBus.emit(`jira.${event.replace(/^jira:/, "")}`, parsed);
+  }
 
   // Fire-and-forget heavy work; return 200 immediately.
   void dispatchAndRecord(event, parsed, deliveryId).catch((err) => {

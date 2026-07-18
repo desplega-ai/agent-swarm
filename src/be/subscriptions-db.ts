@@ -3,7 +3,7 @@ import type {
   SubscriptionDelivery,
   SubscriptionDeliveryStatus,
   SubscriptionTargetType,
-  SwarmEvent,
+  SwarmBusEvent,
 } from "../subscriptions/types";
 import { getDb } from "./db";
 
@@ -115,6 +115,48 @@ export function setSubscriptionEnabled(id: string, enabled: boolean): boolean {
   return res.changes > 0;
 }
 
+export function updateSubscription(
+  id: string,
+  patch: {
+    description?: string;
+    eventPattern?: string;
+    filter?: unknown | null;
+    scriptArgs?: Record<string, unknown> | null;
+    enabled?: boolean;
+  },
+): Subscription | null {
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  if (patch.description !== undefined) {
+    sets.push("description = ?");
+    values.push(patch.description);
+  }
+  if (patch.eventPattern !== undefined) {
+    sets.push("eventPattern = ?");
+    values.push(patch.eventPattern);
+  }
+  if (patch.filter !== undefined) {
+    sets.push("filter = ?");
+    values.push(patch.filter === null ? null : JSON.stringify(patch.filter));
+  }
+  if (patch.scriptArgs !== undefined) {
+    sets.push("scriptArgs = ?");
+    values.push(patch.scriptArgs === null ? null : JSON.stringify(patch.scriptArgs));
+  }
+  if (patch.enabled !== undefined) {
+    sets.push("enabled = ?");
+    values.push(patch.enabled ? 1 : 0);
+  }
+  if (sets.length === 0) return getSubscriptionById(id);
+  sets.push("updatedAt = ?");
+  values.push(new Date().toISOString());
+  values.push(id);
+  getDb()
+    .prepare(`UPDATE subscriptions SET ${sets.join(", ")} WHERE id = ?`)
+    .run(...(values as (string | number | null)[]));
+  return getSubscriptionById(id);
+}
+
 export function deleteSubscription(id: string): boolean {
   const res = getDb().prepare("DELETE FROM subscriptions WHERE id = ?").run(id);
   return res.changes > 0;
@@ -122,8 +164,8 @@ export function deleteSubscription(id: string): boolean {
 
 // --- events -----------------------------------------------------------------
 
-export function recordSwarmEvent(name: string, data: unknown): SwarmEvent {
-  const event: SwarmEvent = {
+export function recordSwarmBusEvent(name: string, data: unknown): SwarmBusEvent {
+  const event: SwarmBusEvent = {
     id: crypto.randomUUID(),
     name,
     data,
@@ -135,7 +177,7 @@ export function recordSwarmEvent(name: string, data: unknown): SwarmEvent {
   return event;
 }
 
-export function getSwarmEventById(id: string): SwarmEvent | null {
+export function getSwarmBusEventById(id: string): SwarmBusEvent | null {
   const row = getDb().prepare("SELECT * FROM swarm_events WHERE id = ?").get(id) as {
     id: string;
     name: string;
@@ -273,4 +315,34 @@ export function listDeliveriesForSubscription(
     )
     .all(subscriptionId, limit) as DeliveryRow[];
   return rows.map(rowToDelivery);
+}
+
+/**
+ * Journal retention: prune finished deliveries (succeeded after 14 days,
+ * failed after 30) and swarm_events rows that no delivery references anymore.
+ * Called opportunistically from the dispatcher (~hourly).
+ */
+export function pruneSubscriptionJournal(now = new Date()): {
+  deliveries: number;
+  events: number;
+} {
+  const iso = (daysAgo: number) => new Date(now.getTime() - daysAgo * 86_400_000).toISOString();
+  const db = getDb();
+  const deliveries =
+    db
+      .prepare(
+        `DELETE FROM subscription_deliveries
+         WHERE (status = 'succeeded' AND finishedAt < ?)
+            OR (status = 'failed' AND finishedAt < ?)`,
+      )
+      .run(iso(14), iso(30)).changes ?? 0;
+  const events =
+    db
+      .prepare(
+        `DELETE FROM swarm_events
+         WHERE emittedAt < ?
+           AND id NOT IN (SELECT eventId FROM subscription_deliveries)`,
+      )
+      .run(iso(30)).changes ?? 0;
+  return { deliveries, events };
 }

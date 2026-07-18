@@ -1,8 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getWorkflow } from "@/be/db";
+import { getAgentById, getWorkflow } from "@/be/db";
 import { getScript } from "@/be/scripts/db";
 import { createSubscription, getSubscriptionByName } from "@/be/subscriptions-db";
+import { can } from "@/rbac";
 import { validateEventPattern } from "@/subscriptions/matcher";
 import { SubscriptionSchema, SubscriptionTargetTypeSchema } from "@/subscriptions/types";
 import { createToolRegistrar } from "@/tools/utils";
@@ -68,6 +69,17 @@ export const registerCreateSubscriptionTool = (server: McpServer) => {
     },
     async (args, requestInfo) => {
       try {
+        const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
+        if (!callerAgent) throw new Error('Agent not found. Set the "X-Agent-ID" header.');
+        const decision = can({
+          principal: { kind: "agent", agentId: callerAgent.id, isLead: callerAgent.isLead },
+          verb: "subscription.write",
+          source: "mcp",
+        });
+        if (!decision.allow) {
+          throw new Error(`Not allowed: ${decision.reason ?? "subscription.write"}`);
+        }
+
         const patternError = validateEventPattern(args.eventPattern);
         if (patternError) throw new Error(patternError);
         if (args.targetType === "script") {

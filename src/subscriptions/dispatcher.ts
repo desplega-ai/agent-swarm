@@ -10,9 +10,10 @@ import {
   createDelivery,
   finishDelivery,
   getSubscriptionById,
-  getSwarmEventById,
+  getSwarmBusEventById,
   listSubscriptions,
-  recordSwarmEvent,
+  pruneSubscriptionJournal,
+  recordSwarmBusEvent,
 } from "@/be/subscriptions-db";
 import { runScript } from "@/scripts-runtime/loader";
 import { getExecutorRegistry as getWorkflowExecutorRegistry } from "@/workflows";
@@ -21,7 +22,7 @@ import { workflowEventBus } from "@/workflows/event-bus";
 import type { ExecutorRegistry } from "@/workflows/executors/registry";
 import { matchesFilter } from "@/workflows/wait-filter";
 import { matchesEventPattern } from "./matcher";
-import type { Subscription, SwarmEvent } from "./types";
+import type { Subscription, SwarmBusEvent } from "./types";
 
 // SPIKE (extension system, Layer 1): event → subscription dispatch.
 //
@@ -38,6 +39,9 @@ import type { Subscription, SwarmEvent } from "./types";
 const MAX_ATTEMPTS = 3;
 const CLAIM_BATCH_SIZE = 5;
 const SCRIPT_TIMEOUT_MS = 60_000;
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+
+let lastPruneAt = 0;
 
 let tapInstalled = false;
 let dispatcherTimer: ReturnType<typeof setInterval> | null = null;
@@ -71,7 +75,7 @@ async function captureEvent(name: string, data: unknown): Promise<void> {
   }
   if (matching.length === 0) return;
 
-  const event = recordSwarmEvent(name, data);
+  const event = recordSwarmBusEvent(name, data);
   for (const sub of matching) {
     createDelivery(sub.id, event.id);
   }
@@ -89,7 +93,7 @@ export function initSubscriptions(): void {
   tapInstalled = true;
 }
 
-async function executeScriptTarget(sub: Subscription, event: SwarmEvent): Promise<unknown> {
+async function executeScriptTarget(sub: Subscription, event: SwarmBusEvent): Promise<unknown> {
   if (!sub.scriptName) {
     throw new Error(`Subscription "${sub.name}" has no scriptName (targetType=script)`);
   }
@@ -122,7 +126,7 @@ async function executeScriptTarget(sub: Subscription, event: SwarmEvent): Promis
   return { scriptName: sub.scriptName, exitCode: output.exitCode };
 }
 
-async function executeWorkflowTarget(sub: Subscription, event: SwarmEvent): Promise<unknown> {
+async function executeWorkflowTarget(sub: Subscription, event: SwarmBusEvent): Promise<unknown> {
   if (!sub.workflowId) {
     throw new Error(`Subscription "${sub.name}" has no workflowId (targetType=workflow)`);
   }
@@ -152,10 +156,19 @@ async function executeWorkflowTarget(sub: Subscription, event: SwarmEvent): Prom
 
 /** Exported for tests: one dispatcher tick. Returns number of processed rows. */
 export async function processPendingDeliveries(limit = CLAIM_BATCH_SIZE): Promise<number> {
+  if (Date.now() - lastPruneAt > PRUNE_INTERVAL_MS) {
+    lastPruneAt = Date.now();
+    const pruned = pruneSubscriptionJournal();
+    if (pruned.deliveries || pruned.events) {
+      console.log(
+        `[Subscriptions] Pruned ${pruned.deliveries} deliveries, ${pruned.events} events`,
+      );
+    }
+  }
   const claimed = claimPendingDeliveries(limit);
   for (const delivery of claimed) {
     const sub = getSubscriptionById(delivery.subscriptionId);
-    const event = getSwarmEventById(delivery.eventId);
+    const event = getSwarmBusEventById(delivery.eventId);
     if (!sub || !event) {
       finishDelivery(delivery.id, {
         status: "failed",

@@ -1727,6 +1727,21 @@ Remove a skill from an agent.
 | `skillId` | `string` | Yes | - | ID of the skill to uninstall |
 | `agentId` | `string` | No | - | Target agent (default: calling agent) |
 
+### patch-subscription
+
+**Patch Event Subscription**
+
+Update fields of an event subscription: pause/resume (enabled), description, eventPattern, filter, or scriptArgs. Target (script/workflow) is immutable — delete and recreate to retarget.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | Yes | - | Subscription name to patch |
+| `description` | `string` | No | - | - |
+| `eventPattern` | `string` | No | - | - |
+| `filter` | `unknown` | No | - | New payload filter; pass null to clear |
+| `scriptArgs` | `unknown` | No | - | New extra script args; pass null to clear |
+| `enabled` | `boolean` | No | - | false pauses the subscription |
+
 ### list-subscriptions
 
 **List Event Subscriptions**

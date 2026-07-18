@@ -81,6 +81,8 @@ export interface SwarmSdk {
   repo_list(args?: Record<string, unknown>): Promise<unknown>;
   // --- schedules ---
   schedule_list(args?: Record<string, unknown>): Promise<unknown>;
+  // --- subscriptions ---
+  subscription_list(args?: { enabledOnly?: boolean; includeDeliveries?: boolean }): Promise<unknown>;
   // --- scripts ---
   script_search(args: { query?: string; scope?: ScriptScope; limit?: number }): Promise<unknown>;
   script_run(args: { name?: string; source?: string; args?: unknown; intent?: string; scope?: ScriptScope; fsMode?: ScriptFsMode; idempotencyKey?: string }): Promise<unknown>;
@@ -165,8 +167,14 @@ export interface SwarmSdk {
   // --- write: schedules ---
   schedule_create(args: Record<string, unknown>): Promise<unknown>;
   schedule_update(args: Record<string, unknown>): Promise<unknown>;
+  schedule_patch(args: Record<string, unknown>): Promise<unknown>;
   schedule_delete(args: { id: string }): Promise<unknown>;
   schedule_runNow(args: { id: string }): Promise<unknown>;
+
+  // --- write: subscriptions ---
+  subscription_create(args: { name: string; eventPattern: string; targetType: "script" | "workflow"; scriptName?: string; scriptArgs?: Record<string, unknown>; workflowId?: string; filter?: unknown; description?: string; enabled?: boolean }): Promise<unknown>;
+  subscription_patch(args: { name: string; description?: string; eventPattern?: string; filter?: unknown; scriptArgs?: Record<string, unknown> | null; enabled?: boolean }): Promise<unknown>;
+  subscription_delete(args: { name: string }): Promise<unknown>;
 
   // --- write: workflows ---
   workflow_create(args: Record<string, unknown>): Promise<unknown>;

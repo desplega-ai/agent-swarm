@@ -221,6 +221,10 @@ export const PERMISSIONS = {
     description: "Delete an external script API endpoint.",
     namespace: "script",
   },
+  "subscription.write": {
+    description: "Create, modify, pause, or delete event subscriptions.",
+    namespace: "subscription",
+  },
 } as const satisfies Record<string, { description: string; namespace: string }>;
 
 export type PermissionVerb = keyof typeof PERMISSIONS;

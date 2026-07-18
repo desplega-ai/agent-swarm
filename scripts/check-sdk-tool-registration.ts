@@ -31,9 +31,6 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   "skill-install-remote": "admin-only remote skill management",
   "skill-sync-remote": "admin-only remote skill management",
   "swarm_x": "external command router — dispatches to third-party services",
-  "create-subscription": "extension-system spike — SDK exposure deferred until subscriptions design settles",
-  "list-subscriptions": "extension-system spike — SDK exposure deferred until subscriptions design settles",
-  "delete-subscription": "extension-system spike — SDK exposure deferred until subscriptions design settles",
 };
 
 const sdkToolNames = new Set(Object.values(SDK_TOOL_NAME_MAP));

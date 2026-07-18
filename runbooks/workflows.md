@@ -265,16 +265,19 @@ For `task.completed` specifically, the canonical payload shape lives in `src/be/
 
 ### What's NOT yet on the bus
 
+Now on the bus (in addition to the table above): Slack messages (`slack.message`, `src/slack/handlers.ts`), Linear webhooks (`linear.<type>.<action>`, e.g. `linear.issue.update` — `src/linear/webhook.ts`), and Jira webhooks (`jira.<event>` with the `jira:` prefix stripped, e.g. `jira.issue_updated` — `src/jira/webhook.ts`).
+
 The following sources do **not** currently emit on `workflowEventBus`. Hooking each one in is a one-line `workflowEventBus.emit(name, payload)` follow-up in the relevant handler — tracked as separate plans:
 
-- Slack messages (`src/slack/`)
-- Linear webhooks (`src/linear/`, `src/http/trackers/linear.ts`)
-- Jira webhooks (`src/jira/`, `src/http/trackers/jira.ts`)
 - Sentry alerts
 - Stripe events
 - Claude-managed callbacks
 
 Until those land, fire signals manually via the HTTP endpoints above.
+
+### Event subscriptions
+
+Beyond in-run `wait` nodes, standing bindings live in the `subscriptions` table (`create-subscription` / `list-subscriptions` / `patch-subscription` / `delete-subscription` MCP tools, or `swarm.subscription_*` from scripts): an event-name glob (`*` = one segment, `**` = rest) plus optional wait-filter-language payload filter, targeting a global catalog script (event injected as `args.event`) or a workflow (trigger data `{ event, subscriptionId, subscriptionName }`, `triggerType: "subscription"`). Delivery is at-least-once via the `subscription_deliveries` outbox (3 attempts, journal pruned after 14/30 days). See `src/subscriptions/`.
 
 ### Filters (event mode)
 

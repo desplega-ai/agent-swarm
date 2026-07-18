@@ -18,7 +18,9 @@ import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import {
   createSubscription,
   getDeliveryById,
+  getSubscriptionById,
   listDeliveriesForSubscription,
+  updateSubscription,
 } from "../be/subscriptions-db";
 import {
   initSubscriptions,
@@ -161,6 +163,38 @@ describe("event pattern matcher", () => {
     expect(validateEventPattern("a..b")).not.toBeNull();
     expect(validateEventPattern("a.**.b")).not.toBeNull();
     expect(validateEventPattern("task.foo*")).not.toBeNull();
+  });
+});
+
+describe("updateSubscription", () => {
+  test("patches fields, clears filter with null, pauses via enabled", async () => {
+    await saveGlobalScript(
+      "sub-patch-fixture",
+      `export default async function run() { return { ok: true }; }`,
+    );
+    const sub = createSubscription({
+      name: `patch-${crypto.randomUUID()}`,
+      eventPattern: "patchtest.*",
+      filter: { a: 1 },
+      targetType: "script",
+      scriptName: "sub-patch-fixture",
+      createdByAgentId: agentId,
+    });
+
+    const updated = updateSubscription(sub.id, {
+      eventPattern: "patchtest.**",
+      filter: null,
+      enabled: false,
+      description: "paused",
+    });
+    expect(updated?.eventPattern).toBe("patchtest.**");
+    expect(updated?.filter).toBeUndefined();
+    expect(updated?.enabled).toBe(false);
+    expect(updated?.description).toBe("paused");
+
+    // no-op patch returns current row unchanged
+    expect(updateSubscription(sub.id, {})?.eventPattern).toBe("patchtest.**");
+    expect(getSubscriptionById(sub.id)?.enabled).toBe(false);
   });
 });
 

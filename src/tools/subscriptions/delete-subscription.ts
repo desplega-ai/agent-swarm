@@ -1,6 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { getAgentById } from "@/be/db";
 import { deleteSubscription, getSubscriptionByName } from "@/be/subscriptions-db";
+import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerDeleteSubscriptionTool = (server: McpServer) => {
@@ -20,6 +22,22 @@ export const registerDeleteSubscriptionTool = (server: McpServer) => {
       }),
     },
     async (args, requestInfo) => {
+      const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
+      const decision = callerAgent
+        ? can({
+            principal: { kind: "agent", agentId: callerAgent.id, isLead: callerAgent.isLead },
+            verb: "subscription.write",
+            source: "mcp",
+          })
+        : { allow: false as const, reason: "agent not found" };
+      if (!decision.allow) {
+        const message = `Not allowed: ${"reason" in decision ? decision.reason : "subscription.write"}`;
+        return {
+          content: [{ type: "text", text: message }],
+          structuredContent: { yourAgentId: requestInfo.agentId, success: false, message },
+        };
+      }
+
       const sub = getSubscriptionByName(args.name);
       if (!sub) {
         return {

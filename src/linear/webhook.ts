@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { workflowEventBus } from "../workflows/event-bus";
 import {
   handleAgentSessionEvent,
   handleAgentSessionPrompted,
@@ -90,6 +91,13 @@ export async function handleLinearWebhook(
 
   // 3. Parse and dispatch
   const event = JSON.parse(rawBody) as Record<string, unknown>;
+
+  // Surface on the workflow event bus (wait nodes + subscriptions),
+  // e.g. "linear.issue.update", "linear.comment.create".
+  workflowEventBus.emit(
+    `linear.${String(event.type ?? "unknown").toLowerCase()}.${String(event.action ?? "unknown")}`,
+    event,
+  );
 
   // Fire-and-forget for heavy work
   processWebhookEvent(event, deliveryId ?? undefined).catch((err) => {

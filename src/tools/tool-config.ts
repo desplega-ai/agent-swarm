@@ -47,9 +47,10 @@ export const DEFERRED_TOOLS = new Set([
   "delete-schedule",
   "run-schedule-now",
 
-  // Event subscriptions (3) — extension-system spike
+  // Event subscriptions (4)
   "create-subscription",
   "list-subscriptions",
+  "patch-subscription",
   "delete-subscription",
 
   // Workflows (11)

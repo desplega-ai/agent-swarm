@@ -121,6 +121,7 @@ import {
   registerCreateSubscriptionTool,
   registerDeleteSubscriptionTool,
   registerListSubscriptionsTool,
+  registerPatchSubscriptionTool,
 } from "./tools/subscriptions";
 // Swarm config tools
 import {
@@ -356,6 +357,7 @@ export function createServer(opts: { scriptsOnly?: boolean } = {}) {
   // Event subscriptions (extension-system spike): event → script/workflow bindings
   registerCreateSubscriptionTool(server);
   registerListSubscriptionsTool(server);
+  registerPatchSubscriptionTool(server);
   registerDeleteSubscriptionTool(server);
 
   // Memory capability - persistent memory with vector search
