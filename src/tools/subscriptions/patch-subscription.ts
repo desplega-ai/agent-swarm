@@ -47,15 +47,20 @@ export const registerPatchSubscriptionTool = (server: McpServer) => {
 
       const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
       if (!callerAgent) return fail('Agent not found. Set the "X-Agent-ID" header.');
-      const decision = can({
-        principal: { kind: "agent", agentId: callerAgent.id, isLead: callerAgent.isLead },
-        verb: "subscription.write",
-        source: "mcp",
-      });
-      if (!decision.allow) return fail(`Not allowed: ${decision.reason ?? "subscription.write"}`);
 
       const sub = getSubscriptionByName(args.name);
       if (!sub) return fail(`Subscription '${args.name}' not found`);
+
+      // Lead or the creating agent may mutate (mirrors task.cancel.any's shape).
+      const decision = can({
+        principal: { kind: "agent", agentId: callerAgent.id, isLead: callerAgent.isLead },
+        verb: "subscription.mutate.any",
+        resource: { kind: "owned", ownerAgentId: sub.createdByAgentId ?? null },
+        source: "mcp",
+      });
+      if (!decision.allow) {
+        return fail(`Not allowed: ${decision.reason ?? "subscription.mutate.any"}`);
+      }
       if (args.eventPattern !== undefined) {
         const patternError = validateEventPattern(args.eventPattern);
         if (patternError) return fail(patternError);

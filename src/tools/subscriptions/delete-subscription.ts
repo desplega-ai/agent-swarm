@@ -22,32 +22,26 @@ export const registerDeleteSubscriptionTool = (server: McpServer) => {
       }),
     },
     async (args, requestInfo) => {
+      const fail = (message: string) => ({
+        content: [{ type: "text" as const, text: message }],
+        structuredContent: { yourAgentId: requestInfo.agentId, success: false, message },
+      });
+
       const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
-      const decision = callerAgent
-        ? can({
-            principal: { kind: "agent", agentId: callerAgent.id, isLead: callerAgent.isLead },
-            verb: "subscription.write",
-            source: "mcp",
-          })
-        : { allow: false as const, reason: "agent not found" };
-      if (!decision.allow) {
-        const message = `Not allowed: ${"reason" in decision ? decision.reason : "subscription.write"}`;
-        return {
-          content: [{ type: "text", text: message }],
-          structuredContent: { yourAgentId: requestInfo.agentId, success: false, message },
-        };
-      }
+      if (!callerAgent) return fail('Agent not found. Set the "X-Agent-ID" header.');
 
       const sub = getSubscriptionByName(args.name);
-      if (!sub) {
-        return {
-          content: [{ type: "text", text: `Subscription '${args.name}' not found` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Subscription '${args.name}' not found`,
-          },
-        };
+      if (!sub) return fail(`Subscription '${args.name}' not found`);
+
+      // Lead or the creating agent may delete (mirrors task.cancel.any's shape).
+      const decision = can({
+        principal: { kind: "agent", agentId: callerAgent.id, isLead: callerAgent.isLead },
+        verb: "subscription.mutate.any",
+        resource: { kind: "owned", ownerAgentId: sub.createdByAgentId ?? null },
+        source: "mcp",
+      });
+      if (!decision.allow) {
+        return fail(`Not allowed: ${decision.reason ?? "subscription.mutate.any"}`);
       }
       deleteSubscription(sub.id);
       return {

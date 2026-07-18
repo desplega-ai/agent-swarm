@@ -222,7 +222,11 @@ export const PERMISSIONS = {
     namespace: "script",
   },
   "subscription.write": {
-    description: "Create, modify, pause, or delete event subscriptions.",
+    description: "Create event subscriptions.",
+    namespace: "subscription",
+  },
+  "subscription.mutate.any": {
+    description: "Modify, pause, or delete event subscriptions beyond the caller's own.",
     namespace: "subscription",
   },
   "tool.publish": {
