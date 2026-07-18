@@ -114,3 +114,36 @@ evaluator for operator-installed hooks only. Recommendation: (b) for v1,
 3. SDK exposure (`subscription_create` et al.) so agents/scripts self-serve.
 4. Journal retention policy + events HTTP listing for the UI.
 5. Then Layer 3 (script-backed tools) — independent of all of the above.
+
+## Update 2026-07-18 (later): promotion + Layer 3 DONE on this branch
+
+Steps 1–4 above shipped in `d9da8556`, Layer 3 in `340e80b2`:
+
+- **Promotion (`d9da8556`)**: `subscription.write` verb (anyAuthenticated) gating
+  create/patch/delete; new `patch-subscription` tool (pause/resume, pattern,
+  filter, args); schemas hoisted to `src/types.ts` (renamed `SwarmBusEvent` —
+  `SwarmEventSchema` was taken by the telemetry `events` table from the
+  2026-03-25 plan, which SHIPPED — worth evaluating as the long-term journal
+  substrate); `subscription_create/list/patch/delete` in the scripts SDK
+  (+ regenerated d.ts, healing pre-existing `schedule_patch` drift where the
+  generated file had been hand-edited); Linear (`linear.<type>.<action>`) and
+  Jira (`jira.<event>`) now emit on the bus (Slack already emitted
+  `slack.message` — runbook list was stale); hourly journal prune
+  (succeeded 14d / failed 30d / orphan events 30d).
+- **Layer 3 (`340e80b2`)**: `script_tools` table (migration 118); lead-gated
+  `script-tools` management tool (`tool.publish` verb, leadOnly); dynamic
+  registration in `createServer()` — per-session, so published tools appear on
+  next MCP session; input passthrough with the script's `argsJsonSchema` in
+  the description, script-side Zod as the validation boundary; shared
+  `runGlobalScriptByName()` helper (dispatcher refactored onto it; scheduler
+  still has its older copy — small follow-up).
+
+All gates green after both commits: full `bun test` (6285 ran, 0 fail),
+rbac-coverage (53 verbs), db-boundary, sdk-tool-registration, dep-graph,
+lint, tsc, MCP.md + swarm-sdk.d.ts regenerated, migrations 117+118 verified
+fresh + existing.
+
+**Remaining before merge to main**: manual E2E against a live server; decide
+whether `swarm_events` should fold into the existing telemetry `events` table;
+UI surface for subscriptions/deliveries/script-tools; docs-site page. Layers
+2 (hook points) and 4 (pack manifest) are unbuilt — next design checkpoints.
