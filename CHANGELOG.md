@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.119.4] - 2026-07-19
+
+### Changed
+- **Daily release metadata now reflects the v1.119.3 documentation release** (#979) — package, chart, OpenAPI, and generated API-reference versions advance together for the patch release.
+
 ## [1.119.3] - 2026-07-18
 
 ### Fixed
