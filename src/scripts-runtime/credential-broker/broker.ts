@@ -1,4 +1,9 @@
-import type { CredentialBinding, CredentialBindingStore, CredentialResolver } from "./types";
+import type {
+  CredentialBinding,
+  CredentialBindingStore,
+  CredentialResolver,
+  OAuthCredentialResolver,
+} from "./types";
 import { placeholderForConfigKey, type ResolvedCredentialBinding } from "./types";
 
 function bindingHasPlaceholder(binding: CredentialBinding) {
@@ -12,11 +17,12 @@ function bindingHasPlaceholder(binding: CredentialBinding) {
 export class CredentialBroker {
   constructor(
     private readonly store: CredentialBindingStore,
-    private readonly resolveCredential: CredentialResolver,
+    private readonly resolveConfigCredential: CredentialResolver,
     private readonly defaults: CredentialBinding[] = [],
+    private readonly resolveOAuthCredential?: OAuthCredentialResolver,
   ) {}
 
-  resolveBindings(context: Parameters<CredentialBindingStore["listActiveBindings"]>[0]) {
+  async resolveBindings(context: Parameters<CredentialBindingStore["listActiveBindings"]>[0]) {
     const merged = [...this.defaults, ...this.store.listActiveBindings(context)];
     const resolved: ResolvedCredentialBinding[] = [];
     const seen = new Set<string>();
@@ -25,7 +31,12 @@ export class CredentialBroker {
       if (binding.active === false) continue;
       if (!bindingHasPlaceholder(binding)) continue;
 
-      const value = this.resolveCredential(binding.configKey);
+      const isOAuthBinding = binding.authKind === "oauth" || Boolean(binding.oauthProvider);
+      const value = isOAuthBinding
+        ? binding.oauthProvider
+          ? await this.resolveOAuthCredential?.(binding.oauthProvider)
+          : undefined
+        : this.resolveConfigCredential(binding.configKey);
       if (!value) continue;
 
       const dedupeKey = [

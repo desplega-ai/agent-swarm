@@ -36,7 +36,7 @@ export type RunScriptOutput = Omit<ExecutorOutput, "result" | "stdout" | "stderr
 
 export type { ScriptRuntimeError, ScriptStackFrame } from "./executors/types";
 
-function buildConfigPayload(input: RunScriptInput): SwarmConfigPayload {
+async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPayload> {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error("Swarm API key is required to run scripts");
 
@@ -50,7 +50,7 @@ function buildConfigPayload(input: RunScriptInput): SwarmConfigPayload {
       },
     },
     user: input.userConfig ?? {},
-    egressSecrets: input.egressSecrets ?? buildEgressSecrets(),
+    egressSecrets: input.egressSecrets ?? (await buildEgressSecrets()),
     apiConnections: input.apiConnections ?? [],
     mcpConnections: input.mcpConnections ?? [],
   };
@@ -91,7 +91,7 @@ export async function runScript(input: RunScriptInput): Promise<RunScriptOutput>
   const output = await getScriptExecutor().run({
     source: input.source,
     args: input.args ?? null,
-    configPayload: buildConfigPayload(input),
+    configPayload: await buildConfigPayload(input),
     resources,
     fsMode: input.fsMode ?? "none",
     network: "open",

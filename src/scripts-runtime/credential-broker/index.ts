@@ -11,6 +11,7 @@ export {
   type CredentialBindingStoreContext,
   CredentialBindingsDocumentSchema,
   type CredentialResolver,
+  type OAuthCredentialResolver,
   normalizeCredentialBindingsDocument,
   placeholderForConfigKey,
   type ResolvedCredentialBinding,
