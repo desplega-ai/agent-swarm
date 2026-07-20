@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import { deleteSwarmConfig, upsertSwarmConfig } from "../be/db";
 import { buildScriptCredentialBindings } from "../be/script-credential-broker";
+import { createApiRegistryClient } from "../scripts-runtime/api-client";
 import {
   CREDENTIAL_BINDINGS_CONFIG_KEY,
   type CredentialBindingStore,
@@ -119,7 +120,7 @@ describe("credential broker", () => {
     );
   });
 
-  test("resolves seeded GITHUB_TOKEN binding", () => {
+  test("resolves seeded GITHUB_TOKEN binding", async () => {
     const emptyStore: CredentialBindingStore = { listActiveBindings: () => [] };
     const broker = new CredentialBroker(
       emptyStore,
@@ -127,7 +128,7 @@ describe("credential broker", () => {
       DEFAULT_CREDENTIAL_BINDINGS,
     );
 
-    expect(broker.resolveBindings({})).toEqual([
+    expect(await broker.resolveBindings({})).toEqual([
       {
         configKey: "GITHUB_TOKEN",
         allowedHosts: ["api.github.com"],
@@ -138,6 +139,132 @@ describe("credential broker", () => {
         authKind: "config",
         placeholder: "[REDACTED:GITHUB_TOKEN]",
         value: "ghp_test",
+      },
+    ]);
+  });
+
+  test("resolves OAuth bindings with the OAuth resolver and substitutes their header", async () => {
+    const oauthResolver = mock(async (provider: string) =>
+      provider === "gmailSupport" ? "gmail-access-token" : undefined,
+    );
+    const broker = new CredentialBroker(
+      {
+        listActiveBindings: () => [
+          {
+            configKey: "GMAIL_SUPPORT_OAUTH_BINDING",
+            allowedHosts: ["gmail.googleapis.com"],
+            headerTemplate: "Authorization: Bearer [REDACTED:GMAIL_SUPPORT_OAUTH_BINDING]",
+            scope: "global",
+            scopeId: null,
+            active: true,
+            authKind: "oauth",
+            oauthProvider: "gmailSupport",
+          },
+        ],
+      },
+      () => {
+        throw new Error("config resolver must not be used for OAuth bindings");
+      },
+      [],
+      oauthResolver,
+    );
+    const bindings = await broker.resolveBindings({});
+
+    expect(oauthResolver).toHaveBeenCalledWith("gmailSupport");
+    let authorization: string | null = null;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      authorization = new Headers(init?.headers).get("authorization");
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    patchFetchWithCredentialBroker(bindings);
+
+    await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+      headers: { Authorization: "Bearer [REDACTED:GMAIL_SUPPORT_OAUTH_BINDING]" },
+    });
+
+    expect(authorization).toBe("Bearer gmail-access-token");
+  });
+
+  test("resolved OAuth bindings also authenticate ctx.api clients", async () => {
+    let authorization: string | null = null;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      authorization = new Headers(init?.headers).get("authorization");
+      return Response.json({ data: { ok: true } });
+    }) as typeof fetch;
+    const broker = new CredentialBroker(
+      {
+        listActiveBindings: () => [
+          {
+            configKey: "GMAIL_SUPPORT_OAUTH_BINDING",
+            allowedHosts: ["gmail.googleapis.com"],
+            headerTemplate: "Authorization: Bearer [REDACTED:GMAIL_SUPPORT_OAUTH_BINDING]",
+            scope: "global",
+            scopeId: null,
+            active: true,
+            authKind: "oauth",
+            oauthProvider: "gmailSupport",
+          },
+        ],
+      },
+      () => undefined,
+      [],
+      async () => "gmail-access-token",
+    );
+    patchFetchWithCredentialBroker(await broker.resolveBindings({}));
+    const api = createApiRegistryClient([
+      {
+        slug: "gmailSupport",
+        kind: "graphql",
+        baseUrl: "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+        credential: {
+          configKey: "GMAIL_SUPPORT_OAUTH_BINDING",
+          headerTemplate: "Authorization: Bearer [REDACTED:GMAIL_SUPPORT_OAUTH_BINDING]",
+        },
+      },
+    ]);
+
+    await api.gmailSupport.graphql("query { me { id } }");
+
+    expect(authorization).toBe("Bearer gmail-access-token");
+  });
+
+  test("resolves config bindings via the config resolver even when oauthProvider metadata is present", async () => {
+    const oauthResolver = mock(async () => "should-not-be-used");
+    const broker = new CredentialBroker(
+      {
+        listActiveBindings: () => [
+          {
+            configKey: "VENDOR_CONFIG_KEY",
+            allowedHosts: ["api.vendor.test"],
+            headerTemplate: "Authorization: Bearer [REDACTED:VENDOR_CONFIG_KEY]",
+            scope: "global",
+            scopeId: null,
+            active: true,
+            authKind: "config",
+            oauthProvider: "vendorProvider",
+          },
+        ],
+      },
+      (key) => (key === "VENDOR_CONFIG_KEY" ? "vendor-config-value" : undefined),
+      [],
+      oauthResolver,
+    );
+
+    const bindings = await broker.resolveBindings({});
+
+    expect(oauthResolver).not.toHaveBeenCalled();
+    expect(bindings).toEqual([
+      {
+        configKey: "VENDOR_CONFIG_KEY",
+        allowedHosts: ["api.vendor.test"],
+        headerTemplate: "Authorization: Bearer [REDACTED:VENDOR_CONFIG_KEY]",
+        scope: "global",
+        scopeId: null,
+        active: true,
+        authKind: "config",
+        oauthProvider: "vendorProvider",
+        placeholder: "[REDACTED:VENDOR_CONFIG_KEY]",
+        value: "vendor-config-value",
       },
     ]);
   });

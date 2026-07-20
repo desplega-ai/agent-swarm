@@ -25,38 +25,24 @@ export async function buildScriptCredentialBindings(input: {
 }): Promise<EgressSecretEntry[]> {
   const resolvedConfigs = getResolvedConfig(input.agentId, input.repoId);
   const configMap = new Map(resolvedConfigs.map((config) => [config.key, config.value]));
-  const relationalBindings = listRelationalCredentialBindings(input);
-  for (const binding of relationalBindings) {
-    if (binding.authKind !== "oauth") continue;
-    configMap.set(binding.configKey, "");
-    if (!binding.oauthProvider) continue;
-
-    let accessToken: string | undefined;
-    try {
-      accessToken = await resolveOAuthBindingToken(binding.oauthProvider);
-    } catch (err) {
-      // A stale/broken provider must not take down unrelated script runs —
-      // skip just this binding (the "" shadow above keeps the placeholder
-      // unresolved instead of falling through to a same-named config value).
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn(
-        `[script-credential-broker] skipping OAuth binding ${binding.configKey}: token refresh for provider ${binding.oauthProvider} failed: ${scrubSecrets(message)}`,
-      );
-      continue;
-    }
-    if (!accessToken) continue;
-
-    configMap.set(binding.configKey, accessToken);
-    registerVolatileSecret(accessToken, binding.configKey);
-  }
-
   const broker = new CredentialBroker(
     new RelationalCredentialBindingStore((filters) => getSwarmConfigs(filters)),
     (configKey) => configMap.get(configKey) ?? process.env[configKey],
     DEFAULT_CREDENTIAL_BINDINGS,
+    async (provider) => {
+      try {
+        return await resolveOAuthBindingToken(provider);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[script-credential-broker] skipping OAuth provider ${provider}: ${scrubSecrets(message)}`,
+        );
+        return undefined;
+      }
+    },
   );
 
-  const bindings = broker.resolveBindings({ agentId: input.agentId, repoId: input.repoId });
+  const bindings = await broker.resolveBindings({ agentId: input.agentId, repoId: input.repoId });
   for (const binding of bindings) {
     registerVolatileSecret(binding.value, binding.configKey);
   }

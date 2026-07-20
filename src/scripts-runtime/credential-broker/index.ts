@@ -12,6 +12,7 @@ export {
   CredentialBindingsDocumentSchema,
   type CredentialResolver,
   normalizeCredentialBindingsDocument,
+  type OAuthCredentialResolver,
   placeholderForConfigKey,
   type ResolvedCredentialBinding,
 } from "./types";

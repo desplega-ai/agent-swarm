@@ -51,6 +51,7 @@ export interface CredentialBindingStore {
 }
 
 export type CredentialResolver = (configKey: string) => string | undefined;
+export type OAuthCredentialResolver = (oauthProvider: string) => Promise<string | undefined>;
 
 export function placeholderForConfigKey(configKey: string): string {
   return `${REDACTED_PLACEHOLDER_PREFIX}${configKey}]`;

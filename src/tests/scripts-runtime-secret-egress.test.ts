@@ -49,9 +49,9 @@ describe("runtime secret egress", () => {
 
 describe("egress-substitution", () => {
   describe("buildEgressSecrets", () => {
-    test("includes GITHUB_TOKEN when set in env", () => {
+    test("includes GITHUB_TOKEN when set in env", async () => {
       process.env.GITHUB_TOKEN = "ghp_test1234567890abcdef";
-      const secrets = buildEgressSecrets();
+      const secrets = await buildEgressSecrets();
       expect(secrets).toEqual([
         {
           configKey: "GITHUB_TOKEN",
@@ -67,9 +67,9 @@ describe("egress-substitution", () => {
       ]);
     });
 
-    test("returns empty array when GITHUB_TOKEN not set", () => {
+    test("returns empty array when GITHUB_TOKEN not set", async () => {
       delete process.env.GITHUB_TOKEN;
-      const secrets = buildEgressSecrets();
+      const secrets = await buildEgressSecrets();
       expect(secrets).toEqual([]);
     });
   });
