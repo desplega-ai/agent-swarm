@@ -1,0 +1,32 @@
+---
+title: "Release Notes — Week of July 13-20, 2026"
+description: "A lighter scripts-only MCP deployment mode, plus reliability and observability improvements across agent-fs, evals, and self-hosted docs."
+---
+
+## Highlights
+
+### Run agent-swarm as a scripts-only MCP surface
+
+This week’s headline is a new, opt-in deployment mode for teams that want agent-swarm’s workflow and automation surface without running a full LLM agent. **Scripts-only mode** exposes the scripts and MCP capabilities needed to orchestrate work programmatically, making it a better fit for controlled operations, custom automation, and integrations where another system supplies the reasoning layer.
+
+The mode ships with a practical seed-script pack for common coordination tasks: delegating work, waiting for child tasks, completing tasks, reporting progress, collecting child outputs, and viewing the swarm. It also includes a dedicated `docker-compose.scripts-only.yml` configuration, gating tests, and a new scripts-only-mode guide. The feature is explicitly flag-gated, so existing agent deployments continue unchanged. [#969, `0200d26f`]
+
+The outcome is a leaner way to deploy the platform: use agent-swarm as an MCP and script execution layer when that is the right boundary, while keeping the full-agent runtime available for workloads that need it. Teams can begin with the packaged Compose configuration, then connect their own control plane or automation to the MCP surface. This keeps operational responsibilities explicit: scripts execute well-defined work, while the caller owns higher-level policy and reasoning. It is designed for environments where execution requirements are stable, repeatable, and subject to deliberate external control. Because the feature is opt-in, existing installations can evaluate this focused boundary alongside their current agent workflows and move individual automation cases only when the operational model is proven.
+
+## Improvements
+
+- **Safer shared-organization provisioning for agent-fs.** Shared-org invitations can now be seeded through a server-side endpoint, which simplifies agent-fs co-deployment and removes setup friction for teams bringing the two services up together. The accompanying co-deployment guide documents the supported path. [#978, `621352f6`]
+
+- **More operational guidance, closer to the release.** Three new docs guides cover scripts-only mode, the evals harness, and agent-fs co-deployment. The environment-variables reference was refreshed with the v1.119.0 release, helping operators find the current configuration surface without chasing implementation details. [#969, #977, #979, `ef84fdc8`, `ebba27fa`, `64784d14`]
+
+- **A steady patch-release cadence.** Versions **v1.119.0** through **v1.119.3** shipped during the week, with daily documentation and API-reference refreshes. This keeps the Helm chart, package metadata, OpenAPI description, and docs site aligned as the deployment surface evolves. [#973, #976, #977, #979]
+
+- **Release notes remain part of the product record.** Last week’s release notes were added to the docs site, making the ongoing changes easier to trace for operators and teams evaluating upgrades. [#970, `82f3db7b`]
+
+## Bug Fixes
+
+- **agent-fs recovers the correct provider after reload.** A reload now re-selects the configured filesystem provider instead of retaining an incorrect selection. This improves reliability for deployments that initialize or reconfigure agent-fs across process reloads. [#978, `621352f6`]
+
+- **Evaluation sandbox traffic no longer pollutes production telemetry.** Sandbox telemetry is now explicitly tagged as test data, so production metrics more accurately reflect real workloads and operational behavior. [#974, `6e4c43f0`]
+
+- **Self-hosted star-history assets generate correctly.** The README chart generation workflow and its light/dark assets were repaired, restoring a working project-health visualization for self-hosted users and contributors. [#975, `c551cb91`]
