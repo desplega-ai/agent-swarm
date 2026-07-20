@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.119.4] - 2026-07-20
+
+### Changed
+- **The documentation site now includes release notes for the week of 2026-07-20** (#982) — the weekly release summary captures the latest Agent Swarm changes and keeps the docs index current.
+
+### Fixed
+- **OAuth-backed script credential bindings now resolve through the credential broker** (#983) — `authKind: oauth` bindings use provider tokens instead of being rejected as missing config secrets.
+
 ## [1.119.3] - 2026-07-18
 
 ### Fixed
