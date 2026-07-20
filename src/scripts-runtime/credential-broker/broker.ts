@@ -31,12 +31,12 @@ export class CredentialBroker {
       if (binding.active === false) continue;
       if (!bindingHasPlaceholder(binding)) continue;
 
-      const isOAuthBinding = binding.authKind === "oauth" || Boolean(binding.oauthProvider);
-      const value = isOAuthBinding
-        ? binding.oauthProvider
-          ? await this.resolveOAuthCredential?.(binding.oauthProvider)
-          : undefined
-        : this.resolveConfigCredential(binding.configKey);
+      const value =
+        binding.authKind === "oauth"
+          ? binding.oauthProvider
+            ? await this.resolveOAuthCredential?.(binding.oauthProvider)
+            : undefined
+          : this.resolveConfigCredential(binding.configKey);
       if (!value) continue;
 
       const dedupeKey = [

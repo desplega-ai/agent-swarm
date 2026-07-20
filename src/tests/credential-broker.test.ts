@@ -228,6 +228,47 @@ describe("credential broker", () => {
     expect(authorization).toBe("Bearer gmail-access-token");
   });
 
+  test("resolves config bindings via the config resolver even when oauthProvider metadata is present", async () => {
+    const oauthResolver = mock(async () => "should-not-be-used");
+    const broker = new CredentialBroker(
+      {
+        listActiveBindings: () => [
+          {
+            configKey: "VENDOR_CONFIG_KEY",
+            allowedHosts: ["api.vendor.test"],
+            headerTemplate: "Authorization: Bearer [REDACTED:VENDOR_CONFIG_KEY]",
+            scope: "global",
+            scopeId: null,
+            active: true,
+            authKind: "config",
+            oauthProvider: "vendorProvider",
+          },
+        ],
+      },
+      (key) => (key === "VENDOR_CONFIG_KEY" ? "vendor-config-value" : undefined),
+      [],
+      oauthResolver,
+    );
+
+    const bindings = await broker.resolveBindings({});
+
+    expect(oauthResolver).not.toHaveBeenCalled();
+    expect(bindings).toEqual([
+      {
+        configKey: "VENDOR_CONFIG_KEY",
+        allowedHosts: ["api.vendor.test"],
+        headerTemplate: "Authorization: Bearer [REDACTED:VENDOR_CONFIG_KEY]",
+        scope: "global",
+        scopeId: null,
+        active: true,
+        authKind: "config",
+        oauthProvider: "vendorProvider",
+        placeholder: "[REDACTED:VENDOR_CONFIG_KEY]",
+        value: "vendor-config-value",
+      },
+    ]);
+  });
+
   test("registers resolved broker config values with the scrubber", async () => {
     const bindingsConfig = upsertSwarmConfig({
       scope: "global",
