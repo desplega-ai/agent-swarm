@@ -524,8 +524,18 @@ async function executeStep(
     requestedByUserId: options.requestedByUserId,
   };
 
-  const timeoutMs =
-    typeof node.config?.timeoutMs === "number" ? node.config.timeoutMs : DEFAULT_TIMEOUT_MS;
+  // Inline script nodes historically expose their wall-clock budget as
+  // `config.timeout`, while the workflow watchdog reads `config.timeoutMs` for
+  // every other executor. Keep the outer watchdog aligned with the script
+  // executor so a script configured for (for example) 90s is not killed by the
+  // engine's 30s default first.
+  const configuredTimeoutMs =
+    typeof node.config?.timeoutMs === "number"
+      ? node.config.timeoutMs
+      : node.type === "script" && typeof node.config?.timeout === "number"
+        ? node.config.timeout
+        : undefined;
+  const timeoutMs = configuredTimeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   let result: Awaited<ReturnType<typeof executor.run>>;
   try {

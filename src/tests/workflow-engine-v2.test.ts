@@ -18,6 +18,7 @@ import {
   type ExecutorResult,
 } from "../workflows/executors/base";
 import { ExecutorRegistry } from "../workflows/executors/registry";
+import { ScriptExecutor } from "../workflows/executors/script";
 import { resolveInputs } from "../workflows/input";
 
 const TEST_DB_PATH = "./test-workflow-engine-v2.sqlite";
@@ -398,6 +399,31 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       expect(run!.status).toBe("failed");
       expect(run!.error).toContain("timed out");
     }, 5_000); // Allow test up to 5s
+
+    test("inline script timeout also extends the workflow step watchdog", async () => {
+      const registry = createTestRegistry();
+      registry.register(new ScriptExecutor(mockDeps));
+      const def: WorkflowDefinition = {
+        nodes: [
+          {
+            id: "slow-script",
+            type: "script",
+            config: {
+              runtime: "bash",
+              script: "sleep 0.075; echo done",
+              timeout: 1_000,
+            },
+          },
+        ],
+      };
+
+      const workflow = makeWorkflow(def);
+      const runId = await startWorkflowExecution(workflow, {}, registry);
+
+      const run = getWorkflowRun(runId);
+      expect(run!.status).toBe("completed");
+      expect(getWorkflowRunStepsByRunId(runId)[0]?.output).toMatchObject({ stdout: "done" });
+    });
   });
 
   // ─── Validation ───────────────────────────────────────────

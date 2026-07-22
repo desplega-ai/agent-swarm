@@ -82,6 +82,14 @@ There are two script-oriented workflow nodes:
 - `script` runs inline `bash`, `ts`, or `python` source embedded directly in the workflow definition.
 - `swarm-script` runs a TypeScript script from the reusable swarm catalog (`scripts` table). Use this when the logic should be shared across agents or reused by multiple workflows.
 
+### `script` config
+
+- `runtime` (required): `bash`, `ts`, or `python`.
+- `script` (required): inline source to execute.
+- `args`: optional string arguments passed to the script.
+- `cwd`: optional working directory.
+- `timeout`: optional wall-clock timeout in milliseconds, minimum `1000`; defaults to `30000`. This value applies to both the inline script executor and the workflow step watchdog.
+
 ### `swarm-script` config
 
 - `scriptName` (required): catalog script name.
