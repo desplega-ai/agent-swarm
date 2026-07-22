@@ -15,11 +15,59 @@
  * Worker-safe: uses fetch() only, no bun:sqlite import.
  */
 
-import type { OAuthCredentials } from "@earendil-works/pi-ai";
+import {
+  InMemoryCredentialStore,
+  type OAuthCredential,
+  type OAuthCredentials,
+} from "@earendil-works/pi-ai";
+import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { getEnvApiKey } from "@earendil-works/pi-ai/compat";
-import { getOAuthApiKey } from "@earendil-works/pi-ai/oauth";
+import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { getValidCodexOAuth, persistCodexOAuth } from "../../providers/codex-oauth/storage.js";
 import { type CredentialKind, DEFAULT_MODEL, resolveModelString } from "./models.js";
+
+registerBunOAuthFlows();
+
+interface OAuthApiKeyResult {
+  apiKey: string;
+  newCredentials?: OAuthCredentials;
+}
+
+type OAuthApiKeyResolver = (
+  providerId: string,
+  credentials: Record<string, OAuthCredentials>,
+) => Promise<OAuthApiKeyResult | null>;
+
+/**
+ * Resolve provider-owned OAuth request auth through pi-ai's 0.81 Models API.
+ * The in-memory store lets Models perform its locked refresh and exposes any
+ * rotated credential so the swarm config store can persist it.
+ */
+const resolveOAuthApiKey: OAuthApiKeyResolver = async (providerId, credentials) => {
+  const input = credentials[providerId];
+  if (!input) return null;
+
+  const store = new InMemoryCredentialStore();
+  const initial: OAuthCredential = { ...input, type: "oauth" };
+  await store.modify(providerId, async () => initial);
+
+  const models = builtinModels({ credentials: store });
+  const resolved = await models.getAuth(providerId);
+  const apiKey = resolved?.auth.apiKey;
+  if (!apiKey) return null;
+
+  const current = await store.read(providerId);
+  const changed =
+    current?.type === "oauth" &&
+    (current.access !== initial.access ||
+      current.refresh !== initial.refresh ||
+      current.expires !== initial.expires);
+
+  return {
+    apiKey,
+    newCredentials: changed && current?.type === "oauth" ? current : undefined,
+  };
+};
 
 export type ResolvedCredential =
   | {
@@ -44,8 +92,8 @@ export interface ResolveCredentialOptions {
   callerTag?: string;
   /** Test injection: override the codex OAuth lookup. */
   _getValidCodexOAuth?: typeof getValidCodexOAuth;
-  /** Test injection: override pi-ai's OAuth-to-API-key resolution. */
-  _getOAuthApiKey?: typeof getOAuthApiKey;
+  /** Test injection: override pi-ai's provider-owned OAuth auth resolution. */
+  _getOAuthApiKey?: OAuthApiKeyResolver;
   /** Test injection: override pi-ai's env API key lookup. */
   _getEnvApiKey?: typeof getEnvApiKey;
   /** Test injection: override the persistCodexOAuth call. */
@@ -71,7 +119,7 @@ export async function resolveCredential(
   const env = opts.env ?? process.env;
   const getEnvKey = opts._getEnvApiKey ?? getEnvApiKey;
   const getCodex = opts._getValidCodexOAuth ?? getValidCodexOAuth;
-  const getOAuth = opts._getOAuthApiKey ?? getOAuthApiKey;
+  const getOAuth = opts._getOAuthApiKey ?? resolveOAuthApiKey;
   const persistCodex = opts._persistCodexOAuth ?? persistCodexOAuth;
 
   // 1. OpenRouter.

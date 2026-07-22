@@ -146,23 +146,23 @@ describe("AGENTS.md symlink management", () => {
 describe("Model name mapping", () => {
   // Test the shortname → full ID mapping logic that resolveModel uses
   const shortnames: Record<string, [string, string]> = {
-    opus: ["anthropic", "claude-opus-4-20250514"],
-    sonnet: ["anthropic", "claude-sonnet-4-20250514"],
+    opus: ["anthropic", "claude-opus-4-8"],
+    sonnet: ["anthropic", "claude-sonnet-5"],
     haiku: ["anthropic", "claude-haiku-4-5-20251001"],
   };
 
-  test("opus maps to anthropic/claude-opus-4-20250514", () => {
+  test("opus maps to anthropic/claude-opus-4-8", () => {
     const mapping = shortnames.opus;
     expect(mapping).toBeDefined();
     expect(mapping![0]).toBe("anthropic");
-    expect(mapping![1]).toBe("claude-opus-4-20250514");
+    expect(mapping![1]).toBe("claude-opus-4-8");
   });
 
-  test("sonnet maps to anthropic/claude-sonnet-4-20250514", () => {
+  test("sonnet maps to anthropic/claude-sonnet-5", () => {
     const mapping = shortnames.sonnet;
     expect(mapping).toBeDefined();
     expect(mapping![0]).toBe("anthropic");
-    expect(mapping![1]).toBe("claude-sonnet-4-20250514");
+    expect(mapping![1]).toBe("claude-sonnet-5");
   });
 
   test("haiku maps to anthropic/claude-haiku-4-5-20251001", () => {
@@ -178,11 +178,11 @@ describe("Model name mapping", () => {
   });
 
   test("provider/model-id format is parseable", () => {
-    const modelStr = "anthropic/claude-opus-4-20250514";
+    const modelStr = "anthropic/claude-opus-4-8";
     expect(modelStr.includes("/")).toBe(true);
     const [provider, modelId] = modelStr.split("/", 2);
     expect(provider).toBe("anthropic");
-    expect(modelId).toBe("claude-opus-4-20250514");
+    expect(modelId).toBe("claude-opus-4-8");
   });
 });
 
@@ -194,12 +194,12 @@ describe("resolveModel — OpenRouter reroute for anthropic shortnames", () => {
   // anthropic provider only checks ANTHROPIC_OAUTH_TOKEN / ANTHROPIC_API_KEY.
   // The adapter now reroutes the shortname through the OpenRouter mirror.
 
-  test("sonnet → openrouter/anthropic/claude-sonnet-4 when only OPENROUTER_API_KEY is set", () => {
+  test("sonnet → openrouter/anthropic/claude-sonnet-5 when only OPENROUTER_API_KEY is set", () => {
     const env = { OPENROUTER_API_KEY: "sk-or-..." };
     const model = resolveModel("sonnet", env);
     expect(model).toBeDefined();
     expect(model?.provider).toBe("openrouter");
-    expect(model?.id).toBe("anthropic/claude-sonnet-4");
+    expect(model?.id).toBe("anthropic/claude-sonnet-5");
   });
 
   test("haiku → openrouter/anthropic/claude-haiku-4.5 when only OPENROUTER_API_KEY is set", () => {
@@ -210,12 +210,12 @@ describe("resolveModel — OpenRouter reroute for anthropic shortnames", () => {
     expect(model?.id).toBe("anthropic/claude-haiku-4.5");
   });
 
-  test("opus → openrouter/anthropic/claude-opus-4 when only OPENROUTER_API_KEY is set", () => {
+  test("opus → openrouter/anthropic/claude-opus-4.8 when only OPENROUTER_API_KEY is set", () => {
     const env = { OPENROUTER_API_KEY: "sk-or-..." };
     const model = resolveModel("opus", env);
     expect(model).toBeDefined();
     expect(model?.provider).toBe("openrouter");
-    expect(model?.id).toBe("anthropic/claude-opus-4");
+    expect(model?.id).toBe("anthropic/claude-opus-4.8");
   });
 
   test("anthropic native path wins when ANTHROPIC_API_KEY is set (even alongside OPENROUTER_API_KEY)", () => {
@@ -223,7 +223,7 @@ describe("resolveModel — OpenRouter reroute for anthropic shortnames", () => {
     const model = resolveModel("sonnet", env);
     expect(model).toBeDefined();
     expect(model?.provider).toBe("anthropic");
-    expect(model?.id).toBe("claude-sonnet-4-20250514");
+    expect(model?.id).toBe("claude-sonnet-5");
   });
 
   test("ANTHROPIC_OAUTH_TOKEN alone also wins over OPENROUTER reroute", () => {
@@ -237,7 +237,7 @@ describe("resolveModel — OpenRouter reroute for anthropic shortnames", () => {
     // Explicit provider prefix should not be silently swapped — that path is
     // the caller's explicit choice, surface as-is.
     const env = { OPENROUTER_API_KEY: "sk-or-..." };
-    const model = resolveModel("anthropic/claude-sonnet-4-20250514", env);
+    const model = resolveModel("anthropic/claude-sonnet-5", env);
     expect(model?.provider).toBe("anthropic");
   });
 
@@ -250,21 +250,29 @@ describe("resolveModel — OpenRouter reroute for anthropic shortnames", () => {
 
 describe("createPiRuntimeAuth", () => {
   test("threads resolved OpenRouter key into pi runtime auth without process.env", async () => {
-    const { modelRegistry } = createPiRuntimeAuth({ OPENROUTER_API_KEY: "sk-or-runtime" });
+    const modelRuntime = await createPiRuntimeAuth({ OPENROUTER_API_KEY: "sk-or-runtime" });
 
-    await expect(modelRegistry.getApiKeyForProvider("openrouter")).resolves.toBe("sk-or-runtime");
+    await expect(modelRuntime.getAuth("openrouter")).resolves.toMatchObject({
+      auth: { apiKey: "sk-or-runtime" },
+    });
   });
 
   test("supports all pi env-backed providers", async () => {
-    const { modelRegistry } = createPiRuntimeAuth({
+    const modelRuntime = await createPiRuntimeAuth({
       ANTHROPIC_API_KEY: "sk-ant-runtime",
       OPENAI_API_KEY: "sk-openai-runtime",
       GOOGLE_API_KEY: "sk-google-runtime",
     });
 
-    await expect(modelRegistry.getApiKeyForProvider("anthropic")).resolves.toBe("sk-ant-runtime");
-    await expect(modelRegistry.getApiKeyForProvider("openai")).resolves.toBe("sk-openai-runtime");
-    await expect(modelRegistry.getApiKeyForProvider("google")).resolves.toBe("sk-google-runtime");
+    await expect(modelRuntime.getAuth("anthropic")).resolves.toMatchObject({
+      auth: { apiKey: "sk-ant-runtime" },
+    });
+    await expect(modelRuntime.getAuth("openai")).resolves.toMatchObject({
+      auth: { apiKey: "sk-openai-runtime" },
+    });
+    await expect(modelRuntime.getAuth("google")).resolves.toMatchObject({
+      auth: { apiKey: "sk-google-runtime" },
+    });
   });
 });
 

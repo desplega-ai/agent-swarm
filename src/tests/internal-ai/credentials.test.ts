@@ -81,6 +81,28 @@ describe("resolveCredential", () => {
     }
   });
 
+  test("codex OAuth resolves through pi-ai's provider-owned auth runtime", async () => {
+    const cred = await resolveCredential({
+      env: {},
+      apiUrl: "http://localhost:3013",
+      apiKey: "test-api-key",
+      _getEnvApiKey: () => undefined,
+      _getValidCodexOAuth: async () => ({
+        access: "at_provider_runtime",
+        refresh: "rt_provider_runtime",
+        expires: Date.now() + 3600_000,
+        accountId: "acc-runtime",
+      }),
+      _persistCodexOAuth: async () => undefined,
+    });
+
+    expect(cred).toEqual({
+      kind: "openai-codex",
+      apiKey: "at_provider_runtime",
+      modelDefault: "openai-codex/gpt-5.4-mini",
+    });
+  });
+
   test("codex OAuth persists newCredentials when present", async () => {
     let persisted: { access: string; refresh: string; expires: number; accountId: string } | null =
       null;

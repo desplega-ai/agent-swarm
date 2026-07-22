@@ -20,11 +20,10 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
   type AgentSession,
-  AuthStorage,
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
-  ModelRegistry,
+  ModelRuntime,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { type TSchema, Type } from "typebox";
@@ -319,8 +318,8 @@ function mcpToolsToDefinitions(
  */
 const ANTHROPIC_SHORTNAME_OPENROUTER_MIRROR: Record<string, string> = {
   fable: "anthropic/claude-fable-5",
-  opus: "anthropic/claude-opus-4",
-  sonnet: "anthropic/claude-sonnet-4",
+  opus: "anthropic/claude-opus-4.8",
+  sonnet: "anthropic/claude-sonnet-5",
   haiku: "anthropic/claude-haiku-4.5",
 };
 
@@ -343,22 +342,18 @@ const PI_RUNTIME_API_KEYS = [
  * in-process, so pass selected keys through pi's runtime auth override instead
  * of relying on environment lookup.
  */
-export function createPiRuntimeAuth(env: Record<string, string | undefined> = process.env): {
-  authStorage: AuthStorage;
-  modelRegistry: ModelRegistry;
-} {
-  const authStorage = AuthStorage.create();
+export async function createPiRuntimeAuth(
+  env: Record<string, string | undefined> = process.env,
+): Promise<ModelRuntime> {
+  const modelRuntime = await ModelRuntime.create();
   for (const [envKey, provider] of PI_RUNTIME_API_KEYS) {
     const apiKey = env[envKey];
     if (apiKey) {
-      authStorage.setRuntimeApiKey(provider, apiKey);
+      await modelRuntime.setRuntimeApiKey(provider, apiKey, { allowNetwork: false });
     }
   }
 
-  return {
-    authStorage,
-    modelRegistry: ModelRegistry.create(authStorage),
-  };
+  return modelRuntime;
 }
 
 /**
@@ -383,7 +378,7 @@ export function resolveModel(
     lower === "opus" || lower === "sonnet" || lower === "haiku" || lower === "fable";
 
   // Reroute anthropic shortnames through OpenRouter when no anthropic cred
-  // is available. The OpenRouter mirror IDs (`anthropic/claude-sonnet-4`,
+  // is available. The OpenRouter mirror IDs (`anthropic/claude-sonnet-5`,
   // etc.) are present in pi-ai's model catalog.
   if (isAnthropicShortname && !envHasAnthropicCred(env) && env.OPENROUTER_API_KEY) {
     const orModelId = ANTHROPIC_SHORTNAME_OPENROUTER_MIRROR[lower];
@@ -399,8 +394,8 @@ export function resolveModel(
   // Map common shortnames to provider/model pairs (native anthropic path).
   const shortnames: Record<string, [string, string]> = {
     fable: ["anthropic", "claude-fable-5"],
-    opus: ["anthropic", "claude-opus-4-20250514"],
-    sonnet: ["anthropic", "claude-sonnet-4-20250514"],
+    opus: ["anthropic", "claude-opus-4-8"],
+    sonnet: ["anthropic", "claude-sonnet-5"],
     haiku: ["anthropic", "claude-haiku-4-5-20251001"],
   };
 
@@ -966,7 +961,7 @@ export class PiMonoAdapter implements ProviderAdapter {
 
     // 3. Resolve model
     const model = resolveModel(config.model, sessionEnv);
-    const { authStorage, modelRegistry } = createPiRuntimeAuth(sessionEnv);
+    const modelRuntime = await createPiRuntimeAuth(sessionEnv);
 
     // 4. Create swarm hooks extension
     const swarmExtension = createSwarmHooksExtension({
@@ -996,8 +991,7 @@ export class PiMonoAdapter implements ProviderAdapter {
       model,
       customTools,
       resourceLoader,
-      authStorage,
-      modelRegistry,
+      modelRuntime,
       ...reasoningSessionOptions,
     };
 
