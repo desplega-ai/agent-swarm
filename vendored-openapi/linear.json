@@ -1,0 +1,252 @@
+{
+  "components": {
+    "schemas": {
+      "GraphqlError": {
+        "properties": {
+          "extensions": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "GraphqlRequest": {
+        "properties": {
+          "operationName": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "variables": {
+            "additionalProperties": true,
+            "properties": {
+              "assigneeId": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "stateId": {
+                "type": "string"
+              },
+              "teamId": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "Issue": {
+        "properties": {
+          "assignee": {
+            "$ref": "#/components/schemas/User"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/WorkflowState"
+          },
+          "team": {
+            "$ref": "#/components/schemas/Team"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "identifier",
+          "title"
+        ],
+        "type": "object"
+      },
+      "IssueGraphqlResponse": {
+        "properties": {
+          "data": {
+            "properties": {
+              "issue": {
+                "$ref": "#/components/schemas/Issue"
+              },
+              "issueCreate": {
+                "properties": {
+                  "issue": {
+                    "$ref": "#/components/schemas/Issue"
+                  },
+                  "success": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              },
+              "issueUpdate": {
+                "properties": {
+                  "issue": {
+                    "$ref": "#/components/schemas/Issue"
+                  },
+                  "success": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/GraphqlError"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "Team": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "name"
+        ],
+        "type": "object"
+      },
+      "User": {
+        "properties": {
+          "displayName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "WorkflowState": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Linear GraphQL API operator-reviewed facade",
+    "version": "2026-07-22"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/graphql": {
+      "post": {
+        "operationId": "executeGraphql",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GraphqlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueGraphqlResponse"
+                }
+              }
+            },
+            "description": "GraphQL issue query or mutation result"
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.linear.app"
+    }
+  ]
+}

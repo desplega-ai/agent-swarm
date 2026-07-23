@@ -1,0 +1,2895 @@
+{
+  "basePath": "/api",
+  "definitions": {
+    "blocks": {
+      "description": "This is a very loose definition, in the future, we'll populate this with deeper schema in this definition namespace.",
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "title": "Block Kit blocks",
+      "type": "array"
+    },
+    "defs_app_id": {
+      "pattern": "^A[A-Z0-9]{1,}$",
+      "title": "App ID",
+      "type": "string"
+    },
+    "defs_bot_id": {
+      "pattern": "^B[A-Z0-9]{8,}$",
+      "title": "Bot User ID",
+      "type": "string"
+    },
+    "defs_channel": {
+      "pattern": "^[CGD][A-Z0-9]{8,}$",
+      "title": "Channel-like conversation ID",
+      "type": "string"
+    },
+    "defs_channel_id": {
+      "pattern": "^[C][A-Z0-9]{2,}$",
+      "title": "Channel ID",
+      "type": "string"
+    },
+    "defs_channel_name": {
+      "title": "Name of a channel",
+      "type": "string"
+    },
+    "defs_comment_id": {
+      "pattern": "^Fc[A-Z0-9]{8,}$",
+      "title": "File Comment ID",
+      "type": "string"
+    },
+    "defs_dm_id": {
+      "pattern": "^[D][A-Z0-9]{8,}$",
+      "title": "Direct Message Channel ID",
+      "type": "string"
+    },
+    "defs_enterprise_id": {
+      "pattern": "^[E][A-Z0-9]{8,}$",
+      "title": "Enterprise ID",
+      "type": "string"
+    },
+    "defs_enterprise_name": {
+      "title": "Name of the enterprise org",
+      "type": "string"
+    },
+    "defs_file_id": {
+      "pattern": "^[F][A-Z0-9]{8,}$",
+      "title": "File ID",
+      "type": "string"
+    },
+    "defs_group_id": {
+      "pattern": "^[G][A-Z0-9]{8,}$",
+      "title": "Private Channel ID",
+      "type": "string"
+    },
+    "defs_ok_false": {
+      "enum": [
+        false
+      ],
+      "title": "default failure response",
+      "type": "boolean"
+    },
+    "defs_ok_true": {
+      "enum": [
+        true
+      ],
+      "title": "default success response",
+      "type": "boolean"
+    },
+    "defs_pinned_info": {
+      "additionalProperties": false,
+      "title": "Info for a pinned item",
+      "type": "object"
+    },
+    "defs_team": {
+      "pattern": "^[T][A-Z0-9]{2,}$",
+      "title": "Team ID",
+      "type": "string"
+    },
+    "defs_topic_purpose_creator": {
+      "pattern": "^[UW][A-Z0-9]{8,}$|^$",
+      "title": "User ID or empty string, used for topic and purpose creation",
+      "type": "string"
+    },
+    "defs_ts": {
+      "pattern": "^\\d{10}\\.\\d{6}$",
+      "title": "Timestamp in format 0123456789.012345",
+      "type": "string"
+    },
+    "defs_user_id": {
+      "pattern": "^[UW][A-Z0-9]{2,}$",
+      "title": "User ID",
+      "type": "string"
+    },
+    "defs_workspace_id": {
+      "pattern": "^[TE][A-Z0-9]{8,}$",
+      "title": "Team or Enterprise ID",
+      "type": "string"
+    },
+    "objs_bot_profile": {
+      "additionalProperties": false,
+      "properties": {
+        "app_id": {
+          "$ref": "#/definitions/defs_app_id"
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "icons": {
+          "additionalProperties": false,
+          "properties": {
+            "image_36": {
+              "format": "uri",
+              "type": "string"
+            },
+            "image_48": {
+              "format": "uri",
+              "type": "string"
+            },
+            "image_72": {
+              "format": "uri",
+              "type": "string"
+            }
+          },
+          "required": [
+            "image_36",
+            "image_48",
+            "image_72"
+          ],
+          "type": "object"
+        },
+        "id": {
+          "$ref": "#/definitions/defs_bot_id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "team_id": {
+          "$ref": "#/definitions/defs_team"
+        },
+        "updated": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "deleted",
+        "name",
+        "updated",
+        "app_id",
+        "icons",
+        "team_id"
+      ],
+      "title": "Bot Profile Object",
+      "type": "object"
+    },
+    "objs_comment": {
+      "additionalProperties": false,
+      "properties": {
+        "comment": {
+          "type": "string"
+        },
+        "created": {
+          "type": "integer"
+        },
+        "id": {
+          "$ref": "#/definitions/defs_comment_id"
+        },
+        "is_intro": {
+          "type": "boolean"
+        },
+        "is_starred": {
+          "type": "boolean"
+        },
+        "num_stars": {
+          "type": "integer"
+        },
+        "pinned_info": {
+          "$ref": "#/definitions/defs_pinned_info"
+        },
+        "pinned_to": {
+          "items": {
+            "$ref": "#/definitions/defs_channel"
+          },
+          "type": "array"
+        },
+        "reactions": {
+          "items": {
+            "$ref": "#/definitions/objs_reaction"
+          },
+          "type": "array"
+        },
+        "timestamp": {
+          "type": "integer"
+        },
+        "user": {
+          "$ref": "#/definitions/defs_user_id"
+        }
+      },
+      "required": [
+        "id",
+        "created",
+        "timestamp",
+        "user",
+        "is_intro",
+        "comment"
+      ],
+      "title": "File Comment Object",
+      "type": "object"
+    },
+    "objs_conversation": {
+      "items": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accepted_user": {
+              "$ref": "#/definitions/defs_user_id"
+            },
+            "connected_team_ids": {
+              "items": {
+                "$ref": "#/definitions/defs_workspace_id"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "conversation_host_id": {
+              "$ref": "#/definitions/defs_workspace_id"
+            },
+            "created": {
+              "type": "integer"
+            },
+            "creator": {
+              "$ref": "#/definitions/defs_user_id"
+            },
+            "display_counts": {
+              "additionalProperties": false,
+              "properties": {
+                "display_counts": {
+                  "type": "integer"
+                },
+                "guest_counts": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "display_counts",
+                "guest_counts"
+              ],
+              "type": "object"
+            },
+            "enterprise_id": {
+              "$ref": "#/definitions/defs_enterprise_id"
+            },
+            "has_pins": {
+              "type": "boolean"
+            },
+            "id": {
+              "$ref": "#/definitions/defs_channel"
+            },
+            "internal_team_ids": {
+              "items": {
+                "$ref": "#/definitions/defs_team"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "is_archived": {
+              "type": "boolean"
+            },
+            "is_channel": {
+              "type": "boolean"
+            },
+            "is_ext_shared": {
+              "type": "boolean"
+            },
+            "is_frozen": {
+              "type": "boolean"
+            },
+            "is_general": {
+              "type": "boolean"
+            },
+            "is_global_shared": {
+              "type": "boolean"
+            },
+            "is_group": {
+              "type": "boolean"
+            },
+            "is_im": {
+              "type": "boolean"
+            },
+            "is_member": {
+              "type": "boolean"
+            },
+            "is_moved": {
+              "type": "integer"
+            },
+            "is_mpim": {
+              "enum": [
+                false
+              ],
+              "type": "boolean"
+            },
+            "is_non_threadable": {
+              "type": "boolean"
+            },
+            "is_open": {
+              "type": "boolean"
+            },
+            "is_org_default": {
+              "type": "boolean"
+            },
+            "is_org_mandatory": {
+              "type": "boolean"
+            },
+            "is_org_shared": {
+              "type": "boolean"
+            },
+            "is_pending_ext_shared": {
+              "type": "boolean"
+            },
+            "is_private": {
+              "type": "boolean"
+            },
+            "is_read_only": {
+              "type": "boolean"
+            },
+            "is_shared": {
+              "type": "boolean"
+            },
+            "is_starred": {
+              "type": "boolean"
+            },
+            "is_thread_only": {
+              "type": "boolean"
+            },
+            "last_read": {
+              "$ref": "#/definitions/defs_ts"
+            },
+            "latest": {
+              "items": [
+                {
+                  "$ref": "#/definitions/objs_message"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "members": {
+              "items": {
+                "$ref": "#/definitions/defs_user_id"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "name": {
+              "type": "string"
+            },
+            "name_normalized": {
+              "type": "string"
+            },
+            "num_members": {
+              "type": "integer"
+            },
+            "parent_conversation": {
+              "items": [
+                {
+                  "$ref": "#/definitions/defs_channel"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "pending_connected_team_ids": {
+              "items": {
+                "$ref": "#/definitions/defs_team"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "pending_shared": {
+              "items": {
+                "$ref": "#/definitions/defs_team"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "pin_count": {
+              "type": "integer"
+            },
+            "previous_names": {
+              "items": {
+                "$ref": "#/definitions/defs_channel_name"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "priority": {
+              "type": "number"
+            },
+            "purpose": {
+              "additionalProperties": false,
+              "properties": {
+                "creator": {
+                  "$ref": "#/definitions/defs_topic_purpose_creator"
+                },
+                "last_set": {
+                  "type": "integer"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value",
+                "creator",
+                "last_set"
+              ],
+              "type": "object"
+            },
+            "shared_team_ids": {
+              "items": {
+                "$ref": "#/definitions/defs_team"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "shares": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "accepted_user": {
+                    "$ref": "#/definitions/defs_user_id"
+                  },
+                  "is_active": {
+                    "type": "boolean"
+                  },
+                  "team": {
+                    "$ref": "#/definitions/objs_team"
+                  },
+                  "user": {
+                    "$ref": "#/definitions/defs_user_id"
+                  }
+                },
+                "required": [
+                  "team",
+                  "user",
+                  "is_active"
+                ],
+                "type": "object"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "timezone_count": {
+              "type": "integer"
+            },
+            "topic": {
+              "additionalProperties": false,
+              "properties": {
+                "creator": {
+                  "$ref": "#/definitions/defs_topic_purpose_creator"
+                },
+                "last_set": {
+                  "type": "integer"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value",
+                "creator",
+                "last_set"
+              ],
+              "type": "object"
+            },
+            "unlinked": {
+              "title": "Field to determine whether a channel has ever been shared/disconnected in the past",
+              "type": "integer"
+            },
+            "unread_count": {
+              "type": "integer"
+            },
+            "unread_count_display": {
+              "type": "integer"
+            },
+            "use_case": {
+              "type": "string"
+            },
+            "user": {
+              "$ref": "#/definitions/defs_user_id"
+            },
+            "version": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "created",
+            "creator",
+            "is_archived",
+            "is_channel",
+            "is_general",
+            "is_mpim",
+            "is_group",
+            "is_org_shared",
+            "is_im",
+            "is_shared",
+            "is_private",
+            "name_normalized",
+            "topic",
+            "purpose"
+          ],
+          "title": "Conversation object",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "accepted_user": {
+              "$ref": "#/definitions/defs_user_id"
+            },
+            "connected_team_ids": {
+              "items": {
+                "$ref": "#/definitions/defs_team"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "conversation_host_id": {
+              "$ref": "#/definitions/defs_workspace_id"
+            },
+            "created": {
+              "type": "integer"
+            },
+            "creator": {
+              "$ref": "#/definitions/defs_user_id"
+            },
+            "display_counts": {
+              "additionalProperties": false,
+              "properties": {
+                "display_counts": {
+                  "type": "integer"
+                },
+                "guest_counts": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "display_counts",
+                "guest_counts"
+              ],
+              "type": "object"
+            },
+            "id": {
+              "$ref": "#/definitions/defs_channel"
+            },
+            "internal_team_ids": {
+              "items": {
+                "$ref": "#/definitions/defs_team"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "is_archived": {
+              "type": "boolean"
+            },
+            "is_channel": {
+              "type": "boolean"
+            },
+            "is_ext_shared": {
+              "type": "boolean"
+            },
+            "is_frozen": {
+              "type": "boolean"
+            },
+            "is_general": {
+              "type": "boolean"
+            },
+            "is_group": {
+              "type": "boolean"
+            },
+            "is_im": {
+              "type": "boolean"
+            },
+            "is_member": {
+              "type": "boolean"
+            },
+            "is_moved": {
+              "type": "integer"
+            },
+            "is_mpim": {
+              "enum": [
+                true
+              ],
+              "type": "boolean"
+            },
+            "is_non_threadable": {
+              "type": "boolean"
+            },
+            "is_open": {
+              "type": "boolean"
+            },
+            "is_org_shared": {
+              "type": "boolean"
+            },
+            "is_pending_ext_shared": {
+              "type": "boolean"
+            },
+            "is_private": {
+              "type": "boolean"
+            },
+            "is_read_only": {
+              "type": "boolean"
+            },
+            "is_shared": {
+              "type": "boolean"
+            },
+            "is_starred": {
+              "type": "boolean"
+            },
+            "is_thread_only": {
+              "type": "boolean"
+            },
+            "last_read": {
+              "$ref": "#/definitions/defs_ts"
+            },
+            "latest": {
+              "items": [
+                {
+                  "$ref": "#/definitions/objs_message"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "members": {
+              "items": {
+                "$ref": "#/definitions/defs_user_id"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "name": {
+              "type": "string"
+            },
+            "name_normalized": {
+              "type": "string"
+            },
+            "num_members": {
+              "type": "integer"
+            },
+            "parent_conversation": {
+              "items": [
+                {
+                  "$ref": "#/definitions/defs_channel"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "pending_connected_team_ids": {
+              "items": {
+                "$ref": "#/definitions/defs_team"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "pending_shared": {
+              "items": {
+                "$ref": "#/definitions/defs_team"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "pin_count": {
+              "type": "integer"
+            },
+            "previous_names": {
+              "items": {
+                "$ref": "#/definitions/defs_channel_name"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "priority": {
+              "type": "number"
+            },
+            "purpose": {
+              "additionalProperties": false,
+              "properties": {
+                "creator": {
+                  "$ref": "#/definitions/defs_topic_purpose_creator"
+                },
+                "last_set": {
+                  "type": "integer"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value",
+                "creator",
+                "last_set"
+              ],
+              "type": "object"
+            },
+            "shared_team_ids": {
+              "items": {
+                "$ref": "#/definitions/defs_team"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "shares": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "accepted_user": {
+                    "$ref": "#/definitions/defs_user_id"
+                  },
+                  "is_active": {
+                    "type": "boolean"
+                  },
+                  "team": {
+                    "$ref": "#/definitions/objs_team"
+                  },
+                  "user": {
+                    "$ref": "#/definitions/defs_user_id"
+                  }
+                },
+                "required": [
+                  "team",
+                  "user",
+                  "is_active"
+                ],
+                "type": "object"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "timezone_count": {
+              "type": "integer"
+            },
+            "topic": {
+              "additionalProperties": false,
+              "properties": {
+                "creator": {
+                  "$ref": "#/definitions/defs_topic_purpose_creator"
+                },
+                "last_set": {
+                  "type": "integer"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value",
+                "creator",
+                "last_set"
+              ],
+              "type": "object"
+            },
+            "unlinked": {
+              "title": "Field to determine whether a channel has ever been shared/disconnected in the past",
+              "type": "integer"
+            },
+            "unread_count": {
+              "type": "integer"
+            },
+            "unread_count_display": {
+              "type": "integer"
+            },
+            "user": {
+              "$ref": "#/definitions/defs_user_id"
+            },
+            "version": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "created",
+            "creator",
+            "is_archived",
+            "is_channel",
+            "is_general",
+            "is_mpim",
+            "is_group",
+            "is_org_shared",
+            "is_im",
+            "is_shared",
+            "is_private",
+            "name_normalized",
+            "topic",
+            "purpose"
+          ],
+          "title": "Conversation MPIM Object",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "created": {
+              "type": "integer"
+            },
+            "has_pins": {
+              "type": "boolean"
+            },
+            "id": {
+              "$ref": "#/definitions/defs_dm_id"
+            },
+            "is_archived": {
+              "type": "boolean"
+            },
+            "is_ext_shared": {
+              "type": "boolean"
+            },
+            "is_frozen": {
+              "type": "boolean"
+            },
+            "is_im": {
+              "type": "boolean"
+            },
+            "is_open": {
+              "type": "boolean"
+            },
+            "is_org_shared": {
+              "type": "boolean"
+            },
+            "is_shared": {
+              "type": "boolean"
+            },
+            "is_starred": {
+              "type": "boolean"
+            },
+            "is_user_deleted": {
+              "type": "boolean"
+            },
+            "last_read": {
+              "$ref": "#/definitions/defs_ts"
+            },
+            "latest": {
+              "items": [
+                {
+                  "$ref": "#/definitions/objs_message"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "parent_conversation": {
+              "items": [
+                {
+                  "$ref": "#/definitions/defs_channel"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "pin_count": {
+              "type": "integer"
+            },
+            "priority": {
+              "type": "number"
+            },
+            "shares": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "date_create": {
+                    "type": "integer"
+                  },
+                  "id": {
+                    "$ref": "#/definitions/defs_team"
+                  },
+                  "is_active": {
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "team": {
+                    "$ref": "#/definitions/objs_team"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "team",
+                  "date_create",
+                  "is_active"
+                ],
+                "type": "object"
+              },
+              "minItems": 0,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "unread_count": {
+              "type": "integer"
+            },
+            "unread_count_display": {
+              "type": "integer"
+            },
+            "user": {
+              "$ref": "#/definitions/defs_user_id"
+            },
+            "version": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id",
+            "created",
+            "is_im",
+            "is_org_shared",
+            "user",
+            "priority"
+          ],
+          "title": "Conversation IM Channel Object from conversations.* methods",
+          "type": "object"
+        }
+      ]
+    },
+    "objs_external_org_migrations": {
+      "properties": {
+        "current": {
+          "items": {
+            "properties": {
+              "date_started": {
+                "type": "integer"
+              },
+              "team_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "team_id",
+              "date_started"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "date_updated": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "date_updated",
+        "current"
+      ],
+      "title": "External Org Migrations",
+      "type": "object"
+    },
+    "objs_file": {
+      "additionalProperties": false,
+      "properties": {
+        "channels": {
+          "items": {
+            "$ref": "#/definitions/defs_channel_id"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "comments_count": {
+          "type": "integer"
+        },
+        "created": {
+          "type": "integer"
+        },
+        "date_delete": {
+          "type": "integer"
+        },
+        "display_as_bot": {
+          "type": "boolean"
+        },
+        "editable": {
+          "type": "boolean"
+        },
+        "editor": {
+          "$ref": "#/definitions/defs_user_id"
+        },
+        "external_id": {
+          "type": "string"
+        },
+        "external_type": {
+          "type": "string"
+        },
+        "external_url": {
+          "format": "uri",
+          "type": "string"
+        },
+        "filetype": {
+          "type": "string"
+        },
+        "groups": {
+          "items": {
+            "$ref": "#/definitions/defs_group_id"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "has_rich_preview": {
+          "type": "boolean"
+        },
+        "id": {
+          "$ref": "#/definitions/defs_file_id"
+        },
+        "image_exif_rotation": {
+          "type": "integer"
+        },
+        "ims": {
+          "items": {
+            "$ref": "#/definitions/defs_dm_id"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "is_external": {
+          "type": "boolean"
+        },
+        "is_public": {
+          "type": "boolean"
+        },
+        "is_starred": {
+          "type": "boolean"
+        },
+        "is_tombstoned": {
+          "type": "boolean"
+        },
+        "last_editor": {
+          "$ref": "#/definitions/defs_user_id"
+        },
+        "mimetype": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "non_owner_editable": {
+          "type": "boolean"
+        },
+        "num_stars": {
+          "type": "integer"
+        },
+        "original_h": {
+          "type": "integer"
+        },
+        "original_w": {
+          "type": "integer"
+        },
+        "permalink": {
+          "format": "uri",
+          "type": "string"
+        },
+        "permalink_public": {
+          "format": "uri",
+          "type": "string"
+        },
+        "pinned_info": {
+          "$ref": "#/definitions/defs_pinned_info"
+        },
+        "pinned_to": {
+          "items": {
+            "$ref": "#/definitions/defs_channel"
+          },
+          "type": "array"
+        },
+        "pretty_type": {
+          "type": "string"
+        },
+        "preview": {
+          "type": "string"
+        },
+        "public_url_shared": {
+          "type": "boolean"
+        },
+        "reactions": {
+          "items": {
+            "$ref": "#/definitions/objs_reaction"
+          },
+          "type": "array"
+        },
+        "shares": {
+          "additionalProperties": false,
+          "properties": {
+            "private": {
+              "additionalProperties": false
+            },
+            "public": {
+              "additionalProperties": false
+            }
+          },
+          "type": "object"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "source_team": {
+          "$ref": "#/definitions/defs_team"
+        },
+        "state": {
+          "type": "string"
+        },
+        "thumb_1024": {
+          "format": "uri",
+          "type": "string"
+        },
+        "thumb_1024_h": {
+          "type": "integer"
+        },
+        "thumb_1024_w": {
+          "type": "integer"
+        },
+        "thumb_160": {
+          "format": "uri",
+          "type": "string"
+        },
+        "thumb_360": {
+          "format": "uri",
+          "type": "string"
+        },
+        "thumb_360_h": {
+          "type": "integer"
+        },
+        "thumb_360_w": {
+          "type": "integer"
+        },
+        "thumb_480": {
+          "format": "uri",
+          "type": "string"
+        },
+        "thumb_480_h": {
+          "type": "integer"
+        },
+        "thumb_480_w": {
+          "type": "integer"
+        },
+        "thumb_64": {
+          "format": "uri",
+          "type": "string"
+        },
+        "thumb_720": {
+          "format": "uri",
+          "type": "string"
+        },
+        "thumb_720_h": {
+          "type": "integer"
+        },
+        "thumb_720_w": {
+          "type": "integer"
+        },
+        "thumb_80": {
+          "format": "uri",
+          "type": "string"
+        },
+        "thumb_800": {
+          "format": "uri",
+          "type": "string"
+        },
+        "thumb_800_h": {
+          "type": "integer"
+        },
+        "thumb_800_w": {
+          "type": "integer"
+        },
+        "thumb_960": {
+          "format": "uri",
+          "type": "string"
+        },
+        "thumb_960_h": {
+          "type": "integer"
+        },
+        "thumb_960_w": {
+          "type": "integer"
+        },
+        "thumb_tiny": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "integer"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated": {
+          "type": "integer"
+        },
+        "url_private": {
+          "format": "uri",
+          "type": "string"
+        },
+        "url_private_download": {
+          "format": "uri",
+          "type": "string"
+        },
+        "user": {
+          "type": "string"
+        },
+        "user_team": {
+          "$ref": "#/definitions/defs_team"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "title": "file object",
+      "type": "object"
+    },
+    "objs_icon": {
+      "properties": {
+        "image_102": {
+          "type": "string"
+        },
+        "image_132": {
+          "type": "string"
+        },
+        "image_230": {
+          "type": "string"
+        },
+        "image_34": {
+          "type": "string"
+        },
+        "image_44": {
+          "type": "string"
+        },
+        "image_68": {
+          "type": "string"
+        },
+        "image_88": {
+          "type": "string"
+        },
+        "image_default": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "objs_message": {
+      "additionalProperties": false,
+      "properties": {
+        "attachments": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "fallback": {
+                "type": "string"
+              },
+              "id": {
+                "type": "integer"
+              },
+              "image_bytes": {
+                "type": "integer"
+              },
+              "image_height": {
+                "type": "integer"
+              },
+              "image_url": {
+                "type": "string"
+              },
+              "image_width": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "blocks": {
+          "$ref": "#/definitions/blocks"
+        },
+        "bot_id": {
+          "items": [
+            {
+              "$ref": "#/definitions/defs_bot_id"
+            },
+            {
+              "title": "Nil bot_id set when display_as_bot is false",
+              "type": "null"
+            }
+          ]
+        },
+        "bot_profile": {
+          "$ref": "#/definitions/objs_bot_profile"
+        },
+        "client_msg_id": {
+          "type": "string"
+        },
+        "comment": {
+          "$ref": "#/definitions/objs_comment"
+        },
+        "display_as_bot": {
+          "type": "boolean"
+        },
+        "file": {
+          "$ref": "#/definitions/objs_file"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/definitions/objs_file"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "icons": {
+          "additionalProperties": false,
+          "properties": {
+            "emoji": {
+              "type": "string"
+            },
+            "image_64": {
+              "format": "uri",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "inviter": {
+          "$ref": "#/definitions/defs_user_id"
+        },
+        "is_delayed_message": {
+          "type": "boolean"
+        },
+        "is_intro": {
+          "type": "boolean"
+        },
+        "is_starred": {
+          "type": "boolean"
+        },
+        "last_read": {
+          "$ref": "#/definitions/defs_ts"
+        },
+        "latest_reply": {
+          "$ref": "#/definitions/defs_ts"
+        },
+        "name": {
+          "type": "string"
+        },
+        "old_name": {
+          "type": "string"
+        },
+        "parent_user_id": {
+          "$ref": "#/definitions/defs_user_id"
+        },
+        "permalink": {
+          "format": "uri",
+          "type": "string"
+        },
+        "pinned_to": {
+          "items": {
+            "$ref": "#/definitions/defs_channel"
+          },
+          "type": "array"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "reactions": {
+          "items": {
+            "$ref": "#/definitions/objs_reaction"
+          },
+          "type": "array"
+        },
+        "reply_count": {
+          "type": "integer"
+        },
+        "reply_users": {
+          "items": {
+            "$ref": "#/definitions/defs_user_id"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "reply_users_count": {
+          "type": "integer"
+        },
+        "source_team": {
+          "$ref": "#/definitions/defs_workspace_id"
+        },
+        "subscribed": {
+          "type": "boolean"
+        },
+        "subtype": {
+          "type": "string"
+        },
+        "team": {
+          "$ref": "#/definitions/defs_workspace_id"
+        },
+        "text": {
+          "type": "string"
+        },
+        "thread_ts": {
+          "$ref": "#/definitions/defs_ts"
+        },
+        "topic": {
+          "type": "string"
+        },
+        "ts": {
+          "$ref": "#/definitions/defs_ts"
+        },
+        "type": {
+          "type": "string"
+        },
+        "unread_count": {
+          "type": "integer"
+        },
+        "upload": {
+          "type": "boolean"
+        },
+        "user": {
+          "$ref": "#/definitions/defs_user_id"
+        },
+        "user_profile": {
+          "$ref": "#/definitions/objs_user_profile_short"
+        },
+        "user_team": {
+          "$ref": "#/definitions/defs_workspace_id"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "type",
+        "ts"
+      ],
+      "title": "Message object",
+      "type": "object"
+    },
+    "objs_primary_owner": {
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "email"
+      ],
+      "type": "object"
+    },
+    "objs_reaction": {
+      "additionalProperties": true,
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "users": {
+          "items": {
+            "$ref": "#/definitions/defs_user_id"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "users",
+        "count"
+      ],
+      "title": "Reaction object",
+      "type": "object"
+    },
+    "objs_team": {
+      "additionalProperties": false,
+      "properties": {
+        "archived": {
+          "type": "boolean"
+        },
+        "avatar_base_url": {
+          "format": "uri",
+          "type": "string"
+        },
+        "created": {
+          "type": "integer"
+        },
+        "date_create": {
+          "type": "integer"
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "discoverable": {
+          "items": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "domain": {
+          "type": "string"
+        },
+        "email_domain": {
+          "type": "string"
+        },
+        "enterprise_id": {
+          "$ref": "#/definitions/defs_enterprise_id"
+        },
+        "enterprise_name": {
+          "$ref": "#/definitions/defs_enterprise_name"
+        },
+        "external_org_migrations": {
+          "$ref": "#/definitions/objs_external_org_migrations"
+        },
+        "has_compliance_export": {
+          "type": "boolean"
+        },
+        "icon": {
+          "$ref": "#/definitions/objs_icon"
+        },
+        "id": {
+          "$ref": "#/definitions/defs_workspace_id"
+        },
+        "is_assigned": {
+          "type": "boolean"
+        },
+        "is_enterprise": {
+          "type": "integer"
+        },
+        "is_over_storage_limit": {
+          "type": "boolean"
+        },
+        "limit_ts": {
+          "type": "integer"
+        },
+        "locale": {
+          "type": "string"
+        },
+        "messages_count": {
+          "type": "integer"
+        },
+        "msg_edit_window_mins": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "over_integrations_limit": {
+          "type": "boolean"
+        },
+        "over_storage_limit": {
+          "type": "boolean"
+        },
+        "pay_prod_cur": {
+          "type": "string"
+        },
+        "plan": {
+          "enum": [
+            "",
+            "std",
+            "plus",
+            "compliance",
+            "enterprise"
+          ],
+          "type": "string"
+        },
+        "primary_owner": {
+          "$ref": "#/definitions/objs_primary_owner"
+        },
+        "sso_provider": {
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "domain",
+        "email_domain",
+        "icon"
+      ],
+      "title": "Team Object",
+      "type": "object"
+    },
+    "objs_user_profile_short": {
+      "additionalProperties": false,
+      "properties": {
+        "avatar_hash": {
+          "type": "string"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "display_name_normalized": {
+          "type": "string"
+        },
+        "first_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image_72": {
+          "format": "uri",
+          "type": "string"
+        },
+        "is_restricted": {
+          "type": "boolean"
+        },
+        "is_ultra_restricted": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "real_name": {
+          "type": "string"
+        },
+        "real_name_normalized": {
+          "type": "string"
+        },
+        "team": {
+          "$ref": "#/definitions/defs_workspace_id"
+        }
+      },
+      "required": [
+        "avatar_hash",
+        "image_72",
+        "first_name",
+        "real_name",
+        "display_name",
+        "team",
+        "name",
+        "is_restricted",
+        "is_ultra_restricted"
+      ],
+      "type": "object"
+    }
+  },
+  "host": "slack.com",
+  "info": {
+    "contact": {
+      "name": "Slack developer relations",
+      "url": "https://api.slack.com/support"
+    },
+    "description": "One way to interact with the Slack platform is its HTTP RPC-based Web API, a collection of methods requiring OAuth 2.0-based user, bot, or workspace tokens blessed with related OAuth scopes.",
+    "title": "Slack Web API",
+    "version": "1.7.0"
+  },
+  "paths": {
+    "/chat.postMessage": {
+      "post": {
+        "consumes": [
+          "application/x-www-form-urlencoded",
+          "application/json"
+        ],
+        "description": "Sends a message to a channel.",
+        "externalDocs": {
+          "description": "API method documentation",
+          "url": "https://api.slack.com/methods/chat.postMessage"
+        },
+        "operationId": "chat_postMessage",
+        "parameters": [
+          {
+            "description": "Authentication token. Requires scope: `chat:write`",
+            "in": "header",
+            "name": "token",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Pass true to post the message as the authed user, instead of as a bot. Defaults to false. See [authorship](#authorship) below.",
+            "in": "formData",
+            "name": "as_user",
+            "type": "string"
+          },
+          {
+            "description": "A JSON-based array of structured attachments, presented as a URL-encoded string.",
+            "in": "formData",
+            "name": "attachments",
+            "type": "string"
+          },
+          {
+            "description": "A JSON-based array of structured blocks, presented as a URL-encoded string.",
+            "in": "formData",
+            "name": "blocks",
+            "type": "string"
+          },
+          {
+            "description": "Channel, private group, or IM channel to send message to. Can be an encoded ID, or a name. See [below](#channels) for more details.",
+            "in": "formData",
+            "name": "channel",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Emoji to use as the icon for this message. Overrides `icon_url`. Must be used in conjunction with `as_user` set to `false`, otherwise ignored. See [authorship](#authorship) below.",
+            "in": "formData",
+            "name": "icon_emoji",
+            "type": "string"
+          },
+          {
+            "description": "URL to an image to use as the icon for this message. Must be used in conjunction with `as_user` set to false, otherwise ignored. See [authorship](#authorship) below.",
+            "in": "formData",
+            "name": "icon_url",
+            "type": "string"
+          },
+          {
+            "description": "Find and link channel names and usernames.",
+            "in": "formData",
+            "name": "link_names",
+            "type": "boolean"
+          },
+          {
+            "description": "Disable Slack markup parsing by setting to `false`. Enabled by default.",
+            "in": "formData",
+            "name": "mrkdwn",
+            "type": "boolean"
+          },
+          {
+            "description": "Change how messages are treated. Defaults to `none`. See [below](#formatting).",
+            "in": "formData",
+            "name": "parse",
+            "type": "string"
+          },
+          {
+            "description": "Used in conjunction with `thread_ts` and indicates whether reply should be made visible to everyone in the channel or conversation. Defaults to `false`.",
+            "in": "formData",
+            "name": "reply_broadcast",
+            "type": "boolean"
+          },
+          {
+            "description": "How this field works and whether it is required depends on other fields you use in your API call. [See below](#text_usage) for more detail.",
+            "in": "formData",
+            "name": "text",
+            "type": "string"
+          },
+          {
+            "description": "Provide another message's `ts` value to make this message a reply. Avoid using a reply's `ts` value; use its parent instead.",
+            "in": "formData",
+            "name": "thread_ts",
+            "type": "string"
+          },
+          {
+            "description": "Pass true to enable unfurling of primarily text-based content.",
+            "in": "formData",
+            "name": "unfurl_links",
+            "type": "boolean"
+          },
+          {
+            "description": "Pass false to disable unfurling of media content.",
+            "in": "formData",
+            "name": "unfurl_media",
+            "type": "boolean"
+          },
+          {
+            "description": "Set your bot's user name. Must be used in conjunction with `as_user` set to false, otherwise ignored. See [authorship](#authorship) below.",
+            "in": "formData",
+            "name": "username",
+            "type": "string"
+          }
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Typical success response",
+            "examples": {
+              "application/json": {
+                "channel": "C1H9RESGL",
+                "message": {
+                  "attachments": [
+                    {
+                      "fallback": "This is an attachment's fallback",
+                      "id": 1,
+                      "text": "This is an attachment"
+                    }
+                  ],
+                  "bot_id": "B19LU7CSY",
+                  "subtype": "bot_message",
+                  "text": "Here's a message for you",
+                  "ts": "1503435956.000247",
+                  "type": "message",
+                  "username": "ecto1"
+                },
+                "ok": true,
+                "ts": "1503435956.000247"
+              }
+            },
+            "schema": {
+              "additionalProperties": false,
+              "description": "Schema for successful response of chat.postMessage method",
+              "properties": {
+                "channel": {
+                  "$ref": "#/definitions/defs_channel"
+                },
+                "message": {
+                  "$ref": "#/definitions/objs_message"
+                },
+                "ok": {
+                  "$ref": "#/definitions/defs_ok_true"
+                },
+                "ts": {
+                  "$ref": "#/definitions/defs_ts"
+                }
+              },
+              "required": [
+                "ok",
+                "channel",
+                "ts",
+                "message"
+              ],
+              "title": "chat.postMessage success schema",
+              "type": "object"
+            }
+          },
+          "default": {
+            "description": "Typical error response if too many attachments are included",
+            "examples": {
+              "application/json": {
+                "error": "too_many_attachments",
+                "ok": false
+              }
+            },
+            "schema": {
+              "additionalProperties": false,
+              "description": "Schema for error response chat.postMessage method",
+              "properties": {
+                "callstack": {
+                  "description": "Note: PHP callstack is only visible in dev/qa",
+                  "type": "string"
+                },
+                "error": {
+                  "enum": [
+                    "channel_not_found",
+                    "not_in_channel",
+                    "is_archived",
+                    "msg_too_long",
+                    "no_text",
+                    "too_many_attachments",
+                    "rate_limited",
+                    "not_authed",
+                    "invalid_auth",
+                    "account_inactive",
+                    "invalid_arg_name",
+                    "invalid_array_arg",
+                    "invalid_charset",
+                    "invalid_form_data",
+                    "invalid_post_type",
+                    "missing_post_type"
+                  ],
+                  "type": "string"
+                },
+                "ok": {
+                  "$ref": "#/definitions/defs_ok_false"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "title": "chat.postMessage error schema",
+              "type": "object"
+            }
+          }
+        },
+        "security": [
+          {
+            "slackAuth": [
+              "chat:write:user",
+              "chat:write:bot"
+            ]
+          }
+        ],
+        "tags": [
+          "chat"
+        ]
+      }
+    },
+    "/conversations.history": {
+      "get": {
+        "consumes": [
+          "application/x-www-form-urlencoded"
+        ],
+        "description": "Fetches a conversation's history of messages and events.",
+        "externalDocs": {
+          "description": "API method documentation",
+          "url": "https://api.slack.com/methods/conversations.history"
+        },
+        "operationId": "conversations_history",
+        "parameters": [
+          {
+            "description": "Authentication token. Requires scope: `conversations:history`",
+            "in": "query",
+            "name": "token",
+            "type": "string"
+          },
+          {
+            "description": "Conversation ID to fetch history for.",
+            "in": "query",
+            "name": "channel",
+            "type": "string"
+          },
+          {
+            "description": "End of time range of messages to include in results.",
+            "in": "query",
+            "name": "latest",
+            "type": "number"
+          },
+          {
+            "description": "Start of time range of messages to include in results.",
+            "in": "query",
+            "name": "oldest",
+            "type": "number"
+          },
+          {
+            "description": "Include messages with latest or oldest timestamp in results only when either timestamp is specified.",
+            "in": "query",
+            "name": "inclusive",
+            "type": "boolean"
+          },
+          {
+            "description": "The maximum number of items to return. Fewer than the requested number of items may be returned, even if the end of the users list hasn't been reached.",
+            "in": "query",
+            "name": "limit",
+            "type": "integer"
+          },
+          {
+            "description": "Paginate through collections of data by setting the `cursor` parameter to a `next_cursor` attribute returned by a previous request's `response_metadata`. Default value fetches the first \"page\" of the collection. See [pagination](/docs/pagination) for more detail.",
+            "in": "query",
+            "name": "cursor",
+            "type": "string"
+          }
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Typical success response containing a channel's messages",
+            "examples": {
+              "application/json": {
+                "has_more": true,
+                "messages": [
+                  {
+                    "text": "I find you punny and would like to smell your nose letter",
+                    "ts": "1512085950.000216",
+                    "type": "message",
+                    "user": "U012AB3CDE"
+                  },
+                  {
+                    "text": "What, you want to smell my shoes better?",
+                    "ts": "1512104434.000490",
+                    "type": "message",
+                    "user": "U061F7AUR"
+                  }
+                ],
+                "ok": true,
+                "pin_count": 0,
+                "response_metadata": {
+                  "next_cursor": "bmV4dF90czoxNTEyMDg1ODYxMDAwNTQz"
+                }
+              }
+            },
+            "schema": {
+              "additionalProperties": false,
+              "description": "Schema for successful response from conversations.history method",
+              "properties": {
+                "channel_actions_count": {
+                  "type": "integer"
+                },
+                "channel_actions_ts": {
+                  "items": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "has_more": {
+                  "type": "boolean"
+                },
+                "messages": {
+                  "items": {
+                    "$ref": "#/definitions/objs_message"
+                  },
+                  "minItems": 1,
+                  "type": "array",
+                  "uniqueItems": true
+                },
+                "ok": {
+                  "$ref": "#/definitions/defs_ok_true"
+                },
+                "pin_count": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "ok",
+                "messages",
+                "has_more",
+                "pin_count",
+                "channel_actions_ts",
+                "channel_actions_count"
+              ],
+              "title": "conversations.history success schema",
+              "type": "object"
+            }
+          },
+          "default": {
+            "description": "Typical error response",
+            "examples": {
+              "application/json": {
+                "error": "channel_not_found",
+                "ok": false
+              }
+            },
+            "schema": {
+              "additionalProperties": false,
+              "description": "Schema for error response from conversations.history method",
+              "properties": {
+                "callstack": {
+                  "description": "Note: PHP callstack is only visible in dev/qa",
+                  "type": "string"
+                },
+                "error": {
+                  "enum": [
+                    "missing_scope",
+                    "channel_not_found",
+                    "invalid_ts_latest",
+                    "invalid_ts_oldest",
+                    "not_authed",
+                    "invalid_auth",
+                    "account_inactive",
+                    "invalid_arg_name",
+                    "invalid_array_arg",
+                    "invalid_charset",
+                    "invalid_form_data",
+                    "invalid_post_type",
+                    "missing_post_type",
+                    "invalid_json",
+                    "json_not_object",
+                    "request_timeout",
+                    "upgrade_required"
+                  ],
+                  "type": "string"
+                },
+                "needed": {
+                  "type": "string"
+                },
+                "ok": {
+                  "$ref": "#/definitions/defs_ok_false"
+                },
+                "provided": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "title": "conversations.history error schema",
+              "type": "object"
+            }
+          }
+        },
+        "security": [
+          {
+            "slackAuth": [
+              "channels:history",
+              "groups:history",
+              "im:history",
+              "mpim:history"
+            ]
+          }
+        ],
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/conversations.list": {
+      "get": {
+        "consumes": [
+          "application/x-www-form-urlencoded"
+        ],
+        "description": "Lists all channels in a Slack team.",
+        "externalDocs": {
+          "description": "API method documentation",
+          "url": "https://api.slack.com/methods/conversations.list"
+        },
+        "operationId": "conversations_list",
+        "parameters": [
+          {
+            "description": "Authentication token. Requires scope: `conversations:read`",
+            "in": "query",
+            "name": "token",
+            "type": "string"
+          },
+          {
+            "description": "Set to `true` to exclude archived channels from the list",
+            "in": "query",
+            "name": "exclude_archived",
+            "type": "boolean"
+          },
+          {
+            "description": "Mix and match channel types by providing a comma-separated list of any combination of `public_channel`, `private_channel`, `mpim`, `im`",
+            "in": "query",
+            "name": "types",
+            "type": "string"
+          },
+          {
+            "description": "The maximum number of items to return. Fewer than the requested number of items may be returned, even if the end of the list hasn't been reached. Must be an integer no larger than 1000.",
+            "in": "query",
+            "name": "limit",
+            "type": "integer"
+          },
+          {
+            "description": "Paginate through collections of data by setting the `cursor` parameter to a `next_cursor` attribute returned by a previous request's `response_metadata`. Default value fetches the first \"page\" of the collection. See [pagination](/docs/pagination) for more detail.",
+            "in": "query",
+            "name": "cursor",
+            "type": "string"
+          }
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Typical success response with only public channels",
+            "examples": {
+              "application/json": {
+                "channels": [
+                  {
+                    "created": 1449252889,
+                    "creator": "U012A3CDE",
+                    "id": "C012AB3CD",
+                    "is_archived": false,
+                    "is_channel": true,
+                    "is_ext_shared": false,
+                    "is_general": true,
+                    "is_group": false,
+                    "is_im": false,
+                    "is_member": true,
+                    "is_mpim": false,
+                    "is_org_shared": false,
+                    "is_pending_ext_shared": false,
+                    "is_private": false,
+                    "is_shared": false,
+                    "name": "general",
+                    "name_normalized": "general",
+                    "num_members": 4,
+                    "pending_shared": [],
+                    "previous_names": [],
+                    "purpose": {
+                      "creator": "",
+                      "last_set": 0,
+                      "value": "This channel is for team-wide communication and announcements. All team members are in this channel."
+                    },
+                    "topic": {
+                      "creator": "",
+                      "last_set": 0,
+                      "value": "Company-wide announcements and work-based matters"
+                    },
+                    "unlinked": 0
+                  },
+                  {
+                    "created": 1449252889,
+                    "creator": "U061F7AUR",
+                    "id": "C061EG9T2",
+                    "is_archived": false,
+                    "is_channel": true,
+                    "is_ext_shared": false,
+                    "is_general": false,
+                    "is_group": false,
+                    "is_im": false,
+                    "is_member": true,
+                    "is_mpim": false,
+                    "is_org_shared": false,
+                    "is_pending_ext_shared": false,
+                    "is_private": false,
+                    "is_shared": false,
+                    "name": "random",
+                    "name_normalized": "random",
+                    "num_members": 4,
+                    "pending_shared": [],
+                    "previous_names": [],
+                    "purpose": {
+                      "creator": "",
+                      "last_set": 0,
+                      "value": "A place for non-work-related flimflam, faffing, hodge-podge or jibber-jabber you'd prefer to keep out of more focused work-related channels."
+                    },
+                    "topic": {
+                      "creator": "",
+                      "last_set": 0,
+                      "value": "Non-work banter and water cooler conversation"
+                    },
+                    "unlinked": 0
+                  }
+                ],
+                "ok": true,
+                "response_metadata": {
+                  "next_cursor": "dGVhbTpDMDYxRkE1UEI="
+                }
+              }
+            },
+            "schema": {
+              "additionalProperties": false,
+              "description": "Schema for successful response from conversations.list method",
+              "properties": {
+                "channels": {
+                  "items": {
+                    "$ref": "#/definitions/objs_conversation"
+                  },
+                  "type": "array",
+                  "uniqueItems": true
+                },
+                "ok": {
+                  "$ref": "#/definitions/defs_ok_true"
+                },
+                "response_metadata": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "next_cursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "next_cursor"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "ok",
+                "channels"
+              ],
+              "title": "conversations.list success schema",
+              "type": "object"
+            }
+          },
+          "default": {
+            "description": "Typical error response",
+            "examples": {
+              "application/json": {
+                "error": "invalid_auth",
+                "ok": false
+              }
+            },
+            "schema": {
+              "additionalProperties": false,
+              "description": "Schema for error response from conversations.list method",
+              "properties": {
+                "callstack": {
+                  "description": "Note: PHP callstack is only visible in dev/qa",
+                  "type": "string"
+                },
+                "error": {
+                  "enum": [
+                    "missing_scope",
+                    "not_authed",
+                    "invalid_auth",
+                    "account_inactive",
+                    "invalid_arg_name",
+                    "invalid_array_arg",
+                    "invalid_charset",
+                    "invalid_form_data",
+                    "invalid_post_type",
+                    "missing_post_type",
+                    "invalid_json",
+                    "json_not_object",
+                    "request_timeout",
+                    "upgrade_required"
+                  ],
+                  "type": "string"
+                },
+                "needed": {
+                  "type": "string"
+                },
+                "ok": {
+                  "$ref": "#/definitions/defs_ok_false"
+                },
+                "provided": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "title": "conversations.list error schema",
+              "type": "object"
+            }
+          }
+        },
+        "security": [
+          {
+            "slackAuth": [
+              "channels:read",
+              "groups:read",
+              "im:read",
+              "mpim:read"
+            ]
+          }
+        ],
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/conversations.replies": {
+      "get": {
+        "consumes": [
+          "application/x-www-form-urlencoded"
+        ],
+        "description": "Retrieve a thread of messages posted to a conversation",
+        "externalDocs": {
+          "description": "API method documentation",
+          "url": "https://api.slack.com/methods/conversations.replies"
+        },
+        "operationId": "conversations_replies",
+        "parameters": [
+          {
+            "description": "Authentication token. Requires scope: `conversations:history`",
+            "in": "query",
+            "name": "token",
+            "type": "string"
+          },
+          {
+            "description": "Conversation ID to fetch thread from.",
+            "in": "query",
+            "name": "channel",
+            "type": "string"
+          },
+          {
+            "description": "Unique identifier of a thread's parent message. `ts` must be the timestamp of an existing message with 0 or more replies. If there are no replies then just the single message referenced by `ts` will return - it is just an ordinary, unthreaded message.",
+            "in": "query",
+            "name": "ts",
+            "type": "number"
+          },
+          {
+            "description": "End of time range of messages to include in results.",
+            "in": "query",
+            "name": "latest",
+            "type": "number"
+          },
+          {
+            "description": "Start of time range of messages to include in results.",
+            "in": "query",
+            "name": "oldest",
+            "type": "number"
+          },
+          {
+            "description": "Include messages with latest or oldest timestamp in results only when either timestamp is specified.",
+            "in": "query",
+            "name": "inclusive",
+            "type": "boolean"
+          },
+          {
+            "description": "The maximum number of items to return. Fewer than the requested number of items may be returned, even if the end of the users list hasn't been reached.",
+            "in": "query",
+            "name": "limit",
+            "type": "integer"
+          },
+          {
+            "description": "Paginate through collections of data by setting the `cursor` parameter to a `next_cursor` attribute returned by a previous request's `response_metadata`. Default value fetches the first \"page\" of the collection. See [pagination](/docs/pagination) for more detail.",
+            "in": "query",
+            "name": "cursor",
+            "type": "string"
+          }
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Typical success response",
+            "examples": {
+              "application/json": {
+                "has_more": true,
+                "messages": [
+                  {
+                    "last_read": "1484678597.521003",
+                    "reply_count": 3,
+                    "subscribed": true,
+                    "text": "island",
+                    "thread_ts": "1482960137.003543",
+                    "ts": "1482960137.003543",
+                    "type": "message",
+                    "unread_count": 0,
+                    "user": "U061F7AUR"
+                  },
+                  {
+                    "parent_user_id": "U061F7AUR",
+                    "text": "one island",
+                    "thread_ts": "1482960137.003543",
+                    "ts": "1483037603.017503",
+                    "type": "message",
+                    "user": "U061F7AUR"
+                  },
+                  {
+                    "parent_user_id": "U061F7AUR",
+                    "text": "two island",
+                    "thread_ts": "1482960137.003543",
+                    "ts": "1483051909.018632",
+                    "type": "message",
+                    "user": "U061F7AUR"
+                  },
+                  {
+                    "parent_user_id": "U061F7AUR",
+                    "text": "three for the land",
+                    "thread_ts": "1482960137.003543",
+                    "ts": "1483125339.020269",
+                    "type": "message",
+                    "user": "U061F7AUR"
+                  }
+                ],
+                "ok": true,
+                "response_metadata": {
+                  "next_cursor": "bmV4dF90czoxNDg0Njc4MjkwNTE3MDkx"
+                }
+              }
+            },
+            "schema": {
+              "additionalProperties": false,
+              "description": "Schema for successful response from conversations.replies method",
+              "properties": {
+                "has_more": {
+                  "type": "boolean"
+                },
+                "messages": {
+                  "items": {
+                    "items": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "last_read": {
+                            "$ref": "#/definitions/defs_ts"
+                          },
+                          "latest_reply": {
+                            "$ref": "#/definitions/defs_ts"
+                          },
+                          "reply_count": {
+                            "type": "integer"
+                          },
+                          "reply_users": {
+                            "items": {
+                              "$ref": "#/definitions/defs_user_id"
+                            },
+                            "type": "array",
+                            "uniqueItems": true
+                          },
+                          "reply_users_count": {
+                            "type": "integer"
+                          },
+                          "source_team": {
+                            "$ref": "#/definitions/defs_team"
+                          },
+                          "subscribed": {
+                            "type": "boolean"
+                          },
+                          "team": {
+                            "$ref": "#/definitions/defs_team"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "thread_ts": {
+                            "$ref": "#/definitions/defs_ts"
+                          },
+                          "ts": {
+                            "$ref": "#/definitions/defs_ts"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "unread_count": {
+                            "type": "integer"
+                          },
+                          "user": {
+                            "$ref": "#/definitions/defs_user_id"
+                          },
+                          "user_profile": {
+                            "$ref": "#/definitions/objs_user_profile_short"
+                          },
+                          "user_team": {
+                            "$ref": "#/definitions/defs_team"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "user",
+                          "text",
+                          "thread_ts",
+                          "reply_count",
+                          "subscribed",
+                          "ts"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "is_starred": {
+                            "type": "boolean"
+                          },
+                          "parent_user_id": {
+                            "$ref": "#/definitions/defs_user_id"
+                          },
+                          "source_team": {
+                            "$ref": "#/definitions/defs_team"
+                          },
+                          "team": {
+                            "$ref": "#/definitions/defs_team"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "thread_ts": {
+                            "$ref": "#/definitions/defs_ts"
+                          },
+                          "ts": {
+                            "$ref": "#/definitions/defs_ts"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "user": {
+                            "$ref": "#/definitions/defs_user_id"
+                          },
+                          "user_profile": {
+                            "$ref": "#/definitions/objs_user_profile_short"
+                          },
+                          "user_team": {
+                            "$ref": "#/definitions/defs_team"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "user",
+                          "text",
+                          "thread_ts",
+                          "parent_user_id",
+                          "ts"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "type": "array"
+                },
+                "ok": {
+                  "$ref": "#/definitions/defs_ok_true"
+                }
+              },
+              "required": [
+                "ok",
+                "messages"
+              ],
+              "title": "conversations.replies success schema",
+              "type": "object"
+            }
+          },
+          "default": {
+            "description": "Typical error response",
+            "examples": {
+              "application/json": {
+                "error": "thread_not_found",
+                "ok": false
+              }
+            },
+            "schema": {
+              "additionalProperties": false,
+              "description": "Schema for error response from conversations.replies method",
+              "properties": {
+                "callstack": {
+                  "description": "Note: PHP callstack is only visible in dev/qa",
+                  "type": "string"
+                },
+                "error": {
+                  "enum": [
+                    "missing_scope",
+                    "channel_not_found",
+                    "thread_not_found",
+                    "not_authed",
+                    "invalid_auth",
+                    "account_inactive",
+                    "invalid_arg_name",
+                    "invalid_array_arg",
+                    "invalid_charset",
+                    "invalid_form_data",
+                    "invalid_post_type",
+                    "missing_post_type",
+                    "team_added_to_org",
+                    "invalid_json",
+                    "json_not_object",
+                    "request_timeout",
+                    "upgrade_required"
+                  ],
+                  "type": "string"
+                },
+                "needed": {
+                  "type": "string"
+                },
+                "ok": {
+                  "$ref": "#/definitions/defs_ok_false"
+                },
+                "provided": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "title": "conversations.replies error schema",
+              "type": "object"
+            }
+          }
+        },
+        "security": [
+          {
+            "slackAuth": [
+              "channels:history",
+              "groups:history",
+              "im:history",
+              "mpim:history"
+            ]
+          }
+        ],
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/search.messages": {
+      "get": {
+        "consumes": [
+          "application/x-www-form-urlencoded"
+        ],
+        "description": "Searches for messages matching a query.",
+        "externalDocs": {
+          "description": "API method documentation",
+          "url": "https://api.slack.com/methods/search.messages"
+        },
+        "operationId": "search_messages",
+        "parameters": [
+          {
+            "description": "Authentication token. Requires scope: `search:read`",
+            "in": "query",
+            "name": "token",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Pass the number of results you want per \"page\". Maximum of `100`.",
+            "in": "query",
+            "name": "count",
+            "type": "integer"
+          },
+          {
+            "description": "Pass a value of `true` to enable query highlight markers (see below).",
+            "in": "query",
+            "name": "highlight",
+            "type": "boolean"
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "description": "Search query.",
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Return matches sorted by either `score` or `timestamp`.",
+            "in": "query",
+            "name": "sort",
+            "type": "string"
+          },
+          {
+            "description": "Change sort direction to ascending (`asc`) or descending (`desc`).",
+            "in": "query",
+            "name": "sort_dir",
+            "type": "string"
+          }
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "responses": {
+          "200": {
+            "description": "Typical success response",
+            "examples": {
+              "application/json": {
+                "messages": {
+                  "matches": [
+                    {
+                      "channel": {
+                        "id": "C12345678",
+                        "is_ext_shared": false,
+                        "is_mpim": false,
+                        "is_org_shared": false,
+                        "is_pending_ext_shared": false,
+                        "is_private": false,
+                        "is_shared": false,
+                        "name": "general",
+                        "pending_shared": []
+                      },
+                      "iid": "cb64bdaa-c1e8-4631-8a91-0f78080113e9",
+                      "permalink": "https://hitchhikers.slack.com/archives/C12345678/p1508284197000015",
+                      "team": "T12345678",
+                      "text": "The meaning of life the universe and everything is 42.",
+                      "ts": "1508284197.000015",
+                      "type": "message",
+                      "user": "U2U85N1RV",
+                      "username": "roach"
+                    },
+                    {
+                      "channel": {
+                        "id": "C12345678",
+                        "is_ext_shared": false,
+                        "is_mpim": false,
+                        "is_org_shared": false,
+                        "is_pending_ext_shared": false,
+                        "is_private": false,
+                        "is_shared": false,
+                        "name": "random",
+                        "pending_shared": []
+                      },
+                      "iid": "9a00d3c9-bd2d-45b0-988b-6cff99ae2a90",
+                      "permalink": "https://hitchhikers.slack.com/archives/C12345678/p1508795665000236",
+                      "team": "T12345678",
+                      "text": "The meaning of life the universe and everything is 101010",
+                      "ts": "1508795665.000236",
+                      "type": "message",
+                      "user": "",
+                      "username": "robot overlord"
+                    }
+                  ],
+                  "pagination": {
+                    "first": 1,
+                    "last": 2,
+                    "page": 1,
+                    "page_count": 1,
+                    "per_page": 20,
+                    "total_count": 2
+                  },
+                  "paging": {
+                    "count": 20,
+                    "page": 1,
+                    "pages": 1,
+                    "total": 2
+                  },
+                  "total": 2
+                },
+                "ok": true,
+                "query": "The meaning of life the universe and everything"
+              }
+            },
+            "schema": {
+              "additionalProperties": true,
+              "description": "This method either only returns a brief _OK_ response or a verbose schema is not available for this method.",
+              "properties": {
+                "ok": {
+                  "$ref": "#/definitions/defs_ok_true"
+                }
+              },
+              "required": [
+                "ok"
+              ],
+              "title": "Default success template",
+              "type": "object"
+            }
+          },
+          "default": {
+            "description": "Typical error response",
+            "examples": {
+              "application/json": {
+                "error": "No query passed",
+                "ok": false
+              }
+            },
+            "schema": {
+              "additionalProperties": true,
+              "description": "This method either only returns a brief _not OK_ response or a verbose schema is not available for this method.",
+              "properties": {
+                "ok": {
+                  "$ref": "#/definitions/defs_ok_false"
+                }
+              },
+              "required": [
+                "ok"
+              ],
+              "title": "Default error template",
+              "type": "object"
+            }
+          }
+        },
+        "security": [
+          {
+            "slackAuth": [
+              "search:read"
+            ]
+          }
+        ],
+        "tags": [
+          "search"
+        ]
+      }
+    }
+  },
+  "schemes": [
+    "https"
+  ],
+  "swagger": "2.0"
+}

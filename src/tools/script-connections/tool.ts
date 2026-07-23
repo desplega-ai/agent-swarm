@@ -78,6 +78,12 @@ const scriptConnectionsInputSchema = z.object({
     .string()
     .optional()
     .describe("Inline OpenAPI JSON for upsert-openapi. Mutually exclusive with openapiSpecUrl."),
+  specSource: z
+    .object({ kind: z.literal("vendored"), slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/) })
+    .optional()
+    .describe(
+      "Vendored OpenAPI source. Mutually exclusive with openapiSpecUrl and openapiSpecJson.",
+    ),
   enabled: z.boolean().optional().describe("Whether the connection is enabled."),
 });
 
@@ -359,34 +365,35 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         };
       }
 
-      if (!args.slug || (!args.openapiSpecJson && !args.openapiSpecUrl)) {
+      if (!args.slug || (!args.openapiSpecJson && !args.openapiSpecUrl && !args.specSource)) {
         return {
           content: [
             {
               type: "text",
-              text: "slug and either openapiSpecJson or openapiSpecUrl are required.",
+              text: "slug and exactly one OpenAPI spec source (openapiSpecJson, openapiSpecUrl, or specSource) are required.",
             },
           ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
-            message: "slug and either openapiSpecJson or openapiSpecUrl are required.",
+            message:
+              "slug and exactly one OpenAPI spec source (openapiSpecJson, openapiSpecUrl, or specSource) are required.",
             connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
           },
         };
       }
-      if (args.openapiSpecJson && args.openapiSpecUrl) {
+      if ([args.openapiSpecJson, args.openapiSpecUrl, args.specSource].filter(Boolean).length > 1) {
         return {
           content: [
             {
               type: "text",
-              text: "Provide either openapiSpecJson or openapiSpecUrl, not both.",
+              text: "Provide exactly one OpenAPI spec source.",
             },
           ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
-            message: "Provide either openapiSpecJson or openapiSpecUrl, not both.",
+            message: "Provide exactly one OpenAPI spec source.",
             connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
           },
         };
@@ -421,6 +428,8 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         baseUrl: args.baseUrl,
         allowedHosts: args.allowedHosts,
         credentialBindingId,
+        openapiSpecSourceKind: args.specSource ? "vendored" : undefined,
+        openapiSpecSource: args.specSource?.slug,
         openapiSpecUrl: args.openapiSpecUrl,
         openapiSpecJson: args.openapiSpecJson,
         enabled: resolveConnectionEnabled(args, existing),

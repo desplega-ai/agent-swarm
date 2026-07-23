@@ -16,7 +16,10 @@ import {
   upsertCredentialBinding,
   upsertScriptConnection,
 } from "../be/script-connections";
-import { handleScriptConnections } from "../http/script-connections";
+import {
+  handleScriptConnections,
+  resetIntegrationsCatalogCacheForTesting,
+} from "../http/script-connections";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 
 const TEST_DB_PATH = "./test-script-connections-http.sqlite";
@@ -138,6 +141,7 @@ afterAll(async () => {
 beforeEach(() => {
   globalThis.fetch = originalFetch;
   setOpenapiSpecFetchForTesting(null);
+  resetIntegrationsCatalogCacheForTesting();
   getDb().run("DELETE FROM script_connections");
   getDb().run("DELETE FROM script_credential_bindings");
   getDb().run("DELETE FROM oauth_authorizations");
@@ -710,7 +714,7 @@ describe("/api/script-connections HTTP", () => {
     }
   });
 
-  test("integrations catalog proxy filters cli entries", async () => {
+  test("integrations catalog puts blessed entries first and filters cli entries", async () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("https://integrations.sh/api.json");
       return new Response(
@@ -740,9 +744,19 @@ describe("/api/script-connections HTTP", () => {
     const res = await dispatch("/api/integrations-catalog");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      entries: Array<{ id: string; kind: string; slug: string; name: string }>;
+      entries: Array<{ id: string; kind: string; slug: string; name: string; feeds: string[] }>;
+      partial: boolean;
     };
-    expect(body.entries).toEqual([
+    expect(body.partial).toBe(false);
+    expect(body.entries.slice(0, 5).map((entry) => entry.slug)).toEqual([
+      "github",
+      "slack",
+      "linear",
+      "jira",
+      "gmail",
+    ]);
+    expect(body.entries.slice(0, 5).every((entry) => entry.feeds.includes("blessed"))).toBe(true);
+    expect(body.entries.slice(5)).toEqual([
       {
         id: "stripe",
         kind: "openapi",
