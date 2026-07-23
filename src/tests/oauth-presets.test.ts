@@ -228,6 +228,20 @@ describe("oauth presets — HTTP", () => {
     expect(stored?.clientSecret).toBe("google-secret");
   });
 
+  test("no presetId + missing required endpoint fields is rejected with 400", async () => {
+    // provider/authorizeUrl/tokenUrl are optional in the schema (preset can
+    // supply them) — but with no presetId the handler must still reject a
+    // request that omits them, not write a half-configured app.
+    const res = await dispatch("/api/oauth-apps", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: { provider: "bare_provider", clientId: "c", clientSecret: "s" },
+    });
+    expect(res.status).toBe(400);
+    expect(res.text).toContain("authorizeUrl");
+    expect(getOAuthApp("bare_provider")).toBeNull();
+  });
+
   test("explicit fields override the preset during hydration", async () => {
     const res = await dispatch("/api/oauth-apps", {
       method: "POST",
