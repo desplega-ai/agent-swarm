@@ -1,16 +1,14 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { deleteSwarmConfig, upsertSwarmConfig } from "../be/db";
+import { deleteSwarmConfig, getDb, upsertSwarmConfig } from "../be/db";
+import { upsertCredentialBinding } from "../be/script-connections";
 import { buildScriptCredentialBindings } from "../be/script-credential-broker";
 import { createApiRegistryClient } from "../scripts-runtime/api-client";
 import {
-  CREDENTIAL_BINDINGS_CONFIG_KEY,
   type CredentialBindingStore,
   CredentialBroker,
   DEFAULT_CREDENTIAL_BINDINGS,
   patchFetchWithCredentialBroker,
-  SwarmConfigCredentialBindingStore,
 } from "../scripts-runtime/credential-broker";
-import type { SwarmConfig } from "../types";
 import { clearVolatileSecretsForTesting, scrubSecrets } from "../utils/secret-scrubber";
 
 const originalFetch = globalThis.fetch;
@@ -20,125 +18,7 @@ afterEach(() => {
   clearVolatileSecretsForTesting();
 });
 
-function configRow(value: unknown): SwarmConfig {
-  return {
-    id: "00000000-0000-4000-8000-000000000001",
-    scope: "global",
-    scopeId: null,
-    key: "SCRIPT_CREDENTIAL_BINDINGS",
-    value: JSON.stringify(value),
-    isSecret: false,
-    envPath: null,
-    description: null,
-    createdAt: "2026-06-26T00:00:00.000Z",
-    lastUpdatedAt: "2026-06-26T00:00:00.000Z",
-    encrypted: false,
-  };
-}
-
-function scopedConfigRow(
-  scope: "global" | "agent" | "repo",
-  scopeId: string | null,
-  value: unknown,
-): SwarmConfig {
-  return {
-    ...configRow(value),
-    scope,
-    scopeId,
-  };
-}
-
 describe("credential broker", () => {
-  test("loads active bindings from swarm_config", () => {
-    const store = new SwarmConfigCredentialBindingStore(() => [
-      configRow({
-        bindings: [
-          {
-            configKey: "LINEAR_API_KEY",
-            allowedHosts: ["api.linear.app"],
-            headerTemplate: "Authorization: Bearer [REDACTED:LINEAR_API_KEY]",
-            scope: "global",
-            active: true,
-          },
-          {
-            configKey: "DISABLED_KEY",
-            allowedHosts: ["example.com"],
-            headerTemplate: "Authorization: Bearer [REDACTED:DISABLED_KEY]",
-            scope: "global",
-            active: false,
-          },
-          {
-            configKey: "QUERY_KEY",
-            allowedHosts: ["api.example.com"],
-            queryTemplate: "api_key=[REDACTED:QUERY_KEY]",
-            scope: "global",
-            active: true,
-          },
-        ],
-      }),
-    ]);
-
-    expect(store.listActiveBindings({})).toEqual([
-      {
-        configKey: "LINEAR_API_KEY",
-        allowedHosts: ["api.linear.app"],
-        headerTemplate: "Authorization: Bearer [REDACTED:LINEAR_API_KEY]",
-        scope: "global",
-        active: true,
-        scopeId: null,
-        authKind: "config",
-      },
-      {
-        configKey: "QUERY_KEY",
-        allowedHosts: ["api.example.com"],
-        queryTemplate: "api_key=[REDACTED:QUERY_KEY]",
-        scope: "global",
-        active: true,
-        scopeId: null,
-        authKind: "config",
-      },
-    ]);
-  });
-
-  test("falls back to the swarm_config row scope when a binding omits scope", () => {
-    const agentId = "22222222-2222-4222-8222-222222222222";
-    const store = new SwarmConfigCredentialBindingStore(() => [
-      scopedConfigRow("agent", agentId, {
-        bindings: [
-          {
-            configKey: "AGENT_VENDOR_KEY",
-            allowedHosts: ["api.vendor.test"],
-            headerTemplate: "Authorization: Bearer [REDACTED:AGENT_VENDOR_KEY]",
-          },
-        ],
-      }),
-    ]);
-
-    expect(store.listActiveBindings({ agentId })).toHaveLength(1);
-    expect(store.listActiveBindings({ agentId: "33333333-3333-4333-8333-333333333333" })).toEqual(
-      [],
-    );
-  });
-
-  test("keeps scope inheritance aligned when a malformed legacy row is dropped", () => {
-    const agentId = "22222222-2222-4222-8222-222222222222";
-    const store = new SwarmConfigCredentialBindingStore(() => [
-      scopedConfigRow("agent", agentId, {
-        bindings: [
-          { malformed: true, scope: "global" },
-          {
-            configKey: "ALIGNED_AGENT_KEY",
-            allowedHosts: ["api.vendor.test"],
-            headerTemplate: "Authorization: Bearer [REDACTED:ALIGNED_AGENT_KEY]",
-          },
-        ],
-      }),
-    ]);
-
-    expect(store.listActiveBindings({ agentId })).toHaveLength(1);
-    expect(store.listActiveBindings({})).toEqual([]);
-  });
-
   test("resolves seeded GITHUB_TOKEN binding", async () => {
     const emptyStore: CredentialBindingStore = { listActiveBindings: () => [] };
     const broker = new CredentialBroker(
@@ -202,54 +82,6 @@ describe("credential broker", () => {
     });
 
     expect(authorization).toBe("Bearer gmail-access-token");
-  });
-
-  test("resolves a legacy oauthProvider blob through the default authorization shim", async () => {
-    const store = new SwarmConfigCredentialBindingStore(
-      () => [
-        configRow({
-          bindings: [
-            {
-              configKey: "LEGACY_LINEAR_OAUTH",
-              allowedHosts: ["api.linear.app"],
-              headerTemplate: "Authorization: Bearer [REDACTED:LEGACY_LINEAR_OAUTH]",
-              scope: "global",
-              active: true,
-              authKind: "oauth",
-              oauthProvider: "linear",
-            },
-          ],
-        }),
-      ],
-      (provider) => (provider === "linear" ? "linear-default-authorization" : undefined),
-    );
-    const oauthResolver = mock(async (authorizationId: string) =>
-      authorizationId === "linear-default-authorization" ? "linear-migrated-token" : undefined,
-    );
-    const broker = new CredentialBroker(store, () => undefined, [], oauthResolver);
-    const bindings = await broker.resolveBindings({});
-
-    expect(bindings).toMatchObject([
-      {
-        configKey: "LEGACY_LINEAR_OAUTH",
-        oauthAuthorizationId: "linear-default-authorization",
-        placeholder: "[REDACTED:LEGACY_LINEAR_OAUTH]",
-        value: "linear-migrated-token",
-      },
-    ]);
-    expect(oauthResolver).toHaveBeenCalledWith("linear-default-authorization");
-
-    let authorization: string | null = null;
-    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
-      authorization = new Headers(init?.headers).get("authorization");
-      return Response.json({ ok: true });
-    }) as typeof fetch;
-    patchFetchWithCredentialBroker(bindings);
-    await fetch("https://api.linear.app/graphql", {
-      headers: { Authorization: "Bearer [REDACTED:LEGACY_LINEAR_OAUTH]" },
-    });
-
-    expect(authorization).toBe("Bearer linear-migrated-token");
   });
 
   test("resolved OAuth bindings also authenticate ctx.api clients", async () => {
@@ -337,18 +169,12 @@ describe("credential broker", () => {
   });
 
   test("registers resolved broker config values with the scrubber", async () => {
-    const bindingsConfig = upsertSwarmConfig({
-      scope: "global",
-      key: CREDENTIAL_BINDINGS_CONFIG_KEY,
-      value: JSON.stringify({
-        bindings: [
-          {
-            configKey: "VENDOR_SPECIAL_API_KEY",
-            allowedHosts: ["api.vendor.test"],
-            headerTemplate: "Authorization: Bearer [REDACTED:VENDOR_SPECIAL_API_KEY]",
-          },
-        ],
-      }),
+    // The legacy SCRIPT_CREDENTIAL_BINDINGS blob is retired — resolution is now
+    // relational-only, so seed a relational binding + its config secret.
+    const binding = upsertCredentialBinding({
+      configKey: "VENDOR_SPECIAL_API_KEY",
+      allowedHosts: ["api.vendor.test"],
+      headerTemplate: "Authorization: Bearer [REDACTED:VENDOR_SPECIAL_API_KEY]",
     });
     const secretConfig = upsertSwarmConfig({
       scope: "global",
@@ -360,12 +186,12 @@ describe("credential broker", () => {
     try {
       const bindings = await buildScriptCredentialBindings({});
 
-      expect(bindings.some((binding) => binding.configKey === "VENDOR_SPECIAL_API_KEY")).toBe(true);
+      expect(bindings.some((entry) => entry.configKey === "VENDOR_SPECIAL_API_KEY")).toBe(true);
       expect(scrubSecrets("echo not_a_standard_token_shape_12345")).toBe(
         "echo [REDACTED:VENDOR_SPECIAL_API_KEY]",
       );
     } finally {
-      deleteSwarmConfig(bindingsConfig.id);
+      getDb().run("DELETE FROM script_credential_bindings WHERE id = ?", [binding.id]);
       deleteSwarmConfig(secretConfig.id);
     }
   });

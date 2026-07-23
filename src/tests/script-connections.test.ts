@@ -529,6 +529,10 @@ describe("script connections", () => {
       markMigrationApplied(database, "115_asset_namespace_keys.sql");
       markMigrationApplied(database, "116_favorite_principal_scope.sql");
       markMigrationApplied(database, "117_unified_oauth.sql");
+      // 120 rebuilds script_credential_bindings using 117's oauth_authorization_id
+      // column, which this pre-117 fixture never materializes; skip it since this
+      // test only exercises the 112 rebuild.
+      markMigrationApplied(database, "120_connection_embedded_auth.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

@@ -1,9 +1,6 @@
-import { getDb, getSwarmConfigs } from "@/be/db";
-import {
-  getAuthorizationById,
-  getDefaultAuthorizationIdForProvider,
-  getOAuthAppById,
-} from "@/be/db-queries/oauth";
+import { z } from "zod";
+import { getDb, upsertSwarmConfig } from "@/be/db";
+import { getAuthorizationById, getOAuthAppById } from "@/be/db-queries/oauth";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
 import type {
   ScriptApiConnectionDescriptor,
@@ -14,16 +11,103 @@ import type {
   ScriptMcpToolDescriptor,
 } from "@/scripts-runtime/api-types";
 import {
-  CREDENTIAL_BINDINGS_CONFIG_KEY,
   type CredentialBinding,
-  normalizeCredentialBindingsDocument,
+  placeholderForConfigKey,
 } from "@/scripts-runtime/credential-broker";
+import { refreshSecretScrubberCache } from "@/utils/secret-scrubber";
 import { listMcpServerTools } from "./mcp-proxy";
 import { readVendoredOpenapiSpec } from "./vendored-openapi";
 
 export type ScriptConnectionScope = "global" | "agent" | "repo";
 export type ScriptConnectionKind = "raw" | "openapi" | "mcp" | "graphql";
 export type ScriptConnectionBaseUrlSource = "user" | "spec";
+export type ScriptConnectionAuthType = "none" | "bearer" | "header" | "query" | "oauth";
+
+/**
+ * Inline auth declared on a connection upsert. The connection owns a single
+ * auto-managed credential binding derived from this intent; scripts never see
+ * the raw secret (only the `[REDACTED:<key>]` placeholder substituted at the
+ * fetch layer toward the connection's allowed hosts).
+ */
+export type ConnectionAuthInput =
+  | { type: "none" }
+  | {
+      type: "bearer";
+      secret?: string;
+      configKey?: string;
+      template?: string;
+      hosts?: string[];
+    }
+  | {
+      type: "header";
+      headerName: string;
+      secret?: string;
+      configKey?: string;
+      template?: string;
+      hosts?: string[];
+    }
+  | {
+      type: "query";
+      paramName: string;
+      secret?: string;
+      configKey?: string;
+      template?: string;
+      hosts?: string[];
+    }
+  | {
+      type: "oauth";
+      authorizationId: string;
+      configKey?: string;
+      template?: string;
+      hosts?: string[];
+    };
+
+export type ConnectionAuthSummary = {
+  type: ScriptConnectionAuthType;
+  configKey?: string;
+  authorizationId?: string;
+  paramName?: string;
+};
+
+const authHostsSchema = z.array(z.string().min(1)).optional();
+const authSecretSchema = z.string().min(1).optional();
+const authConfigKeySchema = z.string().min(1).max(255).optional();
+const authTemplateSchema = z.string().min(1).optional();
+
+/** Zod schema mirroring {@link ConnectionAuthInput} for HTTP + MCP tool bodies. */
+export const ConnectionAuthInputSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("none") }),
+  z.object({
+    type: z.literal("bearer"),
+    secret: authSecretSchema,
+    configKey: authConfigKeySchema,
+    template: authTemplateSchema,
+    hosts: authHostsSchema,
+  }),
+  z.object({
+    type: z.literal("header"),
+    headerName: z.string().min(1).max(255),
+    secret: authSecretSchema,
+    configKey: authConfigKeySchema,
+    template: authTemplateSchema,
+    hosts: authHostsSchema,
+  }),
+  z.object({
+    type: z.literal("query"),
+    paramName: z.string().min(1).max(255),
+    secret: authSecretSchema,
+    configKey: authConfigKeySchema,
+    template: authTemplateSchema,
+    hosts: authHostsSchema,
+  }),
+  z.object({
+    type: z.literal("oauth"),
+    authorizationId: z.string().min(1).max(255),
+    configKey: authConfigKeySchema,
+    template: authTemplateSchema,
+    hosts: authHostsSchema,
+  }),
+]);
 
 export type ScriptConnectionBaseUrlMismatch = {
   specUrl: string;
@@ -32,7 +116,8 @@ export type ScriptConnectionBaseUrlMismatch = {
 
 export type ScriptCredentialBindingRecord = CredentialBinding & {
   id: string;
-  source: "default" | "user" | "migration";
+  source: "default" | "user" | "migration" | "connection";
+  managedByConnectionId: string | null;
   createdAt: string;
   updatedAt: string;
   createdBy: string | null;
@@ -51,6 +136,12 @@ export type ScriptConnectionRecord = {
   baseUrlMismatch?: ScriptConnectionBaseUrlMismatch;
   allowedHosts: string[];
   credentialBindingId: string | null;
+  authType: ScriptConnectionAuthType;
+  authConfigKey: string | null;
+  authAuthorizationId: string | null;
+  authParamName: string | null;
+  authTemplateOverride: string | null;
+  authHostsOverride: string[] | null;
   openapiSpecSourceKind: "url" | "inline" | "agent_fs" | "vendored" | null;
   openapiSpecSource: string | null;
   openapiSpecJson: string | null;
@@ -80,6 +171,7 @@ type BindingRow = {
   active: number;
   auth_kind: string;
   oauth_authorization_id: string | null;
+  managed_by_connection_id: string | null;
   source: string;
   created_at: string;
   updated_at: string;
@@ -98,6 +190,12 @@ type ConnectionRow = {
   base_url_source: string;
   allowed_hosts_json: string;
   credential_binding_id: string | null;
+  auth_type: string;
+  auth_config_key: string | null;
+  auth_authorization_id: string | null;
+  auth_param_name: string | null;
+  auth_template_override: string | null;
+  auth_hosts_override_json: string | null;
   openapi_spec_source_kind: string | null;
   openapi_spec_source: string | null;
   openapi_spec_json: string | null;
@@ -125,6 +223,21 @@ function parseJsonArray(value: string): string[] {
   }
 }
 
+const AUTH_TYPES: ScriptConnectionAuthType[] = ["none", "bearer", "header", "query", "oauth"];
+
+function normalizeAuthType(value: string): ScriptConnectionAuthType {
+  return (AUTH_TYPES as string[]).includes(value) ? (value as ScriptConnectionAuthType) : "none";
+}
+
+export function connectionAuthSummary(connection: ScriptConnectionRecord): ConnectionAuthSummary {
+  return {
+    type: connection.authType,
+    ...(connection.authConfigKey ? { configKey: connection.authConfigKey } : {}),
+    ...(connection.authAuthorizationId ? { authorizationId: connection.authAuthorizationId } : {}),
+    ...(connection.authParamName ? { paramName: connection.authParamName } : {}),
+  };
+}
+
 function bindingFromRow(row: BindingRow): ScriptCredentialBindingRecord {
   return {
     id: row.id,
@@ -138,6 +251,7 @@ function bindingFromRow(row: BindingRow): ScriptCredentialBindingRecord {
     authKind: row.auth_kind === "oauth" ? "oauth" : "config",
     oauthAuthorizationId: row.oauth_authorization_id ?? undefined,
     source: row.source as ScriptCredentialBindingRecord["source"],
+    managedByConnectionId: row.managed_by_connection_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     createdBy: row.created_by,
@@ -179,6 +293,14 @@ function connectionFromRow(row: ConnectionRow): ScriptConnectionRecord {
     ...(baseUrlMismatch ? { baseUrlMismatch } : {}),
     allowedHosts: parseJsonArray(row.allowed_hosts_json),
     credentialBindingId: row.credential_binding_id,
+    authType: normalizeAuthType(row.auth_type),
+    authConfigKey: row.auth_config_key,
+    authAuthorizationId: row.auth_authorization_id,
+    authParamName: row.auth_param_name,
+    authTemplateOverride: row.auth_template_override,
+    authHostsOverride: row.auth_hosts_override_json
+      ? parseJsonArray(row.auth_hosts_override_json)
+      : null,
     openapiSpecSourceKind:
       row.openapi_spec_source_kind as ScriptConnectionRecord["openapiSpecSourceKind"],
     openapiSpecSource: row.openapi_spec_source,
@@ -228,6 +350,10 @@ export function listRelationalCredentialBindings(context?: {
   agentId?: string;
   repoId?: string;
   includeInactive?: boolean;
+  // Managed bindings back embedded connection auth. They are included by default
+  // (the credential broker and connection decorators need them) and only the
+  // standalone binding surfaces pass `excludeManaged` to hide them.
+  excludeManaged?: boolean;
 }): ScriptCredentialBindingRecord[] {
   const rows = getDb()
     .prepare<BindingRow, []>("SELECT * FROM script_credential_bindings ORDER BY config_key ASC")
@@ -235,7 +361,19 @@ export function listRelationalCredentialBindings(context?: {
   return rows
     .map(bindingFromRow)
     .filter((binding) => context?.includeInactive || binding.active !== false)
+    .filter((binding) => !context?.excludeManaged || binding.managedByConnectionId === null)
     .filter((binding) => !context || applies(binding.scope, binding.scopeId ?? null, context));
+}
+
+function findManagedBindingByConnectionId(
+  connectionId: string,
+): ScriptCredentialBindingRecord | null {
+  const row = getDb()
+    .prepare<BindingRow, [string]>(
+      "SELECT * FROM script_credential_bindings WHERE managed_by_connection_id = ?",
+    )
+    .get(connectionId);
+  return row ? bindingFromRow(row) : null;
 }
 
 export function getCredentialBindingById(id: string): ScriptCredentialBindingRecord | null {
@@ -282,7 +420,8 @@ export function upsertCredentialBinding(data: {
   active?: boolean;
   authKind?: CredentialBinding["authKind"];
   oauthAuthorizationId?: string | null;
-  source?: "default" | "user" | "migration";
+  source?: "default" | "user" | "migration" | "connection";
+  managedByConnectionId?: string | null;
   userId?: string | null;
 }): ScriptCredentialBindingRecord {
   const now = new Date().toISOString();
@@ -291,6 +430,7 @@ export function upsertCredentialBinding(data: {
   const scopeId = scope === "global" ? null : (data.scopeId ?? null);
   const active = data.active === false ? 0 : 1;
   const authKind = data.authKind ?? "config";
+  const managedByConnectionId = data.managedByConnectionId ?? null;
   if (authKind === "oauth" && !data.oauthAuthorizationId) {
     throw new Error("oauthAuthorizationId is required for oauth credential bindings");
   }
@@ -305,12 +445,15 @@ export function upsertCredentialBinding(data: {
         `OAuth authorization ${data.oauthAuthorizationId} is not a generic provider authorization`,
       );
     }
-    if (authorization.status !== "active") {
+    // Managed (connection-owned) bindings may be attached before the OAuth flow
+    // is completed; a non-active authorization simply resolves to no token at
+    // egress time. Standalone bindings keep the stricter active-only guard.
+    if (!managedByConnectionId && authorization.status !== "active") {
       throw new Error(`OAuth authorization ${data.oauthAuthorizationId} is not active`);
     }
   }
   const oauthAuthorizationId = data.oauthAuthorizationId ?? null;
-  const source = data.source ?? "user";
+  const source = data.source ?? (managedByConnectionId ? "connection" : "user");
   const existing =
     (data.id ? getCredentialBindingById(data.id) : null) ??
     findCredentialBindingByIdentity({
@@ -338,6 +481,7 @@ export function upsertCredentialBinding(data: {
           string | null,
           string,
           string | null,
+          string | null,
           string,
           string,
         ]
@@ -345,7 +489,7 @@ export function upsertCredentialBinding(data: {
         `UPDATE script_credential_bindings
          SET config_key = ?, allowed_hosts_json = ?, header_template = ?, query_template = ?,
              scope = ?, scope_id = ?, active = ?, auth_kind = ?, oauth_authorization_id = ?,
-             source = ?, updated_by = ?, updated_at = ?
+             source = ?, managed_by_connection_id = ?, updated_by = ?, updated_at = ?
          WHERE id = ? RETURNING *`,
       )
       .get(
@@ -359,6 +503,7 @@ export function upsertCredentialBinding(data: {
         authKind,
         oauthAuthorizationId,
         source,
+        managedByConnectionId,
         data.userId ?? null,
         now,
         targetId,
@@ -382,6 +527,7 @@ export function upsertCredentialBinding(data: {
         string,
         string | null,
         string,
+        string | null,
         string,
         string,
         string | null,
@@ -390,8 +536,9 @@ export function upsertCredentialBinding(data: {
     >(
       `INSERT INTO script_credential_bindings
        (id, config_key, allowed_hosts_json, header_template, query_template, scope, scope_id,
-        active, auth_kind, oauth_authorization_id, source, created_at, updated_at, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        active, auth_kind, oauth_authorization_id, source, managed_by_connection_id,
+        created_at, updated_at, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -405,6 +552,7 @@ export function upsertCredentialBinding(data: {
       authKind,
       oauthAuthorizationId,
       source,
+      managedByConnectionId,
       now,
       now,
       data.userId ?? null,
@@ -424,39 +572,6 @@ export function disableCredentialBinding(
     )
     .get(new Date().toISOString(), userId ?? null, id);
   return row ? bindingFromRow(row) : null;
-}
-
-export function importLegacyCredentialBindings(userId?: string | null): number {
-  let imported = 0;
-  for (const config of getSwarmConfigs({ key: CREDENTIAL_BINDINGS_CONFIG_KEY })) {
-    let bindings: CredentialBinding[];
-    try {
-      bindings = normalizeCredentialBindingsDocument(
-        JSON.parse(config.value),
-        (provider) => getDefaultAuthorizationIdForProvider(provider) ?? undefined,
-      );
-    } catch {
-      continue;
-    }
-    for (const binding of bindings) {
-      const scope = binding.scope ?? (config.scope as ScriptConnectionScope);
-      upsertCredentialBinding({
-        configKey: binding.configKey,
-        allowedHosts: binding.allowedHosts,
-        headerTemplate: binding.headerTemplate,
-        queryTemplate: binding.queryTemplate,
-        scope,
-        scopeId: binding.scopeId ?? config.scopeId ?? null,
-        active: binding.active !== false,
-        authKind: binding.authKind,
-        oauthAuthorizationId: binding.oauthAuthorizationId ?? null,
-        source: "migration",
-        userId,
-      });
-      imported += 1;
-    }
-  }
-  return imported;
 }
 
 export function listScriptConnections(context?: {
@@ -849,15 +964,21 @@ function extractOperations(
   return { operations, types: typeBlocks.join("\n") };
 }
 
+type CredentialDescriptorInput = {
+  configKey: string;
+  headerTemplate?: string | null;
+  queryTemplate?: string | null;
+} | null;
+
 export function buildGeneratedArtifacts(input: {
   slug: string;
   baseUrl: string;
-  credentialBinding: ScriptCredentialBindingRecord | null;
+  credential: CredentialDescriptorInput;
   openapiSpec: unknown;
 }): { generatedTypes: string; generatedRuntimeJson: string } {
   const slug = normalizeSlug(input.slug);
   const { operations, types } = extractOperations(input.openapiSpec, slug);
-  const credential = credentialDescriptor(input.credentialBinding);
+  const credential = credentialDescriptor(input.credential);
   const descriptor: ScriptApiConnectionDescriptor = {
     slug,
     baseUrl: input.baseUrl,
@@ -876,12 +997,12 @@ export function buildGeneratedArtifacts(input: {
   return { generatedTypes, generatedRuntimeJson: JSON.stringify(descriptor) };
 }
 
-function credentialDescriptor(binding: ScriptCredentialBindingRecord | null) {
-  return binding
+function credentialDescriptor(credential: CredentialDescriptorInput) {
+  return credential
     ? {
-        configKey: binding.configKey,
-        headerTemplate: binding.headerTemplate,
-        queryTemplate: binding.queryTemplate,
+        configKey: credential.configKey,
+        headerTemplate: credential.headerTemplate ?? undefined,
+        queryTemplate: credential.queryTemplate ?? undefined,
       }
     : null;
 }
@@ -889,14 +1010,14 @@ function credentialDescriptor(binding: ScriptCredentialBindingRecord | null) {
 export function buildGraphqlGeneratedArtifacts(input: {
   slug: string;
   baseUrl: string;
-  credentialBinding: ScriptCredentialBindingRecord | null;
+  credential: CredentialDescriptorInput;
 }): { generatedTypes: string; generatedRuntimeJson: string } {
   const slug = normalizeSlug(input.slug);
   const descriptor: ScriptApiConnectionDescriptor = {
     slug,
     kind: "graphql",
     baseUrl: input.baseUrl,
-    credential: credentialDescriptor(input.credentialBinding),
+    credential: credentialDescriptor(input.credential),
   };
   const generatedTypes = [
     `export interface ${pascal(slug)}Api {`,
@@ -904,6 +1025,239 @@ export function buildGraphqlGeneratedArtifacts(input: {
     "}",
   ].join("\n");
   return { generatedTypes, generatedRuntimeJson: JSON.stringify(descriptor) };
+}
+
+type AuthColumns = {
+  authType: ScriptConnectionAuthType;
+  authConfigKey: string | null;
+  authAuthorizationId: string | null;
+  authParamName: string | null;
+  authTemplateOverride: string | null;
+  authHostsOverrideJson: string | null;
+};
+
+const NONE_AUTH_COLUMNS: AuthColumns = {
+  authType: "none",
+  authConfigKey: null,
+  authAuthorizationId: null,
+  authParamName: null,
+  authTemplateOverride: null,
+  authHostsOverrideJson: null,
+};
+
+type DerivedConnectionBinding = {
+  configKey: string;
+  headerTemplate: string | null;
+  queryTemplate: string | null;
+  allowedHosts: string[];
+  authKind: "config" | "oauth";
+  oauthAuthorizationId: string | null;
+  authColumns: AuthColumns;
+  credential: CredentialDescriptorInput;
+  secretWrite: {
+    scope: ScriptConnectionScope;
+    scopeId: string | null;
+    key: string;
+    value: string;
+  } | null;
+};
+
+/**
+ * Resolve inline connection auth into a managed credential binding spec.
+ *
+ * Inline secrets land in a derived, write-only, encrypted `swarm_config` key
+ * (`connection.<slug>.secret`); explicit `configKey` values are used as-is
+ * (shared/rotated secrets). Templates are derived per auth type — a `query`
+ * binding NEVER falls back to a header (see the Phase-0 regression). Scripts
+ * only ever see the `[REDACTED:<key>]` placeholder.
+ */
+function deriveConnectionBinding(
+  auth: ConnectionAuthInput,
+  ctx: {
+    slug: string;
+    baseUrl: string | null;
+    scope: ScriptConnectionScope;
+    scopeId: string | null;
+  },
+): DerivedConnectionBinding | null {
+  if (auth.type === "none") return null;
+
+  let configKey: string;
+  let secretWrite: DerivedConnectionBinding["secretWrite"] = null;
+  if (auth.type === "oauth") {
+    if (!auth.authorizationId) {
+      throw new Error("oauth connection auth requires an authorizationId.");
+    }
+    const authorization = getAuthorizationById(auth.authorizationId);
+    if (!authorization) {
+      throw new Error(`OAuth authorization ${auth.authorizationId} was not found.`);
+    }
+    const app = getOAuthAppById(authorization.appId);
+    if (!app || app.mcpServerId !== null) {
+      throw new Error(
+        `OAuth authorization ${auth.authorizationId} is not a generic provider authorization.`,
+      );
+    }
+    configKey = auth.configKey ?? `connection.${ctx.slug}.oauth`;
+  } else if (auth.secret !== undefined) {
+    if (auth.configKey) {
+      throw new Error("Provide either `secret` or `configKey` for connection auth, not both.");
+    }
+    configKey = `connection.${ctx.slug}.secret`;
+    secretWrite = { scope: ctx.scope, scopeId: ctx.scopeId, key: configKey, value: auth.secret };
+  } else if (auth.configKey) {
+    configKey = auth.configKey;
+  } else {
+    throw new Error(`Connection auth of type '${auth.type}' requires 'secret' or 'configKey'.`);
+  }
+
+  const placeholder = placeholderForConfigKey(configKey);
+  let headerTemplate: string | null = null;
+  let queryTemplate: string | null = null;
+  if (auth.type === "query") {
+    queryTemplate = auth.template ?? `${auth.paramName}=${placeholder}`;
+  } else if (auth.type === "header") {
+    headerTemplate = auth.template ?? `${auth.headerName}: ${placeholder}`;
+  } else {
+    // bearer + oauth both resolve to a bearer Authorization header.
+    headerTemplate = auth.template ?? `Authorization: Bearer ${placeholder}`;
+  }
+  if (!headerTemplate?.includes(placeholder) && !queryTemplate?.includes(placeholder)) {
+    throw new Error(`Connection auth template must include ${placeholder}.`);
+  }
+
+  const hosts = auth.hosts ?? (ctx.baseUrl ? [new URL(ctx.baseUrl).hostname] : []);
+  if (hosts.length === 0) {
+    throw new Error(
+      "Connection auth requires a baseUrl or explicit hosts for egress allowlisting.",
+    );
+  }
+
+  const paramName =
+    auth.type === "header" ? auth.headerName : auth.type === "query" ? auth.paramName : null;
+
+  return {
+    configKey,
+    headerTemplate,
+    queryTemplate,
+    allowedHosts: hosts,
+    authKind: auth.type === "oauth" ? "oauth" : "config",
+    oauthAuthorizationId: auth.type === "oauth" ? auth.authorizationId : null,
+    credential: { configKey, headerTemplate, queryTemplate },
+    secretWrite,
+    authColumns: {
+      authType: auth.type,
+      authConfigKey: configKey,
+      authAuthorizationId: auth.type === "oauth" ? auth.authorizationId : null,
+      authParamName: paramName,
+      authTemplateOverride: auth.template ?? null,
+      authHostsOverrideJson: auth.hosts ? JSON.stringify(auth.hosts) : null,
+    },
+  };
+}
+
+/**
+ * Rebuild the auth intent from a connection's persisted columns so metadata-only
+ * upserts and refreshes re-derive the managed binding (propagating slug/baseUrl
+ * changes) WITHOUT rewriting the underlying secret (it already lives under the
+ * stored configKey).
+ */
+function reconstructAuthFromConnection(conn: ScriptConnectionRecord | null): ConnectionAuthInput {
+  if (!conn || conn.authType === "none") return { type: "none" };
+  const configKey = conn.authConfigKey ?? undefined;
+  const template = conn.authTemplateOverride ?? undefined;
+  const hosts = conn.authHostsOverride ?? undefined;
+  switch (conn.authType) {
+    case "bearer":
+      return { type: "bearer", configKey, template, hosts };
+    case "header":
+      return {
+        type: "header",
+        headerName: conn.authParamName ?? "Authorization",
+        configKey,
+        template,
+        hosts,
+      };
+    case "query":
+      return {
+        type: "query",
+        paramName: conn.authParamName ?? "api_key",
+        configKey,
+        template,
+        hosts,
+      };
+    case "oauth":
+      return {
+        type: "oauth",
+        authorizationId: conn.authAuthorizationId ?? "",
+        configKey,
+        template,
+        hosts,
+      };
+    default:
+      return { type: "none" };
+  }
+}
+
+/**
+ * Map the legacy flat auth args (`configKey` + `headerTemplate`/`queryTemplate`,
+ * or `authKind:'oauth'` + `oauthAuthorizationId`) onto the unified
+ * {@link ConnectionAuthInput}. An explicit `auth` object always wins. Returns
+ * `undefined` when no auth intent is expressed (upsert then preserves existing
+ * embedded auth or leaves the connection unauthenticated).
+ */
+export function connectionAuthInputFromFlat(input: {
+  auth?: ConnectionAuthInput;
+  configKey?: string | null;
+  headerTemplate?: string | null;
+  queryTemplate?: string | null;
+  authKind?: "config" | "oauth";
+  oauthAuthorizationId?: string | null;
+  allowedHosts?: string[];
+}): ConnectionAuthInput | undefined {
+  const hosts =
+    input.allowedHosts && input.allowedHosts.length > 0 ? input.allowedHosts : undefined;
+  if (input.auth) {
+    if (input.auth.type !== "none" && input.auth.hosts === undefined && hosts) {
+      return { ...input.auth, hosts };
+    }
+    return input.auth;
+  }
+  if (input.authKind === "oauth" && input.oauthAuthorizationId) {
+    return { type: "oauth", authorizationId: input.oauthAuthorizationId, hosts };
+  }
+  if (input.configKey) {
+    if (input.queryTemplate) {
+      const paramName = input.queryTemplate.split("=")[0] || "api_key";
+      return {
+        type: "query",
+        paramName,
+        configKey: input.configKey,
+        template: input.queryTemplate,
+        hosts,
+      };
+    }
+    if (input.headerTemplate) {
+      const headerName = input.headerTemplate.split(":")[0] || "Authorization";
+      return {
+        type: "header",
+        headerName,
+        configKey: input.configKey,
+        template: input.headerTemplate,
+        hosts,
+      };
+    }
+    return { type: "bearer", configKey: input.configKey, hosts };
+  }
+  return undefined;
+}
+
+function deleteManagedBindingForConnection(connectionId: string): void {
+  getDb()
+    .prepare<unknown, [string]>(
+      "DELETE FROM script_credential_bindings WHERE managed_by_connection_id = ?",
+    )
+    .run(connectionId);
 }
 
 type OpenapiSpecFetchResult =
@@ -1084,6 +1438,11 @@ export async function upsertScriptConnection(data: {
   baseUrl?: string | null;
   allowedHosts?: string[];
   credentialBindingId?: string | null;
+  // Inline auth intent. When provided, the connection owns an auto-managed
+  // credential binding derived from it. When omitted on an update, existing
+  // embedded auth is preserved (and re-derived so slug/baseUrl changes flow
+  // through). `{ type: 'none' }` explicitly clears embedded auth.
+  auth?: ConnectionAuthInput;
   openapiSpecSourceKind?: "url" | "inline" | "agent_fs" | "vendored" | null;
   openapiSpecSource?: string | null;
   openapiSpecUrl?: string | null;
@@ -1128,6 +1487,34 @@ export async function upsertScriptConnection(data: {
   let baseUrlSource: ScriptConnectionBaseUrlSource = "user";
   let allowedHosts = data.allowedHosts ?? [];
   let vendoredBaseUrl: string | null = null;
+
+  // MCP connections resolve auth through their MCP server, never inline.
+  if (data.kind === "mcp" && data.auth && data.auth.type !== "none") {
+    throw new Error(
+      "MCP connections resolve auth through their MCP server; `auth` is not supported.",
+    );
+  }
+  // Explicit legacy attach: caller passes `credentialBindingId` (a standalone
+  // binding, e.g. raw-fetch egress) with no `auth`.
+  const explicitLegacyBinding = data.auth === undefined && data.credentialBindingId !== undefined;
+  const authIntent: ConnectionAuthInput =
+    data.kind === "mcp" || explicitLegacyBinding
+      ? { type: "none" }
+      : (data.auth ?? reconstructAuthFromConnection(existingConnection));
+  let derived: DerivedConnectionBinding | null = null;
+  // An explicitly-attached standalone binding still feeds the generated
+  // credential descriptor (raw fetch() / advanced path).
+  const explicitBinding =
+    explicitLegacyBinding && data.credentialBindingId
+      ? getCredentialBindingById(data.credentialBindingId)
+      : null;
+  const explicitBindingCredential: CredentialDescriptorInput = explicitBinding
+    ? {
+        configKey: explicitBinding.configKey,
+        headerTemplate: explicitBinding.headerTemplate,
+        queryTemplate: explicitBinding.queryTemplate,
+      }
+    : null;
 
   if (data.kind === "openapi") {
     if (openapiSpecSourceKind === "vendored") {
@@ -1180,13 +1567,16 @@ export async function upsertScriptConnection(data: {
         );
       }
       new URL(effectiveBaseUrl);
-      const binding = data.credentialBindingId
-        ? getCredentialBindingById(data.credentialBindingId)
-        : null;
+      derived = deriveConnectionBinding(authIntent, {
+        slug: normalizedSlug,
+        baseUrl: effectiveBaseUrl,
+        scope,
+        scopeId,
+      });
       const artifacts = buildGeneratedArtifacts({
         slug: data.slug,
         baseUrl: effectiveBaseUrl,
-        credentialBinding: binding,
+        credential: derived?.credential ?? explicitBindingCredential,
         openapiSpec: spec,
       });
       generatedTypes = artifacts.generatedTypes;
@@ -1239,13 +1629,16 @@ export async function upsertScriptConnection(data: {
     effectiveBaseUrl = data.baseUrl;
     baseUrlSource = "user";
     allowedHosts = data.allowedHosts;
-    const binding = data.credentialBindingId
-      ? getCredentialBindingById(data.credentialBindingId)
-      : null;
+    derived = deriveConnectionBinding(authIntent, {
+      slug: normalizedSlug,
+      baseUrl: data.baseUrl,
+      scope,
+      scopeId,
+    });
     const artifacts = buildGraphqlGeneratedArtifacts({
       slug: data.slug,
       baseUrl: data.baseUrl,
-      credentialBinding: binding,
+      credential: derived?.credential ?? explicitBindingCredential,
     });
     generatedTypes = artifacts.generatedTypes;
     generatedRuntimeJson = artifacts.generatedRuntimeJson;
@@ -1257,61 +1650,125 @@ export async function upsertScriptConnection(data: {
       data.allowedHosts ?? (effectiveBaseUrl ? [new URL(effectiveBaseUrl).hostname] : []);
   }
 
-  const params = [
-    normalizedSlug,
-    data.displayName ?? null,
-    data.kind,
-    scope,
-    scopeId,
-    effectiveBaseUrl,
-    baseUrlSource,
-    JSON.stringify(allowedHosts),
-    data.credentialBindingId ?? null,
-    openapiSpecSourceKind,
-    openapiSpecSource,
-    openapiSpecJson,
-    openapiSpecEtag,
-    openapiSpecFetchedAt,
-    data.mcpServerId ?? null,
-    generatedTypes,
-    generatedRuntimeJson,
-    generatedAt,
-    generationError,
-    data.enabled === false ? 0 : 1,
-  ] as const;
+  // Connection row and its auto-managed binding form a reference cycle
+  // (connection.credential_binding_id ↔ binding.managed_by_connection_id).
+  // Defer FK enforcement to commit so a fresh connection + its binding can be
+  // written in a single atomic pass regardless of insert order.
+  const writeConnectionAndBinding = getDb().transaction((): ConnectionRow => {
+    getDb().run("PRAGMA defer_foreign_keys = ON");
 
-  if (existing) {
+    if (derived?.secretWrite) {
+      upsertSwarmConfig({ ...derived.secretWrite, isSecret: true });
+    }
+
+    let credentialBindingId: string | null;
+    let authCols: AuthColumns;
+    if (explicitLegacyBinding) {
+      deleteManagedBindingForConnection(connectionId);
+      credentialBindingId = data.credentialBindingId ?? null;
+      authCols = NONE_AUTH_COLUMNS;
+    } else if (derived) {
+      const existingManaged = findManagedBindingByConnectionId(connectionId);
+      const binding = upsertCredentialBinding({
+        id: existingManaged?.id,
+        configKey: derived.configKey,
+        allowedHosts: derived.allowedHosts,
+        headerTemplate: derived.headerTemplate,
+        queryTemplate: derived.queryTemplate,
+        scope,
+        scopeId,
+        active: true,
+        authKind: derived.authKind,
+        oauthAuthorizationId: derived.oauthAuthorizationId,
+        managedByConnectionId: connectionId,
+        source: "connection",
+        userId: data.userId,
+      });
+      credentialBindingId = binding.id;
+      authCols = derived.authColumns;
+    } else {
+      // auth `none`: drop any managed binding; clear the connection link when it
+      // pointed at that managed binding, otherwise preserve an explicit one.
+      const existingManaged = findManagedBindingByConnectionId(connectionId);
+      if (existingManaged) deleteManagedBindingForConnection(connectionId);
+      credentialBindingId =
+        existingConnection &&
+        existingManaged &&
+        existingConnection.credentialBindingId === existingManaged.id
+          ? null
+          : (existingConnection?.credentialBindingId ?? null);
+      authCols = NONE_AUTH_COLUMNS;
+    }
+
+    const params = [
+      normalizedSlug,
+      data.displayName ?? null,
+      data.kind,
+      scope,
+      scopeId,
+      effectiveBaseUrl,
+      baseUrlSource,
+      JSON.stringify(allowedHosts),
+      credentialBindingId,
+      authCols.authType,
+      authCols.authConfigKey,
+      authCols.authAuthorizationId,
+      authCols.authParamName,
+      authCols.authTemplateOverride,
+      authCols.authHostsOverrideJson,
+      openapiSpecSourceKind,
+      openapiSpecSource,
+      openapiSpecJson,
+      openapiSpecEtag,
+      openapiSpecFetchedAt,
+      data.mcpServerId ?? null,
+      generatedTypes,
+      generatedRuntimeJson,
+      generatedAt,
+      generationError,
+      data.enabled === false ? 0 : 1,
+    ] as const;
+
+    if (existing) {
+      const row = getDb()
+        .prepare<ConnectionRow, [...typeof params, string, string | null, number, string]>(
+          `UPDATE script_connections SET
+            slug = ?, display_name = ?, kind = ?, scope = ?, scope_id = ?, base_url = ?,
+            base_url_source = ?, allowed_hosts_json = ?, credential_binding_id = ?,
+            auth_type = ?, auth_config_key = ?, auth_authorization_id = ?, auth_param_name = ?,
+            auth_template_override = ?, auth_hosts_override_json = ?, openapi_spec_source_kind = ?,
+            openapi_spec_source = ?, openapi_spec_json = ?, openapi_spec_etag = ?,
+            openapi_spec_fetched_at = ?, mcp_server_id = ?, generated_types = ?,
+            generated_runtime_json = ?, generated_at = ?, generation_error = ?, enabled = ?,
+            updated_at = ?, updated_by = ?, version = ?
+           WHERE id = ? RETURNING *`,
+        )
+        .get(...params, now, data.userId ?? null, existing.version + 1, existing.id);
+      if (!row) throw new Error("Failed to update script connection");
+      return row;
+    }
+
     const row = getDb()
-      .prepare<ConnectionRow, [...typeof params, string, string | null, number, string]>(
-        `UPDATE script_connections SET
-          slug = ?, display_name = ?, kind = ?, scope = ?, scope_id = ?, base_url = ?,
-          base_url_source = ?, allowed_hosts_json = ?, credential_binding_id = ?, openapi_spec_source_kind = ?,
-          openapi_spec_source = ?, openapi_spec_json = ?, openapi_spec_etag = ?,
-          openapi_spec_fetched_at = ?, mcp_server_id = ?, generated_types = ?,
-          generated_runtime_json = ?, generated_at = ?, generation_error = ?, enabled = ?,
-          updated_at = ?, updated_by = ?, version = ?
-         WHERE id = ? RETURNING *`,
+      .prepare<
+        ConnectionRow,
+        [string, ...typeof params, string, string, string | null, string | null]
+      >(
+        `INSERT INTO script_connections
+         (id, slug, display_name, kind, scope, scope_id, base_url, base_url_source, allowed_hosts_json,
+          credential_binding_id, auth_type, auth_config_key, auth_authorization_id, auth_param_name,
+          auth_template_override, auth_hosts_override_json, openapi_spec_source_kind,
+          openapi_spec_source, openapi_spec_json, openapi_spec_etag, openapi_spec_fetched_at,
+          mcp_server_id, generated_types, generated_runtime_json, generated_at, generation_error,
+          enabled, created_at, updated_at, created_by, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       )
-      .get(...params, now, data.userId ?? null, existing.version + 1, existing.id);
-    if (!row) throw new Error("Failed to update script connection");
-    return connectionFromRow(row);
-  }
+      .get(connectionId, ...params, now, now, data.userId ?? null, data.userId ?? null);
+    if (!row) throw new Error("Failed to create script connection");
+    return row;
+  });
 
-  const row = getDb()
-    .prepare<
-      ConnectionRow,
-      [string, ...typeof params, string, string, string | null, string | null]
-    >(
-      `INSERT INTO script_connections
-       (id, slug, display_name, kind, scope, scope_id, base_url, base_url_source, allowed_hosts_json,
-        credential_binding_id, openapi_spec_source_kind, openapi_spec_source, openapi_spec_json,
-        openapi_spec_etag, openapi_spec_fetched_at, mcp_server_id, generated_types,
-        generated_runtime_json, generated_at, generation_error, enabled, created_at, updated_at,
-        created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(id, ...params, now, now, data.userId ?? null, data.userId ?? null);
-  if (!row) throw new Error("Failed to create script connection");
+  const row = writeConnectionAndBinding();
+  if (derived?.secretWrite) refreshSecretScrubberCache();
   return connectionFromRow(row);
 }
 
@@ -1341,7 +1798,6 @@ export async function refreshScriptConnection(
       scope: connection.scope,
       scopeId: connection.scopeId,
       allowedHosts: connection.allowedHosts,
-      credentialBindingId: connection.credentialBindingId,
       mcpServerId: connection.mcpServerId,
       enabled: connection.enabled,
       agentId: callerAgentId,
@@ -1373,7 +1829,6 @@ export async function refreshScriptConnection(
       scopeId: connection.scopeId,
       baseUrl: connection.baseUrlSource === "user" ? connection.baseUrl : undefined,
       allowedHosts: vendoredHostsWereDefault ? undefined : connection.allowedHosts,
-      credentialBindingId: connection.credentialBindingId,
       openapiSpecSourceKind: "vendored",
       openapiSpecSource: connection.openapiSpecSource,
       enabled: connection.enabled,
@@ -1414,7 +1869,6 @@ export async function refreshScriptConnection(
     scopeId: connection.scopeId,
     baseUrl: connection.baseUrlSource === "user" ? connection.baseUrl : undefined,
     allowedHosts: allowedHostsWereSpecDefault ? undefined : connection.allowedHosts,
-    credentialBindingId: connection.credentialBindingId,
     openapiSpecSourceKind: "url",
     openapiSpecSource: connection.openapiSpecSource,
     openapiSpecJson: fetched.specJson,
