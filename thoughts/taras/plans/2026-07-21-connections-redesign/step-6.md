@@ -2,7 +2,9 @@
 id: step-6
 name: OAuth presets + curated app hydration
 depends_on: [step-1, step-2]
-status: ready
+status: claimed
+assignee: fable-orchestrator-opus-step6
+claimed_at: 2026-07-23T01:15:00+0200
 ---
 
 # step-6: OAuth presets + curated app hydration

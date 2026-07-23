@@ -40,6 +40,12 @@ import {
 } from "@/oauth/app-validation";
 import { forceRefreshTokenOrThrow } from "@/oauth/ensure-token";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
+import {
+  getOAuthPreset,
+  hydrateOAuthAppFromPreset,
+  listOAuthPresetIds,
+  listOAuthPresets,
+} from "@/oauth/presets";
 import { buildAuthorizationUrl, refreshTokenGrant } from "@/oauth/wrapper";
 import { can } from "@/rbac";
 import {
@@ -131,15 +137,18 @@ const credentialBindingBodySchema = z.object({
 });
 
 const oauthAppBodySchema = z.object({
-  provider: providerSchema,
+  // provider / authorizeUrl / tokenUrl are optional when a presetId supplies
+  // them; the handler enforces presence after preset hydration.
+  presetId: z.string().min(1).optional(),
+  provider: providerSchema.optional(),
   clientId: z.string().min(1),
   clientSecret: z.string().min(1).optional(),
-  authorizeUrl: z.string().url(),
-  tokenUrl: z.string().url(),
+  authorizeUrl: z.string().url().optional(),
+  tokenUrl: z.string().url().optional(),
   // Fetched server-side with credentials — SSRF-validated on write.
   userinfoUrl: z.string().url().optional(),
   revocationUrl: z.string().url().optional(),
-  scopes: z.array(z.string().min(1)).default([]).optional(),
+  scopes: z.array(z.string().min(1)).optional(),
   extraParams: z.record(z.string(), z.string()).optional(),
   tokenAuthStyle: z.enum(["body", "basic"]).optional(),
   tokenBodyFormat: z.enum(["form", "json"]).optional(),
@@ -266,6 +275,20 @@ const listOAuthAppsRoute = route({
   tags: ["Script Connections"],
   responses: {
     200: { description: "OAuth apps without client secrets" },
+  },
+});
+
+const listOAuthPresetsRoute = route({
+  method: "get",
+  path: "/api/oauth-presets",
+  pattern: ["api", "oauth-presets"],
+  operationId: "oauth_presets_list",
+  summary: "List curated OAuth presets for app-creation pickers",
+  description:
+    "Static curated OAuth presets (endpoints, scopes, quirks, and setup hints). Contains no secrets; client credentials are always customer-supplied.",
+  tags: ["Script Connections"],
+  responses: {
+    200: { description: "Curated OAuth presets" },
   },
 });
 
@@ -526,6 +549,7 @@ type OAuthAppRow = {
   extraParamsJson: string | null;
   tokenAuthStyle: "body" | "basic";
   tokenBodyFormat: "form" | "json";
+  source: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -1033,6 +1057,7 @@ function sanitizeOAuthApp(row: OAuthAppRow) {
     ...(Object.keys(extraParams).length > 0 ? { extraParams } : {}),
     tokenAuthStyle: row.tokenAuthStyle,
     tokenBodyFormat: row.tokenBodyFormat,
+    source: row.source,
     tokenStatus: row.authorizationId ? getOAuthBindingTokenStatus(row.authorizationId) : "missing",
     expiresAt: row.tokenExpiresAt,
     lastRefreshedAt: normalizeDate(row.tokenUpdatedAt),
@@ -1046,7 +1071,7 @@ function listOAuthApps() {
   const rows = getDb()
     .prepare<OAuthAppRow, []>(
       `SELECT a.id, a.provider, a.clientId, a.authorizeUrl, a.tokenUrl, a.redirectUri,
-              a.scopes, a.extraParamsJson, a.tokenAuthStyle, a.tokenBodyFormat,
+              a.scopes, a.extraParamsJson, a.tokenAuthStyle, a.tokenBodyFormat, a.source,
               z.id AS authorizationId, z.expiresAt AS tokenExpiresAt,
               z.updatedAt AS tokenUpdatedAt, a.createdAt, a.updatedAt
        FROM oauth_apps a
@@ -1692,6 +1717,11 @@ export async function handleScriptConnections(
     return true;
   }
 
+  if (listOAuthPresetsRoute.match(req.method, pathSegments)) {
+    json(res, { presets: listOAuthPresets() });
+    return true;
+  }
+
   if (listOAuthAppsRoute.match(req.method, pathSegments)) {
     json(res, { oauthApps: listOAuthApps() });
     return true;
@@ -1703,32 +1733,88 @@ export async function handleScriptConnections(
     if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
 
     try {
-      assertOAuthProviderIsNotReserved(parsed.body.provider);
-      assertOAuthAppUrlsSafe(parsed.body);
-      const existing = getOAuthApp(parsed.body.provider);
-      const clientSecret = parsed.body.clientSecret ?? existing?.clientSecret;
+      const body = parsed.body;
+      // Resolve the preset (if any), then merge with explicit body fields —
+      // explicit fields always win. Client credentials are never prefilled.
+      const preset = body.presetId ? getOAuthPreset(body.presetId) : null;
+      if (body.presetId && !preset) {
+        jsonError(
+          res,
+          `Unknown presetId "${body.presetId}". Valid preset ids: ${listOAuthPresetIds().join(", ")}.`,
+          400,
+        );
+        return true;
+      }
+
+      const hydrated = preset
+        ? hydrateOAuthAppFromPreset(preset, {
+            provider: body.provider,
+            authorizeUrl: body.authorizeUrl,
+            tokenUrl: body.tokenUrl,
+            scopes: body.scopes,
+            extraParams: body.extraParams,
+            tokenAuthStyle: body.tokenAuthStyle,
+            tokenBodyFormat: body.tokenBodyFormat,
+          })
+        : null;
+
+      const provider = hydrated?.provider ?? body.provider;
+      const authorizeUrl = hydrated?.authorizeUrl ?? body.authorizeUrl;
+      const tokenUrl = hydrated?.tokenUrl ?? body.tokenUrl;
+      const userinfoUrl = hydrated?.userinfoUrl ?? body.userinfoUrl ?? null;
+      const revocationUrl = hydrated?.revocationUrl ?? body.revocationUrl ?? null;
+      if (!provider || !authorizeUrl || !tokenUrl) {
+        jsonError(
+          res,
+          "provider, authorizeUrl, and tokenUrl are required (supply them directly or via a presetId).",
+          400,
+        );
+        return true;
+      }
+
+      assertOAuthProviderIsNotReserved(provider);
+      // Defense in depth: SSRF-check the merged endpoints (incl. preset-supplied
+      // userinfo/revocation URLs), not just raw input.
+      assertOAuthAppUrlsSafe({ authorizeUrl, tokenUrl, userinfoUrl, revocationUrl });
+
+      const existing = getOAuthApp(provider);
+      const clientSecret = body.clientSecret ?? existing?.clientSecret;
       if (!clientSecret) {
         jsonError(res, "clientSecret is required when creating a new OAuth app.", 400);
         return true;
       }
 
-      // All flows now redirect to the single static callback.
+      const scopes = hydrated?.scopes ?? body.scopes ?? [];
+      const extraParams = hydrated?.extraParams ?? body.extraParams;
+      const tokenAuthStyle = hydrated?.tokenAuthStyle ?? body.tokenAuthStyle;
+      const tokenBodyFormat = hydrated?.tokenBodyFormat ?? body.tokenBodyFormat;
+
+      // All flows now redirect to the single static callback (step-4).
       const redirectUri = staticOAuthCallbackUri();
-      upsertOAuthApp(parsed.body.provider, {
-        clientId: parsed.body.clientId,
+      upsertOAuthApp(provider, {
+        clientId: body.clientId,
         clientSecret,
-        authorizeUrl: parsed.body.authorizeUrl,
-        tokenUrl: parsed.body.tokenUrl,
+        authorizeUrl,
+        tokenUrl,
         redirectUri,
-        scopes: (parsed.body.scopes ?? []).join(","),
-        ...(parsed.body.userinfoUrl ? { userinfoUrl: parsed.body.userinfoUrl } : {}),
-        ...(parsed.body.revocationUrl ? { revocationUrl: parsed.body.revocationUrl } : {}),
-        ...(parsed.body.extraParams ? { extraParams: parsed.body.extraParams } : {}),
-        ...(parsed.body.tokenAuthStyle ? { tokenAuthStyle: parsed.body.tokenAuthStyle } : {}),
-        ...(parsed.body.tokenBodyFormat ? { tokenBodyFormat: parsed.body.tokenBodyFormat } : {}),
+        scopes: scopes.join(","),
+        ...(userinfoUrl ? { userinfoUrl } : {}),
+        ...(revocationUrl ? { revocationUrl } : {}),
+        ...(extraParams ? { extraParams } : {}),
+        ...(tokenAuthStyle ? { tokenAuthStyle } : {}),
+        ...(tokenBodyFormat ? { tokenBodyFormat } : {}),
+        ...(hydrated?.scopeSeparator ? { scopeSeparator: hydrated.scopeSeparator } : {}),
+        ...(hydrated?.requiresRefreshTokenRotation !== undefined
+          ? { requiresRefreshTokenRotation: hydrated.requiresRefreshTokenRotation }
+          : {}),
+        ...(hydrated ? { source: hydrated.source } : {}),
       });
-      const app = listOAuthApps().find((row) => row.provider === parsed.body.provider);
-      json(res, { oauthApp: app });
+      const app = listOAuthApps().find((row) => row.provider === provider);
+      json(res, {
+        oauthApp: app,
+        redirectUri,
+        ...(hydrated ? { setupHints: hydrated.setupHints } : {}),
+      });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err), 400);
     }

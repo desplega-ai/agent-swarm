@@ -2,7 +2,9 @@
 id: step-7
 name: Embedded connection auth + derived bindings
 depends_on: [step-1]
-status: ready
+status: claimed
+assignee: fable-orchestrator-opus-step7
+claimed_at: 2026-07-23T00:30:00+0200
 ---
 
 # step-7: Embedded connection auth + derived bindings
