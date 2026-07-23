@@ -2,8 +2,9 @@
 id: step-4
 name: Static callback + DB pending + multi-authorization flow
 depends_on: [step-1]
-status: claimed
+status: done
 assignee: fable-orchestrator-opus-step4
+completed_at: 2026-07-23T02:30:00+0200
 claimed_at: 2026-07-23T00:30:00+0200
 ---
 
