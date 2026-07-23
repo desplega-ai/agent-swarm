@@ -21,6 +21,10 @@ import {
   oauthAppToProviderConfig,
 } from "@/be/oauth-credential-bindings";
 import {
+  ConnectionAuthInputSchema,
+  type ConnectionAuthSummary,
+  connectionAuthInputFromFlat,
+  connectionAuthSummary,
   getScriptConnectionById,
   listRelationalCredentialBindings,
   listScriptConnections,
@@ -89,6 +93,7 @@ const connectionBaseBodySchema = z.object({
   scopeId: scopedResourceScopeIdSchema.nullable().optional(),
   allowedHosts: z.array(z.string().min(1)).optional(),
   credentialBindingId: z.string().uuid().nullable().optional(),
+  auth: ConnectionAuthInputSchema.optional(),
   configKey: z.string().min(1).max(255).optional(),
   headerTemplate: z.string().min(1).optional(),
   queryTemplate: z.string().min(1).optional(),
@@ -243,8 +248,11 @@ const listCredentialBindingsRoute = route({
   path: "/api/credential-bindings",
   pattern: ["api", "credential-bindings"],
   operationId: "credential_bindings_list",
-  summary: "List script credential bindings",
+  summary: "List standalone script credential bindings",
+  description:
+    "Lists standalone (raw fetch()) credential bindings. Auto-managed bindings that back embedded connection auth are hidden by default; pass includeManaged=true to include them.",
   tags: ["Script Connections"],
+  query: z.object({ includeManaged: z.enum(["true", "false"]).optional() }),
   responses: {
     200: { description: "Credential bindings" },
   },
@@ -501,6 +509,10 @@ type DecoratedBinding = ScriptCredentialBindingRecord & {
   tokenStatus?: OAuthBindingTokenStatus;
 };
 
+type ConnectionAuthSummaryResponse = ConnectionAuthSummary & {
+  status?: OAuthBindingTokenStatus;
+};
+
 type DecoratedConnection = Omit<
   ScriptConnectionRecord,
   "openapiSpecJson" | "generatedTypes" | "generatedRuntimeJson"
@@ -508,6 +520,7 @@ type DecoratedConnection = Omit<
   operationCount: number;
   toolCount: number;
   credentialBinding: BindingSummary | null;
+  auth: ConnectionAuthSummaryResponse;
 };
 
 type ConnectionOperationParameter = {
@@ -746,6 +759,21 @@ function decorateBinding(binding: ScriptCredentialBindingRecord): DecoratedBindi
   return tokenStatus ? { ...binding, tokenStatus } : binding;
 }
 
+function authSummaryForConnection(
+  connection: ScriptConnectionRecord,
+): ConnectionAuthSummaryResponse {
+  const base = connectionAuthSummary(connection);
+  if (connection.authType === "oauth") {
+    return {
+      ...base,
+      status: connection.authAuthorizationId
+        ? getOAuthBindingTokenStatus(connection.authAuthorizationId)
+        : "missing",
+    };
+  }
+  return base;
+}
+
 function bindingSummary(binding: ScriptCredentialBindingRecord | undefined): BindingSummary | null {
   if (!binding) return null;
   const tokenStatus = tokenStatusForBinding(binding);
@@ -911,6 +939,7 @@ function decorateConnections(connections: ScriptConnectionRecord[]): DecoratedCo
       credentialBinding: bindingSummary(
         connection.credentialBindingId ? bindings.get(connection.credentialBindingId) : undefined,
       ),
+      auth: authSummaryForConnection(connection),
     };
   });
 }
@@ -952,49 +981,6 @@ function validateCredentialTemplate(input: {
   if (input.queryTemplate && !input.queryTemplate.includes(placeholder)) {
     throw new Error(`queryTemplate must include ${placeholder}.`);
   }
-}
-
-function maybeCreateInlineBinding(
-  data: z.infer<typeof upsertConnectionBodySchema>,
-  resolvedScope?: "global" | "agent" | "repo",
-  resolvedScopeId?: string | null,
-) {
-  if (data.credentialBindingId || !data.configKey) return data.credentialBindingId ?? null;
-
-  const scope = resolvedScope ?? data.scope ?? "global";
-  const scopeId =
-    resolvedScopeId !== undefined
-      ? resolvedScopeId
-      : connectionScopeId(scope, data.scopeId, "bindings");
-  const allowedHosts =
-    data.allowedHosts ??
-    ("baseUrl" in data && data.baseUrl ? [new URL(data.baseUrl).hostname] : []);
-  const authKind = data.authKind ?? "config";
-  const placeholder = placeholderForConfigKey(data.configKey);
-  const headerTemplate =
-    data.headerTemplate ??
-    (data.queryTemplate ? undefined : `Authorization: Bearer ${placeholder}`);
-
-  validateCredentialTemplate({
-    configKey: data.configKey,
-    headerTemplate,
-    queryTemplate: data.queryTemplate,
-  });
-  if (authKind === "oauth" && !data.oauthAuthorizationId) {
-    throw new Error("oauthAuthorizationId is required for oauth credential bindings.");
-  }
-
-  return upsertCredentialBinding({
-    configKey: data.configKey,
-    allowedHosts,
-    headerTemplate,
-    queryTemplate: data.queryTemplate,
-    scope,
-    scopeId,
-    active: true,
-    authKind,
-    oauthAuthorizationId: data.oauthAuthorizationId ?? null,
-  }).id;
 }
 
 function parseMetadata(metadata: string | null): Record<string, unknown> {
@@ -1554,7 +1540,18 @@ export async function handleScriptConnections(
       const enabled = enabledWasProvided
         ? parsed.body.enabled !== false
         : (existingConnection?.enabled ?? true);
-      const credentialBindingId = maybeCreateInlineBinding(parsed.body, scope, scopeId);
+      const authInput =
+        parsed.body.kind === "mcp"
+          ? undefined
+          : connectionAuthInputFromFlat({
+              auth: parsed.body.auth,
+              configKey: parsed.body.configKey,
+              headerTemplate: parsed.body.headerTemplate,
+              queryTemplate: parsed.body.queryTemplate,
+              authKind: parsed.body.authKind,
+              oauthAuthorizationId: parsed.body.oauthAuthorizationId,
+              allowedHosts: parsed.body.allowedHosts,
+            });
       const userId = resolveHttpAuditUserId(req, agentId);
       const openapiSpecUrl =
         parsed.body.kind === "openapi" ? parsed.body.openapiSpecUrl : undefined;
@@ -1581,7 +1578,8 @@ export async function handleScriptConnections(
         scopeId,
         baseUrl: "baseUrl" in parsed.body ? parsed.body.baseUrl : undefined,
         allowedHosts: parsed.body.allowedHosts,
-        credentialBindingId,
+        auth: authInput,
+        credentialBindingId: parsed.body.credentialBindingId ?? undefined,
         openapiSpecSourceKind: vendoredSpecSource
           ? "vendored"
           : reuseExistingOpenapiSpec && !openapiSpecUrl
@@ -1658,8 +1656,12 @@ export async function handleScriptConnections(
   }
 
   if (listCredentialBindingsRoute.match(req.method, pathSegments)) {
+    const includeManaged = queryParams.get("includeManaged") === "true";
     json(res, {
-      bindings: listRelationalCredentialBindings({ includeInactive: true }).map(decorateBinding),
+      bindings: listRelationalCredentialBindings({
+        includeInactive: true,
+        excludeManaged: !includeManaged,
+      }).map(decorateBinding),
     });
     return true;
   }

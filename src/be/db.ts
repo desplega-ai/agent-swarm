@@ -121,6 +121,7 @@ import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { auditAssetKeys, enforceAssetKeyStartupAudit } from "./asset-key-audit";
+import { migrateLegacyCredentialBindingBlob } from "./connection-bindings-blob-migration";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import { runMigrations } from "./migrations/runner";
@@ -373,6 +374,19 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   } catch (err) {
     console.error(
       `[secrets] FATAL: failed to auto-encrypt legacy secrets: ${(err as Error).message}`,
+    );
+    throw err;
+  }
+
+  // Retire the legacy SCRIPT_CREDENTIAL_BINDINGS swarm-config blob: promote any
+  // remaining entries to relational rows so the credential broker is
+  // relational-only. Idempotent; failures are fatal because a silently-dropped
+  // binding would leave scripts unable to authenticate.
+  try {
+    migrateLegacyCredentialBindingBlob(database);
+  } catch (err) {
+    console.error(
+      `[credential-bindings] FATAL: failed to migrate legacy credential binding blob: ${(err as Error).message}`,
     );
     throw err;
   }

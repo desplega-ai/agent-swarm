@@ -10424,6 +10424,174 @@
                         ],
                         "format": "uuid"
                       },
+                      "auth": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "none"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "bearer"
+                                ]
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "header"
+                                ]
+                              },
+                              "headerName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "headerName"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "query"
+                                ]
+                              },
+                              "paramName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "paramName"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "oauth"
+                                ]
+                              },
+                              "authorizationId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "authorizationId"
+                            ]
+                          }
+                        ]
+                      },
                       "configKey": {
                         "type": "string",
                         "minLength": 1,
@@ -10541,6 +10709,174 @@
                         ],
                         "format": "uuid"
                       },
+                      "auth": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "none"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "bearer"
+                                ]
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "header"
+                                ]
+                              },
+                              "headerName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "headerName"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "query"
+                                ]
+                              },
+                              "paramName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "paramName"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "oauth"
+                                ]
+                              },
+                              "authorizationId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "authorizationId"
+                            ]
+                          }
+                        ]
+                      },
                       "configKey": {
                         "type": "string",
                         "minLength": 1,
@@ -10632,6 +10968,174 @@
                           "null"
                         ],
                         "format": "uuid"
+                      },
+                      "auth": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "none"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "bearer"
+                                ]
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "header"
+                                ]
+                              },
+                              "headerName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "headerName"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "query"
+                                ]
+                              },
+                              "paramName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "paramName"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "oauth"
+                                ]
+                              },
+                              "authorizationId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "authorizationId"
+                            ]
+                          }
+                        ]
                       },
                       "configKey": {
                         "type": "string",
@@ -10824,13 +11328,28 @@
     "/api/credential-bindings": {
       "get": {
         "operationId": "credential_bindings_list",
-        "summary": "List script credential bindings",
+        "summary": "List standalone script credential bindings",
+        "description": "Lists standalone (raw fetch()) credential bindings. Auto-managed bindings that back embedded connection auth are hidden by default; pass includeManaged=true to include them.",
         "tags": [
           "Script Connections"
         ],
         "security": [
           {
             "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "includeManaged",
+            "in": "query"
           }
         ],
         "responses": {

@@ -1,23 +1,24 @@
 import {
+  type CredentialBinding,
+  type CredentialBindingStore,
+  type CredentialBindingStoreContext,
   CredentialBroker,
   DEFAULT_CREDENTIAL_BINDINGS,
   type FailedCredentialBinding,
-  SwarmConfigCredentialBindingStore,
 } from "@/scripts-runtime/credential-broker";
 import type { EgressSecretEntry } from "@/scripts-runtime/executors/types";
 import { registerVolatileSecret } from "@/utils/secret-scrubber";
-import { getResolvedConfig, getSwarmConfigs } from "./db";
-import { getDefaultAuthorizationIdForProvider } from "./db-queries/oauth";
+import { getResolvedConfig } from "./db";
 import { resolveOAuthBindingToken } from "./oauth-credential-bindings";
 import { listRelationalCredentialBindings } from "./script-connections";
 
-class RelationalCredentialBindingStore extends SwarmConfigCredentialBindingStore {
-  override listActiveBindings(
-    context: Parameters<SwarmConfigCredentialBindingStore["listActiveBindings"]>[0],
-  ) {
-    const relational = listRelationalCredentialBindings(context);
-    if (relational.length > 0) return relational;
-    return super.listActiveBindings(context);
+// Relational-only credential binding store. The legacy SCRIPT_CREDENTIAL_BINDINGS
+// swarm-config JSON blob is retired (migrated to relational rows at boot), so
+// resolution now reads exclusively from the relational table — including the
+// auto-managed bindings that back embedded connection auth.
+class RelationalCredentialBindingStore implements CredentialBindingStore {
+  listActiveBindings(context: CredentialBindingStoreContext): CredentialBinding[] {
+    return listRelationalCredentialBindings(context);
   }
 }
 
@@ -35,10 +36,7 @@ export async function buildScriptCredentialBindingsWithFailures(input: {
   const resolvedConfigs = getResolvedConfig(input.agentId, input.repoId);
   const configMap = new Map(resolvedConfigs.map((config) => [config.key, config.value]));
   const broker = new CredentialBroker(
-    new RelationalCredentialBindingStore(
-      (filters) => getSwarmConfigs(filters),
-      (provider) => getDefaultAuthorizationIdForProvider(provider) ?? undefined,
-    ),
+    new RelationalCredentialBindingStore(),
     (configKey) => configMap.get(configKey) ?? process.env[configKey],
     DEFAULT_CREDENTIAL_BINDINGS,
     (oauthAuthorizationId) => resolveOAuthBindingToken(oauthAuthorizationId),

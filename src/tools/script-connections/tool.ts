@@ -2,15 +2,15 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import {
+  ConnectionAuthInputSchema,
+  connectionAuthInputFromFlat,
   getScriptConnectionById,
   listScriptConnections,
   refreshScriptConnection,
   setScriptConnectionEnabled,
-  upsertCredentialBinding,
   upsertScriptConnection,
 } from "@/be/script-connections";
 import { can } from "@/rbac";
-import { placeholderForConfigKey } from "@/scripts-runtime/credential-broker";
 import { createToolRegistrar } from "@/tools/utils";
 import { resolveScopedResourceId, scopedResourceScopeIdSchema } from "@/utils/scoped-resource";
 
@@ -51,24 +51,29 @@ const scriptConnectionsInputSchema = z.object({
     .nullable()
     .optional()
     .describe("Existing credential binding ID to attach to the connection."),
+  auth: ConnectionAuthInputSchema.optional().describe(
+    "Inline connection auth. type=bearer|header|query with an inline `secret` (stored encrypted under a derived key) or a shared `configKey`; type=oauth with an `authorizationId`; type=none clears auth. Auto-manages the connection's credential binding.",
+  ),
   configKey: z
     .string()
     .min(1)
     .max(255)
     .optional()
-    .describe(
-      "Config key used to create a credential binding when credentialBindingId is omitted.",
-    ),
+    .describe("Deprecated flat alias for auth: config key for a derived credential binding."),
   headerTemplate: z
     .string()
     .min(1)
     .optional()
-    .describe("Header template containing the config-key placeholder."),
+    .describe(
+      "Deprecated flat alias for auth: header template containing the config-key placeholder.",
+    ),
   queryTemplate: z
     .string()
     .min(1)
     .optional()
-    .describe("Query parameter template containing the config-key placeholder."),
+    .describe(
+      "Deprecated flat alias for auth: query parameter template containing the config-key placeholder.",
+    ),
   openapiSpecUrl: z
     .string()
     .url()
@@ -319,23 +324,6 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
           };
         }
 
-        let credentialBindingId = args.credentialBindingId ?? null;
-        if (!credentialBindingId && args.configKey) {
-          const placeholder = placeholderForConfigKey(args.configKey);
-          const bindingScope = args.scope ?? "global";
-          const binding = upsertCredentialBinding({
-            configKey: args.configKey,
-            allowedHosts: args.allowedHosts,
-            headerTemplate:
-              args.headerTemplate ??
-              (args.queryTemplate ? undefined : `Authorization: Bearer ${placeholder}`),
-            queryTemplate: args.queryTemplate,
-            scope: bindingScope,
-            scopeId: resolveScopedResourceId(bindingScope, args.scopeId, "bindings"),
-          });
-          credentialBindingId = binding.id;
-        }
-
         const existing = args.id ? getScriptConnectionById(args.id) : null;
         const { scope, scopeId } = resolveConnectionScope(args, existing);
         const connection = await upsertScriptConnection({
@@ -347,7 +335,14 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
           scopeId,
           baseUrl: args.baseUrl,
           allowedHosts: args.allowedHosts,
-          credentialBindingId,
+          auth: connectionAuthInputFromFlat({
+            auth: args.auth,
+            configKey: args.configKey,
+            headerTemplate: args.headerTemplate,
+            queryTemplate: args.queryTemplate,
+            allowedHosts: args.allowedHosts,
+          }),
+          credentialBindingId: args.credentialBindingId ?? undefined,
           enabled: resolveConnectionEnabled(args, existing),
         });
 
@@ -399,23 +394,6 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         };
       }
 
-      let credentialBindingId = args.credentialBindingId ?? null;
-      if (!credentialBindingId && args.configKey) {
-        const placeholder = placeholderForConfigKey(args.configKey);
-        const bindingScope = args.scope ?? "global";
-        const binding = upsertCredentialBinding({
-          configKey: args.configKey,
-          allowedHosts: args.allowedHosts ?? (args.baseUrl ? [new URL(args.baseUrl).hostname] : []),
-          headerTemplate:
-            args.headerTemplate ??
-            (args.queryTemplate ? undefined : `Authorization: Bearer ${placeholder}`),
-          queryTemplate: args.queryTemplate,
-          scope: bindingScope,
-          scopeId: resolveScopedResourceId(bindingScope, args.scopeId, "bindings"),
-        });
-        credentialBindingId = binding.id;
-      }
-
       const existing = args.id ? getScriptConnectionById(args.id) : null;
       const { scope, scopeId } = resolveConnectionScope(args, existing);
       const connection = await upsertScriptConnection({
@@ -427,7 +405,14 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         scopeId,
         baseUrl: args.baseUrl,
         allowedHosts: args.allowedHosts,
-        credentialBindingId,
+        auth: connectionAuthInputFromFlat({
+          auth: args.auth,
+          configKey: args.configKey,
+          headerTemplate: args.headerTemplate,
+          queryTemplate: args.queryTemplate,
+          allowedHosts: args.allowedHosts,
+        }),
+        credentialBindingId: args.credentialBindingId ?? undefined,
         openapiSpecSourceKind: args.specSource ? "vendored" : undefined,
         openapiSpecSource: args.specSource?.slug,
         openapiSpecUrl: args.openapiSpecUrl,

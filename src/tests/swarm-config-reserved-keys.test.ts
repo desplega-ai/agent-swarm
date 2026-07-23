@@ -282,7 +282,7 @@ describe("swarm-config reserved keys guard", () => {
       expect(result.structuredContent.success).toBe(true);
     });
 
-    test("rejects SCRIPT_CREDENTIAL_BINDINGS from non-lead set-config callers", async () => {
+    test("rejects arbitrary config writes from non-lead set-config callers", async () => {
       const worker = createAgent({
         name: "config-worker",
         isLead: false,
@@ -290,6 +290,8 @@ describe("swarm-config reserved keys guard", () => {
         capabilities: [],
       });
       const handler = mcpServer.handlers.get("set-config");
+      // The legacy SCRIPT_CREDENTIAL_BINDINGS blob is retired; it is now an
+      // ordinary config key still gated behind the generic lead-only write.
       const result = (await handler!(
         {
           scope: "global",
@@ -300,7 +302,7 @@ describe("swarm-config reserved keys guard", () => {
       )) as { structuredContent: { success: boolean; message: string } };
 
       expect(result.structuredContent.success).toBe(false);
-      expect(result.structuredContent.message).toContain("Only the lead can manage");
+      expect(result.structuredContent.message).toContain("lead");
     });
   });
 

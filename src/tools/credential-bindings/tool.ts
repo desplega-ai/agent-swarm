@@ -13,7 +13,6 @@ import {
 } from "@/be/oauth-credential-bindings";
 import {
   disableCredentialBinding,
-  importLegacyCredentialBindings,
   listRelationalCredentialBindings,
   type ScriptCredentialBindingRecord,
   upsertCredentialBinding,
@@ -79,13 +78,12 @@ const credentialBindingsInputSchema = z.object({
       "list",
       "upsert",
       "disable",
-      "import-legacy",
       "oauth-app-upsert",
       "oauth-authorize-url",
       "oauth-authorizations-list",
     ])
     .describe(
-      "List, add/update, disable, import legacy JSON bindings, register/authorize OAuth apps, or list an app's authorizations.",
+      "List, add/update, disable, register/authorize OAuth apps, or list an app's authorizations.",
     ),
   id: z
     .string()
@@ -215,7 +213,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
     {
       title: "Credential Bindings",
       description:
-        "Lead-only management for scripts-runtime credential broker bindings. Bindings map config keys to allowed egress hosts; scripts consume them only through fetch-layer placeholder substitution.",
+        "Advanced, lead-only management for standalone scripts-runtime credential broker bindings — the escape hatch for authenticating spec-less raw fetch() egress. Most connections should embed auth inline via the script-connections tool (which auto-manages its binding); those managed bindings are hidden here. Bindings map config keys to allowed egress hosts; scripts consume them only through fetch-layer placeholder substitution.",
       annotations: { idempotentHint: true },
       inputSchema: credentialBindingsInputSchema,
       outputSchema: credentialBindingsOutputSchema,
@@ -256,7 +254,9 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
       }
 
       const currentBindings = () =>
-        decorateBindings(listRelationalCredentialBindings({ includeInactive: true }));
+        decorateBindings(
+          listRelationalCredentialBindings({ includeInactive: true, excludeManaged: true }),
+        );
       const bindings = currentBindings();
 
       if (args.action === "oauth-app-upsert") {
@@ -491,20 +491,6 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
                 ? "No configured credential bindings."
                 : `Found ${bindings.length} credential binding(s).`,
             bindings,
-          },
-        };
-      }
-
-      if (args.action === "import-legacy") {
-        const imported = importLegacyCredentialBindings();
-        const nextBindings = currentBindings();
-        return {
-          content: [{ type: "text", text: `Imported ${imported} legacy credential binding(s).` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Imported ${imported} legacy credential binding(s).`,
-            bindings: nextBindings,
           },
         };
       }
