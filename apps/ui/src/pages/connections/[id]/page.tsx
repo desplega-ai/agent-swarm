@@ -1,4 +1,4 @@
-import { Maximize2, Pencil, Power, PowerOff, RefreshCw } from "lucide-react";
+import { AlertTriangle, Maximize2, Pencil, Power, PowerOff, RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -12,6 +12,7 @@ import {
 } from "@/api/hooks/use-script-connections";
 import type { ScriptConnectionTool } from "@/api/types";
 import { ScriptSourceEditor } from "@/components/scripts/script-source-editor";
+import { AlertCallout } from "@/components/ui/alert-callout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -103,6 +104,10 @@ export default function ConnectionDetailPage() {
   const target = connection.baseUrl ?? connection.mcpServerId ?? "-";
   const specUrl =
     connection.openapiSpecSourceKind === "url" ? (connection.openapiSpecSource ?? "") : "";
+  // Tolerant of both shapes: the embedded auth summary (step-7) or the binding
+  // token status. `missing` flags a broken/absent OAuth authorization.
+  const authStatus = connection.auth?.status ?? connection.credentialBinding?.tokenStatus;
+  const authBroken = connection.credentialBinding?.authKind === "oauth" && authStatus === "missing";
 
   return (
     <div className="flex flex-col gap-4 lg:flex-1 lg:min-h-0 lg:overflow-y-hidden">
@@ -243,6 +248,17 @@ export default function ConnectionDetailPage() {
                 />
               </CardContent>
             </Card>
+
+            {authBroken ? (
+              <AlertCallout tone="error" icon={AlertTriangle}>
+                This connection's OAuth authorization
+                {connection.credentialBinding?.oauthProvider
+                  ? ` (${connection.credentialBinding.oauthProvider})`
+                  : ""}{" "}
+                needs attention — the token is missing, expired, or the last refresh failed.
+                Re-authorize it from the OAuth Apps tab; calls will fail until then.
+              </AlertCallout>
+            ) : null}
 
             <Card>
               <CardHeader>

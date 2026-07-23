@@ -1,9 +1,11 @@
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
 import {
+  AlertTriangle,
   Check,
   ChevronDown,
   Copy,
   ExternalLink,
+  Info,
   KeyRound,
   Link2,
   Plus,
@@ -24,7 +26,8 @@ import {
   useIntegrationsCatalog,
   useIntegrationsSurface,
   useOAuthApps,
-  useOAuthAuthorizeUrl,
+  useOAuthPresets,
+  useOAuthRedirectUri,
   useRefreshScriptConnection,
   useScriptConnections,
   useSetScriptConnectionEnabled,
@@ -39,7 +42,9 @@ import type {
   IntegrationsSurfaceMechanics,
   IntegrationsSurfaceResponse,
   OAuthAppSummary,
+  OAuthAuthorizationStatus,
   OAuthBindingTokenStatus,
+  OAuthPreset,
   ScriptConnection,
   ScriptConnectionDetail,
   ScriptConnectionKind,
@@ -48,6 +53,7 @@ import type {
 } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { MarkdownView } from "@/components/shared/markdown-view";
+import { AlertCallout } from "@/components/ui/alert-callout";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -256,6 +262,63 @@ export function TokenStatusBadge({ status }: { status?: OAuthBindingTokenStatus 
   );
 }
 
+const AUTHORIZATION_STATUS_COLORS: Record<OAuthAuthorizationStatus, string> = {
+  active: "border-status-success/30 text-status-success",
+  "refresh-failed": "border-status-error/30 text-status-error",
+  expired: "border-status-warning/30 text-status-warning-strong",
+  revoked: "border-status-neutral/30 text-status-neutral",
+};
+
+// Worst-first severity so the app grid can surface the most urgent state across
+// all of an app's authorizations in a single column.
+const AUTHORIZATION_STATUS_SEVERITY: Record<OAuthAuthorizationStatus, number> = {
+  "refresh-failed": 3,
+  expired: 2,
+  revoked: 1,
+  active: 0,
+};
+
+export function OAuthAuthorizationStatusBadge({ status }: { status: OAuthAuthorizationStatus }) {
+  return (
+    <Badge variant="outline" size="tag" className={AUTHORIZATION_STATUS_COLORS[status]}>
+      {status}
+    </Badge>
+  );
+}
+
+export function worstAuthorizationStatus(
+  authorizations: Array<{ status: OAuthAuthorizationStatus }>,
+): OAuthAuthorizationStatus | null {
+  if (authorizations.length === 0) return null;
+  return authorizations.reduce<OAuthAuthorizationStatus>(
+    (worst, current) =>
+      AUTHORIZATION_STATUS_SEVERITY[current.status] > AUTHORIZATION_STATUS_SEVERITY[worst]
+        ? current.status
+        : worst,
+    authorizations[0].status,
+  );
+}
+
+const OAUTH_SOURCE_COLORS: Record<OAuthAppSummary["source"], string> = {
+  manual: "border-status-neutral/30 text-status-neutral",
+  "curated-prefill": "border-status-info/30 text-status-info-strong",
+  dcr: "border-status-paused/30 text-status-paused-strong",
+};
+
+const OAUTH_SOURCE_LABELS: Record<OAuthAppSummary["source"], string> = {
+  manual: "manual",
+  "curated-prefill": "curated",
+  dcr: "dcr",
+};
+
+export function OAuthSourceBadge({ source }: { source: OAuthAppSummary["source"] }) {
+  return (
+    <Badge variant="outline" size="tag" className={OAUTH_SOURCE_COLORS[source]}>
+      {OAUTH_SOURCE_LABELS[source]}
+    </Badge>
+  );
+}
+
 function AuthKindBadge({ kind }: { kind: CredentialAuthKind }) {
   const colors: Record<CredentialAuthKind, string> = {
     config: "border-status-neutral/30 text-status-neutral",
@@ -321,59 +384,86 @@ function CredentialChip({
   const keyClass = summary.tokenStatus
     ? TOKEN_STATUS_TEXT[summary.tokenStatus]
     : "text-muted-foreground";
+  // Tolerant of both shapes: prefer the embedded connection auth summary
+  // (step-7), fall back to the binding token status. `missing` flags a
+  // broken/absent authorization (refresh-failed / revoked / expired upstream).
+  const authStatus = connection.auth?.status ?? summary.tokenStatus;
+  const isBroken = summary.authKind === "oauth" && authStatus === "missing";
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex max-w-full cursor-default items-center gap-1.5 rounded-md border bg-muted/40 px-1.5 py-0.5 font-mono text-xs">
-          <KeyRound className={cn("size-3 shrink-0", keyClass)} />
-          <span className="truncate">{summary.configKey}</span>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent
-        side="right"
-        align="start"
-        className="max-w-xs px-3 py-2.5 text-left whitespace-normal"
-      >
-        <div className="space-y-1.5 text-xs leading-relaxed">
-          <div className="flex items-center gap-2">
-            <span className="font-mono font-semibold">{summary.configKey}</span>
-            <span className="uppercase opacity-70">{summary.authKind}</span>
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex max-w-full cursor-default items-center gap-1.5 rounded-md border bg-muted/40 px-1.5 py-0.5 font-mono text-xs">
+            <KeyRound className={cn("size-3 shrink-0", keyClass)} />
+            <span className="truncate">{summary.configKey}</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent
+          side="right"
+          align="start"
+          className="max-w-xs px-3 py-2.5 text-left whitespace-normal"
+        >
+          <div className="space-y-1.5 text-xs leading-relaxed">
+            <div className="flex items-center gap-2">
+              <span className="font-mono font-semibold">{summary.configKey}</span>
+              <span className="uppercase opacity-70">{summary.authKind}</span>
+            </div>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 opacity-90">
+              {summary.oauthProvider ? (
+                <>
+                  <dt className="opacity-60">Provider</dt>
+                  <dd>{summary.oauthProvider}</dd>
+                </>
+              ) : null}
+              {summary.tokenStatus ? (
+                <>
+                  <dt className="opacity-60">Token</dt>
+                  <dd className="font-medium">{summary.tokenStatus}</dd>
+                </>
+              ) : null}
+              {full?.allowedHosts.length ? (
+                <>
+                  <dt className="opacity-60">Hosts</dt>
+                  <dd className="break-all">{full.allowedHosts.join(", ")}</dd>
+                </>
+              ) : null}
+              {full?.headerTemplate ? (
+                <>
+                  <dt className="opacity-60">Header</dt>
+                  <dd className="break-all font-mono">{full.headerTemplate}</dd>
+                </>
+              ) : null}
+              {full?.queryTemplate ? (
+                <>
+                  <dt className="opacity-60">Query</dt>
+                  <dd className="break-all font-mono">{full.queryTemplate}</dd>
+                </>
+              ) : null}
+            </dl>
           </div>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 opacity-90">
-            {summary.oauthProvider ? (
-              <>
-                <dt className="opacity-60">Provider</dt>
-                <dd>{summary.oauthProvider}</dd>
-              </>
-            ) : null}
-            {summary.tokenStatus ? (
-              <>
-                <dt className="opacity-60">Token</dt>
-                <dd className="font-medium">{summary.tokenStatus}</dd>
-              </>
-            ) : null}
-            {full?.allowedHosts.length ? (
-              <>
-                <dt className="opacity-60">Hosts</dt>
-                <dd className="break-all">{full.allowedHosts.join(", ")}</dd>
-              </>
-            ) : null}
-            {full?.headerTemplate ? (
-              <>
-                <dt className="opacity-60">Header</dt>
-                <dd className="break-all font-mono">{full.headerTemplate}</dd>
-              </>
-            ) : null}
-            {full?.queryTemplate ? (
-              <>
-                <dt className="opacity-60">Query</dt>
-                <dd className="break-all font-mono">{full.queryTemplate}</dd>
-              </>
-            ) : null}
-          </dl>
-        </div>
-      </TooltipContent>
-    </Tooltip>
+        </TooltipContent>
+      </Tooltip>
+      {isBroken ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge
+              variant="outline"
+              size="tag"
+              className="gap-1 border-status-error/30 text-status-error"
+            >
+              <AlertTriangle className="size-3" />
+              {summary.oauthProvider ?? "auth"}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs whitespace-normal">
+            This connection's OAuth authorization{" "}
+            {summary.oauthProvider ? `(${summary.oauthProvider}) ` : ""}
+            needs attention — the token is missing, expired, or the last refresh failed.
+            Re-authorize it from the OAuth Apps tab.
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
+    </span>
   );
 }
 
@@ -1844,7 +1934,6 @@ function OAuthAppsSection({
   const navigate = useNavigate();
   const [editOpen, setEditOpen] = useState(false);
   const [editApp, setEditApp] = useState<OAuthAppSummary | undefined>();
-  const authorize = useOAuthAuthorizeUrl();
   const deleteApp = useDeleteOAuthApp();
 
   const columnDefs = useMemo<ColDef<OAuthAppSummary>[]>(
@@ -1859,9 +1948,16 @@ function OAuthAppsSection({
         ),
       },
       {
+        field: "source",
+        headerName: "Source",
+        width: 130,
+        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) =>
+          params.data ? <OAuthSourceBadge source={params.data.source} /> : null,
+      },
+      {
         field: "clientId",
         headerName: "Client ID",
-        minWidth: 180,
+        minWidth: 160,
         flex: 1,
         cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => (
           <span className="block max-w-full truncate font-mono text-xs text-muted-foreground">
@@ -1872,7 +1968,7 @@ function OAuthAppsSection({
       {
         field: "redirectUri",
         headerName: "Redirect URI",
-        minWidth: 240,
+        minWidth: 220,
         flex: 1,
         cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) =>
           params.data ? (
@@ -1887,24 +1983,31 @@ function OAuthAppsSection({
           ) : null,
       },
       {
-        field: "scopes",
-        headerName: "Scopes",
-        minWidth: 160,
-        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => (
-          <HostChips hosts={params.data?.scopes ?? []} />
-        ),
+        headerName: "Accounts",
+        width: 110,
+        valueGetter: (params) => params.data?.authorizations.length ?? 0,
+        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => {
+          const count = params.data?.authorizations.length ?? 0;
+          return (
+            <span className={count === 0 ? "text-muted-foreground" : "font-medium"}>{count}</span>
+          );
+        },
       },
       {
-        field: "tokenStatus",
-        headerName: "Token",
-        width: 100,
-        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => (
-          <TokenStatusBadge status={params.data?.tokenStatus} />
-        ),
+        headerName: "Status",
+        width: 130,
+        cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => {
+          const worst = worstAuthorizationStatus(params.data?.authorizations ?? []);
+          return worst ? (
+            <OAuthAuthorizationStatusBadge status={worst} />
+          ) : (
+            <span className="text-muted-foreground">no accounts</span>
+          );
+        },
       },
       {
         headerName: "Actions",
-        width: 250,
+        width: 150,
         sortable: false,
         cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) => {
           const app = params.data;
@@ -1914,22 +2017,6 @@ function OAuthAppsSection({
               className="flex items-center gap-1.5"
               onClick={(event) => event.stopPropagation()}
             >
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={async () => {
-                  try {
-                    const result = await authorize.mutateAsync(app.provider);
-                    window.open(result.authorizeUrl, "_blank", "noopener,noreferrer");
-                  } catch (error) {
-                    toastMutationError(error);
-                  }
-                }}
-                disabled={authorize.isPending}
-              >
-                <ExternalLink className="size-3" />
-                {app.tokenStatus === "missing" ? "Authorize" : "Re-authorize"}
-              </Button>
               <Button
                 size="xs"
                 variant="ghost"
@@ -1950,8 +2037,8 @@ function OAuthAppsSection({
                   <AlertDialogHeader>
                     <AlertDialogTitle>Delete OAuth app?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      This deletes the app configuration and all stored OAuth tokens for{" "}
-                      {app.provider}.
+                      This deletes the app configuration and all {app.authorizations.length}{" "}
+                      authorization(s) for {app.provider}.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -1978,7 +2065,7 @@ function OAuthAppsSection({
         },
       },
     ],
-    [authorize, deleteApp],
+    [deleteApp],
   );
 
   return (
@@ -1994,7 +2081,7 @@ function OAuthAppsSection({
           const target = event.event?.target as HTMLElement | null;
           if (target?.closest("a, button")) return;
           if (event.data) {
-            navigate(`/connections/oauth-apps/${encodeURIComponent(event.data.provider)}`);
+            navigate(`/connections/oauth-apps/${encodeURIComponent(event.data.id)}`);
           }
         }}
       />
@@ -2094,6 +2181,9 @@ export function OAuthAppDialog({
 }) {
   const upsert = useUpsertOAuthApp();
   const discover = useDiscoverOAuthApp();
+  const { data: presets = [] } = useOAuthPresets();
+  const { data: redirectUri } = useOAuthRedirectUri();
+  const [presetId, setPresetId] = useState("");
   const [provider, setProvider] = useState("");
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
@@ -2104,10 +2194,17 @@ export function OAuthAppDialog({
   const [tokenAuthStyle, setTokenAuthStyle] = useState<"body" | "basic">("body");
   const [tokenBodyFormat, setTokenBodyFormat] = useState<"form" | "json">("form");
   const [extraParams, setExtraParams] = useState<Array<{ key: string; value: string }>>([]);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const isEdit = Boolean(app);
+
+  const selectedPreset = useMemo<OAuthPreset | null>(
+    () => presets.find((preset) => preset.id === presetId) ?? null,
+    [presets, presetId],
+  );
 
   useEffect(() => {
     if (!open) return;
+    setPresetId("");
     setProvider(app?.provider ?? "");
     setClientId(app?.clientId ?? "");
     setClientSecret("");
@@ -2122,7 +2219,27 @@ export function OAuthAppDialog({
         ? Object.entries(app.extraParams).map(([key, value]) => ({ key, value }))
         : [],
     );
+    // Edit mode always shows the endpoint fields (they're populated); creation
+    // starts collapsed and leans on the preset picker / discovery.
+    setShowAdvanced(Boolean(app));
   }, [open, app]);
+
+  function applyPreset(id: string) {
+    setPresetId(id);
+    const preset = presets.find((candidate) => candidate.id === id);
+    if (!preset) return;
+    setProvider(preset.provider);
+    setAuthorizeUrl(preset.authorizeUrl);
+    setTokenUrl(preset.tokenUrl);
+    setScopes([...preset.scopes]);
+    setTokenAuthStyle(preset.tokenAuthStyle ?? "body");
+    setTokenBodyFormat(preset.tokenBodyFormat ?? "form");
+    setExtraParams(
+      preset.extraParams
+        ? Object.entries(preset.extraParams).map(([key, value]) => ({ key, value }))
+        : [],
+    );
+  }
 
   async function discoverFromUrl() {
     try {
@@ -2139,6 +2256,10 @@ export function OAuthAppDialog({
   async function submit() {
     try {
       await upsert.mutateAsync({
+        // With a preset, the server hydrates endpoints/quirks (userinfo,
+        // revocation, scope separator, rotation) that aren't editable here.
+        // Explicit fields below still win server-side.
+        ...(presetId ? { presetId } : {}),
         provider,
         clientId,
         ...(clientSecret.trim() ? { clientSecret: clientSecret.trim() } : {}),
@@ -2163,12 +2284,15 @@ export function OAuthAppDialog({
     onOpenChange(false);
   }
 
-  const canSubmit =
-    provider.trim() &&
-    clientId.trim() &&
-    (isEdit || clientSecret.trim()) &&
-    authorizeUrl.trim() &&
-    tokenUrl.trim();
+  const canSubmit = presetId
+    ? Boolean(clientId.trim() && (isEdit || clientSecret.trim()))
+    : Boolean(
+        provider.trim() &&
+          clientId.trim() &&
+          authorizeUrl.trim() &&
+          tokenUrl.trim() &&
+          (isEdit || clientSecret.trim()),
+      );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -2180,26 +2304,58 @@ export function OAuthAppDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-5">
-          <div className="space-y-2 rounded-md border p-4">
-            <FieldLabel tip="Paste the provider base URL or issuer URL; the server checks OAuth and OIDC well-known metadata.">
-              Discover from URL
+          <div className="space-y-1.5 rounded-md border bg-muted/30 p-3">
+            <FieldLabel tip="The single static callback the swarm listens on. It never changes and is derived from the public server URL.">
+              Redirect URI
             </FieldLabel>
-            <div className="flex gap-2">
-              <Input
-                value={discoverUrl}
-                onChange={(event) => setDiscoverUrl(event.target.value)}
-                placeholder="https://accounts.google.com"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                onClick={discoverFromUrl}
-                disabled={!discoverUrl.trim() || discover.isPending}
-              >
-                Discover
-              </Button>
+            <div className="flex min-w-0 items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs">
+                {redirectUri ?? "Loading…"}
+              </code>
+              {redirectUri ? <CopyButton value={redirectUri} /> : null}
             </div>
+            <p className="text-xs text-muted-foreground">
+              Register this exact URL in the provider console first — the authorization won't
+              complete until it's whitelisted there.
+            </p>
           </div>
+
+          {!isEdit ? (
+            <div className="space-y-2">
+              <FieldLabel tip="Curated providers prefill endpoints, scopes, and provider quirks. Pick Custom to configure everything by hand.">
+                Preset
+              </FieldLabel>
+              <Select
+                value={presetId || "custom"}
+                onValueChange={(value) =>
+                  value === "custom" ? setPresetId("") : applyPreset(value)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="custom">Custom (no preset)</SelectItem>
+                  {presets.map((preset) => (
+                    <SelectItem key={preset.id} value={preset.id}>
+                      {preset.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+
+          {selectedPreset?.setupHints.length ? (
+            <AlertCallout tone="info" icon={Info}>
+              <ul className="list-disc space-y-1 pl-4">
+                {selectedPreset.setupHints.map((hint) => (
+                  <li key={hint}>{hint}</li>
+                ))}
+              </ul>
+            </AlertCallout>
+          ) : null}
+
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <FieldLabel tip="Stable provider slug used by credential bindings, e.g. github or notion.">
@@ -2208,7 +2364,7 @@ export function OAuthAppDialog({
               <Input
                 value={provider}
                 onChange={(event) => setProvider(event.target.value)}
-                disabled={isEdit}
+                disabled={isEdit || Boolean(presetId)}
                 placeholder="github"
               />
             </div>
@@ -2234,126 +2390,166 @@ export function OAuthAppDialog({
               placeholder={isEdit ? "unchanged" : "3c9d1f2e8ab74650cd1208d586cf1a2b34e5d6f7"}
             />
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <FieldLabel tip="Provider authorization endpoint; usually in OAuth app or issuer metadata.">
-                Authorize URL
-              </FieldLabel>
-              <Input
-                value={authorizeUrl}
-                onChange={(event) => setAuthorizeUrl(event.target.value)}
-                placeholder="https://github.com/login/oauth/authorize"
-              />
-            </div>
-            <div className="space-y-2">
-              <FieldLabel tip="Provider token endpoint used to exchange and refresh OAuth tokens.">
-                Token URL
-              </FieldLabel>
-              <Input
-                value={tokenUrl}
-                onChange={(event) => setTokenUrl(event.target.value)}
-                placeholder="https://github.com/login/oauth/access_token"
-              />
-            </div>
-          </div>
           <div className="space-y-2">
             <FieldLabel tip="Optional scopes requested during authorization; paste or type and press Enter to add tags.">
               Scopes
             </FieldLabel>
             <ScopeTagInput scopes={scopes} onChange={setScopes} />
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <FieldLabel tip="How client credentials are sent to the token endpoint; provider docs usually call this client authentication.">
-                Token Auth
-              </FieldLabel>
-              <Select
-                value={tokenAuthStyle}
-                onValueChange={(value) => setTokenAuthStyle(value as "body" | "basic")}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="body">Body</SelectItem>
-                  <SelectItem value="basic">Basic</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <FieldLabel tip="Token request body encoding expected by the provider: form-encoded or JSON.">
-                Body Format
-              </FieldLabel>
-              <Select
-                value={tokenBodyFormat}
-                onValueChange={(value) => setTokenBodyFormat(value as "form" | "json")}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="form">Form</SelectItem>
-                  <SelectItem value="json">JSON</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <FieldLabel tip="Optional static authorization parameters such as audience, resource, prompt, or access_type.">
-                Extra Params
-              </FieldLabel>
-              <Button
-                type="button"
-                size="xs"
-                variant="outline"
-                onClick={() => setExtraParams((rows) => [...rows, { key: "", value: "" }])}
-              >
-                Add Row
-              </Button>
-            </div>
-            <div className="grid gap-2">
-              {extraParams.map((row, index) => (
-                <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-2">
-                  <Input
-                    value={row.key}
-                    onChange={(event) =>
-                      setExtraParams((rows) =>
-                        rows.map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, key: event.target.value } : item,
-                        ),
-                      )
-                    }
-                    placeholder="access_type"
-                    aria-label="Extra parameter name"
-                  />
-                  <Input
-                    value={row.value}
-                    onChange={(event) =>
-                      setExtraParams((rows) =>
-                        rows.map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, value: event.target.value } : item,
-                        ),
-                      )
-                    }
-                    placeholder="offline"
-                    aria-label="Extra parameter value"
-                  />
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    onClick={() =>
-                      setExtraParams((rows) => rows.filter((_, itemIndex) => itemIndex !== index))
-                    }
-                    aria-label="Remove extra parameter"
-                  >
-                    <X className="size-4" />
-                  </Button>
+          <div className="space-y-3">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 px-1"
+              onClick={() => setShowAdvanced((current) => !current)}
+            >
+              <ChevronDown
+                className={cn("size-4 transition-transform", showAdvanced && "rotate-180")}
+              />
+              Advanced{presetId ? " (prefilled from preset)" : ""}
+            </Button>
+            {showAdvanced ? (
+              <div className="space-y-5 rounded-md border border-dashed p-4">
+                <div className="space-y-2">
+                  <FieldLabel tip="Paste the provider base URL or issuer URL; the server checks OAuth and OIDC well-known metadata.">
+                    Discover from URL
+                  </FieldLabel>
+                  <div className="flex gap-2">
+                    <Input
+                      value={discoverUrl}
+                      onChange={(event) => setDiscoverUrl(event.target.value)}
+                      placeholder="https://accounts.google.com"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={discoverFromUrl}
+                      disabled={!discoverUrl.trim() || discover.isPending}
+                    >
+                      Discover
+                    </Button>
+                  </div>
                 </div>
-              ))}
-            </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <FieldLabel tip="Provider authorization endpoint; usually in OAuth app or issuer metadata.">
+                      Authorize URL
+                    </FieldLabel>
+                    <Input
+                      value={authorizeUrl}
+                      onChange={(event) => setAuthorizeUrl(event.target.value)}
+                      placeholder="https://github.com/login/oauth/authorize"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <FieldLabel tip="Provider token endpoint used to exchange and refresh OAuth tokens.">
+                      Token URL
+                    </FieldLabel>
+                    <Input
+                      value={tokenUrl}
+                      onChange={(event) => setTokenUrl(event.target.value)}
+                      placeholder="https://github.com/login/oauth/access_token"
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <FieldLabel tip="How client credentials are sent to the token endpoint; provider docs usually call this client authentication.">
+                      Token Auth
+                    </FieldLabel>
+                    <Select
+                      value={tokenAuthStyle}
+                      onValueChange={(value) => setTokenAuthStyle(value as "body" | "basic")}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="body">Body</SelectItem>
+                        <SelectItem value="basic">Basic</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <FieldLabel tip="Token request body encoding expected by the provider: form-encoded or JSON.">
+                      Body Format
+                    </FieldLabel>
+                    <Select
+                      value={tokenBodyFormat}
+                      onValueChange={(value) => setTokenBodyFormat(value as "form" | "json")}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="form">Form</SelectItem>
+                        <SelectItem value="json">JSON</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <FieldLabel tip="Optional static authorization parameters such as audience, resource, prompt, or access_type.">
+                      Extra Params
+                    </FieldLabel>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      onClick={() => setExtraParams((rows) => [...rows, { key: "", value: "" }])}
+                    >
+                      Add Row
+                    </Button>
+                  </div>
+                  <div className="grid gap-2">
+                    {extraParams.map((row, index) => (
+                      <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-2">
+                        <Input
+                          value={row.key}
+                          onChange={(event) =>
+                            setExtraParams((rows) =>
+                              rows.map((item, itemIndex) =>
+                                itemIndex === index ? { ...item, key: event.target.value } : item,
+                              ),
+                            )
+                          }
+                          placeholder="access_type"
+                          aria-label="Extra parameter name"
+                        />
+                        <Input
+                          value={row.value}
+                          onChange={(event) =>
+                            setExtraParams((rows) =>
+                              rows.map((item, itemIndex) =>
+                                itemIndex === index ? { ...item, value: event.target.value } : item,
+                              ),
+                            )
+                          }
+                          placeholder="offline"
+                          aria-label="Extra parameter value"
+                        />
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant="ghost"
+                          onClick={() =>
+                            setExtraParams((rows) =>
+                              rows.filter((_, itemIndex) => itemIndex !== index),
+                            )
+                          }
+                          aria-label="Remove extra parameter"
+                        >
+                          <X className="size-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
           <InlineError error={upsert.error ?? discover.error} />
         </div>

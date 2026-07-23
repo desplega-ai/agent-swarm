@@ -1019,6 +1019,9 @@ function sanitizeAuthorization(authorization: OAuthAuthorization) {
     expiresAt: authorization.expiresAt,
     scope: authorization.scope,
     hasRefreshToken: authorization.refreshToken != null && authorization.refreshToken !== "",
+    // Non-sensitive: the refresh-failure reason is scrubbed at write time and
+    // surfaced in the UI tooltip on `refresh-failed` authorizations. Never a token.
+    lastErrorMessage: authorization.lastErrorMessage,
     lastRefreshedAt: authorization.lastRefreshedAt,
     createdAt: authorization.createdAt,
     updatedAt: authorization.updatedAt,

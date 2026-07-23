@@ -1200,6 +1200,12 @@ export interface ScriptConnection {
   allowedHosts: string[];
   credentialBindingId: string | null;
   credentialBinding: ScriptConnectionCredentialSummary | null;
+  /**
+   * Embedded auth summary (step-7). `status` mirrors the binding token status
+   * (`ok` | `expiring` | `missing`); `missing` flags a broken/absent
+   * authorization used to raise the dependent-connection warning badge.
+   */
+  auth?: { required?: boolean; status?: OAuthBindingTokenStatus } | null;
   openapiSpecSourceKind: "url" | "inline" | "agent_fs" | null;
   openapiSpecSource: string | null;
   openapiSpecEtag: string | null;
@@ -1319,6 +1325,30 @@ export interface UpsertCredentialBindingInput {
   oauthProvider?: string;
 }
 
+/** Lifecycle status of a single labeled authorization (mirrors the API). */
+export type OAuthAuthorizationStatus = "active" | "refresh-failed" | "expired" | "revoked";
+
+/** Provenance of an OAuth app row. */
+export type OAuthAppSource = "manual" | "dcr" | "curated-prefill";
+
+/**
+ * A single labeled authorization under an OAuth app (never carries token
+ * material — mirrors the server's `sanitizeAuthorization`).
+ */
+export interface OAuthAuthorization {
+  id: string;
+  label: string;
+  accountEmail: string | null;
+  status: OAuthAuthorizationStatus;
+  expiresAt: string | null;
+  scope: string | null;
+  hasRefreshToken: boolean;
+  lastErrorMessage: string | null;
+  lastRefreshedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface OAuthAppSummary {
   id: string;
   provider: string;
@@ -1330,23 +1360,61 @@ export interface OAuthAppSummary {
   extraParams?: Record<string, string>;
   tokenAuthStyle: "body" | "basic";
   tokenBodyFormat: "form" | "json";
+  source: OAuthAppSource;
+  /** Legacy default-authorization token status (kept for back-compat). */
   tokenStatus: OAuthBindingTokenStatus;
   expiresAt?: string | null;
   lastRefreshedAt?: string | null;
+  /** N labeled authorizations under this app (empty until first authorize). */
+  authorizations: OAuthAuthorization[];
   createdAt: string;
   updatedAt: string;
 }
 
-export interface UpsertOAuthAppInput {
+/** Curated OAuth preset (mirrors the public shape of `src/oauth/presets.ts`). */
+export interface OAuthPreset {
+  id: string;
+  displayName: string;
   provider: string;
-  clientId: string;
-  clientSecret?: string;
   authorizeUrl: string;
   tokenUrl: string;
+  revocationUrl?: string;
+  userinfoUrl?: string;
+  scopes: string[];
+  scopeSeparator?: string;
+  tokenAuthStyle?: "body" | "basic";
+  tokenBodyFormat?: "form" | "json";
+  requiresRefreshTokenRotation?: boolean;
+  extraParams?: Record<string, string>;
+  setupHints: string[];
+}
+
+export interface UpsertOAuthAppInput {
+  /** When set, the server hydrates endpoints/quirks from the curated preset. */
+  presetId?: string;
+  provider?: string;
+  clientId: string;
+  clientSecret?: string;
+  authorizeUrl?: string;
+  tokenUrl?: string;
   scopes?: string[];
   extraParams?: Record<string, string>;
   tokenAuthStyle?: "body" | "basic";
   tokenBodyFormat?: "form" | "json";
+}
+
+export interface UpsertOAuthAppResult {
+  oauthApp: OAuthAppSummary;
+  redirectUri: string;
+  setupHints?: string[];
+}
+
+/** Result of building an authorization URL for a labeled authorization. */
+export interface OAuthAuthorizeUrlResult {
+  authorizeUrl: string;
+  state: string;
+  label: string;
+  redirectUri: string;
 }
 
 export interface OAuthAppDiscoveryResult {

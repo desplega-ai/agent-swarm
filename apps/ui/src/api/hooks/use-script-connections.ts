@@ -213,9 +213,66 @@ export function useIntegrationsSurface() {
   });
 }
 
+export function useOAuthPresets() {
+  return useQuery({
+    queryKey: ["oauth-presets"],
+    queryFn: () => api.fetchOAuthPresets(),
+    staleTime: Number.POSITIVE_INFINITY,
+    select: (data) => data.presets,
+  });
+}
+
+export function useOAuthRedirectUri() {
+  return useQuery({
+    queryKey: ["oauth-redirect-uri"],
+    queryFn: () => api.fetchOAuthRedirectUri(),
+    staleTime: Number.POSITIVE_INFINITY,
+    select: (data) => data.redirectUri,
+  });
+}
+
+export function useOAuthAppAuthorizations(appId: string | undefined) {
+  return useQuery({
+    queryKey: ["oauth-app-authorizations", appId],
+    queryFn: () => api.fetchOAuthAppAuthorizations(appId as string),
+    enabled: Boolean(appId),
+    select: (data) => data.authorizations,
+  });
+}
+
+/** Build an authorization URL for a labeled authorization (id-keyed). */
 export function useOAuthAuthorizeUrl() {
   return useMutation({
-    mutationFn: (provider: string) => api.fetchOAuthAuthorizeUrl(provider),
+    mutationFn: ({ appId, label }: { appId: string; label?: string }) =>
+      api.fetchOAuthAuthorizeUrl(appId, label),
+  });
+}
+
+export function useRefreshOAuthAuthorization() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (authorizationId: string) => api.refreshOAuthAuthorization(authorizationId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["oauth-apps"] });
+      queryClient.invalidateQueries({ queryKey: ["oauth-app-authorizations"] });
+      queryClient.invalidateQueries({ queryKey: ["credential-bindings"] });
+      queryClient.invalidateQueries({ queryKey: ["script-connections"] });
+      queryClient.invalidateQueries({ queryKey: ["script-connection"] });
+    },
+  });
+}
+
+export function useDeleteOAuthAuthorization() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (authorizationId: string) => api.deleteOAuthAuthorization(authorizationId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["oauth-apps"] });
+      queryClient.invalidateQueries({ queryKey: ["oauth-app-authorizations"] });
+      queryClient.invalidateQueries({ queryKey: ["credential-bindings"] });
+      queryClient.invalidateQueries({ queryKey: ["script-connections"] });
+      queryClient.invalidateQueries({ queryKey: ["script-connection"] });
+    },
   });
 }
 
