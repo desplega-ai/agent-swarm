@@ -389,15 +389,25 @@ function findCredentialBindingByIdentity(data: {
   scopeId: string | null;
   headerTemplate?: string | null;
   queryTemplate?: string | null;
+  managedByConnectionId?: string | null;
 }): ScriptCredentialBindingRecord | null {
+  // Managed ownership is part of the identity: a connection-managed upsert
+  // (managedByConnectionId set) may ONLY reuse a row already managed by that
+  // same connection, and a standalone upsert (null) may ONLY reuse a standalone
+  // row. `allowedHosts` is deliberately NOT part of the identity, so without
+  // this fence a managed upsert could ADOPT a user-created standalone raw-fetch
+  // binding that shares configKey/scope/template — stamping source='connection'
+  // + managed_by_connection_id onto it, hiding it from the raw-fetch UI and
+  // letting later connection-auth changes mutate/delete the user's credential.
   const row = getDb()
-    .prepare<BindingRow, [string, string, string, string, string]>(
+    .prepare<BindingRow, [string, string, string, string, string, string]>(
       `SELECT * FROM script_credential_bindings
        WHERE config_key = ?
          AND scope = ?
          AND COALESCE(scope_id, '') = ?
          AND COALESCE(header_template, '') = ?
-         AND COALESCE(query_template, '') = ?`,
+         AND COALESCE(query_template, '') = ?
+         AND COALESCE(managed_by_connection_id, '') = ?`,
     )
     .get(
       data.configKey,
@@ -405,6 +415,7 @@ function findCredentialBindingByIdentity(data: {
       data.scopeId ?? "",
       data.headerTemplate ?? "",
       data.queryTemplate ?? "",
+      data.managedByConnectionId ?? "",
     );
   return row ? bindingFromRow(row) : null;
 }
@@ -462,6 +473,7 @@ export function upsertCredentialBinding(data: {
       scopeId,
       headerTemplate: data.headerTemplate,
       queryTemplate: data.queryTemplate,
+      managedByConnectionId,
     });
 
   if (existing) {
@@ -1306,15 +1318,48 @@ function deleteManagedConnectionSecret(input: {
 }
 
 /**
+ * Matches the reserved derived namespaces an inline secret / oauth placeholder
+ * mints for a connection (`connection.<slug>.secret`, `connection.<slug>.oauth`).
+ * User-supplied `configKey`s are barred from these namespaces (see
+ * {@link assertConfigKeyNotReserved}), so any auth_config_key matching one was
+ * minted by the connection itself.
+ */
+const RESERVED_DERIVED_CONFIG_KEY = /^connection\..+\.(secret|oauth)$/;
+const DERIVED_INLINE_SECRET_KEY = /^connection\..+\.secret$/;
+
+/** Reject user-supplied configKeys that collide with a connection's reserved
+ * derived-credential namespace. Reconstruction of an existing connection's auth
+ * bypasses this (it is not user input), so a metadata-only rename that preserves
+ * `connection.<oldSlug>.secret` still round-trips. */
+function assertConfigKeyNotReserved(auth: ConnectionAuthInput | undefined): void {
+  if (!auth || auth.type === "none" || auth.type === "oauth") return;
+  const configKey = auth.configKey;
+  if (configKey && RESERVED_DERIVED_CONFIG_KEY.test(configKey)) {
+    throw new Error(
+      "configKey may not use the reserved `connection.*.secret` / `connection.*.oauth` namespace; that space is reserved for connection-derived credentials.",
+    );
+  }
+}
+
+/**
  * The derived, write-only key an inline-secret auth mints for a connection.
- * Returns null unless the connection's persisted auth actually points at that
- * derived key (i.e. an inline secret, not an explicit shared `configKey` nor an
- * oauth `.oauth` key) — so we never delete a secret the connection doesn't own.
+ * Returns null unless the connection's persisted auth actually points at a
+ * derived inline secret (i.e. an inline secret, not an explicit shared
+ * `configKey` nor an oauth `.oauth` key) — so we never delete a secret the
+ * connection doesn't own.
+ *
+ * Recognizes the key by the reserved `connection.*.secret` namespace rather than
+ * recomputing it from the CURRENT slug: a metadata-only rename preserves the old
+ * `connection.<oldSlug>.secret` in `authConfigKey` while the slug changes, so a
+ * slug-derived comparison would miss it and orphan the encrypted secret when
+ * auth is later switched to oauth/config/none. User configKeys can't occupy this
+ * namespace, so a namespace match unambiguously identifies an owned secret.
  */
 function derivedInlineSecretKey(connection: ScriptConnectionRecord | null): string | null {
   if (!connection) return null;
-  const derivedKey = `connection.${connection.slug}.secret`;
-  return connection.authConfigKey === derivedKey ? derivedKey : null;
+  if (connection.authType === "none" || connection.authType === "oauth") return null;
+  const key = connection.authConfigKey;
+  return key && DERIVED_INLINE_SECRET_KEY.test(key) ? key : null;
 }
 
 type OpenapiSpecFetchResult =
@@ -1550,6 +1595,32 @@ export async function upsertScriptConnection(data: {
     throw new Error(
       "MCP connections resolve auth through their MCP server; `auth` is not supported.",
     );
+  }
+  // Keep the reserved derived-credential namespaces exclusive so a user-supplied
+  // configKey can never collide with (or later be mistaken for) a connection's
+  // own derived inline secret. Checked on user input only — reconstruction of an
+  // existing connection's preserved key is not routed through here.
+  assertConfigKeyNotReserved(data.auth);
+
+  // Preserve a stored OpenAPI spec across metadata/auth-only edits. When an
+  // update omits EVERY spec source (no url, inline json, or vendored/source),
+  // re-seed from the existing connection so the spec + its `ctx.api` operations
+  // survive — the generated artifacts are still rebuilt below so slug/auth/
+  // baseUrl changes propagate. Without this, an omitted source defaults to an
+  // empty inline `{}` and wipes the connection's operations (e.g. a name/auth
+  // edit of a vendored or inline connection).
+  if (
+    data.kind === "openapi" &&
+    existingConnection?.openapiSpecJson &&
+    data.openapiSpecJson == null &&
+    data.openapiSpecUrl == null &&
+    data.openapiSpecSource == null
+  ) {
+    openapiSpecJson = existingConnection.openapiSpecJson;
+    openapiSpecSourceKind = existingConnection.openapiSpecSourceKind;
+    openapiSpecSource = existingConnection.openapiSpecSource;
+    openapiSpecEtag = existingConnection.openapiSpecEtag;
+    openapiSpecFetchedAt = existingConnection.openapiSpecFetchedAt;
   }
   // Explicit legacy attach: caller passes `credentialBindingId` (a standalone
   // binding, e.g. raw-fetch egress) with no `auth`.

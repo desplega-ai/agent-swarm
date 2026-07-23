@@ -164,11 +164,29 @@ export default function OAuthAppDetailPage() {
 
   async function openAuthorize(label: string) {
     if (!app) return;
+    // Open the popup synchronously inside the click gesture so popup blockers
+    // don't reject a window opened after the awaited authorize-URL call (browsers
+    // clear transient user activation across awaits). Navigate it once the URL
+    // arrives; fall back to a manual open if the browser blocked it. Mirrors the
+    // OAuthInlineConnect flow on the connections page.
+    const popup = window.open("about:blank", "oauth-authorize", "width=640,height=760");
     try {
       const result = await authorize.mutateAsync({ appId: app.id, label });
-      window.open(result.authorizeUrl, "_blank", "noopener,noreferrer");
-      toast.success(`Opened consent for "${result.label}" in a new tab`);
+      if (popup && !popup.closed) {
+        popup.location.href = result.authorizeUrl;
+        toast.success(`Opened consent for "${result.label}" in a new tab`);
+      } else {
+        popup?.close();
+        toast.error("Popup blocked — open the consent page manually.", {
+          action: {
+            label: "Open",
+            onClick: () => window.open(result.authorizeUrl, "_blank", "noopener,noreferrer"),
+          },
+          duration: 15000,
+        });
+      }
     } catch (err) {
+      popup?.close();
       toastMutationError(err);
     }
   }

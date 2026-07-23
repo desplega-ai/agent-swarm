@@ -499,6 +499,16 @@ export function deleteAuthorizationById(id: string): boolean {
   return result.changes > 0;
 }
 
+/**
+ * Delete every authorization owned by a SPECIFIC app id. Scoped by app id (not
+ * provider) so deleting one of several same-provider apps never touches a
+ * sibling app's authorizations. Bindings referencing the rows detach via
+ * `ON DELETE SET NULL`.
+ */
+export function deleteAuthorizationsForApp(appId: string): number {
+  return getDb().query("DELETE FROM oauth_authorizations WHERE appId = ?").run(appId).changes;
+}
+
 // ── OAuth pending (DB-backed PKCE state for generic/tracker flows) ──
 
 /** Pending PKCE sessions are valid for 10 minutes (matches the GC window). */

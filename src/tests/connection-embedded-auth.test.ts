@@ -4,7 +4,9 @@ import { deleteSwarmConfig, getDb, getSwarmConfigs, upsertSwarmConfig } from "..
 import { getOAuthApp, upsertAuthorization, upsertOAuthApp } from "../be/db-queries/oauth";
 import {
   getScriptApiConnectionDescriptors,
+  getScriptConnectionById,
   listRelationalCredentialBindings,
+  upsertCredentialBinding,
   upsertScriptConnection,
 } from "../be/script-connections";
 import { buildScriptCredentialBindings } from "../be/script-credential-broker";
@@ -353,6 +355,58 @@ describe("embedded connection auth", () => {
     expect(getSwarmConfigs({ key: "connection.keepVendor.secret" })[0]?.value).toBe("keep-secret");
   });
 
+  test("clearing auth AFTER a rename deletes the renamed derived inline secret", async () => {
+    createdConfigKeys.push("connection.renameOne.secret", "connection.renameTwo.secret");
+    const connection = await upsertScriptConnection({
+      slug: "renameOne",
+      kind: "graphql",
+      baseUrl: "https://api.vendor.test/graphql",
+      allowedHosts: ["api.vendor.test"],
+      auth: { type: "bearer", secret: "rename-secret" },
+    });
+    createdConnectionIds.push(connection.id);
+    expect(getSwarmConfigs({ key: "connection.renameOne.secret" })).toHaveLength(1);
+
+    // Metadata-only rename with a blank secret field (no `auth`): reconstruct
+    // keeps referencing `connection.renameOne.secret` even though the slug is now
+    // renameTwo, so the secret is preserved.
+    const renamed = await upsertScriptConnection({
+      id: connection.id,
+      slug: "renameTwo",
+      kind: "graphql",
+      baseUrl: "https://api.vendor.test/graphql",
+      allowedHosts: ["api.vendor.test"],
+    });
+    expect(renamed.authConfigKey).toBe("connection.renameOne.secret");
+    expect(getSwarmConfigs({ key: "connection.renameOne.secret" })).toHaveLength(1);
+
+    // Later switch to `none`: the owned key is `connection.renameOne.secret`,
+    // NOT the slug-derived `connection.renameTwo.secret`. It must be deleted so
+    // the encrypted credential is not orphaned.
+    const cleared = await upsertScriptConnection({
+      id: connection.id,
+      slug: "renameTwo",
+      kind: "graphql",
+      baseUrl: "https://api.vendor.test/graphql",
+      allowedHosts: ["api.vendor.test"],
+      auth: { type: "none" },
+    });
+    expect(cleared.authType).toBe("none");
+    expect(getSwarmConfigs({ key: "connection.renameOne.secret" })).toHaveLength(0);
+  });
+
+  test("a user configKey may not use the reserved connection.*.secret namespace", async () => {
+    await expect(
+      upsertScriptConnection({
+        slug: "reservedVendor",
+        kind: "graphql",
+        baseUrl: "https://api.vendor.test/graphql",
+        allowedHosts: ["api.vendor.test"],
+        auth: { type: "bearer", configKey: "connection.someoneElse.secret" },
+      }),
+    ).rejects.toThrow(/reserved/);
+  });
+
   test("auth:{type:'none'} clears the managed binding", async () => {
     const connection = await upsertScriptConnection({
       slug: "clearVendor",
@@ -408,6 +462,72 @@ describe("embedded connection auth", () => {
 
     const all = listRelationalCredentialBindings({ includeInactive: true });
     expect(all.some((b) => b.managedByConnectionId === connection.id)).toBe(true);
+  });
+
+  test("connection auth upsert does NOT adopt a user's standalone raw-fetch binding", async () => {
+    // A binding the user created directly (raw fetch egress) — same configKey /
+    // scope / header template a connection would derive, but NOT connection-owned.
+    const standalone = upsertCredentialBinding({
+      configKey: "SHARED_ADOPT_KEY",
+      allowedHosts: ["user.example.test"],
+      headerTemplate: "Authorization: Bearer [REDACTED:SHARED_ADOPT_KEY]",
+      scope: "global",
+    });
+    expect(standalone.managedByConnectionId).toBeNull();
+    expect(standalone.source).toBe("user");
+
+    // A connection whose derived binding matches that identity (but shares no id)
+    // must create its OWN managed row, never adopt the standalone one.
+    const connection = await upsertScriptConnection({
+      slug: "adoptVendor",
+      kind: "graphql",
+      baseUrl: "https://api.vendor.test/graphql",
+      allowedHosts: ["api.vendor.test"],
+      auth: { type: "bearer", configKey: "SHARED_ADOPT_KEY" },
+    });
+    createdConnectionIds.push(connection.id);
+
+    const managed = managedBindingFor(connection.id);
+    expect(managed).toBeTruthy();
+    expect(managed?.id).not.toBe(standalone.id);
+
+    // The user's standalone row is untouched: still user-owned, still its hosts.
+    const row = getDb()
+      .prepare<
+        { source: string; managed_by_connection_id: string | null; allowed_hosts_json: string },
+        [string]
+      >(
+        "SELECT source, managed_by_connection_id, allowed_hosts_json FROM script_credential_bindings WHERE id = ?",
+      )
+      .get(standalone.id);
+    expect(row?.source).toBe("user");
+    expect(row?.managed_by_connection_id).toBeNull();
+    expect(JSON.parse(row?.allowed_hosts_json ?? "[]")).toEqual(["user.example.test"]);
+
+    getDb().run("DELETE FROM script_credential_bindings WHERE id = ?", standalone.id);
+  });
+
+  test("openapi metadata/auth-only edit preserves the stored spec (no wipe to {})", async () => {
+    const created = await upsertScriptConnection({
+      slug: "specVendor",
+      kind: "openapi",
+      baseUrl: "https://api.vendor.test",
+      allowedHosts: ["api.vendor.test"],
+      openapiSpecJson: openapiSpec(8080),
+    });
+    createdConnectionIds.push(created.id);
+    expect(Object.keys(JSON.parse(created.openapiSpecJson ?? "{}").paths ?? {})).toContain("/me");
+
+    // A name-only edit that omits every spec source must NOT wipe the operations.
+    const edited = await upsertScriptConnection({
+      id: created.id,
+      slug: "specVendor",
+      kind: "openapi",
+      displayName: "Renamed Vendor",
+    });
+    const stored = getScriptConnectionById(created.id);
+    expect(edited.displayName).toBe("Renamed Vendor");
+    expect(Object.keys(JSON.parse(stored?.openapiSpecJson ?? "{}").paths ?? {})).toContain("/me");
   });
 
   test("mcp connections reject inline auth", async () => {

@@ -6,6 +6,7 @@ import { closeDb, createAgent, getDb, initDb, upsertSwarmConfig } from "../be/db
 import {
   getAuthorizationById,
   getOAuthApp,
+  getOAuthAppById,
   getOAuthTokens,
   storeOAuthTokens,
   upsertAuthorization,
@@ -560,6 +561,99 @@ describe("/api/script-connections HTTP", () => {
     expect(await res.json()).toEqual({ success: true });
     expect(getOAuthApp("vendor_oauth")).toBeNull();
     expect(getOAuthTokens("vendor_oauth")).toBeNull();
+  });
+
+  test("DELETE oauth app by id does not revoke a same-provider sibling", async () => {
+    // First (oldest) app for the provider + its default authorization.
+    upsertOAuthApp("sibling_oauth", {
+      clientId: "first-client",
+      clientSecret: "first-secret",
+      authorizeUrl: "https://oauth.vendor.test/authorize",
+      tokenUrl: "https://oauth.vendor.test/token",
+      redirectUri: "https://api.public.test/api/oauth/callback",
+      scopes: "read",
+    });
+    const first = getOAuthApp("sibling_oauth");
+    if (!first) throw new Error("first app not created");
+    const firstAuth = upsertAuthorization({
+      appId: first.id,
+      accessToken: "first-access-token",
+      status: "active",
+    });
+
+    // Second (newer) same-provider app — inserted directly because
+    // upsertOAuthApp updates the existing provider row.
+    const secondId = crypto.randomUUID();
+    getDb().run(
+      `INSERT INTO oauth_apps
+         (id, provider, clientId, clientSecret, clientSecretEncrypted,
+          authorizeUrl, tokenUrl, redirectUri, scopes, createdAt)
+       VALUES (?, 'sibling_oauth', 'second-client', 'second-secret', 0,
+               'https://oauth.vendor.test/authorize', 'https://oauth.vendor.test/token',
+               'https://api.public.test/api/oauth/callback', '[]', ?)`,
+      secondId,
+      "2035-06-01T00:00:00.000Z",
+    );
+    const secondAuth = upsertAuthorization({
+      appId: secondId,
+      accessToken: "second-access-token",
+      status: "active",
+    });
+
+    // Delete the SECOND (newer) app by its exact id.
+    const res = await dispatch(`/api/oauth-apps/${secondId}`, {
+      method: "DELETE",
+      agentId: leadAgentId,
+    });
+    expect(res.status).toBe(200);
+
+    // Second app + its authorization are gone.
+    expect(getOAuthAppById(secondId)).toBeNull();
+    expect(getAuthorizationById(secondAuth.id)).toBeNull();
+
+    // The oldest sibling's authorization is UNTOUCHED — the provider-keyed
+    // revoke would have marked it 'revoked' (or dropped it).
+    expect(getAuthorizationById(firstAuth.id)?.status).toBe("active");
+    expect(getOAuthApp("sibling_oauth")?.id).toBe(first.id);
+  });
+
+  test("manual authorization refresh failure scrubs echoed secrets from the error", async () => {
+    upsertOAuthApp("leaky_oauth", {
+      clientId: "leaky-client",
+      clientSecret: "leaky-client-secret-should-not-leak",
+      authorizeUrl: "https://oauth.vendor.test/authorize",
+      tokenUrl: "https://oauth.vendor.test/token",
+      redirectUri: "https://api.public.test/api/oauth/callback",
+      scopes: "read",
+    });
+    const app = getOAuthApp("leaky_oauth");
+    if (!app) throw new Error("app not created");
+    const authorization = upsertAuthorization({
+      appId: app.id,
+      accessToken: "leaky-access-token",
+      refreshToken: "refresh-secret-should-not-leak",
+      status: "active",
+    });
+
+    // Provider rejects the refresh and echoes the submitted refresh_token AND
+    // client_secret back in the error body.
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          error: "invalid_grant",
+          error_description:
+            "bad refresh_token=refresh-secret-should-not-leak client_secret=leaky-client-secret-should-not-leak",
+        }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+
+    const res = await dispatch(`/api/oauth-authorizations/${authorization.id}/refresh`, {
+      method: "POST",
+      agentId: leadAgentId,
+    });
+    expect(res.status).toBe(502);
+    expect(res.text).not.toContain("refresh-secret-should-not-leak");
+    expect(res.text).not.toContain("leaky-client-secret-should-not-leak");
   });
 
   test("oauth app upsert without clientSecret keeps existing secret", async () => {

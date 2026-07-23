@@ -94,6 +94,15 @@ beforeAll(async () => {
           scope: "read write",
         });
       }
+      if (url.pathname === "/token-fail") {
+        // Reject the exchange and echo the posted body (client_secret + PKCE
+        // code_verifier) back in the error — the leak this scrub guards against.
+        const body = await req.text();
+        return Response.json(
+          { error: "invalid_grant", error_description: `rejected: ${body}` },
+          { status: 400 },
+        );
+      }
       if (url.pathname === "/userinfo") {
         return Response.json({ email: "connected@example.test", sub: "user-123" });
       }
@@ -179,6 +188,30 @@ describe("static OAuth callback + multi-authorization flow", () => {
     expect(labels).toEqual(["sales", "support"]);
     // Same support authorization id preserved.
     expect(getAuthorizationById(supportAuth.id)?.label).toBe("support");
+  });
+
+  test("callback token-exchange failure scrubs the app clientSecret from the error", async () => {
+    const provider = "flow-scrub";
+    // clientSecret is `${provider}-secret` = "flow-scrub-secret" (testApp). Point
+    // the token URL at the failing endpoint that echoes the posted secrets.
+    upsertOAuthApp(provider, {
+      ...testApp(provider),
+      tokenUrl: `${providerBase}/token-fail`,
+    });
+    const appId = getOAuthAppIdByProvider(provider)!;
+    const config = getOAuthProviderConfig(provider)!;
+    const pending = await buildAuthorizationUrl(config, {
+      appId,
+      label: "scrub",
+      flow: "generic",
+    });
+
+    const res = await driveStaticCallback(pending.state);
+    // No finalRedirect → jsonError 502.
+    expect(res.status).toBe(502);
+    const text = await res.text();
+    // The DB-sourced client secret must NOT appear raw in the error response.
+    expect(text).not.toContain("flow-scrub-secret");
   });
 
   test("POST /api/oauth-apps/{id}/authorize-url (lead) issues a state the callback completes", async () => {

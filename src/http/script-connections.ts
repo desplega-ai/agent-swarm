@@ -5,6 +5,7 @@ import { normalizeDate } from "@/be/date-utils";
 import { getAgentById, getDb } from "@/be/db";
 import {
   deleteAuthorizationById,
+  deleteAuthorizationsForApp,
   deleteOAuthTokens,
   getAuthorizationById,
   getOAuthApp,
@@ -55,7 +56,7 @@ import {
 import type { OAuthApp } from "@/tracker/types";
 import { getRequestAuth } from "@/utils/request-auth-context";
 import { resolveScopedResourceId, scopedResourceScopeIdSchema } from "@/utils/scoped-resource";
-import { scrubSecrets } from "@/utils/secret-scrubber";
+import { registerVolatileSecret, scrubSecrets } from "@/utils/secret-scrubber";
 import { staticOAuthCallbackUri } from "./oauth-callback";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -1485,7 +1486,11 @@ function deleteOAuthApp(idOrProvider: string): { deleted: boolean; warnings: str
   if (!existing || existing.mcpServerId !== null) return { deleted: false, warnings: [] };
   const warnings = collectOAuthAppDeletionWarnings(existing);
   const tx = getDb().transaction(() => {
-    deleteOAuthTokens(existing.provider);
+    // Revoke by THIS app's id — not the provider-keyed `deleteOAuthTokens`,
+    // which targets the oldest same-provider app and would disconnect a
+    // surviving sibling. The app DELETE also CASCADEs its authorizations; this
+    // explicit delete keeps the scoping correct regardless of FK enforcement.
+    deleteAuthorizationsForApp(existing.id);
     getDb().query("DELETE FROM oauth_apps WHERE id = ?").run(existing.id);
   });
   tx();
@@ -2001,7 +2006,16 @@ export async function handleScriptConnections(
       }
       json(res, { ok: true, status: updated.status, expiresAt: updated.expiresAt });
     } catch (err) {
-      jsonError(res, `Refresh failed: ${err instanceof Error ? err.message : String(err)}`, 502);
+      // performTokenRefreshRequest folds the provider response body into
+      // err.message, and providers can echo the submitted refresh_token /
+      // client_secret. scrubSecrets only knows env/vendor-fixed shapes, so
+      // register this attempt's DB-sourced secrets as volatile before scrubbing
+      // (same as the refresh core does before persisting failures).
+      if (authorization.refreshToken)
+        registerVolatileSecret(authorization.refreshToken, "oauth-refresh-token");
+      if (app.clientSecret) registerVolatileSecret(app.clientSecret, "oauth-client-secret");
+      const message = scrubSecrets(err instanceof Error ? err.message : String(err));
+      jsonError(res, `Refresh failed: ${message}`, 502);
     }
     return true;
   }

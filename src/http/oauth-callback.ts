@@ -14,7 +14,7 @@ import { oauthAppRowToProviderConfig } from "@/oauth/ensure-token";
 import { captureIdentity } from "@/oauth/identity-capture";
 import { exchangeAuthorizationCode } from "@/oauth/wrapper";
 import { getPublicMcpBaseUrl } from "@/utils/constants";
-import { scrubSecrets } from "@/utils/secret-scrubber";
+import { registerVolatileSecret, scrubSecrets } from "@/utils/secret-scrubber";
 import { completeMcpOAuthCallback } from "./mcp-oauth";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -249,7 +249,11 @@ export async function completeGenericOAuthCallback(
   } catch (err) {
     const rawMessage = err instanceof Error ? err.message : String(err);
     // The provider token-endpoint body can echo back secrets — scrub before it
-    // reaches the log AND the browser/finalRedirect.
+    // reaches the log AND the browser/finalRedirect. The posted client_secret
+    // and PKCE code verifier are DB-sourced (not in scrubSecrets' env/shape
+    // cache), so register them as volatile first, like ensure-token.ts does.
+    if (app.clientSecret) registerVolatileSecret(app.clientSecret, "oauth-client-secret");
+    if (pending.codeVerifier) registerVolatileSecret(pending.codeVerifier, "oauth-code-verifier");
     const message = scrubSecrets(rawMessage);
     console.warn(`[oauth] callback exchange failed for ${app.provider}: ${message}`);
     if (pending.finalRedirect) {
