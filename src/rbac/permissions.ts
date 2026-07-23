@@ -117,10 +117,6 @@ export const PERMISSIONS = {
     description: "Start, refresh, or revoke labeled OAuth authorizations on an OAuth app.",
     namespace: "oauth-authorization",
   },
-  "config.credential-bindings.write": {
-    description: "Write the SCRIPT_CREDENTIAL_BINDINGS swarm-config key.",
-    namespace: "config",
-  },
   "config.write.any": {
     description: "Write any swarm-config key.",
     namespace: "config",
