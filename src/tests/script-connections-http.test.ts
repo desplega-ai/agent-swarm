@@ -4,9 +4,11 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { closeDb, createAgent, getDb, initDb, upsertSwarmConfig } from "../be/db";
 import {
+  getAuthorizationById,
   getOAuthApp,
   getOAuthTokens,
   storeOAuthTokens,
+  upsertAuthorization,
   upsertOAuthApp,
 } from "../be/db-queries/oauth";
 import {
@@ -1195,5 +1197,84 @@ describe("POST /api/oauth-apps/{provider}/refresh", () => {
       agentId: workerAgentId,
     });
     expect(res.status).toBe(403);
+  });
+});
+
+describe("POST /api/oauth-authorizations/{id}/refresh", () => {
+  const realFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  function seedRotatingAuthorization() {
+    upsertOAuthApp("rotator", {
+      clientId: "rotator-client",
+      clientSecret: "rotator-secret-should-not-leak",
+      authorizeUrl: "https://rotator.test/authorize",
+      tokenUrl: "https://rotator.test/token",
+      redirectUri: "https://api.public.test/api/oauth/callback",
+      scopes: "read,write",
+      requiresRefreshTokenRotation: true,
+    });
+    const app = getOAuthApp("rotator");
+    if (!app) throw new Error("app not created");
+    return upsertAuthorization({
+      appId: app.id,
+      accessToken: "old-access-should-not-leak",
+      refreshToken: "old-refresh-should-not-leak",
+      status: "active",
+    });
+  }
+
+  test("502 and does NOT persist when a rotating provider omits the new refresh_token", async () => {
+    const authorization = seedRotatingAuthorization();
+    // 200 with a new access token but no rotated refresh_token — the rotation
+    // core must reject rather than silently keep the (possibly invalidated) old
+    // refresh token.
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ access_token: "new-access-should-not-leak", token_type: "bearer" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+
+    const res = await dispatch(`/api/oauth-authorizations/${authorization.id}/refresh`, {
+      method: "POST",
+      agentId: leadAgentId,
+    });
+
+    expect(res.status).toBe(502);
+    expect(res.text).toContain("did not include a rotated refresh_token");
+    // Nothing persisted: the authorization was never marked refreshed.
+    const after = getAuthorizationById(authorization.id);
+    expect(after?.lastRefreshedAt).toBeNull();
+    expect(after?.status).toBe("active");
+  });
+
+  test("200 and rotates when the provider returns a new refresh_token", async () => {
+    const authorization = seedRotatingAuthorization();
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          access_token: "new-access-should-not-leak",
+          token_type: "bearer",
+          expires_in: 7200,
+          refresh_token: "rotated-refresh-should-not-leak",
+          scope: "read,write",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+
+    const res = await dispatch(`/api/oauth-authorizations/${authorization.id}/refresh`, {
+      method: "POST",
+      agentId: leadAgentId,
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.text).not.toContain("rotated-refresh-should-not-leak");
+    const body = (await res.json()) as { ok: boolean; status: string };
+    expect(body.ok).toBe(true);
+    const after = getAuthorizationById(authorization.id);
+    expect(after?.lastRefreshedAt).not.toBeNull();
   });
 });

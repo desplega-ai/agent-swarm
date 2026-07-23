@@ -451,6 +451,56 @@ describe("embedded connection auth", () => {
     getDb().run("DELETE FROM script_credential_bindings WHERE config_key = 'BLOB_VENDOR_KEY'");
   });
 
+  test("agent-scoped blob entries that omit scope inherit the config row scope (no leak)", () => {
+    // Legacy blob stored under an agent-scoped swarm_config row. The first entry
+    // omits its own scope (must inherit "agent"); the second pins "global"
+    // explicitly (must stay global).
+    upsertSwarmConfig({
+      scope: "agent",
+      scopeId: "agent-scope-owner",
+      key: "SCRIPT_CREDENTIAL_BINDINGS",
+      value: JSON.stringify({
+        bindings: [
+          {
+            configKey: "SCOPED_VENDOR_KEY",
+            allowedHosts: ["scoped.vendor.test"],
+            headerTemplate: "Authorization: Bearer [REDACTED:SCOPED_VENDOR_KEY]",
+          },
+          {
+            configKey: "GLOBAL_VENDOR_KEY",
+            allowedHosts: ["global.vendor.test"],
+            headerTemplate: "Authorization: Bearer [REDACTED:GLOBAL_VENDOR_KEY]",
+            scope: "global",
+          },
+        ],
+      }),
+    });
+
+    expect(migrateLegacyCredentialBindingBlob(getDb())).toBe(2);
+
+    // Read the relational rows directly — listRelationalCredentialBindings
+    // applies scope filtering (an agent-scoped row needs an agentId context),
+    // and here we want to assert the persisted scope/scope_id verbatim.
+    const rowFor = (configKey: string) =>
+      getDb()
+        .prepare<{ scope: string; scope_id: string | null }, [string]>(
+          "SELECT scope, scope_id FROM script_credential_bindings WHERE config_key = ?",
+        )
+        .get(configKey);
+
+    const scoped = rowFor("SCOPED_VENDOR_KEY");
+    expect(scoped?.scope).toBe("agent");
+    expect(scoped?.scope_id).toBe("agent-scope-owner");
+
+    const global = rowFor("GLOBAL_VENDOR_KEY");
+    expect(global?.scope).toBe("global");
+    expect(global?.scope_id).toBeNull();
+
+    getDb().run(
+      "DELETE FROM script_credential_bindings WHERE config_key IN ('SCOPED_VENDOR_KEY', 'GLOBAL_VENDOR_KEY')",
+    );
+  });
+
   test("sandbox e2e: ctx.api substitutes the embedded secret toward the allowed host", async () => {
     let observedAuth: string | null = null;
     const server = Bun.serve({

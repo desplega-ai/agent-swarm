@@ -46,7 +46,7 @@ import {
   listOAuthPresetIds,
   listOAuthPresets,
 } from "@/oauth/presets";
-import { buildAuthorizationUrl, refreshTokenGrant } from "@/oauth/wrapper";
+import { buildAuthorizationUrl, performTokenRefreshRequest } from "@/oauth/wrapper";
 import { can } from "@/rbac";
 import {
   CredentialBindingSchema,
@@ -1983,14 +1983,15 @@ export async function handleScriptConnections(
     }
     try {
       const config = oauthAppToProviderConfig(app);
-      const tokens = await refreshTokenGrant(config, authorization.refreshToken);
-      const expiresAt = tokens.expiresIn
-        ? new Date(Date.now() + tokens.expiresIn * 1000).toISOString()
-        : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      // Route through the rotation-enforcing refresh core: for apps with
+      // requiresRefreshTokenRotation (e.g. Atlassian/Jira) a 200 that omits a
+      // new refresh_token throws here instead of silently persisting the old
+      // (possibly already-invalidated) token.
+      const tokens = await performTokenRefreshRequest(config, authorization.refreshToken);
       const updated = updateAuthorizationTokens(authorization.id, {
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken ?? authorization.refreshToken,
-        expiresAt,
+        expiresAt: tokens.expiresAt,
         ...(tokens.scope != null ? { scope: tokens.scope } : {}),
         expectedTokenVersion: authorization.tokenVersion,
       });

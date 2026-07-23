@@ -129,7 +129,11 @@ function tokenRequestInit(
   const bodyParams = useBasic
     ? params
     : { ...params, client_id: config.clientId, client_secret: config.clientSecret };
-  const headers: Record<string, string> = {};
+  // Always request a JSON token response. RFC 6749 responses are JSON, but some
+  // providers (notably GitHub) default to form-encoded and only return JSON when
+  // Accept: application/json is sent — without this the unconditional
+  // response.json() in exchange/refresh would throw on their token payload.
+  const headers: Record<string, string> = { Accept: "application/json" };
   if (useBasic) {
     headers.Authorization = `Basic ${Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64")}`;
   }

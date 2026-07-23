@@ -1504,7 +1504,7 @@ function CredentialBindingDialog({
   const upsert = useUpsertCredentialBinding();
   const [configKey, setConfigKey] = useState("");
   const [authKind, setAuthKind] = useState<CredentialAuthKind>("config");
-  const [oauthProvider, setOauthProvider] = useState("");
+  const [oauthAuthorizationId, setOauthAuthorizationId] = useState("");
   const [allowedHosts, setAllowedHosts] = useState<string[]>([]);
   const [headerTemplate, setHeaderTemplate] = useState(defaultHeaderTemplate(""));
   const [queryTemplate, setQueryTemplate] = useState("");
@@ -1520,7 +1520,7 @@ function CredentialBindingDialog({
       binding?.headerTemplate ?? (binding ? "" : defaultHeaderTemplate(""));
     setConfigKey(nextConfigKey);
     setAuthKind(binding?.authKind ?? "config");
-    setOauthProvider(binding?.oauthProvider ?? "");
+    setOauthAuthorizationId(binding?.oauthAuthorizationId ?? "");
     setAllowedHosts(binding?.allowedHosts ?? []);
     setHeaderTemplate(nextHeaderTemplate);
     setQueryTemplate(binding?.queryTemplate ?? "");
@@ -1540,13 +1540,6 @@ function CredentialBindingDialog({
     setHeaderTemplate(defaultHeaderTemplate(configKey));
   }, [configKey, headerManuallyEdited, open]);
 
-  const providerOptions = useMemo(() => {
-    const providers = oauthApps.map((app) => app.provider);
-    return oauthProvider && !providers.includes(oauthProvider)
-      ? [oauthProvider, ...providers]
-      : providers;
-  }, [oauthApps, oauthProvider]);
-
   async function submit() {
     try {
       await upsert.mutateAsync({
@@ -1559,7 +1552,8 @@ function CredentialBindingDialog({
         scopeId: scope === "global" ? null : (optionalString(scopeId) ?? null),
         active: binding?.active ?? true,
         authKind,
-        oauthProvider: authKind === "oauth" ? optionalString(oauthProvider) : undefined,
+        oauthAuthorizationId:
+          authKind === "oauth" ? optionalString(oauthAuthorizationId) : undefined,
       });
     } catch (error) {
       // InlineError keeps the detail visible in the dialog; the toast makes
@@ -1577,7 +1571,7 @@ function CredentialBindingDialog({
     allowedHosts.length > 0 &&
     (headerTemplate.trim() || queryTemplate.trim()) &&
     (scope === "global" || scopeId.trim()) &&
-    (authKind !== "oauth" || oauthProvider.trim());
+    (authKind !== "oauth" || oauthAuthorizationId.trim());
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1609,7 +1603,7 @@ function CredentialBindingDialog({
                 onValueChange={(value) => {
                   const nextAuthKind = value as CredentialAuthKind;
                   setAuthKind(nextAuthKind);
-                  if (nextAuthKind === "config") setOauthProvider("");
+                  if (nextAuthKind === "config") setOauthAuthorizationId("");
                 }}
               >
                 <SelectTrigger>
@@ -1625,23 +1619,14 @@ function CredentialBindingDialog({
 
           {authKind === "oauth" ? (
             <div className="space-y-2">
-              <FieldLabel tip="OAuth app provider whose token supplies this credential.">
-                OAuth Provider
+              <FieldLabel tip="OAuth authorization whose token supplies this credential. Pick an existing app + account or authorize a new one.">
+                OAuth Authorization
               </FieldLabel>
-              <Select value={oauthProvider} onValueChange={setOauthProvider}>
-                <SelectTrigger>
-                  <SelectValue
-                    placeholder={providerOptions.length ? "Select provider" : "No OAuth apps"}
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {providerOptions.map((provider) => (
-                    <SelectItem key={provider} value={provider}>
-                      {provider}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <OAuthInlineConnect
+                oauthApps={oauthApps}
+                value={oauthAuthorizationId}
+                onChange={setOauthAuthorizationId}
+              />
             </div>
           ) : null}
 
@@ -1807,6 +1792,17 @@ function CredentialBindingsSection({
   const [editOpen, setEditOpen] = useState(false);
   const [editBinding, setEditBinding] = useState<ScriptCredentialBinding | undefined>();
   const upsert = useUpsertCredentialBinding();
+  // Resolve an oauth authorization id back to its owning app's provider + label
+  // so the grid can label + link the credential's account.
+  const authorizationIndex = useMemo(() => {
+    const index = new Map<string, { provider: string; label: string }>();
+    for (const app of oauthApps) {
+      for (const authorization of app.authorizations ?? []) {
+        index.set(authorization.id, { provider: app.provider, label: authorization.label });
+      }
+    }
+    return index;
+  }, [oauthApps]);
   const usedByCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const binding of bindings) {
@@ -1841,19 +1837,28 @@ function CredentialBindingsSection({
           params.value ? <AuthKindBadge kind={params.value as CredentialAuthKind} /> : null,
       },
       {
-        field: "oauthProvider",
-        headerName: "OAuth Provider",
+        field: "oauthAuthorizationId",
+        headerName: "OAuth Account",
         minWidth: 150,
         cellRenderer: (params: ICellRendererParams<ScriptCredentialBinding>) => {
-          const provider = params.data?.oauthProvider;
-          if (!provider) return <span className="text-muted-foreground">—</span>;
+          const authorizationId = params.data?.oauthAuthorizationId;
+          if (!authorizationId) return <span className="text-muted-foreground">—</span>;
+          const resolved = authorizationIndex.get(authorizationId);
+          if (!resolved) {
+            return (
+              <span className="font-mono text-xs text-muted-foreground">{authorizationId}</span>
+            );
+          }
           return (
             <Link
-              to={`/connections/oauth-apps/${encodeURIComponent(provider)}`}
+              to={`/connections/oauth-apps/${encodeURIComponent(resolved.provider)}`}
               className="inline-flex max-w-full items-center gap-1 text-action-default hover:underline"
               onClick={(event) => event.stopPropagation()}
             >
-              <span className="truncate">{provider}</span>
+              <span className="truncate">
+                {resolved.provider}
+                {resolved.label && resolved.label !== "default" ? ` / ${resolved.label}` : ""}
+              </span>
               <ExternalLink className="size-3 shrink-0" />
             </Link>
           );
@@ -1931,8 +1936,10 @@ function CredentialBindingsSection({
                       scopeId: params.data!.scopeId,
                       active,
                       authKind: params.data!.authKind,
-                      oauthProvider:
-                        params.data!.authKind === "oauth" ? params.data!.oauthProvider : undefined,
+                      oauthAuthorizationId:
+                        params.data!.authKind === "oauth"
+                          ? params.data!.oauthAuthorizationId
+                          : undefined,
                     },
                     {
                       onSuccess: () =>
@@ -1961,7 +1968,7 @@ function CredentialBindingsSection({
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
     ],
-    [upsert, usedByCounts],
+    [upsert, usedByCounts, authorizationIndex],
   );
 
   return (

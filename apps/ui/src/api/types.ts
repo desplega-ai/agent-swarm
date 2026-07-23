@@ -1212,7 +1212,8 @@ export interface ScriptCredentialBinding {
   scopeId: string | null;
   active: boolean;
   authKind: CredentialAuthKind;
-  oauthProvider?: string;
+  /** OAuth authorization the binding resolves its token from (authKind==="oauth"). */
+  oauthAuthorizationId?: string;
   source?: "default" | "user" | "migration";
   tokenStatus?: OAuthBindingTokenStatus;
   createdAt: string;
@@ -1369,7 +1370,8 @@ export interface UpsertCredentialBindingInput {
   scopeId?: string | null;
   active?: boolean;
   authKind?: CredentialAuthKind;
-  oauthProvider?: string;
+  /** Selected OAuth authorization id (required when authKind==="oauth"). */
+  oauthAuthorizationId?: string;
 }
 
 /** Lifecycle status of a single labeled authorization (mirrors the API). */

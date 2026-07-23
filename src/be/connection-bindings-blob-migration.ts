@@ -75,6 +75,10 @@ export function migrateLegacyCredentialBindingBlob(database: Database): number {
         bindings = normalizeCredentialBindingsDocument(
           JSON.parse(config.value),
           resolveLegacyOAuthProvider,
+          // Entries that omit their own scope inherit the containing config
+          // row's scope, so agent/repo-scoped blobs stay scoped instead of
+          // being promoted to global relational bindings (secret leak).
+          config.scope as "global" | "agent" | "repo",
         );
       } catch (err) {
         // Don't silently drop an unparseable blob entry — the whole point of

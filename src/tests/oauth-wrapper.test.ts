@@ -150,4 +150,22 @@ describe("exchangeAuthorizationCode", () => {
       fetchSpy.mockRestore();
     }
   });
+
+  test("sends Accept: application/json so form-encoding providers (GitHub) return JSON", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      Response.json({ access_token: "atk", token_type: "Bearer" }),
+    );
+    try {
+      await exchangeAuthorizationCode(testConfig, {
+        code: "the-code",
+        codeVerifier: "the-verifier",
+        redirectUri: testConfig.redirectUri,
+      });
+      const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      const headers = init.headers as Record<string, string>;
+      expect(headers.Accept).toBe("application/json");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
 });

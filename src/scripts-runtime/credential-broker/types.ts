@@ -74,6 +74,7 @@ export function placeholderForConfigKey(configKey: string): string {
 export function normalizeCredentialBindingsDocument(
   input: unknown,
   resolveLegacyOAuthProvider?: (provider: string) => string | undefined,
+  defaultScope?: CredentialBindingScope,
 ): CredentialBinding[] {
   const document = Array.isArray(input)
     ? input
@@ -86,6 +87,14 @@ export function normalizeCredentialBindingsDocument(
   return document.flatMap((raw) => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
     const candidate = { ...(raw as Record<string, unknown>) };
+    // Preserve scope omission: when the raw entry omits its own `scope`, fall
+    // back to the caller-supplied default (e.g. the containing swarm_config row
+    // scope during migration) instead of the schema's "global" default. Without
+    // this, agent/repo-scoped blobs would migrate as global bindings and leak
+    // across scopes.
+    if (defaultScope !== undefined && candidate.scope == null) {
+      candidate.scope = defaultScope;
+    }
     if (
       candidate.authKind === "oauth" &&
       typeof candidate.oauthAuthorizationId !== "string" &&
