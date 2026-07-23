@@ -1,4 +1,4 @@
-import type { ResolvedCredentialBinding } from "./types";
+import type { FailedCredentialBinding, ResolvedCredentialBinding } from "./types";
 
 function hostnameForFetchInput(input: string | URL | Request): string | null {
   try {
@@ -60,8 +60,30 @@ function applyQueryTemplates(url: URL, bindings: ResolvedCredentialBinding[]): b
   return modified;
 }
 
-export function patchFetchWithCredentialBroker(bindings: ResolvedCredentialBinding[]): void {
-  if (bindings.length === 0) return;
+function assertNoFailedBinding(
+  failedBindings: FailedCredentialBinding[],
+  hostname: string,
+  url: URL,
+  headers: Headers,
+): void {
+  if (failedBindings.length === 0) return;
+  for (const failed of failedBindings) {
+    if (!failed.allowedHosts.includes(hostname)) continue;
+    const inUrl = url.href.includes(failed.placeholder);
+    const inHeaders = [...headers.values()].some((value) => value.includes(failed.placeholder));
+    if (inUrl || inHeaders) {
+      throw new Error(
+        `OAuth authorization '${failed.authorizationLabel ?? "unknown"}' is in refresh-failed state: ${failed.reason}`,
+      );
+    }
+  }
+}
+
+export function patchFetchWithCredentialBroker(
+  bindings: ResolvedCredentialBinding[],
+  failedBindings: FailedCredentialBinding[] = [],
+): void {
+  if (bindings.length === 0 && failedBindings.length === 0) return;
 
   const originalFetch = globalThis.fetch;
 
@@ -74,6 +96,11 @@ export function patchFetchWithCredentialBroker(bindings: ResolvedCredentialBindi
     if (!hostname || !url) return originalFetch(input, init);
 
     const headers = new Headers(input instanceof Request ? input.headers : init?.headers);
+
+    // Fail closed: a request that would carry a broken binding's placeholder to
+    // its host throws a typed error instead of leaking the placeholder.
+    assertNoFailedBinding(failedBindings, hostname, url, headers);
+
     let headersModified = false;
     const newHeaders = new Headers();
 

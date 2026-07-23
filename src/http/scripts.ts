@@ -9,7 +9,7 @@ import {
   getScriptMcpConnectionDescriptors,
   getScriptMcpTypes,
 } from "../be/script-connections";
-import { buildScriptCredentialBindings } from "../be/script-credential-broker";
+import { buildScriptCredentialBindingsWithFailures } from "../be/script-credential-broker";
 import {
   createScriptApi,
   deleteScript,
@@ -517,12 +517,14 @@ export async function handleScripts(
     }
 
     const startedAt = new Date().toISOString();
+    const credentials = await buildScriptCredentialBindingsWithFailures({ agentId: agent.id });
     const output = await runScript({
       source: source as string,
       args: parsed.body.args,
       fsMode,
       agentId: agent.id,
-      egressSecrets: await buildScriptCredentialBindings({ agentId: agent.id }),
+      egressSecrets: credentials.egressSecrets,
+      failedBindings: credentials.failedBindings,
       apiConnections: getScriptApiConnectionDescriptors({ agentId: agent.id }),
       mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agent.id }),
     });

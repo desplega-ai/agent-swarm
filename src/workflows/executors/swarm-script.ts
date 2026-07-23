@@ -3,7 +3,7 @@ import {
   getScriptApiConnectionDescriptors,
   getScriptMcpConnectionDescriptors,
 } from "../../be/script-connections";
-import { buildScriptCredentialBindings } from "../../be/script-credential-broker";
+import { buildScriptCredentialBindingsWithFailures } from "../../be/script-credential-broker";
 import { getScript, getScriptVersion } from "../../be/scripts/db";
 import { DEFAULT_SCRIPT_RESOURCES } from "../../scripts-runtime/executors/types";
 import { runScript } from "../../scripts-runtime/loader";
@@ -72,12 +72,16 @@ export class SwarmScriptExecutor extends BaseExecutor<
       return { status: "failed", error: resolved.error };
     }
 
+    const credentials = await buildScriptCredentialBindingsWithFailures({
+      agentId: agentId ?? undefined,
+    });
     const output = await runScript({
       source: resolved.source,
       args: config.args,
       fsMode: "none",
       agentId: agentId ?? "workflow",
-      egressSecrets: await buildScriptCredentialBindings({ agentId: agentId ?? undefined }),
+      egressSecrets: credentials.egressSecrets,
+      failedBindings: credentials.failedBindings,
       apiConnections: getScriptApiConnectionDescriptors({ agentId: agentId ?? undefined }),
       mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agentId ?? undefined }),
       timeoutMs: config.timeoutMs,

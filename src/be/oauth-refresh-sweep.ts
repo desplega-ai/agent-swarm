@@ -3,22 +3,29 @@
  *
  * The reactive path (src/oauth/ensure-token.ts) only refreshes tokens when a
  * binding is about to be USED, so rotation / inactivity-TTL refresh tokens can
- * die while a connection sits idle. This sweep walks every oauth_tokens row on
- * a 15-minute tick and refreshes when either:
+ * die while a connection sits idle. This sweep walks every provider-facing
+ * oauth_authorizations row on a 15-minute tick and refreshes when either:
  *
  *  (a) the access token expires within 30 minutes, or
  *  (b) the row hasn't been touched in > 7 days (keep-alive for providers that
- *      expire refresh tokens after an inactivity window, e.g. Atlassian ~90d).
+ *      expire refresh tokens after an inactivity window, e.g. Atlassian ~90d),
+ *  (c) the authorization is already in a non-terminal broken state
+ *      (`refresh-failed`/`expired`) — retried each pass so transient provider
+ *      outages self-heal.
  *
  * Relationship to src/oauth/keepalive.ts: that job is a 12-hour alerting
- * keepalive hardcoded to the tracker providers (linear/jira). This sweep is
- * the generic counterpart covering every provider registered in oauth_apps
+ * keepalive over keep-alive-opted-in authorizations. This sweep is the generic
+ * counterpart covering every authorization registered in oauth_apps
  * (script-connection credential bindings included). Both funnel through the
- * same per-provider locks in ensure-token, so overlap is safe.
+ * same per-authorization locks in ensure-token, so overlap is safe.
  */
-import { forceRefreshTokenOrThrow } from "../oauth/ensure-token";
+import { forceRefreshAuthorizationOrThrow } from "../oauth/ensure-token";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { getOAuthTokens, listOAuthTokenSweepRows } from "./db-queries/oauth";
+import {
+  type AuthorizationSweepRow,
+  getAuthorizationById,
+  listAuthorizationSweepRows,
+} from "./db-queries/oauth";
 
 const EXPIRY_BUFFER_MS = 30 * 60 * 1000; // (a) refresh when expiring within 30 min
 const STALE_ROW_MS = 7 * 24 * 60 * 60 * 1000; // (b) keep-alive when untouched > 7 days
@@ -32,10 +39,17 @@ export type OAuthRefreshSweepResult = {
   failed: string[];
 };
 
+function sweepRowLabel(row: AuthorizationSweepRow): string {
+  return row.label && row.label !== "default" ? `${row.provider}/${row.label}` : row.provider;
+}
+
 /**
- * Run one sweep over all stored OAuth tokens. Never throws — per-provider
- * failures are collected in `failed` (and logged, scrubbed) so one dead
- * provider can't starve the rest.
+ * Run one sweep over every provider-facing OAuth authorization. Never throws —
+ * per-authorization failures are persisted (`refresh-failed`, by the refresh
+ * core) and collected in `failed` (logged, scrubbed) so one dead authorization
+ * can't starve the rest. `revoked` rows are terminal and skipped;
+ * `refresh-failed` rows stay in the sweep and retry each pass so transient
+ * provider outages self-heal.
  */
 export async function sweepOAuthTokenRefresh(): Promise<OAuthRefreshSweepResult> {
   let checked = 0;
@@ -43,10 +57,10 @@ export async function sweepOAuthTokenRefresh(): Promise<OAuthRefreshSweepResult>
   let skipped = 0;
   const failed: string[] = [];
 
-  for (const row of listOAuthTokenSweepRows()) {
+  for (const row of listAuthorizationSweepRows()) {
     checked++;
 
-    if (!row.hasApp || !row.hasRefreshToken) {
+    if (row.status === "revoked" || !row.hasRefreshToken) {
       skipped++;
       continue;
     }
@@ -54,17 +68,19 @@ export async function sweepOAuthTokenRefresh(): Promise<OAuthRefreshSweepResult>
     const now = Date.now();
     const expiringSoon = new Date(row.expiresAt).getTime() - now < EXPIRY_BUFFER_MS;
     const stale = now - new Date(row.updatedAt).getTime() > STALE_ROW_MS;
-    if (!expiringSoon && !stale) {
+    const isFailed = row.status === "refresh-failed" || row.status === "expired";
+    if (!expiringSoon && !stale && !isFailed) {
       skipped++;
       continue;
     }
 
-    const before = getOAuthTokens(row.provider);
+    const before = getAuthorizationById(row.authorizationId);
     try {
-      await forceRefreshTokenOrThrow(row.provider);
-      const after = getOAuthTokens(row.provider);
-      // forceRefreshTokenOrThrow stays silent on some no-op paths (row changed
-      // concurrently, config vanished mid-flight) — only count real refreshes.
+      await forceRefreshAuthorizationOrThrow(row.authorizationId);
+      const after = getAuthorizationById(row.authorizationId);
+      // forceRefreshAuthorizationOrThrow stays silent on some no-op paths (row
+      // changed concurrently, config vanished mid-flight) — only count real
+      // refreshes.
       const changed =
         after !== null &&
         (before === null ||
@@ -78,10 +94,9 @@ export async function sweepOAuthTokenRefresh(): Promise<OAuthRefreshSweepResult>
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      failed.push(`${row.provider}: ${message}`);
-      console.warn(
-        scrubSecrets(`[oauth-refresh-sweep] ${row.provider} refresh failed: ${message}`),
-      );
+      const label = sweepRowLabel(row);
+      failed.push(`${label}: ${message}`);
+      console.warn(scrubSecrets(`[oauth-refresh-sweep] ${label} refresh failed: ${message}`));
     }
   }
 

@@ -204,6 +204,111 @@ describe("credential broker", () => {
     expect(authorization).toBe("Bearer gmail-access-token");
   });
 
+  test("partitions a throwing OAuth resolver into failedBindings while others resolve", async () => {
+    const broker = new CredentialBroker(
+      {
+        listActiveBindings: () => [
+          {
+            configKey: "BROKEN_OAUTH_BINDING",
+            allowedHosts: ["api.broken.test"],
+            headerTemplate: "Authorization: Bearer [REDACTED:BROKEN_OAUTH_BINDING]",
+            scope: "global",
+            scopeId: null,
+            active: true,
+            authKind: "oauth",
+            oauthAuthorizationId: "broken-authz",
+          },
+          {
+            configKey: "HEALTHY_OAUTH_BINDING",
+            allowedHosts: ["api.healthy.test"],
+            headerTemplate: "Authorization: Bearer [REDACTED:HEALTHY_OAUTH_BINDING]",
+            scope: "global",
+            scopeId: null,
+            active: true,
+            authKind: "oauth",
+            oauthAuthorizationId: "healthy-authz",
+          },
+        ],
+      },
+      () => undefined,
+      [],
+      async (authorizationId: string) => {
+        if (authorizationId === "broken-authz") {
+          // Duck-typed shape of OAuthRefreshError (server-side class not imported here).
+          const err = Object.assign(new Error("refresh rejected (400)"), {
+            reason: "refresh_rejected",
+            authorizationLabel: "Broken Vendor",
+          });
+          throw err;
+        }
+        return "healthy-access-token";
+      },
+    );
+
+    const { resolved, failed } = await broker.resolveBindingsWithFailures({});
+
+    expect(resolved).toMatchObject([
+      { configKey: "HEALTHY_OAUTH_BINDING", value: "healthy-access-token" },
+    ]);
+    expect(failed).toEqual([
+      {
+        placeholder: "[REDACTED:BROKEN_OAUTH_BINDING]",
+        allowedHosts: ["api.broken.test"],
+        reason: "refresh_rejected",
+        authorizationLabel: "Broken Vendor",
+      },
+    ]);
+
+    // The backward-compatible array API returns only the resolved bindings.
+    expect(await broker.resolveBindings({})).toMatchObject([
+      { configKey: "HEALTHY_OAUTH_BINDING", value: "healthy-access-token" },
+    ]);
+  });
+
+  test("patched fetch throws for a failed binding but still substitutes healthy ones", async () => {
+    let observed: string | null = null;
+    globalThis.fetch = ((_input: string | URL | Request, init?: RequestInit) => {
+      observed = new Headers(init?.headers).get("authorization");
+      return Promise.resolve(Response.json({ ok: true }));
+    }) as typeof fetch;
+
+    patchFetchWithCredentialBroker(
+      [
+        {
+          configKey: "GITHUB_TOKEN",
+          allowedHosts: ["api.github.com"],
+          headerTemplate: "Authorization: Bearer [REDACTED:GITHUB_TOKEN]",
+          scope: "global",
+          scopeId: null,
+          active: true,
+          placeholder: "[REDACTED:GITHUB_TOKEN]",
+          value: "ghp_secret",
+        },
+      ],
+      [
+        {
+          placeholder: "[REDACTED:BROKEN_OAUTH_BINDING]",
+          allowedHosts: ["api.broken.test"],
+          reason: "refresh_rejected",
+          authorizationLabel: "Broken Vendor",
+        },
+      ],
+    );
+
+    // Targets the failed binding's host WITH its placeholder → typed throw.
+    expect(() =>
+      fetch("https://api.broken.test/v1/items", {
+        headers: { Authorization: "Bearer [REDACTED:BROKEN_OAUTH_BINDING]" },
+      }),
+    ).toThrow(/OAuth authorization 'Broken Vendor' is in refresh-failed state: refresh_rejected/);
+
+    // A healthy resolved binding on a different host still substitutes.
+    await fetch("https://api.github.com/user", {
+      headers: { Authorization: "Bearer [REDACTED:GITHUB_TOKEN]" },
+    });
+    expect(observed).toBe("Bearer ghp_secret");
+  });
+
   test("resolves a legacy oauthProvider blob through the default authorization shim", async () => {
     const store = new SwarmConfigCredentialBindingStore(
       () => [

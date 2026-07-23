@@ -529,6 +529,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "115_asset_namespace_keys.sql");
       markMigrationApplied(database, "116_favorite_principal_scope.sql");
       markMigrationApplied(database, "117_unified_oauth.sql");
+      // Depends on oauth_apps, which the 117-skipped fixture never creates.
+      markMigrationApplied(database, "121_oauth_keepalive_flag.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

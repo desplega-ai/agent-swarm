@@ -603,6 +603,28 @@ export function gcOAuthPending(olderThanMs = 10 * 60 * 1000): number {
     .run(cutoff).changes;
 }
 
+/**
+ * Persist a `refresh-failed` status + scrubbed error message on an
+ * authorization whose refresh just failed. Never clobbers a `revoked` row (a
+ * disconnected authorization is terminal, not "failing"). Best-effort by id —
+ * no optimistic-concurrency guard, since a successful refresh always bumps
+ * status back to `active` and clears the message anyway.
+ */
+export function markAuthorizationRefreshFailed(
+  id: string,
+  message: string | null,
+): OAuthAuthorization | null {
+  const result = getDb()
+    .query(
+      `UPDATE oauth_authorizations SET
+         status = 'refresh-failed', lastErrorMessage = ?,
+         updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND status != 'revoked'`,
+    )
+    .run(message, id);
+  return result.changes === 1 ? getAuthorizationById(id) : null;
+}
+
 // ── Provider-string compatibility adapters ──
 
 export function getOAuthTokens(provider: string): OAuthTokens | null {
@@ -694,40 +716,108 @@ export function updateOAuthTokensAfterRefresh(
   );
 }
 
-export type OAuthTokenSweepRow = {
+export type AuthorizationSweepRow = {
+  authorizationId: string;
+  appId: string;
   provider: string;
-  hasApp: boolean;
+  label: string;
+  status: OAuthAuthorizationStatus;
   hasRefreshToken: boolean;
   expiresAt: string;
   updatedAt: string;
 };
 
-export function listOAuthTokenSweepRows(): OAuthTokenSweepRow[] {
+/**
+ * Every provider-facing authorization (any label; DCR/MCP apps excluded) the
+ * background sweep should consider. Keyed by authorization id — the sweep skips
+ * `revoked` rows and refreshes `refresh-failed` ones each pass so transient
+ * provider outages self-heal.
+ */
+export function listAuthorizationSweepRows(): AuthorizationSweepRow[] {
   const rows = getDb()
     .query(
-      `SELECT a.provider,
-              1 AS hasApp,
+      `SELECT z.id AS authorizationId,
+              z.appId AS appId,
+              a.provider AS provider,
+              z.label AS label,
+              z.status AS status,
               CASE WHEN z.refreshToken IS NOT NULL AND z.refreshToken != '' THEN 1 ELSE 0 END AS hasRefreshToken,
               COALESCE(z.expiresAt, '') AS expiresAt,
-              z.updatedAt
+              z.updatedAt AS updatedAt
        FROM oauth_authorizations z
        JOIN oauth_apps a ON a.id = z.appId
-       WHERE a.mcpServerId IS NULL AND z.label = 'default'
-       ORDER BY a.provider ASC`,
+       WHERE a.mcpServerId IS NULL
+       ORDER BY a.provider ASC, z.label ASC`,
     )
     .all() as Array<{
+    authorizationId: string;
+    appId: string;
     provider: string;
-    hasApp: number;
+    label: string;
+    status: OAuthAuthorizationStatus;
     hasRefreshToken: number;
     expiresAt: string;
     updatedAt: string;
   }>;
   return rows.map((row) => ({
+    authorizationId: row.authorizationId,
+    appId: row.appId,
     provider: row.provider,
-    hasApp: row.hasApp === 1,
+    label: row.label,
+    status: row.status,
     hasRefreshToken: row.hasRefreshToken === 1,
     expiresAt: normalizeDateRequired(row.expiresAt),
     updatedAt: normalizeDateRequired(row.updatedAt),
+  }));
+}
+
+export type KeepAliveAuthorization = {
+  authorizationId: string;
+  appId: string;
+  provider: string;
+  label: string;
+  displayName: string | null;
+};
+
+/**
+ * Active, refreshable authorizations whose app opts into keep-alive: either it
+ * rotates refresh tokens (`requiresRefreshTokenRotation=1`) or sets the
+ * `keepAlive` metadata flag. Replaces the hardcoded `["linear","jira"]` list;
+ * migrated tracker rows qualify automatically (jira via rotation, linear via
+ * the metadata backfill).
+ */
+export function listKeepAliveAuthorizations(): KeepAliveAuthorization[] {
+  const rows = getDb()
+    .query(
+      `SELECT z.id AS authorizationId,
+              z.appId AS appId,
+              a.provider AS provider,
+              z.label AS label,
+              a.displayName AS displayName
+       FROM oauth_authorizations z
+       JOIN oauth_apps a ON a.id = z.appId
+       WHERE a.mcpServerId IS NULL
+         AND z.status = 'active'
+         AND z.refreshToken IS NOT NULL AND z.refreshToken != ''
+         AND (
+           a.requiresRefreshTokenRotation = 1
+           OR (json_valid(a.metadata) = 1 AND json_extract(a.metadata, '$.keepAlive') IN (1, 'true'))
+         )
+       ORDER BY a.provider ASC, z.label ASC`,
+    )
+    .all() as Array<{
+    authorizationId: string;
+    appId: string;
+    provider: string;
+    label: string;
+    displayName: string | null;
+  }>;
+  return rows.map((row) => ({
+    authorizationId: row.authorizationId,
+    appId: row.appId,
+    provider: row.provider,
+    label: row.label,
+    displayName: row.displayName,
   }));
 }
 

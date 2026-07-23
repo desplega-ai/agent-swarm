@@ -271,14 +271,26 @@ export async function refreshTokenGrant(
 }
 
 /**
- * Refresh an access token using a stored refresh token.
- * Persists the new tokens via storeOAuthTokens().
+ * Call the token endpoint to exchange a refresh token, validate the response
+ * (access token present; rotated refresh token present when the provider
+ * requires rotation), and return the normalized result WITHOUT persisting.
+ *
+ * Persistence is the caller's job — provider-string callers persist via
+ * {@link refreshAccessToken}; authorization-keyed callers
+ * (src/oauth/ensure-token.ts) persist against a specific authorization id.
+ * Throws on any HTTP error, missing access token, or a missing rotated refresh
+ * token.
  */
-export async function refreshAccessToken(
+export async function performTokenRefreshRequest(
   config: OAuthProviderConfig,
   refreshToken: string,
-  expectedTokenVersion?: number,
-): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number; scope?: string }> {
+): Promise<{
+  accessToken: string;
+  refreshToken?: string;
+  expiresIn?: number;
+  scope?: string;
+  expiresAt: string;
+}> {
   const response = await fetch(config.tokenUrl, {
     method: "POST",
     ...tokenRequestInit(config, {
@@ -317,13 +329,34 @@ export async function refreshAccessToken(
     ? new Date(Date.now() + data.expires_in * 1000).toISOString()
     : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
-  const nextRefreshToken = data.refresh_token ?? refreshToken;
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresIn: data.expires_in,
+    scope: data.scope,
+    expiresAt,
+  };
+}
+
+/**
+ * Refresh an access token using a stored refresh token.
+ * Persists the new tokens via updateOAuthTokensAfterRefresh() (provider-keyed
+ * default-authorization path).
+ */
+export async function refreshAccessToken(
+  config: OAuthProviderConfig,
+  refreshToken: string,
+  expectedTokenVersion?: number,
+): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number; scope?: string }> {
+  const refreshed = await performTokenRefreshRequest(config, refreshToken);
+
+  const nextRefreshToken = refreshed.refreshToken ?? refreshToken;
   try {
     updateOAuthTokensAfterRefresh(config.provider, refreshToken, {
-      accessToken: data.access_token,
+      accessToken: refreshed.accessToken,
       refreshToken: nextRefreshToken,
-      expiresAt,
-      scope: data.scope ?? null,
+      expiresAt: refreshed.expiresAt,
+      scope: refreshed.scope ?? null,
       ...(expectedTokenVersion !== undefined ? { expectedTokenVersion } : {}),
     });
   } catch (err) {
@@ -335,10 +368,10 @@ export async function refreshAccessToken(
   }
 
   return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresIn: data.expires_in,
-    scope: data.scope,
+    accessToken: refreshed.accessToken,
+    refreshToken: refreshed.refreshToken,
+    expiresIn: refreshed.expiresIn,
+    scope: refreshed.scope,
   };
 }
 

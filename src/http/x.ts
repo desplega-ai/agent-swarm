@@ -6,7 +6,7 @@ import {
   getScriptApiConnectionDescriptors,
   getScriptMcpConnectionDescriptors,
 } from "../be/script-connections";
-import { buildScriptCredentialBindings } from "../be/script-credential-broker";
+import { buildScriptCredentialBindingsWithFailures } from "../be/script-credential-broker";
 import {
   getScriptApiById,
   getScriptApiSecret,
@@ -196,6 +196,9 @@ export async function handleX(
   const timeoutMs = resolveTimeoutMs(req);
   const startedAt = new Date().toISOString();
 
+  const credentials = await buildScriptCredentialBindingsWithFailures({
+    agentId: endpoint.agentId,
+  });
   const output = await runScript({
     source: script.source,
     args: args ?? null,
@@ -207,7 +210,8 @@ export async function handleX(
     // timeout, so an external caller can't use a long X-Swarm-Timeout-Ms to
     // burn proportionally more CPU per request.
     timeoutMs,
-    egressSecrets: await buildScriptCredentialBindings({ agentId: endpoint.agentId }),
+    egressSecrets: credentials.egressSecrets,
+    failedBindings: credentials.failedBindings,
     apiConnections: getScriptApiConnectionDescriptors({ agentId: endpoint.agentId }),
     mcpConnections: getScriptMcpConnectionDescriptors({ agentId: endpoint.agentId }),
   });

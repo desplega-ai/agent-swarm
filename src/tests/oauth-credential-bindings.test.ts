@@ -43,7 +43,7 @@ type ToolResult = {
       configKey: string;
       authKind?: "config" | "oauth";
       oauthAuthorizationId?: string;
-      tokenStatus?: "ok" | "expiring" | "missing";
+      tokenStatus?: "ok" | "expiring" | "refresh-failed" | "revoked" | "missing";
     }>;
   };
 };
@@ -422,7 +422,7 @@ describe("OAuth credential bindings", () => {
     delete process.env.PHASE2_HEALTHY_CONFIG;
   });
 
-  test("missing OAuth token skips binding resolution and list reports missing", async () => {
+  test("revoked OAuth token skips binding resolution and list reports revoked", async () => {
     upsertOAuthApp("phase2-missing", testApp("phase2-missing"));
     storeOAuthTokens("phase2-missing", {
       accessToken: "soon-deleted",
@@ -450,7 +450,9 @@ describe("OAuth credential bindings", () => {
       (binding) => binding.configKey === "PHASE2_MISSING_OAUTH",
     );
     expect(result.structuredContent.success).toBe(true);
-    expect(listed?.tokenStatus).toBe("missing");
+    // Disconnect revokes the authorization in place (row kept for referential
+    // continuity), so the binding surfaces as `revoked`, not `missing`.
+    expect(listed?.tokenStatus).toBe("revoked");
   });
 
   test("generic OAuth callback exchanges code and stores tokens", async () => {
