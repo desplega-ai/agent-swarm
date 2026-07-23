@@ -320,10 +320,13 @@ describe("migration 117 unified OAuth storage", () => {
           .query<{ count: number }, []>("SELECT count(*) AS count FROM oauth_authorizations")
           .get()?.count,
       ).toBe(5);
+      // Pending PKCE state is NOT carried over (10-min TTL makes it dead on
+      // arrival across an upgrade); the seeded mcp_oauth_pending row must
+      // vanish with its table instead of surfacing in oauth_pending.
       expect(
         database.query<{ count: number }, []>("SELECT count(*) AS count FROM oauth_pending").get()
           ?.count,
-      ).toBe(1);
+      ).toBe(0);
 
       const linear = database
         .query<
@@ -384,17 +387,6 @@ describe("migration 117 unified OAuth storage", () => {
       expect(manualMcp?.source).toBe("dcr");
       expect(JSON.parse(manualMcp?.metadata ?? "{}").clientSource).toBe("manual");
       expect(manualMcp?.status).toBe("refresh-failed");
-
-      const pendingContext = database
-        .query<{ contextJson: string }, []>(
-          "SELECT contextJson FROM oauth_pending WHERE state = 'pending-state'",
-        )
-        .get();
-      expect(JSON.parse(pendingContext?.contextJson ?? "{}")).toMatchObject({
-        resourceUrl: "https://pending-resource.test",
-        authorizationServerIssuer: "https://pending-issuer.test",
-        dcrClientId: "pending-client",
-      });
 
       const oauthBinding = database
         .query<{ oauth_authorization_id: string | null }, []>(

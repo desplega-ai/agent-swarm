@@ -229,57 +229,11 @@ CREATE TABLE oauth_pending (
   createdAt TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-INSERT INTO oauth_pending (
-  state, appId, label, flow, codeVerifier, nonce,
-  redirectUri, finalRedirect, userId, contextJson, createdAt
-)
-SELECT
-  p.state,
-  (
-    SELECT a.id
-    FROM oauth_apps_new a
-    WHERE a.id = 'mcp-app-' || (
-      SELECT t.id
-      FROM mcp_oauth_tokens t
-      WHERE t.mcpServerId = p.mcpServerId AND t.userId IS p.userId
-      ORDER BY t.createdAt ASC, t.id ASC
-      LIMIT 1
-    )
-    ORDER BY a.createdAt ASC, a.id ASC
-    LIMIT 1
-  ),
-  'default',
-  'mcp',
-  p.codeVerifier,
-  p.nonce,
-  p.redirectUri,
-  p.finalRedirect,
-  p.userId,
-  json_object(
-    'resourceUrl', p.resourceUrl,
-    'authorizationServerIssuer', p.authorizationServerIssuer,
-    'authorizeUrl', p.authorizeUrl,
-    'tokenUrl', p.tokenUrl,
-    'revocationUrl', p.revocationUrl,
-    'scopes', p.scopes,
-    'dcrClientId', p.dcrClientId,
-    'dcrClientSecret', p.dcrClientSecret,
-    'clientSource', CASE
-      WHEN EXISTS (
-        SELECT 1 FROM mcp_oauth_tokens t
-        WHERE t.mcpServerId = p.mcpServerId AND t.clientSource = 'manual'
-      ) THEN 'manual'
-      WHEN p.dcrClientId IS NOT NULL THEN 'dcr'
-      ELSE 'preregistered'
-    END
-  ),
-  p.createdAt
-FROM mcp_oauth_pending p
-WHERE EXISTS (
-  SELECT 1
-  FROM mcp_oauth_tokens t
-  WHERE t.mcpServerId = p.mcpServerId AND t.userId IS p.userId
-);
+-- Legacy `mcp_oauth_pending` rows are intentionally NOT carried over: pending
+-- PKCE state has a 10-minute TTL, so anything mid-flight at upgrade time is
+-- effectively expired by the time the server is back up — the user simply
+-- re-runs the consent. Dropping the carryover avoids fragile app-id
+-- correlation against half-migrated tables for zero practical benefit.
 
 CREATE INDEX idx_oauth_pending_createdAt ON oauth_pending(createdAt);
 
