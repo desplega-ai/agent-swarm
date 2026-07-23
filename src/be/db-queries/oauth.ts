@@ -156,6 +156,14 @@ function rawOAuthAppByProvider(provider: string): OAuthAppRow | null {
     .get(provider) as OAuthAppRow | null;
 }
 
+/** Exact (non-MCP) app lookup by id — used to target a specific row when the
+ * provider is ambiguous (N apps per provider are allowed). */
+function rawOAuthAppById(id: string): OAuthAppRow | null {
+  return getDb()
+    .query("SELECT * FROM oauth_apps WHERE id = ? AND mcpServerId IS NULL")
+    .get(id) as OAuthAppRow | null;
+}
+
 function rawDefaultAuthorizationForApp(appId: string): OAuthAuthorizationRow | null {
   return getDb()
     .query("SELECT * FROM oauth_authorizations WHERE appId = ? AND label = 'default'")
@@ -199,6 +207,8 @@ export function getOAuthAppIdByProvider(provider: string): string | null {
 export function upsertOAuthApp(
   provider: string,
   data: {
+    /** Target a specific existing row by id (N apps per provider allowed). */
+    id?: string;
     clientId: string;
     clientSecret: string;
     authorizeUrl: string;
@@ -217,7 +227,7 @@ export function upsertOAuthApp(
     source?: "manual" | "dcr" | "curated-prefill";
   },
 ): void {
-  const existing = rawOAuthAppByProvider(provider);
+  const existing = data.id ? rawOAuthAppById(data.id) : rawOAuthAppByProvider(provider);
   const metadataProvided = data.metadata !== undefined;
   const lifted = metadataProvided ? storageMetadata(data.metadata as string) : null;
   const encryptedSecret = encryptSecret(data.clientSecret, getEncryptionKey());

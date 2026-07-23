@@ -49,6 +49,9 @@ import type {
   MetricsListResponse,
   MintTokenResponse,
   OAuthAppDiscoveryResult,
+  OAuthAuthorization,
+  OAuthAuthorizeUrlResult,
+  OAuthPreset,
   PageListItem,
   PageMetadata,
   PagesListResponse,
@@ -104,6 +107,7 @@ import type {
   UpdateUserInput,
   UpsertCredentialBindingInput,
   UpsertOAuthAppInput,
+  UpsertOAuthAppResult,
   UpsertPromptTemplateInput,
   UpsertScriptConnectionInput,
   UsageSummaryResponse,
@@ -1213,7 +1217,22 @@ class ApiClient {
     return res.json();
   }
 
-  async upsertOAuthApp(data: UpsertOAuthAppInput) {
+  async fetchOAuthPresets(): Promise<{ presets: OAuthPreset[] }> {
+    const url = `${this.getBaseUrl()}/api/oauth-presets`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch OAuth presets: ${res.status}`);
+    return res.json();
+  }
+
+  /** The static OAuth callback URL to register with providers (pre-creation). */
+  async fetchOAuthRedirectUri(): Promise<{ redirectUri: string }> {
+    const url = `${this.getBaseUrl()}/api/oauth/redirect-uri`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch OAuth redirect URI: ${res.status}`);
+    return res.json();
+  }
+
+  async upsertOAuthApp(data: UpsertOAuthAppInput): Promise<UpsertOAuthAppResult> {
     const url = `${this.getBaseUrl()}/api/oauth-apps`;
     const res = await fetch(url, {
       method: "POST",
@@ -1240,8 +1259,10 @@ class ApiClient {
     return res.json();
   }
 
-  async deleteOAuthApp(provider: string): Promise<{ success: boolean }> {
-    const url = `${this.getBaseUrl()}/api/oauth-apps/${encodeURIComponent(provider)}`;
+  async deleteOAuthApp(idOrProvider: string): Promise<{ success: boolean }> {
+    // Server resolves id-first then provider; callers pass the app id so a
+    // same-provider sibling is never deleted by mistake.
+    const url = `${this.getBaseUrl()}/api/oauth-apps/${encodeURIComponent(idOrProvider)}`;
     const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to delete OAuth app" }));
@@ -1274,14 +1295,56 @@ class ApiClient {
     return res.json();
   }
 
-  async fetchOAuthAuthorizeUrl(
-    provider: string,
-  ): Promise<{ authorizeUrl: string; redirectUri: string }> {
-    const url = `${this.getBaseUrl()}/api/oauth-apps/${encodeURIComponent(provider)}/authorize-url`;
-    const res = await fetch(url, { method: "POST", headers: this.getHeaders() });
+  /** List the labeled authorizations for an OAuth app (never token material). */
+  async fetchOAuthAppAuthorizations(
+    appId: string,
+  ): Promise<{ authorizations: OAuthAuthorization[] }> {
+    const url = `${this.getBaseUrl()}/api/oauth-apps/${encodeURIComponent(appId)}/authorizations`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch authorizations: ${res.status}`);
+    return res.json();
+  }
+
+  /**
+   * Build an authorization URL for a labeled authorization (id-keyed). The
+   * caller navigates the browser to `authorizeUrl` to run the OAuth dance.
+   */
+  async fetchOAuthAuthorizeUrl(appId: string, label?: string): Promise<OAuthAuthorizeUrlResult> {
+    const url = `${this.getBaseUrl()}/api/oauth-apps/${encodeURIComponent(appId)}/authorize-url`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(label ? { label } : {}),
+    });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to build authorize URL" }));
       throw new Error(error.error || `Failed to build authorize URL: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /** Force-refresh a single labeled authorization (never returns token values). */
+  async refreshOAuthAuthorization(
+    authorizationId: string,
+  ): Promise<{ ok: boolean; status: string; expiresAt: string | null }> {
+    const url = `${this.getBaseUrl()}/api/oauth-authorizations/${encodeURIComponent(authorizationId)}/refresh`;
+    const res = await fetch(url, { method: "POST", headers: this.getHeaders() });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to refresh authorization" }));
+      throw new Error(error.error || `Failed to refresh authorization: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /** Revoke (best-effort) and delete a single labeled authorization. */
+  async deleteOAuthAuthorization(
+    authorizationId: string,
+  ): Promise<{ deleted: boolean; revocationAttempted: boolean }> {
+    const url = `${this.getBaseUrl()}/api/oauth-authorizations/${encodeURIComponent(authorizationId)}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to revoke authorization" }));
+      throw new Error(error.error || `Failed to revoke authorization: ${res.status}`);
     }
     return res.json();
   }

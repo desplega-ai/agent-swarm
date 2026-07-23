@@ -142,6 +142,9 @@ const credentialBindingBodySchema = z.object({
 });
 
 const oauthAppBodySchema = z.object({
+  // Target a specific existing app on edit. Required to avoid mutating the
+  // wrong row when multiple apps share a provider slug.
+  id: z.string().min(1).max(255).optional(),
   // provider / authorizeUrl / tokenUrl are optional when a presetId supplies
   // them; the handler enforces presence after preset hydration.
   presetId: z.string().min(1).optional(),
@@ -1019,6 +1022,9 @@ function sanitizeAuthorization(authorization: OAuthAuthorization) {
     expiresAt: authorization.expiresAt,
     scope: authorization.scope,
     hasRefreshToken: authorization.refreshToken != null && authorization.refreshToken !== "",
+    // Non-sensitive: the refresh-failure reason is scrubbed at write time and
+    // surfaced in the UI tooltip on `refresh-failed` authorizations. Never a token.
+    lastErrorMessage: authorization.lastErrorMessage,
     lastRefreshedAt: authorization.lastRefreshedAt,
     createdAt: authorization.createdAt,
     updatedAt: authorization.updatedAt,
@@ -1450,11 +1456,13 @@ async function fetchIntegrationsSurface(domain: string): Promise<IntegrationsSur
   }
 }
 
-function deleteOAuthApp(provider: string): boolean {
-  const existing = getOAuthApp(provider);
-  if (!existing) return false;
+function deleteOAuthApp(idOrProvider: string): boolean {
+  // Resolve id first (exact — N apps per provider allowed), then provider slug
+  // for old provider-keyed callers. Never touches DCR/MCP apps.
+  const existing = getOAuthAppById(idOrProvider) ?? getOAuthApp(idOrProvider);
+  if (!existing || existing.mcpServerId !== null) return false;
   const tx = getDb().transaction(() => {
-    deleteOAuthTokens(provider);
+    deleteOAuthTokens(existing.provider);
     getDb().query("DELETE FROM oauth_apps WHERE id = ?").run(existing.id);
   });
   tx();
@@ -1748,6 +1756,14 @@ export async function handleScriptConnections(
         return true;
       }
 
+      // Edit targets an exact row by id (N apps per provider allowed); provider
+      // is immutable on edit. 404 if the id is unknown or an MCP/DCR app.
+      const editing = body.id ? getOAuthAppById(body.id) : null;
+      if (body.id && (!editing || editing.mcpServerId !== null)) {
+        jsonError(res, `OAuth app ${body.id} not found.`, 404);
+        return true;
+      }
+
       const hydrated = preset
         ? hydrateOAuthAppFromPreset(preset, {
             provider: body.provider,
@@ -1760,7 +1776,7 @@ export async function handleScriptConnections(
           })
         : null;
 
-      const provider = hydrated?.provider ?? body.provider;
+      const provider = editing?.provider ?? hydrated?.provider ?? body.provider;
       const authorizeUrl = hydrated?.authorizeUrl ?? body.authorizeUrl;
       const tokenUrl = hydrated?.tokenUrl ?? body.tokenUrl;
       const userinfoUrl = hydrated?.userinfoUrl ?? body.userinfoUrl ?? null;
@@ -1779,7 +1795,7 @@ export async function handleScriptConnections(
       // userinfo/revocation URLs), not just raw input.
       assertOAuthAppUrlsSafe({ authorizeUrl, tokenUrl, userinfoUrl, revocationUrl });
 
-      const existing = getOAuthApp(provider);
+      const existing = editing ?? getOAuthApp(provider);
       const clientSecret = body.clientSecret ?? existing?.clientSecret;
       if (!clientSecret) {
         jsonError(res, "clientSecret is required when creating a new OAuth app.", 400);
@@ -1794,6 +1810,7 @@ export async function handleScriptConnections(
       // All flows now redirect to the single static callback (step-4).
       const redirectUri = staticOAuthCallbackUri();
       upsertOAuthApp(provider, {
+        ...(editing ? { id: editing.id } : {}),
         clientId: body.clientId,
         clientSecret,
         authorizeUrl,
@@ -1811,7 +1828,9 @@ export async function handleScriptConnections(
           : {}),
         ...(hydrated ? { source: hydrated.source } : {}),
       });
-      const app = listOAuthApps().find((row) => row.provider === provider);
+      const app = listOAuthApps().find((row) =>
+        editing ? row.id === editing.id : row.provider === provider,
+      );
       json(res, {
         oauthApp: app,
         redirectUri,
