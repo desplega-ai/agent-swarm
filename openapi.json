@@ -9994,8 +9994,7 @@
                     },
                     "required": [
                       "slug",
-                      "kind",
-                      "baseUrl"
+                      "kind"
                     ]
                   },
                   {

@@ -91,6 +91,14 @@ const scriptConnectionsOutputSchema = z.object({
 type ScriptConnectionsArgs = z.infer<typeof scriptConnectionsInputSchema>;
 type ExistingConnection = NonNullable<ReturnType<typeof getScriptConnectionById>>;
 
+function baseUrlProvenanceText(connection: {
+  slug: string;
+  baseUrlSource: string;
+  baseUrlMismatch?: { specUrl: string; effectiveUrl: string };
+}): string {
+  return `${connection.slug}: baseUrlSource=${connection.baseUrlSource}${connection.baseUrlMismatch ? `, baseUrlMismatch=${JSON.stringify(connection.baseUrlMismatch)}` : ""}`;
+}
+
 function resolveConnectionScope(
   args: ScriptConnectionsArgs,
   existing: ExistingConnection | null,
@@ -164,8 +172,16 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
 
       if (args.action === "list") {
         const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
+        const provenanceLines = connections
+          .filter((connection) => connection.kind === "openapi" || connection.baseUrl !== null)
+          .map(baseUrlProvenanceText);
         return {
-          content: [{ type: "text", text: `Found ${connections.length} script connection(s).` }],
+          content: [
+            {
+              type: "text",
+              text: `Found ${connections.length} script connection(s).${provenanceLines.length ? `\n${provenanceLines.join("\n")}` : ""}`,
+            },
+          ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: true,
@@ -226,7 +242,12 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
           };
         }
         return {
-          content: [{ type: "text", text: `Script connection ${refreshed.slug} refreshed.` }],
+          content: [
+            {
+              type: "text",
+              text: `Script connection ${refreshed.slug} refreshed (${baseUrlProvenanceText(refreshed)}).`,
+            },
+          ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: !refreshed.generationError,
@@ -338,18 +359,18 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         };
       }
 
-      if (!args.slug || !args.baseUrl || (!args.openapiSpecJson && !args.openapiSpecUrl)) {
+      if (!args.slug || (!args.openapiSpecJson && !args.openapiSpecUrl)) {
         return {
           content: [
             {
               type: "text",
-              text: "slug, baseUrl, and either openapiSpecJson or openapiSpecUrl are required.",
+              text: "slug and either openapiSpecJson or openapiSpecUrl are required.",
             },
           ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
-            message: "slug, baseUrl, and either openapiSpecJson or openapiSpecUrl are required.",
+            message: "slug and either openapiSpecJson or openapiSpecUrl are required.",
             connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
           },
         };
@@ -377,7 +398,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         const bindingScope = args.scope ?? "global";
         const binding = upsertCredentialBinding({
           configKey: args.configKey,
-          allowedHosts: args.allowedHosts ?? [new URL(args.baseUrl).hostname],
+          allowedHosts: args.allowedHosts ?? (args.baseUrl ? [new URL(args.baseUrl).hostname] : []),
           headerTemplate:
             args.headerTemplate ??
             (args.queryTemplate ? undefined : `Authorization: Bearer ${placeholder}`),
@@ -398,7 +419,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         scope,
         scopeId,
         baseUrl: args.baseUrl,
-        allowedHosts: args.allowedHosts ?? [new URL(args.baseUrl).hostname],
+        allowedHosts: args.allowedHosts,
         credentialBindingId,
         openapiSpecUrl: args.openapiSpecUrl,
         openapiSpecJson: args.openapiSpecJson,
@@ -407,7 +428,12 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
 
       const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
       return {
-        content: [{ type: "text", text: `Script connection ${connection.slug} saved.` }],
+        content: [
+          {
+            type: "text",
+            text: `Script connection ${connection.slug} saved (${baseUrlProvenanceText(connection)}).`,
+          },
+        ],
         structuredContent: {
           yourAgentId: requestInfo.agentId,
           success: !connection.generationError,

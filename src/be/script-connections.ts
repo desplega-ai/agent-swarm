@@ -17,6 +17,12 @@ import { listMcpServerTools } from "./mcp-proxy";
 
 export type ScriptConnectionScope = "global" | "agent" | "repo";
 export type ScriptConnectionKind = "raw" | "openapi" | "mcp" | "graphql";
+export type ScriptConnectionBaseUrlSource = "user" | "spec";
+
+export type ScriptConnectionBaseUrlMismatch = {
+  specUrl: string;
+  effectiveUrl: string;
+};
 
 export type ScriptCredentialBindingRecord = CredentialBinding & {
   id: string;
@@ -35,6 +41,8 @@ export type ScriptConnectionRecord = {
   scope: ScriptConnectionScope;
   scopeId: string | null;
   baseUrl: string | null;
+  baseUrlSource: ScriptConnectionBaseUrlSource;
+  baseUrlMismatch?: ScriptConnectionBaseUrlMismatch;
   allowedHosts: string[];
   credentialBindingId: string | null;
   openapiSpecSourceKind: "url" | "inline" | "agent_fs" | null;
@@ -81,6 +89,7 @@ type ConnectionRow = {
   scope: string;
   scope_id: string | null;
   base_url: string | null;
+  base_url_source: string;
   allowed_hosts_json: string;
   credential_binding_id: string | null;
   openapi_spec_source_kind: string | null;
@@ -131,6 +140,27 @@ function bindingFromRow(row: BindingRow): ScriptCredentialBindingRecord {
 }
 
 function connectionFromRow(row: ConnectionRow): ScriptConnectionRecord {
+  const baseUrlSource: ScriptConnectionBaseUrlSource =
+    row.base_url_source === "spec" ? "spec" : "user";
+  const specBaseUrl =
+    row.kind === "openapi" && row.openapi_spec_json
+      ? (() => {
+          try {
+            return extractSpecBaseUrl(
+              JSON.parse(row.openapi_spec_json),
+              row.openapi_spec_source_kind === "url"
+                ? (row.openapi_spec_source ?? undefined)
+                : undefined,
+            );
+          } catch {
+            return null;
+          }
+        })()
+      : null;
+  const baseUrlMismatch =
+    baseUrlSource === "user" && row.base_url && specBaseUrl && !urlsMatch(row.base_url, specBaseUrl)
+      ? { specUrl: specBaseUrl, effectiveUrl: row.base_url }
+      : undefined;
   return {
     id: row.id,
     slug: row.slug,
@@ -139,6 +169,8 @@ function connectionFromRow(row: ConnectionRow): ScriptConnectionRecord {
     scope: row.scope as ScriptConnectionScope,
     scopeId: row.scope_id,
     baseUrl: row.base_url,
+    baseUrlSource,
+    ...(baseUrlMismatch ? { baseUrlMismatch } : {}),
     allowedHosts: parseJsonArray(row.allowed_hosts_json),
     credentialBindingId: row.credential_binding_id,
     openapiSpecSourceKind:
@@ -482,6 +514,77 @@ function jsonSchema(schema: unknown): ScriptApiJsonSchema {
 function methodName(operationId: string | undefined, method: string, path: string): string {
   if (operationId) return normalizeSlug(operationId);
   return normalizeSlug(`${method}_${path.replace(/[{}]/g, "").replace(/\//g, "_")}`);
+}
+
+function urlsMatch(left: string, right: string): boolean {
+  try {
+    return new URL(left).toString() === new URL(right).toString();
+  } catch {
+    return left === right;
+  }
+}
+
+function resolveTemplatedServerUrl(value: string, variables: unknown): string | null {
+  const definitions =
+    variables && typeof variables === "object" && !Array.isArray(variables)
+      ? (variables as Record<string, unknown>)
+      : {};
+  let missingDefault = false;
+  const resolved = value.replace(/\{([^{}]+)\}/g, (_match, name: string) => {
+    const definition = definitions[name];
+    if (!definition || typeof definition !== "object" || !("default" in definition)) {
+      missingDefault = true;
+      return _match;
+    }
+    const defaultValue = (definition as { default?: unknown }).default;
+    if (defaultValue === undefined || defaultValue === null) {
+      missingDefault = true;
+      return _match;
+    }
+    return String(defaultValue);
+  });
+  return missingDefault ? null : resolved;
+}
+
+/**
+ * Return the first usable server URL declared by an OpenAPI 3 or Swagger 2
+ * document. Relative OAS3 servers only have meaning for URL-sourced specs, so
+ * they are resolved against that spec URL when it is available.
+ */
+export function extractSpecBaseUrl(spec: unknown, specSourceUrl?: string): string | null {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return null;
+  const root = spec as Record<string, unknown>;
+  const servers = root.servers;
+  if (Array.isArray(servers) && servers.length > 0) {
+    const server = servers[0];
+    if (!server || typeof server !== "object" || Array.isArray(server)) return null;
+    const value = (server as { url?: unknown }).url;
+    if (typeof value !== "string" || !value.trim()) return null;
+    const resolvedTemplate = resolveTemplatedServerUrl(
+      value,
+      (server as { variables?: unknown }).variables,
+    );
+    if (!resolvedTemplate) return null;
+    try {
+      return new URL(resolvedTemplate, specSourceUrl).toString();
+    } catch {
+      return null;
+    }
+  }
+
+  if (typeof root.host !== "string" || !root.host.trim()) return null;
+  const schemes = Array.isArray(root.schemes)
+    ? root.schemes.filter((scheme): scheme is string => typeof scheme === "string")
+    : [];
+  const scheme = schemes.find((candidate) => candidate.toLowerCase() === "https") ?? schemes[0];
+  if (!scheme) return null;
+  const basePath = typeof root.basePath === "string" ? root.basePath : "";
+  const path = basePath ? (basePath.startsWith("/") ? basePath : `/${basePath}`) : "";
+  try {
+    return new URL(`${scheme}://${root.host}${path}`).toString();
+  } catch {
+    return null;
+  }
 }
 
 function extractOperations(
@@ -863,16 +966,18 @@ export async function upsertScriptConnection(data: {
 
   const existing = data.id
     ? getDb()
-        .prepare<{ id: string; version: number }, [string]>(
-          "SELECT id, version FROM script_connections WHERE id = ?",
-        )
+        .prepare<ConnectionRow, [string]>("SELECT * FROM script_connections WHERE id = ?")
         .get(data.id)
     : getDb()
-        .prepare<{ id: string; version: number }, [string, string, string | null]>(
-          "SELECT id, version FROM script_connections WHERE slug = ? AND scope = ? AND COALESCE(scope_id, '') = COALESCE(?, '')",
+        .prepare<ConnectionRow, [string, string, string | null]>(
+          "SELECT * FROM script_connections WHERE slug = ? AND scope = ? AND COALESCE(scope_id, '') = COALESCE(?, '')",
         )
         .get(normalizedSlug, scope, scopeId);
   const connectionId = existing?.id ?? id;
+  const existingConnection = existing ? connectionFromRow(existing) : null;
+  let effectiveBaseUrl = data.baseUrl ?? null;
+  let baseUrlSource: ScriptConnectionBaseUrlSource = "user";
+  let allowedHosts = data.allowedHosts ?? [];
 
   if (data.kind === "openapi") {
     if (!openapiSpecJson && data.openapiSpecUrl) {
@@ -895,12 +1000,31 @@ export async function upsertScriptConnection(data: {
         spec = parseOpenapiSpecBody(openapiSpecJson ?? "{}");
         openapiSpecJson = JSON.stringify(spec);
       }
+      const specBaseUrl = extractSpecBaseUrl(
+        spec,
+        openapiSpecSourceKind === "url" ? (openapiSpecSource ?? undefined) : undefined,
+      );
+      if (data.baseUrl) {
+        effectiveBaseUrl = data.baseUrl;
+        baseUrlSource = "user";
+      } else if (specBaseUrl) {
+        effectiveBaseUrl = specBaseUrl;
+        baseUrlSource = "spec";
+      } else if (existingConnection?.baseUrl) {
+        effectiveBaseUrl = existingConnection.baseUrl;
+        baseUrlSource = existingConnection.baseUrlSource;
+      } else {
+        throw new Error(
+          "baseUrl is required for OpenAPI connections when the spec has no server URL",
+        );
+      }
+      new URL(effectiveBaseUrl);
       const binding = data.credentialBindingId
         ? getCredentialBindingById(data.credentialBindingId)
         : null;
       const artifacts = buildGeneratedArtifacts({
         slug: data.slug,
-        baseUrl: data.baseUrl ?? "",
+        baseUrl: effectiveBaseUrl,
         credentialBinding: binding,
         openapiSpec: spec,
       });
@@ -908,6 +1032,13 @@ export async function upsertScriptConnection(data: {
       generatedRuntimeJson = artifacts.generatedRuntimeJson;
       generatedAt = now;
     } catch (err) {
+      if (
+        err instanceof Error &&
+        err.message ===
+          "baseUrl is required for OpenAPI connections when the spec has no server URL"
+      ) {
+        throw err;
+      }
       generationError = err instanceof Error ? err.message : String(err);
     }
   }
@@ -944,6 +1075,9 @@ export async function upsertScriptConnection(data: {
       throw new Error("allowedHosts is required for GraphQL connections");
     }
     new URL(data.baseUrl);
+    effectiveBaseUrl = data.baseUrl;
+    baseUrlSource = "user";
+    allowedHosts = data.allowedHosts;
     const binding = data.credentialBindingId
       ? getCredentialBindingById(data.credentialBindingId)
       : null;
@@ -957,14 +1091,20 @@ export async function upsertScriptConnection(data: {
     generatedAt = now;
   }
 
+  if (data.kind !== "graphql") {
+    allowedHosts =
+      data.allowedHosts ?? (effectiveBaseUrl ? [new URL(effectiveBaseUrl).hostname] : []);
+  }
+
   const params = [
     normalizedSlug,
     data.displayName ?? null,
     data.kind,
     scope,
     scopeId,
-    data.baseUrl ?? null,
-    JSON.stringify(data.allowedHosts ?? []),
+    effectiveBaseUrl,
+    baseUrlSource,
+    JSON.stringify(allowedHosts),
     data.credentialBindingId ?? null,
     openapiSpecSourceKind,
     openapiSpecSource,
@@ -984,7 +1124,7 @@ export async function upsertScriptConnection(data: {
       .prepare<ConnectionRow, [...typeof params, string, string | null, number, string]>(
         `UPDATE script_connections SET
           slug = ?, display_name = ?, kind = ?, scope = ?, scope_id = ?, base_url = ?,
-          allowed_hosts_json = ?, credential_binding_id = ?, openapi_spec_source_kind = ?,
+          base_url_source = ?, allowed_hosts_json = ?, credential_binding_id = ?, openapi_spec_source_kind = ?,
           openapi_spec_source = ?, openapi_spec_json = ?, openapi_spec_etag = ?,
           openapi_spec_fetched_at = ?, mcp_server_id = ?, generated_types = ?,
           generated_runtime_json = ?, generated_at = ?, generation_error = ?, enabled = ?,
@@ -1002,12 +1142,12 @@ export async function upsertScriptConnection(data: {
       [string, ...typeof params, string, string, string | null, string | null]
     >(
       `INSERT INTO script_connections
-       (id, slug, display_name, kind, scope, scope_id, base_url, allowed_hosts_json,
+       (id, slug, display_name, kind, scope, scope_id, base_url, base_url_source, allowed_hosts_json,
         credential_binding_id, openapi_spec_source_kind, openapi_spec_source, openapi_spec_json,
         openapi_spec_etag, openapi_spec_fetched_at, mcp_server_id, generated_types,
         generated_runtime_json, generated_at, generation_error, enabled, created_at, updated_at,
         created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(id, ...params, now, now, data.userId ?? null, data.userId ?? null);
   if (!row) throw new Error("Failed to create script connection");
@@ -1069,6 +1209,13 @@ export async function refreshScriptConnection(
     return refreshed ? connectionFromRow(refreshed) : null;
   }
 
+  const oldDerivedHostname = connection.baseUrl ? new URL(connection.baseUrl).hostname : null;
+  const allowedHostsWereSpecDefault =
+    connection.baseUrlSource === "spec" &&
+    oldDerivedHostname !== null &&
+    connection.allowedHosts.length === 1 &&
+    connection.allowedHosts[0] === oldDerivedHostname;
+
   return upsertScriptConnection({
     id: connection.id,
     slug: connection.slug,
@@ -1076,8 +1223,8 @@ export async function refreshScriptConnection(
     kind: "openapi",
     scope: connection.scope,
     scopeId: connection.scopeId,
-    baseUrl: connection.baseUrl,
-    allowedHosts: connection.allowedHosts,
+    baseUrl: connection.baseUrlSource === "user" ? connection.baseUrl : undefined,
+    allowedHosts: allowedHostsWereSpecDefault ? undefined : connection.allowedHosts,
     credentialBindingId: connection.credentialBindingId,
     openapiSpecSourceKind: "url",
     openapiSpecSource: connection.openapiSpecSource,

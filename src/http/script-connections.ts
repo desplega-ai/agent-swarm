@@ -80,7 +80,7 @@ const connectionBaseBodySchema = z.object({
 const upsertConnectionBodySchema = z.discriminatedUnion("kind", [
   connectionBaseBodySchema.extend({
     kind: z.literal("openapi"),
-    baseUrl: z.string().url(),
+    baseUrl: z.string().url().optional(),
     openapiSpecUrl: z.string().url().optional(),
     openapiSpecJson: z.string().optional(),
   }),
@@ -771,7 +771,8 @@ function maybeCreateInlineBinding(
       ? resolvedScopeId
       : connectionScopeId(scope, data.scopeId, "bindings");
   const allowedHosts =
-    data.allowedHosts ?? ("baseUrl" in data ? [new URL(data.baseUrl).hostname] : []);
+    data.allowedHosts ??
+    ("baseUrl" in data && data.baseUrl ? [new URL(data.baseUrl).hostname] : []);
   const authKind = data.authKind ?? "config";
   const placeholder = placeholderForConfigKey(data.configKey);
   const headerTemplate =
@@ -1332,10 +1333,8 @@ export async function handleScriptConnections(
         kind: parsed.body.kind,
         scope,
         scopeId,
-        baseUrl: "baseUrl" in parsed.body ? parsed.body.baseUrl : null,
-        allowedHosts:
-          parsed.body.allowedHosts ??
-          ("baseUrl" in parsed.body ? [new URL(parsed.body.baseUrl).hostname] : []),
+        baseUrl: "baseUrl" in parsed.body ? parsed.body.baseUrl : undefined,
+        allowedHosts: parsed.body.allowedHosts,
         credentialBindingId,
         openapiSpecSourceKind:
           reuseExistingOpenapiSpec && !openapiSpecUrl
