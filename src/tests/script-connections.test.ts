@@ -528,13 +528,9 @@ describe("script connections", () => {
       markMigrationApplied(database, "114_backfill_gpt_5_6_pricing.sql");
       markMigrationApplied(database, "115_asset_namespace_keys.sql");
       markMigrationApplied(database, "116_favorite_principal_scope.sql");
+      // The consolidated connections-redesign migration depends on OAuth tables
+      // and binding columns this intentionally partial fixture does not create.
       markMigrationApplied(database, "117_unified_oauth.sql");
-      // 120 rebuilds script_credential_bindings using 117's oauth_authorization_id
-      // column, which this pre-117 fixture never materializes; skip it since this
-      // test only exercises the 112 rebuild.
-      markMigrationApplied(database, "120_connection_embedded_auth.sql");
-      // Depends on oauth_apps, which the 117-skipped fixture never creates.
-      markMigrationApplied(database, "121_oauth_keepalive_flag.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
@@ -640,37 +636,36 @@ describe("script connections", () => {
     }
   });
 
-  test("migration 120 keeps a user-attached shared binding standalone (adopts only derived-key bindings)", () => {
-    const dbPath = "./test-script-connections-migration-120-adoption.sqlite";
+  test("migration 117 keeps a user-attached shared binding standalone (adopts only derived-key bindings)", () => {
+    const dbPath = "./test-script-connections-migration-117-adoption.sqlite";
     removeDbFiles(dbPath);
     const database = new Database(dbPath, { create: true });
     try {
-      // Materialize the pre-120 schema: fake migration 120 as already applied so
-      // runMigrations stops at 119, giving us the real post-117 connection +
-      // binding tables without the embedded-auth rebuild.
+      // Materialize the pre-redesign schema through 116 by temporarily marking
+      // the consolidated migration as applied.
       database.run(`
         CREATE TABLE IF NOT EXISTS _migrations (
           version INTEGER PRIMARY KEY, name TEXT NOT NULL,
           applied_at TEXT NOT NULL, checksum TEXT NOT NULL
         )
       `);
-      const migration120 = "120_connection_embedded_auth.sql";
-      const sql120 = migrationSql(migration120);
+      const migration117 = "117_unified_oauth.sql";
+      const sql117 = migrationSql(migration117);
       database
         .prepare(
           "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
         )
         .run(
-          120,
-          migration120.replace(".sql", ""),
+          117,
+          migration117.replace(".sql", ""),
           new Date().toISOString(),
-          createHash("sha256").update(sql120).digest("hex"),
+          createHash("sha256").update(sql117).digest("hex"),
         );
-      runMigrations(database); // applies 001..119
+      runMigrations(database); // applies 001..116
 
       const now = new Date().toISOString();
       // A user-created STANDALONE binding: source='user', arbitrary config_key
-      // (the shape a real pre-120 inline OR attached binding has — they are
+      // (the shape a real pre-redesign inline OR attached binding has — they are
       // indistinguishable by source/key, so neither the loose adopt-any-single-
       // referencer rule nor a source check is safe here).
       const bindingId = crypto.randomUUID();
@@ -711,10 +706,10 @@ describe("script connections", () => {
         ],
       );
 
-      // Now run migration 120 for real (FKs off, mirroring the runner's pass —
-      // the rebuild DROPs + RENAMEs a table in a reference cycle).
+      // Now run the consolidated migration for real (FKs off, mirroring the
+      // runner's pass — the rebuild DROPs + RENAMEs a table in a reference cycle).
       database.run("PRAGMA foreign_keys = OFF");
-      database.exec(sql120);
+      database.exec(sql117);
       database.run("PRAGMA foreign_keys = ON");
 
       const migrated = database

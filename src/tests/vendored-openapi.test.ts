@@ -11,6 +11,7 @@ import {
   trimOpenapiSpec,
 } from "../../scripts/vendored-openapi-utils";
 import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { runMigrations } from "../be/migrations/runner";
 import { refreshScriptConnection, upsertScriptConnection } from "../be/script-connections";
 import {
   handleScriptConnections,
@@ -189,20 +190,37 @@ describe("vendored OpenAPI", () => {
     ]);
   });
 
-  test("migration 119 preserves rows while widening the source-kind check", () => {
+  test("migration 117 preserves rows while widening the source-kind check", () => {
     removeDbFiles(MIGRATION_DB_PATH);
     const database = new Database(MIGRATION_DB_PATH);
     try {
-      database.exec(readFileSync("src/be/migrations/101_script_connections.sql", "utf-8"));
-      database.exec(readFileSync("src/be/migrations/111_oauth_credential_bindings.sql", "utf-8"));
-      database.exec(readFileSync("src/be/migrations/112_script_connections_graphql.sql", "utf-8"));
+      database.run(`
+        CREATE TABLE _migrations (
+          version INTEGER PRIMARY KEY,
+          name TEXT NOT NULL,
+          applied_at TEXT NOT NULL,
+          checksum TEXT NOT NULL
+        )
+      `);
+      const migration117 = readFileSync("src/be/migrations/117_unified_oauth.sql", "utf-8");
+      database
+        .prepare(
+          "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
+        )
+        .run(
+          117,
+          "117_unified_oauth",
+          new Date().toISOString(),
+          new Bun.CryptoHasher("sha256").update(migration117).digest("hex"),
+        );
+      runMigrations(database);
       database
         .query(
           "INSERT INTO script_connections (id, slug, kind, openapi_spec_json) VALUES (?, ?, ?, ?)",
         )
         .run("legacy-row", "legacy", "openapi", "{}");
-      database.exec(readFileSync("src/be/migrations/118_base_url_provenance.sql", "utf-8"));
-      database.exec(readFileSync("src/be/migrations/119_vendored_spec_source.sql", "utf-8"));
+      database.run("DELETE FROM _migrations WHERE version = 117");
+      runMigrations(database);
       expect(
         database.query<{ id: string }, []>("SELECT id FROM script_connections").get()?.id,
       ).toBe("legacy-row");

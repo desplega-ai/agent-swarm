@@ -9,10 +9,9 @@ const NOW = "2026-07-21T12:00:00.000Z";
 async function pre117Database(path = ":memory:"): Promise<Database> {
   const database = new Database(path, { create: true });
 
-  // Mark 117 and everything after it as already applied so the real runner
-  // constructs an exact schema through 116 (later migrations like 120 depend on
-  // 117's columns and would crash on the legacy schema). Removing the sentinels
-  // later makes the same runner apply 117+ in order.
+  // Mark the consolidated connections-redesign migration as already applied so
+  // the real runner constructs an exact pre-redesign schema through 116.
+  // Removing the sentinel later makes the same runner apply migration 117.
   database.run(`
     CREATE TABLE _migrations (
       version INTEGER PRIMARY KEY,
@@ -296,8 +295,8 @@ describe("migration 117 unified OAuth storage", () => {
             .query<{ count: number }, []>("SELECT count(*) AS count FROM mcp_oauth_tokens")
             .get()?.count,
         ).toBe(2);
-        // The sentinels exist only to make runMigrations stop at 116. Remove
-        // them before handing the file to a real boot so 117+ are pending.
+        // The sentinel exists only to make runMigrations stop at 116. Remove it
+        // before handing the file to a real boot so migration 117 is pending.
         database.query("DELETE FROM _migrations WHERE version >= 117").run();
       } finally {
         database.close();

@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync, unlinkSync } from "node:fs";
 import { getDb } from "../be/db";
+import { runMigrations } from "../be/migrations/runner";
 import {
   extractSpecBaseUrl,
   refreshScriptConnection,
@@ -217,21 +218,40 @@ describe("OpenAPI base URL provenance", () => {
   });
 });
 
-describe("migration 118 base URL provenance", () => {
+describe("migration 117 consolidated connections-redesign schema", () => {
   test("gives existing script connection rows the user source default", () => {
     removeDbFiles(MIGRATION_DB_PATH);
     const database = new Database(MIGRATION_DB_PATH, { create: true });
     try {
-      database.run("CREATE TABLE script_connections (id TEXT PRIMARY KEY, base_url TEXT)");
-      database.run(
-        "INSERT INTO script_connections (id, base_url) VALUES ('existing', 'https://api.vendor.test')",
+      database.run(`
+        CREATE TABLE _migrations (
+          version INTEGER PRIMARY KEY,
+          name TEXT NOT NULL,
+          applied_at TEXT NOT NULL,
+          checksum TEXT NOT NULL
+        )
+      `);
+      const migration117 = readFileSync(
+        new URL("../be/migrations/117_unified_oauth.sql", import.meta.url),
+        "utf-8",
       );
+      database
+        .prepare(
+          "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
+        )
+        .run(
+          117,
+          "117_unified_oauth",
+          new Date().toISOString(),
+          new Bun.CryptoHasher("sha256").update(migration117).digest("hex"),
+        );
+      runMigrations(database);
       database.run(
-        readFileSync(
-          new URL("../be/migrations/118_base_url_provenance.sql", import.meta.url),
-          "utf-8",
-        ),
+        `INSERT INTO script_connections (id, slug, kind, base_url)
+         VALUES ('existing', 'existing', 'raw', 'https://api.vendor.test')`,
       );
+      database.run("DELETE FROM _migrations WHERE version = 117");
+      runMigrations(database);
       expect(
         database
           .prepare<{ base_url_source: string }, []>(

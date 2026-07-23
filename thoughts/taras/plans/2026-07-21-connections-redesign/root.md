@@ -114,6 +114,8 @@ Steps reference this contract instead of restating DDL. Canonical DDL lives in s
 
 **Migration number assignments** (pre-assigned to avoid parallel-step collisions): **117** step-1 (OAuth restructure), **118** step-3 (baseUrl provenance), **119** step-2 (`vendored` spec source kind), **120** step-7 (embedded connection auth columns). If a number is taken by the time a step lands, take the next free one and update this table.
 
+> **2026-07-23 consolidation**: pre-merge cleanup collapsed 118–121 (incl. step-5/8's `121_oauth_keepalive_flag`) into a single `117_unified_oauth.sql` — none were released, so one migration ships. Filename kept so dev DBs that applied all five stay consistent (runner keys by version; stale 118–121 `_migrations` rows are harmless).
+
 ## Quick Verification Reference
 
 - `bun test` (single file: `bun test src/tests/<file>.test.ts`)

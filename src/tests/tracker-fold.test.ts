@@ -213,7 +213,7 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
     const metadata = JSON.parse(app?.metadata || "{}");
     expect(metadata.actor).toBe("app");
     // keepAlive opts the (non-rotating) linear row into the keepalive job on a
-    // fresh DB where migration 121's data-only backfill matched no rows.
+    // fresh DB where migration 117's consolidated backfill matched no rows.
     expect(metadata.keepAlive === true || metadata.keepAlive === 1).toBe(true);
   });
 

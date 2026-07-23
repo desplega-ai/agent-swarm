@@ -73,8 +73,8 @@ export function initLinear(): boolean {
     // `actor: app` installs the OAuth app as its own bot user. `keepAlive`
     // opts the row into the generalized keepalive job (Linear does not rotate
     // refresh tokens, so it wouldn't qualify via requiresRefreshTokenRotation);
-    // this mirrors migration 121's backfill for a fresh-DB boot where that
-    // data-only migration matches no rows yet.
+    // this mirrors migration 117's consolidated backfill for a fresh-DB boot
+    // where the data-only statement matches no rows yet.
     metadata: JSON.stringify({ ...existingMetadata, actor: "app", keepAlive: true }),
   });
 
