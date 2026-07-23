@@ -1,7 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
-import { upsertOAuthApp } from "@/be/db-queries/oauth";
+import {
+  getOAuthAppIdByProvider,
+  listAuthorizationsForApp,
+  upsertOAuthApp,
+} from "@/be/db-queries/oauth";
 import {
   getOAuthBindingTokenStatus,
   getOAuthProviderConfig,
@@ -50,14 +54,36 @@ const credentialBindingsOutputSchema = z.object({
   provider: z.string().optional(),
   authorizeUrl: z.string().optional(),
   redirectUri: z.string().optional(),
+  state: z.string().optional(),
+  label: z.string().optional(),
+  authorizations: z
+    .array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        accountEmail: z.string().nullable(),
+        status: z.string(),
+        expiresAt: z.string().nullable(),
+        scope: z.string().nullable(),
+      }),
+    )
+    .optional(),
   bindings: z.array(credentialBindingToolBindingSchema),
 });
 
 const credentialBindingsInputSchema = z.object({
   action: z
-    .enum(["list", "upsert", "disable", "import-legacy", "oauth-app-upsert", "oauth-authorize-url"])
+    .enum([
+      "list",
+      "upsert",
+      "disable",
+      "import-legacy",
+      "oauth-app-upsert",
+      "oauth-authorize-url",
+      "oauth-authorizations-list",
+    ])
     .describe(
-      "List, add/update, disable, import legacy JSON bindings, or register/authorize OAuth apps.",
+      "List, add/update, disable, import legacy JSON bindings, register/authorize OAuth apps, or list an app's authorizations.",
     ),
   id: z
     .string()
@@ -107,7 +133,15 @@ const credentialBindingsInputSchema = z.object({
     .describe("OAuth authorization ID required when authKind is oauth."),
   provider: providerSchema
     .optional()
-    .describe("OAuth provider slug for oauth-app-upsert and oauth-authorize-url."),
+    .describe(
+      "OAuth provider slug for oauth-app-upsert, oauth-authorize-url, and oauth-authorizations-list.",
+    ),
+  label: z
+    .string()
+    .min(1)
+    .max(255)
+    .optional()
+    .describe("Authorization label for oauth-authorize-url (defaults to 'default'). N per app."),
   clientId: z.string().min(1).optional().describe("OAuth client ID for oauth-app-upsert."),
   clientSecret: z.string().min(1).optional().describe("OAuth client secret for oauth-app-upsert."),
   authorizeUrl: z
@@ -116,6 +150,16 @@ const credentialBindingsInputSchema = z.object({
     .optional()
     .describe("OAuth authorization URL for oauth-app-upsert."),
   tokenUrl: z.string().url().optional().describe("OAuth token URL for oauth-app-upsert."),
+  userinfoUrl: z
+    .string()
+    .url()
+    .optional()
+    .describe("OIDC userinfo endpoint for identity capture (SSRF-validated)."),
+  revocationUrl: z
+    .string()
+    .url()
+    .optional()
+    .describe("RFC 7009 revocation endpoint (SSRF-validated)."),
   scopes: z.array(z.string().min(1)).optional().describe("OAuth scopes for oauth-app-upsert."),
   extraParams: z
     .record(z.string(), z.string())
@@ -139,8 +183,8 @@ type BindingWithTokenStatus = ScriptCredentialBindingRecord & {
   tokenStatus?: OAuthBindingTokenStatus;
 };
 
-function genericOAuthRedirectUri(provider: string): string {
-  return `${getPublicMcpBaseUrl()}/api/oauth/${encodeURIComponent(provider)}/callback`;
+function staticOAuthCallbackUri(): string {
+  return `${getPublicMcpBaseUrl()}/api/oauth/callback`;
 }
 
 function decorateBindings(bindings: ScriptCredentialBindingRecord[]): BindingWithTokenStatus[] {
@@ -237,6 +281,8 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
           assertOAuthAppUrlsSafe({
             authorizeUrl: args.authorizeUrl,
             tokenUrl: args.tokenUrl,
+            userinfoUrl: args.userinfoUrl,
+            revocationUrl: args.revocationUrl,
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -251,7 +297,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
           };
         }
 
-        const redirectUri = genericOAuthRedirectUri(args.provider);
+        const redirectUri = staticOAuthCallbackUri();
         upsertOAuthApp(args.provider, {
           clientId: args.clientId,
           clientSecret: args.clientSecret,
@@ -259,6 +305,8 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
           tokenUrl: args.tokenUrl,
           redirectUri,
           scopes: args.scopes.join(","),
+          ...(args.userinfoUrl ? { userinfoUrl: args.userinfoUrl } : {}),
+          ...(args.revocationUrl ? { revocationUrl: args.revocationUrl } : {}),
           ...(args.extraParams ? { extraParams: args.extraParams } : {}),
           ...(args.tokenAuthStyle ? { tokenAuthStyle: args.tokenAuthStyle } : {}),
           ...(args.tokenBodyFormat ? { tokenBodyFormat: args.tokenBodyFormat } : {}),
@@ -309,16 +357,75 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
           };
         }
 
-        const result = await buildAuthorizationUrl(config);
+        const label = args.label ?? "default";
+        const result = await buildAuthorizationUrl(
+          { ...config, redirectUri: staticOAuthCallbackUri() },
+          { label },
+        );
         return {
           content: [{ type: "text", text: result.url }],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: true,
-            message: `OAuth authorization URL generated for ${args.provider}.`,
+            message: `OAuth authorization URL generated for ${args.provider} ("${label}").`,
             provider: args.provider,
             authorizeUrl: result.url,
-            redirectUri: config.redirectUri,
+            redirectUri: staticOAuthCallbackUri(),
+            state: result.state,
+            label,
+            bindings,
+          },
+        };
+      }
+
+      if (args.action === "oauth-authorizations-list") {
+        if (!args.provider) {
+          return {
+            content: [
+              { type: "text", text: "provider is required for oauth-authorizations-list." },
+            ],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: "provider is required for oauth-authorizations-list.",
+              bindings,
+            },
+          };
+        }
+        const appId = getOAuthAppIdByProvider(args.provider);
+        if (!appId) {
+          return {
+            content: [{ type: "text", text: `OAuth app ${args.provider} is not configured.` }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: `OAuth app ${args.provider} is not configured.`,
+              provider: args.provider,
+              bindings,
+            },
+          };
+        }
+        const authorizations = listAuthorizationsForApp(appId).map((authorization) => ({
+          id: authorization.id,
+          label: authorization.label,
+          accountEmail: authorization.accountEmail,
+          status: authorization.status,
+          expiresAt: authorization.expiresAt,
+          scope: authorization.scope,
+        }));
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Found ${authorizations.length} authorization(s) for ${args.provider}.`,
+            },
+          ],
+          structuredContent: {
+            yourAgentId: requestInfo.agentId,
+            success: true,
+            message: `Found ${authorizations.length} authorization(s) for ${args.provider}.`,
+            provider: args.provider,
+            authorizations,
             bindings,
           },
         };

@@ -166,6 +166,8 @@ export const LEGACY_POLICY = {
   "credential-binding.manage": leadOnly,
   "script-connection.manage": leadOnly,
   "script-connection.invoke": anyAuthenticated,
+  "oauth-app.manage": leadOnly,
+  "oauth-authorization.manage": leadOnly,
   "config.credential-bindings.write": leadOnly,
   "config.write.any": leadOnly,
   "config.delete.any": leadOnly,

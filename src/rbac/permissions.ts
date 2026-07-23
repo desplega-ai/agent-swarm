@@ -109,6 +109,14 @@ export const PERMISSIONS = {
     description: "Invoke a script MCP connection through the server-side proxy.",
     namespace: "script-connection",
   },
+  "oauth-app.manage": {
+    description: "Register, update, delete, disconnect, or discover OAuth apps.",
+    namespace: "oauth-app",
+  },
+  "oauth-authorization.manage": {
+    description: "Start, refresh, or revoke labeled OAuth authorizations on an OAuth app.",
+    namespace: "oauth-authorization",
+  },
   "config.credential-bindings.write": {
     description: "Write the SCRIPT_CREDENTIAL_BINDINGS swarm-config key.",
     namespace: "config",

@@ -4,15 +4,21 @@ import { resolveHttpAuditUserId } from "@/be/audit-user";
 import { normalizeDate } from "@/be/date-utils";
 import { getAgentById, getDb } from "@/be/db";
 import {
+  deleteAuthorizationById,
   deleteOAuthTokens,
+  getAuthorizationById,
   getOAuthApp,
+  getOAuthAppById,
   getOAuthTokens,
+  listAuthorizationsForApp,
+  type OAuthAuthorization,
+  updateAuthorizationTokens,
   upsertOAuthApp,
 } from "@/be/db-queries/oauth";
 import {
   getOAuthBindingTokenStatus,
-  getOAuthProviderConfig,
   type OAuthBindingTokenStatus,
+  oauthAppToProviderConfig,
 } from "@/be/oauth-credential-bindings";
 import {
   getScriptConnectionById,
@@ -27,20 +33,24 @@ import {
   upsertScriptConnection,
 } from "@/be/script-connections";
 import { listVendoredOpenapiEntries } from "@/be/vendored-openapi";
-import { assertOAuthAppUrlsSafe, assertOAuthProviderIsNotReserved } from "@/oauth/app-validation";
+import {
+  assertOAuthAppUrlsSafe,
+  assertOAuthEgressUrlSafe,
+  assertOAuthProviderIsNotReserved,
+} from "@/oauth/app-validation";
 import { forceRefreshTokenOrThrow } from "@/oauth/ensure-token";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
-import { buildAuthorizationUrl } from "@/oauth/wrapper";
+import { buildAuthorizationUrl, refreshTokenGrant } from "@/oauth/wrapper";
 import { can } from "@/rbac";
 import {
   CredentialBindingSchema,
   placeholderForConfigKey,
 } from "@/scripts-runtime/credential-broker";
 import type { OAuthApp } from "@/tracker/types";
-import { getPublicMcpBaseUrl } from "@/utils/constants";
 import { getRequestAuth } from "@/utils/request-auth-context";
 import { resolveScopedResourceId, scopedResourceScopeIdSchema } from "@/utils/scoped-resource";
 import { scrubSecrets } from "@/utils/secret-scrubber";
+import { staticOAuthCallbackUri } from "./oauth-callback";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -55,6 +65,9 @@ const connectionKindSchema = z.enum(["openapi", "graphql", "mcp"]);
 
 const idParamsSchema = z.object({ id: z.string().uuid() });
 const providerParamsSchema = z.object({ provider: providerSchema });
+// OAuth app ids are `hex(randomblob(16))` and authorization ids may be
+// migrated (non-UUID) identifiers — accept any opaque id, not just UUIDs.
+const oauthResourceIdParamsSchema = z.object({ id: z.string().min(1).max(255) });
 
 const listConnectionsQuerySchema = z.object({
   kind: connectionKindSchema.optional(),
@@ -123,6 +136,9 @@ const oauthAppBodySchema = z.object({
   clientSecret: z.string().min(1).optional(),
   authorizeUrl: z.string().url(),
   tokenUrl: z.string().url(),
+  // Fetched server-side with credentials — SSRF-validated on write.
+  userinfoUrl: z.string().url().optional(),
+  revocationUrl: z.string().url().optional(),
   scopes: z.array(z.string().min(1)).default([]).optional(),
   extraParams: z.record(z.string(), z.string()).optional(),
   tokenAuthStyle: z.enum(["body", "basic"]).optional(),
@@ -266,7 +282,7 @@ const upsertOAuthAppRoute = route({
     400: { description: "Validation error" },
     403: { description: "Only the lead agent can manage script connections" },
   },
-  rbac: { permission: "script-connection.manage" },
+  rbac: { permission: "oauth-app.manage" },
 });
 
 const discoverOAuthAppRoute = route({
@@ -282,7 +298,7 @@ const discoverOAuthAppRoute = route({
     400: { description: "Discovery failed" },
     403: { description: "Only the lead agent can manage script connections" },
   },
-  rbac: { permission: "script-connection.manage" },
+  rbac: { permission: "oauth-app.manage" },
 });
 
 const deleteOAuthAppRoute = route({
@@ -298,23 +314,87 @@ const deleteOAuthAppRoute = route({
     403: { description: "Only the lead agent can manage script connections" },
     404: { description: "OAuth app not found" },
   },
-  rbac: { permission: "script-connection.manage" },
+  rbac: { permission: "oauth-app.manage" },
 });
+
+const authorizeUrlBodySchema = z
+  .object({
+    label: z.string().min(1).max(255).default("default").optional(),
+    // Emitted verbatim in the 302 Location — restrict to http(s) so it can't
+    // be a javascript:/data: URL. Origin allowlisting is a follow-up (noted).
+    finalRedirect: z
+      .string()
+      .url()
+      .refine((value) => /^https?:$/.test(new URL(value).protocol), {
+        message: "finalRedirect must be an http(s) URL.",
+      })
+      .optional(),
+  })
+  .optional();
 
 const authorizeUrlRoute = route({
   method: "post",
-  path: "/api/oauth-apps/{provider}/authorize-url",
+  path: "/api/oauth-apps/{id}/authorize-url",
   pattern: ["api", "oauth-apps", null, "authorize-url"],
   operationId: "oauth_apps_authorize_url",
-  summary: "Build an OAuth authorization URL",
+  summary: "Build an OAuth authorization URL for a labeled authorization",
   tags: ["Script Connections"],
-  params: providerParamsSchema,
+  params: oauthResourceIdParamsSchema,
+  body: authorizeUrlBodySchema,
   responses: {
-    200: { description: "OAuth authorization URL" },
-    403: { description: "Only the lead agent can manage script connections" },
+    200: { description: "OAuth authorization URL + state" },
+    403: { description: "Only the lead agent can manage OAuth authorizations" },
     404: { description: "OAuth app not found" },
   },
-  rbac: { permission: "script-connection.manage" },
+  rbac: { permission: "oauth-authorization.manage" },
+});
+
+const listAuthorizationsRoute = route({
+  method: "get",
+  path: "/api/oauth-apps/{id}/authorizations",
+  pattern: ["api", "oauth-apps", null, "authorizations"],
+  operationId: "oauth_app_authorizations_list",
+  summary: "List the labeled authorizations for an OAuth app (never token material)",
+  tags: ["Script Connections"],
+  params: oauthResourceIdParamsSchema,
+  responses: {
+    200: { description: "Authorizations without token material" },
+    404: { description: "OAuth app not found" },
+  },
+});
+
+const deleteAuthorizationRoute = route({
+  method: "delete",
+  path: "/api/oauth-authorizations/{id}",
+  pattern: ["api", "oauth-authorizations", null],
+  operationId: "oauth_authorization_delete",
+  summary: "Revoke (best-effort) and delete a single OAuth authorization",
+  tags: ["Script Connections"],
+  params: oauthResourceIdParamsSchema,
+  responses: {
+    200: { description: "Authorization revoked + deleted" },
+    403: { description: "Only the lead agent can manage OAuth authorizations" },
+    404: { description: "Authorization not found" },
+  },
+  rbac: { permission: "oauth-authorization.manage" },
+});
+
+const refreshAuthorizationRoute = route({
+  method: "post",
+  path: "/api/oauth-authorizations/{id}/refresh",
+  pattern: ["api", "oauth-authorizations", null, "refresh"],
+  operationId: "oauth_authorization_refresh",
+  summary: "Force-refresh a single OAuth authorization (never returns token values)",
+  tags: ["Script Connections"],
+  params: oauthResourceIdParamsSchema,
+  responses: {
+    200: { description: "Refresh result with token status and new expiry" },
+    400: { description: "No refresh token stored" },
+    403: { description: "Only the lead agent can manage OAuth authorizations" },
+    404: { description: "Authorization not found" },
+    502: { description: "Provider token endpoint rejected the refresh" },
+  },
+  rbac: { permission: "oauth-authorization.manage" },
 });
 
 const integrationsCatalogRoute = route({
@@ -365,7 +445,7 @@ const disconnectOAuthAppRoute = route({
     403: { description: "Only the lead agent can manage script connections" },
     404: { description: "OAuth app not found" },
   },
-  rbac: { permission: "script-connection.manage" },
+  rbac: { permission: "oauth-app.manage" },
 });
 
 const refreshOAuthAppTokensRoute = route({
@@ -383,7 +463,7 @@ const refreshOAuthAppTokensRoute = route({
     404: { description: "OAuth app not found" },
     502: { description: "Provider token endpoint rejected the refresh" },
   },
-  rbac: { permission: "script-connection.manage" },
+  rbac: { permission: "oauth-app.manage" },
 });
 
 type BindingSummary = {
@@ -568,6 +648,64 @@ function ensureConnectionAdmin(
     return false;
   }
   return true;
+}
+
+/**
+ * Generic principal gate for OAuth-app / OAuth-authorization management. Mirrors
+ * {@link ensureConnectionAdmin} but keys on the OAuth-specific verbs so the two
+ * surfaces can diverge in a future role-based rollout.
+ */
+function ensureVerbAdmin(
+  req: IncomingMessage,
+  res: ServerResponse,
+  agentId: string | undefined,
+  verb: "oauth-app.manage" | "oauth-authorization.manage",
+  denyMessage: string,
+): boolean {
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "operator" || auth?.kind === "user") return true;
+
+  const callerAgentId = agentId ?? singleHeader(req, "x-agent-id");
+  const agent = callerAgentId ? getAgentById(callerAgentId) : undefined;
+  const decision = can({
+    principal: { kind: "agent", agentId: callerAgentId ?? "", isLead: agent?.isLead ?? false },
+    verb,
+    resource: { kind: "none" },
+    source: "http",
+  });
+  if (!decision.allow) {
+    jsonError(res, denyMessage, 403);
+    return false;
+  }
+  return true;
+}
+
+function ensureOAuthAppAdmin(
+  req: IncomingMessage,
+  res: ServerResponse,
+  agentId: string | undefined,
+): boolean {
+  return ensureVerbAdmin(
+    req,
+    res,
+    agentId,
+    "oauth-app.manage",
+    "Only the lead can manage OAuth apps.",
+  );
+}
+
+function ensureOAuthAuthorizationAdmin(
+  req: IncomingMessage,
+  res: ServerResponse,
+  agentId: string | undefined,
+): boolean {
+  return ensureVerbAdmin(
+    req,
+    res,
+    agentId,
+    "oauth-authorization.manage",
+    "Only the lead can manage OAuth authorizations.",
+  );
 }
 
 function tokenStatusForBinding(
@@ -861,6 +999,22 @@ function parseScopes(scopes: string): string[] {
     .filter(Boolean);
 }
 
+/** Sanitized view of an authorization — never includes token material. */
+function sanitizeAuthorization(authorization: OAuthAuthorization) {
+  return {
+    id: authorization.id,
+    label: authorization.label,
+    accountEmail: authorization.accountEmail,
+    status: authorization.status,
+    expiresAt: authorization.expiresAt,
+    scope: authorization.scope,
+    hasRefreshToken: authorization.refreshToken != null && authorization.refreshToken !== "",
+    lastRefreshedAt: authorization.lastRefreshedAt,
+    createdAt: authorization.createdAt,
+    updatedAt: authorization.updatedAt,
+  };
+}
+
 function sanitizeOAuthApp(row: OAuthAppRow) {
   const extraParamsObject = parseMetadata(row.extraParamsJson);
   const extraParams = Object.fromEntries(
@@ -882,6 +1036,7 @@ function sanitizeOAuthApp(row: OAuthAppRow) {
     tokenStatus: row.authorizationId ? getOAuthBindingTokenStatus(row.authorizationId) : "missing",
     expiresAt: row.tokenExpiresAt,
     lastRefreshedAt: normalizeDate(row.tokenUpdatedAt),
+    authorizations: listAuthorizationsForApp(row.id).map(sanitizeAuthorization),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -912,6 +1067,21 @@ async function attemptRemoteRevocation(app: OAuthApp, accessToken: string): Prom
   const revocationUrl = app.revocationUrl ?? undefined;
   if (!revocationUrl) return false;
 
+  // Fail-closed host re-check at egress: this POST carries the client_secret +
+  // token. A stored revocationUrl must not be able to reach an internal host.
+  try {
+    assertOAuthEgressUrlSafe(revocationUrl);
+  } catch (err) {
+    console.warn(
+      scrubSecrets(
+        `OAuth token revocation skipped for provider ${app.provider} (unsafe revocation URL): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      ),
+    );
+    return false;
+  }
+
   const body = new URLSearchParams({
     token: accessToken,
     token_type_hint: "access_token",
@@ -934,6 +1104,8 @@ async function attemptRemoteRevocation(app: OAuthApp, accessToken: string): Prom
       headers,
       body: body.toString(),
       signal: controller.signal,
+      // A public revocationUrl must not 302 the client_secret to an internal host.
+      redirect: "manual",
     });
   } catch (err) {
     console.warn(
@@ -947,10 +1119,6 @@ async function attemptRemoteRevocation(app: OAuthApp, accessToken: string): Prom
     clearTimeout(timeout);
   }
   return true;
-}
-
-function genericOAuthRedirectUri(provider: string): string {
-  return `${getPublicMcpBaseUrl()}/api/oauth/${encodeURIComponent(provider)}/callback`;
 }
 
 function oauthDiscoveryUrls(inputUrl: string): string[] {
@@ -1532,7 +1700,7 @@ export async function handleScriptConnections(
   if (upsertOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await upsertOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
 
     try {
       assertOAuthProviderIsNotReserved(parsed.body.provider);
@@ -1544,7 +1712,8 @@ export async function handleScriptConnections(
         return true;
       }
 
-      const redirectUri = genericOAuthRedirectUri(parsed.body.provider);
+      // All flows now redirect to the single static callback.
+      const redirectUri = staticOAuthCallbackUri();
       upsertOAuthApp(parsed.body.provider, {
         clientId: parsed.body.clientId,
         clientSecret,
@@ -1552,6 +1721,8 @@ export async function handleScriptConnections(
         tokenUrl: parsed.body.tokenUrl,
         redirectUri,
         scopes: (parsed.body.scopes ?? []).join(","),
+        ...(parsed.body.userinfoUrl ? { userinfoUrl: parsed.body.userinfoUrl } : {}),
+        ...(parsed.body.revocationUrl ? { revocationUrl: parsed.body.revocationUrl } : {}),
         ...(parsed.body.extraParams ? { extraParams: parsed.body.extraParams } : {}),
         ...(parsed.body.tokenAuthStyle ? { tokenAuthStyle: parsed.body.tokenAuthStyle } : {}),
         ...(parsed.body.tokenBodyFormat ? { tokenBodyFormat: parsed.body.tokenBodyFormat } : {}),
@@ -1567,7 +1738,7 @@ export async function handleScriptConnections(
   if (discoverOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await discoverOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
     try {
       const discovered = await discoverOAuthApp(parsed.body.url);
       json(res, discovered);
@@ -1580,7 +1751,7 @@ export async function handleScriptConnections(
   if (deleteOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await deleteOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
     if (!deleteOAuthApp(parsed.params.provider)) {
       jsonError(res, `OAuth app ${parsed.params.provider} not found.`, 404);
       return true;
@@ -1589,18 +1760,113 @@ export async function handleScriptConnections(
     return true;
   }
 
+  if (listAuthorizationsRoute.match(req.method, pathSegments)) {
+    const parsed = await listAuthorizationsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const app = getOAuthAppById(parsed.params.id);
+    if (!app || app.mcpServerId !== null) {
+      jsonError(res, `OAuth app ${parsed.params.id} not found.`, 404);
+      return true;
+    }
+    json(res, {
+      authorizations: listAuthorizationsForApp(app.id).map(sanitizeAuthorization),
+    });
+    return true;
+  }
+
   if (authorizeUrlRoute.match(req.method, pathSegments)) {
     const parsed = await authorizeUrlRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!ensureOAuthAuthorizationAdmin(req, res, agentId)) return true;
 
-    const config = getOAuthProviderConfig(parsed.params.provider);
-    if (!config) {
-      jsonError(res, `OAuth app ${parsed.params.provider} is not configured.`, 404);
+    const app = getOAuthAppById(parsed.params.id);
+    if (!app || app.mcpServerId !== null) {
+      jsonError(res, `OAuth app ${parsed.params.id} is not configured.`, 404);
       return true;
     }
-    const result = await buildAuthorizationUrl(config);
-    json(res, { authorizeUrl: result.url, redirectUri: config.redirectUri });
+    const label = parsed.body?.label ?? "default";
+    // Every authorization redirects to the single static callback.
+    const config = { ...oauthAppToProviderConfig(app), redirectUri: staticOAuthCallbackUri() };
+    try {
+      const result = await buildAuthorizationUrl(config, {
+        appId: app.id,
+        label,
+        flow: "generic",
+        ...(parsed.body?.finalRedirect ? { finalRedirect: parsed.body.finalRedirect } : {}),
+        userId: resolveHttpAuditUserId(req, agentId),
+      });
+      json(res, {
+        authorizeUrl: result.url,
+        state: result.state,
+        label,
+        redirectUri: config.redirectUri,
+      });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : String(err), 400);
+    }
+    return true;
+  }
+
+  if (deleteAuthorizationRoute.match(req.method, pathSegments)) {
+    const parsed = await deleteAuthorizationRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!ensureOAuthAuthorizationAdmin(req, res, agentId)) return true;
+
+    const authorization = getAuthorizationById(parsed.params.id);
+    if (!authorization) {
+      jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
+      return true;
+    }
+    const app = getOAuthAppById(authorization.appId);
+    let revocationAttempted = false;
+    if (app && authorization.accessToken && authorization.status !== "revoked") {
+      revocationAttempted = await attemptRemoteRevocation(app, authorization.accessToken);
+    }
+    deleteAuthorizationById(authorization.id);
+    json(res, { deleted: true, revocationAttempted });
+    return true;
+  }
+
+  if (refreshAuthorizationRoute.match(req.method, pathSegments)) {
+    const parsed = await refreshAuthorizationRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!ensureOAuthAuthorizationAdmin(req, res, agentId)) return true;
+
+    const authorization = getAuthorizationById(parsed.params.id);
+    if (!authorization) {
+      jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
+      return true;
+    }
+    const app = getOAuthAppById(authorization.appId);
+    if (!app || app.mcpServerId !== null) {
+      jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
+      return true;
+    }
+    if (!authorization.refreshToken) {
+      jsonError(res, "Authorization has no refresh token stored.", 400);
+      return true;
+    }
+    try {
+      const config = oauthAppToProviderConfig(app);
+      const tokens = await refreshTokenGrant(config, authorization.refreshToken);
+      const expiresAt = tokens.expiresIn
+        ? new Date(Date.now() + tokens.expiresIn * 1000).toISOString()
+        : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const updated = updateAuthorizationTokens(authorization.id, {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken ?? authorization.refreshToken,
+        expiresAt,
+        ...(tokens.scope != null ? { scope: tokens.scope } : {}),
+        expectedTokenVersion: authorization.tokenVersion,
+      });
+      if (!updated) {
+        jsonError(res, "Authorization changed during refresh; retry.", 409);
+        return true;
+      }
+      json(res, { ok: true, status: updated.status, expiresAt: updated.expiresAt });
+    } catch (err) {
+      jsonError(res, `Refresh failed: ${err instanceof Error ? err.message : String(err)}`, 502);
+    }
     return true;
   }
 
@@ -1652,7 +1918,7 @@ export async function handleScriptConnections(
   if (disconnectOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await disconnectOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
 
     const app = getOAuthApp(parsed.params.provider);
     if (!app) {
@@ -1673,7 +1939,7 @@ export async function handleScriptConnections(
   if (refreshOAuthAppTokensRoute.match(req.method, pathSegments)) {
     const parsed = await refreshOAuthAppTokensRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
 
     const provider = parsed.params.provider;
     if (!getOAuthApp(provider)) {

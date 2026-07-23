@@ -191,6 +191,11 @@ export function getOAuthAppById(id: string): OAuthApp | null {
   return row ? normalizeOAuthApp(row) : null;
 }
 
+/** Resolve the (non-MCP) app id for a provider slug, or null if none. */
+export function getOAuthAppIdByProvider(provider: string): string | null {
+  return rawOAuthAppByProvider(provider)?.id ?? null;
+}
+
 export function upsertOAuthApp(
   provider: string,
   data: {
@@ -453,6 +458,149 @@ export function updateAuthorizationTokens(
       expectedVersion,
     );
   return result.changes === 1 ? getAuthorizationById(id) : null;
+}
+
+/**
+ * Persist best-effort account identity (email + raw identity claims) captured
+ * after a successful token exchange. Never touches token material or
+ * tokenVersion — display-only metadata.
+ */
+export function updateAuthorizationIdentity(
+  id: string,
+  data: { accountEmail?: string | null; identityJson?: string | null },
+): void {
+  getDb()
+    .query(
+      `UPDATE oauth_authorizations SET
+         accountEmail = ?, identityJson = ?,
+         updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ?`,
+    )
+    .run(data.accountEmail ?? null, data.identityJson ?? null, id);
+}
+
+/**
+ * Hard-delete a single authorization row (used by the multi-authorization
+ * DELETE endpoint after best-effort remote revocation). Bindings referencing
+ * it are detached via `ON DELETE SET NULL`.
+ */
+export function deleteAuthorizationById(id: string): boolean {
+  const result = getDb().query("DELETE FROM oauth_authorizations WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
+// ── OAuth pending (DB-backed PKCE state for generic/tracker flows) ──
+
+/** Pending PKCE sessions are valid for 10 minutes (matches the GC window). */
+export const OAUTH_PENDING_TTL_MS = 10 * 60 * 1000;
+
+export type OAuthPendingFlow = "generic" | "tracker";
+
+export interface OAuthPendingRecord {
+  state: string;
+  appId: string;
+  label: string;
+  flow: OAuthPendingFlow;
+  /** Decrypted PKCE code verifier. */
+  codeVerifier: string;
+  nonce: string | null;
+  redirectUri: string;
+  finalRedirect: string | null;
+  userId: string | null;
+  contextJson: string;
+  createdAt: string;
+}
+
+type OAuthPendingRow = {
+  state: string;
+  appId: string;
+  label: string;
+  flow: OAuthPendingFlow;
+  codeVerifier: string;
+  nonce: string | null;
+  redirectUri: string;
+  finalRedirect: string | null;
+  userId: string | null;
+  contextJson: string;
+  createdAt: string;
+};
+
+/** Persist a pending PKCE session for a generic/tracker OAuth flow. */
+export function createOAuthPending(input: {
+  state: string;
+  appId: string;
+  label?: string;
+  flow?: OAuthPendingFlow;
+  /** Plaintext PKCE code verifier — encrypted at rest. */
+  codeVerifier: string;
+  nonce?: string | null;
+  redirectUri: string;
+  finalRedirect?: string | null;
+  userId?: string | null;
+  contextJson?: string;
+}): void {
+  getDb()
+    .query(
+      `INSERT INTO oauth_pending (
+         state, appId, label, flow, codeVerifier, nonce,
+         redirectUri, finalRedirect, userId, contextJson
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.state,
+      input.appId,
+      input.label ?? "default",
+      input.flow ?? "generic",
+      encryptSecret(input.codeVerifier, getEncryptionKey()),
+      input.nonce ?? null,
+      input.redirectUri,
+      input.finalRedirect ?? null,
+      input.userId ?? null,
+      input.contextJson ?? "{}",
+    );
+}
+
+/**
+ * Single-use consume of a generic/tracker pending row by `state`. Returns null
+ * for unknown states and for `mcp`-flow rows (those are owned by the MCP
+ * adapter), leaving the row untouched so the caller can fall through.
+ *
+ * Enforces the 10-minute TTL at consume time: an expired row is deleted and
+ * treated as invalid, so a stalled/failed GC timer cannot widen the validity
+ * window.
+ */
+export function consumeOAuthPending(state: string): OAuthPendingRecord | null {
+  return getDb().transaction(() => {
+    const row = getDb()
+      .query(
+        `SELECT state, appId, label, flow, codeVerifier, nonce, redirectUri,
+                finalRedirect, userId, contextJson, createdAt
+         FROM oauth_pending
+         WHERE state = ? AND flow IN ('generic', 'tracker')`,
+      )
+      .get(state) as OAuthPendingRow | null;
+    if (!row) return null;
+    // Single-use: always delete, whether valid or expired.
+    getDb().query("DELETE FROM oauth_pending WHERE state = ?").run(state);
+    const createdAt = normalizeDateRequired(row.createdAt);
+    const createdMs = new Date(createdAt).getTime();
+    if (Number.isNaN(createdMs) || Date.now() - createdMs > OAUTH_PENDING_TTL_MS) {
+      return null;
+    }
+    return {
+      ...row,
+      codeVerifier: decryptSecret(row.codeVerifier, getEncryptionKey()),
+      createdAt,
+    };
+  })();
+}
+
+/** GC expired generic/tracker pending rows. MCP rows are GC'd separately. */
+export function gcOAuthPending(olderThanMs = 10 * 60 * 1000): number {
+  const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+  return getDb()
+    .query("DELETE FROM oauth_pending WHERE flow IN ('generic', 'tracker') AND createdAt < ?")
+    .run(cutoff).changes;
 }
 
 // ── Provider-string compatibility adapters ──
