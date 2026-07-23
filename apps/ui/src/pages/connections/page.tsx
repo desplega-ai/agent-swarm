@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Check,
   ChevronDown,
+  ChevronsUpDown,
   Copy,
   ExternalLink,
   Info,
@@ -18,6 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAgents } from "@/api/hooks/use-agents";
+import { useConfigs } from "@/api/hooks/use-config-api";
 import { useMcpServers } from "@/api/hooks/use-mcp-servers";
 import {
   useCredentialBindings,
@@ -51,6 +53,7 @@ import type {
   ScriptConnectionKind,
   ScriptConnectionScope,
   ScriptCredentialBinding,
+  SwarmConfigScope,
 } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { MarkdownView } from "@/components/shared/markdown-view";
@@ -69,6 +72,14 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -80,6 +91,7 @@ import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -320,6 +332,233 @@ export function OAuthSourceBadge({ source }: { source: OAuthAppSummary["source"]
     <Badge variant="outline" size="tag" className={OAUTH_SOURCE_COLORS[source]}>
       {OAUTH_SOURCE_LABELS[source]}
     </Badge>
+  );
+}
+
+// Docs entry covering the single-static-callback migration. Linked from the
+// OAuth-app dialog, the app detail page, and the legacy-callback warning.
+export const OAUTH_CALLBACK_MIGRATION_DOCS_URL =
+  "https://docs.agent-swarm.dev/guides/oauth-callback-migration";
+
+// A generic-connections OAuth app registered before the redesign points its
+// stored redirectUri at the legacy per-provider callback
+// (`/api/oauth/<provider>/callback`). The redesign now authorizes against the
+// single static `/api/oauth/callback`, so any NEW (re-)authorization fails with
+// redirect_uri_mismatch until the provider app adds the static callback.
+// Existing tokens + refresh are unaffected. Tracker apps (linear/jira) and DCR
+// apps keep their own dedicated callbacks and are never flagged.
+const LEGACY_PER_PROVIDER_CALLBACK_RE = /\/api\/oauth\/[^/]+\/callback\/?$/i;
+
+export function hasLegacyOAuthCallback(
+  app: Pick<OAuthAppSummary, "redirectUri" | "provider" | "source">,
+  staticCallback?: string | null,
+): boolean {
+  const redirectUri = app.redirectUri?.trim();
+  if (!redirectUri) return false;
+  // Trackers legitimately use their own dedicated callback.
+  if (app.provider === "linear" || app.provider === "jira") return false;
+  // DCR apps use their MCP-specific callback (and are already excluded from the
+  // generic-app list, which filters `mcpServerId IS NULL`) — never flag them.
+  if (app.source === "dcr") return false;
+  // Already migrated to the static callback → nothing to warn about.
+  if (staticCallback && redirectUri === staticCallback) return false;
+  // The static callback is `/api/oauth/callback` (no provider segment); the
+  // legacy shape carries a provider segment between `oauth` and `callback`.
+  return LEGACY_PER_PROVIDER_CALLBACK_RE.test(redirectUri);
+}
+
+export function OAuthCallbackDocsLink({ className }: { className?: string }) {
+  return (
+    <a
+      href={OAUTH_CALLBACK_MIGRATION_DOCS_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(event) => event.stopPropagation()}
+      className={cn(
+        "inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline",
+        className,
+      )}
+    >
+      Callback migration guide
+      <ExternalLink className="size-3" />
+    </a>
+  );
+}
+
+// Amber-triangle indicator for generic OAuth apps still registered against the
+// legacy per-provider callback. The triangle links to the migration guide; the
+// tooltip explains the failure mode. Renders nothing for healthy / excluded apps.
+export function LegacyCallbackWarning({
+  app,
+  staticCallback,
+  className,
+}: {
+  app: OAuthAppSummary;
+  staticCallback?: string | null;
+  className?: string;
+}) {
+  if (!hasLegacyOAuthCallback(app, staticCallback)) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <a
+          href={OAUTH_CALLBACK_MIGRATION_DOCS_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(event) => event.stopPropagation()}
+          aria-label="Legacy OAuth callback — migration required"
+          className={cn(
+            "inline-flex shrink-0 text-status-warning-strong hover:text-status-warning",
+            className,
+          )}
+        >
+          <AlertTriangle className="size-4" />
+        </a>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs whitespace-normal">
+        This app was registered with a legacy callback URL. Re-authorization will fail until you add{" "}
+        <span className="font-mono">{staticCallback ?? "the static /api/oauth/callback"}</span> to
+        the provider registration. Click for the migration guide.
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+const CONFIG_SCOPE_BADGE_CLASSES: Record<SwarmConfigScope, string> = {
+  global: "border-status-neutral/30 text-status-neutral",
+  agent: "border-status-info/30 text-status-info-strong",
+  repo: "border-status-paused/30 text-status-paused-strong",
+};
+
+function ConfigScopeBadge({ scope, className }: { scope: SwarmConfigScope; className?: string }) {
+  return (
+    <Badge
+      variant="outline"
+      size="tag"
+      className={cn(CONFIG_SCOPE_BADGE_CLASSES[scope], className)}
+    >
+      {scope}
+    </Badge>
+  );
+}
+
+// Creatable combobox over existing swarm-config KEYS (never values). Lists global
+// keys always, plus keys for the selected binding/connection scope (filtered by
+// scopeId when one is chosen), each labeled with its scope. Typing a new/unknown
+// key is always allowed — selecting an existing key is optional.
+function ConfigKeyCombobox({
+  value,
+  onChange,
+  scope,
+  scopeId,
+  placeholder = "GITHUB_TOKEN",
+  id,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  scope: SwarmConfigScope;
+  scopeId?: string | null;
+  placeholder?: string;
+  id?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  // Keys only — never request secret values.
+  const { data: globalConfigs } = useConfigs({ scope: "global" });
+  const scopedFilters =
+    scope === "global" ? { scope: "global" as const } : scopeId ? { scope, scopeId } : { scope };
+  const { data: scopedConfigs } = useConfigs(scopedFilters);
+
+  const options = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Array<{ key: string; scope: SwarmConfigScope }> = [];
+    for (const config of [...(globalConfigs ?? []), ...(scopedConfigs ?? [])]) {
+      const dedupeKey = `${config.key}::${config.scope}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      out.push({ key: config.key, scope: config.scope });
+    }
+    out.sort((a, b) => a.key.localeCompare(b.key) || a.scope.localeCompare(b.scope));
+    return out;
+  }, [globalConfigs, scopedConfigs]);
+
+  const trimmed = search.trim();
+  const hasExactMatch = options.some((option) => option.key === trimmed);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          id={id}
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="w-full justify-between font-normal"
+        >
+          <span
+            className={cn(
+              "truncate font-mono text-sm",
+              !value && "font-sans text-muted-foreground",
+            )}
+          >
+            {value || placeholder}
+          </span>
+          <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command>
+          <CommandInput
+            placeholder="Search or type a config key…"
+            value={search}
+            onValueChange={setSearch}
+          />
+          <CommandList>
+            {trimmed && !hasExactMatch ? (
+              <CommandGroup heading="New key">
+                <CommandItem
+                  value={`__create__ ${trimmed}`}
+                  onSelect={() => {
+                    onChange(trimmed);
+                    setOpen(false);
+                  }}
+                >
+                  <Plus className="mr-2 size-4" />
+                  <span className="truncate">
+                    Use “<span className="font-mono">{trimmed}</span>”
+                  </span>
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
+            <CommandEmpty>No matching config key. Type to create one.</CommandEmpty>
+            {options.length ? (
+              <CommandGroup heading="Existing keys">
+                {options.map((option) => (
+                  <CommandItem
+                    key={`${option.key}::${option.scope}`}
+                    value={`${option.key} ${option.scope}`}
+                    onSelect={() => {
+                      onChange(option.key);
+                      setOpen(false);
+                    }}
+                  >
+                    <Check
+                      className={cn(
+                        "mr-2 size-4 shrink-0",
+                        value === option.key ? "opacity-100" : "opacity-0",
+                      )}
+                    />
+                    <span className="truncate font-mono text-xs">{option.key}</span>
+                    <ConfigScopeBadge scope={option.scope} className="ml-auto" />
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ) : null}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -1430,13 +1669,13 @@ export function AddConnectionDialog({
                     </div>
                     {useExistingConfigKey ? (
                       <div className="space-y-2">
-                        <FieldLabel tip="Existing swarm config key whose value is substituted only for allowed hosts.">
+                        <FieldLabel tip="Existing swarm config key whose value is substituted only for allowed hosts. Pick a stored key or type a new one.">
                           Config Key
                         </FieldLabel>
-                        <Input
+                        <ConfigKeyCombobox
                           value={authConfigKey}
-                          onChange={(event) => setAuthConfigKey(event.target.value)}
-                          placeholder="GITHUB_TOKEN"
+                          onChange={setAuthConfigKey}
+                          scope="global"
                         />
                       </div>
                     ) : (
@@ -1585,13 +1824,14 @@ function CredentialBindingDialog({
         <div className="space-y-6">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <FieldLabel tip="Secret config key referenced by the redacted placeholder in templates.">
+              <FieldLabel tip="Secret config key referenced by the redacted placeholder in templates. Pick a stored key or type a new one.">
                 Config Key
               </FieldLabel>
-              <Input
+              <ConfigKeyCombobox
                 value={configKey}
-                onChange={(event) => setConfigKey(event.target.value)}
-                placeholder="GITHUB_TOKEN"
+                onChange={setConfigKey}
+                scope={scope}
+                scopeId={scopeId || null}
               />
             </div>
             <div className="space-y-2">
@@ -2012,6 +2252,9 @@ function OAuthAppsSection({
   const [editOpen, setEditOpen] = useState(false);
   const [editApp, setEditApp] = useState<OAuthAppSummary | undefined>();
   const deleteApp = useDeleteOAuthApp();
+  // The single static callback every authorization now redirects to. Used to
+  // flag apps still registered against the legacy per-provider callback.
+  const { data: staticCallback } = useOAuthRedirectUri();
 
   const columnDefs = useMemo<ColDef<OAuthAppSummary>[]>(
     () => [
@@ -2050,6 +2293,7 @@ function OAuthAppsSection({
         cellRenderer: (params: ICellRendererParams<OAuthAppSummary>) =>
           params.data ? (
             <span className="flex min-w-0 items-center gap-1.5">
+              <LegacyCallbackWarning app={params.data} staticCallback={staticCallback} />
               <span className="truncate text-xs text-muted-foreground">
                 {params.data.redirectUri}
               </span>
@@ -2142,7 +2386,7 @@ function OAuthAppsSection({
         },
       },
     ],
-    [deleteApp],
+    [deleteApp, staticCallback],
   );
 
   return (
@@ -2398,6 +2642,7 @@ export function OAuthAppDialog({
               Register this exact URL in the provider console first — the authorization won't
               complete until it's whitelisted there.
             </p>
+            <OAuthCallbackDocsLink />
           </div>
 
           {!isEdit ? (

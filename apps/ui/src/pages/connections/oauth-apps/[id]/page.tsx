@@ -9,9 +9,11 @@ import {
   useOAuthAppAuthorizations,
   useOAuthApps,
   useOAuthAuthorizeUrl,
+  useOAuthRedirectUri,
   useRefreshOAuthAuthorization,
 } from "@/api/hooks/use-script-connections";
 import type { OAuthAppSummary } from "@/api/types";
+import { AlertCallout } from "@/components/ui/alert-callout";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,9 +50,12 @@ import { formatSmartTime } from "@/lib/utils";
 import { BackButton } from "@/pages/connections/components/back-button";
 import { CopyIconButton } from "@/pages/connections/components/copy-icon-button";
 import {
+  hasLegacyOAuthCallback,
   InlineError,
+  LegacyCallbackWarning,
   OAuthAppDialog,
   OAuthAuthorizationStatusBadge,
+  OAuthCallbackDocsLink,
   OAuthSourceBadge,
   toastMutationError,
 } from "@/pages/connections/page";
@@ -143,6 +148,7 @@ export default function OAuthAppDetailPage() {
     apps.find((candidate) => candidate.id === decoded) ??
     apps.find((candidate) => candidate.provider === decoded);
   const { data: authorizations = [] } = useOAuthAppAuthorizations(app?.id);
+  const { data: staticCallback } = useOAuthRedirectUri();
   const authorize = useOAuthAuthorizeUrl();
   const refresh = useRefreshOAuthAuthorization();
   const revoke = useDeleteOAuthAuthorization();
@@ -198,6 +204,7 @@ export default function OAuthAppDetailPage() {
             <BackButton fallback="/connections?tab=oauth-apps" iconOnly />
             <span className="truncate text-xl font-semibold">{app.provider}</span>
             <OAuthSourceBadge source={app.source} />
+            <LegacyCallbackWarning app={app} staticCallback={staticCallback} />
           </span>
         }
         description={`OAuth app for ${app.clientId}`}
@@ -246,6 +253,23 @@ export default function OAuthAppDetailPage() {
         className="lg:flex-1 lg:min-h-0"
         main={
           <div className="space-y-4 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
+            {hasLegacyOAuthCallback(app, staticCallback) ? (
+              <AlertCallout tone="warning" icon={AlertTriangle}>
+                <div className="space-y-1">
+                  <p>
+                    This app is registered with a legacy callback URL (
+                    <span className="font-mono break-all">{app.redirectUri}</span>).
+                    Re-authorization will fail with{" "}
+                    <span className="font-mono">redirect_uri_mismatch</span> until you add{" "}
+                    <span className="font-mono break-all">
+                      {staticCallback ?? "the static /api/oauth/callback"}
+                    </span>{" "}
+                    to the provider app registration. Existing tokens and refresh keep working.
+                  </p>
+                  <OAuthCallbackDocsLink />
+                </div>
+              </AlertCallout>
+            ) : null}
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Authorizations</CardTitle>
@@ -381,7 +405,12 @@ export default function OAuthAppDetailPage() {
                 />
                 <InfoRow
                   label="Redirect URI"
-                  value={<CopyableValue value={app.redirectUri} label="Copy redirect URI" />}
+                  value={
+                    <div className="space-y-1">
+                      <CopyableValue value={app.redirectUri} label="Copy redirect URI" />
+                      <OAuthCallbackDocsLink />
+                    </div>
+                  }
                 />
                 <InfoRow
                   label="Authorize URL"
