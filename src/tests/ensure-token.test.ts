@@ -405,7 +405,7 @@ describe("ensureTokenOrThrow", () => {
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
 
-    globalThis.fetch = mock(() => {
+    const fetchSpy = mock(() => {
       storeOAuthTokens("jira", {
         accessToken: "concurrent-jira-access",
         refreshToken: "concurrent-jira-refresh",
@@ -423,9 +423,13 @@ describe("ensureTokenOrThrow", () => {
         ),
       );
     });
+    globalThis.fetch = fetchSpy;
 
-    await expect(ensureTokenOrThrow("jira")).rejects.toThrow(/stored refresh token changed/);
+    // The CAS write loses to the concurrent writer; the loop reconciles to the
+    // winner's row instead of persisting (or re-rotating with) the stale result.
+    await ensureTokenOrThrow("jira");
 
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     const tokens = getOAuthTokens("jira");
     expect(tokens?.accessToken).toBe("concurrent-jira-access");
     expect(tokens?.refreshToken).toBe("concurrent-jira-refresh");
@@ -438,7 +442,7 @@ describe("ensureTokenOrThrow", () => {
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
 
-    globalThis.fetch = mock(() => {
+    const fetchSpy = mock(() => {
       storeOAuthTokens("jira", {
         accessToken: "same-refresh-concurrent-winner",
         refreshToken: "stable-jira-refresh",
@@ -456,9 +460,14 @@ describe("ensureTokenOrThrow", () => {
         ),
       );
     });
+    globalThis.fetch = fetchSpy;
 
-    await expect(ensureTokenOrThrow("jira")).rejects.toThrow(/no rows updated/);
+    // Same refresh-token string, but the concurrent write bumped tokenVersion —
+    // the CAS keyed on the loaded version loses and the winner's row survives.
+    // (Raw string equality can't detect this once tokens use per-write IVs.)
+    await ensureTokenOrThrow("jira");
 
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     const tokens = getOAuthTokens("jira");
     expect(tokens?.accessToken).toBe("same-refresh-concurrent-winner");
     expect(tokens?.refreshToken).toBe("stable-jira-refresh");

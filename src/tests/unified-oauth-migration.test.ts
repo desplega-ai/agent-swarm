@@ -8,13 +8,11 @@ const NOW = "2026-07-21T12:00:00.000Z";
 
 async function pre117Database(path = ":memory:"): Promise<Database> {
   const database = new Database(path, { create: true });
-  const migrationSql = await Bun.file(
-    `${import.meta.dir}/../be/migrations/117_unified_oauth.sql`,
-  ).text();
-  const checksum = new Bun.CryptoHasher("sha256").update(migrationSql).digest("hex");
 
-  // Mark 117 as already applied so the real runner constructs an exact schema
-  // through 116. Removing this sentinel later makes the same runner apply 117.
+  // Mark 117 and everything after it as already applied so the real runner
+  // constructs an exact schema through 116 (later migrations like 120 depend on
+  // 117's columns and would crash on the legacy schema). Removing the sentinels
+  // later makes the same runner apply 117+ in order.
   database.run(`
     CREATE TABLE _migrations (
       version INTEGER PRIMARY KEY,
@@ -23,9 +21,23 @@ async function pre117Database(path = ":memory:"): Promise<Database> {
       checksum TEXT NOT NULL
     )
   `);
-  database
-    .query("INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (117, ?, ?, ?)")
-    .run("117_unified_oauth", NOW, checksum);
+  const migrationsDir = `${import.meta.dir}/../be/migrations`;
+  const post116Files = (await Array.fromAsync(new Bun.Glob("*.sql").scan(migrationsDir)))
+    .filter((file) => parseInt(file.split("_")[0] ?? "0", 10) >= 117)
+    .sort();
+  const insertSentinel = database.query(
+    "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
+  );
+  for (const file of post116Files) {
+    const sql = await Bun.file(`${migrationsDir}/${file}`).text();
+    const checksum = new Bun.CryptoHasher("sha256").update(sql).digest("hex");
+    insertSentinel.run(
+      parseInt(file.split("_")[0] ?? "0", 10),
+      file.replace(".sql", ""),
+      NOW,
+      checksum,
+    );
+  }
   runMigrations(database);
 
   const appRows = [
@@ -284,9 +296,9 @@ describe("migration 117 unified OAuth storage", () => {
             .query<{ count: number }, []>("SELECT count(*) AS count FROM mcp_oauth_tokens")
             .get()?.count,
         ).toBe(2);
-        // The sentinel exists only to make runMigrations stop at 116. Remove
-        // it before handing the file to a real boot so migration 117 is pending.
-        database.query("DELETE FROM _migrations WHERE version = 117").run();
+        // The sentinels exist only to make runMigrations stop at 116. Remove
+        // them before handing the file to a real boot so 117+ are pending.
+        database.query("DELETE FROM _migrations WHERE version >= 117").run();
       } finally {
         database.close();
       }
@@ -297,7 +309,7 @@ describe("migration 117 unified OAuth storage", () => {
   test("carries legacy rows, lifts quirks, re-keys bindings, and encrypts idempotently", async () => {
     const database = await pre117Database();
     try {
-      database.query("DELETE FROM _migrations WHERE version = 117").run();
+      database.query("DELETE FROM _migrations WHERE version >= 117").run();
       runMigrations(database);
 
       expect(
@@ -330,7 +342,8 @@ describe("migration 117 unified OAuth storage", () => {
       expect(linear?.id).toBe("app-linear");
       expect(linear?.scopeSeparator).toBe(",");
       expect(JSON.parse(linear?.extraParamsJson ?? "{}")).toEqual({ prompt: "consent" });
-      expect(JSON.parse(linear?.metadata ?? "{}")).toEqual({ actor: "app" });
+      // Migration 121 backfills metadata.keepAlive on the migrated tracker apps.
+      expect(JSON.parse(linear?.metadata ?? "{}")).toEqual({ actor: "app", keepAlive: true });
 
       const jira = database
         .query<
@@ -357,6 +370,7 @@ describe("migration 117 unified OAuth storage", () => {
       expect(JSON.parse(jira?.metadata ?? "{}")).toEqual({
         cloudId: "cloud-1",
         webhookIds: ["hook-1"],
+        keepAlive: true,
       });
 
       const manualMcp = database

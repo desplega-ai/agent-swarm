@@ -180,6 +180,11 @@ export async function ensureAuthorizationTokenOrThrow(
     while (true) {
       const current = getAuthorizationById(authorizationId);
       if (!current || current.status === "revoked") return;
+      // Another caller refreshed (tokenVersion bumped) since this call loaded
+      // the row — its work satisfies ours. Without this check a waiter whose
+      // bufferMs exceeds the token lifetime (e.g. force refresh) would rotate
+      // again immediately after the winner, burning provider refresh calls.
+      if (current.tokenVersion !== initial.tokenVersion) return;
       if (!authorizationNeedsRefresh(current, bufferMs)) return;
 
       const app = getOAuthAppById(current.appId);
@@ -211,6 +216,7 @@ export async function ensureAuthorizationTokenOrThrow(
         // (tokenVersion bumped → no longer expiring) or revoked while we waited.
         const locked = getAuthorizationById(authorizationId);
         if (!locked || locked.status === "revoked") return;
+        if (locked.tokenVersion !== initial.tokenVersion) return;
         if (!authorizationNeedsRefresh(locked, bufferMs)) return;
 
         const lockedApp = getOAuthAppById(locked.appId);
