@@ -14,7 +14,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAgents } from "@/api/hooks/use-agents";
@@ -36,10 +36,11 @@ import {
   useUpsertScriptConnection,
 } from "@/api/hooks/use-script-connections";
 import type {
+  ConnectionAuthInput,
+  ConnectionAuthType,
   CredentialAuthKind,
   IntegrationsCatalogEntry,
   IntegrationsSurfaceCredential,
-  IntegrationsSurfaceMechanics,
   IntegrationsSurfaceResponse,
   OAuthAppSummary,
   OAuthAuthorizationStatus,
@@ -94,6 +95,7 @@ import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { cn, formatSmartTime } from "@/lib/utils";
 import { CatalogBrowser } from "@/pages/connections/components/catalog-browser";
+import { OAuthInlineConnect } from "@/pages/connections/components/oauth-inline-connect";
 import { PlaygroundPanel } from "./playground-panel";
 
 const KIND_OPTIONS: Array<ScriptConnectionKind | "all"> = ["all", "openapi", "graphql", "mcp"];
@@ -553,24 +555,6 @@ const integrationsSurfaceCache = new Map<string, IntegrationsSurfaceResponse>();
 
 const SURFACE_DOMAIN_PATTERN = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
 
-function surfaceConfigKeySuggestion(credentialId: string, domain: string): string {
-  const fallback = `${domain.split(".")[0] ?? "API"}_API_KEY`;
-  const cleaned = (credentialId || fallback)
-    .replace(/[^A-Za-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .toUpperCase();
-  return cleaned || "API_KEY";
-}
-
-function surfaceHeaderTemplate(
-  mechanics: IntegrationsSurfaceMechanics,
-  configKey: string,
-): string | null {
-  if (mechanics.in !== "header" || !mechanics.headerName) return null;
-  const scheme = mechanics.scheme ? `${mechanics.scheme} ` : "";
-  return `${mechanics.headerName}: ${scheme}${configPlaceholder(configKey)}`;
-}
-
 /**
  * Compact markdown for integrations.sh texts (credential setup notes, domain
  * summaries). Links open in new tabs via the shared MarkdownView overrides.
@@ -739,14 +723,12 @@ function McpGuidancePanel({
 export function AddConnectionDialog({
   open,
   onOpenChange,
-  bindings,
   oauthApps,
   mcpServers,
   connection,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  bindings: ScriptCredentialBinding[];
   oauthApps: OAuthAppSummary[];
   mcpServers: Array<{ id: string; name: string }>;
   connection?: ScriptConnectionDetail | ScriptConnection;
@@ -773,24 +755,22 @@ export function AddConnectionDialog({
   const [specMode, setSpecMode] = useState<"url" | "inline">("url");
   const [openapiSpecUrl, setOpenapiSpecUrl] = useState("");
   const [openapiSpecJson, setOpenapiSpecJson] = useState("");
-  const [credentialMode, setCredentialMode] = useState<"none" | "existing" | "inline">("none");
-  const [credentialBindingId, setCredentialBindingId] = useState("");
-  const [configKey, setConfigKey] = useState("");
-  const [headerTemplate, setHeaderTemplate] = useState(defaultHeaderTemplate(""));
-  const [queryTemplate, setQueryTemplate] = useState("");
-  const [authKind, setAuthKind] = useState<CredentialAuthKind>("config");
-  const [oauthProvider, setOauthProvider] = useState("");
+  // Embedded connection auth (step-7). One inline auth intent submitted with the
+  // connection; the server derives + auto-manages the credential binding. The
+  // separate binding-creation path lives only under "Raw fetch credentials".
+  const [authType, setAuthType] = useState<ConnectionAuthType>("none");
+  const [authSecret, setAuthSecret] = useState("");
+  const [useExistingConfigKey, setUseExistingConfigKey] = useState(false);
+  const [authConfigKey, setAuthConfigKey] = useState("");
+  const [authHeaderName, setAuthHeaderName] = useState("Authorization");
+  const [authParamName, setAuthParamName] = useState("api_key");
+  const [authAuthorizationId, setAuthAuthorizationId] = useState("");
+  const [suggestedPresetId, setSuggestedPresetId] = useState<string | undefined>(undefined);
+  // Set when a blessed catalog entry is selected: the server resolves the spec
+  // from the in-repo vendored copy (step-2) instead of a fetched URL.
+  const [vendoredSlug, setVendoredSlug] = useState("");
   const [appliedCredentialId, setAppliedCredentialId] = useState<string | null>(null);
-  const previousAutoHeader = useRef(defaultHeaderTemplate(""));
   const isEdit = Boolean(connection);
-
-  useEffect(() => {
-    const next = defaultHeaderTemplate(configKey);
-    if (!headerTemplate || headerTemplate === previousAutoHeader.current) {
-      setHeaderTemplate(next);
-    }
-    previousAutoHeader.current = next;
-  }, [configKey, headerTemplate]);
 
   // Reset form fields + loaded surface state. Runs on open, on close, and
   // when navigating back to the catalog step so a new selection starts clean.
@@ -811,15 +791,26 @@ export function AddConnectionDialog({
         : "",
     );
     setOpenapiSpecJson("");
-    setCredentialMode(connection?.credentialBindingId ? "existing" : "none");
-    setCredentialBindingId(connection?.credentialBindingId ?? "");
-    setConfigKey("");
-    setHeaderTemplate(defaultHeaderTemplate(""));
-    setQueryTemplate("");
-    setAuthKind("config");
-    setOauthProvider("");
+    setVendoredSlug("");
+    setSuggestedPresetId(undefined);
+    // Prefill embedded auth from the connection's write-only summary (secret is
+    // never echoed — the field stays blank and means "keep current").
+    const authSummary = connection?.auth;
+    setAuthType(authSummary?.type ?? "none");
+    setAuthSecret("");
+    const sharedKey = Boolean(
+      authSummary?.configKey && authSummary.configKey !== `connection.${connection?.slug}.secret`,
+    );
+    setUseExistingConfigKey(sharedKey);
+    setAuthConfigKey(sharedKey ? (authSummary?.configKey ?? "") : "");
+    setAuthHeaderName(
+      authSummary?.type === "header" ? (authSummary.paramName ?? "Authorization") : "Authorization",
+    );
+    setAuthParamName(
+      authSummary?.type === "query" ? (authSummary.paramName ?? "api_key") : "api_key",
+    );
+    setAuthAuthorizationId(authSummary?.authorizationId ?? "");
     setAppliedCredentialId(null);
-    previousAutoHeader.current = defaultHeaderTemplate("");
   }, [connection]);
 
   useEffect(() => {
@@ -864,16 +855,25 @@ export function AddConnectionDialog({
       setSpecMode("url");
       setOpenapiSpecUrl((current) => (current.trim() ? current : specUrl));
     }
+    // Suggest an auth type from the surface's declared mechanics, without
+    // overriding a choice the user has already made.
     const mechanics = httpSurface.auth.mechanics;
-    if (httpSurface.auth.required && mechanics?.in === "header" && mechanics.headerName) {
-      const suggestedKey = surfaceConfigKeySuggestion(
-        httpSurface.auth.credentialIds[0] ?? "",
-        data.domain,
-      );
-      const template = surfaceHeaderTemplate(mechanics, suggestedKey);
-      setCredentialMode((current) => (current === "none" ? "inline" : current));
-      setConfigKey((current) => (current.trim() ? current : suggestedKey));
-      if (template) setHeaderTemplate(template);
+    if (httpSurface.auth.required && mechanics) {
+      let suggested: ConnectionAuthType | null = null;
+      if (mechanics.in === "query") {
+        suggested = "query";
+      } else if (mechanics.in === "header") {
+        if (mechanics.headerName && mechanics.headerName.toLowerCase() !== "authorization") {
+          suggested = "header";
+          setAuthHeaderName(mechanics.headerName);
+        } else {
+          suggested = "bearer";
+        }
+      }
+      if (suggested)
+        setAuthType((current) =>
+          current === "none" ? (suggested as ConnectionAuthType) : current,
+        );
     }
   }
 
@@ -881,16 +881,25 @@ export function AddConnectionDialog({
   // credential section. OAuth-type credentials flip authKind to oauth (the
   // token comes from an OAuth app, not a stored config secret).
   function applySurfaceCredential(id: string, credential: IntegrationsSurfaceCredential) {
-    const key = surfaceConfigKeySuggestion(id, surface?.domain ?? "");
     const mechanics =
       surface?.surfaces.find((entry) => entry.type === "http")?.auth.mechanics ?? null;
     const isOauth = credential.type.toLowerCase().includes("oauth");
-    setCredentialMode("inline");
-    setConfigKey(key);
-    const template = mechanics ? surfaceHeaderTemplate(mechanics, key) : null;
-    setHeaderTemplate(template ?? defaultHeaderTemplate(key));
-    setAuthKind(isOauth ? "oauth" : "config");
-    if (!isOauth) setOauthProvider("");
+    if (isOauth) {
+      setAuthType("oauth");
+    } else if (mechanics?.in === "query") {
+      setAuthType("query");
+    } else if (
+      mechanics?.in === "header" &&
+      mechanics.headerName &&
+      mechanics.headerName.toLowerCase() !== "authorization"
+    ) {
+      setAuthType("header");
+      setAuthHeaderName(mechanics.headerName);
+    } else {
+      setAuthType("bearer");
+    }
+    setUseExistingConfigKey(false);
+    setAuthSecret("");
     setAppliedCredentialId(id);
   }
 
@@ -950,10 +959,14 @@ export function AddConnectionDialog({
     setStep("form");
     setCatalogHint("");
     setSurface(null);
+    setVendoredSlug("");
     setKind(entry.kind);
     setSlug(normalizeScriptSlug(entry.slug || entry.name));
     setDisplayName(entry.name);
     if (entry.domain) setAllowedHosts(entry.domain);
+    // Blessed entries may suggest a curated OAuth preset — pre-arm the oauth path.
+    setSuggestedPresetId(entry.presetId);
+    if (entry.presetId) setAuthType((current) => (current === "none" ? "oauth" : current));
 
     if (entry.kind === "graphql") {
       setBaseUrl(entry.url);
@@ -967,6 +980,16 @@ export function AddConnectionDialog({
     }
     setSpecMode("url");
     setOpenapiSpecUrl("");
+    // Blessed OpenAPI entries resolve from the in-repo vendored spec and the
+    // server extracts the base URL, so leave both empty and skip the apis.guru
+    // fetch. Non-blessed entries keep the apis.guru client preview.
+    if (entry.vendoredSlug) {
+      setVendoredSlug(entry.vendoredSlug);
+      setBaseUrl("");
+      if (entry.domain) void loadSurface(entry.domain, "openapi");
+      setCatalogHint("Blessed integration — spec and base URL are resolved on save.");
+      return;
+    }
     setBaseUrl(entry.url);
     setResolvingCatalogId(entry.id);
     const [resolved] = await Promise.all([
@@ -982,26 +1005,52 @@ export function AddConnectionDialog({
     }
   }
 
+  // Resolve the form's auth section into the step-7 embedded-auth object. Returns
+  // undefined when there is no auth intent to send (untouched edit → preserve).
+  function buildAuthInput(): ConnectionAuthInput | undefined {
+    if (authType === "none") {
+      // Untouched none-on-edit → send nothing (preserve). Otherwise clear auth.
+      return isEdit && (connection?.auth?.type ?? "none") === "none" ? undefined : { type: "none" };
+    }
+    if (authType === "oauth") {
+      if (!authAuthorizationId) return undefined;
+      return { type: "oauth", authorizationId: authAuthorizationId };
+    }
+    // bearer / header / query: pick the credential source. A blank secret on edit
+    // re-sends the derived key (no `secret`) so the stored value is preserved.
+    const credentialFields: { secret?: string; configKey?: string } = useExistingConfigKey
+      ? { configKey: authConfigKey.trim() }
+      : authSecret.trim()
+        ? { secret: authSecret.trim() }
+        : isEdit && connection?.auth?.configKey
+          ? { configKey: connection.auth.configKey }
+          : {};
+    if (authType === "header") {
+      return {
+        type: "header",
+        headerName: authHeaderName.trim() || "Authorization",
+        ...credentialFields,
+      };
+    }
+    if (authType === "query") {
+      return {
+        type: "query",
+        paramName: authParamName.trim() || "api_key",
+        ...credentialFields,
+      };
+    }
+    return { type: "bearer", ...credentialFields };
+  }
+
   async function submit() {
     const parsedHosts = splitList(allowedHosts);
-    const credential =
-      credentialMode === "existing"
-        ? { credentialBindingId: credentialBindingId || null }
-        : credentialMode === "inline"
-          ? {
-              configKey,
-              headerTemplate: optionalString(headerTemplate),
-              queryTemplate: optionalString(queryTemplate),
-              authKind,
-              oauthProvider: authKind === "oauth" ? optionalString(oauthProvider) : undefined,
-            }
-          : {};
+    const authInput = kind === "mcp" ? undefined : buildAuthInput();
     const common = {
       id: connection?.id,
       slug,
       displayName: optionalString(displayName),
       allowedHosts: parsedHosts.length ? parsedHosts : undefined,
-      ...credential,
+      ...(authInput ? { auth: authInput } : {}),
     };
 
     try {
@@ -1024,12 +1073,15 @@ export function AddConnectionDialog({
         await upsert.mutateAsync({
           ...common,
           kind: "openapi",
-          baseUrl,
-          ...(specMode === "url" && openapiSpecUrl.trim()
-            ? { openapiSpecUrl: openapiSpecUrl.trim() }
-            : specMode === "inline" && openapiSpecJson.trim()
-              ? { openapiSpecJson: openapiSpecJson.trim() }
-              : {}),
+          // Base URL is optional: the server extracts spec-declared servers.
+          ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+          ...(vendoredSlug && !isEdit
+            ? { specSource: { kind: "vendored" as const, slug: vendoredSlug } }
+            : specMode === "url" && openapiSpecUrl.trim()
+              ? { openapiSpecUrl: openapiSpecUrl.trim() }
+              : specMode === "inline" && openapiSpecJson.trim()
+                ? { openapiSpecJson: openapiSpecJson.trim() }
+                : {}),
         });
       }
     } catch (error) {
@@ -1044,17 +1096,28 @@ export function AddConnectionDialog({
 
   const specUrlIsYaml = /\.ya?ml($|[?#])/i.test(openapiSpecUrl.trim());
 
-  const canSubmit =
+  const authReady =
+    authType === "none"
+      ? true
+      : authType === "oauth"
+        ? Boolean(authAuthorizationId)
+        : useExistingConfigKey
+          ? Boolean(authConfigKey.trim())
+          : Boolean(authSecret.trim()) ||
+            (isEdit && Boolean(connection?.auth && connection.auth.type !== "none"));
+
+  const canSubmit = Boolean(
     slug.trim() &&
-    (kind === "mcp"
-      ? mcpServerId
-      : baseUrl.trim() &&
-        (kind === "graphql" ||
-          isEdit ||
-          (specMode === "url" ? openapiSpecUrl.trim() : openapiSpecJson.trim()))) &&
-    (credentialMode !== "existing" || credentialBindingId) &&
-    (credentialMode !== "inline" ||
-      (configKey.trim() && (authKind !== "oauth" || oauthProvider.trim())));
+      (kind === "mcp"
+        ? mcpServerId
+        : kind === "graphql"
+          ? baseUrl.trim()
+          : // openapi: a vendored spec, an existing connection, or a provided spec source.
+            vendoredSlug ||
+            isEdit ||
+            (specMode === "url" ? openapiSpecUrl.trim() : openapiSpecJson.trim())) &&
+      authReady,
+  );
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -1280,134 +1343,101 @@ export function AddConnectionDialog({
               <div className="space-y-4 rounded-md border p-4">
                 <div className="grid gap-4 md:grid-cols-3">
                   <div className="space-y-2">
-                    <FieldLabel tip="Choose no credential, reuse an existing binding, or create a binding while saving this connection.">
-                      Credential
+                    <FieldLabel tip="How scripts authenticate to this API. Inline secrets are stored write-only and substituted only for allowed hosts at egress.">
+                      Auth
                     </FieldLabel>
                     <Select
-                      value={credentialMode}
-                      onValueChange={(value) =>
-                        setCredentialMode(value as "none" | "existing" | "inline")
-                      }
+                      value={authType}
+                      onValueChange={(value) => setAuthType(value as ConnectionAuthType)}
                     >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">None</SelectItem>
-                        <SelectItem value="existing">Existing</SelectItem>
-                        <SelectItem value="inline">Create Inline</SelectItem>
+                        <SelectItem value="bearer">Bearer token</SelectItem>
+                        <SelectItem value="header">Custom header</SelectItem>
+                        <SelectItem value="query">Query parameter</SelectItem>
+                        <SelectItem value="oauth">OAuth</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                  {credentialMode === "existing" ? (
-                    <div className="space-y-2 md:col-span-2">
-                      <FieldLabel tip="Existing credential binding whose config key and templates apply to this connection.">
-                        Binding
+                  {authType === "header" ? (
+                    <div className="space-y-2">
+                      <FieldLabel tip="Header name that carries the credential, e.g. X-API-Key.">
+                        Header Name
                       </FieldLabel>
-                      <Select value={credentialBindingId} onValueChange={setCredentialBindingId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select binding" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {bindings.map((binding) => (
-                            <SelectItem key={binding.id} value={binding.id}>
-                              {binding.configKey} ({binding.authKind})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <Input
+                        value={authHeaderName}
+                        onChange={(event) => setAuthHeaderName(event.target.value)}
+                        placeholder="X-API-Key"
+                      />
+                    </div>
+                  ) : null}
+                  {authType === "query" ? (
+                    <div className="space-y-2">
+                      <FieldLabel tip="Query parameter name that carries the credential, e.g. api_key.">
+                        Param Name
+                      </FieldLabel>
+                      <Input
+                        value={authParamName}
+                        onChange={(event) => setAuthParamName(event.target.value)}
+                        placeholder="api_key"
+                      />
                     </div>
                   ) : null}
                 </div>
 
-                {credentialMode === "inline" ? (
-                  <div className="space-y-4">
-                    <div className="grid gap-4 md:grid-cols-3">
+                {authType === "bearer" || authType === "header" || authType === "query" ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <FieldLabel tip="Reuse a shared/rotated secret already stored under a swarm config key instead of entering a value inline.">
+                        Use existing config key
+                      </FieldLabel>
+                      <Switch
+                        checked={useExistingConfigKey}
+                        onCheckedChange={setUseExistingConfigKey}
+                      />
+                    </div>
+                    {useExistingConfigKey ? (
                       <div className="space-y-2">
-                        <FieldLabel tip="Swarm config secret key whose value is substituted only for allowed hosts.">
+                        <FieldLabel tip="Existing swarm config key whose value is substituted only for allowed hosts.">
                           Config Key
                         </FieldLabel>
                         <Input
-                          value={configKey}
-                          onChange={(event) => setConfigKey(event.target.value)}
+                          value={authConfigKey}
+                          onChange={(event) => setAuthConfigKey(event.target.value)}
                           placeholder="GITHUB_TOKEN"
                         />
                       </div>
+                    ) : (
                       <div className="space-y-2">
-                        <FieldLabel tip="Config uses a stored swarm secret; OAuth uses the selected OAuth app token.">
-                          Auth Kind
+                        <FieldLabel tip="Secret value stored write-only under connection.<slug>.secret. Never shown again.">
+                          Secret
                         </FieldLabel>
-                        <Select
-                          value={authKind}
-                          onValueChange={(value) => setAuthKind(value as CredentialAuthKind)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="config">Config</SelectItem>
-                            <SelectItem value="oauth">OAuth</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <Input
+                          type="password"
+                          value={authSecret}
+                          onChange={(event) => setAuthSecret(event.target.value)}
+                          autoComplete="new-password"
+                          placeholder={
+                            isEdit && connection?.auth && connection.auth.type !== "none"
+                              ? "Leave blank to keep current secret"
+                              : "Paste the token or API key"
+                          }
+                        />
                       </div>
-                      {authKind === "oauth" ? (
-                        <div className="space-y-2">
-                          <FieldLabel tip="Provider slug from OAuth Apps; its token supplies this credential.">
-                            OAuth Provider
-                          </FieldLabel>
-                          <Input
-                            value={oauthProvider}
-                            onChange={(event) => setOauthProvider(event.target.value)}
-                            list="oauth-provider-options"
-                            placeholder="github"
-                          />
-                          <datalist id="oauth-provider-options">
-                            {oauthApps.map((app) => (
-                              <option key={app.provider} value={app.provider} />
-                            ))}
-                          </datalist>
-                        </div>
-                      ) : null}
-                    </div>
-                    {authKind === "oauth" ? (
-                      <p className="text-xs text-muted-foreground">
-                        OAuth credentials need a configured OAuth app for this provider.{" "}
-                        <Link
-                          to="/connections?tab=oauth-apps&new=oauth-app"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-primary underline underline-offset-2"
-                        >
-                          Create one in OAuth Apps
-                        </Link>{" "}
-                        (opens in a new tab), then enter its provider slug above.
-                      </p>
-                    ) : null}
-                    <div className="space-y-2">
-                      <FieldLabel
-                        tip={`Must contain the exact placeholder ${configPlaceholder(configKey)}. Used to add request headers at egress.`}
-                      >
-                        Header Template
-                      </FieldLabel>
-                      <Input
-                        value={headerTemplate}
-                        onChange={(event) => setHeaderTemplate(event.target.value)}
-                        placeholder={`Authorization: Bearer ${configPlaceholder(configKey)}`}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <FieldLabel
-                        tip={`Must contain the exact placeholder ${configPlaceholder(configKey)}. Used for APIs that expect credentials in a query string.`}
-                      >
-                        Query Template
-                      </FieldLabel>
-                      <Input
-                        value={queryTemplate}
-                        onChange={(event) => setQueryTemplate(event.target.value)}
-                        placeholder={`access_token=${configPlaceholder(configKey)}`}
-                      />
-                    </div>
+                    )}
                   </div>
+                ) : null}
+
+                {authType === "oauth" ? (
+                  <OAuthInlineConnect
+                    oauthApps={oauthApps}
+                    value={authAuthorizationId}
+                    onChange={setAuthAuthorizationId}
+                    suggestedPresetId={suggestedPresetId}
+                  />
                 ) : null}
               </div>
             ) : null}
@@ -2763,9 +2793,9 @@ export default function ConnectionsPage() {
         <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <TabsList className="w-full justify-start overflow-x-auto overflow-y-hidden sm:w-fit">
             <TabsTrigger value="connections">Connections</TabsTrigger>
-            <TabsTrigger value="bindings">Bindings</TabsTrigger>
             <TabsTrigger value="oauth-apps">OAuth Apps</TabsTrigger>
             <TabsTrigger value="playground">Playground</TabsTrigger>
+            <TabsTrigger value="bindings">Raw fetch credentials</TabsTrigger>
           </TabsList>
           {activeTab !== "playground" ? (
             <div className="flex w-full flex-col gap-2 md:flex-row md:items-center md:justify-end lg:w-auto">
@@ -2842,7 +2872,18 @@ export default function ConnectionsPage() {
             paginationQueryKey="connections"
           />
         </TabsContent>
+        <TabsContent value="oauth-apps" className="flex flex-col flex-1 min-h-0 mt-3">
+          <OAuthAppsSection apps={oauthApps} search={search} loading={oauthAppsLoading} />
+        </TabsContent>
+        <TabsContent value="playground" className="mt-3">
+          <PlaygroundPanel defaultAgentId={defaultAgentId} />
+        </TabsContent>
         <TabsContent value="bindings" className="flex flex-col flex-1 min-h-0 mt-3">
+          <p className="mb-3 shrink-0 text-xs text-muted-foreground">
+            Advanced: standalone credentials for raw <code>fetch()</code> calls in scripts. Auth for
+            connections is configured on the connection itself — bindings it manages are hidden
+            here.
+          </p>
           <CredentialBindingsSection
             bindings={bindings}
             connections={connections ?? []}
@@ -2851,18 +2892,11 @@ export default function ConnectionsPage() {
             loading={bindingsLoading}
           />
         </TabsContent>
-        <TabsContent value="oauth-apps" className="flex flex-col flex-1 min-h-0 mt-3">
-          <OAuthAppsSection apps={oauthApps} search={search} loading={oauthAppsLoading} />
-        </TabsContent>
-        <TabsContent value="playground" className="mt-3">
-          <PlaygroundPanel defaultAgentId={defaultAgentId} />
-        </TabsContent>
       </Tabs>
 
       <AddConnectionDialog
         open={newParam === "connection"}
         onOpenChange={(open) => setNewParam(open ? "connection" : "")}
-        bindings={bindings}
         oauthApps={oauthApps}
         mcpServers={(mcpServersData?.servers ?? []).map((server) => ({
           id: server.id,

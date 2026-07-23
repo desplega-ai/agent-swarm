@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   IntegrationsCatalogResponse,
   OAuthAppSummary,
+  OAuthPreset,
   ScriptConnectionDetail,
   ScriptConnectionKind,
   ScriptConnectionScope,
@@ -273,6 +274,32 @@ export function useDeleteOAuthAuthorization() {
       queryClient.invalidateQueries({ queryKey: ["script-connections"] });
       queryClient.invalidateQueries({ queryKey: ["script-connection"] });
     },
+  });
+}
+
+// Curated OAuth presets for the "new from preset" app-creation picker (step-6).
+export function useOAuthPresets() {
+  return useQuery({
+    queryKey: ["oauth-presets"],
+    queryFn: () => api.fetchOAuthPresets(),
+    staleTime: 60 * 60 * 1000,
+    select: (data) => data.presets as OAuthPreset[],
+  });
+}
+
+// Build a labeled authorize URL for an app id (opened in a popup by the inline
+// OAuth connect flow). Distinct from the legacy provider-keyed authorize hook.
+export function useBuildOAuthAuthorizeUrl() {
+  return useMutation({
+    mutationFn: ({
+      appId,
+      label,
+      finalRedirect,
+    }: {
+      appId: string;
+      label?: string;
+      finalRedirect?: string;
+    }) => api.buildOAuthAuthorizeUrl(appId, { label, finalRedirect }),
   });
 }
 

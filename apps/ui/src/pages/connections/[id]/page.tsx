@@ -4,7 +4,6 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMcpServers } from "@/api/hooks/use-mcp-servers";
 import {
-  useCredentialBindings,
   useOAuthApps,
   useRefreshScriptConnection,
   useScriptConnection,
@@ -75,7 +74,6 @@ function ExpandButton({ label, onClick }: { label: string; onClick: () => void }
 export default function ConnectionDetailPage() {
   const { id } = useParams();
   const { data: connection, isLoading, error } = useScriptConnection(id);
-  const { data: bindings = [] } = useCredentialBindings();
   const { data: oauthApps = [] } = useOAuthApps();
   const { data: mcpServersData } = useMcpServers();
   const refreshConnection = useRefreshScriptConnection();
@@ -364,7 +362,6 @@ export default function ConnectionDetailPage() {
         open={editOpen}
         onOpenChange={setEditOpen}
         connection={connection}
-        bindings={bindings}
         oauthApps={oauthApps}
         mcpServers={(mcpServersData?.servers ?? []).map((server) => ({
           id: server.id,

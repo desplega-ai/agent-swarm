@@ -1,5 +1,6 @@
 import { memo, useMemo, useState } from "react";
 import type { IntegrationsCatalogEntry, ScriptConnectionKind } from "@/api/types";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -72,6 +73,8 @@ const WELL_KNOWN_DOMAINS = new Set([
 function curationBoost(entry: IntegrationsCatalogEntry): number {
   let boost = 0;
   const feeds = entry.feeds ?? [];
+  // Blessed (in-repo curated) entries outrank everything else.
+  if (feeds.includes("blessed")) boost += 1000;
   if (feeds.length > 0 && !feeds.includes("apis-guru")) boost += 30;
   if (entry.icon) boost += 10;
   if (entry.description) boost += 10;
@@ -106,7 +109,18 @@ const CatalogCard = memo(function CatalogCard({
               </div>
             )}
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium">{entry.name}</div>
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-sm font-medium">{entry.name}</span>
+                {entry.feeds?.includes("blessed") ? (
+                  <Badge
+                    variant="outline"
+                    size="tag"
+                    className="border-status-success/30 text-status-success-strong"
+                  >
+                    Blessed
+                  </Badge>
+                ) : null}
+              </div>
               <div className="truncate text-xs text-muted-foreground">
                 {entry.domain || entry.slug}
               </div>

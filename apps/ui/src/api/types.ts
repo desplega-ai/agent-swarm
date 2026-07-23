@@ -1162,6 +1162,46 @@ export type ScriptConnectionScope = "global" | "agent" | "repo";
 export type OAuthBindingTokenStatus = "ok" | "expiring" | "refresh-failed" | "revoked" | "missing";
 export type CredentialAuthKind = "config" | "oauth";
 
+// Embedded connection auth (step-7). A connection carries a single inline auth
+// intent that the server resolves into an auto-managed credential binding.
+export type ConnectionAuthType = "none" | "bearer" | "header" | "query" | "oauth";
+
+export type ConnectionAuthInput =
+  | { type: "none" }
+  | { type: "bearer"; secret?: string; configKey?: string; template?: string; hosts?: string[] }
+  | {
+      type: "header";
+      headerName: string;
+      secret?: string;
+      configKey?: string;
+      template?: string;
+      hosts?: string[];
+    }
+  | {
+      type: "query";
+      paramName: string;
+      secret?: string;
+      configKey?: string;
+      template?: string;
+      hosts?: string[];
+    }
+  | {
+      type: "oauth";
+      authorizationId: string;
+      configKey?: string;
+      template?: string;
+      hosts?: string[];
+    };
+
+// Write-only summary of a connection's embedded auth (never returns the secret).
+export interface ConnectionAuthSummary {
+  type: ConnectionAuthType;
+  configKey?: string;
+  authorizationId?: string;
+  paramName?: string;
+  status?: OAuthBindingTokenStatus;
+}
+
 export interface ScriptCredentialBinding {
   id: string;
   configKey: string;
@@ -1201,11 +1241,11 @@ export interface ScriptConnection {
   credentialBindingId: string | null;
   credentialBinding: ScriptConnectionCredentialSummary | null;
   /**
-   * Embedded auth summary (step-7). `status` mirrors the binding token status
-   * (`ok` | `expiring` | `missing`); `missing` flags a broken/absent
-   * authorization used to raise the dependent-connection warning badge.
+   * Embedded connection auth summary (step-7), present on list + detail.
+   * `status` mirrors the binding token status; broken states raise the
+   * dependent-connection warning badge.
    */
-  auth?: { required?: boolean; status?: OAuthBindingTokenStatus } | null;
+  auth?: ConnectionAuthSummary | null;
   openapiSpecSourceKind: "url" | "inline" | "agent_fs" | null;
   openapiSpecSource: string | null;
   openapiSpecEtag: string | null;
@@ -1272,9 +1312,13 @@ export type UpsertScriptConnectionInput =
       displayName?: string;
       scope?: ScriptConnectionScope;
       scopeId?: string | null;
-      baseUrl: string;
+      // Optional: the server extracts spec-declared server URLs (step-3), so
+      // spec-backed connections may leave this empty.
+      baseUrl?: string;
       allowedHosts?: string[];
       credentialBindingId?: string | null;
+      // Embedded auth (step-7). Supersedes the legacy flat credential fields.
+      auth?: ConnectionAuthInput;
       configKey?: string;
       headerTemplate?: string;
       queryTemplate?: string;
@@ -1282,6 +1326,8 @@ export type UpsertScriptConnectionInput =
       oauthProvider?: string;
       openapiSpecUrl?: string;
       openapiSpecJson?: string;
+      // Vendored blessed spec source (step-2).
+      specSource?: { kind: "vendored"; slug: string };
       enabled?: boolean;
     }
   | {
@@ -1294,6 +1340,7 @@ export type UpsertScriptConnectionInput =
       baseUrl: string;
       allowedHosts: string[];
       credentialBindingId?: string | null;
+      auth?: ConnectionAuthInput;
       configKey?: string;
       headerTemplate?: string;
       queryTemplate?: string;
@@ -1349,6 +1396,9 @@ export interface OAuthAuthorization {
   updatedAt: string;
 }
 
+/** Alias kept for call sites written against the single-flow dialog work. */
+export type OAuthAuthorizationSummary = OAuthAuthorization;
+
 export interface OAuthAppSummary {
   id: string;
   provider: string;
@@ -1371,7 +1421,27 @@ export interface OAuthAppSummary {
   updatedAt: string;
 }
 
-/** Curated OAuth preset (mirrors the public shape of `src/oauth/presets.ts`). */
+export interface UpsertOAuthAppInput {
+  /** Target an exact existing app on edit (avoids mutating a same-provider row). */
+  id?: string;
+  /** When set, the server hydrates endpoints/quirks from the curated preset. */
+  presetId?: string;
+  provider?: string;
+  clientId: string;
+  clientSecret?: string;
+  authorizeUrl?: string;
+  tokenUrl?: string;
+  userinfoUrl?: string;
+  revocationUrl?: string;
+  scopes?: string[];
+  scopeSeparator?: string;
+  extraParams?: Record<string, string>;
+  tokenAuthStyle?: "body" | "basic";
+  tokenBodyFormat?: "form" | "json";
+  requiresRefreshTokenRotation?: boolean;
+}
+
+// Curated OAuth preset surfaced by GET /api/oauth-presets (step-6). No secrets.
 export interface OAuthPreset {
   id: string;
   displayName: string;
@@ -1387,22 +1457,6 @@ export interface OAuthPreset {
   requiresRefreshTokenRotation?: boolean;
   extraParams?: Record<string, string>;
   setupHints: string[];
-}
-
-export interface UpsertOAuthAppInput {
-  /** Target an exact existing app on edit (avoids mutating a same-provider row). */
-  id?: string;
-  /** When set, the server hydrates endpoints/quirks from the curated preset. */
-  presetId?: string;
-  provider?: string;
-  clientId: string;
-  clientSecret?: string;
-  authorizeUrl?: string;
-  tokenUrl?: string;
-  scopes?: string[];
-  extraParams?: Record<string, string>;
-  tokenAuthStyle?: "body" | "basic";
-  tokenBodyFormat?: "form" | "json";
 }
 
 export interface UpsertOAuthAppResult {
@@ -1436,8 +1490,12 @@ export interface IntegrationsCatalogEntry {
   icon: string | null;
   domain: string;
   categories: string[];
-  /** Upstream catalog feeds; "apis-guru" marks bulk-imported entries. */
+  /** Upstream catalog feeds; "apis-guru" marks bulk-imported entries, "blessed" curated ones. */
   feeds?: string[];
+  /** Blessed entries reference an in-repo vendored OpenAPI spec (step-2). */
+  vendoredSlug?: string;
+  /** Blessed entries may suggest a curated OAuth preset for the auth flow (step-6). */
+  presetId?: string;
 }
 
 export interface IntegrationsCatalogResponse {
