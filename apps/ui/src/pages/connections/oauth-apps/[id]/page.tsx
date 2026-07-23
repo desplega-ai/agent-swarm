@@ -170,7 +170,7 @@ export default function OAuthAppDetailPage() {
   async function confirmDelete() {
     if (!app) return;
     try {
-      await deleteApp.mutateAsync(app.provider);
+      await deleteApp.mutateAsync(app.id);
       toast.success("OAuth app deleted");
       navigate("/connections?tab=oauth-apps");
     } catch (err) {

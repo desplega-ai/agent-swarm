@@ -10,7 +10,7 @@ import {
   updateAuthorizationTokens,
 } from "../be/db-queries/oauth";
 import type { OAuthApp } from "../tracker/types";
-import { scrubSecrets } from "../utils/secret-scrubber";
+import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 import { type OAuthProviderConfig, performTokenRefreshRequest } from "./wrapper";
 
 function parseMetadata(metadataJson: string | null | undefined): Record<string, unknown> {
@@ -252,6 +252,17 @@ export async function ensureAuthorizationTokenOrThrow(
           return;
         } catch (err) {
           const label = authorizationLabelFor(lockedApp, locked);
+          // The provider token endpoint can echo the submitted refresh_token /
+          // client_secret back in an invalid_grant body (which lands in
+          // err.message). scrubSecrets only knows env/vendor-fixed shapes, so
+          // register this attempt's own secrets as volatile before scrubbing —
+          // otherwise they'd be persisted to lastErrorMessage and surfaced in
+          // the UI tooltip.
+          if (locked.refreshToken)
+            registerVolatileSecret(locked.refreshToken, "oauth-refresh-token");
+          if (locked.accessToken) registerVolatileSecret(locked.accessToken, "oauth-access-token");
+          if (lockedApp.clientSecret)
+            registerVolatileSecret(lockedApp.clientSecret, "oauth-client-secret");
           const message = scrubSecrets(err instanceof Error ? err.message : String(err));
           markAuthorizationRefreshFailed(authorizationId, message);
           if (err instanceof OAuthRefreshError) throw err;

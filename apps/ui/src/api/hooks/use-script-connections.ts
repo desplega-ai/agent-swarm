@@ -167,7 +167,7 @@ export function useUpsertOAuthApp() {
 export function useDeleteOAuthApp() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (provider: string) => api.deleteOAuthApp(provider),
+    mutationFn: (idOrProvider: string) => api.deleteOAuthApp(idOrProvider),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["oauth-apps"] });
       queryClient.invalidateQueries({ queryKey: ["credential-bindings"] });

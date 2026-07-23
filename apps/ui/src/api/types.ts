@@ -1159,7 +1159,7 @@ export interface ScriptsResponse {
 // Script connections (`ctx.api.<slug>` / `ctx.mcp.<slug>`)
 export type ScriptConnectionKind = "openapi" | "graphql" | "mcp";
 export type ScriptConnectionScope = "global" | "agent" | "repo";
-export type OAuthBindingTokenStatus = "ok" | "expiring" | "missing";
+export type OAuthBindingTokenStatus = "ok" | "expiring" | "refresh-failed" | "revoked" | "missing";
 export type CredentialAuthKind = "config" | "oauth";
 
 export interface ScriptCredentialBinding {
@@ -1390,6 +1390,8 @@ export interface OAuthPreset {
 }
 
 export interface UpsertOAuthAppInput {
+  /** Target an exact existing app on edit (avoids mutating a same-provider row). */
+  id?: string;
   /** When set, the server hydrates endpoints/quirks from the curated preset. */
   presetId?: string;
   provider?: string;

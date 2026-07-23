@@ -1259,8 +1259,10 @@ class ApiClient {
     return res.json();
   }
 
-  async deleteOAuthApp(provider: string): Promise<{ success: boolean }> {
-    const url = `${this.getBaseUrl()}/api/oauth-apps/${encodeURIComponent(provider)}`;
+  async deleteOAuthApp(idOrProvider: string): Promise<{ success: boolean }> {
+    // Server resolves id-first then provider; callers pass the app id so a
+    // same-provider sibling is never deleted by mistake.
+    const url = `${this.getBaseUrl()}/api/oauth-apps/${encodeURIComponent(idOrProvider)}`;
     const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to delete OAuth app" }));

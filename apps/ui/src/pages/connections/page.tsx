@@ -253,6 +253,8 @@ export function TokenStatusBadge({ status }: { status?: OAuthBindingTokenStatus 
   const colors: Record<OAuthBindingTokenStatus, string> = {
     ok: "border-status-success/30 text-status-success",
     expiring: "border-status-active/30 text-status-active",
+    "refresh-failed": "border-status-error/30 text-status-error",
+    revoked: "border-status-neutral/30 text-status-neutral",
     missing: "border-status-error/30 text-status-error",
   };
   return (
@@ -368,8 +370,17 @@ function TemplateCell({ value }: { value?: string }) {
 const TOKEN_STATUS_TEXT: Record<OAuthBindingTokenStatus, string> = {
   ok: "text-status-success",
   expiring: "text-status-active",
+  "refresh-failed": "text-status-error",
+  revoked: "text-status-neutral",
   missing: "text-status-error",
 };
+
+// A binding whose token is `missing`, `refresh-failed`, or `revoked` can no
+// longer resolve — the three states that warrant a dependent-connection
+// warning. `ok`/`expiring` are healthy.
+export function isBrokenTokenStatus(status?: OAuthBindingTokenStatus): boolean {
+  return status === "missing" || status === "refresh-failed" || status === "revoked";
+}
 
 function CredentialChip({
   connection,
@@ -385,10 +396,10 @@ function CredentialChip({
     ? TOKEN_STATUS_TEXT[summary.tokenStatus]
     : "text-muted-foreground";
   // Tolerant of both shapes: prefer the embedded connection auth summary
-  // (step-7), fall back to the binding token status. `missing` flags a
-  // broken/absent authorization (refresh-failed / revoked / expired upstream).
+  // (step-7), fall back to the binding token status. `missing` / `refresh-failed`
+  // / `revoked` all flag an authorization that can no longer resolve.
   const authStatus = connection.auth?.status ?? summary.tokenStatus;
-  const isBroken = summary.authKind === "oauth" && authStatus === "missing";
+  const isBroken = summary.authKind === "oauth" && isBrokenTokenStatus(authStatus);
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
       <Tooltip>
@@ -2047,7 +2058,7 @@ function OAuthAppsSection({
                       variant="destructive"
                       onClick={async () => {
                         try {
-                          await deleteApp.mutateAsync(app.provider);
+                          await deleteApp.mutateAsync(app.id);
                           toast.success("OAuth app deleted");
                         } catch (error) {
                           toastMutationError(error);
@@ -2256,6 +2267,9 @@ export function OAuthAppDialog({
   async function submit() {
     try {
       await upsert.mutateAsync({
+        // On edit, target the exact row by id so a same-provider sibling app
+        // is never mutated by mistake.
+        ...(app?.id ? { id: app.id } : {}),
         // With a preset, the server hydrates endpoints/quirks (userinfo,
         // revocation, scope separator, rotation) that aren't editable here.
         // Explicit fields below still win server-side.

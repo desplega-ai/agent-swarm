@@ -36,6 +36,7 @@ import { OperationsTable } from "@/pages/connections/components/operations-table
 import {
   AddConnectionDialog,
   InlineError,
+  isBrokenTokenStatus,
   KindBadge,
   TokenStatusBadge,
   toastMutationError,
@@ -105,9 +106,11 @@ export default function ConnectionDetailPage() {
   const specUrl =
     connection.openapiSpecSourceKind === "url" ? (connection.openapiSpecSource ?? "") : "";
   // Tolerant of both shapes: the embedded auth summary (step-7) or the binding
-  // token status. `missing` flags a broken/absent OAuth authorization.
+  // token status. `missing` / `refresh-failed` / `revoked` flag a broken
+  // OAuth authorization.
   const authStatus = connection.auth?.status ?? connection.credentialBinding?.tokenStatus;
-  const authBroken = connection.credentialBinding?.authKind === "oauth" && authStatus === "missing";
+  const authBroken =
+    connection.credentialBinding?.authKind === "oauth" && isBrokenTokenStatus(authStatus);
 
   return (
     <div className="flex flex-col gap-4 lg:flex-1 lg:min-h-0 lg:overflow-y-hidden">
