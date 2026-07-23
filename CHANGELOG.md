@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.119.5] - 2026-07-23
+
+### Changed
+- **Worker harness pins now track the latest compatible weekly releases** (#987) — the worker image ships Claude Code 2.1.217, pi 0.81.1, Codex 0.145.0, and OpenCode 1.18.4, with pi adapters migrated to the new runtime-scoped authentication APIs.
+
+### Fixed
+- **Inline workflow scripts now honor their configured timeout end to end** (#986) — `config.timeout` governs both the script executor and the outer step watchdog, so network-heavy nodes can run beyond the default 30-second limit without premature cancellation.
+
 ## [1.119.4] - 2026-07-20
 
 ### Changed

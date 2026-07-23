@@ -262,6 +262,8 @@ If the step exceeds its timeout, it is marked as failed and the retry/failure po
 
 For `swarm-script` nodes there is a second timeout surface inside `config.timeoutMs`. Use the node-level `timeoutMs` for general step orchestration limits and the config-level `timeoutMs` to raise or lower the spawned script's own wall-clock budget within the allowed `1000`-`60000` ms range.
 
+Inline `script` nodes use `config.timeout` instead. That value is the wall-clock budget for both the inline executor and the workflow step watchdog, so a long-running script is not stopped by the default 30-second watchdog before its configured timeout. The minimum is `1000` ms and the default is `30000` ms.
+
 ### Cancelling a Workflow Run
 
 Running or waiting workflow runs can be cancelled using the `cancel-workflow-run` MCP tool. Cancellation terminates all non-terminal steps and their associated tasks. An optional reason can be provided for audit purposes.
