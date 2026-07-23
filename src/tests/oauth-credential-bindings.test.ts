@@ -324,7 +324,7 @@ describe("OAuth credential bindings", () => {
     expect(getOAuthProviderConfig("phase2-actor")?.extraParams).toEqual({ actor: "app" });
   });
 
-  test("credential-bindings tool rejects reserved tracker OAuth providers", async () => {
+  test("credential-bindings tool now accepts tracker providers (reserved carve-out removed in step-8)", async () => {
     const result = (await credentialBindingsTool().handler(
       {
         action: "oauth-app-upsert",
@@ -338,9 +338,10 @@ describe("OAuth credential bindings", () => {
       meta(),
     )) as ToolResult;
 
-    expect(result.structuredContent.success).toBe(false);
-    expect(result.structuredContent.message).toContain("dedicated tracker");
-    expect(getOAuthApp("jira")).toBeNull();
+    // linear/jira are ordinary oauth_apps rows now — no reserved-provider block.
+    expect(result.structuredContent.success).toBe(true);
+    expect(result.structuredContent.message).not.toContain("dedicated tracker");
+    expect(getOAuthApp("jira")?.clientId).toBe("jira-client");
   });
 
   test("credential-bindings tool validates OAuth app URLs in production", async () => {

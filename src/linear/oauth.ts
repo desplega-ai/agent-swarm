@@ -1,54 +1,29 @@
 import { upsertKv } from "../be/db";
 import { getOAuthApp } from "../be/db-queries/oauth";
-import { buildAuthorizationUrl, exchangeCode, type OAuthProviderConfig } from "../oauth/wrapper";
+import { oauthAppRowToProviderConfig } from "../oauth/ensure-token";
+import { buildAuthorizationUrl, type OAuthProviderConfig } from "../oauth/wrapper";
 
 /** kv namespace for the Linear bot's appUserId (Q21.C). Keyed by workspace ID. */
 const APP_USER_ID_NAMESPACE = "integration:linear:bot-app-user-id";
 
+/**
+ * Thin projection of the seeded `oauth_apps` row. The comma `scopeSeparator`
+ * quirk and `actor` extra-param are seeded as column/metadata by `initLinear()`
+ * and surfaced by {@link oauthAppRowToProviderConfig}.
+ */
 export function getLinearOAuthConfig(): OAuthProviderConfig | null {
   const app = getOAuthApp("linear");
-  if (!app) return null;
-
-  const metadata = JSON.parse(app.metadata || "{}");
-  return {
-    provider: "linear",
-    clientId: app.clientId,
-    clientSecret: app.clientSecret,
-    authorizeUrl: app.authorizeUrl,
-    tokenUrl: app.tokenUrl,
-    redirectUri: app.redirectUri,
-    scopes: app.scopes.split(","),
-    extraParams: metadata.actor ? { actor: metadata.actor } : {},
-  };
+  return app ? oauthAppRowToProviderConfig(app) : null;
 }
 
 export async function getLinearAuthorizationUrl(): Promise<string | null> {
   const config = getLinearOAuthConfig();
   if (!config) return null;
-  const result = await buildAuthorizationUrl(config);
+  // flow='tracker' so the unified state-keyed callback runs the tracker
+  // post-processing (appUserId capture) after landing tokens on the default
+  // authorization.
+  const result = await buildAuthorizationUrl(config, { flow: "tracker", label: "default" });
   return result.url;
-}
-
-export async function handleLinearCallback(
-  code: string,
-  state: string,
-): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number; scope?: string }> {
-  const config = getLinearOAuthConfig();
-  if (!config) throw new Error("Linear OAuth not configured");
-  const result = await exchangeCode(config, code, state);
-
-  // Best-effort: capture the Linear bot's appUserId now that we have a fresh
-  // token (Q21.C). Persisted in kv_entries so webhook handlers can guard
-  // against the swarm hearing itself ("creator.id === storedAppUserId").
-  // Failure here is non-fatal — the guard is a no-op until the next refresh.
-  captureLinearAppUserId(result.accessToken).catch((err) => {
-    console.warn(
-      "[Linear] Failed to capture appUserId during OAuth completion (non-fatal):",
-      err instanceof Error ? err.message : err,
-    );
-  });
-
-  return result;
 }
 
 /**

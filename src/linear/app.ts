@@ -1,8 +1,11 @@
 import { upsertOAuthApp } from "../be/db-queries/oauth";
+import { onAuthorizationRefreshed } from "../oauth/ensure-token";
 import { getPublicMcpBaseUrl } from "../utils/constants";
+import { resetLinearClient } from "./client";
 import { initLinearOutboundSync, teardownLinearOutboundSync } from "./outbound";
 
 let initialized = false;
+let unsubscribeRefresh: (() => void) | null = null;
 
 export function isLinearEnabled(): boolean {
   const disabled = process.env.LINEAR_DISABLE;
@@ -14,6 +17,10 @@ export function isLinearEnabled(): boolean {
 
 export function resetLinear(): void {
   teardownLinearOutboundSync();
+  if (unsubscribeRefresh) {
+    unsubscribeRefresh();
+    unsubscribeRefresh = null;
+  }
   initialized = false;
 }
 
@@ -43,8 +50,27 @@ export function initLinear(): boolean {
     tokenUrl: "https://api.linear.app/oauth/token",
     redirectUri,
     scopes: "read,write,issues:create,comments:create,app:assignable,app:mentionable",
-    metadata: JSON.stringify({ actor: "app" }),
+    // Linear requires comma-separated scopes in the authorize URL (RFC default
+    // is space) — pin the quirk as a column rather than relying on the
+    // provider-string default in upsertOAuthApp.
+    scopeSeparator: ",",
+    // `actor: app` installs the OAuth app as its own bot user. `keepAlive`
+    // opts the row into the generalized keepalive job (Linear does not rotate
+    // refresh tokens, so it wouldn't qualify via requiresRefreshTokenRotation);
+    // this mirrors migration 121's backfill for a fresh-DB boot where that
+    // data-only migration matches no rows yet.
+    metadata: JSON.stringify({ actor: "app", keepAlive: true }),
   });
+
+  // Invalidate the cached LinearClient whenever *any* path (sweep, reactive)
+  // refreshes the Linear authorization, not just the outbound-sync call sites
+  // that already reset it inline. Closes the staleness gap for background
+  // refreshes.
+  if (!unsubscribeRefresh) {
+    unsubscribeRefresh = onAuthorizationRefreshed((event) => {
+      if (event.provider === "linear") resetLinearClient();
+    });
+  }
 
   initLinearOutboundSync();
 

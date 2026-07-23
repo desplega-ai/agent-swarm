@@ -37,11 +37,7 @@ import {
   upsertScriptConnection,
 } from "@/be/script-connections";
 import { listVendoredOpenapiEntries } from "@/be/vendored-openapi";
-import {
-  assertOAuthAppUrlsSafe,
-  assertOAuthEgressUrlSafe,
-  assertOAuthProviderIsNotReserved,
-} from "@/oauth/app-validation";
+import { assertOAuthAppUrlsSafe, assertOAuthEgressUrlSafe } from "@/oauth/app-validation";
 import { forceRefreshTokenOrThrow } from "@/oauth/ensure-token";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
 import {
@@ -1450,15 +1446,42 @@ async function fetchIntegrationsSurface(domain: string): Promise<IntegrationsSur
   }
 }
 
-function deleteOAuthApp(provider: string): boolean {
+/**
+ * Foot-gun warnings for deleting an OAuth app from the generic surface. Since
+ * step-8 removed the linear/jira reserved-provider carve-out, these apps are
+ * deletable here — but doing so degrades the tracker integration, so surface
+ * (don't block) the consequences.
+ */
+function collectOAuthAppDeletionWarnings(app: OAuthApp): string[] {
+  const warnings: string[] = [];
+  if (app.provider === "linear" || app.provider === "jira") {
+    warnings.push(
+      `'${app.provider}' is the seeded tracker OAuth app; deleting it disconnects the ${app.provider} integration until the server re-seeds it on next start (you must re-run the OAuth flow to reconnect).`,
+    );
+  }
+  try {
+    const metadata = JSON.parse(app.metadata || "{}") as { webhookIds?: unknown };
+    if (Array.isArray(metadata.webhookIds) && metadata.webhookIds.length > 0) {
+      warnings.push(
+        `This app has ${metadata.webhookIds.length} registered webhook(s); deleting it drops the local record without deregistering them upstream.`,
+      );
+    }
+  } catch {
+    // Unparseable metadata — nothing to warn about.
+  }
+  return warnings;
+}
+
+function deleteOAuthApp(provider: string): { deleted: boolean; warnings: string[] } {
   const existing = getOAuthApp(provider);
-  if (!existing) return false;
+  if (!existing) return { deleted: false, warnings: [] };
+  const warnings = collectOAuthAppDeletionWarnings(existing);
   const tx = getDb().transaction(() => {
     deleteOAuthTokens(provider);
     getDb().query("DELETE FROM oauth_apps WHERE id = ?").run(existing.id);
   });
   tx();
-  return true;
+  return { deleted: true, warnings };
 }
 
 async function refreshHttpConnection(
@@ -1774,9 +1797,10 @@ export async function handleScriptConnections(
         return true;
       }
 
-      assertOAuthProviderIsNotReserved(provider);
       // Defense in depth: SSRF-check the merged endpoints (incl. preset-supplied
-      // userinfo/revocation URLs), not just raw input.
+      // userinfo/revocation URLs), not just raw input. (The former linear/jira
+      // reserved-provider carve-out was removed in step-8 — trackers are
+      // ordinary rows on this surface now.)
       assertOAuthAppUrlsSafe({ authorizeUrl, tokenUrl, userinfoUrl, revocationUrl });
 
       const existing = getOAuthApp(provider);
@@ -1840,11 +1864,15 @@ export async function handleScriptConnections(
     const parsed = await deleteOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
-    if (!deleteOAuthApp(parsed.params.provider)) {
+    const deletion = deleteOAuthApp(parsed.params.provider);
+    if (!deletion.deleted) {
       jsonError(res, `OAuth app ${parsed.params.provider} not found.`, 404);
       return true;
     }
-    json(res, { success: true });
+    json(res, {
+      success: true,
+      ...(deletion.warnings.length > 0 ? { warnings: deletion.warnings } : {}),
+    });
     return true;
   }
 

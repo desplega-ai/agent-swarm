@@ -8,6 +8,8 @@ import {
   updateAuthorizationIdentity,
   upsertAuthorization,
 } from "@/be/db-queries/oauth";
+import { resolveAndStoreJiraCloudId } from "@/jira/oauth";
+import { captureLinearAppUserId } from "@/linear/oauth";
 import { oauthAppRowToProviderConfig } from "@/oauth/ensure-token";
 import { captureIdentity } from "@/oauth/identity-capture";
 import { exchangeAuthorizationCode } from "@/oauth/wrapper";
@@ -116,6 +118,36 @@ function redirectWith(res: ServerResponse, base: string, params: Record<string, 
 }
 
 /**
+ * Provider-specific post-processing for a completed `flow='tracker'`
+ * authorization, folded onto the unified callback from the retired dedicated
+ * tracker callbacks:
+ *
+ * - **jira**: resolve the workspace `cloudId`/`siteUrl` into `oauth_apps`
+ *   metadata. Required for the Jira REST API — failures propagate to the caller.
+ * - **linear**: capture the bot `appUserId` (best-effort — swallowed here so it
+ *   never fails the OAuth callback).
+ */
+async function runTrackerCallbackPostProcess(provider: string, accessToken: string): Promise<void> {
+  if (provider === "jira") {
+    await resolveAndStoreJiraCloudId(accessToken);
+    return;
+  }
+  if (provider === "linear") {
+    try {
+      await captureLinearAppUserId(accessToken);
+    } catch (err) {
+      console.warn(
+        scrubSecrets(
+          `[Linear] Failed to capture appUserId during OAuth completion (non-fatal): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        ),
+      );
+    }
+  }
+}
+
+/**
  * Complete a generic/tracker OAuth callback: consume the pending row, exchange
  * the code against the app's token endpoint, upsert the `(appId, label)`
  * authorization, and capture account identity (best-effort). Returns
@@ -198,6 +230,15 @@ export async function completeGenericOAuthCallback(
         accountEmail: identity.accountEmail,
         identityJson: identity.identityJson,
       });
+    }
+
+    // Tracker (Linear/Jira) flows fold onto this unified handler; run the
+    // provider-specific post-exchange step that used to live in the dedicated
+    // tracker callbacks. Jira cloudId resolution is REQUIRED (jiraFetch depends
+    // on it) so a failure surfaces via the outer catch; Linear appUserId
+    // capture is best-effort and swallowed inside the helper.
+    if (pending.flow === "tracker") {
+      await runTrackerCallbackPostProcess(app.provider, tokens.accessToken);
     }
 
     if (pending.finalRedirect) {
