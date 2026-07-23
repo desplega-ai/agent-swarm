@@ -73,7 +73,7 @@ const connectionBaseBodySchema = z.object({
   headerTemplate: z.string().min(1).optional(),
   queryTemplate: z.string().min(1).optional(),
   authKind: z.enum(["config", "oauth"]).optional(),
-  oauthProvider: providerSchema.optional(),
+  oauthAuthorizationId: z.string().min(1).max(255).optional(),
   enabled: z.boolean().optional(),
 });
 
@@ -107,7 +107,7 @@ const credentialBindingBodySchema = z.object({
   scopeId: scopedResourceScopeIdSchema.nullable().optional(),
   active: z.boolean().default(true).optional(),
   authKind: z.enum(["config", "oauth"]).default("config").optional(),
-  oauthProvider: providerSchema.optional(),
+  oauthAuthorizationId: z.string().min(1).max(255).optional(),
 });
 
 const oauthAppBodySchema = z.object({
@@ -383,7 +383,7 @@ type BindingSummary = {
   id: string;
   configKey: string;
   authKind: "config" | "oauth";
-  oauthProvider?: string;
+  oauthAuthorizationId?: string;
   tokenStatus?: OAuthBindingTokenStatus;
 };
 
@@ -433,9 +433,12 @@ type OAuthAppRow = {
   tokenUrl: string;
   redirectUri: string;
   scopes: string;
-  metadata: string;
   tokenExpiresAt: string | null;
   tokenUpdatedAt: string | null;
+  authorizationId: string | null;
+  extraParamsJson: string | null;
+  tokenAuthStyle: "body" | "basic";
+  tokenBodyFormat: "form" | "json";
   createdAt: string;
   updatedAt: string;
 };
@@ -540,9 +543,10 @@ function ensureConnectionAdmin(
 function tokenStatusForBinding(
   binding: ScriptCredentialBindingRecord,
 ): OAuthBindingTokenStatus | undefined {
-  return binding.authKind === "oauth" && binding.oauthProvider
-    ? getOAuthBindingTokenStatus(binding.oauthProvider)
-    : undefined;
+  if (binding.authKind !== "oauth") return undefined;
+  return binding.oauthAuthorizationId
+    ? getOAuthBindingTokenStatus(binding.oauthAuthorizationId)
+    : "missing";
 }
 
 function decorateBinding(binding: ScriptCredentialBindingRecord): DecoratedBinding {
@@ -557,7 +561,7 @@ function bindingSummary(binding: ScriptCredentialBindingRecord | undefined): Bin
     id: binding.id,
     configKey: binding.configKey,
     authKind: binding.authKind ?? "config",
-    ...(binding.oauthProvider ? { oauthProvider: binding.oauthProvider } : {}),
+    ...(binding.oauthAuthorizationId ? { oauthAuthorizationId: binding.oauthAuthorizationId } : {}),
     ...(tokenStatus ? { tokenStatus } : {}),
   };
 }
@@ -783,8 +787,8 @@ function maybeCreateInlineBinding(
     headerTemplate,
     queryTemplate: data.queryTemplate,
   });
-  if (authKind === "oauth" && !data.oauthProvider) {
-    throw new Error("oauthProvider is required for oauth credential bindings.");
+  if (authKind === "oauth" && !data.oauthAuthorizationId) {
+    throw new Error("oauthAuthorizationId is required for oauth credential bindings.");
   }
 
   return upsertCredentialBinding({
@@ -796,13 +800,13 @@ function maybeCreateInlineBinding(
     scopeId,
     active: true,
     authKind,
-    oauthProvider: data.oauthProvider ?? null,
+    oauthAuthorizationId: data.oauthAuthorizationId ?? null,
   }).id;
 }
 
-function parseMetadata(metadata: string): Record<string, unknown> {
+function parseMetadata(metadata: string | null): Record<string, unknown> {
   try {
-    const parsed = JSON.parse(metadata);
+    const parsed = JSON.parse(metadata ?? "{}");
     return parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : {};
@@ -812,6 +816,14 @@ function parseMetadata(metadata: string): Record<string, unknown> {
 }
 
 function parseScopes(scopes: string): string[] {
+  try {
+    const parsed = JSON.parse(scopes);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((scope): scope is string => typeof scope === "string");
+    }
+  } catch {
+    // Provider adapters accepted comma-delimited scopes before migration 117.
+  }
   return scopes
     .split(",")
     .map((scope) => scope.trim())
@@ -819,17 +831,12 @@ function parseScopes(scopes: string): string[] {
 }
 
 function sanitizeOAuthApp(row: OAuthAppRow) {
-  const metadata = parseMetadata(row.metadata);
-  const extraParams =
-    metadata.extraParams &&
-    typeof metadata.extraParams === "object" &&
-    !Array.isArray(metadata.extraParams)
-      ? Object.fromEntries(
-          Object.entries(metadata.extraParams as Record<string, unknown>).filter(
-            (entry): entry is [string, string] => typeof entry[1] === "string",
-          ),
-        )
-      : undefined;
+  const extraParamsObject = parseMetadata(row.extraParamsJson);
+  const extraParams = Object.fromEntries(
+    Object.entries(extraParamsObject).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
   return {
     id: row.id,
     provider: row.provider,
@@ -838,10 +845,10 @@ function sanitizeOAuthApp(row: OAuthAppRow) {
     tokenUrl: row.tokenUrl,
     redirectUri: row.redirectUri,
     scopes: parseScopes(row.scopes),
-    extraParams,
-    tokenAuthStyle: metadata.tokenAuthStyle === "basic" ? "basic" : "body",
-    tokenBodyFormat: metadata.tokenBodyFormat === "json" ? "json" : "form",
-    tokenStatus: getOAuthBindingTokenStatus(row.provider),
+    ...(Object.keys(extraParams).length > 0 ? { extraParams } : {}),
+    tokenAuthStyle: row.tokenAuthStyle,
+    tokenBodyFormat: row.tokenBodyFormat,
+    tokenStatus: row.authorizationId ? getOAuthBindingTokenStatus(row.authorizationId) : "missing",
     expiresAt: row.tokenExpiresAt,
     lastRefreshedAt: normalizeDate(row.tokenUpdatedAt),
     createdAt: row.createdAt,
@@ -853,10 +860,12 @@ function listOAuthApps() {
   const rows = getDb()
     .prepare<OAuthAppRow, []>(
       `SELECT a.id, a.provider, a.clientId, a.authorizeUrl, a.tokenUrl, a.redirectUri,
-              a.scopes, a.metadata, t.expiresAt AS tokenExpiresAt,
-              t.updatedAt AS tokenUpdatedAt, a.createdAt, a.updatedAt
+              a.scopes, a.extraParamsJson, a.tokenAuthStyle, a.tokenBodyFormat,
+              z.id AS authorizationId, z.expiresAt AS tokenExpiresAt,
+              z.updatedAt AS tokenUpdatedAt, a.createdAt, a.updatedAt
        FROM oauth_apps a
-       LEFT JOIN oauth_tokens t ON t.provider = a.provider
+       LEFT JOIN oauth_authorizations z ON z.appId = a.id AND z.label = 'default'
+       WHERE a.mcpServerId IS NULL
        ORDER BY a.provider ASC`,
     )
     .all();
@@ -869,9 +878,7 @@ function listOAuthApps() {
  * Network/HTTP failures are logged (scrubbed) and never fail the caller.
  */
 async function attemptRemoteRevocation(app: OAuthApp, accessToken: string): Promise<boolean> {
-  const metadata = parseMetadata(app.metadata);
-  const revocationUrl =
-    typeof metadata.revocationUrl === "string" ? metadata.revocationUrl : undefined;
+  const revocationUrl = app.revocationUrl ?? undefined;
   if (!revocationUrl) return false;
 
   const body = new URLSearchParams({
@@ -881,7 +888,7 @@ async function attemptRemoteRevocation(app: OAuthApp, accessToken: string): Prom
   const headers: Record<string, string> = {
     "content-type": "application/x-www-form-urlencoded",
   };
-  if (metadata.tokenAuthStyle === "basic") {
+  if (app.tokenAuthStyle === "basic") {
     headers.authorization = `Basic ${Buffer.from(`${app.clientId}:${app.clientSecret}`).toString("base64")}`;
   } else {
     body.set("client_id", app.clientId);
@@ -1226,7 +1233,7 @@ function deleteOAuthApp(provider: string): boolean {
   if (!existing) return false;
   const tx = getDb().transaction(() => {
     deleteOAuthTokens(provider);
-    getDb().query("DELETE FROM oauth_apps WHERE provider = ?").run(provider);
+    getDb().query("DELETE FROM oauth_apps WHERE id = ?").run(existing.id);
   });
   tx();
   return true;
@@ -1429,8 +1436,8 @@ export async function handleScriptConnections(
         jsonError(res, "At least one of headerTemplate or queryTemplate is required.", 400);
         return true;
       }
-      if ((parsed.body.authKind ?? "config") === "oauth" && !parsed.body.oauthProvider) {
-        jsonError(res, "oauthProvider is required for oauth credential bindings.", 400);
+      if ((parsed.body.authKind ?? "config") === "oauth" && !parsed.body.oauthAuthorizationId) {
+        jsonError(res, "oauthAuthorizationId is required for oauth credential bindings.", 400);
         return true;
       }
       validateCredentialTemplate({
@@ -1448,7 +1455,7 @@ export async function handleScriptConnections(
         scopeId,
         active: parsed.body.active ?? true,
         authKind: parsed.body.authKind ?? "config",
-        oauthProvider: parsed.body.oauthProvider,
+        oauthAuthorizationId: parsed.body.oauthAuthorizationId,
       });
       const binding = upsertCredentialBinding({
         id: parsed.body.id,
@@ -1460,7 +1467,7 @@ export async function handleScriptConnections(
         scopeId: nextBinding.scopeId ?? null,
         active: nextBinding.active,
         authKind: nextBinding.authKind,
-        oauthProvider: nextBinding.oauthProvider ?? null,
+        oauthAuthorizationId: nextBinding.oauthAuthorizationId ?? null,
         userId: resolveHttpAuditUserId(req, agentId),
       });
       json(res, { binding: decorateBinding(binding) });
@@ -1498,19 +1505,9 @@ export async function handleScriptConnections(
         tokenUrl: parsed.body.tokenUrl,
         redirectUri,
         scopes: (parsed.body.scopes ?? []).join(","),
-        ...(parsed.body.extraParams || parsed.body.tokenAuthStyle || parsed.body.tokenBodyFormat
-          ? {
-              metadata: JSON.stringify({
-                ...(parsed.body.extraParams ? { extraParams: parsed.body.extraParams } : {}),
-                ...(parsed.body.tokenAuthStyle
-                  ? { tokenAuthStyle: parsed.body.tokenAuthStyle }
-                  : {}),
-                ...(parsed.body.tokenBodyFormat
-                  ? { tokenBodyFormat: parsed.body.tokenBodyFormat }
-                  : {}),
-              }),
-            }
-          : {}),
+        ...(parsed.body.extraParams ? { extraParams: parsed.body.extraParams } : {}),
+        ...(parsed.body.tokenAuthStyle ? { tokenAuthStyle: parsed.body.tokenAuthStyle } : {}),
+        ...(parsed.body.tokenBodyFormat ? { tokenBodyFormat: parsed.body.tokenBodyFormat } : {}),
       });
       const app = listOAuthApps().find((row) => row.provider === parsed.body.provider);
       json(res, { oauthApp: app });
@@ -1647,7 +1644,7 @@ export async function handleScriptConnections(
 
     json(res, {
       refreshed: true,
-      tokenStatus: getOAuthBindingTokenStatus(provider),
+      tokenStatus: getOAuthBindingTokenStatus(tokens.id),
       expiresAt: getOAuthTokens(provider)?.expiresAt ?? null,
     });
     return true;

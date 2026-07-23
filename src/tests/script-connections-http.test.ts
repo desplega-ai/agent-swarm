@@ -140,7 +140,7 @@ beforeEach(() => {
   setOpenapiSpecFetchForTesting(null);
   getDb().run("DELETE FROM script_connections");
   getDb().run("DELETE FROM script_credential_bindings");
-  getDb().run("DELETE FROM oauth_tokens");
+  getDb().run("DELETE FROM oauth_authorizations");
   getDb().run("DELETE FROM oauth_apps");
   getDb().run("DELETE FROM swarm_config");
 });

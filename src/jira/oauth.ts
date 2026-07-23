@@ -29,7 +29,7 @@ export function getJiraOAuthConfig(): OAuthProviderConfig | null {
     scopes: app.scopes.split(","),
     scopeSeparator: " ",
     extraParams: { audience: "api.atlassian.com" },
-    requiresRefreshTokenRotation: true,
+    requiresRefreshTokenRotation: app.requiresRefreshTokenRotation,
   };
 }
 

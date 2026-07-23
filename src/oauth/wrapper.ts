@@ -199,6 +199,7 @@ export async function exchangeCode(
 export async function refreshAccessToken(
   config: OAuthProviderConfig,
   refreshToken: string,
+  expectedTokenVersion?: number,
 ): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number; scope?: string }> {
   const response = await fetch(config.tokenUrl, {
     method: "POST",
@@ -245,6 +246,7 @@ export async function refreshAccessToken(
       refreshToken: nextRefreshToken,
       expiresAt,
       scope: data.scope ?? null,
+      ...(expectedTokenVersion !== undefined ? { expectedTokenVersion } : {}),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -67,6 +67,7 @@ export async function ensureMcpToken(
         refreshToken: refreshed.refresh_token ?? undefined,
         expiresAt: computeExpiresAt(refreshed.expires_in),
         scope: refreshed.scope ?? null,
+        expectedTokenVersion: token.tokenVersion,
       });
 
       return getMcpOAuthToken(mcpServerId, userId);

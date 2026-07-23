@@ -6,6 +6,7 @@ import {
 import type { EgressSecretEntry } from "@/scripts-runtime/executors/types";
 import { registerVolatileSecret, scrubSecrets } from "@/utils/secret-scrubber";
 import { getResolvedConfig, getSwarmConfigs } from "./db";
+import { getDefaultAuthorizationIdForProvider } from "./db-queries/oauth";
 import { resolveOAuthBindingToken } from "./oauth-credential-bindings";
 import { listRelationalCredentialBindings } from "./script-connections";
 
@@ -26,16 +27,19 @@ export async function buildScriptCredentialBindings(input: {
   const resolvedConfigs = getResolvedConfig(input.agentId, input.repoId);
   const configMap = new Map(resolvedConfigs.map((config) => [config.key, config.value]));
   const broker = new CredentialBroker(
-    new RelationalCredentialBindingStore((filters) => getSwarmConfigs(filters)),
+    new RelationalCredentialBindingStore(
+      (filters) => getSwarmConfigs(filters),
+      (provider) => getDefaultAuthorizationIdForProvider(provider) ?? undefined,
+    ),
     (configKey) => configMap.get(configKey) ?? process.env[configKey],
     DEFAULT_CREDENTIAL_BINDINGS,
-    async (provider) => {
+    async (oauthAuthorizationId) => {
       try {
-        return await resolveOAuthBindingToken(provider);
+        return await resolveOAuthBindingToken(oauthAuthorizationId);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.warn(
-          `[script-credential-broker] skipping OAuth provider ${provider}: ${scrubSecrets(message)}`,
+          `[script-credential-broker] skipping OAuth authorization ${oauthAuthorizationId}: ${scrubSecrets(message)}`,
         );
         return undefined;
       }

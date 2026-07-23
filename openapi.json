@@ -9965,11 +9965,10 @@
                           "oauth"
                         ]
                       },
-                      "oauthProvider": {
+                      "oauthAuthorizationId": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 255,
-                        "pattern": "^[A-Za-z0-9_-]+$"
+                        "maxLength": 255
                       },
                       "enabled": {
                         "type": "boolean"
@@ -10065,11 +10064,10 @@
                           "oauth"
                         ]
                       },
-                      "oauthProvider": {
+                      "oauthAuthorizationId": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 255,
-                        "pattern": "^[A-Za-z0-9_-]+$"
+                        "maxLength": 255
                       },
                       "enabled": {
                         "type": "boolean"
@@ -10158,11 +10156,10 @@
                           "oauth"
                         ]
                       },
-                      "oauthProvider": {
+                      "oauthAuthorizationId": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 255,
-                        "pattern": "^[A-Za-z0-9_-]+$"
+                        "maxLength": 255
                       },
                       "enabled": {
                         "type": "boolean"
@@ -10416,11 +10413,10 @@
                     ],
                     "default": "config"
                   },
-                  "oauthProvider": {
+                  "oauthAuthorizationId": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 255,
-                    "pattern": "^[A-Za-z0-9_-]+$"
+                    "maxLength": 255
                   }
                 },
                 "required": [
