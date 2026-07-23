@@ -199,6 +199,33 @@ describe("/api/script-connections HTTP", () => {
     expect(bindingRow?.query_template).toBe("api_key=[REDACTED:QUERY_AUTH_VENDOR_KEY]");
   });
 
+  test("POST upsert defaults connection and inline binding allowedHosts from baseUrl", async () => {
+    const res = await dispatch("/api/script-connections", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        kind: "openapi",
+        slug: "defaultAllowedHostVendor",
+        baseUrl: "https://api.vendor.test/v1",
+        configKey: "DEFAULT_ALLOWED_HOST_VENDOR_KEY",
+        openapiSpecJson: inlineOpenApiSpec(),
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { connection: { id: string; allowedHosts: string[] } };
+    expect(body.connection.allowedHosts).toEqual(["api.vendor.test"]);
+    const bindingRow = getDb()
+      .prepare<{ allowed_hosts_json: string }, [string]>(
+        `SELECT b.allowed_hosts_json
+         FROM script_credential_bindings b
+         JOIN script_connections c ON c.credential_binding_id = b.id
+         WHERE c.id = ?`,
+      )
+      .get(body.connection.id);
+    expect(JSON.parse(bindingRow?.allowed_hosts_json ?? "[]")).toEqual(["api.vendor.test"]);
+  });
+
   test("POST upsert is forbidden for non-lead agent principal", async () => {
     const res = await dispatch("/api/script-connections", {
       method: "POST",
