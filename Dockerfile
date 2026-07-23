@@ -98,6 +98,9 @@ COPY src/be/migrations/*.sql /app/migrations/
 # pricing rows from a real filesystem path at runtime.
 COPY src/be/modelsdev-cache.json /app/src/be/modelsdev-cache.json
 
+# Curated OpenAPI snapshots are loaded by vendored script connections at runtime.
+COPY vendored-openapi/ /app/vendored-openapi/
+
 # Copy sqlite-vec native extension on real disk. `bun build --compile` embeds JS
 # into /$bunfs/ but not native .so files, and dlopen can't load from /$bunfs/.
 # The glob matches whichever arch-specific sqlite-vec optional dep bun installed

@@ -26,6 +26,7 @@ import {
   upsertCredentialBinding,
   upsertScriptConnection,
 } from "@/be/script-connections";
+import { listVendoredOpenapiEntries } from "@/be/vendored-openapi";
 import { assertOAuthAppUrlsSafe, assertOAuthProviderIsNotReserved } from "@/oauth/app-validation";
 import { forceRefreshTokenOrThrow } from "@/oauth/ensure-token";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
@@ -77,12 +78,18 @@ const connectionBaseBodySchema = z.object({
   enabled: z.boolean().optional(),
 });
 
+const vendoredSpecSourceSchema = z.object({
+  kind: z.literal("vendored"),
+  slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+});
+
 const upsertConnectionBodySchema = z.discriminatedUnion("kind", [
   connectionBaseBodySchema.extend({
     kind: z.literal("openapi"),
-    baseUrl: z.string().url(),
+    baseUrl: z.string().url().optional(),
     openapiSpecUrl: z.string().url().optional(),
     openapiSpecJson: z.string().optional(),
+    specSource: vendoredSpecSourceSchema.optional(),
   }),
   connectionBaseBodySchema.extend({
     kind: z.literal("graphql"),
@@ -451,7 +458,26 @@ type IntegrationsCatalogEntry = {
   domain: string;
   categories: string[];
   feeds: string[];
+  vendoredSlug?: string;
+  presetId?: string;
 };
+
+const BLESSED_CATALOG_ENTRIES: IntegrationsCatalogEntry[] = listVendoredOpenapiEntries().map(
+  (entry) => ({
+    id: entry.slug,
+    kind: "openapi",
+    slug: entry.slug,
+    name: entry.name,
+    description: `Blessed ${entry.name} integration`,
+    url: entry.docsUrl,
+    icon: null,
+    domain: entry.domain,
+    categories: entry.categories,
+    feeds: ["blessed"],
+    vendoredSlug: entry.slug,
+    ...(entry.presetId ? { presetId: entry.presetId } : {}),
+  }),
+);
 
 const DISCOVERY_TIMEOUT_MS = 10_000;
 const INTEGRATIONS_CATALOG_TIMEOUT_MS = 15_000;
@@ -462,6 +488,10 @@ let integrationsCatalogCache: {
   expiresAtMs: number;
   payload: { entries: IntegrationsCatalogEntry[]; cachedAt: string };
 } | null = null;
+
+export function resetIntegrationsCatalogCacheForTesting(): void {
+  integrationsCatalogCache = null;
+}
 
 type IntegrationsSurfaceMechanics = {
   in: string;
@@ -771,7 +801,8 @@ function maybeCreateInlineBinding(
       ? resolvedScopeId
       : connectionScopeId(scope, data.scopeId, "bindings");
   const allowedHosts =
-    data.allowedHosts ?? ("baseUrl" in data ? [new URL(data.baseUrl).hostname] : []);
+    data.allowedHosts ??
+    ("baseUrl" in data && data.baseUrl ? [new URL(data.baseUrl).hostname] : []);
   const authKind = data.authKind ?? "config";
   const placeholder = placeholderForConfigKey(data.configKey);
   const headerTemplate =
@@ -1093,6 +1124,18 @@ async function fetchIntegrationsCatalog() {
   }
 }
 
+function mergeBlessedCatalogEntries(
+  entries: IntegrationsCatalogEntry[],
+): IntegrationsCatalogEntry[] {
+  const blessedDomains = new Set(
+    BLESSED_CATALOG_ENTRIES.map((entry) => entry.domain.toLowerCase()),
+  );
+  return [
+    ...BLESSED_CATALOG_ENTRIES,
+    ...entries.filter((entry) => !blessedDomains.has(entry.domain.toLowerCase())),
+  ];
+}
+
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
 }
@@ -1277,10 +1320,11 @@ export async function handleScriptConnections(
     try {
       if (
         parsed.body.kind === "openapi" &&
-        Boolean(parsed.body.openapiSpecJson) &&
-        Boolean(parsed.body.openapiSpecUrl)
+        [parsed.body.openapiSpecJson, parsed.body.openapiSpecUrl, parsed.body.specSource].filter(
+          Boolean,
+        ).length > 1
       ) {
-        jsonError(res, "Provide exactly one of openapiSpecJson or openapiSpecUrl.", 400);
+        jsonError(res, "Provide exactly one OpenAPI spec source.", 400);
         return true;
       }
       const existingConnection = parsed.body.id ? getScriptConnectionById(parsed.body.id) : null;
@@ -1290,9 +1334,10 @@ export async function handleScriptConnections(
         parsed.body.kind === "openapi" &&
         !parsed.body.openapiSpecJson &&
         !parsed.body.openapiSpecUrl &&
+        !parsed.body.specSource &&
         !existingOpenapiConnection
       ) {
-        jsonError(res, "Provide exactly one of openapiSpecJson or openapiSpecUrl.", 400);
+        jsonError(res, "Provide exactly one OpenAPI spec source.", 400);
         return true;
       }
 
@@ -1315,6 +1360,8 @@ export async function handleScriptConnections(
         parsed.body.kind === "openapi" ? parsed.body.openapiSpecUrl : undefined;
       const openapiSpecJson =
         parsed.body.kind === "openapi" ? parsed.body.openapiSpecJson : undefined;
+      const vendoredSpecSource =
+        parsed.body.kind === "openapi" ? parsed.body.specSource : undefined;
       const openapiSpecUrlChanged =
         parsed.body.kind === "openapi" &&
         Boolean(openapiSpecUrl) &&
@@ -1332,19 +1379,23 @@ export async function handleScriptConnections(
         kind: parsed.body.kind,
         scope,
         scopeId,
-        baseUrl: "baseUrl" in parsed.body ? parsed.body.baseUrl : null,
+        baseUrl: "baseUrl" in parsed.body ? (parsed.body.baseUrl ?? null) : null,
         allowedHosts:
           parsed.body.allowedHosts ??
-          ("baseUrl" in parsed.body ? [new URL(parsed.body.baseUrl).hostname] : []),
+          ("baseUrl" in parsed.body && parsed.body.baseUrl
+            ? [new URL(parsed.body.baseUrl).hostname]
+            : []),
         credentialBindingId,
-        openapiSpecSourceKind:
-          reuseExistingOpenapiSpec && !openapiSpecUrl
+        openapiSpecSourceKind: vendoredSpecSource
+          ? "vendored"
+          : reuseExistingOpenapiSpec && !openapiSpecUrl
             ? existingOpenapiConnection?.openapiSpecSourceKind
             : undefined,
         openapiSpecSource:
-          reuseExistingOpenapiSpec && !openapiSpecUrl
+          vendoredSpecSource?.slug ??
+          (reuseExistingOpenapiSpec && !openapiSpecUrl
             ? existingOpenapiConnection?.openapiSpecSource
-            : undefined,
+            : undefined),
         openapiSpecUrl,
         openapiSpecJson:
           parsed.body.kind === "openapi"
@@ -1562,13 +1613,26 @@ export async function handleScriptConnections(
 
   if (integrationsCatalogRoute.match(req.method, pathSegments)) {
     try {
-      json(res, await fetchIntegrationsCatalog());
+      const catalog = await fetchIntegrationsCatalog();
+      json(res, {
+        ...catalog,
+        entries: mergeBlessedCatalogEntries(catalog.entries),
+        partial: false,
+      });
     } catch (err) {
-      jsonError(
-        res,
-        `Failed to fetch integrations catalog: ${err instanceof Error ? err.message : String(err)}`,
-        502,
-      );
+      if (BLESSED_CATALOG_ENTRIES.length > 0) {
+        json(res, {
+          entries: BLESSED_CATALOG_ENTRIES,
+          cachedAt: new Date().toISOString(),
+          partial: true,
+        });
+      } else {
+        jsonError(
+          res,
+          `Failed to fetch integrations catalog: ${err instanceof Error ? err.message : String(err)}`,
+          502,
+        );
+      }
     }
     return true;
   }

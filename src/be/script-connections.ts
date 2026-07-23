@@ -14,6 +14,7 @@ import {
   normalizeCredentialBindingsDocument,
 } from "@/scripts-runtime/credential-broker";
 import { listMcpServerTools } from "./mcp-proxy";
+import { readVendoredOpenapiSpec } from "./vendored-openapi";
 
 export type ScriptConnectionScope = "global" | "agent" | "repo";
 export type ScriptConnectionKind = "raw" | "openapi" | "mcp" | "graphql";
@@ -37,7 +38,7 @@ export type ScriptConnectionRecord = {
   baseUrl: string | null;
   allowedHosts: string[];
   credentialBindingId: string | null;
-  openapiSpecSourceKind: "url" | "inline" | "agent_fs" | null;
+  openapiSpecSourceKind: "url" | "inline" | "agent_fs" | "vendored" | null;
   openapiSpecSource: string | null;
   openapiSpecJson: string | null;
   openapiSpecEtag: string | null;
@@ -430,16 +431,54 @@ export function getScriptConnectionById(id: string): ScriptConnectionRecord | nu
   return row ? connectionFromRow(row) : null;
 }
 
-function schemaToTs(schema: unknown): string {
+function resolveLocalReference(
+  root: Record<string, unknown>,
+  value: unknown,
+  seen = new Set<string>(),
+): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  if (typeof record.$ref !== "string" || !record.$ref.startsWith("#/")) return value;
+  if (seen.has(record.$ref)) return undefined;
+  let resolved: unknown = root;
+  for (const rawSegment of record.$ref.slice(2).split("/")) {
+    const segment = decodeURIComponent(rawSegment).replaceAll("~1", "/").replaceAll("~0", "~");
+    if (!resolved || typeof resolved !== "object" || Array.isArray(resolved)) return undefined;
+    resolved = (resolved as Record<string, unknown>)[segment];
+  }
+  if (!resolved || typeof resolved !== "object" || Array.isArray(resolved)) return resolved;
+  const nextSeen = new Set(seen).add(record.$ref);
+  const nested = resolveLocalReference(root, resolved, nextSeen);
+  if (!nested || typeof nested !== "object" || Array.isArray(nested)) return nested;
+  const siblings = Object.fromEntries(Object.entries(record).filter(([key]) => key !== "$ref"));
+  return { ...(nested as Record<string, unknown>), ...siblings };
+}
+
+function schemaToTs(
+  schema: unknown,
+  root: Record<string, unknown>,
+  seen = new Set<string>(),
+): string {
   if (!schema || typeof schema !== "object") return "JsonValue";
   const s = schema as Record<string, unknown>;
-  if (typeof s.$ref === "string") return "JsonValue";
+  if (typeof s.$ref === "string") {
+    if (seen.has(s.$ref)) return "JsonValue";
+    const resolved = resolveLocalReference(root, s);
+    return resolved ? schemaToTs(resolved, root, new Set(seen).add(s.$ref)) : "JsonValue";
+  }
   if (Array.isArray(s.enum)) return s.enum.map((v) => JSON.stringify(v)).join(" | ") || "JsonValue";
+  if (Array.isArray(s.oneOf) || Array.isArray(s.anyOf)) {
+    const alternatives = (Array.isArray(s.oneOf) ? s.oneOf : s.anyOf) as unknown[];
+    return alternatives.map((item) => schemaToTs(item, root, new Set(seen))).join(" | ");
+  }
+  if (Array.isArray(s.allOf)) {
+    return s.allOf.map((item) => schemaToTs(item, root, new Set(seen))).join(" & ");
+  }
   const type = s.type;
   if (type === "string") return "string";
   if (type === "integer" || type === "number") return "number";
   if (type === "boolean") return "boolean";
-  if (type === "array") return `${schemaToTs(s.items)}[]`;
+  if (type === "array") return `(${schemaToTs(s.items, root, new Set(seen))})[]`;
   if (type === "object" || s.properties) {
     const required = new Set(
       Array.isArray(s.required) ? s.required.filter((v): v is string => typeof v === "string") : [],
@@ -449,8 +488,12 @@ function schemaToTs(schema: unknown): string {
         ? (s.properties as Record<string, unknown>)
         : {};
     const entries = Object.entries(props);
-    if (entries.length === 0) return "{ [key: string]: JsonValue }";
-    return `{ ${entries.map(([key, value]) => `${JSON.stringify(key)}${required.has(key) ? "" : "?"}: ${schemaToTs(value)}`).join("; ")} }`;
+    if (entries.length === 0) {
+      return s.additionalProperties
+        ? `{ [key: string]: ${schemaToTs(s.additionalProperties, root, new Set(seen))} }`
+        : "{ [key: string]: JsonValue }";
+    }
+    return `{ ${entries.map(([key, value]) => `${JSON.stringify(key)}${required.has(key) ? "" : "?"}: ${schemaToTs(value, root, new Set(seen))}`).join("; ")} }`;
   }
   return "JsonValue";
 }
@@ -473,9 +516,32 @@ function toJsonValue(value: unknown): ScriptApiJsonValue | undefined {
   return undefined;
 }
 
-function jsonSchema(schema: unknown): ScriptApiJsonSchema {
+function dereferenceSchema(
+  schema: unknown,
+  root: Record<string, unknown>,
+  seen = new Set<string>(),
+): unknown {
+  if (Array.isArray(schema)) {
+    return schema.map((item) => dereferenceSchema(item, root, new Set(seen)));
+  }
+  if (!schema || typeof schema !== "object") return schema;
+  const record = schema as Record<string, unknown>;
+  if (typeof record.$ref === "string") {
+    if (seen.has(record.$ref)) return {};
+    const resolved = resolveLocalReference(root, record);
+    return resolved ? dereferenceSchema(resolved, root, new Set(seen).add(record.$ref)) : {};
+  }
+  return Object.fromEntries(
+    Object.entries(record).map(([key, value]) => [
+      key,
+      dereferenceSchema(value, root, new Set(seen)),
+    ]),
+  );
+}
+
+function jsonSchema(schema: unknown, root: Record<string, unknown>): ScriptApiJsonSchema {
   if (typeof schema === "boolean") return schema;
-  const value = toJsonValue(schema);
+  const value = toJsonValue(dereferenceSchema(schema, root));
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
@@ -510,55 +576,113 @@ function extractOperations(
         path,
       );
       const typeBase = `${pascal(slug)}${pascal(name)}`;
-      const parameters = [
+      const rawParameters = [
         ...inheritedParams,
         ...(Array.isArray(operation.parameters) ? operation.parameters : []),
-      ]
+      ].map((param) => resolveLocalReference(root, param));
+      const parameters = rawParameters
         .filter((param): param is Record<string, unknown> =>
           Boolean(
             param &&
               typeof param === "object" &&
-              typeof (param as Record<string, unknown>).name === "string",
+              typeof (param as Record<string, unknown>).name === "string" &&
+              ["path", "query", "header"].includes(String((param as Record<string, unknown>).in)),
           ),
         )
-        .map((param) => ({
-          name: String(param.name),
-          in: (["path", "query", "header"].includes(String(param.in))
-            ? String(param.in)
-            : "query") as "path" | "query" | "header",
-          required: param.required === true,
-          type: schemaToTs(param.schema),
-          schema: jsonSchema(param.schema),
-        }));
+        .map((param) => {
+          const parameterSchema =
+            param.schema ??
+            Object.fromEntries(
+              ["type", "format", "items", "enum", "default"].flatMap((key) =>
+                param[key] === undefined ? [] : [[key, param[key]]],
+              ),
+            );
+          return {
+            name: String(param.name),
+            in: String(param.in) as "path" | "query" | "header",
+            required: param.required === true,
+            type: schemaToTs(parameterSchema, root),
+            schema: jsonSchema(parameterSchema, root),
+          };
+        });
+      const resolvedRequestBody = resolveLocalReference(root, operation.requestBody);
       const requestBody =
-        operation.requestBody && typeof operation.requestBody === "object"
-          ? (operation.requestBody as Record<string, unknown>)
+        resolvedRequestBody &&
+        typeof resolvedRequestBody === "object" &&
+        !Array.isArray(resolvedRequestBody)
+          ? (resolvedRequestBody as Record<string, unknown>)
           : null;
       const jsonContent =
         requestBody && typeof requestBody.content === "object"
-          ? (requestBody.content as Record<string, { schema?: unknown }>)["application/json"]
+          ? ((requestBody.content as Record<string, { schema?: unknown }>)["application/json"] ??
+            Object.values(requestBody.content as Record<string, { schema?: unknown }>)[0])
           : undefined;
-      const requestBodySchema = jsonContent?.schema ? jsonSchema(jsonContent.schema) : undefined;
-      const bodyType = jsonContent?.schema ? schemaToTs(jsonContent.schema) : "JsonValue";
+      const swaggerBodyParameter = rawParameters.find((param): param is Record<string, unknown> =>
+        Boolean(
+          param && typeof param === "object" && (param as Record<string, unknown>).in === "body",
+        ),
+      );
+      const swaggerFormParameters = rawParameters.filter(
+        (param): param is Record<string, unknown> =>
+          Boolean(
+            param &&
+              typeof param === "object" &&
+              (param as Record<string, unknown>).in === "formData" &&
+              typeof (param as Record<string, unknown>).name === "string",
+          ),
+      );
+      const swaggerFormSchema =
+        swaggerFormParameters.length > 0
+          ? {
+              type: "object",
+              properties: Object.fromEntries(
+                swaggerFormParameters.map((param) => [
+                  String(param.name),
+                  param.schema ??
+                    Object.fromEntries(
+                      ["type", "format", "items", "enum", "default"].flatMap((key) =>
+                        param[key] === undefined ? [] : [[key, param[key]]],
+                      ),
+                    ),
+                ]),
+              ),
+              required: swaggerFormParameters
+                .filter((param) => param.required === true)
+                .map((param) => String(param.name)),
+            }
+          : undefined;
+      const rawRequestBodySchema =
+        jsonContent?.schema ?? swaggerBodyParameter?.schema ?? swaggerFormSchema;
+      const requestBodySchema = rawRequestBodySchema
+        ? jsonSchema(rawRequestBodySchema, root)
+        : undefined;
+      const bodyType = rawRequestBodySchema ? schemaToTs(rawRequestBodySchema, root) : "JsonValue";
       const responses =
         operation.responses && typeof operation.responses === "object"
           ? (operation.responses as Record<string, unknown>)
           : {};
       const successStatus =
         Object.keys(responses).find((status) => /^2\d\d$/.test(status)) ?? "default";
-      const response = responses[successStatus];
+      const response = resolveLocalReference(root, responses[successStatus]);
       const responseContent =
         response &&
         typeof response === "object" &&
+        !Array.isArray(response) &&
         typeof (response as { content?: unknown }).content === "object"
-          ? (response as { content: Record<string, { schema?: unknown }> }).content[
+          ? ((response as { content: Record<string, { schema?: unknown }> }).content[
               "application/json"
-            ]
+            ] ??
+            Object.values(
+              (response as { content: Record<string, { schema?: unknown }> }).content,
+            )[0])
           : undefined;
-      const responseType = responseContent?.schema
-        ? schemaToTs(responseContent.schema)
-        : "JsonValue";
-      const responseSchema = responseContent?.schema ? jsonSchema(responseContent.schema) : {};
+      const swaggerResponseSchema =
+        response && typeof response === "object" && !Array.isArray(response)
+          ? (response as Record<string, unknown>).schema
+          : undefined;
+      const rawResponseSchema = responseContent?.schema ?? swaggerResponseSchema;
+      const responseType = rawResponseSchema ? schemaToTs(rawResponseSchema, root) : "JsonValue";
+      const responseSchema = rawResponseSchema ? jsonSchema(rawResponseSchema, root) : {};
       const paramsByPlace = (place: "path" | "query" | "header") =>
         parameters
           .filter((param) => param.in === place)
@@ -569,7 +693,7 @@ function extractOperations(
       // Some generated specs (e.g. readme.io exports) declare a requestBody on
       // GET operations; fetch() rejects GET/HEAD bodies, so never generate one.
       const methodAllowsBody = method !== "get" && method !== "head";
-      const hasBody = methodAllowsBody && Boolean(jsonContent?.schema || requestBody);
+      const hasBody = methodAllowsBody && Boolean(rawRequestBodySchema || requestBody);
       const requestType = `export type ${typeBase}Args = {${paramsByPlace("path") ? ` path: { ${paramsByPlace("path")} };` : ""}${paramsByPlace("query") ? ` query?: { ${paramsByPlace("query")} };` : ""}${paramsByPlace("header") ? ` header?: { ${paramsByPlace("header")} };` : ""}${hasBody ? ` body: ${bodyType};` : ""}};`;
       const responseDecl = `export type ${typeBase}Response = ${responseType};`;
       typeBlocks.push(requestType, responseDecl);
@@ -710,7 +834,7 @@ function mcpToolArgsType(inputSchema: unknown): string {
   if (!inputSchema || typeof inputSchema !== "object") return "Record<string, JsonValue>";
   const schema = inputSchema as Record<string, unknown>;
   if (Object.keys(schema).length === 0) return "Record<string, JsonValue>";
-  const type = schemaToTs(schema);
+  const type = schemaToTs(schema, schema);
   return type === "JsonValue" ? "Record<string, JsonValue>" : type;
 }
 
@@ -724,7 +848,7 @@ export function buildMcpGeneratedArtifacts(input: {
   const tools: ScriptMcpToolDescriptor[] = input.tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
-    inputSchema: jsonSchema(tool.inputSchema ?? {}),
+    inputSchema: jsonSchema(tool.inputSchema ?? {}, tool.inputSchema ?? {}),
   }));
   const generatedTypes = [
     `export interface ${pascal(slug)}Mcp {`,
@@ -832,7 +956,7 @@ export async function upsertScriptConnection(data: {
   baseUrl?: string | null;
   allowedHosts?: string[];
   credentialBindingId?: string | null;
-  openapiSpecSourceKind?: "url" | "inline" | "agent_fs" | null;
+  openapiSpecSourceKind?: "url" | "inline" | "agent_fs" | "vendored" | null;
   openapiSpecSource?: string | null;
   openapiSpecUrl?: string | null;
   openapiSpecJson?: string | null;
@@ -860,6 +984,8 @@ export async function upsertScriptConnection(data: {
   let openapiSpecEtag = data.openapiSpecEtag ?? null;
   let openapiSpecFetchedAt = data.openapiSpecFetchedAt ?? null;
   let openapiSpec: unknown;
+  let baseUrl = data.baseUrl ?? null;
+  let allowedHosts = data.allowedHosts ?? [];
 
   const existing = data.id
     ? getDb()
@@ -875,6 +1001,14 @@ export async function upsertScriptConnection(data: {
   const connectionId = existing?.id ?? id;
 
   if (data.kind === "openapi") {
+    if (openapiSpecSourceKind === "vendored") {
+      if (!openapiSpecSource) throw new Error("Vendored OpenAPI connections require a spec slug.");
+      const vendored = readVendoredOpenapiSpec(openapiSpecSource);
+      openapiSpecJson = vendored.specJson;
+      openapiSpec = JSON.parse(vendored.specJson) as unknown;
+      baseUrl ??= vendored.entry.baseUrl;
+      if (allowedHosts.length === 0) allowedHosts = [new URL(vendored.entry.baseUrl).hostname];
+    }
     if (!openapiSpecJson && data.openapiSpecUrl) {
       const fetched = await fetchOpenapiSpec(data.openapiSpecUrl);
       if (fetched.status === "not_modified") {
@@ -900,7 +1034,7 @@ export async function upsertScriptConnection(data: {
         : null;
       const artifacts = buildGeneratedArtifacts({
         slug: data.slug,
-        baseUrl: data.baseUrl ?? "",
+        baseUrl: baseUrl ?? "",
         credentialBinding: binding,
         openapiSpec: spec,
       });
@@ -963,8 +1097,8 @@ export async function upsertScriptConnection(data: {
     data.kind,
     scope,
     scopeId,
-    data.baseUrl ?? null,
-    JSON.stringify(data.allowedHosts ?? []),
+    baseUrl,
+    JSON.stringify(allowedHosts),
     data.credentialBindingId ?? null,
     openapiSpecSourceKind,
     openapiSpecSource,
@@ -1051,8 +1185,28 @@ export async function refreshScriptConnection(
   if (connection.kind !== "openapi") {
     throw new Error("Only OpenAPI and MCP script connections can be refreshed.");
   }
-  if (connection.openapiSpecSourceKind !== "url" || !connection.openapiSpecSource) {
-    throw new Error("Only OpenAPI script connections registered by URL can be refreshed.");
+  if (!connection.openapiSpecSource) {
+    throw new Error("OpenAPI script connection has no source to refresh from.");
+  }
+  if (connection.openapiSpecSourceKind === "vendored") {
+    return upsertScriptConnection({
+      id: connection.id,
+      slug: connection.slug,
+      displayName: connection.displayName,
+      kind: "openapi",
+      scope: connection.scope,
+      scopeId: connection.scopeId,
+      baseUrl: connection.baseUrl,
+      allowedHosts: connection.allowedHosts,
+      credentialBindingId: connection.credentialBindingId,
+      openapiSpecSourceKind: "vendored",
+      openapiSpecSource: connection.openapiSpecSource,
+      enabled: connection.enabled,
+      userId,
+    });
+  }
+  if (connection.openapiSpecSourceKind !== "url") {
+    throw new Error("Only URL and vendored OpenAPI script connections can be refreshed.");
   }
 
   const fetched = await fetchOpenapiSpec(connection.openapiSpecSource, {

@@ -1,0 +1,3396 @@
+{
+  "components": {
+    "schemas": {
+      "ApplicationRole": {
+        "additionalProperties": false,
+        "description": "Details of an application role.",
+        "properties": {
+          "defaultGroups": {
+            "description": "The groups that are granted default access for this application role. As a group's name can change, use of `defaultGroupsDetails` is recommended to identify a groups.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "defaultGroupsDetails": {
+            "description": "The groups that are granted default access for this application role.",
+            "items": {
+              "$ref": "#/components/schemas/GroupName"
+            },
+            "type": "array"
+          },
+          "defined": {
+            "description": "Deprecated.",
+            "type": "boolean"
+          },
+          "groupDetails": {
+            "description": "The groups associated with the application role.",
+            "items": {
+              "$ref": "#/components/schemas/GroupName"
+            },
+            "type": "array"
+          },
+          "groups": {
+            "description": "The groups associated with the application role. As a group's name can change, use of `groupDetails` is recommended to identify a groups.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "hasUnlimitedSeats": {
+            "type": "boolean"
+          },
+          "key": {
+            "description": "The key of the application role.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The display name of the application role.",
+            "type": "string"
+          },
+          "numberOfSeats": {
+            "description": "The maximum count of users on your license.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "platform": {
+            "description": "Indicates if the application role belongs to Jira platform (`jira-core`).",
+            "type": "boolean"
+          },
+          "remainingSeats": {
+            "description": "The count of users remaining on your license.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "selectedByDefault": {
+            "description": "Determines whether this application role should be selected by default on user creation.",
+            "type": "boolean"
+          },
+          "userCount": {
+            "description": "The number of users counting against your license.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "userCountDescription": {
+            "description": "The [type of users](https://confluence.atlassian.com/x/lRW3Ng) being counted against your license.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AvatarUrlsBean": {
+        "additionalProperties": false,
+        "properties": {
+          "16x16": {
+            "description": "The URL of the item's 16x16 pixel avatar.",
+            "format": "uri",
+            "type": "string"
+          },
+          "24x24": {
+            "description": "The URL of the item's 24x24 pixel avatar.",
+            "format": "uri",
+            "type": "string"
+          },
+          "32x32": {
+            "description": "The URL of the item's 32x32 pixel avatar.",
+            "format": "uri",
+            "type": "string"
+          },
+          "48x48": {
+            "description": "The URL of the item's 48x48 pixel avatar.",
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ChangeDetails": {
+        "additionalProperties": false,
+        "description": "A change item.",
+        "properties": {
+          "field": {
+            "description": "The name of the field changed.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "fieldId": {
+            "description": "The ID of the field changed.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "fieldtype": {
+            "description": "The type of the field changed.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "from": {
+            "description": "The details of the original value.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "fromString": {
+            "description": "The details of the original value as a string.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "to": {
+            "description": "The details of the new value.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "toString": {
+            "description": "The details of the new value as a string.",
+            "readOnly": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Changelog": {
+        "additionalProperties": false,
+        "description": "A log of changes made to issue fields. Changelogs related to workflow associations are currently being deprecated.",
+        "properties": {
+          "author": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserDetails"
+              }
+            ],
+            "description": "The user who made the change.",
+            "readOnly": true
+          },
+          "created": {
+            "description": "The date on which the change took place.",
+            "format": "date-time",
+            "readOnly": true,
+            "type": "string"
+          },
+          "historyMetadata": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HistoryMetadata"
+              }
+            ],
+            "description": "The history metadata associated with the changed.",
+            "readOnly": true
+          },
+          "id": {
+            "description": "The ID of the changelog.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "description": "The list of items changed.",
+            "items": {
+              "$ref": "#/components/schemas/ChangeDetails"
+            },
+            "readOnly": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "CreatedIssue": {
+        "additionalProperties": false,
+        "description": "Details about a created issue or subtask.",
+        "properties": {
+          "id": {
+            "description": "The ID of the created issue or subtask.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "key": {
+            "description": "The key of the created issue or subtask.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "self": {
+            "description": "The URL of the created issue or subtask.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "transition": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NestedResponse"
+              }
+            ],
+            "description": "The response code and messages related to any requested transition.",
+            "readOnly": true
+          },
+          "watchers": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NestedResponse"
+              }
+            ],
+            "description": "The response code and messages related to any requested watchers.",
+            "readOnly": true
+          }
+        },
+        "type": "object"
+      },
+      "EntityProperty": {
+        "additionalProperties": false,
+        "description": "An entity property, for more information see [Entity properties](https://developer.atlassian.com/cloud/jira/platform/jira-entity-properties/).",
+        "properties": {
+          "key": {
+            "description": "The key of the property. Required on create and update.",
+            "type": "string"
+          },
+          "value": {
+            "description": "The value of the property. Required on create and update."
+          }
+        },
+        "type": "object"
+      },
+      "ErrorCollection": {
+        "additionalProperties": false,
+        "description": "Error messages from an operation.",
+        "properties": {
+          "errorMessages": {
+            "description": "The list of error messages produced by this operation. For example, \"input parameter 'key' must be provided\"",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "errors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The list of errors by parameter returned by the operation. For example,\"projectKey\": \"Project keys must start with an uppercase letter, followed by one or more uppercase alphanumeric characters.\"",
+            "type": "object"
+          },
+          "status": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "FieldMetadata": {
+        "additionalProperties": false,
+        "description": "The metadata describing an issue field.",
+        "properties": {
+          "allowedValues": {
+            "description": "The list of values allowed in the field.",
+            "items": {
+              "readOnly": true
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "autoCompleteUrl": {
+            "description": "The URL that can be used to automatically complete the field.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "configuration": {
+            "additionalProperties": {
+              "readOnly": true
+            },
+            "description": "The configuration properties.",
+            "readOnly": true,
+            "type": "object"
+          },
+          "defaultValue": {
+            "description": "The default value of the field.",
+            "readOnly": true
+          },
+          "hasDefaultValue": {
+            "description": "Whether the field has a default value.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "key": {
+            "description": "The key of the field.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "The name of the field.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "operations": {
+            "description": "The list of operations that can be performed on the field.",
+            "items": {
+              "readOnly": true,
+              "type": "string"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "required": {
+            "description": "Whether the field is required.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "schema": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/JsonTypeBean"
+              }
+            ],
+            "description": "The data type of the field.",
+            "readOnly": true
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "operations",
+          "required",
+          "schema"
+        ],
+        "type": "object",
+        "xml": {
+          "name": "availableField"
+        }
+      },
+      "FieldUpdateOperation": {
+        "additionalProperties": false,
+        "description": "Details of an operation to perform on a field.",
+        "properties": {
+          "add": {
+            "description": "The value to add to the field.",
+            "example": "triaged"
+          },
+          "copy": {
+            "description": "The field value to copy from another issue.",
+            "example": {
+              "issuelinks": {
+                "sourceIssues": [
+                  {
+                    "key": "FP-5"
+                  }
+                ]
+              }
+            }
+          },
+          "edit": {
+            "description": "The value to edit in the field.",
+            "example": {
+              "originalEstimate": "1w 1d",
+              "remainingEstimate": "4d"
+            }
+          },
+          "remove": {
+            "description": "The value to removed from the field.",
+            "example": "blocker"
+          },
+          "set": {
+            "description": "The value to set in the field.",
+            "example": "A new summary"
+          }
+        },
+        "type": "object"
+      },
+      "GroupName": {
+        "additionalProperties": false,
+        "description": "Details about a group.",
+        "properties": {
+          "groupId": {
+            "description": "The ID of the group, which uniquely identifies the group across all Atlassian products. For example, *952d12c3-5b5b-4d04-bb32-44d383afc4b2*.",
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "The name of group.",
+            "type": "string"
+          },
+          "self": {
+            "description": "The URL for these group details.",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Hierarchy": {
+        "additionalProperties": false,
+        "description": "The project issue type hierarchy.",
+        "properties": {
+          "baseLevelId": {
+            "description": "The ID of the base level. This property is deprecated, see [Change notice: Removing hierarchy level IDs from next-gen APIs](https://developer.atlassian.com/cloud/jira/platform/change-notice-removing-hierarchy-level-ids-from-next-gen-apis/).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "levels": {
+            "description": "Details about the hierarchy level.",
+            "items": {
+              "$ref": "#/components/schemas/SimplifiedHierarchyLevel"
+            },
+            "readOnly": true,
+            "type": "array"
+          }
+        },
+        "type": "object",
+        "xml": {
+          "name": "hierarchy"
+        }
+      },
+      "HistoryMetadata": {
+        "additionalProperties": true,
+        "description": "Details of issue history metadata.",
+        "properties": {
+          "activityDescription": {
+            "description": "The activity described in the history record.",
+            "type": "string"
+          },
+          "activityDescriptionKey": {
+            "description": "The key of the activity described in the history record.",
+            "type": "string"
+          },
+          "actor": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HistoryMetadataParticipant"
+              }
+            ],
+            "description": "Details of the user whose action created the history record."
+          },
+          "cause": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HistoryMetadataParticipant"
+              }
+            ],
+            "description": "Details of the cause that triggered the creation the history record."
+          },
+          "description": {
+            "description": "The description of the history record.",
+            "type": "string"
+          },
+          "descriptionKey": {
+            "description": "The description key of the history record.",
+            "type": "string"
+          },
+          "emailDescription": {
+            "description": "The description of the email address associated the history record.",
+            "type": "string"
+          },
+          "emailDescriptionKey": {
+            "description": "The description key of the email address associated the history record.",
+            "type": "string"
+          },
+          "extraData": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Additional arbitrary information about the history record.",
+            "type": "object"
+          },
+          "generator": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HistoryMetadataParticipant"
+              }
+            ],
+            "description": "Details of the system that generated the history record."
+          },
+          "type": {
+            "description": "The type of the history record.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "HistoryMetadataParticipant": {
+        "additionalProperties": true,
+        "description": "Details of user or system associated with a issue history metadata item.",
+        "properties": {
+          "avatarUrl": {
+            "description": "The URL to an avatar for the user or system associated with a history record.",
+            "type": "string"
+          },
+          "displayName": {
+            "description": "The display name of the user or system associated with a history record.",
+            "type": "string"
+          },
+          "displayNameKey": {
+            "description": "The key of the display name of the user or system associated with a history record.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The ID of the user or system associated with a history record.",
+            "type": "string"
+          },
+          "type": {
+            "description": "The type of the user or system associated with a history record.",
+            "type": "string"
+          },
+          "url": {
+            "description": "The URL of the user or system associated with a history record.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "IncludedFields": {
+        "additionalProperties": false,
+        "properties": {
+          "actuallyIncluded": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "excluded": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "included": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "type": "object"
+      },
+      "IssueBean": {
+        "additionalProperties": false,
+        "description": "Details about an issue.",
+        "properties": {
+          "changelog": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PageOfChangelogs"
+              }
+            ],
+            "description": "Details of changelogs associated with the issue.",
+            "readOnly": true
+          },
+          "editmeta": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IssueUpdateMetadata"
+              }
+            ],
+            "description": "The metadata for the fields on the issue that can be amended.",
+            "readOnly": true
+          },
+          "expand": {
+            "description": "Expand options that include additional issue details in the response.",
+            "readOnly": true,
+            "type": "string",
+            "xml": {
+              "attribute": true
+            }
+          },
+          "fields": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "fieldsToInclude": {
+            "$ref": "#/components/schemas/IncludedFields"
+          },
+          "id": {
+            "description": "The ID of the issue.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "key": {
+            "description": "The key of the issue.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "names": {
+            "additionalProperties": {
+              "readOnly": true,
+              "type": "string"
+            },
+            "description": "The ID and name of each field present on the issue.",
+            "readOnly": true,
+            "type": "object"
+          },
+          "operations": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Operations"
+              }
+            ],
+            "description": "The operations that can be performed on the issue.",
+            "readOnly": true
+          },
+          "properties": {
+            "additionalProperties": {
+              "readOnly": true
+            },
+            "description": "Details of the issue properties identified in the request.",
+            "readOnly": true,
+            "type": "object"
+          },
+          "renderedFields": {
+            "additionalProperties": {
+              "readOnly": true
+            },
+            "description": "The rendered value of each field present on the issue.",
+            "readOnly": true,
+            "type": "object"
+          },
+          "schema": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonTypeBean"
+            },
+            "description": "The schema describing each field present on the issue.",
+            "readOnly": true,
+            "type": "object"
+          },
+          "self": {
+            "description": "The URL of the issue details.",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "transitions": {
+            "description": "The transitions that can be performed on the issue.",
+            "items": {
+              "$ref": "#/components/schemas/IssueTransition"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "versionedRepresentations": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "readOnly": true
+              },
+              "readOnly": true,
+              "type": "object"
+            },
+            "description": "The versions of each field on the issue.",
+            "readOnly": true,
+            "type": "object"
+          }
+        },
+        "type": "object",
+        "xml": {
+          "name": "issue"
+        }
+      },
+      "IssueTransition": {
+        "additionalProperties": true,
+        "description": "Details of an issue transition.",
+        "properties": {
+          "expand": {
+            "description": "Expand options that include additional transition details in the response.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FieldMetadata"
+            },
+            "description": "Details of the fields associated with the issue transition screen. Use this information to populate `fields` and `update` in a transition request.",
+            "readOnly": true,
+            "type": "object"
+          },
+          "hasScreen": {
+            "description": "Whether there is a screen associated with the issue transition.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "id": {
+            "description": "The ID of the issue transition. Required when specifying a transition to undertake.",
+            "type": "string"
+          },
+          "isAvailable": {
+            "description": "Whether the transition is available to be performed.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "isConditional": {
+            "description": "Whether the issue has to meet criteria before the issue transition is applied.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "isGlobal": {
+            "description": "Whether the issue transition is global, that is, the transition is applied to issues regardless of their status.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "isInitial": {
+            "description": "Whether this is the initial issue transition for the workflow.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "looped": {
+            "type": "boolean"
+          },
+          "name": {
+            "description": "The name of the issue transition.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "to": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StatusDetails"
+              }
+            ],
+            "description": "Details of the issue status after the transition.",
+            "readOnly": true
+          }
+        },
+        "type": "object"
+      },
+      "IssueTypeDetails": {
+        "additionalProperties": false,
+        "description": "Details about an issue type.",
+        "properties": {
+          "avatarId": {
+            "description": "The ID of the issue type's avatar.",
+            "format": "int64",
+            "readOnly": true,
+            "type": "integer"
+          },
+          "description": {
+            "description": "The description of the issue type.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "entityId": {
+            "description": "Unique ID for next-gen projects.",
+            "format": "uuid",
+            "readOnly": true,
+            "type": "string"
+          },
+          "hierarchyLevel": {
+            "description": "Hierarchy level of the issue type.",
+            "format": "int32",
+            "readOnly": true,
+            "type": "integer"
+          },
+          "iconUrl": {
+            "description": "The URL of the issue type's avatar.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "id": {
+            "description": "The ID of the issue type.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "The name of the issue type.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "scope": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Scope"
+              }
+            ],
+            "description": "Details of the next-gen projects the issue type is available in.",
+            "readOnly": true
+          },
+          "self": {
+            "description": "The URL of these issue type details.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "subtask": {
+            "description": "Whether this issue type is used to create subtasks.",
+            "readOnly": true,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "IssueUpdateDetails": {
+        "additionalProperties": true,
+        "description": "Details of an issue update request.",
+        "properties": {
+          "fields": {
+            "additionalProperties": {},
+            "description": "List of issue screen fields to update, specifying the sub-field to update and its value for each field. This field provides a straightforward option when setting a sub-field. When multiple sub-fields or other operations are required, use `update`. Fields included in here cannot be included in `update`.",
+            "type": "object"
+          },
+          "historyMetadata": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HistoryMetadata"
+              }
+            ],
+            "description": "Additional issue history details."
+          },
+          "properties": {
+            "description": "Details of issue properties to be add or update.",
+            "items": {
+              "$ref": "#/components/schemas/EntityProperty"
+            },
+            "type": "array"
+          },
+          "transition": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IssueTransition"
+              }
+            ],
+            "description": "Details of a transition. Required when performing a transition, optional when creating or editing an issue."
+          },
+          "update": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/FieldUpdateOperation"
+              },
+              "type": "array"
+            },
+            "description": "A Map containing the field field name and a list of operations to perform on the issue screen field. Note that fields included in here cannot be included in `fields`.",
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "IssueUpdateMetadata": {
+        "description": "A list of editable field details.",
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FieldMetadata"
+            },
+            "readOnly": true,
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "JsonTypeBean": {
+        "additionalProperties": false,
+        "description": "The schema of a field.",
+        "properties": {
+          "configuration": {
+            "additionalProperties": {
+              "readOnly": true
+            },
+            "description": "If the field is a custom field, the configuration of the field.",
+            "readOnly": true,
+            "type": "object"
+          },
+          "custom": {
+            "description": "If the field is a custom field, the URI of the field.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "customId": {
+            "description": "If the field is a custom field, the custom ID of the field.",
+            "format": "int64",
+            "readOnly": true,
+            "type": "integer"
+          },
+          "items": {
+            "description": "When the data type is an array, the name of the field items within the array.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "system": {
+            "description": "If the field is a system field, the name of the field.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "type": {
+            "description": "The data type of the field.",
+            "readOnly": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "LinkGroup": {
+        "additionalProperties": false,
+        "description": "Details a link group, which defines issue operations.",
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/LinkGroup"
+            },
+            "type": "array"
+          },
+          "header": {
+            "$ref": "#/components/schemas/SimpleLink"
+          },
+          "id": {
+            "type": "string"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/SimpleLink"
+            },
+            "type": "array"
+          },
+          "styleClass": {
+            "type": "string"
+          },
+          "weight": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ListWrapperCallbackApplicationRole": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "ListWrapperCallbackGroupName": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "NestedResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "errorCollection": {
+            "$ref": "#/components/schemas/ErrorCollection"
+          },
+          "status": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "warningCollection": {
+            "$ref": "#/components/schemas/WarningCollection"
+          }
+        },
+        "type": "object"
+      },
+      "Operations": {
+        "additionalProperties": true,
+        "description": "Details of the operations that can be performed on the issue.",
+        "properties": {
+          "linkGroups": {
+            "description": "Details of the link groups defining issue operations.",
+            "items": {
+              "$ref": "#/components/schemas/LinkGroup"
+            },
+            "readOnly": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "PageBeanProject": {
+        "additionalProperties": false,
+        "description": "A page of items.",
+        "properties": {
+          "isLast": {
+            "description": "Whether this is the last page.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "maxResults": {
+            "description": "The maximum number of items that could be returned.",
+            "format": "int32",
+            "readOnly": true,
+            "type": "integer"
+          },
+          "nextPage": {
+            "description": "If there is another page of results, the URL of the next page.",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "self": {
+            "description": "The URL of the page.",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "startAt": {
+            "description": "The index of the first item returned.",
+            "format": "int64",
+            "readOnly": true,
+            "type": "integer"
+          },
+          "total": {
+            "description": "The number of items returned.",
+            "format": "int64",
+            "readOnly": true,
+            "type": "integer"
+          },
+          "values": {
+            "description": "The list of items.",
+            "items": {
+              "$ref": "#/components/schemas/Project"
+            },
+            "readOnly": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "PageOfChangelogs": {
+        "additionalProperties": false,
+        "description": "A page of changelogs.",
+        "properties": {
+          "histories": {
+            "description": "The list of changelogs.",
+            "items": {
+              "$ref": "#/components/schemas/Changelog"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "maxResults": {
+            "description": "The maximum number of results that could be on the page.",
+            "format": "int32",
+            "readOnly": true,
+            "type": "integer"
+          },
+          "startAt": {
+            "description": "The index of the first item returned on the page.",
+            "format": "int32",
+            "readOnly": true,
+            "type": "integer"
+          },
+          "total": {
+            "description": "The number of results on the page.",
+            "format": "int32",
+            "readOnly": true,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "Project": {
+        "additionalProperties": false,
+        "description": "Details about a project.",
+        "properties": {
+          "archived": {
+            "description": "Whether the project is archived.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "archivedBy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              }
+            ],
+            "description": "The user who archived the project.",
+            "readOnly": true
+          },
+          "archivedDate": {
+            "description": "The date when the project was archived.",
+            "format": "date-time",
+            "readOnly": true,
+            "type": "string"
+          },
+          "assigneeType": {
+            "description": "The default assignee when creating issues for this project.",
+            "enum": [
+              "PROJECT_LEAD",
+              "UNASSIGNED"
+            ],
+            "readOnly": true,
+            "type": "string"
+          },
+          "avatarUrls": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AvatarUrlsBean"
+              }
+            ],
+            "description": "The URLs of the project's avatars.",
+            "readOnly": true
+          },
+          "components": {
+            "description": "List of the components contained in the project.",
+            "items": {
+              "$ref": "#/components/schemas/ProjectComponent"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "deleted": {
+            "description": "Whether the project is marked as deleted.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "deletedBy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              }
+            ],
+            "description": "The user who marked the project as deleted.",
+            "readOnly": true
+          },
+          "deletedDate": {
+            "description": "The date when the project was marked as deleted.",
+            "format": "date-time",
+            "readOnly": true,
+            "type": "string"
+          },
+          "description": {
+            "description": "A brief description of the project.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "email": {
+            "description": "An email address associated with the project.",
+            "type": "string"
+          },
+          "expand": {
+            "description": "Expand options that include additional project details in the response.",
+            "readOnly": true,
+            "type": "string",
+            "xml": {
+              "attribute": true
+            }
+          },
+          "favourite": {
+            "description": "Whether the project is selected as a favorite.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "The ID of the project.",
+            "type": "string"
+          },
+          "insight": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProjectInsight"
+              }
+            ],
+            "description": "Insights about the project.",
+            "readOnly": true
+          },
+          "isPrivate": {
+            "description": "Whether the project is private from the user's perspective. This means the user can't see the project or any associated issues.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "issueTypeHierarchy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Hierarchy"
+              }
+            ],
+            "description": "The issue type hierarchy for the project.",
+            "readOnly": true
+          },
+          "issueTypes": {
+            "description": "List of the issue types available in the project.",
+            "items": {
+              "$ref": "#/components/schemas/IssueTypeDetails"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "key": {
+            "description": "The key of the project.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "landingPageInfo": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProjectLandingPageInfo"
+              }
+            ],
+            "description": "The project landing page info.",
+            "readOnly": true
+          },
+          "lead": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              }
+            ],
+            "description": "The username of the project lead.",
+            "readOnly": true
+          },
+          "name": {
+            "description": "The name of the project.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "permissions": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProjectPermissions"
+              }
+            ],
+            "description": "User permissions on the project",
+            "readOnly": true
+          },
+          "projectCategory": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProjectCategory"
+              }
+            ],
+            "description": "The category the project belongs to.",
+            "readOnly": true
+          },
+          "projectTypeKey": {
+            "description": "The [project type](https://confluence.atlassian.com/x/GwiiLQ#Jiraapplicationsoverview-Productfeaturesandprojecttypes) of the project.",
+            "enum": [
+              "software",
+              "service_desk",
+              "business"
+            ],
+            "readOnly": true,
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": {
+              "readOnly": true
+            },
+            "description": "Map of project properties",
+            "readOnly": true,
+            "type": "object"
+          },
+          "retentionTillDate": {
+            "description": "The date when the project is deleted permanently.",
+            "format": "date-time",
+            "readOnly": true,
+            "type": "string"
+          },
+          "roles": {
+            "additionalProperties": {
+              "format": "uri",
+              "readOnly": true,
+              "type": "string"
+            },
+            "description": "The name and self URL for each role defined in the project. For more information, see [Create project role](#api-rest-api-3-role-post).",
+            "readOnly": true,
+            "type": "object"
+          },
+          "self": {
+            "description": "The URL of the project details.",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "simplified": {
+            "description": "Whether the project is simplified.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "style": {
+            "description": "The type of the project.",
+            "enum": [
+              "classic",
+              "next-gen"
+            ],
+            "readOnly": true,
+            "type": "string"
+          },
+          "url": {
+            "description": "A link to information about this project, such as project documentation.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "uuid": {
+            "description": "Unique ID for next-gen projects.",
+            "format": "uuid",
+            "readOnly": true,
+            "type": "string"
+          },
+          "versions": {
+            "description": "The versions defined in the project. For more information, see [Create version](#api-rest-api-3-version-post).",
+            "items": {
+              "$ref": "#/components/schemas/Version"
+            },
+            "readOnly": true,
+            "type": "array"
+          }
+        },
+        "type": "object",
+        "xml": {
+          "name": "project"
+        }
+      },
+      "ProjectCategory": {
+        "additionalProperties": false,
+        "description": "A project category.",
+        "properties": {
+          "description": {
+            "description": "The description of the project category.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The ID of the project category.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "The name of the project category. Required on create, optional on update.",
+            "type": "string"
+          },
+          "self": {
+            "description": "The URL of the project category.",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectComponent": {
+        "additionalProperties": false,
+        "description": "Details about a project component.",
+        "properties": {
+          "ari": {
+            "description": "Compass component's ID. Can't be updated. Not required for creating a Project Component.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "assignee": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              }
+            ],
+            "description": "The details of the user associated with `assigneeType`, if any. See `realAssignee` for details of the user assigned to issues created with this component.",
+            "readOnly": true
+          },
+          "assigneeType": {
+            "description": "The nominal user type used to determine the assignee for issues created with this component. See `realAssigneeType` for details on how the type of the user, and hence the user, assigned to issues is determined. Can take the following values:\n\n *  `PROJECT_LEAD` the assignee to any issues created with this component is nominally the lead for the project the component is in.\n *  `COMPONENT_LEAD` the assignee to any issues created with this component is nominally the lead for the component.\n *  `UNASSIGNED` an assignee is not set for issues created with this component.\n *  `PROJECT_DEFAULT` the assignee to any issues created with this component is nominally the default assignee for the project that the component is in.\n\nDefault value: `PROJECT_DEFAULT`.  \nOptional when creating or updating a component.",
+            "enum": [
+              "PROJECT_DEFAULT",
+              "COMPONENT_LEAD",
+              "PROJECT_LEAD",
+              "UNASSIGNED"
+            ],
+            "type": "string"
+          },
+          "description": {
+            "description": "The description for the component. Optional when creating or updating a component.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The unique identifier for the component.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "isAssigneeTypeValid": {
+            "description": "Whether a user is associated with `assigneeType`. For example, if the `assigneeType` is set to `COMPONENT_LEAD` but the component lead is not set, then `false` is returned.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "lead": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              }
+            ],
+            "description": "The user details for the component's lead user.",
+            "readOnly": true
+          },
+          "leadAccountId": {
+            "description": "The accountId of the component's lead user. The accountId uniquely identifies the user across all Atlassian products. For example, *5b10ac8d82e05b22cc7d4ef5*.",
+            "maxLength": 128,
+            "type": "string",
+            "writeOnly": true
+          },
+          "leadUserName": {
+            "description": "This property is no longer available and will be removed from the documentation soon. See the [deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-user-privacy-api-migration-guide/) for details.",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "readOnly": true,
+              "type": "string"
+            },
+            "description": "Compass component's metadata. Can't be updated. Not required for creating a Project Component.",
+            "readOnly": true,
+            "type": "object"
+          },
+          "name": {
+            "description": "The unique name for the component in the project. Required when creating a component. Optional when updating a component. The maximum length is 255 characters.",
+            "type": "string"
+          },
+          "project": {
+            "description": "The key of the project the component is assigned to. Required when creating a component. Can't be updated.",
+            "type": "string"
+          },
+          "projectId": {
+            "description": "The ID of the project the component is assigned to.",
+            "format": "int64",
+            "readOnly": true,
+            "type": "integer"
+          },
+          "realAssignee": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              }
+            ],
+            "description": "The user assigned to issues created with this component, when `assigneeType` does not identify a valid assignee.",
+            "readOnly": true
+          },
+          "realAssigneeType": {
+            "description": "The type of the assignee that is assigned to issues created with this component, when an assignee cannot be set from the `assigneeType`. For example, `assigneeType` is set to `COMPONENT_LEAD` but no component lead is set. This property is set to one of the following values:\n\n *  `PROJECT_LEAD` when `assigneeType` is `PROJECT_LEAD` and the project lead has permission to be assigned issues in the project that the component is in.\n *  `COMPONENT_LEAD` when `assignee`Type is `COMPONENT_LEAD` and the component lead has permission to be assigned issues in the project that the component is in.\n *  `UNASSIGNED` when `assigneeType` is `UNASSIGNED` and Jira is configured to allow unassigned issues.\n *  `PROJECT_DEFAULT` when none of the preceding cases are true.",
+            "enum": [
+              "PROJECT_DEFAULT",
+              "COMPONENT_LEAD",
+              "PROJECT_LEAD",
+              "UNASSIGNED"
+            ],
+            "readOnly": true,
+            "type": "string"
+          },
+          "self": {
+            "description": "The URL of the component.",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          }
+        },
+        "type": "object",
+        "xml": {
+          "name": "component"
+        }
+      },
+      "ProjectDetails": {
+        "additionalProperties": false,
+        "description": "Details about a project.",
+        "properties": {
+          "avatarUrls": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AvatarUrlsBean"
+              }
+            ],
+            "description": "The URLs of the project's avatars.",
+            "readOnly": true
+          },
+          "id": {
+            "description": "The ID of the project.",
+            "type": "string"
+          },
+          "key": {
+            "description": "The key of the project.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "The name of the project.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "projectCategory": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdatedProjectCategory"
+              }
+            ],
+            "description": "The category the project belongs to.",
+            "readOnly": true
+          },
+          "projectTypeKey": {
+            "description": "The [project type](https://confluence.atlassian.com/x/GwiiLQ#Jiraapplicationsoverview-Productfeaturesandprojecttypes) of the project.",
+            "enum": [
+              "software",
+              "service_desk",
+              "business"
+            ],
+            "readOnly": true,
+            "type": "string"
+          },
+          "self": {
+            "description": "The URL of the project details.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "simplified": {
+            "description": "Whether or not the project is simplified.",
+            "readOnly": true,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectInsight": {
+        "additionalProperties": false,
+        "description": "Additional details about a project.",
+        "properties": {
+          "lastIssueUpdateTime": {
+            "description": "The last issue update time.",
+            "format": "date-time",
+            "readOnly": true,
+            "type": "string"
+          },
+          "totalIssueCount": {
+            "description": "Total issue count.",
+            "format": "int64",
+            "readOnly": true,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectLandingPageInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "attributes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "boardId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "boardName": {
+            "type": "string"
+          },
+          "projectKey": {
+            "type": "string"
+          },
+          "projectType": {
+            "type": "string"
+          },
+          "queueCategory": {
+            "type": "string"
+          },
+          "queueId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "queueName": {
+            "type": "string"
+          },
+          "simpleBoard": {
+            "type": "boolean"
+          },
+          "simplified": {
+            "type": "boolean"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectPermissions": {
+        "additionalProperties": false,
+        "description": "Permissions which a user has on a project.",
+        "properties": {
+          "canEdit": {
+            "description": "Whether the logged user can edit the project.",
+            "readOnly": true,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "Scope": {
+        "additionalProperties": true,
+        "description": "The projects the item is associated with. Indicated for items associated with [next-gen projects](https://confluence.atlassian.com/x/loMyO).",
+        "properties": {
+          "project": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProjectDetails"
+              }
+            ],
+            "description": "The project the item has scope in.",
+            "readOnly": true
+          },
+          "type": {
+            "description": "The type of scope.",
+            "enum": [
+              "PROJECT",
+              "TEMPLATE"
+            ],
+            "readOnly": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SearchAndReconcileResults": {
+        "additionalProperties": false,
+        "description": "The result of a JQL search with issues reconsilation.",
+        "properties": {
+          "isLast": {
+            "description": "Indicates whether this is the last page of the paginated response.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "issues": {
+            "description": "The list of issues found by the search or reconsiliation.",
+            "items": {
+              "$ref": "#/components/schemas/IssueBean"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "names": {
+            "additionalProperties": {
+              "readOnly": true,
+              "type": "string"
+            },
+            "description": "The ID and name of each field in the search results.",
+            "readOnly": true,
+            "type": "object"
+          },
+          "nextPageToken": {
+            "description": "Continuation token to fetch the next page. If this result represents the last or the only page this token will be null. This token will expire in 7 days.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "schema": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonTypeBean"
+            },
+            "description": "The schema describing the field types in the search results.",
+            "readOnly": true,
+            "type": "object"
+          },
+          "warnings": {
+            "description": "Experimental. Warnings generated during the search, e.g. when a JQL clause exceeded its argument limit or when the result set was truncated due to an ingestion limit. This field is currently rolling out behind a feature flag and may be absent, empty, or change shape without notice until generally available.",
+            "items": {
+              "$ref": "#/components/schemas/SearchWarning"
+            },
+            "readOnly": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "SearchWarning": {
+        "additionalProperties": false,
+        "description": "Experimental. A warning returned alongside successful search results.",
+        "properties": {
+          "details": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SearchWarningLimitDetails"
+              }
+            ],
+            "description": "Structured details about the warning, if available."
+          },
+          "message": {
+            "description": "A human-readable explanation of the warning suitable for surfacing to end users.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "type": {
+            "description": "The type of warning, e.g. CLAUSE\\_LIMIT\\_EXCEEDED.",
+            "readOnly": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SearchWarningLimitDetails": {
+        "additionalProperties": false,
+        "description": "Experimental. Structured details about a JQL clause exceeding its argument limit.",
+        "properties": {
+          "actual": {
+            "description": "The actual number of arguments supplied that exceeded the limit.",
+            "format": "int64",
+            "readOnly": true,
+            "type": "integer"
+          },
+          "arguments": {
+            "description": "The arguments passed to the JQL clause.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "clause": {
+            "description": "The JQL clause that triggered the limit, e.g. issueHistory().",
+            "readOnly": true,
+            "type": "string"
+          },
+          "limit": {
+            "description": "The maximum number of arguments allowed for the clause.",
+            "format": "int64",
+            "readOnly": true,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "SimpleLink": {
+        "additionalProperties": false,
+        "description": "Details about the operations available in this version.",
+        "properties": {
+          "href": {
+            "type": "string"
+          },
+          "iconClass": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "styleClass": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "weight": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "type": "object",
+        "xml": {
+          "name": "link"
+        }
+      },
+      "SimpleListWrapperApplicationRole": {
+        "additionalProperties": false,
+        "properties": {
+          "callback": {
+            "$ref": "#/components/schemas/ListWrapperCallbackApplicationRole"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ApplicationRole"
+            },
+            "type": "array"
+          },
+          "max-results": {
+            "format": "int32",
+            "type": "integer",
+            "xml": {
+              "attribute": true,
+              "name": "max-results"
+            }
+          },
+          "pagingCallback": {
+            "$ref": "#/components/schemas/ListWrapperCallbackApplicationRole"
+          },
+          "size": {
+            "format": "int32",
+            "type": "integer",
+            "xml": {
+              "attribute": true
+            }
+          }
+        },
+        "type": "object",
+        "xml": {
+          "name": "list"
+        }
+      },
+      "SimpleListWrapperGroupName": {
+        "additionalProperties": false,
+        "properties": {
+          "callback": {
+            "$ref": "#/components/schemas/ListWrapperCallbackGroupName"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GroupName"
+            },
+            "type": "array"
+          },
+          "max-results": {
+            "format": "int32",
+            "type": "integer",
+            "xml": {
+              "attribute": true,
+              "name": "max-results"
+            }
+          },
+          "pagingCallback": {
+            "$ref": "#/components/schemas/ListWrapperCallbackGroupName"
+          },
+          "size": {
+            "format": "int32",
+            "type": "integer",
+            "xml": {
+              "attribute": true
+            }
+          }
+        },
+        "type": "object",
+        "xml": {
+          "name": "list"
+        }
+      },
+      "SimplifiedHierarchyLevel": {
+        "additionalProperties": false,
+        "properties": {
+          "aboveLevelId": {
+            "description": "The ID of the level above this one in the hierarchy. This property is deprecated, see [Change notice: Removing hierarchy level IDs from next-gen APIs](https://developer.atlassian.com/cloud/jira/platform/change-notice-removing-hierarchy-level-ids-from-next-gen-apis/).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "belowLevelId": {
+            "description": "The ID of the level below this one in the hierarchy. This property is deprecated, see [Change notice: Removing hierarchy level IDs from next-gen APIs](https://developer.atlassian.com/cloud/jira/platform/change-notice-removing-hierarchy-level-ids-from-next-gen-apis/).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "externalUuid": {
+            "description": "The external UUID of the hierarchy level. This property is deprecated, see [Change notice: Removing hierarchy level IDs from next-gen APIs](https://developer.atlassian.com/cloud/jira/platform/change-notice-removing-hierarchy-level-ids-from-next-gen-apis/).",
+            "format": "uuid",
+            "type": "string"
+          },
+          "hierarchyLevelNumber": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "description": "The ID of the hierarchy level. This property is deprecated, see [Change notice: Removing hierarchy level IDs from next-gen APIs](https://developer.atlassian.com/cloud/jira/platform/change-notice-removing-hierarchy-level-ids-from-next-gen-apis/).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "issueTypeIds": {
+            "description": "The issue types available in this hierarchy level.",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "level": {
+            "description": "The level of this item in the hierarchy.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "description": "The name of this hierarchy level.",
+            "type": "string"
+          },
+          "projectConfigurationId": {
+            "description": "The ID of the project configuration. This property is deprecated, see [Change oticen: Removing hierarchy level IDs from next-gen APIs](https://developer.atlassian.com/cloud/jira/platform/change-notice-removing-hierarchy-level-ids-from-next-gen-apis/).",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "StatusCategory": {
+        "additionalProperties": true,
+        "description": "A status category.",
+        "properties": {
+          "colorName": {
+            "description": "The name of the color used to represent the status category.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "id": {
+            "description": "The ID of the status category.",
+            "format": "int64",
+            "readOnly": true,
+            "type": "integer"
+          },
+          "key": {
+            "description": "The key of the status category.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "The name of the status category.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "self": {
+            "description": "The URL of the status category.",
+            "readOnly": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "StatusDetails": {
+        "additionalProperties": true,
+        "description": "A status.",
+        "properties": {
+          "description": {
+            "description": "The description of the status.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "iconUrl": {
+            "description": "The URL of the icon used to represent the status.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "id": {
+            "description": "The ID of the status.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "The name of the status.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "scope": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Scope"
+              }
+            ],
+            "description": "The scope of the field.",
+            "readOnly": true
+          },
+          "self": {
+            "description": "The URL of the status.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "statusCategory": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StatusCategory"
+              }
+            ],
+            "description": "The category assigned to the status.",
+            "readOnly": true
+          }
+        },
+        "type": "object"
+      },
+      "StringList": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "UpdatedProjectCategory": {
+        "additionalProperties": false,
+        "description": "A project category.",
+        "properties": {
+          "description": {
+            "description": "The name of the project category.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "id": {
+            "description": "The ID of the project category.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "The description of the project category.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "self": {
+            "description": "The URL of the project category.",
+            "readOnly": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "User": {
+        "additionalProperties": false,
+        "description": "A user with details as permitted by the user's Atlassian Account privacy settings. However, be aware of these exceptions:\n\n *  User record deleted from Atlassian: This occurs as the result of a right to be forgotten request. In this case, `displayName` provides an indication and other parameters have default values or are blank (for example, email is blank).\n *  User record corrupted: This occurs as a results of events such as a server import and can only happen to deleted users. In this case, `accountId` returns *unknown* and all other parameters have fallback values.\n *  User record unavailable: This usually occurs due to an internal service outage. In this case, all parameters have fallback values.",
+        "properties": {
+          "accountId": {
+            "description": "The account ID of the user, which uniquely identifies the user across all Atlassian products. For example, *5b10ac8d82e05b22cc7d4ef5*. Required in requests.",
+            "maxLength": 128,
+            "type": "string"
+          },
+          "accountType": {
+            "description": "The user account type. Can take the following values:\n\n *  `atlassian` regular Atlassian user account\n *  `app` system account used for Connect applications and OAuth to represent external systems\n *  `customer` Jira Service Desk account representing an external service desk",
+            "enum": [
+              "atlassian",
+              "app",
+              "customer",
+              "unknown"
+            ],
+            "readOnly": true,
+            "type": "string"
+          },
+          "active": {
+            "description": "Whether the user is active.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "applicationRoles": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SimpleListWrapperApplicationRole"
+              }
+            ],
+            "description": "The application roles the user is assigned to.",
+            "readOnly": true
+          },
+          "appType": {
+            "description": "The app type of the user account when accountType is 'app'. Can take the following values:\n\n *  `service` Service Account\n *  `agent` Rovo Agent Account\n *  `unknown` Unknown app type",
+            "readOnly": true,
+            "type": "string"
+          },
+          "avatarUrls": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AvatarUrlsBean"
+              }
+            ],
+            "description": "The avatars of the user.",
+            "readOnly": true
+          },
+          "displayName": {
+            "description": "The display name of the user. Depending on the user’s privacy setting, this may return an alternative value.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "emailAddress": {
+            "description": "The email address of the user. Depending on the user’s privacy setting, this may be returned as null.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "expand": {
+            "description": "Expand options that include additional user details in the response.",
+            "readOnly": true,
+            "type": "string",
+            "xml": {
+              "attribute": true
+            }
+          },
+          "groups": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SimpleListWrapperGroupName"
+              }
+            ],
+            "description": "The groups that the user belongs to.",
+            "readOnly": true
+          },
+          "guest": {
+            "description": "Whether the user is a guest.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "key": {
+            "description": "This property is no longer available and will be removed from the documentation soon. See the [deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-user-privacy-api-migration-guide/) for details.",
+            "type": "string"
+          },
+          "locale": {
+            "description": "The locale of the user. Depending on the user’s privacy setting, this may be returned as null.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "This property is no longer available and will be removed from the documentation soon. See the [deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-user-privacy-api-migration-guide/) for details.",
+            "type": "string"
+          },
+          "self": {
+            "description": "The URL of the user.",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "timeZone": {
+            "description": "The time zone specified in the user's profile. If the user's time zone is not visible to the current user (due to user's profile setting), or if a time zone has not been set, the instance's default time zone will be returned.",
+            "readOnly": true,
+            "type": "string"
+          }
+        },
+        "type": "object",
+        "xml": {
+          "name": "user"
+        }
+      },
+      "UserDetails": {
+        "additionalProperties": false,
+        "description": "User details permitted by the user's Atlassian Account privacy settings. However, be aware of these exceptions:\n\n *  User record deleted from Atlassian: This occurs as the result of a right to be forgotten request. In this case, `displayName` provides an indication and other parameters have default values or are blank (for example, email is blank).\n *  User record corrupted: This occurs as a results of events such as a server import and can only happen to deleted users. In this case, `accountId` returns *unknown* and all other parameters have fallback values.\n *  User record unavailable: This usually occurs due to an internal service outage. In this case, all parameters have fallback values.",
+        "properties": {
+          "accountId": {
+            "description": "The account ID of the user, which uniquely identifies the user across all Atlassian products. For example, *5b10ac8d82e05b22cc7d4ef5*.",
+            "maxLength": 128,
+            "type": "string"
+          },
+          "accountType": {
+            "description": "The type of account represented by this user. This will be one of 'atlassian' (normal users), 'app' (application user) or 'customer' (Jira Service Desk customer user)",
+            "readOnly": true,
+            "type": "string"
+          },
+          "active": {
+            "description": "Whether the user is active.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "avatarUrls": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AvatarUrlsBean"
+              }
+            ],
+            "description": "The avatars of the user.",
+            "readOnly": true
+          },
+          "displayName": {
+            "description": "The display name of the user. Depending on the user’s privacy settings, this may return an alternative value.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "emailAddress": {
+            "description": "The email address of the user. Depending on the user’s privacy settings, this may be returned as null.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "key": {
+            "description": "This property is no longer available and will be removed from the documentation soon. See the [deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-user-privacy-api-migration-guide/) for details.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "This property is no longer available and will be removed from the documentation soon. See the [deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-user-privacy-api-migration-guide/) for details.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "self": {
+            "description": "The URL of the user.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "timeZone": {
+            "description": "The time zone specified in the user's profile. Depending on the user’s privacy settings, this may be returned as null.",
+            "readOnly": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Version": {
+        "additionalProperties": false,
+        "description": "Details about a project version.",
+        "properties": {
+          "approvers": {
+            "description": "If the expand option `approvers` is used, returns a list containing the approvers for this version.",
+            "items": {
+              "$ref": "#/components/schemas/VersionApprover"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "archived": {
+            "description": "Indicates that the version is archived. Optional when creating or updating a version.",
+            "type": "boolean"
+          },
+          "description": {
+            "description": "The description of the version. Optional when creating or updating a version. The maximum size is 16,384 bytes.",
+            "type": "string"
+          },
+          "driver": {
+            "description": "The Atlassian account ID of the version driver. Optional when creating or updating a version. If the expand option `driver` is used, returns the Atlassian account ID of the driver.",
+            "type": "string"
+          },
+          "expand": {
+            "description": "Use [expand](em>#expansion) to include additional information about version in the response. This parameter accepts a comma-separated list. Expand options include:\n\n *  `operations` Returns the list of operations available for this version.\n *  `issuesstatus` Returns the count of issues in this version for each of the status categories *to do*, *in progress*, *done*, and *unmapped*. The *unmapped* property contains a count of issues with a status other than *to do*, *in progress*, and *done*.\n *  `driver` Returns the Atlassian account ID of the version driver.\n *  `approvers` Returns a list containing approvers for this version.\n\nOptional for create and update.",
+            "type": "string",
+            "xml": {
+              "attribute": true
+            }
+          },
+          "id": {
+            "description": "The ID of the version.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "issuesStatusForFixVersion": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VersionIssuesStatus"
+              }
+            ],
+            "description": "If the expand option `issuesstatus` is used, returns the count of issues in this version for each of the status categories *to do*, *in progress*, *done*, and *unmapped*. The *unmapped* property contains a count of issues with a status other than *to do*, *in progress*, and *done*.",
+            "readOnly": true
+          },
+          "moveUnfixedIssuesTo": {
+            "description": "The URL of the self link to the version to which all unfixed issues are moved when a version is released. Not applicable when creating a version. Optional when updating a version.",
+            "format": "uri",
+            "type": "string"
+          },
+          "name": {
+            "description": "The unique name of the version. Required when creating a version. Optional when updating a version. The maximum length is 255 characters.",
+            "type": "string"
+          },
+          "operations": {
+            "description": "If the expand option `operations` is used, returns the list of operations available for this version.",
+            "items": {
+              "$ref": "#/components/schemas/SimpleLink"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "overdue": {
+            "description": "Indicates that the version is overdue.",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "project": {
+            "description": "Deprecated. Use `projectId`.",
+            "type": "string"
+          },
+          "projectId": {
+            "description": "The ID of the project to which this version is attached. Required when creating a version. Not applicable when updating a version.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "released": {
+            "description": "Indicates that the version is released. If the version is released a request to release again is ignored. Not applicable when creating a version. Optional when updating a version.",
+            "type": "boolean"
+          },
+          "releaseDate": {
+            "description": "The release date of the version. Expressed in ISO 8601 format (yyyy-mm-dd). Optional when creating or updating a version.",
+            "format": "date",
+            "type": "string"
+          },
+          "self": {
+            "description": "The URL of the version.",
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "startDate": {
+            "description": "The start date of the version. Expressed in ISO 8601 format (yyyy-mm-dd). Optional when creating or updating a version.",
+            "format": "date",
+            "type": "string"
+          },
+          "userReleaseDate": {
+            "description": "The date on which work on this version is expected to finish, expressed in the instance's *Day/Month/Year Format* date format.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "userStartDate": {
+            "description": "The date on which work on this version is expected to start, expressed in the instance's *Day/Month/Year Format* date format.",
+            "readOnly": true,
+            "type": "string"
+          }
+        },
+        "type": "object",
+        "xml": {
+          "name": "version"
+        }
+      },
+      "VersionApprover": {
+        "additionalProperties": true,
+        "description": "Contains details about a version approver.",
+        "properties": {
+          "accountId": {
+            "description": "The Atlassian account ID of the approver.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "declineReason": {
+            "description": "A description of why the user is declining the approval.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "description": {
+            "description": "A description of what the user is approving within the specified version.",
+            "readOnly": true,
+            "type": "string"
+          },
+          "status": {
+            "description": "The status of the approval, which can be *PENDING*, *APPROVED*, or *DECLINED*",
+            "readOnly": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "VersionIssuesStatus": {
+        "additionalProperties": true,
+        "description": "Counts of the number of issues in various statuses.",
+        "properties": {
+          "done": {
+            "description": "Count of issues with status *done*.",
+            "format": "int64",
+            "readOnly": true,
+            "type": "integer"
+          },
+          "inProgress": {
+            "description": "Count of issues with status *in progress*.",
+            "format": "int64",
+            "readOnly": true,
+            "type": "integer"
+          },
+          "toDo": {
+            "description": "Count of issues with status *to do*.",
+            "format": "int64",
+            "readOnly": true,
+            "type": "integer"
+          },
+          "unmapped": {
+            "description": "Count of issues with a status other than *to do*, *in progress*, and *done*.",
+            "format": "int64",
+            "readOnly": true,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "WarningCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "contact": {
+      "email": "ecosystem@atlassian.com"
+    },
+    "description": "Jira Cloud platform REST API documentation",
+    "license": {
+      "name": "Apache 2.0",
+      "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
+    },
+    "termsOfService": "https://developer.atlassian.com/platform/marketplace/atlassian-developer-terms/",
+    "title": "The Jira Cloud platform REST API",
+    "version": "1001.0.0-SNAPSHOT-f6b6eead949dbe0e9c4be63fb2c0832e34686933"
+  },
+  "openapi": "3.0.1",
+  "paths": {
+    "/rest/api/3/issue": {
+      "post": {
+        "deprecated": false,
+        "description": "Creates an issue or, where the option to create subtasks is enabled in Jira, a subtask. A transition may be applied, to move the issue or subtask to a workflow step other than the default start step, and issue properties set.\n\nThe content of the issue or subtask is defined using `update` and `fields`. The fields that can be set in the issue or subtask are determined using the [ Get create issue metadata](#api-rest-api-3-issue-createmeta-get). These are the same fields that appear on the issue's create screen. Note that the `description`, `environment`, and any `textarea` type custom fields (multi-line text fields) take Atlassian Document Format content. Single line custom fields (`textfield`) accept a string and don't handle Atlassian Document Format content.\n\nCreating a subtask differs from creating an issue as follows:\n\n *  `issueType` must be set to a subtask issue type (use [ Get create issue metadata](#api-rest-api-3-issue-createmeta-get) to find subtask issue types).\n *  `parent` must contain the ID or key of the parent issue.\n\nIn a next-gen project any issue may be made a child providing that the parent and child are members of the same project.\n\n**[Permissions](#permissions) required:** *Browse projects* and *Create issues* [project permissions](https://confluence.atlassian.com/x/yodKLg) for the project in which the issue or subtask is created.",
+        "operationId": "createIssue",
+        "parameters": [
+          {
+            "description": "Whether the project in which the issue is created is added to the user's **Recently viewed** project list, as shown under **Projects** in Jira. When provided, the issue type and request type are added to the user's history for a project. These values are then used to provide defaults on the issue create screen.",
+            "in": "query",
+            "name": "updateHistory",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "fields": {
+                  "assignee": {
+                    "id": "5b109f2e9729b51b54dc274d"
+                  },
+                  "components": [
+                    {
+                      "id": "10000"
+                    }
+                  ],
+                  "customfield_10000": "09/Jun/19",
+                  "customfield_20000": "06/Jul/19 3:25 PM",
+                  "customfield_30000": [
+                    "10000",
+                    "10002"
+                  ],
+                  "customfield_40000": {
+                    "content": [
+                      {
+                        "content": [
+                          {
+                            "text": "Occurs on all orders",
+                            "type": "text"
+                          }
+                        ],
+                        "type": "paragraph"
+                      }
+                    ],
+                    "type": "doc",
+                    "version": 1
+                  },
+                  "customfield_50000": {
+                    "content": [
+                      {
+                        "content": [
+                          {
+                            "text": "Could impact day-to-day work.",
+                            "type": "text"
+                          }
+                        ],
+                        "type": "paragraph"
+                      }
+                    ],
+                    "type": "doc",
+                    "version": 1
+                  },
+                  "customfield_60000": "jira-software-users",
+                  "customfield_70000": [
+                    "jira-administrators",
+                    "jira-software-users"
+                  ],
+                  "customfield_80000": {
+                    "value": "red"
+                  },
+                  "description": {
+                    "content": [
+                      {
+                        "content": [
+                          {
+                            "text": "Order entry fails when selecting supplier.",
+                            "type": "text"
+                          }
+                        ],
+                        "type": "paragraph"
+                      }
+                    ],
+                    "type": "doc",
+                    "version": 1
+                  },
+                  "duedate": "2019-05-11",
+                  "environment": {
+                    "content": [
+                      {
+                        "content": [
+                          {
+                            "text": "UAT",
+                            "type": "text"
+                          }
+                        ],
+                        "type": "paragraph"
+                      }
+                    ],
+                    "type": "doc",
+                    "version": 1
+                  },
+                  "fixVersions": [
+                    {
+                      "id": "10001"
+                    }
+                  ],
+                  "issuetype": {
+                    "id": "10000"
+                  },
+                  "labels": [
+                    "bugfix",
+                    "blitz_test"
+                  ],
+                  "parent": {
+                    "key": "PROJ-123"
+                  },
+                  "priority": {
+                    "id": "20000"
+                  },
+                  "project": {
+                    "id": "10000"
+                  },
+                  "reporter": {
+                    "id": "5b10a2844c20165700ede21g"
+                  },
+                  "security": {
+                    "id": "10000"
+                  },
+                  "summary": "Main order flow broken",
+                  "timetracking": {
+                    "originalEstimate": "10",
+                    "remainingEstimate": "5"
+                  },
+                  "versions": [
+                    {
+                      "id": "10000"
+                    }
+                  ]
+                },
+                "update": {}
+              },
+              "schema": {
+                "$ref": "#/components/schemas/IssueUpdateDetails"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "example": "{\"id\":\"10000\",\"key\":\"ED-24\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/issue/10000\",\"transition\":{\"status\":200,\"errorCollection\":{\"errorMessages\":[],\"errors\":{}}}}",
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedIssue"
+                }
+              }
+            },
+            "description": "Returned if the request is successful."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": "{\"errorMessages\":[\"Field 'priority' is required\"],\"errors\":{}}",
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorCollection"
+                }
+              }
+            },
+            "description": "Returned if the request:\n\n *  is missing required fields.\n *  contains invalid field values.\n *  contains fields that cannot be set for the issue type.\n *  is by a user who does not have the necessary permission.\n *  is to create a subtype in a project different that of the parent issue.\n *  is for a subtask when the option to create subtasks is disabled.\n *  is invalid for any other reason."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorCollection"
+                }
+              }
+            },
+            "description": "Returned if the authentication credentials are incorrect or missing."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorCollection"
+                }
+              }
+            },
+            "description": "Returned if the user does not have the necessary permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorCollection"
+                }
+              }
+            },
+            "description": "Returned if a configuration problem prevents the creation of the issue."
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          },
+          {
+            "OAuth2": [
+              "write:jira-work"
+            ]
+          },
+          {}
+        ],
+        "summary": "Create issue",
+        "tags": [
+          "Issues"
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [
+          {
+            "app-access-rule-exempt": false
+          }
+        ],
+        "x-atlassian-oauth2-scopes": [
+          {
+            "scheme": "OAuth2",
+            "scopes": [
+              "write:jira-work"
+            ],
+            "state": "Current"
+          },
+          {
+            "scheme": "OAuth2",
+            "scopes": [
+              "write:issue:jira",
+              "write:comment:jira",
+              "write:comment.property:jira",
+              "write:attachment:jira",
+              "read:issue:jira"
+            ],
+            "state": "Beta"
+          }
+        ]
+      }
+    },
+    "/rest/api/3/issue/{issueIdOrKey}": {
+      "get": {
+        "deprecated": false,
+        "description": "Returns the details for an issue.\n\nThe issue is identified by its ID or key, however, if the identifier doesn't match an issue, a case-insensitive search and check for moved issues is performed. If a matching issue is found its details are returned, a 302 or other redirect is **not** returned. The issue key returned in the response is the key of the issue found.\n\nThis operation can be accessed anonymously.\n\n**[Permissions](#permissions) required:**\n\n *  *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project that the issue is in.\n *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.",
+        "operationId": "getIssue",
+        "parameters": [
+          {
+            "description": "The ID or key of the issue.",
+            "in": "path",
+            "name": "issueIdOrKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "A list of fields to return for the issue. This parameter accepts a comma-separated list. Use it to retrieve a subset of fields. Allowed values:\n\n *  `*all` Returns all fields.\n *  `*navigable` Returns navigable fields.\n *  Any issue field, prefixed with a minus to exclude.\n\nExamples:\n\n *  `summary,comment` Returns only the summary and comments fields.\n *  `-description` Returns all (default) fields except description.\n *  `*navigable,-comment` Returns all navigable fields except comment.\n\nThis parameter may be specified multiple times. For example, `fields=field1,field2& fields=field3`.\n\nNote: All fields are returned by default. This differs from [Search for issues using JQL (GET)](#api-rest-api-3-search-get) and [Search for issues using JQL (POST)](#api-rest-api-3-search-post) where the default is all navigable fields.",
+            "in": "query",
+            "name": "fields",
+            "schema": {
+              "items": {
+                "default": "*all",
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "Whether fields in `fields` are referenced by keys rather than IDs. This parameter is useful where fields have been added by a connect app and a field's key may differ from its ID.",
+            "in": "query",
+            "name": "fieldsByKeys",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Use [expand](#expansion) to include additional information about the issues in the response. This parameter accepts a comma-separated list. Expand options include:\n\n *  `renderedFields` Returns field values rendered in HTML format.\n *  `names` Returns the display name of each field.\n *  `schema` Returns the schema describing a field type.\n *  `transitions` Returns all possible transitions for the issue.\n *  `editmeta` Returns information about how each field can be edited.\n *  `changelog` Returns a list of recent updates to an issue, sorted by date, starting from the most recent.\n *  `versionedRepresentations` Returns a JSON array for each version of a field's value, with the highest number representing the most recent version. Note: When included in the request, the `fields` parameter is ignored.",
+            "in": "query",
+            "name": "expand",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "A list of issue properties to return for the issue. This parameter accepts a comma-separated list. Allowed values:\n\n *  `*all` Returns all issue properties.\n *  Any issue property key, prefixed with a minus to exclude.\n\nExamples:\n\n *  `*all` Returns all properties.\n *  `*all,-prop1` Returns all properties except `prop1`.\n *  `prop1,prop2` Returns `prop1` and `prop2` properties.\n\nThis parameter may be specified multiple times. For example, `properties=prop1,prop2& properties=prop3`.",
+            "in": "query",
+            "name": "properties",
+            "schema": {
+              "items": {
+                "default": "null",
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "Whether the project in which the issue is created is added to the user's **Recently viewed** project list, as shown under **Projects** in Jira. This also populates the [JQL issues search](#api-rest-api-3-search-get) `lastViewed` field.",
+            "in": "query",
+            "name": "updateHistory",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Whether to fail the request quickly in case of an error while loading fields for an issue. For `failFast=true`, if one field fails, the entire operation fails. For `failFast=false`, the operation will continue even if a field fails. It will return a valid response, but without values for the failed field(s).",
+            "in": "query",
+            "name": "failFast",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": "{\"fields\":{\"watcher\":{\"isWatching\":false,\"self\":\"https://your-domain.atlassian.net/rest/api/3/issue/EX-1/watchers\",\"watchCount\":1},\"attachment\":[{\"author\":{\"accountId\":\"5b10a2844c20165700ede21g\",\"accountType\":\"atlassian\",\"active\":false,\"avatarUrls\":{\"16x16\":\"https://avatar-management--avatars.server-location.prod.public.atl-paas.net/initials/MK-5.png?size=16&s=16\",\"24x24\":\"https://avatar-management--avatars.server-location.prod.public.atl-paas.net/initials/MK-5.png?size=24&s=24\",\"32x32\":\"https://avatar-management--avatars.server-location.prod.public.atl-paas.net/initials/MK-5.png?size=32&s=32\",\"48x48\":\"https://avatar-management--avatars.server-location.prod.public.atl-paas.net/initials/MK-5.png?size=48&s=48\"},\"displayName\":\"Mia Krystof\",\"key\":\"\",\"name\":\"\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/user?accountId=5b10a2844c20165700ede21g\"},\"content\":\"https://your-domain.atlassian.net/jira/rest/api/3/attachment/content/10000\",\"created\":\"2022-10-06T07:32:47.000+0000\",\"filename\":\"picture.jpg\",\"id\":10000,\"mimeType\":\"image/jpeg\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/attachments/10000\",\"size\":23123,\"thumbnail\":\"https://your-domain.atlassian.net/jira/rest/api/3/attachment/thumbnail/10000\"}],\"sub-tasks\":[{\"id\":\"10000\",\"outwardIssue\":{\"fields\":{\"status\":{\"iconUrl\":\"https://your-domain.atlassian.net/images/icons/statuses/open.png\",\"name\":\"Open\"}},\"id\":\"10003\",\"key\":\"ED-2\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/issue/ED-2\"},\"type\":{\"id\":\"10000\",\"inward\":\"Parent\",\"name\":\"\",\"outward\":\"Sub-task\"}}],\"description\":{\"type\":\"doc\",\"version\":1,\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"Main order flow broken\"}]}]},\"project\":{\"avatarUrls\":{\"16x16\":\"https://your-domain.atlassian.net/secure/projectavatar?size=xsmall&pid=10000\",\"24x24\":\"https://your-domain.atlassian.net/secure/projectavatar?size=small&pid=10000\",\"32x32\":\"https://your-domain.atlassian.net/secure/projectavatar?size=medium&pid=10000\",\"48x48\":\"https://your-domain.atlassian.net/secure/projectavatar?size=large&pid=10000\"},\"id\":\"10000\",\"insight\":{\"lastIssueUpdateTime\":\"2021-04-22T05:37:05.000+0000\",\"totalIssueCount\":100},\"key\":\"EX\",\"name\":\"Example\",\"projectCategory\":{\"description\":\"First Project Category\",\"id\":\"10000\",\"name\":\"FIRST\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/projectCategory/10000\"},\"self\":\"https://your-domain.atlassian.net/rest/api/3/project/EX\",\"simplified\":false,\"style\":\"classic\"},\"comment\":[{\"author\":{\"accountId\":\"5b10a2844c20165700ede21g\",\"active\":false,\"displayName\":\"Mia Krystof\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/user?accountId=5b10a2844c20165700ede21g\"},\"body\":{\"type\":\"doc\",\"version\":1,\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque eget venenatis elit. Duis eu justo eget augue iaculis fermentum. Sed semper quam laoreet nisi egestas at posuere augue semper.\"}]}]},\"created\":\"2021-01-17T12:34:00.000+0000\",\"id\":\"10000\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/issue/10010/comment/10000\",\"updateAuthor\":{\"accountId\":\"5b10a2844c20165700ede21g\",\"active\":false,\"displayName\":\"Mia Krystof\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/user?accountId=5b10a2844c20165700ede21g\"},\"updated\":\"2021-01-18T23:45:00.000+0000\",\"visibility\":{\"identifier\":\"Administrators\",\"type\":\"role\",\"value\":\"Administrators\"}}],\"issuelinks\":[{\"id\":\"10001\",\"outwardIssue\":{\"fields\":{\"status\":{\"iconUrl\":\"https://your-domain.atlassian.net/images/icons/statuses/open.png\",\"name\":\"Open\"}},\"id\":\"10004L\",\"key\":\"PR-2\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/issue/PR-2\"},\"type\":{\"id\":\"10000\",\"inward\":\"depends on\",\"name\":\"Dependent\",\"outward\":\"is depended by\"}},{\"id\":\"10002\",\"inwardIssue\":{\"fields\":{\"status\":{\"iconUrl\":\"https://your-domain.atlassian.net/images/icons/statuses/open.png\",\"name\":\"Open\"}},\"id\":\"10004\",\"key\":\"PR-3\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/issue/PR-3\"},\"type\":{\"id\":\"10000\",\"inward\":\"depends on\",\"name\":\"Dependent\",\"outward\":\"is depended by\"}}],\"worklog\":[{\"author\":{\"accountId\":\"5b10a2844c20165700ede21g\",\"active\":false,\"displayName\":\"Mia Krystof\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/user?accountId=5b10a2844c20165700ede21g\"},\"comment\":{\"type\":\"doc\",\"version\":1,\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"I did some work here.\"}]}]},\"id\":\"100028\",\"issueId\":\"10002\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/issue/10010/worklog/10000\",\"started\":\"2021-01-17T12:34:00.000+0000\",\"timeSpent\":\"3h 20m\",\"timeSpentSeconds\":12000,\"updateAuthor\":{\"accountId\":\"5b10a2844c20165700ede21g\",\"active\":false,\"displayName\":\"Mia Krystof\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/user?accountId=5b10a2844c20165700ede21g\"},\"updated\":\"2021-01-18T23:45:00.000+0000\",\"visibility\":{\"identifier\":\"276f955c-63d7-42c8-9520-92d01dca0625\",\"type\":\"group\",\"value\":\"jira-developers\"}}],\"updated\":1,\"timetracking\":{\"originalEstimate\":\"10m\",\"originalEstimateSeconds\":600,\"remainingEstimate\":\"3m\",\"remainingEstimateSeconds\":200,\"timeSpent\":\"6m\",\"timeSpentSeconds\":400}},\"id\":\"10002\",\"key\":\"ED-1\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/issue/10002\"}",
+                "schema": {
+                  "$ref": "#/components/schemas/IssueBean"
+                }
+              }
+            },
+            "description": "Returned if the request is successful."
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing."
+          },
+          "404": {
+            "description": "Returned if the issue is not found or the user does not have permission to view it."
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          },
+          {
+            "OAuth2": [
+              "read:jira-work"
+            ]
+          },
+          {}
+        ],
+        "summary": "Get issue",
+        "tags": [
+          "Issues"
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [
+          {
+            "app-access-rule-exempt": false
+          }
+        ],
+        "x-atlassian-oauth2-scopes": [
+          {
+            "scheme": "OAuth2",
+            "scopes": [
+              "read:jira-work"
+            ],
+            "state": "Current"
+          },
+          {
+            "scheme": "OAuth2",
+            "scopes": [
+              "read:issue-meta:jira",
+              "read:issue-security-level:jira",
+              "read:issue.vote:jira",
+              "read:issue.changelog:jira",
+              "read:avatar:jira",
+              "read:issue:jira",
+              "read:status:jira",
+              "read:user:jira",
+              "read:field-configuration:jira"
+            ],
+            "state": "Beta"
+          }
+        ]
+      },
+      "put": {
+        "deprecated": false,
+        "description": "Edits an issue. Issue properties may be updated as part of the edit. Please note that issue transition is not supported and is ignored here. To transition an issue, please use [Transition issue](#api-rest-api-3-issue-issueIdOrKey-transitions-post).\n\nThe edits to the issue's fields are defined using `update` and `fields`. The fields that can be edited are determined using [ Get edit issue metadata](#api-rest-api-3-issue-issueIdOrKey-editmeta-get).\n\n**Note:** This endpoint doesn't check screen configurations to determine if a field is editable. For more context, see the [Deprecation of override screen security](https://community.developer.atlassian.com/t/deprecation-of-override-screen-security/97153) announcement.\n\nThe parent field may be set by key or ID. For standard issue types, the parent may be removed by setting `update.parent.set.none` to *true*. Note that the `description`, `environment`, and any `textarea` type custom fields (multi-line text fields) take Atlassian Document Format content. Single line custom fields (`textfield`) accept a string and don't handle Atlassian Document Format content.\n\nConnect apps having an app user with *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg), and Forge apps acting on behalf of users with *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg), can override the screen security configuration using `overrideScreenSecurity` and `overrideEditableFlag`.\n\nThis operation can be accessed anonymously.\n\n**[Permissions](#permissions) required:**\n\n *  *Browse projects* and *Edit issues* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project that the issue is in.\n *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.",
+        "operationId": "editIssue",
+        "parameters": [
+          {
+            "description": "The ID or key of the issue.",
+            "in": "path",
+            "name": "issueIdOrKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Whether a notification email about the issue update is sent to all watchers. To disable the notification, administer Jira or administer project permissions are required. If the user doesn't have the necessary permission the request is ignored.",
+            "in": "query",
+            "name": "notifyUsers",
+            "schema": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Whether screen security is overridden to enable hidden fields to be edited. Available to Connect and Forge app users with *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg) and Forge apps acting on behalf of users with *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
+            "in": "query",
+            "name": "overrideScreenSecurity",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Whether screen security is overridden to enable uneditable fields to be edited. Available to Connect and Forge app users with *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg) and Forge apps acting on behalf of users with *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
+            "in": "query",
+            "name": "overrideEditableFlag",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Whether the response should contain the issue with fields edited in this request. The returned issue will have the same format as in the [Get issue API](#api-rest-api-3-issue-issueidorkey-get).",
+            "in": "query",
+            "name": "returnIssue",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "The Get issue API expand parameter to use in the response if the `returnIssue` parameter is `true`.",
+            "in": "query",
+            "name": "expand",
+            "schema": {
+              "default": "",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "fields": {
+                  "customfield_10000": {
+                    "content": [
+                      {
+                        "content": [
+                          {
+                            "text": "Investigation underway",
+                            "type": "text"
+                          }
+                        ],
+                        "type": "paragraph"
+                      }
+                    ],
+                    "type": "doc",
+                    "version": 1
+                  },
+                  "customfield_10010": 1,
+                  "summary": "Completed orders still displaying in pending"
+                },
+                "historyMetadata": {
+                  "activityDescription": "Complete order processing",
+                  "actor": {
+                    "avatarUrl": "http://mysystem/avatar/tony.jpg",
+                    "displayName": "Tony",
+                    "id": "tony",
+                    "type": "mysystem-user",
+                    "url": "http://mysystem/users/tony"
+                  },
+                  "cause": {
+                    "id": "myevent",
+                    "type": "mysystem-event"
+                  },
+                  "description": "From the order testing process",
+                  "extraData": {
+                    "Iteration": "10a",
+                    "Step": "4"
+                  },
+                  "generator": {
+                    "id": "mysystem-1",
+                    "type": "mysystem-application"
+                  },
+                  "type": "myplugin:type"
+                },
+                "properties": [
+                  {
+                    "key": "key1",
+                    "value": "Order number 10784"
+                  },
+                  {
+                    "key": "key2",
+                    "value": "Order number 10923"
+                  }
+                ],
+                "update": {
+                  "components": [
+                    {
+                      "set": ""
+                    }
+                  ],
+                  "labels": [
+                    {
+                      "add": "triaged"
+                    },
+                    {
+                      "remove": "blocker"
+                    }
+                  ],
+                  "summary": [
+                    {
+                      "set": "Bug in business logic"
+                    }
+                  ],
+                  "timetracking": [
+                    {
+                      "edit": {
+                        "originalEstimate": "1w 1d",
+                        "remainingEstimate": "4d"
+                      }
+                    }
+                  ]
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/IssueUpdateDetails"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Returned if the request is successful and the `returnIssue` parameter is `true`"
+          },
+          "204": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Returned if the request is successful."
+          },
+          "400": {
+            "description": "Returned if:\n\n *  the request body is missing.\n *  the user does not have the necessary permission to edit one or more fields.\n *  the request includes one or more fields that don't exist or aren't associated with the project and issue type.\n *  the request includes an invalid transition."
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing."
+          },
+          "403": {
+            "description": "Returned if the user uses `overrideScreenSecurity` or `overrideEditableFlag` but doesn't have the necessary permission."
+          },
+          "404": {
+            "description": "Returned if the issue is not found or the user does not have permission to view it."
+          },
+          "409": {
+            "description": "Returned if the issue could not be updated due to a conflicting update."
+          },
+          "422": {
+            "description": "Returned if a configuration problem prevents the issue being updated."
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          },
+          {
+            "OAuth2": [
+              "write:jira-work"
+            ]
+          },
+          {}
+        ],
+        "summary": "Edit issue",
+        "tags": [
+          "Issues"
+        ],
+        "x-atlassian-connect-scope": "WRITE",
+        "x-atlassian-data-security-policy": [
+          {
+            "app-access-rule-exempt": false
+          }
+        ],
+        "x-atlassian-oauth2-scopes": [
+          {
+            "scheme": "OAuth2",
+            "scopes": [
+              "write:jira-work"
+            ],
+            "state": "Current"
+          },
+          {
+            "scheme": "OAuth2",
+            "scopes": [
+              "write:issue:jira"
+            ],
+            "state": "Beta"
+          }
+        ]
+      }
+    },
+    "/rest/api/3/project/search": {
+      "get": {
+        "deprecated": false,
+        "description": "Returns a [paginated](#pagination) list of projects visible to the user.\n\nThis operation can be accessed anonymously.\n\n**[Permissions](#permissions) required:** Projects are returned only where the user has one of:\n\n *  *Browse Projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project.\n *  *Administer Projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project.\n *  *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
+        "operationId": "searchProjects",
+        "parameters": [
+          {
+            "description": "The index of the first item to return in a page of results (page offset).",
+            "in": "query",
+            "name": "startAt",
+            "schema": {
+              "default": 0,
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The maximum number of items to return per page. Must be less than or equal to 100. If a value greater than 100 is provided, the `maxResults` parameter will default to 100.",
+            "in": "query",
+            "name": "maxResults",
+            "schema": {
+              "default": 50,
+              "format": "int32",
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "[Order](#ordering) the results by a field.\n\n *  `category` Sorts by project category. A complete list of category IDs is found using [Get all project categories](#api-rest-api-3-projectCategory-get).\n *  `issueCount` Sorts by the total number of issues in each project.\n *  `key` Sorts by project key.\n *  `lastIssueUpdatedTime` Sorts by the last issue update time.\n *  `name` Sorts by project name.\n *  `owner` Sorts by project lead.\n *  `archivedDate` EXPERIMENTAL. Sorts by project archived date.\n *  `deletedDate` EXPERIMENTAL. Sorts by project deleted date.",
+            "in": "query",
+            "name": "orderBy",
+            "schema": {
+              "default": "key",
+              "enum": [
+                "category",
+                "-category",
+                "+category",
+                "key",
+                "-key",
+                "+key",
+                "name",
+                "-name",
+                "+name",
+                "owner",
+                "-owner",
+                "+owner",
+                "issueCount",
+                "-issueCount",
+                "+issueCount",
+                "lastIssueUpdatedDate",
+                "-lastIssueUpdatedDate",
+                "+lastIssueUpdatedDate",
+                "archivedDate",
+                "+archivedDate",
+                "-archivedDate",
+                "deletedDate",
+                "+deletedDate",
+                "-deletedDate"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The project IDs to filter the results by. To include multiple IDs, provide an ampersand-separated list. For example, `id=10000&id=10001`. Up to 50 project IDs can be provided.",
+            "in": "query",
+            "name": "id",
+            "schema": {
+              "items": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          {
+            "description": "The project keys to filter the results by. To include multiple keys, provide an ampersand-separated list. For example, `keys=PA&keys=PB`. Up to 50 project keys can be provided.",
+            "in": "query",
+            "name": "keys",
+            "schema": {
+              "items": {
+                "default": "",
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          {
+            "description": "Filter the results using a literal string. Projects with a matching `key` or `name` are returned (case insensitive).",
+            "in": "query",
+            "name": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Orders results by the [project type](https://confluence.atlassian.com/x/GwiiLQ#Jiraapplicationsoverview-Productfeaturesandprojecttypes). This parameter accepts a comma-separated list. Valid values are `business`, `service_desk`, and `software`.",
+            "in": "query",
+            "name": "typeKey",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The ID of the project's category. A complete list of category IDs is found using the [Get all project categories](#api-rest-api-3-projectCategory-get) operation.",
+            "in": "query",
+            "name": "categoryId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filter results by projects for which the user can:\n\n *  `view` the project, meaning that they have one of the following permissions:\n    \n     *  *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project.\n     *  *Administer projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project.\n     *  *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).\n *  `browse` the project, meaning that they have the *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project.\n *  `edit` the project, meaning that they have one of the following permissions:\n    \n     *  *Administer projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project.\n     *  *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).\n *  `create` the project, meaning that they have the *Create issues* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project in which the issue is created.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "default": "view",
+              "enum": [
+                "view",
+                "browse",
+                "edit",
+                "create"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Use [expand](#expansion) to include additional information in the response. This parameter accepts a comma-separated list. Expanded options include:\n\n *  `description` Returns the project description.\n *  `projectKeys` Returns all project keys associated with a project.\n *  `lead` Returns information about the project lead.\n *  `issueTypes` Returns all issue types associated with the project.\n *  `url` Returns the URL associated with the project.\n *  `insight` EXPERIMENTAL. Returns the insight details of total issue count and last issue update time for the project.",
+            "in": "query",
+            "name": "expand",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "EXPERIMENTAL. Filter results by project status:\n\n *  `live` Search live projects.\n *  `archived` Search archived projects.\n *  `deleted` Search deleted projects, those in the recycle bin.",
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "items": {
+                "default": "live",
+                "enum": [
+                  "live",
+                  "archived",
+                  "deleted"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "EXPERIMENTAL. A list of project properties to return for the project. This parameter accepts a comma-separated list.",
+            "in": "query",
+            "name": "properties",
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/StringList"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "EXPERIMENTAL. A query string used to search properties. The query string cannot be specified using a JSON object. For example, to search for the value of `nested` from `{\"something\":{\"nested\":1,\"other\":2}}` use `[thepropertykey].something.nested=1`. Note that the propertyQuery key is enclosed in square brackets to enable searching where the propertyQuery key includes dot (.) or equals (=) characters. Note that `thepropertykey` is only returned when included in `properties`.",
+            "in": "query",
+            "name": "propertyQuery",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": "{\"isLast\":false,\"maxResults\":2,\"nextPage\":\"https://your-domain.atlassian.net/rest/api/3/project/search?startAt=2&maxResults=2\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/project/search?startAt=0&maxResults=2\",\"startAt\":0,\"total\":7,\"values\":[{\"avatarUrls\":{\"16x16\":\"https://your-domain.atlassian.net/secure/projectavatar?size=xsmall&pid=10000\",\"24x24\":\"https://your-domain.atlassian.net/secure/projectavatar?size=small&pid=10000\",\"32x32\":\"https://your-domain.atlassian.net/secure/projectavatar?size=medium&pid=10000\",\"48x48\":\"https://your-domain.atlassian.net/secure/projectavatar?size=large&pid=10000\"},\"id\":\"10000\",\"insight\":{\"lastIssueUpdateTime\":\"2021-04-22T05:37:05.000+0000\",\"totalIssueCount\":100},\"key\":\"EX\",\"name\":\"Example\",\"projectCategory\":{\"description\":\"First Project Category\",\"id\":\"10000\",\"name\":\"FIRST\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/projectCategory/10000\"},\"self\":\"https://your-domain.atlassian.net/rest/api/3/project/EX\",\"simplified\":false,\"style\":\"classic\"},{\"avatarUrls\":{\"16x16\":\"https://your-domain.atlassian.net/secure/projectavatar?size=xsmall&pid=10001\",\"24x24\":\"https://your-domain.atlassian.net/secure/projectavatar?size=small&pid=10001\",\"32x32\":\"https://your-domain.atlassian.net/secure/projectavatar?size=medium&pid=10001\",\"48x48\":\"https://your-domain.atlassian.net/secure/projectavatar?size=large&pid=10001\"},\"id\":\"10001\",\"insight\":{\"lastIssueUpdateTime\":\"2021-04-22T05:37:05.000+0000\",\"totalIssueCount\":100},\"key\":\"ABC\",\"name\":\"Alphabetical\",\"projectCategory\":{\"description\":\"First Project Category\",\"id\":\"10000\",\"name\":\"FIRST\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/projectCategory/10000\"},\"self\":\"https://your-domain.atlassian.net/rest/api/3/project/ABC\",\"simplified\":false,\"style\":\"classic\"}]}",
+                "schema": {
+                  "$ref": "#/components/schemas/PageBeanProject"
+                }
+              }
+            },
+            "description": "Returned if the request is successful."
+          },
+          "400": {
+            "description": "Returned if the request is not valid."
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing."
+          },
+          "404": {
+            "description": "Returned if no projects matching the search criteria are found."
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          },
+          {
+            "OAuth2": [
+              "read:jira-work"
+            ]
+          },
+          {}
+        ],
+        "summary": "Get projects paginated",
+        "tags": [
+          "Projects"
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [
+          {
+            "app-access-rule-exempt": true
+          }
+        ],
+        "x-atlassian-oauth2-scopes": [
+          {
+            "scheme": "OAuth2",
+            "scopes": [
+              "read:jira-work"
+            ],
+            "state": "Current"
+          },
+          {
+            "scheme": "OAuth2",
+            "scopes": [
+              "read:issue-type:jira",
+              "read:project:jira",
+              "read:project.property:jira",
+              "read:user:jira",
+              "read:application-role:jira",
+              "read:avatar:jira",
+              "read:group:jira",
+              "read:issue-type-hierarchy:jira",
+              "read:project-category:jira",
+              "read:project-version:jira",
+              "read:project.component:jira"
+            ],
+            "state": "Beta"
+          }
+        ]
+      }
+    },
+    "/rest/api/3/search/jql": {
+      "get": {
+        "deprecated": false,
+        "description": "Searches for issues using [JQL](https://confluence.atlassian.com/x/egORLQ). Recent updates might not be immediately visible in the returned search results. If you need [read-after-write](https://developer.atlassian.com/cloud/jira/platform/search-and-reconcile/) consistency, you can utilize the `reconcileIssues` parameter to ensure stronger consistency assurances. This operation can be accessed anonymously.\n\nIf the JQL query expression is too large to be encoded as a query parameter, use the [POST](#api-rest-api-3-search-post) version of this resource.\n\n**[Permissions](#permissions) required:** Issues are included in the response where the user has:\n\n *  *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project containing the issue.\n *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.",
+        "operationId": "searchAndReconsileIssuesUsingJql",
+        "parameters": [
+          {
+            "description": "A [JQL](https://confluence.atlassian.com/x/egORLQ) expression. For performance reasons, this parameter requires a bounded query. A bounded query is a query with a search restriction.\n\n *  Example of an unbounded query: `order by key desc`.\n *  Example of a bounded query: `assignee = currentUser() order by key`.\n\nAdditionally, `orderBy` clause can contain a maximum of 7 fields.",
+            "in": "query",
+            "name": "jql",
+            "schema": {
+              "example": "project = HSP",
+              "type": "string"
+            },
+            "x-showInExample": "true"
+          },
+          {
+            "description": "The token for a page to fetch that is not the first page. The first page has a `nextPageToken` of `null`. Use the `nextPageToken` to fetch the next page of issues.\n\nNote: The `nextPageToken` field is **not included** in the response for the last page, indicating there is no next page.",
+            "in": "query",
+            "name": "nextPageToken",
+            "schema": {
+              "example": "<string>",
+              "type": "string"
+            },
+            "x-showInExample": "true"
+          },
+          {
+            "description": "The maximum number of items to return per page. To manage page size, API may return fewer items per page where a large number of fields or properties are requested. The greatest number of items returned per page is achieved when requesting `id` or `key` only. It returns max 5000 issues.",
+            "in": "query",
+            "name": "maxResults",
+            "schema": {
+              "default": 50,
+              "example": 114,
+              "format": "int32",
+              "type": "integer"
+            },
+            "x-showInExample": "true"
+          },
+          {
+            "description": "A list of fields to return for each issue, use it to retrieve a subset of fields. This parameter accepts a comma-separated list. Expand options include:\n\n *  `*all` Returns all fields.\n *  `*navigable` Returns navigable fields.\n *  `id` Returns only issue IDs.\n *  Any issue field, prefixed with a minus to exclude.\n\nThe default is `id`.\n\nExamples:\n\n *  `summary,comment` Returns only the summary and comments fields only.\n *  `-description` Returns all navigable (default) fields except description.\n *  `*all,-comment` Returns all fields except comments.\n\nMultiple `fields` parameters can be included in a request.\n\nNote: By default, this resource returns IDs only. This differs from [GET issue](#api-rest-api-3-issue-issueIdOrKey-get) where the default is all fields.",
+            "in": "query",
+            "name": "fields",
+            "schema": {
+              "items": {
+                "default": "id",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "x-showInExample": "true"
+          },
+          {
+            "description": "Use [expand](#expansion) to include additional information about issues in the response. Note that, unlike the majority of instances where `expand` is specified, `expand` is defined as a comma-delimited string of values. The expand options are:\n\n *  `renderedFields` Returns field values rendered in HTML format.\n *  `names` Returns the display name of each field.\n *  `schema` Returns the schema describing a field type.\n *  `transitions` Returns all possible transitions for the issue.\n *  `operations` Returns all possible operations for the issue.\n *  `editmeta` Returns information about how each field can be edited.\n *  `changelog` Returns a list of recent updates to an issue, sorted by date, starting from the most recent.\n *  `versionedRepresentations` Instead of `fields`, returns `versionedRepresentations` a JSON array containing each version of a field's value, with the highest numbered item representing the most recent version.\n\nExamples: `\"names,changelog\"` Returns the display name of each field as well as a list of recent updates to an issue.",
+            "in": "query",
+            "name": "expand",
+            "schema": {
+              "example": "<string>",
+              "type": "string"
+            },
+            "x-showInExample": "true"
+          },
+          {
+            "description": "A list of up to 5 issue properties to include in the results. This parameter accepts a comma-separated list.",
+            "in": "query",
+            "name": "properties",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "Reference fields by their key (rather than ID). The default is `false`.",
+            "in": "query",
+            "name": "fieldsByKeys",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Fail this request early if we can't retrieve all field data.",
+            "in": "query",
+            "name": "failFast",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Strong consistency issue ids to be reconciled with search results. Accepts max 50 ids. This list of ids should be consistent with each paginated request across different pages.",
+            "in": "query",
+            "name": "reconcileIssues",
+            "schema": {
+              "items": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "x-showInExample": "true"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": "{\"isLast\":true,\"issues\":[{\"expand\":\"\",\"fields\":{\"watcher\":{\"isWatching\":false,\"self\":\"https://your-domain.atlassian.net/rest/api/3/issue/EX-1/watchers\",\"watchCount\":1},\"attachment\":[{\"author\":{\"accountId\":\"5b10a2844c20165700ede21g\",\"accountType\":\"atlassian\",\"active\":false,\"avatarUrls\":{\"16x16\":\"https://avatar-management--avatars.server-location.prod.public.atl-paas.net/initials/MK-5.png?size=16&s=16\",\"24x24\":\"https://avatar-management--avatars.server-location.prod.public.atl-paas.net/initials/MK-5.png?size=24&s=24\",\"32x32\":\"https://avatar-management--avatars.server-location.prod.public.atl-paas.net/initials/MK-5.png?size=32&s=32\",\"48x48\":\"https://avatar-management--avatars.server-location.prod.public.atl-paas.net/initials/MK-5.png?size=48&s=48\"},\"displayName\":\"Mia Krystof\",\"key\":\"\",\"name\":\"\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/user?accountId=5b10a2844c20165700ede21g\"},\"content\":\"https://your-domain.atlassian.net/jira/rest/api/3/attachment/content/10001\",\"created\":\"2023-06-24T19:24:50.000+0000\",\"filename\":\"debuglog.txt\",\"id\":10001,\"mimeType\":\"text/plain\",\"self\":\"https://your-domain.atlassian.net/rest/api/2/attachments/10001\",\"size\":2460}],\"sub-tasks\":[{\"id\":\"10000\",\"outwardIssue\":{\"fields\":{\"status\":{\"iconUrl\":\"https://your-domain.atlassian.net/images/icons/statuses/open.png\",\"name\":\"Open\"}},\"id\":\"10003\",\"key\":\"ED-2\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/issue/ED-2\"},\"type\":{\"id\":\"10000\",\"inward\":\"Parent\",\"name\":\"\",\"outward\":\"Sub-task\"}}],\"description\":\"Main order flow broken\",\"project\":{\"avatarUrls\":{\"16x16\":\"https://your-domain.atlassian.net/secure/projectavatar?size=xsmall&pid=10000\",\"24x24\":\"https://your-domain.atlassian.net/secure/projectavatar?size=small&pid=10000\",\"32x32\":\"https://your-domain.atlassian.net/secure/projectavatar?size=medium&pid=10000\",\"48x48\":\"https://your-domain.atlassian.net/secure/projectavatar?size=large&pid=10000\"},\"id\":\"10000\",\"insight\":{\"lastIssueUpdateTime\":\"2021-04-22T05:37:05.000+0000\",\"totalIssueCount\":100},\"key\":\"EX\",\"name\":\"Example\",\"projectCategory\":{\"description\":\"First Project Category\",\"id\":\"10000\",\"name\":\"FIRST\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/projectCategory/10000\"},\"self\":\"https://your-domain.atlassian.net/rest/api/3/project/EX\",\"simplified\":false,\"style\":\"classic\"},\"comment\":[{\"author\":{\"accountId\":\"5b10a2844c20165700ede21g\",\"active\":false,\"displayName\":\"Mia Krystof\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/user?accountId=5b10a2844c20165700ede21g\"},\"body\":\"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque eget venenatis elit. Duis eu justo eget augue iaculis fermentum. Sed semper quam laoreet nisi egestas at posuere augue semper.\",\"created\":\"2021-01-17T12:34:00.000+0000\",\"id\":\"10000\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/issue/10010/comment/10000\",\"updateAuthor\":{\"accountId\":\"5b10a2844c20165700ede21g\",\"active\":false,\"displayName\":\"Mia Krystof\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/user?accountId=5b10a2844c20165700ede21g\"},\"updated\":\"2021-01-18T23:45:00.000+0000\",\"visibility\":{\"identifier\":\"Administrators\",\"type\":\"role\",\"value\":\"Administrators\"}}],\"issuelinks\":[{\"id\":\"10001\",\"outwardIssue\":{\"fields\":{\"status\":{\"iconUrl\":\"https://your-domain.atlassian.net/images/icons/statuses/open.png\",\"name\":\"Open\"}},\"id\":\"10004L\",\"key\":\"PR-2\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/issue/PR-2\"},\"type\":{\"id\":\"10000\",\"inward\":\"depends on\",\"name\":\"Dependent\",\"outward\":\"is depended by\"}},{\"id\":\"10002\",\"inwardIssue\":{\"fields\":{\"status\":{\"iconUrl\":\"https://your-domain.atlassian.net/images/icons/statuses/open.png\",\"name\":\"Open\"}},\"id\":\"10004\",\"key\":\"PR-3\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/issue/PR-3\"},\"type\":{\"id\":\"10000\",\"inward\":\"depends on\",\"name\":\"Dependent\",\"outward\":\"is depended by\"}}],\"worklog\":[{\"author\":{\"accountId\":\"5b10a2844c20165700ede21g\",\"active\":false,\"displayName\":\"Mia Krystof\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/user?accountId=5b10a2844c20165700ede21g\"},\"comment\":\"I did some work here.\",\"id\":\"100028\",\"issueId\":\"10002\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/issue/10010/worklog/10000\",\"started\":\"2021-01-17T12:34:00.000+0000\",\"timeSpent\":\"3h 20m\",\"timeSpentSeconds\":12000,\"updateAuthor\":{\"accountId\":\"5b10a2844c20165700ede21g\",\"active\":false,\"displayName\":\"Mia Krystof\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/user?accountId=5b10a2844c20165700ede21g\"},\"updated\":\"2021-01-18T23:45:00.000+0000\",\"visibility\":{\"identifier\":\"276f955c-63d7-42c8-9520-92d01dca0625\",\"type\":\"group\",\"value\":\"jira-developers\"}}],\"updated\":1,\"timetracking\":{\"originalEstimate\":\"10m\",\"originalEstimateSeconds\":600,\"remainingEstimate\":\"3m\",\"remainingEstimateSeconds\":200,\"timeSpent\":\"6m\",\"timeSpentSeconds\":400}},\"id\":\"10002\",\"key\":\"ED-1\",\"self\":\"https://your-domain.atlassian.net/rest/api/3/issue/10002\"}]}",
+                "schema": {
+                  "$ref": "#/components/schemas/SearchAndReconcileResults"
+                }
+              }
+            },
+            "description": "Returned if the request is successful."
+          },
+          "400": {
+            "description": "Returned if the search request is invalid"
+          },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing."
+          }
+        },
+        "security": [
+          {
+            "basicAuth": []
+          },
+          {
+            "OAuth2": [
+              "read:jira-work"
+            ]
+          },
+          {}
+        ],
+        "summary": "Search for issues using JQL enhanced search (GET)",
+        "tags": [
+          "Issue search"
+        ],
+        "x-atlassian-connect-scope": "READ",
+        "x-atlassian-data-security-policy": [
+          {
+            "app-access-rule-exempt": false
+          }
+        ],
+        "x-atlassian-oauth2-scopes": [
+          {
+            "scheme": "OAuth2",
+            "scopes": [
+              "read:jira-work"
+            ],
+            "state": "Current"
+          },
+          {
+            "scheme": "OAuth2",
+            "scopes": [
+              "read:issue-details:jira",
+              "read:audit-log:jira",
+              "read:avatar:jira",
+              "read:field-configuration:jira",
+              "read:issue-meta:jira"
+            ],
+            "state": "Beta"
+          }
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://your-domain.atlassian.net"
+    }
+  ]
+}

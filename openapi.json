@@ -9990,12 +9990,30 @@
                       },
                       "openapiSpecJson": {
                         "type": "string"
+                      },
+                      "specSource": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "vendored"
+                            ]
+                          },
+                          "slug": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]*$"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "slug"
+                        ]
                       }
                     },
                     "required": [
                       "slug",
-                      "kind",
-                      "baseUrl"
+                      "kind"
                     ]
                   },
                   {

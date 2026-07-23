@@ -78,6 +78,12 @@ const scriptConnectionsInputSchema = z.object({
     .string()
     .optional()
     .describe("Inline OpenAPI JSON for upsert-openapi. Mutually exclusive with openapiSpecUrl."),
+  specSource: z
+    .object({ kind: z.literal("vendored"), slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/) })
+    .optional()
+    .describe(
+      "Vendored OpenAPI source. Mutually exclusive with openapiSpecUrl and openapiSpecJson.",
+    ),
   enabled: z.boolean().optional().describe("Whether the connection is enabled."),
 });
 
@@ -338,34 +344,39 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         };
       }
 
-      if (!args.slug || !args.baseUrl || (!args.openapiSpecJson && !args.openapiSpecUrl)) {
+      if (
+        !args.slug ||
+        (!args.openapiSpecJson && !args.openapiSpecUrl && !args.specSource) ||
+        (!args.baseUrl && !args.specSource)
+      ) {
         return {
           content: [
             {
               type: "text",
-              text: "slug, baseUrl, and either openapiSpecJson or openapiSpecUrl are required.",
+              text: "slug, baseUrl (unless vendored), and exactly one OpenAPI spec source are required.",
             },
           ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
-            message: "slug, baseUrl, and either openapiSpecJson or openapiSpecUrl are required.",
+            message:
+              "slug, baseUrl (unless vendored), and exactly one OpenAPI spec source are required.",
             connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
           },
         };
       }
-      if (args.openapiSpecJson && args.openapiSpecUrl) {
+      if ([args.openapiSpecJson, args.openapiSpecUrl, args.specSource].filter(Boolean).length > 1) {
         return {
           content: [
             {
               type: "text",
-              text: "Provide either openapiSpecJson or openapiSpecUrl, not both.",
+              text: "Provide exactly one OpenAPI spec source.",
             },
           ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
-            message: "Provide either openapiSpecJson or openapiSpecUrl, not both.",
+            message: "Provide exactly one OpenAPI spec source.",
             connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
           },
         };
@@ -377,7 +388,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         const bindingScope = args.scope ?? "global";
         const binding = upsertCredentialBinding({
           configKey: args.configKey,
-          allowedHosts: args.allowedHosts ?? [new URL(args.baseUrl).hostname],
+          allowedHosts: args.allowedHosts ?? (args.baseUrl ? [new URL(args.baseUrl).hostname] : []),
           headerTemplate:
             args.headerTemplate ??
             (args.queryTemplate ? undefined : `Authorization: Bearer ${placeholder}`),
@@ -398,8 +409,10 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         scope,
         scopeId,
         baseUrl: args.baseUrl,
-        allowedHosts: args.allowedHosts ?? [new URL(args.baseUrl).hostname],
+        allowedHosts: args.allowedHosts ?? (args.baseUrl ? [new URL(args.baseUrl).hostname] : []),
         credentialBindingId,
+        openapiSpecSourceKind: args.specSource ? "vendored" : undefined,
+        openapiSpecSource: args.specSource?.slug,
         openapiSpecUrl: args.openapiSpecUrl,
         openapiSpecJson: args.openapiSpecJson,
         enabled: resolveConnectionEnabled(args, existing),
