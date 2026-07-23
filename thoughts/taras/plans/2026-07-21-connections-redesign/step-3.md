@@ -2,7 +2,10 @@
 id: step-3
 name: Spec server extraction + baseUrl provenance
 depends_on: []
-status: ready
+status: done
+assignee: fable-orchestrator-codex-terra-step3
+claimed_at: 2026-07-22T00:00:00+0200
+completed_at: 2026-07-22T17:20:00+0200
 ---
 
 # step-3: Spec server extraction + baseUrl provenance

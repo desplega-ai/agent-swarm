@@ -2,7 +2,10 @@
 id: step-1
 name: Unified OAuth schema + migration 117 + store adapters
 depends_on: []
-status: ready
+status: done
+assignee: fable-orchestrator-codex-sol-step1
+claimed_at: 2026-07-22T00:00:00+0200
+completed_at: 2026-07-22T19:30:00+0200
 ---
 
 # step-1: Unified OAuth schema + migration 117 + store adapters
