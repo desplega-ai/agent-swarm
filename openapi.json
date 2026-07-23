@@ -10994,6 +10994,14 @@
                     "type": "string",
                     "format": "uri"
                   },
+                  "userinfoUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "revocationUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
                   "scopes": {
                     "type": "array",
                     "items": {

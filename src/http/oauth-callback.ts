@@ -66,6 +66,16 @@ interface OAuthCallbackParams {
   error_description?: string;
 }
 
+/** Escape a value for safe interpolation into the success HTML page. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function sendAuthorizedHtml(res: ServerResponse, provider: string, label: string): void {
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(`<!DOCTYPE html>
@@ -73,15 +83,33 @@ function sendAuthorizedHtml(res: ServerResponse, provider: string, label: string
 <head><title>OAuth Authorized</title></head>
 <body style="font-family: system-ui; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0;">
   <main style="text-align: center;">
-    <h1>${provider} authorized</h1>
-    <p>Connected the "${label}" authorization. You can close this tab.</p>
+    <h1>${escapeHtml(provider)} authorized</h1>
+    <p>Connected the "${escapeHtml(label)}" authorization. You can close this tab.</p>
   </main>
 </body>
 </html>`);
 }
 
+/**
+ * 302 to a caller-supplied `finalRedirect`. Rejects non-http(s) schemes
+ * (javascript:/data:) so the redirect target can never carry script; an origin
+ * allowlist is out of scope for step-4 (noted for a follow-up). Falls back to a
+ * plain error page when the target is unsafe.
+ */
 function redirectWith(res: ServerResponse, base: string, params: Record<string, string>): void {
-  const target = new URL(base);
+  let target: URL;
+  try {
+    target = new URL(base);
+  } catch {
+    res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Invalid redirect target.");
+    return;
+  }
+  if (target.protocol !== "http:" && target.protocol !== "https:") {
+    res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Unsupported redirect scheme.");
+    return;
+  }
   for (const [key, value] of Object.entries(params)) target.searchParams.set(key, value);
   res.writeHead(302, { Location: target.toString() });
   res.end();
@@ -178,8 +206,11 @@ export async function completeGenericOAuthCallback(
       sendAuthorizedHtml(res, app.provider, pending.label);
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(scrubSecrets(`[oauth] callback exchange failed for ${app.provider}: ${message}`));
+    const rawMessage = err instanceof Error ? err.message : String(err);
+    // The provider token-endpoint body can echo back secrets — scrub before it
+    // reaches the log AND the browser/finalRedirect.
+    const message = scrubSecrets(rawMessage);
+    console.warn(`[oauth] callback exchange failed for ${app.provider}: ${message}`);
     if (pending.finalRedirect) {
       redirectWith(res, pending.finalRedirect, { oauth: "error", error_description: message });
     } else {

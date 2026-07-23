@@ -1,4 +1,5 @@
 import { scrubSecrets } from "@/utils/secret-scrubber";
+import { assertOAuthEgressUrlSafe } from "./app-validation";
 
 /**
  * Best-effort account identity captured after a successful token exchange.
@@ -60,6 +61,8 @@ export async function captureIdentity(input: {
 }): Promise<CapturedIdentity | null> {
   try {
     if (input.userinfoUrl) {
+      // Fail-closed host re-check at egress: we are about to send a live bearer.
+      assertOAuthEgressUrlSafe(input.userinfoUrl);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), IDENTITY_FETCH_TIMEOUT_MS);
       try {
@@ -69,6 +72,10 @@ export async function captureIdentity(input: {
             accept: "application/json",
           },
           signal: controller.signal,
+          // Never follow a redirect: a public userinfoUrl could 302 the bearer
+          // toward an internal metadata endpoint. A 3xx is not `.ok`, so it is
+          // simply ignored below.
+          redirect: "manual",
         });
         if (response.ok) {
           const data = (await response.json()) as unknown;

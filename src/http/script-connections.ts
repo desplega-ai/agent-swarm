@@ -33,7 +33,11 @@ import {
   upsertScriptConnection,
 } from "@/be/script-connections";
 import { listVendoredOpenapiEntries } from "@/be/vendored-openapi";
-import { assertOAuthAppUrlsSafe, assertOAuthProviderIsNotReserved } from "@/oauth/app-validation";
+import {
+  assertOAuthAppUrlsSafe,
+  assertOAuthEgressUrlSafe,
+  assertOAuthProviderIsNotReserved,
+} from "@/oauth/app-validation";
 import { forceRefreshTokenOrThrow } from "@/oauth/ensure-token";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
 import { buildAuthorizationUrl, refreshTokenGrant } from "@/oauth/wrapper";
@@ -132,6 +136,9 @@ const oauthAppBodySchema = z.object({
   clientSecret: z.string().min(1).optional(),
   authorizeUrl: z.string().url(),
   tokenUrl: z.string().url(),
+  // Fetched server-side with credentials — SSRF-validated on write.
+  userinfoUrl: z.string().url().optional(),
+  revocationUrl: z.string().url().optional(),
   scopes: z.array(z.string().min(1)).default([]).optional(),
   extraParams: z.record(z.string(), z.string()).optional(),
   tokenAuthStyle: z.enum(["body", "basic"]).optional(),
@@ -313,7 +320,15 @@ const deleteOAuthAppRoute = route({
 const authorizeUrlBodySchema = z
   .object({
     label: z.string().min(1).max(255).default("default").optional(),
-    finalRedirect: z.string().url().optional(),
+    // Emitted verbatim in the 302 Location — restrict to http(s) so it can't
+    // be a javascript:/data: URL. Origin allowlisting is a follow-up (noted).
+    finalRedirect: z
+      .string()
+      .url()
+      .refine((value) => /^https?:$/.test(new URL(value).protocol), {
+        message: "finalRedirect must be an http(s) URL.",
+      })
+      .optional(),
   })
   .optional();
 
@@ -1052,6 +1067,21 @@ async function attemptRemoteRevocation(app: OAuthApp, accessToken: string): Prom
   const revocationUrl = app.revocationUrl ?? undefined;
   if (!revocationUrl) return false;
 
+  // Fail-closed host re-check at egress: this POST carries the client_secret +
+  // token. A stored revocationUrl must not be able to reach an internal host.
+  try {
+    assertOAuthEgressUrlSafe(revocationUrl);
+  } catch (err) {
+    console.warn(
+      scrubSecrets(
+        `OAuth token revocation skipped for provider ${app.provider} (unsafe revocation URL): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      ),
+    );
+    return false;
+  }
+
   const body = new URLSearchParams({
     token: accessToken,
     token_type_hint: "access_token",
@@ -1074,6 +1104,8 @@ async function attemptRemoteRevocation(app: OAuthApp, accessToken: string): Prom
       headers,
       body: body.toString(),
       signal: controller.signal,
+      // A public revocationUrl must not 302 the client_secret to an internal host.
+      redirect: "manual",
     });
   } catch (err) {
     console.warn(
@@ -1689,6 +1721,8 @@ export async function handleScriptConnections(
         tokenUrl: parsed.body.tokenUrl,
         redirectUri,
         scopes: (parsed.body.scopes ?? []).join(","),
+        ...(parsed.body.userinfoUrl ? { userinfoUrl: parsed.body.userinfoUrl } : {}),
+        ...(parsed.body.revocationUrl ? { revocationUrl: parsed.body.revocationUrl } : {}),
         ...(parsed.body.extraParams ? { extraParams: parsed.body.extraParams } : {}),
         ...(parsed.body.tokenAuthStyle ? { tokenAuthStyle: parsed.body.tokenAuthStyle } : {}),
         ...(parsed.body.tokenBodyFormat ? { tokenBodyFormat: parsed.body.tokenBodyFormat } : {}),

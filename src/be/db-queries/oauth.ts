@@ -491,6 +491,9 @@ export function deleteAuthorizationById(id: string): boolean {
 
 // ── OAuth pending (DB-backed PKCE state for generic/tracker flows) ──
 
+/** Pending PKCE sessions are valid for 10 minutes (matches the GC window). */
+export const OAUTH_PENDING_TTL_MS = 10 * 60 * 1000;
+
 export type OAuthPendingFlow = "generic" | "tracker";
 
 export interface OAuthPendingRecord {
@@ -561,6 +564,10 @@ export function createOAuthPending(input: {
  * Single-use consume of a generic/tracker pending row by `state`. Returns null
  * for unknown states and for `mcp`-flow rows (those are owned by the MCP
  * adapter), leaving the row untouched so the caller can fall through.
+ *
+ * Enforces the 10-minute TTL at consume time: an expired row is deleted and
+ * treated as invalid, so a stalled/failed GC timer cannot widen the validity
+ * window.
  */
 export function consumeOAuthPending(state: string): OAuthPendingRecord | null {
   return getDb().transaction(() => {
@@ -573,11 +580,17 @@ export function consumeOAuthPending(state: string): OAuthPendingRecord | null {
       )
       .get(state) as OAuthPendingRow | null;
     if (!row) return null;
+    // Single-use: always delete, whether valid or expired.
     getDb().query("DELETE FROM oauth_pending WHERE state = ?").run(state);
+    const createdAt = normalizeDateRequired(row.createdAt);
+    const createdMs = new Date(createdAt).getTime();
+    if (Number.isNaN(createdMs) || Date.now() - createdMs > OAUTH_PENDING_TTL_MS) {
+      return null;
+    }
     return {
       ...row,
       codeVerifier: decryptSecret(row.codeVerifier, getEncryptionKey()),
-      createdAt: normalizeDateRequired(row.createdAt),
+      createdAt,
     };
   })();
 }

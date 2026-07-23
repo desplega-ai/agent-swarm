@@ -150,6 +150,16 @@ const credentialBindingsInputSchema = z.object({
     .optional()
     .describe("OAuth authorization URL for oauth-app-upsert."),
   tokenUrl: z.string().url().optional().describe("OAuth token URL for oauth-app-upsert."),
+  userinfoUrl: z
+    .string()
+    .url()
+    .optional()
+    .describe("OIDC userinfo endpoint for identity capture (SSRF-validated)."),
+  revocationUrl: z
+    .string()
+    .url()
+    .optional()
+    .describe("RFC 7009 revocation endpoint (SSRF-validated)."),
   scopes: z.array(z.string().min(1)).optional().describe("OAuth scopes for oauth-app-upsert."),
   extraParams: z
     .record(z.string(), z.string())
@@ -271,6 +281,8 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
           assertOAuthAppUrlsSafe({
             authorizeUrl: args.authorizeUrl,
             tokenUrl: args.tokenUrl,
+            userinfoUrl: args.userinfoUrl,
+            revocationUrl: args.revocationUrl,
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -293,6 +305,8 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
           tokenUrl: args.tokenUrl,
           redirectUri,
           scopes: args.scopes.join(","),
+          ...(args.userinfoUrl ? { userinfoUrl: args.userinfoUrl } : {}),
+          ...(args.revocationUrl ? { revocationUrl: args.revocationUrl } : {}),
           ...(args.extraParams ? { extraParams: args.extraParams } : {}),
           ...(args.tokenAuthStyle ? { tokenAuthStyle: args.tokenAuthStyle } : {}),
           ...(args.tokenBodyFormat ? { tokenBodyFormat: args.tokenBodyFormat } : {}),

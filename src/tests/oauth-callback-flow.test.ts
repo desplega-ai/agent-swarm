@@ -21,6 +21,7 @@ import { handleOAuthCallback } from "../http/oauth-callback";
 import { handleGenericOAuth } from "../http/oauth-generic";
 import { handleScriptConnections } from "../http/script-connections";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { captureIdentity } from "../oauth/identity-capture";
 import { buildAuthorizationUrl } from "../oauth/wrapper";
 
 const TEST_DB_PATH = "./test-oauth-callback-flow.sqlite";
@@ -95,6 +96,10 @@ beforeAll(async () => {
       }
       if (url.pathname === "/userinfo") {
         return Response.json({ email: "connected@example.test", sub: "user-123" });
+      }
+      if (url.pathname === "/userinfo-redirect") {
+        // A public userinfoUrl that 302s toward a would-be internal endpoint.
+        return new Response(null, { status: 302, headers: { location: "http://127.0.0.1/steal" } });
       }
       return new Response("not found", { status: 404 });
     },
@@ -321,5 +326,126 @@ describe("static OAuth callback + multi-authorization flow", () => {
       body: JSON.stringify({ label: "support" }),
     });
     expect(res.status).toBe(403);
+  });
+});
+
+describe("step-4 security hardening", () => {
+  test("app-write rejects a private-host userinfoUrl (SSRF, production)", async () => {
+    const saved = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      const res = await fetch(`${appBase}/api/oauth-apps`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-agent-id": LEAD_ID },
+        body: JSON.stringify({
+          provider: "sec-userinfo",
+          clientId: "c",
+          clientSecret: "s",
+          authorizeUrl: "https://oauth.example.test/authorize",
+          tokenUrl: "https://oauth.example.test/token",
+          userinfoUrl: "http://169.254.169.254/latest/meta-data/iam",
+          scopes: [],
+        }),
+      });
+      expect(res.status).toBe(400);
+      expect(getOAuthAppIdByProvider("sec-userinfo")).toBeNull();
+    } finally {
+      if (saved === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = saved;
+    }
+  });
+
+  test("app-write rejects a private-host revocationUrl (SSRF, production)", async () => {
+    const saved = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      const res = await fetch(`${appBase}/api/oauth-apps`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-agent-id": LEAD_ID },
+        body: JSON.stringify({
+          provider: "sec-revoke",
+          clientId: "c",
+          clientSecret: "s",
+          authorizeUrl: "https://oauth.example.test/authorize",
+          tokenUrl: "https://oauth.example.test/token",
+          revocationUrl: "http://127.0.0.1/revoke",
+          scopes: [],
+        }),
+      });
+      expect(res.status).toBe(400);
+      expect(getOAuthAppIdByProvider("sec-revoke")).toBeNull();
+    } finally {
+      if (saved === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = saved;
+    }
+  });
+
+  test("captureIdentity fails closed on a private-host userinfo URL", async () => {
+    const saved = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      const identity = await captureIdentity({
+        userinfoUrl: "http://127.0.0.1/userinfo",
+        accessToken: "live-bearer",
+      });
+      expect(identity).toBeNull();
+    } finally {
+      if (saved === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = saved;
+    }
+  });
+
+  test("captureIdentity does not follow a redirect to a private host", async () => {
+    const identity = await captureIdentity({
+      userinfoUrl: `${providerBase}/userinfo-redirect`,
+      accessToken: "live-bearer",
+    });
+    // The 302 is not followed (redirect: manual → not .ok), so no identity.
+    expect(identity).toBeNull();
+  });
+
+  test("success page HTML-escapes a hostile authorization label (XSS)", async () => {
+    const provider = "sec-xss";
+    upsertOAuthApp(provider, testApp(provider));
+    const appId = getOAuthAppIdByProvider(provider)!;
+    const config = getOAuthProviderConfig(provider)!;
+    const label = "</h1><script>alert(1)</script>";
+    const { state } = await buildAuthorizationUrl(config, { appId, label, flow: "generic" });
+    const res = await driveStaticCallback(state);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).not.toContain("<script>alert(1)</script>");
+    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+  });
+
+  test("authorize-url rejects a non-http(s) finalRedirect (open redirect)", async () => {
+    const provider = "sec-redirect";
+    upsertOAuthApp(provider, testApp(provider));
+    const appId = getOAuthAppIdByProvider(provider)!;
+    const res = await fetch(`${appBase}/api/oauth-apps/${appId}/authorize-url`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-agent-id": LEAD_ID },
+      body: JSON.stringify({ label: "x", finalRedirect: "javascript:alert(1)" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test("consume enforces the 10-minute pending TTL", async () => {
+    const provider = "sec-ttl";
+    upsertOAuthApp(provider, testApp(provider));
+    const appId = getOAuthAppIdByProvider(provider)!;
+    createOAuthPending({
+      state: "ttl-state",
+      appId,
+      flow: "generic",
+      codeVerifier: "verifier",
+      redirectUri: `${appBase}/api/oauth/callback`,
+    });
+    // Backdate past the 10-minute TTL.
+    getDb()
+      .query("UPDATE oauth_pending SET createdAt = ? WHERE state = ?")
+      .run(new Date(Date.now() - 11 * 60 * 1000).toISOString(), "ttl-state");
+    const res = await driveStaticCallback("ttl-state");
+    expect(res.status).toBe(400);
   });
 });
