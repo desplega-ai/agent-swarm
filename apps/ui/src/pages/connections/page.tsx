@@ -14,7 +14,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAgents } from "@/api/hooks/use-agents";
@@ -813,11 +813,22 @@ export function AddConnectionDialog({
     setAppliedCredentialId(null);
   }, [connection]);
 
+  // Initialize the form only when the dialog opens or the target connection id
+  // changes — NOT on every `connection` object identity change. The list/detail
+  // hooks poll every ~10s and oauth connections tick auth.status/lastRefreshedAt,
+  // so keying on the object would wipe in-progress edits mid-session.
+  const initializedKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!open) return;
-    setStep(connection ? "form" : "catalog");
+    if (!open) {
+      initializedKeyRef.current = null;
+      return;
+    }
+    const key = connection?.id ?? "__new__";
+    if (initializedKeyRef.current === key) return;
+    initializedKeyRef.current = key;
+    setStep(isEdit ? "form" : "catalog");
     resetForm();
-  }, [open, connection, resetForm]);
+  }, [open, connection?.id, isEdit, resetForm]);
 
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) resetForm();
@@ -1016,14 +1027,24 @@ export function AddConnectionDialog({
       if (!authAuthorizationId) return undefined;
       return { type: "oauth", authorizationId: authAuthorizationId };
     }
-    // bearer / header / query: pick the credential source. A blank secret on edit
-    // re-sends the derived key (no `secret`) so the stored value is preserved.
+    // bearer / header / query: pick the credential source. A blank secret on
+    // edit re-sends the derived key (no `secret`) so the stored value is
+    // preserved — but ONLY when the previous auth was itself a secret type.
+    // An oauth connection's configKey is the `connection.<slug>.oauth`
+    // placeholder (never written to swarm_config), so reusing it would ship a
+    // credential that substitutes nothing. When coming from oauth, a fresh
+    // secret is required (enforced by `authReady`).
+    const canReuseStoredKey =
+      isEdit &&
+      Boolean(connection?.auth?.configKey) &&
+      connection?.auth?.type !== "none" &&
+      connection?.auth?.type !== "oauth";
     const credentialFields: { secret?: string; configKey?: string } = useExistingConfigKey
       ? { configKey: authConfigKey.trim() }
       : authSecret.trim()
         ? { secret: authSecret.trim() }
-        : isEdit && connection?.auth?.configKey
-          ? { configKey: connection.auth.configKey }
+        : canReuseStoredKey
+          ? { configKey: connection?.auth?.configKey }
           : {};
     if (authType === "header") {
       return {
@@ -1096,6 +1117,15 @@ export function AddConnectionDialog({
 
   const specUrlIsYaml = /\.ya?ml($|[?#])/i.test(openapiSpecUrl.trim());
 
+  // A blank secret only preserves an existing value when the previous auth was a
+  // secret type (its stored key holds a real secret). Coming from oauth (or a
+  // fresh connection) requires an entered secret — otherwise the reused
+  // placeholder key would substitute nothing at runtime.
+  const canPreserveSecret =
+    isEdit &&
+    Boolean(connection?.auth) &&
+    connection?.auth?.type !== "none" &&
+    connection?.auth?.type !== "oauth";
   const authReady =
     authType === "none"
       ? true
@@ -1103,8 +1133,7 @@ export function AddConnectionDialog({
         ? Boolean(authAuthorizationId)
         : useExistingConfigKey
           ? Boolean(authConfigKey.trim())
-          : Boolean(authSecret.trim()) ||
-            (isEdit && Boolean(connection?.auth && connection.auth.type !== "none"));
+          : Boolean(authSecret.trim()) || canPreserveSecret;
 
   const canSubmit = Boolean(
     slug.trim() &&
@@ -1421,7 +1450,7 @@ export function AddConnectionDialog({
                           onChange={(event) => setAuthSecret(event.target.value)}
                           autoComplete="new-password"
                           placeholder={
-                            isEdit && connection?.auth && connection.auth.type !== "none"
+                            canPreserveSecret
                               ? "Leave blank to keep current secret"
                               : "Paste the token or API key"
                           }
