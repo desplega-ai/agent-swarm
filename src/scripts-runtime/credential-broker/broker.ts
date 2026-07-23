@@ -33,8 +33,8 @@ export class CredentialBroker {
 
       const value =
         binding.authKind === "oauth"
-          ? binding.oauthProvider
-            ? await this.resolveOAuthCredential?.(binding.oauthProvider)
+          ? binding.oauthAuthorizationId
+            ? await this.resolveOAuthCredential?.(binding.oauthAuthorizationId)
             : undefined
           : this.resolveConfigCredential(binding.configKey);
       if (!value) continue;

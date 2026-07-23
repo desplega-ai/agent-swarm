@@ -469,7 +469,7 @@ export async function handleMcpOAuth(
         mcpServerId: pending.mcpServerId,
         userId: pending.userId,
         accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token ?? null,
+        ...(tokens.refresh_token != null ? { refreshToken: tokens.refresh_token } : {}),
         tokenType: tokens.token_type ?? "Bearer",
         expiresAt: computeExpiresAt(tokens.expires_in),
         scope: tokens.scope ?? pending.scopes ?? null,
@@ -639,6 +639,7 @@ export async function handleMcpOAuth(
         refreshToken: refreshed.refresh_token ?? undefined,
         expiresAt: computeExpiresAt(refreshed.expires_in),
         scope: refreshed.scope ?? null,
+        expectedTokenVersion: existing.tokenVersion,
       });
       json(res, {
         ok: true,

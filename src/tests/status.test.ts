@@ -124,7 +124,7 @@ function clearTables() {
   const db = getDb();
   db.prepare("DELETE FROM agent_tasks").run();
   db.prepare("DELETE FROM agents").run();
-  db.prepare("DELETE FROM oauth_tokens").run();
+  db.prepare("DELETE FROM oauth_authorizations").run();
   db.prepare("DELETE FROM oauth_apps").run();
 }
 
@@ -345,7 +345,7 @@ describe("setup milestones", () => {
     expect(getMilestone(b, "github").state).toBe("verified");
   });
 
-  test("linear: row in oauth_tokens flips to verified", () => {
+  test("linear: authorization row flips to verified", () => {
     expect(getMilestone(buildStatusPayload(), "linear").state).toBe("unverified");
 
     upsertOAuthApp("linear", {
@@ -365,8 +365,7 @@ describe("setup milestones", () => {
     expect(getMilestone(buildStatusPayload(), "linear").state).toBe("verified");
   });
 
-  test("jira: requires both oauth_tokens row AND oauth_apps.metadata.cloudId", () => {
-    // Seed app row first (FK on oauth_tokens.provider → oauth_apps.provider).
+  test("jira: requires both an authorization row and oauth_apps.metadata.cloudId", () => {
     upsertOAuthApp("jira", {
       clientId: "cid",
       clientSecret: "csec",

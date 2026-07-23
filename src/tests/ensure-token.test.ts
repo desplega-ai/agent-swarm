@@ -430,4 +430,37 @@ describe("ensureTokenOrThrow", () => {
     expect(tokens?.accessToken).toBe("concurrent-jira-access");
     expect(tokens?.refreshToken).toBe("concurrent-jira-refresh");
   });
+
+  test("carries the loaded tokenVersion through refresh when the refresh token is unchanged", async () => {
+    storeOAuthTokens("jira", {
+      accessToken: "old-jira-access",
+      refreshToken: "stable-jira-refresh",
+      expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
+    });
+
+    globalThis.fetch = mock(() => {
+      storeOAuthTokens("jira", {
+        accessToken: "same-refresh-concurrent-winner",
+        refreshToken: "stable-jira-refresh",
+        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      });
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            access_token: "same-refresh-stale-result",
+            token_type: "Bearer",
+            expires_in: 3600,
+            refresh_token: "stable-jira-refresh",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    });
+
+    await expect(ensureTokenOrThrow("jira")).rejects.toThrow(/no rows updated/);
+
+    const tokens = getOAuthTokens("jira");
+    expect(tokens?.accessToken).toBe("same-refresh-concurrent-winner");
+    expect(tokens?.refreshToken).toBe("stable-jira-refresh");
+  });
 });

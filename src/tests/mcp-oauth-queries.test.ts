@@ -4,11 +4,13 @@ import {
   closeDb,
   createMcpServer,
   createUser,
+  getDb,
   getMcpServerById,
   initDb,
   updateMcpServer,
 } from "../be/db";
 import {
+  applyMcpOAuthRefresh,
   consumeMcpOAuthPending,
   deleteMcpOAuthToken,
   gcMcpOAuthPending,
@@ -75,7 +77,15 @@ describe("mcp_oauth_tokens encryption roundtrip", () => {
     expect(token!.accessToken).toBe("access-123");
     expect(token!.refreshToken).toBe("refresh-456");
     expect(token!.dcrClientSecret).toBe("dcr-secret-xyz");
+    expect(token!.tokenVersion).toBe(1);
     expect(token!.status).toBe("connected");
+    const app = getDb()
+      .query<{ source: string; metadata: string }, []>(
+        "SELECT source, metadata FROM oauth_apps WHERE mcpServerId = ?",
+      )
+      .get(server.id);
+    expect(app?.source).toBe("dcr");
+    expect(JSON.parse(app?.metadata ?? "{}").clientSource).toBe("dcr");
   });
 
   test("access token is encrypted at rest (not stored plaintext)", async () => {
@@ -85,7 +95,12 @@ describe("mcp_oauth_tokens encryption roundtrip", () => {
     // Use raw SQL to inspect the row bypassing the decrypt helper.
     const { getDb } = await import("../be/db");
     const row = getDb()
-      .query("SELECT accessToken FROM mcp_oauth_tokens WHERE mcpServerId = ?")
+      .query(`
+        SELECT auth.accessToken
+        FROM oauth_authorizations auth
+        JOIN oauth_apps app ON app.id = auth.appId
+        WHERE app.mcpServerId = ?
+      `)
       .get(server.id) as { accessToken: string } | null;
 
     expect(row).not.toBeNull();
@@ -99,6 +114,7 @@ describe("mcp_oauth_tokens encryption roundtrip", () => {
     upsertMcpOAuthToken({
       ...base(server.id),
       accessToken: "access-updated",
+      refreshToken: undefined,
       scope: "read",
     });
     const token = getMcpOAuthToken(server.id);
@@ -106,6 +122,30 @@ describe("mcp_oauth_tokens encryption roundtrip", () => {
     // COALESCE behaviour on refreshToken: not overridden when updater omits it
     // (we re-pass the same refresh above, so expect it intact).
     expect(token!.refreshToken).toBe("refresh-456");
+  });
+
+  test("refresh CAS uses the tokenVersion observed before the provider request", () => {
+    const server = makeServer("mcp-refresh-cas");
+    upsertMcpOAuthToken(base(server.id));
+    const observed = getMcpOAuthToken(server.id)!;
+
+    upsertMcpOAuthToken({
+      ...base(server.id),
+      accessToken: "concurrent-winner",
+      refreshToken: "refresh-456",
+    });
+
+    expect(() =>
+      applyMcpOAuthRefresh(observed.id, {
+        accessToken: "stale-refresh-result",
+        refreshToken: "stale-refresh-token",
+        expectedTokenVersion: observed.tokenVersion,
+      }),
+    ).toThrow(/token version changed during refresh/);
+    expect(getMcpOAuthToken(server.id)).toMatchObject({
+      accessToken: "concurrent-winner",
+      refreshToken: "refresh-456",
+    });
   });
 });
 
@@ -121,23 +161,56 @@ describe("markMcpOAuthTokenStatus + deleteMcpOAuthToken", () => {
     expect(updated.lastErrorMessage).toBe("refresh token missing");
   });
 
-  test("delete removes the row", () => {
-    const server = makeServer("mcp-delete-row");
+  test("disconnect revokes in place and reconnect reuses the authorization id", () => {
+    const server = makeServer("mcp-revoke-row");
     upsertMcpOAuthToken(base(server.id));
-    expect(getMcpOAuthToken(server.id)).not.toBeNull();
+    const original = getMcpOAuthToken(server.id)!;
     expect(deleteMcpOAuthToken(server.id)).toBe(true);
-    expect(getMcpOAuthToken(server.id)).toBeNull();
+    expect(getMcpOAuthToken(server.id)).toMatchObject({
+      id: original.id,
+      accessToken: "",
+      refreshToken: null,
+      expiresAt: null,
+      scope: null,
+      status: "revoked",
+    });
+
+    upsertMcpOAuthToken({
+      ...base(server.id),
+      accessToken: "reconnected-access",
+      refreshToken: "reconnected-refresh",
+    });
+    expect(getMcpOAuthToken(server.id)).toMatchObject({
+      id: original.id,
+      accessToken: "reconnected-access",
+      refreshToken: "reconnected-refresh",
+      status: "connected",
+    });
   });
 
   test("listMcpOAuthTokensForMcp returns multiple user rows", () => {
     const server = makeServer("mcp-multi-user");
     const userA = createUser({ name: "user-a" });
     const userB = createUser({ name: "user-b" });
-    upsertMcpOAuthToken({ ...base(server.id), userId: userA.id });
-    upsertMcpOAuthToken({ ...base(server.id), userId: userB.id });
+    upsertMcpOAuthToken({
+      ...base(server.id),
+      userId: userA.id,
+      resourceUrl: "https://user-a.example.com",
+    });
+    upsertMcpOAuthToken({
+      ...base(server.id),
+      userId: userB.id,
+      resourceUrl: "https://user-b.example.com",
+    });
     const rows = listMcpOAuthTokensForMcp(server.id);
     expect(rows.length).toBe(2);
     expect(new Set(rows.map((r) => r.userId))).toEqual(new Set([userA.id, userB.id]));
+    expect(rows.find((row) => row.userId === userA.id)?.resourceUrl).toBe(
+      "https://user-a.example.com",
+    );
+    expect(rows.find((row) => row.userId === userB.id)?.resourceUrl).toBe(
+      "https://user-b.example.com",
+    );
   });
 });
 
@@ -201,6 +274,72 @@ describe("mcp_oauth_pending (state PK)", () => {
 
     // Second consume returns null (row deleted).
     expect(consumeMcpOAuthPending("state-1")).toBeNull();
+    expect(
+      getDb()
+        .query<{ count: number }, []>(
+          "SELECT count(*) AS count FROM oauth_apps WHERE mcpServerId = ?",
+        )
+        .get(server.id)?.count,
+    ).toBe(0);
+  });
+
+  test("concurrent pending states preserve independent AS context", () => {
+    const server = makeServer("mcp-pending-concurrent");
+    for (const suffix of ["a", "b"]) {
+      insertMcpOAuthPending({
+        state: `state-${suffix}`,
+        mcpServerId: server.id,
+        codeVerifier: `verifier-${suffix}`,
+        resourceUrl: `https://resource-${suffix}.example.com`,
+        authorizationServerIssuer: `https://issuer-${suffix}.example.com`,
+        authorizeUrl: `https://issuer-${suffix}.example.com/authorize`,
+        tokenUrl: `https://issuer-${suffix}.example.com/token`,
+        dcrClientId: `client-${suffix}`,
+        dcrClientSecret: `secret-${suffix}`,
+        redirectUri: "https://swarm.example.com/cb",
+      });
+    }
+
+    expect(consumeMcpOAuthPending("state-b")).toMatchObject({
+      resourceUrl: "https://resource-b.example.com",
+      tokenUrl: "https://issuer-b.example.com/token",
+      dcrClientId: "client-b",
+      dcrClientSecret: "secret-b",
+    });
+    expect(consumeMcpOAuthPending("state-a")).toMatchObject({
+      resourceUrl: "https://resource-a.example.com",
+      tokenUrl: "https://issuer-a.example.com/token",
+      dcrClientId: "client-a",
+      dcrClientSecret: "secret-a",
+    });
+  });
+
+  test("pending authorization does not mutate a connected app", () => {
+    const server = makeServer("mcp-pending-connected");
+    upsertMcpOAuthToken(base(server.id));
+    insertMcpOAuthPending({
+      state: "state-reconnect",
+      mcpServerId: server.id,
+      codeVerifier: "reconnect-verifier",
+      resourceUrl: "https://replacement-resource.example.com",
+      authorizationServerIssuer: "https://replacement-issuer.example.com",
+      authorizeUrl: "https://replacement-issuer.example.com/authorize",
+      tokenUrl: "https://replacement-issuer.example.com/token",
+      dcrClientId: "replacement-client",
+      dcrClientSecret: "replacement-secret",
+      redirectUri: "https://swarm.example.com/cb",
+    });
+
+    expect(getMcpOAuthToken(server.id)).toMatchObject({
+      resourceUrl: "https://mcp.example.com/",
+      tokenUrl: "https://as.example.com/token",
+      dcrClientId: "client-abc",
+    });
+    expect(consumeMcpOAuthPending("state-reconnect")).toMatchObject({
+      resourceUrl: "https://replacement-resource.example.com",
+      tokenUrl: "https://replacement-issuer.example.com/token",
+      dcrClientId: "replacement-client",
+    });
   });
 
   test("gcMcpOAuthPending deletes rows older than TTL", () => {
@@ -219,12 +358,19 @@ describe("mcp_oauth_pending (state PK)", () => {
     // Backdate createdAt via direct update.
     const { getDb } = require("../be/db");
     getDb()
-      .query("UPDATE mcp_oauth_pending SET createdAt = ? WHERE state = ?")
+      .query("UPDATE oauth_pending SET createdAt = ? WHERE state = ? AND flow = 'mcp'")
       .run(new Date(Date.now() - 60 * 60_000).toISOString(), "state-gc-old");
 
     const deleted = gcMcpOAuthPending(10 * 60_000);
     expect(deleted).toBeGreaterThanOrEqual(1);
     expect(consumeMcpOAuthPending("state-gc-old")).toBeNull();
+    expect(
+      getDb()
+        .query<{ count: number }, []>(
+          "SELECT count(*) AS count FROM oauth_apps WHERE mcpServerId = ?",
+        )
+        .get(server.id)?.count,
+    ).toBe(0);
   });
 });
 

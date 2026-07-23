@@ -99,9 +99,12 @@ const credentialBindingsInputSchema = z.object({
     .default("config")
     .optional()
     .describe("Use config for stored swarm config secrets or oauth for OAuth token resolution."),
-  oauthProvider: providerSchema
+  oauthAuthorizationId: z
+    .string()
+    .min(1)
+    .max(255)
     .optional()
-    .describe("OAuth provider slug required when authKind is oauth."),
+    .describe("OAuth authorization ID required when authKind is oauth."),
   provider: providerSchema
     .optional()
     .describe("OAuth provider slug for oauth-app-upsert and oauth-authorize-url."),
@@ -142,8 +145,13 @@ function genericOAuthRedirectUri(provider: string): string {
 
 function decorateBindings(bindings: ScriptCredentialBindingRecord[]): BindingWithTokenStatus[] {
   return bindings.map((binding) =>
-    binding.authKind === "oauth" && binding.oauthProvider
-      ? { ...binding, tokenStatus: getOAuthBindingTokenStatus(binding.oauthProvider) }
+    binding.authKind === "oauth"
+      ? {
+          ...binding,
+          tokenStatus: binding.oauthAuthorizationId
+            ? getOAuthBindingTokenStatus(binding.oauthAuthorizationId)
+            : "missing",
+        }
       : binding,
   );
 }
@@ -251,15 +259,9 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
           tokenUrl: args.tokenUrl,
           redirectUri,
           scopes: args.scopes.join(","),
-          ...(args.extraParams || args.tokenAuthStyle || args.tokenBodyFormat
-            ? {
-                metadata: JSON.stringify({
-                  ...(args.extraParams ? { extraParams: args.extraParams } : {}),
-                  ...(args.tokenAuthStyle ? { tokenAuthStyle: args.tokenAuthStyle } : {}),
-                  ...(args.tokenBodyFormat ? { tokenBodyFormat: args.tokenBodyFormat } : {}),
-                }),
-              }
-            : {}),
+          ...(args.extraParams ? { extraParams: args.extraParams } : {}),
+          ...(args.tokenAuthStyle ? { tokenAuthStyle: args.tokenAuthStyle } : {}),
+          ...(args.tokenBodyFormat ? { tokenBodyFormat: args.tokenBodyFormat } : {}),
         });
 
         return {
@@ -432,13 +434,13 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         };
       }
 
-      if ((args.authKind ?? "config") === "oauth" && !args.oauthProvider) {
+      if ((args.authKind ?? "config") === "oauth" && !args.oauthAuthorizationId) {
         return {
-          content: [{ type: "text", text: "oauthProvider is required for oauth bindings." }],
+          content: [{ type: "text", text: "oauthAuthorizationId is required for oauth bindings." }],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
-            message: "oauthProvider is required for oauth bindings.",
+            message: "oauthAuthorizationId is required for oauth bindings.",
             bindings,
           },
         };
@@ -477,7 +479,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         scopeId,
         active: true,
         authKind: args.authKind ?? "config",
-        oauthProvider: args.oauthProvider,
+        oauthAuthorizationId: args.oauthAuthorizationId,
       });
 
       upsertCredentialBinding({
@@ -490,7 +492,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         scopeId: nextBinding.scopeId ?? null,
         active: true,
         authKind: nextBinding.authKind,
-        oauthProvider: nextBinding.oauthProvider ?? null,
+        oauthAuthorizationId: nextBinding.oauthAuthorizationId ?? null,
       });
       const nextBindings = currentBindings();
 

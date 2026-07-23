@@ -9,6 +9,7 @@ import {
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, getDb, initDb } from "../be/db";
 import {
+  deleteOAuthTokens,
   getOAuthApp,
   getOAuthTokens,
   storeOAuthTokens,
@@ -41,7 +42,7 @@ type ToolResult = {
     bindings: Array<{
       configKey: string;
       authKind?: "config" | "oauth";
-      oauthProvider?: string;
+      oauthAuthorizationId?: string;
       tokenStatus?: "ok" | "expiring" | "missing";
     }>;
   };
@@ -100,7 +101,6 @@ async function listen(server: Server): Promise<number> {
 function cleanupRows() {
   const db = getDb();
   db.run("DELETE FROM script_credential_bindings WHERE config_key LIKE 'PHASE2_%'");
-  db.run("DELETE FROM oauth_tokens WHERE provider LIKE 'phase2-%'");
   db.run("DELETE FROM oauth_apps WHERE provider LIKE 'phase2-%'");
 }
 
@@ -147,24 +147,31 @@ describe("OAuth credential bindings", () => {
       .all()
       .map((column) => column.name);
     expect(columns).toContain("auth_kind");
-    expect(columns).toContain("oauth_provider");
+    expect(columns).toContain("oauth_authorization_id");
+
+    upsertOAuthApp("phase2-roundtrip", testApp("phase2-roundtrip"));
+    storeOAuthTokens("phase2-roundtrip", {
+      accessToken: "roundtrip-access",
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+    const authorizationId = getOAuthTokens("phase2-roundtrip")!.id;
 
     const binding = upsertCredentialBinding({
       configKey: "PHASE2_ROUNDTRIP_OAUTH",
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_ROUNDTRIP_OAUTH]",
       authKind: "oauth",
-      oauthProvider: "phase2-roundtrip",
+      oauthAuthorizationId: authorizationId,
     });
 
     expect(binding.authKind).toBe("oauth");
-    expect(binding.oauthProvider).toBe("phase2-roundtrip");
+    expect(binding.oauthAuthorizationId).toBe(authorizationId);
 
     const listed = listRelationalCredentialBindings({ includeInactive: true }).find(
       (item) => item.id === binding.id,
     );
     expect(listed?.authKind).toBe("oauth");
-    expect(listed?.oauthProvider).toBe("phase2-roundtrip");
+    expect(listed?.oauthAuthorizationId).toBe(authorizationId);
   });
 
   test("OAuth binding resolves through the stored access token", async () => {
@@ -179,7 +186,7 @@ describe("OAuth credential bindings", () => {
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_RESOLVE_OAUTH]",
       authKind: "oauth",
-      oauthProvider: "phase2-resolve",
+      oauthAuthorizationId: getOAuthTokens("phase2-resolve")!.id,
     });
     process.env.PHASE2_RESOLVE_OAUTH = "env-must-not-win";
 
@@ -205,7 +212,7 @@ describe("OAuth credential bindings", () => {
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_REFRESH_OAUTH]",
       authKind: "oauth",
-      oauthProvider: "phase2-refresh",
+      oauthAuthorizationId: getOAuthTokens("phase2-refresh")!.id,
     });
 
     const fetchSpy = mock((input: string | URL | Request, init?: RequestInit) => {
@@ -254,7 +261,7 @@ describe("OAuth credential bindings", () => {
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_BASIC_OAUTH]",
       authKind: "oauth",
-      oauthProvider: "phase2-basic",
+      oauthAuthorizationId: getOAuthTokens("phase2-basic")!.id,
     });
 
     const config = getOAuthProviderConfig("phase2-basic");
@@ -306,6 +313,15 @@ describe("OAuth credential bindings", () => {
     const { url } = await buildAuthorizationUrl(config);
     expect(url).toContain("scope=read+write");
     expect(url).not.toContain("scope=read%2Cwrite");
+  });
+
+  test("metadata actor remains an authorization parameter without lifted extras", () => {
+    upsertOAuthApp("phase2-actor", {
+      ...testApp("phase2-actor"),
+      metadata: JSON.stringify({ actor: "app" }),
+    });
+
+    expect(getOAuthProviderConfig("phase2-actor")?.extraParams).toEqual({ actor: "app" });
   });
 
   test("credential-bindings tool rejects reserved tracker OAuth providers", async () => {
@@ -376,7 +392,7 @@ describe("OAuth credential bindings", () => {
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_BROKEN_OAUTH]",
       authKind: "oauth",
-      oauthProvider: "phase2-broken",
+      oauthAuthorizationId: getOAuthTokens("phase2-broken")!.id,
     });
     upsertCredentialBinding({
       configKey: "PHASE2_HEALTHY_CONFIG",
@@ -408,13 +424,19 @@ describe("OAuth credential bindings", () => {
 
   test("missing OAuth token skips binding resolution and list reports missing", async () => {
     upsertOAuthApp("phase2-missing", testApp("phase2-missing"));
+    storeOAuthTokens("phase2-missing", {
+      accessToken: "soon-deleted",
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+    const authorizationId = getOAuthTokens("phase2-missing")!.id;
     upsertCredentialBinding({
       configKey: "PHASE2_MISSING_OAUTH",
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_MISSING_OAUTH]",
       authKind: "oauth",
-      oauthProvider: "phase2-missing",
+      oauthAuthorizationId: authorizationId,
     });
+    deleteOAuthTokens("phase2-missing");
     process.env.PHASE2_MISSING_OAUTH = "env-must-not-win";
 
     const bindings = await buildScriptCredentialBindings({});

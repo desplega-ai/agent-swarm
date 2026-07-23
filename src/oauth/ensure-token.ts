@@ -31,9 +31,11 @@ function stringRecord(value: unknown): Record<string, string> | undefined {
  */
 export function oauthAppRowToProviderConfig(app: OAuthApp): OAuthProviderConfig {
   const metadata = parseMetadata(app.metadata);
-  const extraParams =
-    stringRecord(metadata.extraParams) ??
-    (typeof metadata.actor === "string" ? { actor: metadata.actor } : undefined);
+  const liftedExtraParams = stringRecord(parseMetadata(app.extraParamsJson));
+  const extraParams = {
+    ...(typeof metadata.actor === "string" ? { actor: metadata.actor } : {}),
+    ...liftedExtraParams,
+  };
 
   return {
     provider: app.provider,
@@ -46,13 +48,11 @@ export function oauthAppRowToProviderConfig(app: OAuthApp): OAuthProviderConfig 
       .split(",")
       .map((scope) => scope.trim())
       .filter(Boolean),
-    extraParams,
-    // Standard OAuth wants space-separated scopes; the wrapper's comma
-    // default exists only for Linear, which has its own dedicated flow.
-    scopeSeparator: " ",
-    ...(metadata.tokenAuthStyle === "basic" ? { tokenAuthStyle: "basic" as const } : {}),
-    ...(metadata.tokenBodyFormat === "json" ? { tokenBodyFormat: "json" as const } : {}),
-    requiresRefreshTokenRotation: app.provider === "jira",
+    extraParams: Object.keys(extraParams).length > 0 ? extraParams : undefined,
+    scopeSeparator: app.scopeSeparator,
+    tokenAuthStyle: app.tokenAuthStyle,
+    tokenBodyFormat: app.tokenBodyFormat,
+    requiresRefreshTokenRotation: app.requiresRefreshTokenRotation,
   };
 }
 
@@ -202,7 +202,11 @@ export async function ensureTokenOrThrow(provider: string, bufferMs?: number): P
           return;
         }
 
-        await refreshAccessToken(lockedConfig, lockedTokens.refreshToken);
+        await refreshAccessToken(
+          lockedConfig,
+          lockedTokens.refreshToken,
+          lockedTokens.tokenVersion,
+        );
         console.log(`[OAuth] ${provider} token refreshed successfully`);
         return;
       } finally {

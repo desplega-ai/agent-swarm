@@ -17,14 +17,14 @@ export const CredentialBindingSchema = z
     scopeId: z.string().nullable().optional(),
     active: z.boolean().default(true),
     authKind: CredentialBindingAuthKindSchema.default("config"),
-    oauthProvider: z.string().min(1).max(255).optional(),
+    oauthAuthorizationId: z.string().min(1).max(255).optional(),
   })
   .refine((binding) => binding.headerTemplate || binding.queryTemplate, {
     message: "At least one of headerTemplate or queryTemplate is required.",
   })
-  .refine((binding) => binding.authKind !== "oauth" || !!binding.oauthProvider, {
-    message: "oauthProvider is required when authKind is oauth.",
-    path: ["oauthProvider"],
+  .refine((binding) => binding.authKind !== "oauth" || !!binding.oauthAuthorizationId, {
+    message: "oauthAuthorizationId is required when authKind is oauth.",
+    path: ["oauthAuthorizationId"],
   });
 
 export const CredentialBindingsDocumentSchema = z.union([
@@ -51,13 +51,37 @@ export interface CredentialBindingStore {
 }
 
 export type CredentialResolver = (configKey: string) => string | undefined;
-export type OAuthCredentialResolver = (oauthProvider: string) => Promise<string | undefined>;
+export type OAuthCredentialResolver = (oauthAuthorizationId: string) => Promise<string | undefined>;
 
 export function placeholderForConfigKey(configKey: string): string {
   return `${REDACTED_PLACEHOLDER_PREFIX}${configKey}]`;
 }
 
-export function normalizeCredentialBindingsDocument(input: unknown): CredentialBinding[] {
-  const parsed = CredentialBindingsDocumentSchema.parse(input);
-  return Array.isArray(parsed) ? parsed : parsed.bindings;
+export function normalizeCredentialBindingsDocument(
+  input: unknown,
+  resolveLegacyOAuthProvider?: (provider: string) => string | undefined,
+): CredentialBinding[] {
+  const document = Array.isArray(input)
+    ? input
+    : input &&
+        typeof input === "object" &&
+        Array.isArray((input as { bindings?: unknown }).bindings)
+      ? (input as { bindings: unknown[] }).bindings
+      : [];
+
+  return document.flatMap((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const candidate = { ...(raw as Record<string, unknown>) };
+    if (
+      candidate.authKind === "oauth" &&
+      typeof candidate.oauthAuthorizationId !== "string" &&
+      typeof candidate.oauthProvider === "string"
+    ) {
+      const authorizationId = resolveLegacyOAuthProvider?.(candidate.oauthProvider);
+      if (!authorizationId) return [];
+      candidate.oauthAuthorizationId = authorizationId;
+    }
+    const parsed = CredentialBindingSchema.safeParse(candidate);
+    return parsed.success ? [parsed.data] : [];
+  });
 }

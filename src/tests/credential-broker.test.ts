@@ -120,6 +120,25 @@ describe("credential broker", () => {
     );
   });
 
+  test("keeps scope inheritance aligned when a malformed legacy row is dropped", () => {
+    const agentId = "22222222-2222-4222-8222-222222222222";
+    const store = new SwarmConfigCredentialBindingStore(() => [
+      scopedConfigRow("agent", agentId, {
+        bindings: [
+          { malformed: true, scope: "global" },
+          {
+            configKey: "ALIGNED_AGENT_KEY",
+            allowedHosts: ["api.vendor.test"],
+            headerTemplate: "Authorization: Bearer [REDACTED:ALIGNED_AGENT_KEY]",
+          },
+        ],
+      }),
+    ]);
+
+    expect(store.listActiveBindings({ agentId })).toHaveLength(1);
+    expect(store.listActiveBindings({})).toEqual([]);
+  });
+
   test("resolves seeded GITHUB_TOKEN binding", async () => {
     const emptyStore: CredentialBindingStore = { listActiveBindings: () => [] };
     const broker = new CredentialBroker(
@@ -144,8 +163,8 @@ describe("credential broker", () => {
   });
 
   test("resolves OAuth bindings with the OAuth resolver and substitutes their header", async () => {
-    const oauthResolver = mock(async (provider: string) =>
-      provider === "gmailSupport" ? "gmail-access-token" : undefined,
+    const oauthResolver = mock(async (authorizationId: string) =>
+      authorizationId === "gmail-authz" ? "gmail-access-token" : undefined,
     );
     const broker = new CredentialBroker(
       {
@@ -158,7 +177,7 @@ describe("credential broker", () => {
             scopeId: null,
             active: true,
             authKind: "oauth",
-            oauthProvider: "gmailSupport",
+            oauthAuthorizationId: "gmail-authz",
           },
         ],
       },
@@ -170,7 +189,7 @@ describe("credential broker", () => {
     );
     const bindings = await broker.resolveBindings({});
 
-    expect(oauthResolver).toHaveBeenCalledWith("gmailSupport");
+    expect(oauthResolver).toHaveBeenCalledWith("gmail-authz");
     let authorization: string | null = null;
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
       authorization = new Headers(init?.headers).get("authorization");
@@ -183,6 +202,54 @@ describe("credential broker", () => {
     });
 
     expect(authorization).toBe("Bearer gmail-access-token");
+  });
+
+  test("resolves a legacy oauthProvider blob through the default authorization shim", async () => {
+    const store = new SwarmConfigCredentialBindingStore(
+      () => [
+        configRow({
+          bindings: [
+            {
+              configKey: "LEGACY_LINEAR_OAUTH",
+              allowedHosts: ["api.linear.app"],
+              headerTemplate: "Authorization: Bearer [REDACTED:LEGACY_LINEAR_OAUTH]",
+              scope: "global",
+              active: true,
+              authKind: "oauth",
+              oauthProvider: "linear",
+            },
+          ],
+        }),
+      ],
+      (provider) => (provider === "linear" ? "linear-default-authorization" : undefined),
+    );
+    const oauthResolver = mock(async (authorizationId: string) =>
+      authorizationId === "linear-default-authorization" ? "linear-migrated-token" : undefined,
+    );
+    const broker = new CredentialBroker(store, () => undefined, [], oauthResolver);
+    const bindings = await broker.resolveBindings({});
+
+    expect(bindings).toMatchObject([
+      {
+        configKey: "LEGACY_LINEAR_OAUTH",
+        oauthAuthorizationId: "linear-default-authorization",
+        placeholder: "[REDACTED:LEGACY_LINEAR_OAUTH]",
+        value: "linear-migrated-token",
+      },
+    ]);
+    expect(oauthResolver).toHaveBeenCalledWith("linear-default-authorization");
+
+    let authorization: string | null = null;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      authorization = new Headers(init?.headers).get("authorization");
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    patchFetchWithCredentialBroker(bindings);
+    await fetch("https://api.linear.app/graphql", {
+      headers: { Authorization: "Bearer [REDACTED:LEGACY_LINEAR_OAUTH]" },
+    });
+
+    expect(authorization).toBe("Bearer linear-migrated-token");
   });
 
   test("resolved OAuth bindings also authenticate ctx.api clients", async () => {
@@ -202,7 +269,7 @@ describe("credential broker", () => {
             scopeId: null,
             active: true,
             authKind: "oauth",
-            oauthProvider: "gmailSupport",
+            oauthAuthorizationId: "gmail-authz",
           },
         ],
       },
@@ -228,7 +295,7 @@ describe("credential broker", () => {
     expect(authorization).toBe("Bearer gmail-access-token");
   });
 
-  test("resolves config bindings via the config resolver even when oauthProvider metadata is present", async () => {
+  test("resolves config bindings via the config resolver even when OAuth authorization metadata is present", async () => {
     const oauthResolver = mock(async () => "should-not-be-used");
     const broker = new CredentialBroker(
       {
@@ -241,7 +308,7 @@ describe("credential broker", () => {
             scopeId: null,
             active: true,
             authKind: "config",
-            oauthProvider: "vendorProvider",
+            oauthAuthorizationId: "vendor-authorization",
           },
         ],
       },
@@ -262,7 +329,7 @@ describe("credential broker", () => {
         scopeId: null,
         active: true,
         authKind: "config",
-        oauthProvider: "vendorProvider",
+        oauthAuthorizationId: "vendor-authorization",
         placeholder: "[REDACTED:VENDOR_CONFIG_KEY]",
         value: "vendor-config-value",
       },

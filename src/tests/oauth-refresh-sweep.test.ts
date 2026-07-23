@@ -34,7 +34,11 @@ function seedTokens(
 function backdateTokenRow(provider: string, ageMs: number): void {
   const backdated = new Date(Date.now() - ageMs).toISOString();
   getDb()
-    .query("UPDATE oauth_tokens SET updatedAt = ? WHERE provider = ?")
+    .query(
+      `UPDATE oauth_authorizations SET updatedAt = ?
+       WHERE appId = (SELECT id FROM oauth_apps WHERE provider = ? AND mcpServerId IS NULL LIMIT 1)
+         AND label = 'default'`,
+    )
     .run(backdated, provider);
 }
 
@@ -73,7 +77,7 @@ beforeAll(() => {
 beforeEach(() => {
   globalThis.fetch = originalFetch;
   getDb().run("DELETE FROM oauth_refresh_locks");
-  getDb().run("DELETE FROM oauth_tokens");
+  getDb().run("DELETE FROM oauth_authorizations");
   getDb().run("DELETE FROM oauth_apps");
 });
 

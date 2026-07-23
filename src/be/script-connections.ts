@@ -1,4 +1,9 @@
 import { getDb, getSwarmConfigs } from "@/be/db";
+import {
+  getAuthorizationById,
+  getDefaultAuthorizationIdForProvider,
+  getOAuthAppById,
+} from "@/be/db-queries/oauth";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
 import type {
   ScriptApiConnectionDescriptor,
@@ -65,7 +70,7 @@ type BindingRow = {
   scope_id: string | null;
   active: number;
   auth_kind: string;
-  oauth_provider: string | null;
+  oauth_authorization_id: string | null;
   source: string;
   created_at: string;
   updated_at: string;
@@ -121,7 +126,7 @@ function bindingFromRow(row: BindingRow): ScriptCredentialBindingRecord {
     scopeId: row.scope_id,
     active: row.active === 1,
     authKind: row.auth_kind === "oauth" ? "oauth" : "config",
-    oauthProvider: row.oauth_provider ?? undefined,
+    oauthAuthorizationId: row.oauth_authorization_id ?? undefined,
     source: row.source as ScriptCredentialBindingRecord["source"],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -243,7 +248,7 @@ export function upsertCredentialBinding(data: {
   scopeId?: string | null;
   active?: boolean;
   authKind?: CredentialBinding["authKind"];
-  oauthProvider?: string | null;
+  oauthAuthorizationId?: string | null;
   source?: "default" | "user" | "migration";
   userId?: string | null;
 }): ScriptCredentialBindingRecord {
@@ -253,10 +258,25 @@ export function upsertCredentialBinding(data: {
   const scopeId = scope === "global" ? null : (data.scopeId ?? null);
   const active = data.active === false ? 0 : 1;
   const authKind = data.authKind ?? "config";
-  if (authKind === "oauth" && !data.oauthProvider) {
-    throw new Error("oauthProvider is required for oauth credential bindings");
+  if (authKind === "oauth" && !data.oauthAuthorizationId) {
+    throw new Error("oauthAuthorizationId is required for oauth credential bindings");
   }
-  const oauthProvider = data.oauthProvider ?? null;
+  if (authKind === "oauth" && data.oauthAuthorizationId) {
+    const authorization = getAuthorizationById(data.oauthAuthorizationId);
+    if (!authorization) {
+      throw new Error(`OAuth authorization ${data.oauthAuthorizationId} was not found`);
+    }
+    const app = getOAuthAppById(authorization.appId);
+    if (!app || app.mcpServerId !== null) {
+      throw new Error(
+        `OAuth authorization ${data.oauthAuthorizationId} is not a generic provider authorization`,
+      );
+    }
+    if (authorization.status !== "active") {
+      throw new Error(`OAuth authorization ${data.oauthAuthorizationId} is not active`);
+    }
+  }
+  const oauthAuthorizationId = data.oauthAuthorizationId ?? null;
   const source = data.source ?? "user";
   const existing =
     (data.id ? getCredentialBindingById(data.id) : null) ??
@@ -291,7 +311,7 @@ export function upsertCredentialBinding(data: {
       >(
         `UPDATE script_credential_bindings
          SET config_key = ?, allowed_hosts_json = ?, header_template = ?, query_template = ?,
-             scope = ?, scope_id = ?, active = ?, auth_kind = ?, oauth_provider = ?,
+             scope = ?, scope_id = ?, active = ?, auth_kind = ?, oauth_authorization_id = ?,
              source = ?, updated_by = ?, updated_at = ?
          WHERE id = ? RETURNING *`,
       )
@@ -304,7 +324,7 @@ export function upsertCredentialBinding(data: {
         scopeId,
         active,
         authKind,
-        oauthProvider,
+        oauthAuthorizationId,
         source,
         data.userId ?? null,
         now,
@@ -337,7 +357,7 @@ export function upsertCredentialBinding(data: {
     >(
       `INSERT INTO script_credential_bindings
        (id, config_key, allowed_hosts_json, header_template, query_template, scope, scope_id,
-        active, auth_kind, oauth_provider, source, created_at, updated_at, created_by, updated_by)
+        active, auth_kind, oauth_authorization_id, source, created_at, updated_at, created_by, updated_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
@@ -350,7 +370,7 @@ export function upsertCredentialBinding(data: {
       scopeId,
       active,
       authKind,
-      oauthProvider,
+      oauthAuthorizationId,
       source,
       now,
       now,
@@ -378,7 +398,10 @@ export function importLegacyCredentialBindings(userId?: string | null): number {
   for (const config of getSwarmConfigs({ key: CREDENTIAL_BINDINGS_CONFIG_KEY })) {
     let bindings: CredentialBinding[];
     try {
-      bindings = normalizeCredentialBindingsDocument(JSON.parse(config.value));
+      bindings = normalizeCredentialBindingsDocument(
+        JSON.parse(config.value),
+        (provider) => getDefaultAuthorizationIdForProvider(provider) ?? undefined,
+      );
     } catch {
       continue;
     }
@@ -392,6 +415,8 @@ export function importLegacyCredentialBindings(userId?: string | null): number {
         scope,
         scopeId: binding.scopeId ?? config.scopeId ?? null,
         active: binding.active !== false,
+        authKind: binding.authKind,
+        oauthAuthorizationId: binding.oauthAuthorizationId ?? null,
         source: "migration",
         userId,
       });
