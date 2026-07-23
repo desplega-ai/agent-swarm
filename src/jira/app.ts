@@ -51,15 +51,21 @@ export function initJira(): boolean {
     authorizeUrl: "https://auth.atlassian.com/authorize",
     tokenUrl: "https://auth.atlassian.com/oauth/token",
     redirectUri,
-    // Atlassian uses space-separated scopes (NOT comma-separated like Linear).
-    // We persist them as-stored; the OAuth wrapper splits on "," so we keep
-    // commas here and the wrapper.ts join(",") will recombine — see oauth.ts
-    // where we override scopes from the comma-stored value back to spaces in
-    // the authorize URL via the standard `scopes` array path.
+    // Scopes are stored comma-joined; `scopeSeparator: " "` makes the authorize
+    // URL space-separate them per RFC 6749 (Atlassian's requirement, unlike
+    // Linear's comma quirk).
     scopes: "read:jira-work,write:jira-work,manage:jira-webhook,offline_access,read:me",
+    scopeSeparator: " ",
+    // Atlassian rotates refresh tokens on every exchange and requires
+    // `audience=api.atlassian.com` on both authorize + token requests. Pin both
+    // as first-class columns rather than the drift-prone getJiraOAuthConfig
+    // hardcoding they replace.
+    requiresRefreshTokenRotation: true,
+    extraParams: { audience: "api.atlassian.com" },
     // Intentionally omit metadata: cloudId/siteUrl/webhookIds are written by
     // the OAuth callback + webhook-register flows. upsertOAuthApp preserves
-    // existing metadata on UPDATE when not passed.
+    // existing metadata on UPDATE when not passed. (Jira already qualifies for
+    // the keepalive job via requiresRefreshTokenRotation.)
   });
 
   initJiraOutboundSync();

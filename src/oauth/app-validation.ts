@@ -1,13 +1,11 @@
 import { assertUrlSafe, publicEndpointSsrfOptions } from "./mcp-wrapper";
 
-export const RESERVED_OAUTH_PROVIDERS = new Set(["linear", "jira"]);
-
-export function assertOAuthProviderIsNotReserved(provider: string): void {
-  if (!RESERVED_OAUTH_PROVIDERS.has(provider.toLowerCase())) return;
-  throw new Error(
-    `OAuth provider "${provider}" is reserved for dedicated tracker OAuth flows. Use the Linear/Jira tracker integration flow instead.`,
-  );
-}
+// NOTE: the former `RESERVED_OAUTH_PROVIDERS` / `assertOAuthProviderIsNotReserved`
+// carve-out was removed in step-8. `linear`/`jira` are now ordinary
+// `oauth_apps` rows manageable from the generic OAuth-app surface; the tracker
+// integration merely seeds and reads them. Delete-time foot-guns (dropping the
+// seeded tracker app / an app with registered webhooks) are surfaced as a
+// warning by the delete handler rather than blocked here.
 
 export function assertOAuthAppUrlsSafe(input: {
   authorizeUrl: string;

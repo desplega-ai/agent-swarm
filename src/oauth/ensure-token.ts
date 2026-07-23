@@ -153,6 +153,53 @@ function authorizationNeedsRefresh(
  */
 const FORCE_REFRESH_BUFFER_MS = 1000 * 60 * 60 * 24 * 365 * 100; // ~100 years
 
+// ─── Refresh notification (cached provider-client invalidation) ──────────────
+//
+// A background sweep or another request path can rotate an authorization's
+// access token while a module-level SDK client still holds the stale one (the
+// Linear `LinearClient` cache is the canonical case). Listeners registered here
+// fire after every successful persist so those caches can invalidate — closing
+// the staleness gap that used to require a reactive `resetLinearClient()` call
+// on the same code path as the refresh.
+
+export interface AuthorizationRefreshedEvent {
+  authorizationId: string;
+  appId: string;
+  provider: string;
+}
+
+type AuthorizationRefreshedListener = (event: AuthorizationRefreshedEvent) => void;
+
+const authorizationRefreshedListeners = new Set<AuthorizationRefreshedListener>();
+
+/**
+ * Subscribe to successful authorization token refreshes. Returns an
+ * unsubscribe function. Listeners must be cheap + non-throwing (throws are
+ * caught and logged so one bad listener can't fail a refresh).
+ */
+export function onAuthorizationRefreshed(listener: AuthorizationRefreshedListener): () => void {
+  authorizationRefreshedListeners.add(listener);
+  return () => {
+    authorizationRefreshedListeners.delete(listener);
+  };
+}
+
+function notifyAuthorizationRefreshed(event: AuthorizationRefreshedEvent): void {
+  for (const listener of authorizationRefreshedListeners) {
+    try {
+      listener(event);
+    } catch (err) {
+      console.error(
+        scrubSecrets(
+          `[OAuth] authorization-refreshed listener failed for ${event.provider}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        ),
+      );
+    }
+  }
+}
+
 // ─── Authorization-keyed core ────────────────────────────────────────────────
 
 /**
@@ -249,6 +296,11 @@ export async function ensureAuthorizationTokenOrThrow(
             // Optimistic-concurrency loss to a concurrent writer — re-evaluate.
             continue;
           }
+          notifyAuthorizationRefreshed({
+            authorizationId,
+            appId: lockedApp.id,
+            provider: lockedApp.provider,
+          });
           return;
         } catch (err) {
           const label = authorizationLabelFor(lockedApp, locked);

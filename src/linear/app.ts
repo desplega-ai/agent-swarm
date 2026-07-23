@@ -1,8 +1,11 @@
-import { upsertOAuthApp } from "../be/db-queries/oauth";
+import { getOAuthApp, upsertOAuthApp } from "../be/db-queries/oauth";
+import { onAuthorizationRefreshed } from "../oauth/ensure-token";
 import { getPublicMcpBaseUrl } from "../utils/constants";
+import { resetLinearClient } from "./client";
 import { initLinearOutboundSync, teardownLinearOutboundSync } from "./outbound";
 
 let initialized = false;
+let unsubscribeRefresh: (() => void) | null = null;
 
 export function isLinearEnabled(): boolean {
   const disabled = process.env.LINEAR_DISABLE;
@@ -14,6 +17,10 @@ export function isLinearEnabled(): boolean {
 
 export function resetLinear(): void {
   teardownLinearOutboundSync();
+  if (unsubscribeRefresh) {
+    unsubscribeRefresh();
+    unsubscribeRefresh = null;
+  }
   initialized = false;
 }
 
@@ -36,6 +43,22 @@ export function initLinear(): boolean {
   const redirectUri =
     process.env.LINEAR_REDIRECT_URI ?? `${apiBaseUrl}/api/trackers/linear/callback`;
 
+  // `upsertOAuthApp` replaces the metadata blob wholesale when `metadata` is
+  // passed. Merge the seeded keys ON TOP of any existing metadata so a re-boot
+  // is idempotent AND preserves foreign keys (e.g. operator edits — now
+  // possible since the row is user-manageable after the carve-out removal, and
+  // runtime keys a future Linear flow may add). Seeded actor/keepAlive win.
+  // Mirrors initJira's preserve-on-update behavior (it omits metadata entirely).
+  const existing = getOAuthApp("linear");
+  const existingMetadata = (() => {
+    try {
+      const parsed = JSON.parse(existing?.metadata || "{}");
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  })();
+
   upsertOAuthApp("linear", {
     clientId,
     clientSecret,
@@ -43,8 +66,27 @@ export function initLinear(): boolean {
     tokenUrl: "https://api.linear.app/oauth/token",
     redirectUri,
     scopes: "read,write,issues:create,comments:create,app:assignable,app:mentionable",
-    metadata: JSON.stringify({ actor: "app" }),
+    // Linear requires comma-separated scopes in the authorize URL (RFC default
+    // is space) — pin the quirk as a column rather than relying on the
+    // provider-string default in upsertOAuthApp.
+    scopeSeparator: ",",
+    // `actor: app` installs the OAuth app as its own bot user. `keepAlive`
+    // opts the row into the generalized keepalive job (Linear does not rotate
+    // refresh tokens, so it wouldn't qualify via requiresRefreshTokenRotation);
+    // this mirrors migration 121's backfill for a fresh-DB boot where that
+    // data-only migration matches no rows yet.
+    metadata: JSON.stringify({ ...existingMetadata, actor: "app", keepAlive: true }),
   });
+
+  // Invalidate the cached LinearClient whenever *any* path (sweep, reactive)
+  // refreshes the Linear authorization, not just the outbound-sync call sites
+  // that already reset it inline. Closes the staleness gap for background
+  // refreshes.
+  if (!unsubscribeRefresh) {
+    unsubscribeRefresh = onAuthorizationRefreshed((event) => {
+      if (event.provider === "linear") resetLinearClient();
+    });
+  }
 
   initLinearOutboundSync();
 

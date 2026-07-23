@@ -589,7 +589,7 @@ describe("/api/script-connections HTTP", () => {
     expect(JSON.stringify(await res.json())).not.toContain("existing-client-secret");
   });
 
-  test("oauth app upsert rejects reserved tracker providers", async () => {
+  test("oauth app upsert accepts tracker providers (reserved carve-out removed in step-8)", async () => {
     const res = await dispatch("/api/oauth-apps", {
       method: "POST",
       agentId: leadAgentId,
@@ -603,9 +603,9 @@ describe("/api/script-connections HTTP", () => {
       },
     });
 
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toContain("dedicated tracker");
-    expect(getOAuthApp("linear")).toBeNull();
+    // linear/jira are ordinary rows now — the generic surface manages them.
+    expect(res.status).toBe(200);
+    expect(getOAuthApp("linear")?.clientId).toBe("linear-client");
   });
 
   test("oauth app upsert rejects unsafe endpoint URLs in production and accepts public HTTPS", async () => {

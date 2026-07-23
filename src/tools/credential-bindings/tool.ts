@@ -17,7 +17,7 @@ import {
   type ScriptCredentialBindingRecord,
   upsertCredentialBinding,
 } from "@/be/script-connections";
-import { assertOAuthAppUrlsSafe, assertOAuthProviderIsNotReserved } from "@/oauth/app-validation";
+import { assertOAuthAppUrlsSafe } from "@/oauth/app-validation";
 import { getOAuthPreset, hydrateOAuthAppFromPreset, listOAuthPresetIds } from "@/oauth/presets";
 import { buildAuthorizationUrl } from "@/oauth/wrapper";
 import { can } from "@/rbac";
@@ -309,7 +309,6 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         }
 
         try {
-          assertOAuthProviderIsNotReserved(provider);
           assertOAuthAppUrlsSafe({ authorizeUrl, tokenUrl, userinfoUrl, revocationUrl });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
