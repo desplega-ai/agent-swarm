@@ -3,6 +3,7 @@ import {
   CREDENTIAL_BINDINGS_CONFIG_KEY,
   normalizeCredentialBindingsDocument,
 } from "@/scripts-runtime/credential-broker";
+import { scrubSecrets } from "@/utils/secret-scrubber";
 
 type BlobConfigRow = {
   id: string;
@@ -75,7 +76,16 @@ export function migrateLegacyCredentialBindingBlob(database: Database): number {
           JSON.parse(config.value),
           resolveLegacyOAuthProvider,
         );
-      } catch {
+      } catch (err) {
+        // Don't silently drop an unparseable blob entry — the whole point of
+        // fatal-on-failure boot wiring is to never lose bindings quietly. Log a
+        // scrubbed warning (the blob value may embed secrets) and skip only this
+        // row so the rest still migrate.
+        console.warn(
+          `[credential-bindings] Skipping unparseable SCRIPT_CREDENTIAL_BINDINGS entry (config id ${config.id}, scope ${config.scope}): ${scrubSecrets(
+            err instanceof Error ? err.message : String(err),
+          )}`,
+        );
         continue;
       }
       for (const binding of bindings) {

@@ -1103,6 +1103,12 @@ function deriveConnectionBinding(
     if (auth.configKey) {
       throw new Error("Provide either `secret` or `configKey` for connection auth, not both.");
     }
+    // Derived, write-only encrypted secret. LIFECYCLE: nothing but this
+    // connection references this key, so every path that supersedes or removes
+    // the connection's inline-secret auth MUST delete this swarm_config row via
+    // deleteManagedConnectionSecret() (the managed binding CASCADEs, this does
+    // not). upsertScriptConnection handles supersession; a future
+    // connection-delete path must handle deletion.
     configKey = `connection.${ctx.slug}.secret`;
     secretWrite = { scope: ctx.scope, scopeId: ctx.scopeId, key: configKey, value: auth.secret };
   } else if (auth.configKey) {
@@ -1258,6 +1264,57 @@ function deleteManagedBindingForConnection(connectionId: string): void {
       "DELETE FROM script_credential_bindings WHERE managed_by_connection_id = ?",
     )
     .run(connectionId);
+}
+
+/**
+ * Delete the derived, encrypted `connection.<slug>.secret` swarm_config row that
+ * backs an inline-secret connection auth.
+ *
+ * The managed credential binding CASCADE-deletes with its connection, but this
+ * swarm_config secret row does NOT — nothing else references it — so it must be
+ * removed explicitly or it lingers forever (encrypted on disk + in the secret
+ * scrubber cache). Callers must {@link refreshSecretScrubberCache} afterwards.
+ *
+ * Two call sites need this:
+ *   1. upsertScriptConnection, when an upsert SUPERSEDES a previously-derived
+ *      inline secret (slug change, or the new auth no longer uses that derived
+ *      key). Handled below.
+ *   2. FUTURE connection-delete path: there is no deleteScriptConnection today
+ *      (only mcp_server_id CASCADE), but any such path MUST call this for the
+ *      connection's derived `connection.<slug>.secret` key (when auth_type used a
+ *      derived inline secret) so the secret is not orphaned.
+ */
+function deleteManagedConnectionSecret(input: {
+  scope: ScriptConnectionScope;
+  scopeId: string | null;
+  key: string;
+}): void {
+  const scopeId = input.scope === "global" ? null : input.scopeId;
+  if (scopeId === null) {
+    getDb()
+      .prepare<unknown, [string, string]>(
+        "DELETE FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
+      )
+      .run(input.scope, input.key);
+  } else {
+    getDb()
+      .prepare<unknown, [string, string, string]>(
+        "DELETE FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
+      )
+      .run(input.scope, scopeId, input.key);
+  }
+}
+
+/**
+ * The derived, write-only key an inline-secret auth mints for a connection.
+ * Returns null unless the connection's persisted auth actually points at that
+ * derived key (i.e. an inline secret, not an explicit shared `configKey` nor an
+ * oauth `.oauth` key) — so we never delete a secret the connection doesn't own.
+ */
+function derivedInlineSecretKey(connection: ScriptConnectionRecord | null): string | null {
+  if (!connection) return null;
+  const derivedKey = `connection.${connection.slug}.secret`;
+  return connection.authConfigKey === derivedKey ? derivedKey : null;
 }
 
 type OpenapiSpecFetchResult =
@@ -1650,6 +1707,17 @@ export async function upsertScriptConnection(data: {
       data.allowedHosts ?? (effectiveBaseUrl ? [new URL(effectiveBaseUrl).hostname] : []);
   }
 
+  // A previously-derived inline secret (`connection.<oldSlug>.secret`) is
+  // orphaned when this upsert moves the connection's binding off that key —
+  // switching auth to oauth / explicit configKey / none, or attaching a
+  // standalone binding. Compare the old derived key against the key the binding
+  // will reference AFTER this upsert (NOT merely against a fresh secretWrite): a
+  // metadata-only rename reconstructs the old derived key as an explicit
+  // configKey and keeps referencing it, so it must NOT be deleted.
+  const oldDerivedSecretKey = derivedInlineSecretKey(existingConnection);
+  const newReferencedConfigKey = derived?.configKey ?? explicitBinding?.configKey ?? null;
+  let supersededSecretDeleted = false;
+
   // Connection row and its auto-managed binding form a reference cycle
   // (connection.credential_binding_id ↔ binding.managed_by_connection_id).
   // Defer FK enforcement to commit so a fresh connection + its binding can be
@@ -1659,6 +1727,19 @@ export async function upsertScriptConnection(data: {
 
     if (derived?.secretWrite) {
       upsertSwarmConfig({ ...derived.secretWrite, isSecret: true });
+    }
+
+    // Drop a superseded derived inline secret (see oldDerivedSecretKey above).
+    // Skip when the connection's binding still references that same key (same
+    // slug + still inline, or a metadata-only rename that kept it) — it is not
+    // orphaned. The old row lives under the EXISTING connection's scope.
+    if (oldDerivedSecretKey && oldDerivedSecretKey !== newReferencedConfigKey) {
+      deleteManagedConnectionSecret({
+        scope: existingConnection?.scope ?? scope,
+        scopeId: existingConnection?.scopeId ?? scopeId,
+        key: oldDerivedSecretKey,
+      });
+      supersededSecretDeleted = true;
     }
 
     let credentialBindingId: string | null;
@@ -1768,7 +1849,7 @@ export async function upsertScriptConnection(data: {
   });
 
   const row = writeConnectionAndBinding();
-  if (derived?.secretWrite) refreshSecretScrubberCache();
+  if (derived?.secretWrite || supersededSecretDeleted) refreshSecretScrubberCache();
   return connectionFromRow(row);
 }
 

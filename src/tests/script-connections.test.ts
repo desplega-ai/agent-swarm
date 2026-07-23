@@ -638,6 +638,105 @@ describe("script connections", () => {
     }
   });
 
+  test("migration 120 keeps a user-attached shared binding standalone (adopts only derived-key bindings)", () => {
+    const dbPath = "./test-script-connections-migration-120-adoption.sqlite";
+    removeDbFiles(dbPath);
+    const database = new Database(dbPath, { create: true });
+    try {
+      // Materialize the pre-120 schema: fake migration 120 as already applied so
+      // runMigrations stops at 119, giving us the real post-117 connection +
+      // binding tables without the embedded-auth rebuild.
+      database.run(`
+        CREATE TABLE IF NOT EXISTS _migrations (
+          version INTEGER PRIMARY KEY, name TEXT NOT NULL,
+          applied_at TEXT NOT NULL, checksum TEXT NOT NULL
+        )
+      `);
+      const migration120 = "120_connection_embedded_auth.sql";
+      const sql120 = migrationSql(migration120);
+      database
+        .prepare(
+          "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
+        )
+        .run(
+          120,
+          migration120.replace(".sql", ""),
+          new Date().toISOString(),
+          createHash("sha256").update(sql120).digest("hex"),
+        );
+      runMigrations(database); // applies 001..119
+
+      const now = new Date().toISOString();
+      // A user-created STANDALONE binding: source='user', arbitrary config_key
+      // (the shape a real pre-120 inline OR attached binding has — they are
+      // indistinguishable by source/key, so neither the loose adopt-any-single-
+      // referencer rule nor a source check is safe here).
+      const bindingId = crypto.randomUUID();
+      database.run(
+        `INSERT INTO script_credential_bindings
+          (id, config_key, allowed_hosts_json, header_template, scope, active, source,
+           created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'global', 1, 'user', ?, ?)`,
+        [
+          bindingId,
+          "SHARED_USER_KEY",
+          JSON.stringify(["api.vendor.test"]),
+          "Authorization: Bearer [REDACTED:SHARED_USER_KEY]",
+          now,
+          now,
+        ],
+      );
+      // Exactly ONE connection references it — the loose COUNT=1 predicate would
+      // wrongly adopt (hide + CASCADE-arm) this shared binding.
+      const connectionId = crypto.randomUUID();
+      database.run(
+        `INSERT INTO script_connections (
+          id, slug, kind, scope, base_url, allowed_hosts_json, credential_binding_id,
+          generated_types, generated_runtime_json, generated_at, created_at, updated_at
+        )
+        VALUES (?, ?, 'graphql', 'global', ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          connectionId,
+          "attachVendor",
+          "https://api.vendor.test",
+          JSON.stringify(["api.vendor.test"]),
+          bindingId,
+          "export interface AttachVendorApi {}",
+          JSON.stringify({ slug: "attachVendor", baseUrl: "https://api.vendor.test" }),
+          now,
+          now,
+          now,
+        ],
+      );
+
+      // Now run migration 120 for real (FKs off, mirroring the runner's pass —
+      // the rebuild DROPs + RENAMEs a table in a reference cycle).
+      database.run("PRAGMA foreign_keys = OFF");
+      database.exec(sql120);
+      database.run("PRAGMA foreign_keys = ON");
+
+      const migrated = database
+        .prepare<{ source: string; managed_by_connection_id: string | null }, [string]>(
+          "SELECT source, managed_by_connection_id FROM script_credential_bindings WHERE id = ?",
+        )
+        .get(bindingId);
+      // Stays standalone: not adopted, not reclassified.
+      expect(migrated?.managed_by_connection_id).toBeNull();
+      expect(migrated?.source).toBe("user");
+
+      // And the connection does NOT get embedded auth backfilled off it.
+      const conn = database
+        .prepare<{ auth_type: string }, [string]>(
+          "SELECT auth_type FROM script_connections WHERE id = ?",
+        )
+        .get(connectionId);
+      expect(conn?.auth_type).toBe("none");
+    } finally {
+      database.close();
+      removeDbFiles(dbPath);
+    }
+  });
+
   test("OpenAPI connections can be registered from a spec URL", async () => {
     const server = serveOpenapiSpec(openapiSpec);
     try {

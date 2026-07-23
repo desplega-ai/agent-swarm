@@ -257,6 +257,102 @@ describe("embedded connection auth", () => {
     expect(JSON.parse(binding?.allowed_hosts_json ?? "[]")).toEqual(["api2.vendor.test"]);
   });
 
+  test("re-upsert changing the slug deletes the orphaned derived inline secret", async () => {
+    createdConfigKeys.push("connection.slugOne.secret", "connection.slugTwo.secret");
+    const connection = await upsertScriptConnection({
+      slug: "slugOne",
+      kind: "graphql",
+      baseUrl: "https://api.vendor.test/graphql",
+      allowedHosts: ["api.vendor.test"],
+      auth: { type: "bearer", secret: "slug-secret-1" },
+    });
+    createdConnectionIds.push(connection.id);
+    expect(getSwarmConfigs({ key: "connection.slugOne.secret" })).toHaveLength(1);
+
+    const renamed = await upsertScriptConnection({
+      id: connection.id,
+      slug: "slugTwo",
+      kind: "graphql",
+      baseUrl: "https://api.vendor.test/graphql",
+      allowedHosts: ["api.vendor.test"],
+      auth: { type: "bearer", secret: "slug-secret-2" },
+    });
+    expect(renamed.authConfigKey).toBe("connection.slugTwo.secret");
+    // Old derived secret is gone; the new one holds the new value.
+    expect(getSwarmConfigs({ key: "connection.slugOne.secret" })).toHaveLength(0);
+    expect(getSwarmConfigs({ key: "connection.slugTwo.secret" })[0]?.value).toBe("slug-secret-2");
+    // Stale key no longer scrubbed; new key is.
+    await buildScriptCredentialBindings({});
+    expect(scrubSecrets("v=slug-secret-2")).toContain("[REDACTED:connection.slugTwo.secret]");
+  });
+
+  test("switching an inline-secret connection to oauth deletes the derived inline secret", async () => {
+    createdConfigKeys.push("connection.switchVendor.secret");
+    upsertOAuthApp("switchvendor", {
+      clientId: "cid",
+      clientSecret: "csecret",
+      authorizeUrl: "https://vendor.test/authorize",
+      tokenUrl: "https://vendor.test/token",
+      redirectUri: "https://swarm.test/api/oauth/callback",
+      scopes: "read",
+    });
+    const app = getOAuthApp("switchvendor");
+    if (!app) throw new Error("app not created");
+    const authorization = upsertAuthorization({
+      appId: app.id,
+      accessToken: "oauth-access-token",
+      status: "active",
+    });
+
+    const connection = await upsertScriptConnection({
+      slug: "switchVendor",
+      kind: "graphql",
+      baseUrl: "https://api.vendor.test/graphql",
+      allowedHosts: ["api.vendor.test"],
+      auth: { type: "bearer", secret: "switch-secret" },
+    });
+    createdConnectionIds.push(connection.id);
+    expect(getSwarmConfigs({ key: "connection.switchVendor.secret" })).toHaveLength(1);
+
+    const switched = await upsertScriptConnection({
+      id: connection.id,
+      slug: "switchVendor",
+      kind: "graphql",
+      baseUrl: "https://api.vendor.test/graphql",
+      allowedHosts: ["api.vendor.test"],
+      auth: { type: "oauth", authorizationId: authorization.id },
+    });
+    expect(switched.authType).toBe("oauth");
+    // The derived inline secret is orphaned by the switch and is deleted.
+    expect(getSwarmConfigs({ key: "connection.switchVendor.secret" })).toHaveLength(0);
+
+    getDb().run("DELETE FROM oauth_apps WHERE id = ?", app.id);
+  });
+
+  test("metadata-only rename preserves the derived inline secret (not deleted)", async () => {
+    createdConfigKeys.push("connection.keepVendor.secret");
+    const connection = await upsertScriptConnection({
+      slug: "keepVendor",
+      kind: "graphql",
+      baseUrl: "https://api.vendor.test/graphql",
+      allowedHosts: ["api.vendor.test"],
+      auth: { type: "bearer", secret: "keep-secret" },
+    });
+    createdConnectionIds.push(connection.id);
+
+    // Metadata-only update (no `auth`): reconstruct keeps referencing the derived
+    // key as an explicit configKey, so the secret must survive.
+    const updated = await upsertScriptConnection({
+      id: connection.id,
+      slug: "keepVendor",
+      kind: "graphql",
+      baseUrl: "https://api2.vendor.test/graphql",
+      allowedHosts: ["api2.vendor.test"],
+    });
+    expect(updated.authConfigKey).toBe("connection.keepVendor.secret");
+    expect(getSwarmConfigs({ key: "connection.keepVendor.secret" })[0]?.value).toBe("keep-secret");
+  });
+
   test("auth:{type:'none'} clears the managed binding", async () => {
     const connection = await upsertScriptConnection({
       slug: "clearVendor",

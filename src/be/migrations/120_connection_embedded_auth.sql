@@ -71,18 +71,37 @@ SELECT
   b.updated_by,
   b.auth_kind,
   b.oauth_authorization_id,
-  -- Adopt a binding as managed only when a single connection references it, so
-  -- the 1:1 managed relationship (and its CASCADE delete) is unambiguous.
+  -- Adopt a binding as managed only when a SINGLE connection references it AND
+  -- its config_key matches that connection's auto-derived pattern
+  -- (`connection.<slug>.secret` / `.oauth`). Pre-migration inline bindings and
+  -- user-attached standalone bindings are indistinguishable by source (both
+  -- default to 'user') and both can end up referenced by exactly one connection,
+  -- so the COUNT=1 test alone would wrongly reclassify an explicitly-attached
+  -- (possibly shared) binding as managed — hiding it and arming its CASCADE
+  -- delete. Restricting to the derived key pattern is the only signal that
+  -- reliably marks an auto-created binding; anything else stays standalone
+  -- (visible + never CASCADE-deleted). It stays fully functional either way.
   (
     SELECT c.id
     FROM script_connections c
     WHERE c.credential_binding_id = b.id
       AND (SELECT COUNT(*) FROM script_connections c2 WHERE c2.credential_binding_id = b.id) = 1
+      AND b.config_key IN (
+        'connection.' || c.slug || '.secret',
+        'connection.' || c.slug || '.oauth'
+      )
   )
 FROM script_credential_bindings b;
 
 DROP TABLE script_credential_bindings;
 ALTER TABLE script_credential_bindings_new RENAME TO script_credential_bindings;
+
+-- Adopted (managed) rows carry a 'connection' source for consistency with the
+-- bindings minted by upsertScriptConnection. Behavior keys off
+-- managed_by_connection_id, not source, so this is a pure correctness fix.
+UPDATE script_credential_bindings
+SET source = 'connection'
+WHERE managed_by_connection_id IS NOT NULL;
 
 -- Standalone bindings keep identity-based idempotent upsert; managed bindings
 -- are keyed by their owning connection, so exempt them from the identity index.
