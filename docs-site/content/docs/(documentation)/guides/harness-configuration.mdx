@@ -271,6 +271,7 @@ Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh`) v
 
 ### pi-mono Specifics
 
+- **Runtime-scoped credentials**: pi 0.81 uses a per-session `ModelRuntime`. The adapter injects the resolved task credential into that runtime instead of mutating process-wide provider state, and refreshed OAuth credentials are persisted through pi's provider-owned auth store.
 - **AGENTS.md symlink**: pi-mono reads `AGENTS.md` for project instructions (equivalent to Claude's `CLAUDE.md`). The adapter automatically creates a symlink `AGENTS.md → CLAUDE.md` during sessions so your existing project instructions work with both providers.
 - **Lazy provider import**: the worker only imports `@earendil-works/pi-coding-agent` when `HARNESS_PROVIDER=pi`, so non-pi workers are no longer exposed to pi-mono's module-level side effects at boot.
 - **MCP tool discovery**: pi-mono discovers swarm MCP tools at session creation via HTTP and registers them as custom tools. This is handled automatically — no `.mcp.json` needed for the swarm connection (though installed MCP servers are also discovered).
