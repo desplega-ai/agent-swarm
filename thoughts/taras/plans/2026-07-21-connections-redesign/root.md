@@ -197,6 +197,11 @@ graph TD
 ## Appendix
 
 - **Follow-up plans**: user/role-level authorization scoping (schema leaves `userId` dormant); self-serve connection setup (post user/role scoping); possible manifest generation from integrations.sh if it's Desplega-owned (open question).
+- **Post-QA follow-ups (2026-07-23)**:
+  - UI: configKey inputs (embedded auth + binding dialogs) should be a selector of existing swarm-config keys instead of free text. NOTE: resolution is scope-aware (`getResolvedConfig` merges global→agent→repo, `src/be/script-credential-broker.ts:36-43`), NOT global-only — selector should use `GET /api/config` with scope filtering (endpoint exists, unconsumed by connections UI).
+  - Step-11 docs MUST include an upgrade note: pre-redesign generic script-connections OAuth apps have the old `/api/oauth/{provider}/callback` registered at the provider; new authorize attempts force the static `/api/oauth/callback` (`src/http/script-connections.ts:1923-1924` overrides stored redirectUri) → redirect_uri_mismatch on re-auth until the registration adds the static URL. Refresh of existing tokens unaffected; legacy route still completes in-flight callbacks. Trackers + MCP-DCR callbacks unchanged (no action for those users).
+  - Minor security-hygiene gap: migration 117 carries legacy `mcp_oauth_pending` rows with `dcrClientSecret` embedded plaintext in `contextJson` (SQL can't encrypt; backfill doesn't scan oauth_pending). Bounded by 10-min TTL + only mid-flight DCR at upgrade moment. Cleanest fix: don't carry pending rows at all (ephemeral by nature) — drop them in the migration.
+  - Informational (TC-9): real Linear rotates refresh tokens despite `requiresRefreshTokenRotation=0` seed + "Linear does not rotate" comment; wrapper's `refreshed ?? old` handles it — fix the comment.
 - **Derail notes**:
   - Phase-0 bug (query-only auth header default) found **already fixed on main** with a regression test (`src/tests/script-connections-http.test.ts:172-200`) — plan treats it as verify-only, diverging from brainstorm requirement #11 (decided 2026-07-21).
   - `updateOAuthTokensAfterRefresh`'s optimistic concurrency compares raw `refreshToken` equality — breaks once tokens are encrypted with per-write IVs; replaced by `tokenVersion` counter (schema contract).
