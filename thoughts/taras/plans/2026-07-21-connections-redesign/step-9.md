@@ -2,7 +2,7 @@
 id: step-9
 name: UI — OAuth apps & authorizations
 depends_on: [step-4, step-6]
-status: ready
+status: done
 ---
 
 # step-9: UI — OAuth apps & authorizations

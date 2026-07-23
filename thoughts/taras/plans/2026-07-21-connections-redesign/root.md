@@ -160,16 +160,16 @@ graph TD
 
 | ID | Name | Depends on | Status | File |
 |----|------|------------|--------|------|
-| step-1 | Unified OAuth schema + migration 117 + store adapters | — | ready | [step-1.md](./step-1.md) |
-| step-2 | Vendored specs + blessed manifest + catalog merge | — | ready | [step-2.md](./step-2.md) |
-| step-3 | Spec server extraction + baseUrl provenance | — | ready | [step-3.md](./step-3.md) |
-| step-4 | Static callback + DB pending + multi-authorization flow | step-1 | ready | [step-4.md](./step-4.md) |
-| step-5 | Refresh re-key + refresh-failed semantics | step-1 | ready | [step-5.md](./step-5.md) |
-| step-6 | OAuth presets + curated app hydration | step-1, step-2 | ready | [step-6.md](./step-6.md) |
-| step-7 | Embedded connection auth + derived bindings | step-1 | ready | [step-7.md](./step-7.md) |
-| step-8 | Tracker fold — Linear/Jira on the unified core | step-4, step-5 | ready | [step-8.md](./step-8.md) |
-| step-9 | UI — OAuth apps & authorizations | step-4, step-6 | ready | [step-9.md](./step-9.md) |
-| step-10 | UI — single-flow connection creation | step-6, step-7 | ready | [step-10.md](./step-10.md) |
+| step-1 | Unified OAuth schema + migration 117 + store adapters | — | done | [step-1.md](./step-1.md) |
+| step-2 | Vendored specs + blessed manifest + catalog merge | — | done | [step-2.md](./step-2.md) |
+| step-3 | Spec server extraction + baseUrl provenance | — | done | [step-3.md](./step-3.md) |
+| step-4 | Static callback + DB pending + multi-authorization flow | step-1 | done | [step-4.md](./step-4.md) |
+| step-5 | Refresh re-key + refresh-failed semantics | step-1 | done | [step-5.md](./step-5.md) |
+| step-6 | OAuth presets + curated app hydration | step-1, step-2 | done | [step-6.md](./step-6.md) |
+| step-7 | Embedded connection auth + derived bindings | step-1 | done | [step-7.md](./step-7.md) |
+| step-8 | Tracker fold — Linear/Jira on the unified core | step-4, step-5 | done | [step-8.md](./step-8.md) |
+| step-9 | UI — OAuth apps & authorizations | step-4, step-6 | done | [step-9.md](./step-9.md) |
+| step-10 | UI — single-flow connection creation | step-6, step-7 | done | [step-10.md](./step-10.md) |
 | step-11 | Integration — E2E gauntlet + docs | step-3, step-8, step-9, step-10 | ready | [step-11.md](./step-11.md) |
 
 > **Canonical dependencies and execution status live in each `step-<n>.md`'s frontmatter.** This table is a derived snapshot at plan creation. During `/v-implement`, frontmatter `status` (`ready` → `claimed` → `done`) is the source of truth — re-render this table when you want a current view.

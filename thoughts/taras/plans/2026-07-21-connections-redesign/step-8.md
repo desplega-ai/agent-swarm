@@ -2,7 +2,7 @@
 id: step-8
 name: Tracker fold — Linear/Jira on the unified core
 depends_on: [step-4, step-5]
-status: ready
+status: done
 ---
 
 # step-8: Tracker fold — Linear/Jira on the unified core
