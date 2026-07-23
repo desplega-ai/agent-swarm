@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  useBuildOAuthAuthorizeUrl,
+  useOAuthAuthorizeUrl,
   useOAuthPresets,
   useUpsertOAuthApp,
 } from "@/api/hooks/use-script-connections";
@@ -68,7 +68,7 @@ export function OAuthInlineConnect({
   const queryClient = useQueryClient();
   const { data: presets = [] } = useOAuthPresets();
   const upsertApp = useUpsertOAuthApp();
-  const buildAuthorizeUrl = useBuildOAuthAuthorizeUrl();
+  const buildAuthorizeUrl = useOAuthAuthorizeUrl();
 
   // The app that owns the currently-selected authorization (edit prefill).
   const owningAppId = useMemo(

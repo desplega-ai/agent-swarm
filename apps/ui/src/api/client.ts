@@ -1246,33 +1246,6 @@ class ApiClient {
     return res.json();
   }
 
-  async fetchOAuthPresets(): Promise<{ presets: OAuthPreset[] }> {
-    const url = `${this.getBaseUrl()}/api/oauth-presets`;
-    const res = await fetch(url, { headers: this.getHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch OAuth presets: ${res.status}`);
-    return res.json();
-  }
-
-  // Build a labeled authorization URL for an existing OAuth app (step-4 static
-  // callback flow). The caller opens the returned URL in a popup and polls the
-  // app's authorizations until the new label appears.
-  async buildOAuthAuthorizeUrl(
-    appId: string,
-    body?: { label?: string; finalRedirect?: string },
-  ): Promise<{ authorizeUrl: string; state: string; label: string; redirectUri: string }> {
-    const url = `${this.getBaseUrl()}/api/oauth-apps/${encodeURIComponent(appId)}/authorize-url`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: this.getHeaders(),
-      body: JSON.stringify(body ?? {}),
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ error: "Failed to build authorize URL" }));
-      throw new Error(error.error || `Failed to build authorize URL: ${res.status}`);
-    }
-    return res.json();
-  }
-
   async discoverOAuthApp(url: string): Promise<OAuthAppDiscoveryResult> {
     const res = await fetch(`${this.getBaseUrl()}/api/oauth-apps/discover`, {
       method: "POST",
