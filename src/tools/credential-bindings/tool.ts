@@ -30,7 +30,7 @@ const providerSchema = z
   .min(1)
   .max(255)
   .regex(/^[A-Za-z0-9_-]+$/);
-const tokenStatusSchema = z.enum(["ok", "expiring", "missing"]);
+const tokenStatusSchema = z.enum(["ok", "expiring", "refresh-failed", "revoked", "missing"]);
 const credentialBindingToolBindingSchema = CredentialBindingSchema.and(
   z.object({
     id: z.string().optional(),

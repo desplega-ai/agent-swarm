@@ -41,6 +41,20 @@ export type ResolvedCredentialBinding = CredentialBinding & {
   value: string;
 };
 
+/**
+ * A binding that could not be resolved because its OAuth authorization is in a
+ * broken (`refresh-failed`) state. Carried in the sandbox config payload so the
+ * patched fetch can throw a typed, actionable error when a request targets the
+ * binding's host with its placeholder present — instead of silently leaking the
+ * unsubstituted `[REDACTED:...]` placeholder toward the provider (a 401).
+ */
+export type FailedCredentialBinding = {
+  placeholder: string;
+  allowedHosts: string[];
+  reason: string;
+  authorizationLabel?: string;
+};
+
 export type CredentialBindingStoreContext = {
   agentId?: string;
   repoId?: string;

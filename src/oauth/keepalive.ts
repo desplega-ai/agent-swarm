@@ -1,12 +1,11 @@
-import { ensureTokenOrThrow } from "./ensure-token";
+import { listKeepAliveAuthorizations } from "../be/db-queries/oauth";
+import { ensureAuthorizationTokenOrThrow } from "./ensure-token";
 
 // Keep refresh tokens warm without constantly rotating strict-rotation
 // providers. Reactive callers still refresh access tokens before API use.
 const KEEPALIVE_INTERVAL_MS = 12 * 60 * 60 * 1000;
 const KEEPALIVE_BUFFER_MS = 10 * 60 * 1000;
 const STARTUP_KEEPALIVE_DELAY_MS = 10_000;
-
-const KEEPALIVE_PROVIDERS = ["linear", "jira"] as const;
 
 let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
 let startupKeepaliveTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -41,16 +40,22 @@ function scheduleKeepaliveRun(trigger: "startup" | "interval" | "manual"): Promi
  */
 async function runKeepalive(trigger: "startup" | "interval" | "manual" = "manual"): Promise<void> {
   console.log(`[OAuth Keepalive] Running ${trigger} token refresh check`);
-  for (const provider of KEEPALIVE_PROVIDERS) {
-    console.log(`[OAuth Keepalive] Running scheduled token refresh for ${provider}...`);
+  const authorizations = listKeepAliveAuthorizations();
+  for (const authorization of authorizations) {
+    const label = authorization.displayName?.trim() || authorization.provider;
+    const named =
+      authorization.label && authorization.label !== "default"
+        ? `${label} (${authorization.label})`
+        : label;
+    console.log(`[OAuth Keepalive] Running scheduled token refresh for ${named}...`);
     try {
-      await ensureTokenOrThrow(provider, KEEPALIVE_BUFFER_MS);
-      console.log(`[OAuth Keepalive] ${provider} token check completed successfully`);
+      await ensureAuthorizationTokenOrThrow(authorization.authorizationId, KEEPALIVE_BUFFER_MS);
+      console.log(`[OAuth Keepalive] ${named} token check completed successfully`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[OAuth Keepalive] Failed to refresh ${provider} token: ${message}`);
+      console.error(`[OAuth Keepalive] Failed to refresh ${named} token: ${message}`);
       await notifySlack(
-        `⚠️ *OAuth Keepalive Failed*\nProvider: \`${provider}\`\nError: ${message}\n\nManual re-authorization may be required.`,
+        `⚠️ *OAuth Keepalive Failed*\nApp: \`${named}\`\nError: ${message}\n\nManual re-authorization may be required.`,
       );
     }
   }

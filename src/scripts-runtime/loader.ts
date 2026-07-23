@@ -1,6 +1,7 @@
 import { getApiKey } from "../utils/api-key";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import type { ScriptApiConnectionDescriptor, ScriptMcpConnectionDescriptor } from "./api-types";
+import type { FailedCredentialBinding } from "./credential-broker";
 import { buildEgressSecrets } from "./egress-secrets";
 import { getScriptExecutor } from "./executors/registry";
 import {
@@ -24,6 +25,7 @@ export type RunScriptInput = {
   resources?: Partial<ScriptResourcePolicy>;
   userConfig?: Record<string, { value: string; isSecret: boolean }>;
   egressSecrets?: EgressSecretEntry[];
+  failedBindings?: FailedCredentialBinding[];
   apiConnections?: ScriptApiConnectionDescriptor[];
   mcpConnections?: ScriptMcpConnectionDescriptor[];
 };
@@ -51,6 +53,7 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
     },
     user: input.userConfig ?? {},
     egressSecrets: input.egressSecrets ?? (await buildEgressSecrets()),
+    failedBindings: input.failedBindings ?? [],
     apiConnections: input.apiConnections ?? [],
     mcpConnections: input.mcpConnections ?? [],
   };
