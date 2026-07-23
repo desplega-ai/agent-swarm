@@ -8,7 +8,7 @@ import {
   getOAuthApp,
   getOAuthTokens,
   isTokenExpiringSoon,
-  listOAuthTokenSweepRows,
+  listAuthorizationSweepRows,
   releaseOAuthRefreshLock,
   storeOAuthTokens,
   updateOAuthTokensAfterRefresh,
@@ -217,7 +217,7 @@ describe("OAuth Tokens CRUD", () => {
     expect(tokens?.refreshToken).toBe("refresh-stable");
   });
 
-  test("listOAuthTokenSweepRows normalizes legacy bare expiresAt values", () => {
+  test("listAuthorizationSweepRows normalizes legacy bare expiresAt values", () => {
     getDb()
       .query(
         `UPDATE oauth_authorizations SET expiresAt = '2030-01-02 03:04:05'
@@ -226,7 +226,7 @@ describe("OAuth Tokens CRUD", () => {
       )
       .run();
 
-    expect(listOAuthTokenSweepRows().find((row) => row.provider === "token-test")?.expiresAt).toBe(
+    expect(listAuthorizationSweepRows().find((row) => row.provider === "token-test")?.expiresAt).toBe(
       "2030-01-02T03:04:05.000Z",
     );
   });
