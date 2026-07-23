@@ -44,6 +44,7 @@ const LEAD_ID = "bbbb9200-0000-4000-8000-000000000001";
 let providerServer: ReturnType<typeof Bun.serve>;
 let providerBase = "";
 let includeRefreshToken = true; // toggled to exercise rotation strictness
+let cloudIdResolves = true; // toggled to exercise the Jira post-process-failure path
 
 // ─── External-URL fetch interceptor ──────────────────────────────────────────
 //
@@ -57,6 +58,9 @@ function installFetchInterceptor(): void {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     if (url === "https://api.atlassian.com/oauth/token/accessible-resources") {
+      if (!cloudIdResolves) {
+        return new Response("upstream unavailable", { status: 503 });
+      }
       return new Response(
         JSON.stringify([{ id: "cloud-xyz", url: "https://acme.atlassian.net", name: "acme" }]),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -183,6 +187,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   includeRefreshToken = true;
+  cloudIdResolves = true;
   resetLinearClient();
   getDb().query("DELETE FROM oauth_authorizations").run();
   getDb().query("DELETE FROM oauth_pending").run();
@@ -209,6 +214,30 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
     expect(metadata.actor).toBe("app");
     // keepAlive opts the (non-rotating) linear row into the keepalive job on a
     // fresh DB where migration 121's data-only backfill matched no rows.
+    expect(metadata.keepAlive === true || metadata.keepAlive === 1).toBe(true);
+  });
+
+  test("initLinear boot seeding preserves foreign metadata keys (idempotent, no clobber)", async () => {
+    // A pre-existing row carrying an operator/runtime-added metadata key — now
+    // possible since the carve-out removal made the linear row user-manageable.
+    upsertOAuthApp("linear", {
+      clientId: "pre-existing",
+      clientSecret: "pre-existing-secret",
+      authorizeUrl: "https://linear.app/oauth/authorize",
+      tokenUrl: "https://api.linear.app/oauth/token",
+      redirectUri: `${appBase}/api/trackers/linear/callback`,
+      scopes: "read",
+      metadata: JSON.stringify({ customKey: "keep-me", actor: "stale" }),
+    });
+
+    const { initLinear } = await import("../linear/app");
+    expect(initLinear()).toBe(true);
+
+    const metadata = JSON.parse(getOAuthApp("linear")?.metadata || "{}");
+    // Foreign key survives the re-boot seed…
+    expect(metadata.customKey).toBe("keep-me");
+    // …and the seeded keys win + are present.
+    expect(metadata.actor).toBe("app");
     expect(metadata.keepAlive === true || metadata.keepAlive === 1).toBe(true);
   });
 
@@ -279,6 +308,29 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
     const meta = getJiraMetadata();
     expect(meta.cloudId).toBe("cloud-xyz");
     expect(meta.siteUrl).toBe("https://acme.atlassian.net");
+  });
+
+  test("jira callback cloudId-resolution failure surfaces an error but still lands the (half-connected) authorization", async () => {
+    const appId = seedMockTrackerApp("jira", " ");
+    cloudIdResolves = false; // accessible-resources returns 503
+
+    const authorizeUrl = await getJiraAuthorizationUrl();
+    const state = stateFromAuthorizeUrl(authorizeUrl as string);
+
+    const res = await fetch(`${appBase}/api/trackers/jira/callback?code=auth-code&state=${state}`, {
+      redirect: "manual",
+    });
+    // The cloudId step is required — its failure surfaces (502 from the unified
+    // callback's exchange try/catch), matching the legacy handleJiraCallback.
+    expect(res.status).toBe(502);
+
+    // Tokens were already persisted before cloudId resolution ran, so the
+    // authorization is "half-connected": active, but no cloudId. Re-running the
+    // OAuth dance (once the provider recovers) resolves it.
+    const authorizations = listAuthorizationsForApp(appId);
+    expect(authorizations).toHaveLength(1);
+    expect(authorizations[0]?.status).toBe("active");
+    expect(getJiraMetadata().cloudId).toBeUndefined();
   });
 
   test("jira refresh enforces rotation strictness — missing rotated refresh_token throws + marks refresh-failed", async () => {

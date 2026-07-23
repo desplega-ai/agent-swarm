@@ -1,4 +1,4 @@
-import { upsertOAuthApp } from "../be/db-queries/oauth";
+import { getOAuthApp, upsertOAuthApp } from "../be/db-queries/oauth";
 import { onAuthorizationRefreshed } from "../oauth/ensure-token";
 import { getPublicMcpBaseUrl } from "../utils/constants";
 import { resetLinearClient } from "./client";
@@ -43,6 +43,22 @@ export function initLinear(): boolean {
   const redirectUri =
     process.env.LINEAR_REDIRECT_URI ?? `${apiBaseUrl}/api/trackers/linear/callback`;
 
+  // `upsertOAuthApp` replaces the metadata blob wholesale when `metadata` is
+  // passed. Merge the seeded keys ON TOP of any existing metadata so a re-boot
+  // is idempotent AND preserves foreign keys (e.g. operator edits — now
+  // possible since the row is user-manageable after the carve-out removal, and
+  // runtime keys a future Linear flow may add). Seeded actor/keepAlive win.
+  // Mirrors initJira's preserve-on-update behavior (it omits metadata entirely).
+  const existing = getOAuthApp("linear");
+  const existingMetadata = (() => {
+    try {
+      const parsed = JSON.parse(existing?.metadata || "{}");
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  })();
+
   upsertOAuthApp("linear", {
     clientId,
     clientSecret,
@@ -59,7 +75,7 @@ export function initLinear(): boolean {
     // refresh tokens, so it wouldn't qualify via requiresRefreshTokenRotation);
     // this mirrors migration 121's backfill for a fresh-DB boot where that
     // data-only migration matches no rows yet.
-    metadata: JSON.stringify({ actor: "app", keepAlive: true }),
+    metadata: JSON.stringify({ ...existingMetadata, actor: "app", keepAlive: true }),
   });
 
   // Invalidate the cached LinearClient whenever *any* path (sweep, reactive)
