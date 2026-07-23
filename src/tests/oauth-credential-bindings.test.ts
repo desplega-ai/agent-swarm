@@ -494,17 +494,20 @@ describe("OAuth credential bindings", () => {
     }
   });
 
-  test("generic OAuth callback rejects linear", async () => {
+  test("generic OAuth callback no longer special-cases linear (unified routing)", async () => {
+    // step-4 dropped the DEDICATED_CALLBACK_PROVIDERS 409 asymmetry: every
+    // provider routes through the unified, state-keyed handler. An unknown
+    // state now reports the same invalid-state error as any other provider.
     const server = createOAuthServer();
     const port = await listen(server);
     try {
       const res = await fetch(
-        `http://localhost:${port}/api/oauth/linear/callback?code=callback-code&state=state`,
+        `http://localhost:${port}/api/oauth/linear/callback?code=callback-code&state=unknown-state`,
       );
 
-      expect(res.status).toBe(409);
+      expect(res.status).toBe(400);
       const body = (await res.json()) as { error: string };
-      expect(body.error).toContain("/api/trackers/linear/callback");
+      expect(body.error).toContain("Invalid or expired OAuth state");
     } finally {
       server.close();
     }

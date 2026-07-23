@@ -1,5 +1,12 @@
 import * as oauth from "oauth4webapi";
-import { storeOAuthTokens, updateOAuthTokensAfterRefresh } from "../be/db-queries/oauth";
+import {
+  consumeOAuthPending,
+  createOAuthPending,
+  getOAuthAppIdByProvider,
+  type OAuthPendingFlow,
+  storeOAuthTokens,
+  updateOAuthTokensAfterRefresh,
+} from "../be/db-queries/oauth";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -45,46 +52,50 @@ export interface OAuthProviderConfig {
   tokenBodyFormat?: "form" | "json";
 }
 
-interface PendingState {
-  codeVerifier: string;
-  config: OAuthProviderConfig;
-  createdAt: number;
-}
-
-// ─── In-memory pending state (PKCE code verifiers keyed by state) ────────────
-
-const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const pendingStates = new Map<string, PendingState>();
-
-/** Remove expired entries from the pending state map */
-function cleanupExpiredStates(): void {
-  const now = Date.now();
-  for (const [key, entry] of pendingStates) {
-    if (now - entry.createdAt > STATE_TTL_MS) {
-      pendingStates.delete(key);
-    }
-  }
+/**
+ * Options controlling how the pending PKCE session is keyed. When `appId` is
+ * omitted it is resolved from `config.provider` (single-app-per-provider
+ * callers). `label` selects which authorization the callback upserts into,
+ * enabling N labeled authorizations per app.
+ */
+export interface BuildAuthorizationUrlOptions {
+  appId?: string;
+  label?: string;
+  flow?: OAuthPendingFlow;
+  finalRedirect?: string | null;
+  userId?: string | null;
+  nonce?: string | null;
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
- * Build an OAuth 2.0 authorization URL with PKCE (S256).
- * Stores the pending state + code verifier in-memory for later exchange.
+ * Build an OAuth 2.0 authorization URL with PKCE (S256). Persists a DB-backed
+ * pending row (encrypted code verifier) keyed by `state` for later exchange by
+ * the static callback handler — survives process restarts.
  */
 export async function buildAuthorizationUrl(
   config: OAuthProviderConfig,
+  options: BuildAuthorizationUrlOptions = {},
 ): Promise<{ url: string; state: string; codeVerifier: string }> {
-  cleanupExpiredStates();
-
   const state = oauth.generateRandomState();
   const codeVerifier = oauth.generateRandomCodeVerifier();
   const codeChallenge = await oauth.calculatePKCECodeChallenge(codeVerifier);
 
-  pendingStates.set(state, {
+  const appId = options.appId ?? getOAuthAppIdByProvider(config.provider);
+  if (!appId) {
+    throw new Error(`OAuth app ${config.provider} is not configured`);
+  }
+  createOAuthPending({
+    state,
+    appId,
+    label: options.label ?? "default",
+    flow: options.flow ?? "generic",
     codeVerifier,
-    config,
-    createdAt: Date.now(),
+    nonce: options.nonce ?? null,
+    redirectUri: config.redirectUri,
+    finalRedirect: options.finalRedirect ?? null,
+    userId: options.userId ?? null,
   });
 
   const url = new URL(config.authorizeUrl);
@@ -106,11 +117,6 @@ export async function buildAuthorizationUrl(
   return { url: url.toString(), state, codeVerifier };
 }
 
-/**
- * Exchange an authorization code for tokens.
- * Validates the state against our pending map, calls the token endpoint,
- * and persists tokens via storeOAuthTokens().
- */
 /**
  * Build headers + body for a token-endpoint request, honoring the provider's
  * client-auth style (body params vs HTTP Basic) and body encoding (form vs JSON).
@@ -135,27 +141,33 @@ function tokenRequestInit(
   return { headers, body: new URLSearchParams(bodyParams).toString() };
 }
 
-export async function exchangeCode(
+export interface OAuthTokenResponse {
+  accessToken: string;
+  refreshToken?: string;
+  expiresIn?: number;
+  scope?: string;
+  tokenType?: string;
+  /** OIDC id_token, when the provider returns one (used for identity capture). */
+  idToken?: string;
+}
+
+/**
+ * Exchange an authorization code for tokens. Pure protocol mechanics — does NOT
+ * touch the DB. The caller (static callback handler) consumes the pending row,
+ * passes the stored `codeVerifier` + `redirectUri`, and persists the tokens
+ * onto the target authorization.
+ */
+export async function exchangeAuthorizationCode(
   config: OAuthProviderConfig,
-  code: string,
-  state: string,
-): Promise<{ accessToken: string; refreshToken?: string; expiresIn?: number; scope?: string }> {
-  const pending = pendingStates.get(state);
-  if (!pending) {
-    throw new Error("Invalid or expired OAuth state");
-  }
-  pendingStates.delete(state);
-
-  const { codeVerifier } = pending;
-
-  // Build token request manually — Linear doesn't use standard OAuth discovery
+  params: { code: string; codeVerifier: string; redirectUri: string },
+): Promise<OAuthTokenResponse> {
   const response = await fetch(config.tokenUrl, {
     method: "POST",
     ...tokenRequestInit(config, {
       grant_type: "authorization_code",
-      redirect_uri: config.redirectUri,
-      code,
-      code_verifier: codeVerifier,
+      redirect_uri: params.redirectUri,
+      code: params.code,
+      code_verifier: params.codeVerifier,
     }),
   });
 
@@ -166,29 +178,95 @@ export async function exchangeCode(
 
   const data = (await response.json()) as {
     access_token: string;
-    token_type: string;
+    token_type?: string;
     expires_in?: number;
     scope?: string;
     refresh_token?: string;
+    id_token?: string;
   };
-
-  // Persist tokens
-  const expiresAt = data.expires_in
-    ? new Date(Date.now() + data.expires_in * 1000).toISOString()
-    : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // default 24h
-
-  storeOAuthTokens(config.provider, {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token ?? null,
-    expiresAt,
-    scope: data.scope ?? null,
-  });
 
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
     expiresIn: data.expires_in,
     scope: data.scope,
+    tokenType: data.token_type,
+    idToken: data.id_token,
+  };
+}
+
+/**
+ * Backward-compatible code exchange for provider-string callers (tracker
+ * callbacks). Consumes the DB-backed pending row by `state`, exchanges the
+ * code, and persists onto the provider's `default` authorization. New
+ * multi-authorization flows use {@link exchangeAuthorizationCode} directly.
+ */
+export async function exchangeCode(
+  config: OAuthProviderConfig,
+  code: string,
+  state: string,
+): Promise<OAuthTokenResponse> {
+  const pending = consumeOAuthPending(state);
+  if (!pending) {
+    throw new Error("Invalid or expired OAuth state");
+  }
+  const tokens = await exchangeAuthorizationCode(config, {
+    code,
+    codeVerifier: pending.codeVerifier,
+    redirectUri: pending.redirectUri,
+  });
+  const expiresAt = tokens.expiresIn
+    ? new Date(Date.now() + tokens.expiresIn * 1000).toISOString()
+    : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  storeOAuthTokens(config.provider, {
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken ?? null,
+    expiresAt,
+    scope: tokens.scope ?? null,
+  });
+  return tokens;
+}
+
+/**
+ * Refresh a token using the `refresh_token` grant. Pure protocol mechanics — no
+ * DB writes. The caller persists onto the target authorization (id-keyed). Used
+ * by the per-authorization refresh endpoint.
+ */
+export async function refreshTokenGrant(
+  config: OAuthProviderConfig,
+  refreshToken: string,
+): Promise<OAuthTokenResponse> {
+  const response = await fetch(config.tokenUrl, {
+    method: "POST",
+    ...tokenRequestInit(config, {
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Token refresh failed (${response.status}): ${errorText}`);
+  }
+
+  const data = (await response.json()) as {
+    access_token: string;
+    token_type?: string;
+    expires_in?: number;
+    scope?: string;
+    refresh_token?: string;
+  };
+
+  if (typeof data.access_token !== "string" || data.access_token.length === 0) {
+    throw new Error(`Token refresh failed: ${config.provider} response missing access_token`);
+  }
+
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresIn: data.expires_in,
+    scope: data.scope,
+    tokenType: data.token_type,
   };
 }
 
@@ -266,10 +344,9 @@ export async function refreshAccessToken(
 
 // ─── Test helpers (exported for unit tests only) ─────────────────────────────
 
-export function _getPendingState(state: string): PendingState | undefined {
-  return pendingStates.get(state);
-}
-
-export function _clearPendingStates(): void {
-  pendingStates.clear();
-}
+/**
+ * Deprecated no-op retained for backward compatibility. Pending PKCE state now
+ * lives in the `oauth_pending` table (per-test DBs isolate it), so there is no
+ * in-memory map to clear.
+ */
+export function _clearPendingStates(): void {}

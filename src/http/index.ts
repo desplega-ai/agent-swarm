@@ -65,11 +65,12 @@ import {
   type McpTransportActivity,
 } from "./mcp";
 import { handleMcpBridge } from "./mcp-bridge";
-import { handleMcpOAuth, startMcpOAuthPendingGc, stopMcpOAuthPendingGc } from "./mcp-oauth";
+import { handleMcpOAuth } from "./mcp-oauth";
 import { handleMcpServers } from "./mcp-servers";
 import { closeIdleMcpUserTransports, handleMcpUser } from "./mcp-user";
 import { handleMemory, startMemoryGc, stopMemoryGc } from "./memory";
 import { handleMetrics } from "./metrics";
+import { handleOAuthCallback, startOAuthPendingGc, stopOAuthPendingGc } from "./oauth-callback";
 import { handleGenericOAuth } from "./oauth-generic";
 import { handleOAuthLocks } from "./oauth-locks";
 import { handlePageProxy } from "./page-proxy";
@@ -338,6 +339,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleMcpOAuth(req, res, pathSegments, queryParams),
         () => handleMemory(req, res, pathSegments, myAgentId),
         () => handleOAuthLocks(req, res, pathSegments, queryParams),
+        () => handleOAuthCallback(req, res, pathSegments, queryParams),
         () => handleGenericOAuth(req, res, pathSegments, queryParams),
         () => handleCodexOAuthKeepWarm(req, res, pathSegments),
         () => handlePagesPublic(req, res, pathSegments, queryParams),
@@ -427,8 +429,8 @@ async function shutdown() {
     await stopOAuthKeepalive();
   }
 
-  // Stop MCP OAuth pending-session garbage collector
-  stopMcpOAuthPendingGc();
+  // Stop the unified OAuth pending-session garbage collector (all flows)
+  stopOAuthPendingGc();
 
   // Stop memory expired-row garbage collector
   stopMemoryGc();
@@ -637,8 +639,8 @@ httpServer
       startOAuthRefreshSweep();
     }
 
-    // Start MCP OAuth pending-session garbage collector (5-min tick)
-    startMcpOAuthPendingGc();
+    // Start the unified OAuth pending-session garbage collector (5-min tick, all flows)
+    startOAuthPendingGc();
 
     // Start expired-memory garbage collector (1-hour tick, immediate first run)
     startMemoryGc();

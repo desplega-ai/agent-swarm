@@ -6,7 +6,6 @@ import {
   applyMcpOAuthRefresh,
   consumeMcpOAuthPending,
   deleteMcpOAuthToken,
-  gcMcpOAuthPending,
   getMcpOAuthToken,
   insertMcpOAuthPending,
   setMcpServerAuthMethod,
@@ -407,6 +406,103 @@ async function prepareAuthorizeFlow(
   return built.url;
 }
 
+// ─── Callback completion (shared with the static /api/oauth/callback route) ──
+
+interface OAuthCallbackParams {
+  code?: string;
+  state?: string;
+  error?: string;
+  error_description?: string;
+}
+
+/**
+ * Complete an MCP-flow OAuth callback: consume the `mcp` pending row, exchange
+ * the code, upsert the token, and flip `authMethod=oauth`. Shared by the legacy
+ * `/api/mcp-oauth/callback` route and the unified `/api/oauth/callback` route.
+ * Returns false (without writing a response) when no `mcp` pending row matches
+ * `state`, so the unified handler can report a single invalid-state error.
+ */
+export async function completeMcpOAuthCallback(
+  res: ServerResponse,
+  query: OAuthCallbackParams,
+): Promise<boolean> {
+  const state = query.state;
+  if (!state) return false;
+  const pending = consumeMcpOAuthPending(state);
+  if (!pending) return false;
+
+  const dashboardBaseUrl = pending.finalRedirect ?? defaultFinalRedirect(pending.mcpServerId);
+
+  if (query.error) {
+    const target = new URL(dashboardBaseUrl);
+    target.searchParams.set("oauth", "error");
+    target.searchParams.set("error", query.error);
+    if (query.error_description) {
+      target.searchParams.set("error_description", query.error_description);
+    }
+    res.writeHead(302, { Location: target.toString() });
+    res.end();
+    return true;
+  }
+
+  if (!query.code) {
+    jsonError(res, "Missing authorization code", 400);
+    return true;
+  }
+
+  try {
+    const tokens = await exchangeCodeForTokens({
+      tokenUrl: pending.tokenUrl,
+      clientId: pending.dcrClientId ?? "",
+      clientSecret: pending.dcrClientSecret ?? undefined,
+      redirectUri: pending.redirectUri,
+      code: query.code,
+      codeVerifier: pending.codeVerifier,
+      resource: pending.resourceUrl,
+    });
+    const existing = getMcpOAuthToken(pending.mcpServerId, pending.userId);
+    const clientSource =
+      existing?.clientSource ??
+      (pending.dcrClientId ? ("dcr" as const) : ("preregistered" as const));
+
+    upsertMcpOAuthToken({
+      mcpServerId: pending.mcpServerId,
+      userId: pending.userId,
+      accessToken: tokens.access_token,
+      ...(tokens.refresh_token != null ? { refreshToken: tokens.refresh_token } : {}),
+      tokenType: tokens.token_type ?? "Bearer",
+      expiresAt: computeExpiresAt(tokens.expires_in),
+      scope: tokens.scope ?? pending.scopes ?? null,
+      resourceUrl: pending.resourceUrl,
+      authorizationServerIssuer: pending.authorizationServerIssuer,
+      authorizeUrl: pending.authorizeUrl,
+      tokenUrl: pending.tokenUrl,
+      revocationUrl: pending.revocationUrl,
+      dcrClientId: pending.dcrClientId,
+      dcrClientSecret: pending.dcrClientSecret,
+      clientSource,
+      lastRefreshedAt: new Date().toISOString(),
+    });
+
+    // Flip authMethod=oauth so resolveSecrets picks this up.
+    setMcpServerAuthMethod(pending.mcpServerId, "oauth");
+
+    const target = new URL(dashboardBaseUrl);
+    target.searchParams.set("oauth", "success");
+    res.writeHead(302, { Location: target.toString() });
+    res.end();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[mcp-oauth] callback exchange failed:", message);
+    const target = new URL(dashboardBaseUrl);
+    target.searchParams.set("oauth", "error");
+    target.searchParams.set("error_description", message);
+    res.writeHead(302, { Location: target.toString() });
+    res.end();
+  }
+  return true;
+}
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleMcpOAuth(
@@ -420,85 +516,13 @@ export async function handleMcpOAuth(
     const parsed = await callbackRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const state = parsed.query.state;
-    if (!state) {
+    if (!parsed.query.state) {
       jsonError(res, "Missing state parameter", 400);
       return true;
     }
-    const pending = consumeMcpOAuthPending(state);
-    if (!pending) {
+    const handled = await completeMcpOAuthCallback(res, parsed.query);
+    if (!handled) {
       jsonError(res, "Invalid or expired OAuth state", 400);
-      return true;
-    }
-
-    const dashboardBaseUrl = pending.finalRedirect ?? defaultFinalRedirect(pending.mcpServerId);
-
-    if (parsed.query.error) {
-      const target = new URL(dashboardBaseUrl);
-      target.searchParams.set("oauth", "error");
-      target.searchParams.set("error", parsed.query.error);
-      if (parsed.query.error_description) {
-        target.searchParams.set("error_description", parsed.query.error_description);
-      }
-      res.writeHead(302, { Location: target.toString() });
-      res.end();
-      return true;
-    }
-
-    if (!parsed.query.code) {
-      jsonError(res, "Missing authorization code", 400);
-      return true;
-    }
-
-    try {
-      const tokens = await exchangeCodeForTokens({
-        tokenUrl: pending.tokenUrl,
-        clientId: pending.dcrClientId ?? "",
-        clientSecret: pending.dcrClientSecret ?? undefined,
-        redirectUri: pending.redirectUri,
-        code: parsed.query.code,
-        codeVerifier: pending.codeVerifier,
-        resource: pending.resourceUrl,
-      });
-      const existing = getMcpOAuthToken(pending.mcpServerId, pending.userId);
-      const clientSource =
-        existing?.clientSource ??
-        (pending.dcrClientId ? ("dcr" as const) : ("preregistered" as const));
-
-      upsertMcpOAuthToken({
-        mcpServerId: pending.mcpServerId,
-        userId: pending.userId,
-        accessToken: tokens.access_token,
-        ...(tokens.refresh_token != null ? { refreshToken: tokens.refresh_token } : {}),
-        tokenType: tokens.token_type ?? "Bearer",
-        expiresAt: computeExpiresAt(tokens.expires_in),
-        scope: tokens.scope ?? pending.scopes ?? null,
-        resourceUrl: pending.resourceUrl,
-        authorizationServerIssuer: pending.authorizationServerIssuer,
-        authorizeUrl: pending.authorizeUrl,
-        tokenUrl: pending.tokenUrl,
-        revocationUrl: pending.revocationUrl,
-        dcrClientId: pending.dcrClientId,
-        dcrClientSecret: pending.dcrClientSecret,
-        clientSource,
-        lastRefreshedAt: new Date().toISOString(),
-      });
-
-      // Flip authMethod=oauth so resolveSecrets picks this up.
-      setMcpServerAuthMethod(pending.mcpServerId, "oauth");
-
-      const target = new URL(dashboardBaseUrl);
-      target.searchParams.set("oauth", "success");
-      res.writeHead(302, { Location: target.toString() });
-      res.end();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error("[mcp-oauth] callback exchange failed:", message);
-      const target = new URL(dashboardBaseUrl);
-      target.searchParams.set("oauth", "error");
-      target.searchParams.set("error_description", message);
-      res.writeHead(302, { Location: target.toString() });
-      res.end();
     }
     return true;
   }
@@ -765,31 +789,8 @@ export async function handleMcpOAuth(
   return false;
 }
 
-// ─── Pending garbage collector ───────────────────────────────────────────────
-
-let gcTimer: ReturnType<typeof setInterval> | null = null;
-
-export function startMcpOAuthPendingGc(intervalMs = 5 * 60 * 1000): void {
-  if (gcTimer) return;
-  gcTimer = setInterval(() => {
-    try {
-      const removed = gcMcpOAuthPending();
-      if (removed > 0) {
-        console.debug(`[mcp-oauth] GC removed ${removed} expired pending session(s)`);
-      }
-    } catch (err) {
-      console.error("[mcp-oauth] GC failed:", err);
-    }
-  }, intervalMs);
-  if (typeof gcTimer?.unref === "function") gcTimer.unref();
-}
-
-export function stopMcpOAuthPendingGc(): void {
-  if (gcTimer) {
-    clearInterval(gcTimer);
-    gcTimer = null;
-  }
-}
+// Pending garbage collection now runs through the unified GC in
+// `oauth-callback.ts` (`startOAuthPendingGc`), which sweeps all flows.
 
 // Expose internal helpers for the resolveSecrets extension in mcp-servers.ts.
 export { ensureMcpToken };

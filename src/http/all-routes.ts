@@ -30,6 +30,7 @@ import "./kv";
 import "./memory";
 import "./metrics";
 import "./oauth-locks";
+import "./oauth-callback";
 import "./oauth-generic";
 import "./page-proxy";
 import "./pages";
