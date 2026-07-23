@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { listOAuthPresetIds } from "../src/oauth/presets";
 import { canonicalJson, type Manifest, sha256, trimOpenapiSpec } from "./vendored-openapi-utils";
+
+const VALID_PRESET_IDS = new Set(listOAuthPresetIds());
 
 const directory = path.join(process.cwd(), "vendored-openapi");
 const manifest = JSON.parse(
@@ -39,6 +42,11 @@ for (const entry of manifest.integrations) {
   }
   if (!/^[a-z0-9][a-z0-9-]*\.json$/.test(entry.specFile)) {
     throw new Error(`${entry.slug}: specFile must be a local JSON filename.`);
+  }
+  if (entry.presetId !== undefined && !VALID_PRESET_IDS.has(entry.presetId)) {
+    throw new Error(
+      `${entry.slug}: presetId "${entry.presetId}" is not a known OAuth preset (${[...VALID_PRESET_IDS].join(", ")}).`,
+    );
   }
   if (
     !entry.baseUrl.startsWith("https://") ||

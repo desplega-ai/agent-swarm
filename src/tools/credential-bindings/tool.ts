@@ -15,6 +15,7 @@ import {
   upsertCredentialBinding,
 } from "@/be/script-connections";
 import { assertOAuthAppUrlsSafe, assertOAuthProviderIsNotReserved } from "@/oauth/app-validation";
+import { getOAuthPreset, hydrateOAuthAppFromPreset, listOAuthPresetIds } from "@/oauth/presets";
 import { buildAuthorizationUrl } from "@/oauth/wrapper";
 import { can } from "@/rbac";
 import {
@@ -50,6 +51,7 @@ const credentialBindingsOutputSchema = z.object({
   provider: z.string().optional(),
   authorizeUrl: z.string().optional(),
   redirectUri: z.string().optional(),
+  setupHints: z.array(z.string()).optional(),
   bindings: z.array(credentialBindingToolBindingSchema),
 });
 
@@ -105,6 +107,13 @@ const credentialBindingsInputSchema = z.object({
     .max(255)
     .optional()
     .describe("OAuth authorization ID required when authKind is oauth."),
+  presetId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "Curated OAuth preset id (e.g. google, slack, github) for oauth-app-upsert. Fills endpoints/scopes/quirks; explicit fields still win. Only clientId + clientSecret are then required.",
+    ),
   provider: providerSchema
     .optional()
     .describe("OAuth provider slug for oauth-app-upsert and oauth-authorize-url."),
@@ -207,37 +216,55 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
       const bindings = currentBindings();
 
       if (args.action === "oauth-app-upsert") {
-        if (
-          !args.provider ||
-          !args.clientId ||
-          !args.clientSecret ||
-          !args.authorizeUrl ||
-          !args.tokenUrl ||
-          !args.scopes
-        ) {
+        // A presetId fills endpoints/scopes/quirks; explicit fields still win.
+        const preset = args.presetId ? getOAuthPreset(args.presetId) : null;
+        if (args.presetId && !preset) {
+          const message = `Unknown presetId "${args.presetId}". Valid preset ids: ${listOAuthPresetIds().join(", ")}.`;
           return {
-            content: [
-              {
-                type: "text",
-                text: "provider, clientId, clientSecret, authorizeUrl, tokenUrl, and scopes are required for oauth-app-upsert.",
-              },
-            ],
+            content: [{ type: "text", text: message }],
             structuredContent: {
               yourAgentId: requestInfo.agentId,
               success: false,
-              message:
-                "provider, clientId, clientSecret, authorizeUrl, tokenUrl, and scopes are required for oauth-app-upsert.",
+              message,
+              bindings,
+            },
+          };
+        }
+
+        const hydrated = preset
+          ? hydrateOAuthAppFromPreset(preset, {
+              provider: args.provider,
+              authorizeUrl: args.authorizeUrl,
+              tokenUrl: args.tokenUrl,
+              scopes: args.scopes,
+              extraParams: args.extraParams,
+              tokenAuthStyle: args.tokenAuthStyle,
+              tokenBodyFormat: args.tokenBodyFormat,
+            })
+          : null;
+
+        const provider = hydrated?.provider ?? args.provider;
+        const authorizeUrl = hydrated?.authorizeUrl ?? args.authorizeUrl;
+        const tokenUrl = hydrated?.tokenUrl ?? args.tokenUrl;
+        const scopes = hydrated?.scopes ?? args.scopes;
+
+        if (!provider || !args.clientId || !args.clientSecret || !authorizeUrl || !tokenUrl) {
+          const message =
+            "clientId, clientSecret, and (provider, authorizeUrl, tokenUrl — supplied directly or via presetId) are required for oauth-app-upsert.";
+          return {
+            content: [{ type: "text", text: message }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message,
               bindings,
             },
           };
         }
 
         try {
-          assertOAuthProviderIsNotReserved(args.provider);
-          assertOAuthAppUrlsSafe({
-            authorizeUrl: args.authorizeUrl,
-            tokenUrl: args.tokenUrl,
-          });
+          assertOAuthProviderIsNotReserved(provider);
+          assertOAuthAppUrlsSafe({ authorizeUrl, tokenUrl });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           return {
@@ -251,32 +278,48 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
           };
         }
 
-        const redirectUri = genericOAuthRedirectUri(args.provider);
-        upsertOAuthApp(args.provider, {
+        const extraParams = hydrated?.extraParams ?? args.extraParams;
+        const tokenAuthStyle = hydrated?.tokenAuthStyle ?? args.tokenAuthStyle;
+        const tokenBodyFormat = hydrated?.tokenBodyFormat ?? args.tokenBodyFormat;
+
+        const redirectUri = genericOAuthRedirectUri(provider);
+        upsertOAuthApp(provider, {
           clientId: args.clientId,
           clientSecret: args.clientSecret,
-          authorizeUrl: args.authorizeUrl,
-          tokenUrl: args.tokenUrl,
+          authorizeUrl,
+          tokenUrl,
           redirectUri,
-          scopes: args.scopes.join(","),
-          ...(args.extraParams ? { extraParams: args.extraParams } : {}),
-          ...(args.tokenAuthStyle ? { tokenAuthStyle: args.tokenAuthStyle } : {}),
-          ...(args.tokenBodyFormat ? { tokenBodyFormat: args.tokenBodyFormat } : {}),
+          scopes: (scopes ?? []).join(","),
+          ...(extraParams ? { extraParams } : {}),
+          ...(tokenAuthStyle ? { tokenAuthStyle } : {}),
+          ...(tokenBodyFormat ? { tokenBodyFormat } : {}),
+          ...(hydrated?.scopeSeparator ? { scopeSeparator: hydrated.scopeSeparator } : {}),
+          ...(hydrated?.revocationUrl ? { revocationUrl: hydrated.revocationUrl } : {}),
+          ...(hydrated?.userinfoUrl ? { userinfoUrl: hydrated.userinfoUrl } : {}),
+          ...(hydrated?.requiresRefreshTokenRotation !== undefined
+            ? { requiresRefreshTokenRotation: hydrated.requiresRefreshTokenRotation }
+            : {}),
+          ...(hydrated ? { source: hydrated.source } : {}),
         });
 
+        const hintText =
+          hydrated && hydrated.setupHints.length > 0
+            ? `\nSetup hints:\n${hydrated.setupHints.map((hint) => `- ${hint}`).join("\n")}`
+            : "";
         return {
           content: [
             {
               type: "text",
-              text: `OAuth app ${args.provider} saved. Redirect URI: ${redirectUri}`,
+              text: `OAuth app ${provider} saved. Redirect URI: ${redirectUri}${hintText}`,
             },
           ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: true,
-            message: `OAuth app ${args.provider} saved.`,
-            provider: args.provider,
+            message: `OAuth app ${provider} saved.`,
+            provider,
             redirectUri,
+            ...(hydrated ? { setupHints: hydrated.setupHints } : {}),
             bindings: currentBindings(),
           },
         };

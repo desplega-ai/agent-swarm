@@ -114,7 +114,7 @@
       "docsUrl": "https://developers.google.com/workspace/gmail/api/reference/rest",
       "domain": "gmail.googleapis.com",
       "name": "Gmail",
-      "presetId": "gmail",
+      "presetId": "google",
       "refreshMode": "operator-review",
       "slug": "gmail",
       "sourceSemantics": "operator-reference",

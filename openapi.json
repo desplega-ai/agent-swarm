@@ -10493,6 +10493,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "presetId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
                   "provider": {
                     "type": "string",
                     "minLength": 1,
@@ -10520,8 +10524,7 @@
                     "items": {
                       "type": "string",
                       "minLength": 1
-                    },
-                    "default": []
+                    }
                   },
                   "extraParams": {
                     "type": "object",
@@ -10545,10 +10548,7 @@
                   }
                 },
                 "required": [
-                  "provider",
-                  "clientId",
-                  "authorizeUrl",
-                  "tokenUrl"
+                  "clientId"
                 ]
               }
             }
@@ -10563,6 +10563,26 @@
           },
           "403": {
             "description": "Only the lead agent can manage script connections"
+          }
+        }
+      }
+    },
+    "/api/oauth-presets": {
+      "get": {
+        "operationId": "oauth_presets_list",
+        "summary": "List curated OAuth presets for app-creation pickers",
+        "description": "Static curated OAuth presets (endpoints, scopes, quirks, and setup hints). Contains no secrets; client credentials are always customer-supplied.",
+        "tags": [
+          "Script Connections"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Curated OAuth presets"
           }
         }
       }
