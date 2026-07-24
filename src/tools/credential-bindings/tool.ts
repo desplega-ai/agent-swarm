@@ -231,23 +231,41 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
       }
 
       const agent = getAgentById(requestInfo.agentId);
+      // Gate EACH action behind the same verb its HTTP counterpart uses, so a
+      // custom role granting only `credential-binding.manage` can't reach the
+      // OAuth app/authorization powers this tool now exposes — powers the HTTP
+      // routes gate behind `oauth-app.manage` (oauth_apps_upsert) and
+      // `oauth-authorization.manage` (oauth_apps_authorize_url). Base credential
+      // binding + read actions keep `credential-binding.manage`.
+      const requiredVerb =
+        args.action === "oauth-app-upsert"
+          ? "oauth-app.manage"
+          : args.action === "oauth-authorize-url"
+            ? "oauth-authorization.manage"
+            : "credential-binding.manage";
+      const denyMessage =
+        requiredVerb === "oauth-app.manage"
+          ? "Only the lead can manage OAuth apps."
+          : requiredVerb === "oauth-authorization.manage"
+            ? "Only the lead can manage OAuth authorizations."
+            : "Only the lead can manage credential bindings.";
       const decision = can({
         principal: {
           kind: "agent",
           agentId: requestInfo.agentId,
           isLead: agent?.isLead ?? false,
         },
-        verb: "credential-binding.manage",
+        verb: requiredVerb,
         resource: { kind: "none" },
         source: "mcp",
       });
       if (!decision.allow) {
         return {
-          content: [{ type: "text", text: "Only the lead can manage credential bindings." }],
+          content: [{ type: "text", text: denyMessage }],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
-            message: "Only the lead can manage credential bindings.",
+            message: denyMessage,
             bindings: [],
           },
         };

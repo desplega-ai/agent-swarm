@@ -235,6 +235,49 @@ describe("embedded connection auth", () => {
     ).rejects.toThrow(/was not found/);
   });
 
+  test("openapi upsert with an unknown oauth authorization is rejected, not swallowed as a generationError", async () => {
+    // A valid inline spec — generation itself would succeed. The bad auth input
+    // must fail the upsert with a thrown error rather than being swallowed into
+    // `generationError` (which the openapi try/catch previously did, then saved
+    // the connection with the managed auth binding cleared).
+    const spec = JSON.stringify({
+      openapi: "3.0.0",
+      info: { title: "t", version: "1" },
+      servers: [{ url: "https://api.vendor.test" }],
+      paths: {},
+    });
+    await expect(
+      upsertScriptConnection({
+        slug: "openapiBadAuth",
+        kind: "openapi",
+        openapiSpecJson: spec,
+        auth: { type: "oauth", authorizationId: "does-not-exist" },
+      }),
+    ).rejects.toThrow(/was not found/);
+
+    // The rejection happens before any DB write — no connection row is saved.
+    const row = getDb()
+      .prepare<{ id: string }, [string]>("SELECT id FROM script_connections WHERE slug = ?")
+      .get("openapiBadAuth");
+    expect(row).toBeNull();
+  });
+
+  test("openapi upsert soft-fails a genuine spec-generation problem into generationError", async () => {
+    // Valid baseUrl + no auth (so auth derivation is a no-op), but a spec body
+    // that is neither JSON nor YAML-mapping parseable. That is a genuine
+    // generation problem and must STILL soft-fail (persist with generationError),
+    // proving the auth-validation rethrow did not turn every openapi error hard.
+    const connection = await upsertScriptConnection({
+      slug: "openapiBadSpec",
+      kind: "openapi",
+      baseUrl: "https://api.vendor.test",
+      openapiSpecJson: "::: not : valid : openapi :::",
+      auth: { type: "none" },
+    });
+    createdConnectionIds.push(connection.id);
+    expect(connection.generationError).not.toBeNull();
+  });
+
   test("re-upsert with a changed slug re-derives the managed binding", async () => {
     createdConfigKeys.push("connection.rederiveVendor.secret");
     const connection = await upsertScriptConnection({

@@ -127,6 +127,28 @@ describe("sweepOAuthTokenRefresh", () => {
     expect(getOAuthTokens("vendor_a")?.accessToken).toBe("vendor_a-old-access-token");
   });
 
+  test("skips a non-expiring (NULL expiry) row instead of proactively refreshing it", async () => {
+    upsertOAuthApp("vendor_a", appConfig("vendor_a"));
+    // GitHub-preset shape: a live token WITH a refresh token but NO expiry.
+    // NULL expiry means "does not expire" — the sweep must not treat it as
+    // expiring, must not refresh it proactively, and must never mark it
+    // refresh-failed.
+    storeOAuthTokens("vendor_a", {
+      accessToken: "vendor_a-old-access-token",
+      refreshToken: "vendor_a-refresh-token",
+      expiresAt: null,
+      scope: "read,write",
+    });
+
+    const captured = mockTokenEndpoint();
+    const result = await sweepOAuthTokenRefresh();
+
+    expect(result).toEqual({ checked: 1, refreshed: 0, skipped: 1, failed: [] });
+    expect(captured).toHaveLength(0);
+    expect(authorizationStatus("vendor_a")).toBe("active");
+    expect(getOAuthTokens("vendor_a")?.accessToken).toBe("vendor_a-old-access-token");
+  });
+
   test("skips fresh rows that are neither expiring nor stale", async () => {
     upsertOAuthApp("vendor_a", appConfig("vendor_a"));
     seedTokens("vendor_a", { expiresInMs: 24 * 60 * 60 * 1000 }); // expires in 24h, just updated

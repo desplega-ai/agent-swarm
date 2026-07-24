@@ -30,6 +30,7 @@
     "plugin/skills/",
     "plugin/pi-skills/",
     "templates/",
+    "vendored-openapi/",
     "openapi.json"
   ],
   "module": "src/http.ts",

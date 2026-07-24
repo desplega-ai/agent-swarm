@@ -219,9 +219,11 @@ export async function exchangeCode(
     codeVerifier: pending.codeVerifier,
     redirectUri: pending.redirectUri,
   });
+  // No `expires_in` → non-expiring token: persist NULL (never proactively
+  // refresh) rather than fabricating an expiry. See oauth-callback.ts.
   const expiresAt = tokens.expiresIn
     ? new Date(Date.now() + tokens.expiresIn * 1000).toISOString()
-    : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    : null;
   storeOAuthTokens(config.provider, {
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken ?? null,
@@ -293,7 +295,7 @@ export async function performTokenRefreshRequest(
   refreshToken?: string;
   expiresIn?: number;
   scope?: string;
-  expiresAt: string;
+  expiresAt: string | null;
 }> {
   const response = await fetch(config.tokenUrl, {
     method: "POST",
@@ -329,9 +331,12 @@ export async function performTokenRefreshRequest(
     );
   }
 
+  // No `expires_in` → non-expiring token stays non-expiring across refreshes:
+  // NULL, not a fabricated 24h expiry that would re-arm the sweep against a
+  // token the provider never expires.
   const expiresAt = data.expires_in
     ? new Date(Date.now() + data.expires_in * 1000).toISOString()
-    : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    : null;
 
   return {
     accessToken: data.access_token,

@@ -16,11 +16,15 @@ import {
   listAuthorizationsForApp,
   upsertOAuthApp,
 } from "../be/db-queries/oauth";
-import { getOAuthProviderConfig } from "../be/oauth-credential-bindings";
+import {
+  getOAuthBindingTokenStatus,
+  getOAuthProviderConfig,
+} from "../be/oauth-credential-bindings";
 import { handleOAuthCallback } from "../http/oauth-callback";
 import { handleGenericOAuth } from "../http/oauth-generic";
 import { handleScriptConnections } from "../http/script-connections";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { ensureAuthorizationTokenOrThrow } from "../oauth/ensure-token";
 import { captureIdentity } from "../oauth/identity-capture";
 import { buildAuthorizationUrl } from "../oauth/wrapper";
 
@@ -92,6 +96,17 @@ beforeAll(async () => {
           expires_in: 3600,
           refresh_token: "mock-refresh-token",
           scope: "read write",
+        });
+      }
+      if (url.pathname === "/token-noexpiry") {
+        // GitHub-preset style: a long-lived token with NO expires_in and NO
+        // refresh_token. The callback must store a NULL expiry, not a
+        // fabricated one.
+        lastTokenBody = await req.text();
+        return Response.json({
+          access_token: "mock-access-token",
+          token_type: "bearer",
+          scope: "read",
         });
       }
       if (url.pathname === "/token-fail") {
@@ -188,6 +203,41 @@ describe("static OAuth callback + multi-authorization flow", () => {
     expect(labels).toEqual(["sales", "support"]);
     // Same support authorization id preserved.
     expect(getAuthorizationById(supportAuth.id)?.label).toBe("support");
+  });
+
+  test("callback with no expires_in stores a NULL expiry and the binding resolves without a refresh-fail", async () => {
+    const provider = "flow-noexpiry";
+    // Long-lived token, no refresh token (GitHub-preset shape). Point the token
+    // URL at the endpoint that omits expires_in.
+    upsertOAuthApp(provider, {
+      ...testApp(provider),
+      tokenUrl: `${providerBase}/token-noexpiry`,
+    });
+    const appId = getOAuthAppIdByProvider(provider)!;
+    const config = getOAuthProviderConfig(provider)!;
+    const pending = await buildAuthorizationUrl(config, {
+      appId,
+      label: "default",
+      flow: "generic",
+    });
+
+    const res = await driveStaticCallback(pending.state);
+    expect(res.status).toBe(200);
+
+    const auth = listAuthorizationsForApp(appId)[0]!;
+    // The 24h fabrication is gone: no expires_in → NULL expiry, no refresh token.
+    expect(auth.expiresAt).toBeNull();
+    expect(auth.refreshToken).toBeNull();
+    expect(auth.status).toBe("active");
+
+    // A NULL expiry reads as "ok" (does not expire), so a binding resolves and
+    // the reactive refresh core is a no-op — it must NOT mark the row
+    // refresh-failed just because there's no refresh token to rotate.
+    expect(getOAuthBindingTokenStatus(auth.id)).toBe("ok");
+    await ensureAuthorizationTokenOrThrow(auth.id);
+    const after = getAuthorizationById(auth.id);
+    expect(after?.status).toBe("active");
+    expect(after?.lastErrorMessage ?? null).toBeNull();
   });
 
   test("callback token-exchange failure scrubs the app clientSecret from the error", async () => {

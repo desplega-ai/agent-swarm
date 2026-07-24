@@ -24,10 +24,28 @@ type VendoredOpenapiManifest = {
 
 export const VENDORED_OPENAPI_DIR = "vendored-openapi";
 
+/**
+ * Candidate directory relative to THIS module. Ships as `src/be/` inside the
+ * published npm package, so `../../vendored-openapi` reaches the packaged specs
+ * (which the package.json `files` whitelist now includes). Works identically in
+ * a source checkout. Returns null in environments where `import.meta.dir` is
+ * unavailable (e.g. a fully-compiled binary) — the cwd//app fallbacks cover
+ * those.
+ */
+function moduleRelativeVendoredDir(): string | null {
+  const moduleDir = import.meta.dir;
+  if (!moduleDir) return null;
+  return path.join(moduleDir, "..", "..", VENDORED_OPENAPI_DIR);
+}
+
 function vendoredOpenapiDirectories(): string[] {
   const explicitPath = process.env.VENDORED_OPENAPI_DIR;
+  const moduleRelative = moduleRelativeVendoredDir();
   return [
     ...(explicitPath ? [explicitPath] : []),
+    // Resolve from the module first so the published npm package (cwd = the
+    // operator's dir, no /app) finds its bundled specs.
+    ...(moduleRelative ? [moduleRelative] : []),
     path.join(process.cwd(), VENDORED_OPENAPI_DIR),
     path.join(process.cwd(), "..", VENDORED_OPENAPI_DIR),
     path.join("/app", VENDORED_OPENAPI_DIR),

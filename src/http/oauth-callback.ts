@@ -204,9 +204,15 @@ export async function completeGenericOAuthCallback(
       codeVerifier: pending.codeVerifier,
       redirectUri: pending.redirectUri,
     });
+    // No `expires_in` means the provider issued a non-expiring token (e.g. the
+    // GitHub OAuth preset, which returns a long-lived token and no refresh
+    // token). Store NULL — a fabricated expiry would later drive the sweep /
+    // resolveOAuthBindingToken to mark the authorization refresh-failed (no
+    // refresh token to rotate) while the token is still perfectly valid. NULL
+    // means "does not expire / never proactively refresh" throughout.
     const expiresAt = tokens.expiresIn
       ? new Date(Date.now() + tokens.expiresIn * 1000).toISOString()
-      : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      : null;
 
     const authorization = upsertAuthorization({
       appId: pending.appId,

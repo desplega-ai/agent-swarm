@@ -673,7 +673,7 @@ export function storeOAuthTokens(
   data: {
     accessToken: string;
     refreshToken?: string | null;
-    expiresAt: string;
+    expiresAt: string | null;
     scope?: string | null;
   },
 ): void {
@@ -700,7 +700,7 @@ export function updateOAuthTokensAfterRefresh(
   data: {
     accessToken: string;
     refreshToken: string;
-    expiresAt: string;
+    expiresAt: string | null;
     scope?: string | null;
     expectedTokenVersion?: number;
   },

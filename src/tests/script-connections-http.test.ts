@@ -1339,10 +1339,15 @@ describe("POST /api/oauth-authorizations/{id}/refresh", () => {
 
     expect(res.status).toBe(502);
     expect(res.text).toContain("did not include a rotated refresh_token");
-    // Nothing persisted: the authorization was never marked refreshed.
+    // Tokens were never rotated (no successful refresh persisted). Routing
+    // through the shared locked refresh core means a genuine rotation failure
+    // now also marks the row refresh-failed — correct, since the old refresh
+    // token may be provider-invalidated, so the sweep must retry it.
     const after = getAuthorizationById(authorization.id);
     expect(after?.lastRefreshedAt).toBeNull();
-    expect(after?.status).toBe("active");
+    expect(after?.accessToken).toBe("old-access-should-not-leak");
+    expect(after?.refreshToken).toBe("old-refresh-should-not-leak");
+    expect(after?.status).toBe("refresh-failed");
   });
 
   test("200 and rotates when the provider returns a new refresh_token", async () => {

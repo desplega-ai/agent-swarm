@@ -1,7 +1,8 @@
 import { Database } from "bun:sqlite";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, unlinkSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import {
@@ -13,6 +14,11 @@ import {
 import { closeDb, createAgent, getDb, initDb } from "../be/db";
 import { runMigrations } from "../be/migrations/runner";
 import { refreshScriptConnection, upsertScriptConnection } from "../be/script-connections";
+import {
+  listVendoredOpenapiEntries,
+  readVendoredOpenapiSpec,
+  resolveVendoredOpenapiDirectory,
+} from "../be/vendored-openapi";
 import {
   handleScriptConnections,
   resetIntegrationsCatalogCacheForTesting,
@@ -132,6 +138,29 @@ describe("vendored OpenAPI", () => {
     const refreshed = await refreshScriptConnection(connection.id);
     expect(refreshed?.generationError).toBeNull();
     expect(refreshed?.version).toBe(connection.version + 1);
+  });
+
+  test("resolves vendored specs from the module location when cwd is unrelated (npm-package install)", () => {
+    // Simulate the published-package case: the operator runs from an unrelated
+    // cwd and there is no /app. Only the module-relative candidate
+    // (../../vendored-openapi from src/be) can resolve — proving the specs are
+    // found without depending on process.cwd() or the Docker /app fallback.
+    const originalCwd = process.cwd();
+    const savedEnv = process.env.VENDORED_OPENAPI_DIR;
+    delete process.env.VENDORED_OPENAPI_DIR;
+    const scratch = mkdtempSync(path.join(tmpdir(), "vendored-cwd-"));
+    try {
+      process.chdir(scratch);
+      const directory = resolveVendoredOpenapiDirectory();
+      expect(directory).not.toBeNull();
+      expect(listVendoredOpenapiEntries().length).toBeGreaterThan(0);
+      expect(readVendoredOpenapiSpec("github").entry.slug).toBe("github");
+    } finally {
+      process.chdir(originalCwd);
+      if (savedEnv === undefined) delete process.env.VENDORED_OPENAPI_DIR;
+      else process.env.VENDORED_OPENAPI_DIR = savedEnv;
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
 
   test("HTTP upsert accepts a vendored spec source without a caller-provided base URL", async () => {

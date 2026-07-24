@@ -13,7 +13,6 @@ import {
   getOAuthTokens,
   listAuthorizationsForApp,
   type OAuthAuthorization,
-  updateAuthorizationTokens,
   upsertOAuthApp,
 } from "@/be/db-queries/oauth";
 import {
@@ -39,7 +38,7 @@ import {
 } from "@/be/script-connections";
 import { listVendoredOpenapiEntries } from "@/be/vendored-openapi";
 import { assertOAuthAppUrlsSafe, assertOAuthEgressUrlSafe } from "@/oauth/app-validation";
-import { forceRefreshTokenOrThrow } from "@/oauth/ensure-token";
+import { forceRefreshAuthorizationOrThrow, forceRefreshTokenOrThrow } from "@/oauth/ensure-token";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
 import {
   getOAuthPreset,
@@ -47,7 +46,7 @@ import {
   listOAuthPresetIds,
   listOAuthPresets,
 } from "@/oauth/presets";
-import { buildAuthorizationUrl, performTokenRefreshRequest } from "@/oauth/wrapper";
+import { buildAuthorizationUrl } from "@/oauth/wrapper";
 import { can } from "@/rbac";
 import {
   CredentialBindingSchema,
@@ -1987,36 +1986,35 @@ export async function handleScriptConnections(
       return true;
     }
     try {
-      const config = oauthAppToProviderConfig(app);
-      // Route through the rotation-enforcing refresh core: for apps with
-      // requiresRefreshTokenRotation (e.g. Atlassian/Jira) a 200 that omits a
-      // new refresh_token throws here instead of silently persisting the old
-      // (possibly already-invalidated) token.
-      const tokens = await performTokenRefreshRequest(config, authorization.refreshToken);
-      const updated = updateAuthorizationTokens(authorization.id, {
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken ?? authorization.refreshToken,
-        expiresAt: tokens.expiresAt,
-        ...(tokens.scope != null ? { scope: tokens.scope } : {}),
-        expectedTokenVersion: authorization.tokenVersion,
-      });
-      if (!updated) {
-        jsonError(res, "Authorization changed during refresh; retry.", 409);
-        return true;
-      }
-      json(res, { ok: true, status: updated.status, expiresAt: updated.expiresAt });
+      // Route through the shared locked refresh core (per-authorization
+      // in-process queue + cross-process DB lock + optimistic-concurrency CAS)
+      // with force semantics — it refreshes even when the token isn't near
+      // expiry. This prevents double-exchanging a rotating refresh token against
+      // a concurrent sweep/reactive refresh, and — because the core detects a
+      // concurrent tokenVersion bump and no-ops rather than losing a CAS — a
+      // provider-side rotation performed by that other writer is never
+      // discarded (the 409 path used to brick the stored refresh token).
+      // Rotation enforcement (requiresRefreshTokenRotation → reject a 200 that
+      // omits a new refresh_token) and secret-scrubbed failure messages both
+      // come from the core; a genuine failure also marks the row refresh-failed.
+      await forceRefreshAuthorizationOrThrow(authorization.id);
     } catch (err) {
-      // performTokenRefreshRequest folds the provider response body into
-      // err.message, and providers can echo the submitted refresh_token /
-      // client_secret. scrubSecrets only knows env/vendor-fixed shapes, so
-      // register this attempt's DB-sourced secrets as volatile before scrubbing
-      // (same as the refresh core does before persisting failures).
+      // The core already registers the attempt's refresh_token / access_token /
+      // client_secret as volatile and scrubs them out of OAuthRefreshError.message
+      // before it is thrown; scrub again defensively for any non-core error.
       if (authorization.refreshToken)
         registerVolatileSecret(authorization.refreshToken, "oauth-refresh-token");
       if (app.clientSecret) registerVolatileSecret(app.clientSecret, "oauth-client-secret");
       const message = scrubSecrets(err instanceof Error ? err.message : String(err));
       jsonError(res, `Refresh failed: ${message}`, 502);
+      return true;
     }
+    const refreshed = getAuthorizationById(authorization.id);
+    if (!refreshed) {
+      jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
+      return true;
+    }
+    json(res, { ok: true, status: refreshed.status, expiresAt: refreshed.expiresAt });
     return true;
   }
 

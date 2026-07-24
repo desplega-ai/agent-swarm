@@ -131,27 +131,30 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * An authorization needs a refresh when it is expiring within `bufferMs`, has
- * no expiry, or is already in a non-terminal broken state (`refresh-failed` /
- * `expired`) — so the sweep and on-demand resolution retry those each pass and
- * self-heal once the provider recovers.
+ * An authorization needs a refresh when it is expiring within `bufferMs`, is
+ * already in a non-terminal broken state (`refresh-failed` / `expired`), or
+ * when `force` is set — so the sweep and on-demand resolution retry broken
+ * rows each pass and self-heal once the provider recovers.
+ *
+ * A NULL `expiresAt` means the provider issued a non-expiring token (e.g. the
+ * GitHub OAuth preset, which has no refresh token). It is treated as "does not
+ * expire / never proactively refresh" — NOT as expired. Refreshing it would
+ * mark it `refresh-failed` (no refresh token to rotate) while the token is
+ * still valid. Only an explicit `force` (manual refresh) or a broken status
+ * refreshes such a row.
  */
 function authorizationNeedsRefresh(
   authorization: OAuthAuthorization,
   bufferMs = DEFAULT_REFRESH_BUFFER_MS,
+  force = false,
 ): boolean {
   if (authorization.status === "refresh-failed" || authorization.status === "expired") return true;
-  if (!authorization.expiresAt) return true;
+  if (force) return true;
+  if (!authorization.expiresAt) return false;
   const expiresAt = new Date(authorization.expiresAt).getTime();
   if (Number.isNaN(expiresAt)) return true;
   return expiresAt - Date.now() < bufferMs;
 }
-
-/**
- * Buffer large enough that any stored expiry counts as "expiring soon",
- * turning a refresh call into an unconditional refresh.
- */
-const FORCE_REFRESH_BUFFER_MS = 1000 * 60 * 60 * 24 * 365 * 100; // ~100 years
 
 // ─── Refresh notification (cached provider-client invalidation) ──────────────
 //
@@ -216,10 +219,11 @@ function notifyAuthorizationRefreshed(event: AuthorizationRefreshedEvent): void 
 export async function ensureAuthorizationTokenOrThrow(
   authorizationId: string,
   bufferMs?: number,
+  force = false,
 ): Promise<void> {
   const initial = getAuthorizationById(authorizationId);
   if (!initial || initial.status === "revoked") return;
-  if (!authorizationNeedsRefresh(initial, bufferMs)) return;
+  if (!authorizationNeedsRefresh(initial, bufferMs, force)) return;
 
   await withAuthorizationRefreshLock(authorizationId, async () => {
     const waitStartedAt = Date.now();
@@ -228,11 +232,11 @@ export async function ensureAuthorizationTokenOrThrow(
       const current = getAuthorizationById(authorizationId);
       if (!current || current.status === "revoked") return;
       // Another caller refreshed (tokenVersion bumped) since this call loaded
-      // the row — its work satisfies ours. Without this check a waiter whose
-      // bufferMs exceeds the token lifetime (e.g. force refresh) would rotate
-      // again immediately after the winner, burning provider refresh calls.
+      // the row — its work satisfies ours. Without this check a waiter that
+      // force-refreshes would rotate again immediately after the winner,
+      // burning provider refresh calls.
       if (current.tokenVersion !== initial.tokenVersion) return;
-      if (!authorizationNeedsRefresh(current, bufferMs)) return;
+      if (!authorizationNeedsRefresh(current, bufferMs, force)) return;
 
       const app = getOAuthAppById(current.appId);
       // No provider-facing app config (missing, or a DCR/MCP app): nothing this
@@ -264,7 +268,7 @@ export async function ensureAuthorizationTokenOrThrow(
         const locked = getAuthorizationById(authorizationId);
         if (!locked || locked.status === "revoked") return;
         if (locked.tokenVersion !== initial.tokenVersion) return;
-        if (!authorizationNeedsRefresh(locked, bufferMs)) return;
+        if (!authorizationNeedsRefresh(locked, bufferMs, force)) return;
 
         const lockedApp = getOAuthAppById(locked.appId);
         if (!lockedApp || lockedApp.mcpServerId !== null) return;
@@ -360,7 +364,9 @@ export async function ensureAuthorizationToken(
  * and the background sweep.
  */
 export async function forceRefreshAuthorizationOrThrow(authorizationId: string): Promise<void> {
-  await ensureAuthorizationTokenOrThrow(authorizationId, FORCE_REFRESH_BUFFER_MS);
+  // `force` refreshes regardless of remaining lifetime — including non-expiring
+  // (NULL expiresAt) tokens, which the buffer path deliberately skips.
+  await ensureAuthorizationTokenOrThrow(authorizationId, undefined, true);
 }
 
 // ─── Provider-string compatibility wrappers ──────────────────────────────────

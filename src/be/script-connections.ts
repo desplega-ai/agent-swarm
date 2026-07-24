@@ -1083,6 +1083,21 @@ type DerivedConnectionBinding = {
  * binding NEVER falls back to a header (see the Phase-0 regression). Scripts
  * only ever see the `[REDACTED:<key>]` placeholder.
  */
+/**
+ * Marks an auth-input validation failure from {@link deriveConnectionBinding}
+ * (unknown authorizationId, missing/ambiguous secret+configKey, template that
+ * omits the placeholder, …). The OpenAPI generation try/catch rethrows these so
+ * a bad auth change fails the upsert (HTTP 4xx) instead of being swallowed as a
+ * `generationError` that then clears the managed binding and saves the row.
+ * Genuine spec-generation problems remain soft failures.
+ */
+export class ConnectionAuthValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConnectionAuthValidationError";
+  }
+}
+
 function deriveConnectionBinding(
   auth: ConnectionAuthInput,
   ctx: {
@@ -1695,12 +1710,20 @@ export async function upsertScriptConnection(data: {
         );
       }
       new URL(effectiveBaseUrl);
-      derived = deriveConnectionBinding(authIntent, {
-        slug: normalizedSlug,
-        baseUrl: effectiveBaseUrl,
-        scope,
-        scopeId,
-      });
+      // Auth derivation validates the caller's auth input (authorizationId,
+      // secret/configKey, template). Those failures must NOT be swallowed as a
+      // generationError below — wrap them so the outer catch rethrows and the
+      // upsert fails loudly instead of clearing the managed binding.
+      try {
+        derived = deriveConnectionBinding(authIntent, {
+          slug: normalizedSlug,
+          baseUrl: effectiveBaseUrl,
+          scope,
+          scopeId,
+        });
+      } catch (err) {
+        throw new ConnectionAuthValidationError(err instanceof Error ? err.message : String(err));
+      }
       const artifacts = buildGeneratedArtifacts({
         slug: data.slug,
         baseUrl: effectiveBaseUrl,
@@ -1711,6 +1734,8 @@ export async function upsertScriptConnection(data: {
       generatedRuntimeJson = artifacts.generatedRuntimeJson;
       generatedAt = now;
     } catch (err) {
+      // Auth-validation failures are hard errors — never a soft generationError.
+      if (err instanceof ConnectionAuthValidationError) throw err;
       if (
         err instanceof Error &&
         err.message ===
