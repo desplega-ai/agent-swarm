@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.119.6] - 2026-07-24
+
+### Changed
+- **GitHub Actions are now pinned to immutable commit SHAs** (#991) — all 26 workflow action references are locked to reviewed revisions, reducing supply-chain drift while preserving Dependabot-managed updates.
+
 ## [1.119.5] - 2026-07-23
 
 ### Changed
