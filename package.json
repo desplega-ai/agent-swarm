@@ -59,6 +59,7 @@
   ],
   "scripts": {
     "build:pi-skills": "bun run plugin/build-pi-skills.ts",
+    "build:script-types": "bun scripts/bundle-script-types.ts",
     "build:cli": "bun run scripts/build-cli.ts",
     "mono:build": "turbo run build",
     "mono:test": "turbo run test",
@@ -71,6 +72,7 @@
     "check:api-key-boundary": "bash scripts/check-api-key-boundary.sh",
     "check:vendored-openapi": "bun scripts/check-vendored-openapi.ts",
     "check:rbac-coverage": "bun scripts/check-rbac-coverage.ts",
+    "check:script-types": "bash scripts/check-script-types-freshness.sh",
     "check:audit-columns": "bash scripts/check-audit-columns.sh",
     "lint:structure": "konsistent check",
     "prepare-release": "bun scripts/prepare-release.ts",
