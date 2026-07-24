@@ -77,9 +77,33 @@ function parseMcpPayload(text: string): unknown {
 
 let server: Server;
 let baseUrl: string;
-let savedScriptsOnlyMcp: string | undefined;
 let savedSlackBotToken: string | undefined;
 let savedSlackAppToken: string | undefined;
+let scriptsOnlyEnvQueue = Promise.resolve();
+
+async function withScriptsOnlyMcpEnv<T>(
+  value: string | undefined,
+  callback: () => T | Promise<T>,
+): Promise<T> {
+  const previous = scriptsOnlyEnvQueue;
+  let release!: () => void;
+  scriptsOnlyEnvQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  await previous;
+  const savedValue = process.env.SCRIPTS_ONLY_MCP;
+  if (value === undefined) delete process.env.SCRIPTS_ONLY_MCP;
+  else process.env.SCRIPTS_ONLY_MCP = value;
+
+  try {
+    return await callback();
+  } finally {
+    if (savedValue === undefined) delete process.env.SCRIPTS_ONLY_MCP;
+    else process.env.SCRIPTS_ONLY_MCP = savedValue;
+    release();
+  }
+}
 
 async function mcpPost(
   agentId: string,
@@ -102,7 +126,7 @@ async function mcpPost(
   return { response, payload: text ? parseMcpPayload(text) : null };
 }
 
-async function listTools(agentId: string): Promise<string[]> {
+async function listToolsWithCurrentEnv(agentId: string): Promise<string[]> {
   const initialize = await mcpPost(agentId, {
     jsonrpc: "2.0",
     id: 1,
@@ -135,6 +159,10 @@ async function listTools(agentId: string): Promise<string[]> {
     .sort();
 }
 
+async function listTools(agentId: string, scriptsOnlyEnv?: string): Promise<string[]> {
+  return withScriptsOnlyMcpEnv(scriptsOnlyEnv, () => listToolsWithCurrentEnv(agentId));
+}
+
 function expectFullSurface(toolNames: string[]): void {
   expect(toolNames).toContain("send-task");
   expect(toolNames.length).toBeGreaterThan(SCRIPT_TOOL_NAMES.length);
@@ -149,24 +177,24 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await scriptsOnlyEnvQueue;
   await new Promise<void>((resolve) => server.close(() => resolve()));
   closeDb();
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
-  savedScriptsOnlyMcp = process.env.SCRIPTS_ONLY_MCP;
+beforeEach(async () => {
+  // A retried test attempt can be abandoned while its async MCP handshake is
+  // still resolving. Wait for that request before mutating the shared DB.
+  await scriptsOnlyEnvQueue;
   savedSlackBotToken = process.env.SLACK_BOT_TOKEN;
   savedSlackAppToken = process.env.SLACK_APP_TOKEN;
-  delete process.env.SCRIPTS_ONLY_MCP;
   process.env.SLACK_BOT_TOKEN = "test-bot-token";
   process.env.SLACK_APP_TOKEN = "test-app-token";
   getDb().run("DELETE FROM swarm_config WHERE key = 'SCRIPTS_ONLY_MCP'");
 });
 
 afterEach(() => {
-  if (savedScriptsOnlyMcp === undefined) delete process.env.SCRIPTS_ONLY_MCP;
-  else process.env.SCRIPTS_ONLY_MCP = savedScriptsOnlyMcp;
   if (savedSlackBotToken === undefined) delete process.env.SLACK_BOT_TOKEN;
   else process.env.SLACK_BOT_TOKEN = savedSlackBotToken;
   if (savedSlackAppToken === undefined) delete process.env.SLACK_APP_TOKEN;
@@ -195,6 +223,27 @@ describe("scripts-only MCP gating", () => {
     const agent = createAgent({ name: "full-surface-agent", isLead: false, status: "idle" });
 
     expectFullSurface(await listTools(agent.id));
+  });
+
+  test("isolates concurrent environment overrides across MCP handshakes", async () => {
+    const scriptsOnlyAgent = createAgent({
+      name: "concurrent-scripts-only-agent",
+      isLead: false,
+      status: "idle",
+    });
+    const fullSurfaceAgent = createAgent({
+      name: "concurrent-full-surface-agent",
+      isLead: false,
+      status: "idle",
+    });
+
+    const [scriptsOnlyTools, fullSurfaceTools] = await Promise.all([
+      listTools(scriptsOnlyAgent.id, "true"),
+      listTools(fullSurfaceAgent.id),
+    ]);
+
+    expect(scriptsOnlyTools).toEqual(SCRIPT_TOOL_NAMES);
+    expectFullSurface(fullSurfaceTools);
   });
 
   test("gates one configured agent without affecting another", async () => {
@@ -234,9 +283,7 @@ describe("scripts-only MCP gating", () => {
       key: "SCRIPTS_ONLY_MCP",
       value: "false",
     });
-    process.env.SCRIPTS_ONLY_MCP = "true";
-
-    expect(await listTools(agent.id)).toEqual(SCRIPT_TOOL_NAMES);
+    expect(await listTools(agent.id, "true")).toEqual(SCRIPT_TOOL_NAMES);
   });
 
   test("treats an empty environment value as unset", async () => {
@@ -247,21 +294,20 @@ describe("scripts-only MCP gating", () => {
       key: "SCRIPTS_ONLY_MCP",
       value: "true",
     });
-    process.env.SCRIPTS_ONLY_MCP = "";
-
-    expect(await listTools(agent.id)).toEqual(SCRIPT_TOOL_NAMES);
+    expect(await listTools(agent.id, "")).toEqual(SCRIPT_TOOL_NAMES);
   });
 
-  test("keeps the scripts SDK bridge's explicit full surface", () => {
-    process.env.SCRIPTS_ONLY_MCP = "true";
+  test("keeps the scripts SDK bridge's explicit full surface", async () => {
     upsertSwarmConfig({ scope: "global", key: "SCRIPTS_ONLY_MCP", value: "true" });
 
-    const tools = (
-      createServer({ scriptsOnly: false }) as unknown as {
-        _registeredTools: RegisteredTool;
-      }
-    )._registeredTools;
-    expectFullSurface(Object.keys(tools));
+    await withScriptsOnlyMcpEnv("true", () => {
+      const tools = (
+        createServer({ scriptsOnly: false }) as unknown as {
+          _registeredTools: RegisteredTool;
+        }
+      )._registeredTools;
+      expectFullSurface(Object.keys(tools));
+    });
   });
 });
 
@@ -279,17 +325,17 @@ describe("scripts-only prompt gating", () => {
   });
 
   test("respects an explicit false argument over a true process environment value", async () => {
-    process.env.SCRIPTS_ONLY_MCP = "true";
+    await withScriptsOnlyMcpEnv("true", async () => {
+      const prompt = await getBasePrompt({
+        role: "worker",
+        agentId: "full-surface-prompt-agent",
+        swarmUrl: "swarm.test",
+        scriptsOnly: false,
+      });
 
-    const prompt = await getBasePrompt({
-      role: "worker",
-      agentId: "full-surface-prompt-agent",
-      swarmUrl: "swarm.test",
-      scriptsOnly: false,
+      expect(prompt).not.toContain("## Code-Mode: script tools ONLY");
+      expect(prompt).toContain("#### Slack Tools");
     });
-
-    expect(prompt).not.toContain("## Code-Mode: script tools ONLY");
-    expect(prompt).toContain("#### Slack Tools");
   });
 
   test("uses the scripts-only Slack variant for Slack-originated tasks", async () => {
