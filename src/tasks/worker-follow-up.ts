@@ -1,5 +1,6 @@
 import {
   buildRoutingAffinityFromAgent,
+  type CreateTaskOptions,
   createTaskExtended,
   getActiveTaskCount,
   getAgentById,
@@ -393,6 +394,72 @@ export type CreateRerouteDecisionResult =
   | { kind: "created"; task: AgentTask }
   | { kind: "skipped"; reason: "lead_not_found" | "duplicate_exists" };
 
+function createLeadRerouteDecisionTask(args: {
+  description: string;
+  leadAgentId: string;
+  creatorAgentId?: string;
+  tags?: string[];
+  priority?: number;
+  parentTaskId?: string;
+  context?: CreateTaskOptions;
+}): AgentTask {
+  const context = args.context;
+  return createTaskExtended(args.description, {
+    agentId: args.leadAgentId,
+    creatorAgentId: args.creatorAgentId,
+    source: "system",
+    taskType: "reroute-decision",
+    tags: ["reroute-decision", ...(args.tags ?? [])],
+    priority: args.priority ?? 60,
+    parentTaskId: args.parentTaskId,
+    slackChannelId: context?.slackChannelId,
+    slackThreadTs: context?.slackThreadTs,
+    slackUserId: context?.slackUserId,
+    vcsProvider: context?.vcsProvider,
+    vcsRepo: context?.vcsRepo,
+    vcsEventType: context?.vcsEventType,
+    vcsNumber: context?.vcsNumber,
+    vcsCommentId: context?.vcsCommentId,
+    vcsAuthor: context?.vcsAuthor,
+    vcsUrl: context?.vcsUrl,
+    vcsInstallationId: context?.vcsInstallationId,
+    vcsNodeId: context?.vcsNodeId,
+    dir: context?.dir,
+    requestedByUserId: context?.requestedByUserId,
+    contextKey: context?.contextKey,
+    inheritParentOutputSchema: false,
+  });
+}
+
+/**
+ * Convert a routing-engine block into a real Lead-owned control task. This is
+ * also the shared task-creation shape used by crash and pool reroute decisions.
+ */
+export function createRoutingBlockDecisionTask(args: {
+  description: string;
+  reason: string;
+  options?: CreateTaskOptions;
+}): AgentTask {
+  const leadAgent = getLeadAgent();
+  if (!leadAgent) {
+    throw new Error("Cannot create routing block decision task: lead agent not found");
+  }
+  const decision = resolveTemplate("task.routing.blocked.decision", {
+    reason: args.reason,
+    task_desc: args.description.slice(0, 500),
+    proposed_agent: args.options?.agentId ?? "(unassigned)",
+  });
+  return createLeadRerouteDecisionTask({
+    description: decision.text,
+    leadAgentId: leadAgent.id,
+    creatorAgentId: args.options?.creatorAgentId,
+    tags: ["routing-blocked"],
+    priority: Math.min(100, (args.options?.priority ?? 50) + 10),
+    parentTaskId: args.options?.parentTaskId,
+    context: args.options,
+  });
+}
+
 /**
  * Hand the Lead a re-delegation DECISION task for a crash-recovery resume that
  * was pinned to its original agent but never reclaimed within the grace window
@@ -462,20 +529,13 @@ export function createRerouteDecisionTask(args: {
   // Lead-owned `pending` decision task (createTaskExtended derives `pending`
   // from a set agentId). Slack/VCS/etc. context is inherited from the original
   // via parentTaskId. taskType is the distinct "reroute-decision" marker.
-  const created = createTaskExtended(decision.text, {
-    agentId: leadAgent.id,
+  const created = createLeadRerouteDecisionTask({
+    description: decision.text,
+    leadAgentId: leadAgent.id,
     creatorAgentId: original.creatorAgentId,
-    source: "system",
-    taskType: "reroute-decision",
-    tags: ["reroute-decision"],
+    tags: [],
     priority: Math.min(100, (original.priority ?? 50) + 10),
     parentTaskId: original.id,
-    // Inherit Slack/VCS context from the original, but NOT its outputSchema: this
-    // is a control-plane task the Lead completes by re-delegating via send-task,
-    // not by producing the original work's structured output. Inheriting it would
-    // make store-progress reject the Lead's completion and strand the decision
-    // (blocking further escalation via the duplicate-decision guard) — DES-523.
-    inheritParentOutputSchema: false,
   });
 
   return { kind: "created", task: created };
@@ -529,17 +589,13 @@ export function createPoolStarvationDecisionTask(args: {
     artifacts_block: attachmentsBlock,
   });
 
-  const created = createTaskExtended(decision.text, {
-    agentId: leadAgent.id,
+  const created = createLeadRerouteDecisionTask({
+    description: decision.text,
+    leadAgentId: leadAgent.id,
     creatorAgentId: original.creatorAgentId,
-    source: "system",
-    taskType: "reroute-decision",
-    tags: ["reroute-decision", "pool-starvation"],
+    tags: ["pool-starvation"],
     priority: Math.min(100, (original.priority ?? 50) + 10),
     parentTaskId: original.id,
-    // Same rationale as createRerouteDecisionTask: don't hold the Lead's
-    // re-delegation decision to the original work's output contract.
-    inheritParentOutputSchema: false,
   });
 
   return { kind: "created", task: created };

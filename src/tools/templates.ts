@@ -226,6 +226,26 @@ This work will NOT fall back to the unassigned pool — you are the only re-dele
   category: "task_lifecycle",
 });
 
+registerTemplate({
+  eventType: "task.routing.blocked.decision",
+  header: "",
+  defaultBody: `Reroute decision: a lifecycle routing guard blocked task assignment.
+
+Block reason: {{reason}}
+Requested task: "{{task_desc}}"
+Proposed agent: {{proposed_agent}}
+
+## Your job
+
+Review the routing block and decide whether, where, and how to re-delegate this work. Do not execute the requested work yourself. If it is safe to continue, use \`send-task\` with an explicit worker \`agentId\` and a task description that addresses the block reason.`,
+  variables: [
+    { name: "reason", description: "Routing guard block reason" },
+    { name: "task_desc", description: "Blocked task description (truncated to 500 chars)" },
+    { name: "proposed_agent", description: "Originally proposed agent ID or a placeholder" },
+  ],
+  category: "task_lifecycle",
+});
+
 // ============================================================================
 // Pool-starvation decision (routing-affinity Phase 3)
 //

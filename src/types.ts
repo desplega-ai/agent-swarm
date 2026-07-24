@@ -1125,6 +1125,11 @@ export const EventNameSchema = z.enum([
   "script.global_upsert",
   // Schedule events
   "schedule.deleted",
+  // Lifecycle routing events
+  "routing.matched",
+  "routing.applied",
+  "routing.blocked",
+  "routing.handler_failed",
 ]);
 
 export const SwarmEventSchema = z.object({
@@ -2642,3 +2647,25 @@ export const EdgeHandlerSchema = z.object({
   updatedAt: z.string(),
 });
 export type EdgeHandler = z.infer<typeof EdgeHandlerSchema>;
+
+export const RoutingTraceSchema = z.object({
+  id: z.string(),
+  routingRunId: z.string(),
+  taskId: z.string().optional(),
+  edge: EdgeHandlerEdgeSchema,
+  via: z.enum(["creation", "delegation", "claim", "resume", "completion", "prompt"]),
+  handlerId: z.string(),
+  handlerName: z.string(),
+  flavor: EdgeHandlerFlavorSchema,
+  mode: EdgeHandlerModeSchema,
+  matched: z.boolean(),
+  result: z.unknown().optional(),
+  decisive: z.boolean(),
+  suggestion: z.string().optional(),
+  deviated: z.boolean().optional(),
+  dryRun: z.boolean(),
+  error: z.string().optional(),
+  durationMs: z.number().int().nonnegative().optional(),
+  createdAt: z.string(),
+});
+export type RoutingTrace = z.infer<typeof RoutingTraceSchema>;

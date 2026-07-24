@@ -1,6 +1,7 @@
 import type { App } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import {
+  type CreateTaskOptions,
   getAgentById,
   getAgentWorkingOnThread,
   getLeadAgent,
@@ -9,7 +10,8 @@ import {
 } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
-import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { createTaskRouted } from "../tasks/create-task-routed";
+import { withSiblingAwareness } from "../tasks/sibling-awareness";
 import { workflowEventBus } from "../workflows/event-bus";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
 import { enrichSlackUserEmail, resolveSlackUserId, rewriteSlackMentions } from "./enrich";
@@ -34,6 +36,11 @@ const allowedUserIds = (process.env.SLACK_ALLOWED_USER_IDS || "")
   .filter(Boolean);
 
 const filteringEnabled = allowedEmailDomains.length > 0 || allowedUserIds.length > 0;
+
+async function createSlackTaskRouted(description: string, options: CreateTaskOptions) {
+  const aware = withSiblingAwareness(description, options);
+  return createTaskRouted(aware.description, aware.options);
+}
 
 /**
  * Configuration for user filtering.
@@ -613,7 +620,7 @@ export function registerMessageHandler(app: App): void {
       }
 
       const lead = getLeadAgent();
-      createTaskWithSiblingAwareness(fullTaskDescription, {
+      await createSlackTaskRouted(fullTaskDescription, {
         agentId: lead?.id,
         source: "slack",
         slackChannelId: msg.channel,
@@ -686,7 +693,7 @@ export function registerMessageHandler(app: App): void {
       try {
         const latestTask = getMostRecentTaskInThread(msg.channel, threadTs);
         if (agent.isLead) {
-          const task = createTaskWithSiblingAwareness(fullTaskDescription, {
+          const { task, blocked } = await createSlackTaskRouted(fullTaskDescription, {
             agentId: agent.id,
             source: "slack",
             slackChannelId: msg.channel,
@@ -696,12 +703,19 @@ export function registerMessageHandler(app: App): void {
             requestedByUserId,
             contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
           });
+          if (blocked) {
+            results.failed.push({
+              agentName: agent.name,
+              reason: `routing blocked: ${blocked.reason} (Lead decision task ${task.id.slice(0, 8)})`,
+            });
+            continue;
+          }
           results.assigned.push({ agentName: agent.name, taskId: task.id });
           continue;
         }
 
         // Workers receive tasks as before
-        const task = createTaskWithSiblingAwareness(fullTaskDescription, {
+        const { task, blocked } = await createSlackTaskRouted(fullTaskDescription, {
           agentId: agent.id,
           source: "slack",
           slackChannelId: msg.channel,
@@ -710,6 +724,13 @@ export function registerMessageHandler(app: App): void {
           requestedByUserId,
           contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
         });
+        if (blocked) {
+          results.failed.push({
+            agentName: agent.name,
+            reason: `routing blocked: ${blocked.reason} (Lead decision task ${task.id.slice(0, 8)})`,
+          });
+          continue;
+        }
 
         // Check if agent has an in-progress task in this thread (queued follow-up)
         const agentTasks = getTasksByAgentId(agent.id);

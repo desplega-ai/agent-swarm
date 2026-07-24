@@ -13,9 +13,15 @@ import {
   getDb,
   getTaskById,
   hasCapacity,
+  resolveEffectiveTaskOptions,
 } from "@/be/db";
 import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
+import { backfillTraceTaskId } from "@/be/routing-trace-db";
+import { buildRoutingCtx } from "@/routing/ctx";
+import { runBeforeAssign } from "@/routing/engine";
+import { applyRoutingDecisionToOptions } from "@/tasks/create-task-routed";
 import { checkSlackRoutingCoherence } from "@/tasks/slack-routing";
+import { createRoutingBlockDecisionTask } from "@/tasks/worker-follow-up";
 import { findDuplicateTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
@@ -321,6 +327,59 @@ export async function sendTaskHandler(
     }
   }
 
+  const effective = resolveEffectiveTaskOptions(task, {
+    key: assetKey,
+    agentId: effectiveAgentId,
+    creatorAgentId,
+    requestedByUserId,
+    sourceTaskId,
+    taskType,
+    tags,
+    priority,
+    dependsOn,
+    dir,
+    parentTaskId: effectiveParentTaskId,
+    vcsRepo: effectiveVcsRepo,
+    model: normalizedModel.model,
+    modelTier: normalizedModel.modelTier,
+    effort,
+    slackChannelId,
+    slackThreadTs,
+    slackUserId,
+    overrideSlackContext,
+    followUpConfig,
+    routingAffinity:
+      !effectiveAgentId && requiredCapabilities?.length
+        ? { capabilities: requiredCapabilities }
+        : undefined,
+  });
+  const routingCtx = buildRoutingCtx("delegation", effective, {
+    proposedAgentId: effectiveAgentId,
+  });
+  const routingDecision = await runBeforeAssign(routingCtx);
+  const routedOptions = applyRoutingDecisionToOptions(effective.options ?? {}, routingDecision);
+  effectiveAgentId = routingDecision.final?.assignTo ?? effectiveAgentId;
+
+  if (routingDecision.final?.block) {
+    const reason = routingDecision.final.block.reason;
+    const rerouteTask = createRoutingBlockDecisionTask({
+      description: effective.description,
+      reason,
+      options: routedOptions,
+    });
+    backfillTraceTaskId(routingDecision.routingRunId, rerouteTask.id);
+    const message = `Delegation blocked by routing: ${reason}. Created Lead reroute-decision task "${rerouteTask.id}".`;
+    return {
+      content: [{ type: "text", text: message }],
+      structuredContent: {
+        yourAgentId: creatorAgentId,
+        success: false,
+        message,
+        task: rerouteTask,
+      },
+    };
+  }
+
   const existingTrackerWork = findExistingLinearTrackerContextWork(effectiveParentTask?.contextKey);
   if (existingTrackerWork) {
     const msg = `Skipped: Linear tracker contextKey ${effectiveParentTask?.contextKey} already has ${existingTrackerWork.reason === "active_task" ? "active task" : "linked open PR"} ${existingTrackerWork.task.id.slice(0, 8)}.`;
@@ -410,69 +469,43 @@ export async function sendTaskHandler(
     }
   }
 
-  const txn = getDb().transaction(() => {
-    const finalTags = tags;
-
-    // If no agentId (and no auto-routed agentId), create an unassigned task for the pool
+  // The engine already ran (via=delegation) above and creation is synchronous
+  // from here, so the capacity check, INSERT, and tracker repoint run inside
+  // one transaction — same atomicity as before routing landed. Never await
+  // inside this block.
+  const txn = getDb().transaction((): { success: boolean; message: string; task?: AgentTask } => {
+    // If no agentId (and no auto-routed agentId), create an unassigned task for the pool.
     if (!effectiveAgentId) {
-      const newTask = createTaskExtended(task, {
-        key: assetKey,
-        creatorAgentId,
-        requestedByUserId,
-        sourceTaskId,
-        taskType,
-        tags: finalTags,
-        priority,
-        dependsOn,
-        dir,
-        parentTaskId: effectiveParentTaskId,
-        vcsRepo: effectiveVcsRepo,
-        model: normalizedModel.model,
-        modelTier: normalizedModel.modelTier,
-        effort,
-        slackChannelId,
-        slackThreadTs,
-        slackUserId,
-        overrideSlackContext,
-        followUpConfig,
-        // Only meaningful here: a pool task's routingAffinity gates
-        // claimTask/autoAssignPoolTasks. offer/direct-assign below bypass the
-        // pool gate entirely via an explicit agentId, so requiredCapabilities
-        // is a no-op there.
-        routingAffinity: requiredCapabilities?.length
-          ? { capabilities: requiredCapabilities }
-          : undefined,
+      const newTask = createTaskExtended(effective.description, {
+        ...routedOptions,
+        agentId: undefined,
+        offeredTo: undefined,
       });
       transferTrackerSyncToResumeChild({
         parentTaskId: effectiveParentTaskId,
         taskType,
         child: newTask,
       });
-
+      backfillTraceTaskId(routingDecision.routingRunId, newTask.id);
       return {
         success: true,
         message: `Created unassigned task "${newTask.id}" in the pool.`,
         task: newTask,
       };
     }
-
     const agent = getAgentById(effectiveAgentId);
-
     if (!agent) {
       return {
         success: false,
         message: `Agent with ID "${effectiveAgentId}" not found.`,
       };
     }
-
     if (agent.isLead) {
       return {
         success: false,
         message: `Cannot assign tasks to the lead agent "${agent.name}", wtf?`,
       };
     }
-
-    // For direct assignment (not offer), check if agent has capacity
     if (!offerMode && !hasCapacity(effectiveAgentId)) {
       const activeCount = getActiveTaskCount(effectiveAgentId);
       return {
@@ -480,80 +513,41 @@ export async function sendTaskHandler(
         message: `Agent "${agent.name}" is at capacity (${activeCount}/${agent.maxTasks ?? 1} tasks). Use offerMode: true to offer the task instead, or wait for a task to complete.`,
       };
     }
-
     if (offerMode) {
-      // Offer the task to the agent (they must accept/reject)
-      const newTask = createTaskExtended(task, {
-        key: assetKey,
+      const newTask = createTaskExtended(effective.description, {
+        ...routedOptions,
+        agentId: undefined,
         offeredTo: effectiveAgentId,
-        creatorAgentId,
-        requestedByUserId,
-        sourceTaskId,
-        taskType,
-        tags: finalTags,
-        priority,
-        dependsOn,
-        dir,
-        parentTaskId: effectiveParentTaskId,
-        vcsRepo: effectiveVcsRepo,
-        model: normalizedModel.model,
-        modelTier: normalizedModel.modelTier,
-        effort,
-        slackChannelId,
-        slackThreadTs,
-        slackUserId,
-        overrideSlackContext,
-        followUpConfig,
       });
       transferTrackerSyncToResumeChild({
         parentTaskId: effectiveParentTaskId,
         taskType,
         child: newTask,
       });
-
+      backfillTraceTaskId(routingDecision.routingRunId, newTask.id);
       return {
         success: true,
         message: `Task "${newTask.id}" offered to agent "${agent.name}". They must accept or reject it.`,
         task: newTask,
       };
     }
-
-    // Direct assignment
-    const newTask = createTaskExtended(task, {
-      key: assetKey,
+    const newTask = createTaskExtended(effective.description, {
+      ...routedOptions,
       agentId: effectiveAgentId,
-      creatorAgentId,
-      requestedByUserId,
-      sourceTaskId,
-      taskType,
-      tags: finalTags,
-      priority,
-      dependsOn,
-      dir,
-      parentTaskId: effectiveParentTaskId,
-      vcsRepo: effectiveVcsRepo,
-      model: normalizedModel.model,
-      modelTier: normalizedModel.modelTier,
-      effort,
-      slackChannelId,
-      slackThreadTs,
-      slackUserId,
-      overrideSlackContext,
-      followUpConfig,
+      offeredTo: undefined,
     });
     transferTrackerSyncToResumeChild({
       parentTaskId: effectiveParentTaskId,
       taskType,
       child: newTask,
     });
-
+    backfillTraceTaskId(routingDecision.routingRunId, newTask.id);
     return {
       success: true,
       message: `Task "${newTask.id}" sent to agent "${agent.name}".`,
       task: newTask,
     };
   });
-
   const result = txn();
   const structuredContent = {
     yourAgentId: creatorAgentId,

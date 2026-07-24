@@ -4149,7 +4149,13 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         : "unassigned";
   ({ description: task, options } = resolveEffectiveTaskOptions(task, options));
 
-  const existingTrackerWork = findExistingLinearTrackerContextWork(options?.contextKey);
+  // Control tasks (reroute-decision) must never be deduped away against the
+  // work they govern — they inherit the parent's contextKey but represent a
+  // decision ABOUT that work, not the work itself.
+  const existingTrackerWork =
+    options?.taskType === "reroute-decision"
+      ? null
+      : findExistingLinearTrackerContextWork(options?.contextKey);
   if (existingTrackerWork) {
     console.log(
       `[task-dedup] Skipping Linear tracker task creation for ${options?.contextKey}: ${existingTrackerWork.reason} ${existingTrackerWork.task.id.slice(0, 8)} already exists`,

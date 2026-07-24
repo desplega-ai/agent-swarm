@@ -353,15 +353,15 @@ export default async function route(ctx: RoutingCtx): Promise<RoutingResult> {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun test src/tests/routing-engine.test.ts` — matcher gating (zero-spawn on no match), guard-before-route ordering, first-decisive, compose semantics, route fail-open, guard fail-closed, timeout path, trace rows written
-- [ ] `bun test src/tests/routing-vias.test.ts` — creation hard-assign via Slack-shaped options; delegation continuity + hard override; block → reroute-decision task
-- [ ] `bun test && bun run tsc:check && bun run lint && bash scripts/check-db-boundary.sh && bun run check:rbac-coverage`
+- [x] `bun test src/tests/routing-engine.test.ts` — matcher gating (zero-spawn on no match), guard-before-route ordering, first-decisive, compose semantics, route fail-open, guard fail-closed, timeout path, trace rows written
+- [x] `bun test src/tests/routing-vias.test.ts` — creation hard-assign via Slack-shaped options; delegation continuity + hard override; block → reroute-decision task
+- [x] `bun test && bun run tsc:check && bun run lint && bash scripts/check-db-boundary.sh && bun run check:rbac-coverage`
 
 #### Automated QA:
-- [ ] Local server, fresh DB: register a hard handler `{via:"creation", slackChannelId:"C0AR967K0KZ"}` → script returns `{assignTo: <worker-id>}`; create a task with that channel via `send-task`; `GET /api/agents`/task shows assignment to the worker, `routing_trace` row `decisive=1`, `routing.applied` event exists.
+- [x] Local server, fresh DB: register a hard handler `{via:"creation", slackChannelId:"C0AR967K0KZ"}` → script returns `{assignTo: <worker-id>}`; create a task with that channel via `send-task`; `GET /api/agents`/task shows assignment to the worker, `routing_trace` row `decisive=1`, `routing.applied` event exists.
 
 #### Manual Verification:
-- [ ] Latency sanity on the creation path with one matching handler (~180ms spawn + script) — acceptable for Slack ingestion.
+- [x] Latency sanity on the creation path with one matching handler (~180ms spawn + script) — acceptable for Slack ingestion.
 
 **Implementation Note**: Pause + commit `[phase 4] before_assign engine + creation/delegation vias`.
 

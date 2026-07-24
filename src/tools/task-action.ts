@@ -12,7 +12,6 @@ import {
   acceptTask,
   checkDependencies,
   claimTask,
-  createTaskExtended,
   getActiveSessions,
   getActiveTaskCount,
   getAgentById,
@@ -28,6 +27,7 @@ import {
   releaseTask,
   updateTaskClaudeSessionId,
 } from "@/be/db";
+import { createTaskRouted } from "@/tasks/create-task-routed";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
 import {
@@ -270,37 +270,50 @@ export async function taskActionHandler(
     }
   }
 
+  if (action === "create") {
+    if (!task) {
+      return taskActionCallResult(
+        { success: false, message: "Task description is required for 'create' action." },
+        agentId,
+      );
+    }
+    const created = await createTaskRouted(task, {
+      key: assetKey,
+      creatorAgentId: agentId,
+      taskType,
+      tags,
+      priority,
+      dependsOn,
+      dir,
+      model: normalizedModel.model,
+      modelTier: normalizedModel.modelTier,
+      effort: input.effort,
+      routingAffinity: requiredCapabilities?.length
+        ? { capabilities: requiredCapabilities }
+        : undefined,
+    });
+    if (created.blocked) {
+      return taskActionCallResult(
+        {
+          success: false,
+          message: `Task blocked by routing: ${created.blocked.reason}. Created Lead reroute-decision task "${created.task.id}".`,
+          task: created.task,
+        },
+        agentId,
+      );
+    }
+    return taskActionCallResult(
+      {
+        success: true,
+        message: `Created unassigned task "${created.task.id}".`,
+        task: created.task,
+      },
+      agentId,
+    );
+  }
+
   const txn = getDb().transaction((): TaskActionResult => {
     switch (action) {
-      case "create": {
-        if (!task) {
-          return {
-            success: false,
-            message: "Task description is required for 'create' action.",
-          };
-        }
-        const newTask = createTaskExtended(task, {
-          key: assetKey,
-          creatorAgentId: agentId,
-          taskType,
-          tags,
-          priority,
-          dependsOn,
-          dir,
-          model: normalizedModel.model,
-          modelTier: normalizedModel.modelTier,
-          effort: input.effort,
-          routingAffinity: requiredCapabilities?.length
-            ? { capabilities: requiredCapabilities }
-            : undefined,
-        });
-        return {
-          success: true,
-          message: `Created unassigned task "${newTask.id}".`,
-          task: newTask,
-        };
-      }
-
       case "claim": {
         if (!taskId) {
           return { success: false, message: "Task ID is required for 'claim' action." };

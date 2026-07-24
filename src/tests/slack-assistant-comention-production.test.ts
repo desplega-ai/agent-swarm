@@ -16,6 +16,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } 
 import * as dbModule from "../be/db";
 import * as slackEnrichModule from "../slack/enrich";
 import * as slackEventDedupModule from "../slack/event-dedup";
+import * as createTaskRoutedModule from "../tasks/create-task-routed";
 import * as siblingAwarenessModule from "../tasks/sibling-awareness";
 
 // ---------------------------------------------------------------------------
@@ -30,6 +31,9 @@ let createAssistantFn: typeof import("../slack/assistant").createAssistant;
 let registerMessageHandlerFn: typeof import("../slack/handlers").registerMessageHandler;
 
 let createTaskWithSiblingAwarenessSpy: any;
+// The registerMessageHandler path now creates through the routing engine
+// (createTaskRouted) instead of createTaskWithSiblingAwareness.
+let createTaskRoutedSpy: any;
 let getAgentWorkingOnThreadSpy: any;
 let getLeadAgentSpy: any;
 let getMostRecentTaskInThreadSpy: any;
@@ -56,6 +60,7 @@ function restoreEnvValue(key: keyof typeof originalEnv): void {
 
 function installSpyImplementations(): void {
   createTaskWithSiblingAwarenessSpy.mockImplementation(() => ({ id: "mock-task-id-prod-path" }));
+  createTaskRoutedSpy.mockImplementation(async () => ({ task: { id: "mock-task-id-prod-path" } }));
   getAgentWorkingOnThreadSpy.mockImplementation(() => null);
   getLeadAgentSpy.mockImplementation(() => ({
     id: "lead-prod-test-1",
@@ -79,6 +84,7 @@ beforeAll(async () => {
     siblingAwarenessModule,
     "createTaskWithSiblingAwareness",
   );
+  createTaskRoutedSpy = spyOn(createTaskRoutedModule, "createTaskRouted");
   getAgentWorkingOnThreadSpy = spyOn(dbModule, "getAgentWorkingOnThread");
   getLeadAgentSpy = spyOn(dbModule, "getLeadAgent");
   getMostRecentTaskInThreadSpy = spyOn(dbModule, "getMostRecentTaskInThread");
@@ -96,6 +102,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   createTaskWithSiblingAwarenessSpy.mockClear();
+  createTaskRoutedSpy.mockClear();
   getAgentWorkingOnThreadSpy.mockClear();
   getLeadAgentSpy.mockClear();
   getMostRecentTaskInThreadSpy.mockClear();
@@ -275,6 +282,7 @@ describe("registerMessageHandler — assistant_thread co-mention guard (producti
     });
 
     expect(createTaskWithSiblingAwarenessSpy).not.toHaveBeenCalled();
+    expect(createTaskRoutedSpy).not.toHaveBeenCalled();
   });
 
   test("DOES spawn a task for assistant_thread plain message with no @-mentions (baseline)", async () => {
@@ -294,7 +302,7 @@ describe("registerMessageHandler — assistant_thread co-mention guard (producti
       say: mock(async () => {}),
     });
 
-    expect(createTaskWithSiblingAwarenessSpy).toHaveBeenCalledTimes(1);
+    expect(createTaskRoutedSpy).toHaveBeenCalledTimes(1);
   });
 
   test("does NOT spawn a task when assistant_thread message @-mentions a human (not our bot)", async () => {
@@ -315,5 +323,6 @@ describe("registerMessageHandler — assistant_thread co-mention guard (producti
     });
 
     expect(createTaskWithSiblingAwarenessSpy).not.toHaveBeenCalled();
+    expect(createTaskRoutedSpy).not.toHaveBeenCalled();
   });
 });

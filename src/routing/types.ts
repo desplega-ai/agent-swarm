@@ -11,8 +11,11 @@ import {
 export const RoutingViaSchema = z.enum(["creation", "delegation", "claim", "resume", "completion"]);
 export type RoutingVia = z.infer<typeof RoutingViaSchema>;
 
+// Id fields are plain strings, not z.uuid(): agents/tasks created through
+// tests and some ingresses carry non-UUID ids, and the routing contract must
+// accept whatever the DB actually holds.
 export const RoutingTaskSchema = z.object({
-  id: AgentTaskSchema.shape.id.optional(),
+  id: z.string().min(1).optional(),
   description: AgentTaskSchema.shape.task,
   source: AgentTaskSourceSchema,
   taskType: AgentTaskSchema.shape.taskType,
@@ -30,7 +33,7 @@ export const RoutingTaskSchema = z.object({
 export type RoutingTask = z.infer<typeof RoutingTaskSchema>;
 
 export const RoutingCandidateSchema = z.object({
-  id: AgentSchema.shape.id,
+  id: z.string().min(1),
   name: AgentSchema.shape.name,
   role: AgentSchema.shape.role,
   capabilities: AgentSchema.shape.capabilities,
@@ -42,8 +45,8 @@ export const RoutingCandidateSchema = z.object({
 export type RoutingCandidate = z.infer<typeof RoutingCandidateSchema>;
 
 export const RoutingContinuityParentSchema = z.object({
-  id: AgentTaskSchema.shape.id,
-  agentId: AgentTaskSchema.shape.agentId,
+  id: z.string().min(1),
+  agentId: z.string().min(1).nullable(),
   agentRole: AgentSchema.shape.role,
   description: AgentTaskSchema.shape.task,
   status: AgentTaskStatusSchema,
@@ -53,7 +56,7 @@ export type RoutingContinuityParent = z.infer<typeof RoutingContinuityParentSche
 export const RoutingCtxSchema = z.object({
   via: RoutingViaSchema,
   task: RoutingTaskSchema,
-  proposedAgentId: AgentSchema.shape.id.optional(),
+  proposedAgentId: z.string().min(1).optional(),
   candidates: z.array(RoutingCandidateSchema),
   continuity: z.object({
     parent: RoutingContinuityParentSchema.nullable(),
@@ -62,26 +65,58 @@ export const RoutingCtxSchema = z.object({
 });
 export type RoutingCtx = z.infer<typeof RoutingCtxSchema>;
 
-export const RoutingResultSchema = z.object({
-  assignTo: AgentSchema.shape.id.optional(),
-  block: z
-    .object({
-      reason: z.string().min(1),
-    })
-    .optional(),
-  mutate: z
-    .object({
-      tags: AgentTaskSchema.shape.tags.optional(),
-      routingAffinity: RoutingAffinitySchema.optional(),
-      modelTier: ModelTierSchema.optional(),
-      priority: AgentTaskSchema.shape.priority.optional(),
-    })
-    .optional(),
-  promptDirectives: z.array(z.string()).optional(),
-  note: z.string().optional(),
-});
+export const RoutingResultSchema = z
+  .object({
+    assignTo: z.string().min(1).optional(),
+    block: z
+      .object({
+        reason: z.string().min(1),
+      })
+      .strict()
+      .optional(),
+    mutate: z
+      .object({
+        tags: AgentTaskSchema.shape.tags.optional(),
+        routingAffinity: RoutingAffinitySchema.optional(),
+        modelTier: ModelTierSchema.optional(),
+        priority: AgentTaskSchema.shape.priority.optional(),
+      })
+      .strict()
+      .optional(),
+    promptDirectives: z.array(z.string()).optional(),
+    note: z.string().optional(),
+  })
+  .strict();
 export type RoutingResult = z.infer<typeof RoutingResultSchema>;
 
 export function isDecisive(result: RoutingResult): boolean {
   return result.assignTo !== undefined || result.block !== undefined;
+}
+
+export interface RoutingSuggestion {
+  handlerName: string;
+  assignTo?: string;
+  block?: { reason: string };
+}
+
+export interface RoutingDecisionTrace {
+  handlerId: string;
+  handlerName: string;
+  flavor: "route" | "guard";
+  mode: "soft" | "hard";
+  result?: RoutingResult;
+  decisive: boolean;
+  suggestion?: string;
+  error?: string;
+  durationMs: number;
+}
+
+export interface RoutingDecision {
+  final?: RoutingResult;
+  suggestions: RoutingSuggestion[];
+  mutations: NonNullable<RoutingResult["mutate"]>;
+  promptDirectives: string[];
+  notes: string[];
+  routingRunId: string;
+  trace: RoutingDecisionTrace[];
 }
