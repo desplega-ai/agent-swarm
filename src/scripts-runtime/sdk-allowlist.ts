@@ -163,6 +163,7 @@ export const SDK_ALLOWLIST = Object.keys(SDK_TOOL_NAME_MAP) as Array<
  * intentionally REST-only.
  */
 export const SDK_REST_BRIDGE_METHODS = [
+  "classify",
   "routing_handler_register",
   "routing_handler_list",
   "routing_handler_patch",

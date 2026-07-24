@@ -50,6 +50,10 @@ function kvPath(args: Record<string, unknown>, keyRequired = true): string {
 function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
   const body = argsRecord(args);
   switch (name) {
+    // ── internal AI (REST-only; no corresponding MCP tool) ──
+    case "classify":
+      return { method: "POST", path: "/api/internal-ai/classify", body };
+
     // ── memory ──
     case "memory_search":
       return { method: "POST", path: "/api/memory/search", body };
@@ -497,15 +501,25 @@ async function callTool(name: string, args: unknown, config: SwarmConfig): Promi
   return callBridgeApi(name, args, config);
 }
 
+function normalizeCallArgs(name: string, args: unknown[]): unknown {
+  if (name !== "classify") return args[0];
+  const opts = argsRecord(args[2]);
+  return {
+    input: args[0],
+    labels: args[1],
+    ...(typeof opts.timeoutMs === "number" ? { timeoutMs: opts.timeoutMs } : {}),
+  };
+}
+
 export function createSwarmSdk(
   config: SwarmConfig,
-): Record<string, (args?: unknown) => Promise<unknown>> {
+): Record<string, (...args: unknown[]) => Promise<unknown>> {
   const target: Record<string, unknown> = {};
   return new Proxy(target, {
     get(target, prop) {
       if (typeof prop !== "string") return undefined;
       if (prop in target) return target[prop];
-      return (args?: unknown) => callTool(prop, args, config);
+      return (...args: unknown[]) => callTool(prop, normalizeCallArgs(prop, args), config);
     },
-  }) as Record<string, (args?: unknown) => Promise<unknown>>;
+  }) as Record<string, (...args: unknown[]) => Promise<unknown>>;
 }

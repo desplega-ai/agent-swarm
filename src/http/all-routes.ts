@@ -14,6 +14,7 @@ import "./approval-requests";
 import "./assets";
 import "./budgets";
 import "./codex-oauth-keep-warm";
+import "./classify";
 import "./config";
 import "./context";
 import "./db-query";

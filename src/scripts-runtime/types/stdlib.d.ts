@@ -89,7 +89,104 @@ declare module "swarm-sdk" {
   };
   export type RoutingBridgeResponse<T> = { success: boolean; status: number; data: T };
 
+  export type RoutingVia = "creation" | "delegation" | "claim" | "resume" | "completion";
+  export type RoutingTaskSource =
+    | "mcp"
+    | "slack"
+    | "api"
+    | "ui"
+    | "github"
+    | "gitlab"
+    | "agentmail"
+    | "system"
+    | "schedule"
+    | "workflow"
+    | "linear"
+    | "jira";
+  export type RoutingModelTier = "smol" | "regular" | "smart" | "ultra";
+  export type RoutingAffinity = {
+    sourceAgentId?: string;
+    role?: string;
+    harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+    capabilities: string[];
+  };
+  export type RoutingCtx = {
+    via: RoutingVia;
+    task: {
+      id?: string;
+      description: string;
+      source: RoutingTaskSource;
+      taskType?: string;
+      tags: string[];
+      parentTaskId?: string;
+      modelTier?: RoutingModelTier;
+      priority: number;
+      routingAffinity?: RoutingAffinity;
+      slackChannelId?: string;
+      slackThreadTs?: string;
+      vcsProvider?: "github" | "gitlab";
+      vcsRepo?: string;
+      contextKey?: string;
+    };
+    proposedAgentId?: string;
+    candidates: Array<{
+      id: string;
+      name: string;
+      role?: string;
+      capabilities: string[];
+      status: "idle" | "busy" | "offline" | "waiting_for_credentials";
+      isLead: boolean;
+      activeTaskCount: number;
+      maxTasks?: number;
+    }>;
+    continuity: {
+      parent: {
+        id: string;
+        agentId: string | null;
+        agentRole?: string;
+        description: string;
+        status:
+          | "backlog"
+          | "unassigned"
+          | "offered"
+          | "reviewing"
+          | "pending"
+          | "in_progress"
+          | "paused"
+          | "completed"
+          | "failed"
+          | "cancelled"
+          | "superseded";
+      } | null;
+      chainDepth: number;
+    };
+  };
+  export type RoutingResult = {
+    assignTo?: string;
+    block?: { reason: string };
+    mutate?: {
+      tags?: string[];
+      routingAffinity?: RoutingAffinity;
+      modelTier?: RoutingModelTier;
+      priority?: number;
+    };
+    promptDirectives?: string[];
+    note?: string;
+  };
+  export type ClassificationResult = {
+    label: string;
+    confidence?: number;
+    reasoning?: string;
+  };
+
   export interface SwarmSdk {
+    // --- internal AI ---
+    classify(
+      input: string | Record<string, unknown>,
+      labels: string[],
+      opts?: { timeoutMs?: number },
+    ): Promise<RoutingBridgeResponse<{ result: ClassificationResult | null }>>;
+
     // --- memory ---
     memory_search(args: {
       query: string;

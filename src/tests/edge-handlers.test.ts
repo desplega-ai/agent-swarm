@@ -7,7 +7,11 @@ import {
   type ServerResponse,
 } from "node:http";
 import { closeDb, createAgent, initDb } from "../be/db";
-import { createEdgeHandler } from "../be/edge-handlers-db";
+import {
+  createEdgeHandler,
+  listEdgeHandlers,
+  listEnabledHandlersForEdge,
+} from "../be/edge-handlers-db";
 import { upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { handleRouting } from "../http/routing";
@@ -223,5 +227,30 @@ describe("edge handler registration routes", () => {
       body: { priority: 20 },
     });
     expect(nonOwnerPatch.status).toBe(403);
+
+    const nonOwnerDelete = await request(`/api/routing/handlers/${owned.id}`, otherAgentId, {
+      method: "DELETE",
+    });
+    expect(nonOwnerDelete.status).toBe(403);
+    expect(listEdgeHandlers().some((handler) => handler.id === owned.id)).toBe(true);
+  });
+
+  test("enabled edge lookup excludes disabled handlers without hiding them from plain lists", () => {
+    const disabled = createEdgeHandler({
+      name: "disabled-routing-handler",
+      edge: "task.before_assign",
+      scriptName: "edge-handler-fixture",
+      flavor: "guard",
+      mode: "soft",
+      enabled: false,
+      createdByAgentId: leadAgentId,
+    });
+
+    expect(listEdgeHandlers().some((handler) => handler.id === disabled.id)).toBe(true);
+    expect(
+      listEnabledHandlersForEdge("task.before_assign").some(
+        (handler) => handler.id === disabled.id,
+      ),
+    ).toBe(false);
   });
 });

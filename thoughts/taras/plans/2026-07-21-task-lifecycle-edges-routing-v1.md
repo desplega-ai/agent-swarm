@@ -235,16 +235,16 @@ The handler authoring contract exists and is tsc-enforced: routing scripts recei
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun test src/tests/routing-ctx.test.ts` (ctx builder: envelope fields, candidates+load, continuity; `resolveEffectiveTaskOptions` parity with previous inheritance behavior)
-- [ ] `bun test && bun run tsc:check && bun run lint && bash scripts/check-db-boundary.sh`
-- [ ] OpenAPI fresh: `bun run docs:openapi && git diff --exit-code openapi.json`
-- [ ] A fixture routing script using `RoutingCtx`/`RoutingResult` types passes `script_upsert` typecheck; one with a wrong result shape is rejected (test asserts both)
+- [x] `bun test src/tests/routing-ctx.test.ts` (ctx builder: envelope fields, candidates+load, continuity; `resolveEffectiveTaskOptions` parity with previous inheritance behavior)
+- [x] `bun test && bun run tsc:check && bun run lint && bash scripts/check-db-boundary.sh`
+- [x] OpenAPI fresh: `bun run docs:openapi && git diff --exit-code openapi.json`
+- [x] A fixture routing script using `RoutingCtx`/`RoutingResult` types passes `script_upsert` typecheck; one with a wrong result shape is rejected (test asserts both)
 
 #### Automated QA:
-- [ ] `curl -s -X POST http://localhost:3013/api/internal-ai/classify -H "Authorization: Bearer 123123" ...` returns a schema-valid classification for a sample task description (requires a configured internal-AI credential; skip gracefully if absent and note it).
+- [x] `curl -s -X POST http://localhost:3013/api/internal-ai/classify -H "Authorization: Bearer 123123" ...` returns a schema-valid classification for a sample task description (requires a configured internal-AI credential; skip gracefully if absent and note it).
 
 #### Manual Verification:
-- [ ] Review `RoutingCtx`/`RoutingResult` shapes — public authoring contract; matches the guard/Airbag forward-compat intent (block carries reason; subject/action/resource derivable).
+- [x] Review `RoutingCtx`/`RoutingResult` shapes — public authoring contract; matches the guard/Airbag forward-compat intent (block carries reason; subject/action/resource derivable).
 
 **Implementation Note**: Pause + commit `[phase 3] routing contract types + classify`.
 

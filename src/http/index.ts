@@ -45,6 +45,7 @@ import { handleApiKeys } from "./api-keys";
 import { handleApprovalRequests } from "./approval-requests";
 import { handleAssets } from "./assets";
 import { handleBudgets } from "./budgets";
+import { handleClassify } from "./classify";
 import { handleCodexOAuthKeepWarm } from "./codex-oauth-keep-warm";
 import { handleConfig } from "./config";
 import { handleContext } from "./context";
@@ -327,6 +328,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleKv(req, res, pathSegments, queryParams),
         () => handleIntegrations(req, res, pathSegments),
         () => handlePromptTemplates(req, res, pathSegments, queryParams),
+        () => handleClassify(req, res, pathSegments, queryParams, myAgentId),
         () => handleDbQuery(req, res, pathSegments, queryParams),
         () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),
         () => handleRepos(req, res, pathSegments, queryParams),

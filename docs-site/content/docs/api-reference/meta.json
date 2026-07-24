@@ -20,6 +20,7 @@
     "heartbeat",
     "inbox-state",
     "integrations",
+    "internal-ai",
     "kv",
     "mcp-oauth",
     "mcp-servers",

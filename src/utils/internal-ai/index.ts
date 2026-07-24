@@ -13,6 +13,12 @@
  */
 
 export {
+  type ClassificationResult,
+  ClassificationResultSchema,
+  type ClassifyOptions,
+  classify,
+} from "./classify.js";
+export {
   type CompleteStructuredOptions,
   completeStructured,
 } from "./complete-structured.js";

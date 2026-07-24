@@ -3912,17 +3912,10 @@ export function findRecentSimilarTasks(opts: {
     .map(rowToAgentTask);
 }
 
-export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask {
-  const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-  const status: AgentTaskStatus = options?.offeredTo
-    ? "offered"
-    : options?.agentId
-      ? "pending"
-      : options?.status === "backlog"
-        ? "backlog"
-        : "unassigned";
-
+export function resolveEffectiveTaskOptions(
+  description: string,
+  options?: CreateTaskOptions,
+): { description: string; options?: CreateTaskOptions } {
   // Inherit Slack/AgentMail metadata from parent task (unless explicitly overridden)
   if (options?.parentTaskId) {
     const parent = getTaskById(options.parentTaskId);
@@ -4064,14 +4057,6 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
     }
   }
 
-  const existingTrackerWork = findExistingLinearTrackerContextWork(options?.contextKey);
-  if (existingTrackerWork) {
-    console.log(
-      `[task-dedup] Skipping Linear tracker task creation for ${options?.contextKey}: ${existingTrackerWork.reason} ${existingTrackerWork.task.id.slice(0, 8)} already exists`,
-    );
-    return existingTrackerWork.task;
-  }
-
   // Auto-inherit Slack metadata from the creator's source task (deterministic via sourceTaskId)
   // Priority: explicit params > parentTaskId inheritance > sourceTaskId lookup
   // sourceTaskId is set by the adapter's X-Source-Task-Id header — each adapter carries its taskId natively
@@ -4147,6 +4132,29 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         options.slackThreadTs = finalSlackContext.threadTs;
       }
     }
+  }
+
+  return { description, options };
+}
+
+export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const status: AgentTaskStatus = options?.offeredTo
+    ? "offered"
+    : options?.agentId
+      ? "pending"
+      : options?.status === "backlog"
+        ? "backlog"
+        : "unassigned";
+  ({ description: task, options } = resolveEffectiveTaskOptions(task, options));
+
+  const existingTrackerWork = findExistingLinearTrackerContextWork(options?.contextKey);
+  if (existingTrackerWork) {
+    console.log(
+      `[task-dedup] Skipping Linear tracker task creation for ${options?.contextKey}: ${existingTrackerWork.reason} ${existingTrackerWork.task.id.slice(0, 8)} already exists`,
+    );
+    return existingTrackerWork.task;
   }
 
   const auditUserId = getCurrentRequestUserId() ?? null;
