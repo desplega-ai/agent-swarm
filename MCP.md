@@ -3,6 +3,22 @@
 > Auto-generated from source. Do not edit manually.
 > Run `bun run docs:mcp` to regenerate.
 
+## Capability Flags
+
+Every tool group is gated by a capability flag on the API server. The set of
+enabled capabilities comes from the `CAPABILITIES` env var (or the
+`CAPABILITIES` global swarm-config entry); when unset, the defaults apply.
+Setting `CAPABILITIES` **replaces** the whole list — it is not additive — so
+include every capability you want, not just the extras.
+
+Capability flags shape the **externally exposed MCP tool list only** — they
+hide tools from agents, they are not feature kill-switches. The scripts SDK
+bridge always builds a full-surface server (its surface is governed by the
+SDK allowlist instead), and HTTP REST routes are generally not gated.
+
+- Enabled by default: `core`, `task-pool`, `config`, `scripts`, `mcp`, `profiles`, `repo`, `scheduling`, `memory`, `tracker`, `workflows`, `skills`, `pages`, `metrics`, `kv`, `slack`
+- Disabled by default: `prompt-templates`, `agentmail`, `kapso`, `swarm-x`, `messaging`, `services`
+
 ## Table of Contents
 
 - [Core Tools](#core-tools)
@@ -20,18 +36,15 @@
   - [manage-user](#manage-user)
   - [db-query](#db-query)
   - [get-oauth-access-token](#get-oauth-access-token)
+- [Task Pool Tools](#task-pool-tools)
+  - [task-action](#task-action)
+- [Config Tools](#config-tools)
   - [set-config](#set-config)
   - [get-config](#get-config)
   - [list-config](#list-config)
   - [delete-config](#delete-config)
   - [credential-bindings](#credential-bindings)
-  - [get-repos](#get-repos)
-  - [update-repo](#update-repo)
-  - [list-prompt-templates](#list-prompt-templates)
-  - [get-prompt-template](#get-prompt-template)
-  - [set-prompt-template](#set-prompt-template)
-  - [delete-prompt-template](#delete-prompt-template)
-  - [preview-prompt-template](#preview-prompt-template)
+- [Scripts Tools](#scripts-tools)
   - [script-search](#script-search)
   - [script-connections](#script-connections)
   - [script-apis](#script-apis)
@@ -39,36 +52,21 @@
   - [script-upsert](#script-upsert)
   - [script-delete](#script-delete)
   - [script-query-types](#script-query-types)
-  - [swarm_x](#swarm_x)
-  - [slack-reply](#slack-reply)
-  - [slack-read](#slack-read)
-  - [slack-post](#slack-post)
-  - [slack-start-thread](#slack-start-thread)
-  - [slack-list-channels](#slack-list-channels)
-  - [slack-upload-file](#slack-upload-file)
-  - [slack-download-file](#slack-download-file)
-  - [slack-delete](#slack-delete)
-  - [slack-update](#slack-update)
-  - [register-agentmail-inbox](#register-agentmail-inbox)
-  - [register-kapso-number](#register-kapso-number)
-  - [unregister-kapso-number](#unregister-kapso-number)
-  - [send-whatsapp-message](#send-whatsapp-message)
-  - [reply-whatsapp-message](#reply-whatsapp-message)
-- [Task Pool Tools](#task-pool-tools)
-  - [task-action](#task-action)
-- [Messaging Tools](#messaging-tools)
-  - [list-channels](#list-channels)
-  - [create-channel](#create-channel)
-  - [delete-channel](#delete-channel)
+- [MCP Server Tools](#mcp-server-tools)
+  - [mcp-server-create](#mcp-server-create)
+  - [mcp-server-update](#mcp-server-update)
+  - [mcp-server-delete](#mcp-server-delete)
+  - [mcp-server-get](#mcp-server-get)
+  - [mcp-server-list](#mcp-server-list)
+  - [mcp-server-install](#mcp-server-install)
+  - [mcp-server-uninstall](#mcp-server-uninstall)
 - [Profiles Tools](#profiles-tools)
   - [update-profile](#update-profile)
   - [context-history](#context-history)
   - [context-diff](#context-diff)
-- [Services Tools](#services-tools)
-  - [register-service](#register-service)
-  - [unregister-service](#unregister-service)
-  - [list-services](#list-services)
-  - [update-service-status](#update-service-status)
+- [Repo Tools](#repo-tools)
+  - [get-repos](#get-repos)
+  - [update-repo](#update-repo)
 - [Scheduling Tools](#scheduling-tools)
   - [list-schedules](#list-schedules)
   - [create-schedule](#create-schedule)
@@ -83,6 +81,12 @@
   - [memory-delete](#memory-delete)
   - [memory_rate](#memory_rate)
   - [inject-learning](#inject-learning)
+- [Tracker Tools](#tracker-tools)
+  - [tracker-status](#tracker-status)
+  - [tracker-link-task](#tracker-link-task)
+  - [tracker-unlink](#tracker-unlink)
+  - [tracker-sync-status](#tracker-sync-status)
+  - [tracker-map-agent](#tracker-map-agent)
 - [Workflows Tools](#workflows-tools)
   - [create-workflow](#create-workflow)
   - [list-workflows](#list-workflows)
@@ -97,22 +101,75 @@
   - [retry-workflow-run](#retry-workflow-run)
   - [cancel-workflow-run](#cancel-workflow-run)
   - [request-human-input](#request-human-input)
+- [Skills Tools](#skills-tools)
+  - [skill-create](#skill-create)
+  - [skill-update](#skill-update)
+  - [skill-delete](#skill-delete)
+  - [skill-get](#skill-get)
+  - [skill-get-file](#skill-get-file)
+  - [skill-list](#skill-list)
+  - [skill-search](#skill-search)
+  - [skill-install](#skill-install)
+  - [skill-uninstall](#skill-uninstall)
+  - [skill-install-remote](#skill-install-remote)
+  - [skill-sync-remote](#skill-sync-remote)
+  - [skill-publish](#skill-publish)
 - [Pages Tools](#pages-tools)
   - [create_page](#create_page)
   - [delete-page](#delete-page)
-- [Kv Tools](#kv-tools)
+- [Metrics Tools](#metrics-tools)
+  - [create_metric](#create_metric)
+- [KV Tools](#kv-tools)
   - [kv-get](#kv-get)
   - [kv-set](#kv-set)
   - [kv-delete](#kv-delete)
   - [kv-incr](#kv-incr)
   - [kv-list](#kv-list)
+- [Slack Tools](#slack-tools)
+  - [slack-reply](#slack-reply)
+  - [slack-read](#slack-read)
+  - [slack-post](#slack-post)
+  - [slack-start-thread](#slack-start-thread)
+  - [slack-list-channels](#slack-list-channels)
+  - [slack-upload-file](#slack-upload-file)
+  - [slack-download-file](#slack-download-file)
+  - [slack-delete](#slack-delete)
+  - [slack-update](#slack-update)
+- [Prompt Templates Tools](#prompt-templates-tools)
+  - [list-prompt-templates](#list-prompt-templates)
+  - [get-prompt-template](#get-prompt-template)
+  - [set-prompt-template](#set-prompt-template)
+  - [delete-prompt-template](#delete-prompt-template)
+  - [preview-prompt-template](#preview-prompt-template)
+- [AgentMail Tools](#agentmail-tools)
+  - [register-agentmail-inbox](#register-agentmail-inbox)
+- [Kapso (WhatsApp) Tools](#kapso-(whatsapp)-tools)
+  - [register-kapso-number](#register-kapso-number)
+  - [unregister-kapso-number](#unregister-kapso-number)
+  - [send-whatsapp-message](#send-whatsapp-message)
+  - [reply-whatsapp-message](#reply-whatsapp-message)
+- [Swarm X Tools](#swarm-x-tools)
+  - [swarm_x](#swarm_x)
+- [Messaging Tools](#messaging-tools)
+  - [post-message](#post-message)
+  - [read-messages](#read-messages)
+  - [list-channels](#list-channels)
+  - [create-channel](#create-channel)
+  - [delete-channel](#delete-channel)
+- [Services Tools](#services-tools)
+  - [register-service](#register-service)
+  - [unregister-service](#unregister-service)
+  - [list-services](#list-services)
+  - [update-service-status](#update-service-status)
 - [Other Tools](#other-tools)
 
 ---
 
 ## Core Tools
 
-*Always available tools for basic swarm operations.*
+*Core capability - swarm membership, task flow, progress, user identity, and lead debug tools*
+
+Capability: `core` (enabled by default)
 
 ### join-swarm
 
@@ -311,8 +368,40 @@ Return a valid plaintext OAuth access token for an integrated tracker. The token
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | OAuth provider slug to read from oauth_tokens (for example: linear, jira). |
+| `provider` | `string` | No | - | OAuth provider slug to resolve the default authorization (for example: linear, jira). Provide this OR authorizationId. |
+| `authorizationId` | `string` | No | - | Explicit oauth_authorizations id to resolve. Takes precedence over provider when both are given. |
 | `minValiditySeconds` | `number` | No | 300 | Minimum remaining token lifetime required before returning it. |
+
+## Task Pool Tools
+
+*Task pool capability - task pool operations (create unassigned, claim, release, accept, reject)*
+
+Capability: `task-pool` (enabled by default)
+
+### task-action
+
+**Task Pool Actions**
+
+Perform task pool operations: create unassigned tasks, claim/release tasks from pool, accept/reject offered tasks.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `action` | `unknown` | Yes | - | The action to perform: 'create' creates an unassigned task, 'claim' takes a task from pool, 'release' returns task to pool, 'accept' accepts offered task, 'reject' declines offered task, 'to_backlog' moves task to backlog, 'from_backlog' moves task from backlog to pool. |
+| `key` | `unknown` | No | - | Logical namespace for a created task. Defaults to a shared/task:<id>/ resource key. |
+| `taskType` | `string` | No | - | Task type (e.g., 'bug', 'feature'). |
+| `tags` | `array` | No | - | Tags for filtering (e.g., ['urgent', 'frontend']). |
+| `priority` | `number` | No | - | Priority 0-100, default 50. |
+| `dependsOn` | `array` | No | - | Task IDs this task depends on. |
+| `model` | `string` | No | - | Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action. |
+| `modelTier` | `unknown` | No | - | Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action. |
+| `effort` | `unknown` | No | - | Reasoning effort for the created task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. Only used with 'create' action. |
+| `requiredCapabilities` | `array` | No | - | Capabilities a claiming agent must have (declared via join-swarm/update-profile) to be pool-eligible for this task. Written into the created task's routingAffinity (role is left unset). Only used with 'create' action. |
+
+## Config Tools
+
+*Config capability - swarm config management and credential bindings*
+
+Capability: `config` (enabled by default)
 
 ### set-config
 
@@ -370,11 +459,11 @@ Delete a swarm configuration entry by its ID. Use list-config to find config IDs
 
 **Credential Bindings**
 
-Lead-only management for scripts-runtime credential broker bindings. Bindings map config keys to allowed egress hosts; scripts consume them only through fetch-layer placeholder substitution.
+Advanced, lead-only management for standalone scripts-runtime credential broker bindings — the escape hatch for authenticating spec-less raw fetch() egress. Most connections should embed auth inline via the script-connections tool (which auto-manages its binding); those managed bindings are hidden here. Bindings map config keys to allowed egress hosts; scripts consume them only through fetch-layer placeholder substitution.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `action` | `list \| upsert \| disable \| import-legacy \| oauth-app-upsert \| oauth-authorize-url` | Yes | - | List, add/update, disable, import legacy JSON bindings, or register/authorize OAuth apps. |
+| `action` | `list \| upsert \| disable \| oauth-app-upsert \| oauth-authorize-url \| oauth-authorizations-list` | Yes | - | List, add/update, disable, register/authorize OAuth apps, or list an app's authorizations. |
 | `id` | `string` | No | - | Existing credential binding ID for update or disable. |
 | `configKey` | `string` | No | - | Swarm config key whose secret value is injected through templates. |
 | `allowedHosts` | `array` | No | - | Allowed outbound hostnames for this binding. |
@@ -383,103 +472,26 @@ Lead-only management for scripts-runtime credential broker bindings. Bindings ma
 | `scope` | `global \| agent \| repo` | No | "global" | Binding visibility scope. |
 | `scopeId` | `unknown` | No | - | Agent UUID for agent scope or repo id (owner/name) for repo scope. |
 | `authKind` | `config \| oauth` | No | "config" | Use config for stored swarm config secrets or oauth for OAuth token resolution. |
-| `oauthProvider` | `string` | No | - | OAuth provider slug required when authKind is oauth. |
-| `provider` | `string` | No | - | OAuth provider slug for oauth-app-upsert and oauth-authorize-url. |
+| `oauthAuthorizationId` | `string` | No | - | OAuth authorization ID required when authKind is oauth. |
+| `presetId` | `string` | No | - | Curated OAuth preset id (e.g. google, slack, github) for oauth-app-upsert. Fills endpoints/scopes/quirks; explicit fields still win. Only clientId + clientSecret are then required. |
+| `provider` | `string` | No | - | OAuth provider slug for oauth-app-upsert, oauth-authorize-url, and oauth-authorizations-list. |
+| `label` | `string` | No | - | Authorization label for oauth-authorize-url (defaults to 'default'). N per app. |
 | `clientId` | `string` | No | - | OAuth client ID for oauth-app-upsert. |
 | `clientSecret` | `string` | No | - | OAuth client secret for oauth-app-upsert. |
 | `authorizeUrl` | `string` | No | - | OAuth authorization URL for oauth-app-upsert. |
 | `tokenUrl` | `string` | No | - | OAuth token URL for oauth-app-upsert. |
+| `userinfoUrl` | `string` | No | - | OIDC userinfo endpoint for identity capture (SSRF-validated). |
+| `revocationUrl` | `string` | No | - | RFC 7009 revocation endpoint (SSRF-validated). |
 | `scopes` | `array` | No | - | OAuth scopes for oauth-app-upsert. |
 | `extraParams` | `object` | No | - | Extra OAuth authorization parameters stored with the OAuth app. |
 | `tokenAuthStyle` | `body \| basic` | No | - | How client credentials reach the token endpoint: body params (default) or HTTP Basic auth (required by e.g. Notion). |
 | `tokenBodyFormat` | `form \| json` | No | - | Token request body encoding: form-urlencoded (default) or JSON (required by e.g. Notion). |
 
-### get-repos
+## Scripts Tools
 
-**Get Repos**
+*Scripts capability - reusable script catalog (HTTP MCP only in v1)*
 
-List registered repos with their guidelines (PR checks, merge policy, review guidance). Use the optional name filter to check a specific repo. The lead should use this to verify a repo has guidelines before routing tasks.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `name` | `string` | No | - | Filter by repo name. If omitted, returns all repos. |
-
-### update-repo
-
-**Update Repo**
-
-Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `id` | `string` | Yes | - | The repo ID to update. |
-| `url` | `string` | No | - | New repo URL. |
-| `name` | `string` | No | - | New repo name. |
-| `clonePath` | `string` | No | - | New clone path. |
-| `defaultBranch` | `string` | No | - | New default branch. |
-| `autoClone` | `boolean` | No | - | Whether to auto-clone. |
-| `hooks` | `unknown` | No | - | Repository hook install config. Set { enabled: true } to opt into best-effort worker hook installation, or null to disable. |
-| `guidelines` | `unknown` | No | - | Repository guidelines: prChecks (commands before PR), mergeChecks (conditions before merge), allowMerge (default false), review (guidance for reviewers). Pass null to clear. |
-
-### list-prompt-templates
-
-**List Prompt Templates**
-
-List prompt templates with optional filters. Returns all templates matching the specified criteria, including defaults and overrides at all scope levels.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `eventType` | `string` | No | - | Filter by event type (e.g. 'github.pull_request.opened'). |
-| `scope` | `unknown` | No | - | Filter by scope: 'global', 'agent', or 'repo'. |
-| `scopeId` | `string` | No | - | Filter by scope ID (agent ID or repo ID). |
-| `isDefault` | `boolean` | No | - | Filter by default status. |
-
-### get-prompt-template
-
-**Get Prompt Template**
-
-Get a prompt template by ID, including its version history and the code-defined variable definitions for its event type.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `id` | `string` | Yes | - | The prompt template ID. |
-
-### set-prompt-template
-
-**Set Prompt Template**
-
-Create or update a prompt template override. Upserts by (eventType, scope, scopeId). Use scope='global' for server-wide, 'agent' for agent-specific, or 'repo' for repo-specific overrides.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `eventType` | `string` | Yes | - | Event type identifier (e.g. 'github.pull_request.opened'). |
-| `scope` | `unknown` | No | - | Template scope: 'global' (default), 'agent', or 'repo'. |
-| `scopeId` | `string` | No | - | Agent ID or repo ID. Required for 'agent' and 'repo' scopes, omit for 'global'. |
-| `state` | `unknown` | No | - | Template state: 'enabled' (default), 'default_prompt_fallback', or 'skip_event'. |
-| `body` | `string` | Yes | - | The template body text with {{variable}} placeholders. |
-| `changeReason` | `string` | No | - | Reason for the change (recorded in history). |
-
-### delete-prompt-template
-
-**Delete Prompt Template**
-
-Delete a prompt template override by ID. Cannot delete default templates — use reset instead. Use list-prompt-templates to find template IDs first.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `id` | `string` | Yes | - | The prompt template ID to delete. |
-
-### preview-prompt-template
-
-**Preview Prompt Template**
-
-Dry-run render a prompt template with provided variables. Optionally supply a custom body to preview before saving. Returns the interpolated text and any unresolved {{variable}} tokens.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `eventType` | `string` | Yes | - | Event type to preview (used to look up header and default body). |
-| `body` | `string` | No | - | Custom body to preview instead of the default. |
-| `variables` | `object` | No | - | Variables to interpolate into the template. |
+Capability: `scripts` (enabled by default)
 
 ### script-search
 
@@ -509,11 +521,13 @@ Lead-only registry management for scripts ctx.api/ctx.mcp connections. Supports 
 | `baseUrl` | `string` | No | - | Base URL for OpenAPI or GraphQL connections. |
 | `allowedHosts` | `array` | No | - | Allowed outbound hostnames for credential substitution. |
 | `credentialBindingId` | `string` | No | - | Existing credential binding ID to attach to the connection. |
-| `configKey` | `string` | No | - | Config key used to create a credential binding when credentialBindingId is omitted. |
-| `headerTemplate` | `string` | No | - | Header template containing the config-key placeholder. |
-| `queryTemplate` | `string` | No | - | Query parameter template containing the config-key placeholder. |
+| `auth` | `unknown` | No | - | Inline connection auth. type=bearer|header|query with an inline `secret` (stored encrypted under a derived key) or a shared `configKey`; type=oauth with an `authorizationId`; type=none clears auth. Auto-manages the connection's credential binding. |
+| `configKey` | `string` | No | - | Deprecated flat alias for auth: config key for a derived credential binding. |
+| `headerTemplate` | `string` | No | - | Deprecated flat alias for auth: header template containing the config-key placeholder. |
+| `queryTemplate` | `string` | No | - | Deprecated flat alias for auth: query parameter template containing the config-key placeholder. |
 | `openapiSpecUrl` | `string` | No | - | URL to fetch and store an OpenAPI spec for upsert-openapi and refresh. |
 | `openapiSpecJson` | `string` | No | - | Inline OpenAPI JSON for upsert-openapi. Mutually exclusive with openapiSpecUrl. |
+| `specSource` | `object` | No | - | Vendored OpenAPI source. Mutually exclusive with openapiSpecUrl and openapiSpecJson. |
 | `enabled` | `boolean` | No | - | Whether the connection is enabled. |
 
 ### script-apis
@@ -578,261 +592,114 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | `name` | `unknown` | Yes | - | Script name whose signature should be fetched. |
 | `scope` | `unknown` | No | - | Optional scope for script resolution. |
 
-### swarm_x
+## MCP Server Tools
 
-**Swarm X**
+*MCP capability - managed MCP server registry (CRUD + install/uninstall)*
 
-Execute an Agent Swarm external command route. v1 supports target='composio' and mirrors `agent-swarm x composio <method> <path>` with the Composio API key injected server-side.
+Capability: `mcp` (enabled by default)
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `target` | `unknown` | No | "composio" | External route target. Only 'composio' is supported in v1. |
-| `method` | `unknown` | Yes | - | HTTP method to route to Composio. |
-| `path` | `string` | Yes | - | Composio API path relative to the configured base URL, e.g. /tool_router/session. |
-| `body` | `unknown` | No | - | Optional JSON request body. |
-| `query` | `object` | No | - | Optional query parameters appended to the Composio path. |
-| `headers` | `object` | No | - | Optional extra headers. Auth headers are injected by the server. |
-| `baseUrl` | `string` | No | - | Optional Composio API base URL override. |
-| `useOrgKey` | `boolean` | No | false | Use COMPOSIO_ORG_API_KEY/x-org-api-key instead of COMPOSIO_API_KEY/x-api-key. |
-| `raw` | `boolean` | No | false | Return raw text instead of JSON-pretty output text. |
+### mcp-server-create
 
-### slack-reply
+**Create MCP Server**
 
-**Reply to Slack thread**
-
-Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads.
+Create a new MCP server definition. Agent-scope servers are auto-installed for the creating agent. Swarm/global scope requires lead.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `inboxMessageId` | `uuid` | No | - | The inbox message ID to reply to (for leads responding to inbox). |
-| `taskId` | `uuid` | No | - | The task ID with Slack context (for task-related threads). |
-| `message` | `string` | Yes | - | The message to send to the Slack thread. |
+| `name` | `string` | Yes | - | Server name |
+| `description` | `string` | No | - | Server description |
+| `transport` | `stdio \| http \| sse` | Yes | - | Transport type |
+| `scope` | `global \| swarm \| agent` | No | "agent" | Scope: agent (personal), swarm (shared), or global. Default: agent |
+| `command` | `string` | No | - | Command to run (required for stdio transport) |
+| `args` | `string` | No | - | JSON array of command arguments (stdio only) |
+| `url` | `string` | No | - | Server URL (required for http/sse transport) |
+| `headers` | `string` | No | - | JSON object of non-secret headers (http/sse only) |
+| `envConfigKeys` | `string` | No | - | JSON object mapping env var names to config key paths |
+| `headerConfigKeys` | `string` | No | - | JSON object mapping header names to config key paths for secret headers |
+| `extraAuthorizeParams` | `string` | No | - | JSON object string of extra OAuth authorize-request params, e.g. {"access_type":"offline","prompt":"consent"} |
 
-### slack-read
+### mcp-server-update
 
-**Read Slack thread/channel history**
+**Update MCP Server**
 
-Read messages from a Slack thread or channel. Use inboxMessageId or taskId to read from a thread you have context for, or provide channelId directly for channel history (leads only).
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `inboxMessageId` | `uuid` | No | - | Read thread history for an inbox message. |
-| `taskId` | `uuid` | No | - | Read thread history for a task. |
-| `channelId` | `string` | No | - | Slack channel ID to read from (requires lead privileges). |
-| `threadTs` | `string` | No | - | Thread timestamp (required with channelId for thread history). |
-| `limit` | `number` | No | 20 | Maximum number of messages to retrieve (default: 20, max: 100). |
-| `includeFiles` | `boolean` | No | true | Include file attachments in the response (default: true). |
-
-### slack-post
-
-**Post message to Slack channel**
-
-Post a message to a Slack channel. By default creates a new top-level message; pass `threadTs` to post as a threaded reply under an existing message (obtain the ts from `slack-start-thread`). Requires lead privileges.
+Update an MCP server's configuration. Only the owner or lead can update.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `channelId` | `string` | Yes | - | The Slack channel ID to post to. |
-| `message` | `string` | Yes | - | The message content to post. |
-| `threadTs` | `string` | No | - | Optional parent message ts to thread under. Obtain via `slack-start-thread`. When omitted, posts as a new top-level message. |
+| `id` | `string` | Yes | - | ID of the MCP server to update |
+| `name` | `string` | No | - | New name |
+| `description` | `string` | No | - | New description |
+| `transport` | `stdio \| http \| sse` | No | - | New transport type |
+| `command` | `string` | No | - | New command (stdio) |
+| `args` | `string` | No | - | New JSON array of arguments (stdio) |
+| `url` | `string` | No | - | New URL (http/sse) |
+| `headers` | `string` | No | - | New JSON object of non-secret headers |
+| `envConfigKeys` | `string` | No | - | New env config key mappings |
+| `headerConfigKeys` | `string` | No | - | New header config key mappings |
+| `extraAuthorizeParams` | `string` | No | - | JSON object string of extra OAuth authorize-request params, e.g. {"access_type":"offline","prompt":"consent"} |
+| `isEnabled` | `boolean` | No | - | Toggle enabled/disabled |
 
-### slack-start-thread
+### mcp-server-delete
 
-**Start a new Slack thread**
+**Delete MCP Server**
 
-Post a new top-level message to a Slack channel and return its ts so the caller can thread replies under it. Pass the returned `ts` as `threadTs` on subsequent `slack-post` calls to keep replies in the same thread. Requires lead privileges.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `channelId` | `string` | Yes | - | The Slack channel ID to post to. |
-| `message` | `string` | Yes | - | The message content to post. |
-
-### slack-list-channels
-
-**List Slack channels**
-
-List Slack channels the bot is a member of. Use this to discover available channels for reading messages.
+Delete an MCP server definition. Only the owning agent or lead can delete.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `types` | `array` | No | - | Filter by channel types. Options: public (public channels), private (private channels), dm (direct messages), mpim (group DMs). Default: all types. |
-| `limit` | `number` | No | 100 | Maximum number of channels to retrieve (default: 100, max: 200). |
+| `id` | `string` | Yes | - | ID of the MCP server to delete |
 
-### slack-upload-file
+### mcp-server-get
 
-**Upload file to Slack**
+**Get MCP Server**
 
-Upload a file (image, document, etc.) to a Slack channel or thread. Use inboxMessageId or taskId for context, or provide channelId directly (leads only). Maximum file size is 1 GB.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `inboxMessageId` | `uuid` | No | - | The inbox message ID for thread context (leads only). |
-| `taskId` | `uuid` | No | - | The task ID with Slack context (for task-related threads). |
-| `channelId` | `string` | No | - | Direct channel ID to upload to (requires lead privileges). |
-| `threadTs` | `string` | No | - | Thread timestamp to upload as a thread reply (used with channelId). |
-| `filePath` | `string` | No | - | Path to the file to upload. Either filePath OR content must be provided. IMPORTANT: the file is read on the API server's filesystem (where this tool runs), NOT on the caller's. Worker/lead containers do NOT share /tmp or /workspace/personal/ with the API server — the only shared volume is /workspace/shared/. Use /workspace/shared/<agent-id>/file.png (or a relative path like 'shared/<agent-id>/file.png'). For files that only live on the caller (e.g. /tmp), pass them inline via `content` (base64) instead. |
-| `content` | `string` | No | - | Base64-encoded file content. Use this when the file lives on the caller's filesystem and isn't reachable by the API server (e.g. anything under /tmp on a worker/lead container). Either filePath OR content must be provided. |
-| `filename` | `string` | No | - | Name to give the file in Slack. Required when using content, defaults to original filename when using filePath. |
-| `initialComment` | `string` | No | - | Optional message to post with the file. |
-
-### slack-download-file
-
-**Download file from Slack**
-
-Download a file from Slack by file ID or URL. Files are saved to the agent's download directory on the shared disk by default.
+Get MCP server details by ID or name. Name resolution uses scope cascade: agent > swarm > global.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `fileId` | `string` | No | - | The Slack file ID to download (e.g., 'F0RDC39U1'). |
-| `url` | `string` | No | - | Direct URL to download (url_private_download from a file object). |
-| `savePath` | `string` | No | - | Where to save the file. Can be a directory or full path. Defaults to /workspace/shared/downloads/{agentId}/slack/ |
-| `filename` | `string` | No | - | Filename to use when saving. Only used if savePath is a directory. |
+| `id` | `string` | No | - | MCP server ID |
+| `name` | `string` | No | - | MCP server name (resolved with scope cascade) |
 
-### slack-delete
+### mcp-server-list
 
-**Delete a Slack message**
+**List MCP Servers**
 
-Deletes a Slack message that THIS bot authored (e.g. a message previously posted via `slack-post`/`slack-reply`). Cannot delete messages authored by humans or other apps. Requires lead privileges.
+List MCP servers with optional filters. Use installedOnly to see servers installed for the calling agent.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `channelId` | `string` | Yes | - | The Slack channel ID the message is in. |
-| `messageTs` | `string` | Yes | - | Timestamp of the message to delete. Accepts the dotted form (1783411554.596189), the 'p' deep-link form (p1783411554596189), or a full Slack permalink URL. |
+| `scope` | `global \| swarm \| agent` | No | - | Filter by scope |
+| `transport` | `stdio \| http \| sse` | No | - | Filter by transport type |
+| `search` | `string` | No | - | Search by name or description |
+| `installedOnly` | `boolean` | No | - | Only show servers installed for the calling agent |
 
-### slack-update
+### mcp-server-install
 
-**Edit a Slack message**
+**Install MCP Server**
 
-Edits (in place) the text of a Slack message that THIS bot authored — use it to post corrections to your own messages. Cannot edit messages authored by humans or other apps. Note: editing may reset the message's display name/icon to the app default (Slack's chat.update cannot set the crown persona). Requires lead privileges.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `channelId` | `string` | Yes | - | The Slack channel ID the message is in. |
-| `messageTs` | `string` | Yes | - | Timestamp of the message to edit (dotted, 'p' deep-link, or full permalink URL). |
-| `message` | `string` | Yes | - | The new message content. |
-
-### register-agentmail-inbox
-
-**Register AgentMail Inbox**
-
-Register an AgentMail inbox ID to route incoming emails to this agent. When emails arrive at this inbox, they will be routed to you as tasks (for workers) or inbox messages (for leads). Use action 'register' to add a mapping, 'unregister' to remove one, or 'list' to see your current mappings.
+Install an MCP server for an agent. Self-install is always allowed; cross-agent install requires lead.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `action` | `register \| unregister \| list` | Yes | - | Action to perform: register, unregister, or list inbox mappings. |
-| `inboxId` | `string` | No | - | The AgentMail inbox ID (e.g., 'inb_xxx'). Required for register/unregister. |
-| `inboxEmail` | `string` | No | - | Optional email address for this inbox (for reference only). |
+| `mcpServerId` | `string` | Yes | - | ID of the MCP server to install |
+| `agentId` | `string` | No | - | Target agent (default: calling agent). Lead can install for others. |
 
-### register-kapso-number
+### mcp-server-uninstall
 
-**Register Kapso WhatsApp Number**
+**Uninstall MCP Server**
 
-Provision a Kapso WhatsApp phone number for native inbound routing. Lead-only. Points the number's Kapso webhook at the swarm's native handler (signed with KAPSO_WEBHOOK_HMAC_SECRET) and stores a KV mapping so inbound messages route to an agent (defaults to the lead, or a workflow if workflowId is given). Returns the stored mapping + the registered webhook URL.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `phoneNumberId` | `string` | Yes | - | Kapso/Meta phone-number ID to provision (KAPSO_PHONE_NUMBER_ID). |
-| `agentId` | `string` | No | - | Agent to route inbound messages to as a `kapso-inbound` task. Defaults to the lead agent when omitted. |
-| `workflowId` | `string` | No | - | Advanced override: dispatch inbound via this workflow's webhook trigger instead of a task. |
-| `name` | `string` | No | - | Human-friendly display name for the number. |
-
-### unregister-kapso-number
-
-**Unregister Kapso WhatsApp Number**
-
-Remove a Kapso phone number's native routing mapping from the KV store. Lead-only. Inbound messages for the number stop routing through the native handler. The Kapso-side webhook is not deleted automatically — remove it in the Kapso dashboard if you want deliveries to stop.
+Uninstall an MCP server from an agent. Self-uninstall is always allowed; cross-agent requires lead.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `phoneNumberId` | `string` | Yes | - | Kapso/Meta phone-number ID whose mapping should be removed. |
-
-### send-whatsapp-message
-
-**Send WhatsApp Message**
-
-Send a free-form WhatsApp text via Kapso (within the 24h session window). Thin wrapper over the Kapso Meta-proxy send. For templates/media/reactions use the `kapso-whatsapp` skill. If the recipient is outside the 24h window the call returns a structured error pointing at the template path.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `phoneNumberId` | `string` | Yes | - | The swarm's Kapso/Meta phone-number ID to send from (KAPSO_PHONE_NUMBER_ID). |
-| `to` | `string` | Yes | - | Recipient phone in E.164 WITHOUT '+' (e.g. '15551234567'). |
-| `body` | `string` | Yes | - | Message text. |
-| `previewUrl` | `boolean` | No | - | Render a link preview for URLs in the body (default false). |
-
-### reply-whatsapp-message
-
-**Reply to WhatsApp Message**
-
-Quote-reply a WhatsApp message via Kapso — same as send-whatsapp-message but threads to a specific inbound WAMID via context.message_id. Recipient is inferred from the conversation; pass the original sender's phone as `to`.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `phoneNumberId` | `string` | Yes | - | The swarm's Kapso/Meta phone-number ID to send from (KAPSO_PHONE_NUMBER_ID). |
-| `to` | `string` | Yes | - | Recipient phone in E.164 WITHOUT '+'. |
-| `inReplyTo` | `string` | Yes | - | The inbound WAMID to quote-reply (set as context.message_id). |
-| `body` | `string` | Yes | - | Reply text. |
-
-## Task Pool Tools
-
-*KV*
-
-### task-action
-
-**Task Pool Actions**
-
-Perform task pool operations: create unassigned tasks, claim/release tasks from pool, accept/reject offered tasks.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `action` | `unknown` | Yes | - | The action to perform: 'create' creates an unassigned task, 'claim' takes a task from pool, 'release' returns task to pool, 'accept' accepts offered task, 'reject' declines offered task, 'to_backlog' moves task to backlog, 'from_backlog' moves task from backlog to pool. |
-| `key` | `unknown` | No | - | Logical namespace for a created task. Defaults to a shared/task:<id>/ resource key. |
-| `taskType` | `string` | No | - | Task type (e.g., 'bug', 'feature'). |
-| `tags` | `array` | No | - | Tags for filtering (e.g., ['urgent', 'frontend']). |
-| `priority` | `number` | No | - | Priority 0-100, default 50. |
-| `dependsOn` | `array` | No | - | Task IDs this task depends on. |
-| `model` | `string` | No | - | Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action. |
-| `modelTier` | `unknown` | No | - | Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action. |
-| `effort` | `unknown` | No | - | Reasoning effort for the created task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. Only used with 'create' action. |
-| `requiredCapabilities` | `array` | No | - | Capabilities a claiming agent must have (declared via join-swarm/update-profile) to be pool-eligible for this task. Written into the created task's routingAffinity (role is left unset). Only used with 'create' action. |
-
-## Messaging Tools
-
-*Messaging*
-
-### list-channels
-
-**List Channels**
-
-Lists all available channels for cross-agent communication.
-
-*No parameters*
-
-### create-channel
-
-**Create Channel**
-
-Creates a new channel for cross-agent communication.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `name` | `string` | Yes | - | Channel name (must be unique). |
-| `description` | `string` | No | - | Channel description. |
-| `type` | `unknown` | No | - | Channel type: 'public' (default) or 'dm'. |
-| `participants` | `array` | No | - | Agent IDs for DM channels. |
-
-### delete-channel
-
-**Delete Channel**
-
-Deletes a channel and all its messages. Only the lead agent can delete channels. The default 'general' channel cannot be deleted.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `channelId` | `string` | No | - | The ID of the channel to delete. |
-| `name` | `string` | No | - | Channel name (alternative to channelId). |
+| `mcpServerId` | `string` | Yes | - | ID of the MCP server to uninstall |
+| `agentId` | `string` | No | - | Target agent (default: calling agent) |
 
 ## Profiles Tools
 
-*Profiles*
+*Profiles capability - agent profile management*
+
+Capability: `profiles` (enabled by default)
 
 ### update-profile
 
@@ -877,66 +744,44 @@ Compare two versions of a context file. Shows a unified diff between the specifi
 | `versionId` | `string` | Yes | - | The "newer" version ID to diff. |
 | `compareToVersionId` | `string` | No | - | The "older" version ID to compare against. Default: previous version. |
 
-## Services Tools
+## Repo Tools
 
-*Services*
+*Repo capability - repository configuration management*
 
-### register-service
+Capability: `repo` (enabled by default)
 
-**Register Service**
+### get-repos
 
-Register a background service (e.g., PM2 process) for discovery by other agents. The service URL is automatically derived from your agent ID (https://{AGENT_ID}.{SWARM_URL}). Each agent can only run one service on port 3000.
+**Get Repos**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `script` | `string` | Yes | - | Path to the script to run (required for PM2 restart). |
-| `description` | `string` | No | - | What this service does. |
-| `healthCheckPath` | `string` | No | - | Health check endpoint path (default: /health). |
-| `cwd` | `string` | No | - | Working directory for the script. |
-| `interpreter` | `string` | No | - | Interpreter to use (e.g., 'node', 'bun'). Auto-detected from extension if not set. |
-| `args` | `array` | No | - | Command line arguments for the script. |
-| `env` | `object` | No | - | Environment variables for the process. |
-| `metadata` | `object` | No | - | Additional metadata. |
-
-### unregister-service
-
-**Unregister Service**
-
-Remove a service from the registry. Use this after stopping a PM2 process. You can only unregister your own services.
+List registered repos with their guidelines (PR checks, merge policy, review guidance). Use the optional name filter to check a specific repo. The lead should use this to verify a repo has guidelines before routing tasks.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `serviceId` | `uuid` | No | - | Service ID to unregister. |
-| `name` | `string` | No | - | Service name to unregister (alternative to serviceId). |
+| `name` | `string` | No | - | Filter by repo name. If omitted, returns all repos. |
 
-### list-services
+### update-repo
 
-**List Services**
+**Update Repo**
 
-Query services registered by agents in the swarm. Use this to discover services exposed by other agents.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `agentId` | `uuid` | No | - | Filter by specific agent ID. |
-| `name` | `string` | No | - | Filter by service name (partial match). |
-| `status` | `unknown` | No | - | Filter by health status. |
-| `includeOwn` | `boolean` | No | true | Include services registered by calling agent (default: true). |
-
-### update-service-status
-
-**Update Service Status**
-
-Update the health status of a registered service. Use this after a service becomes healthy or needs to be marked as stopped/unhealthy.
+Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `serviceId` | `uuid` | No | - | Service ID to update. |
-| `name` | `string` | No | - | Service name to update (alternative to serviceId). |
-| `status` | `unknown` | Yes | - | New status: 'starting', 'healthy', 'unhealthy', or 'stopped'. |
+| `id` | `string` | Yes | - | The repo ID to update. |
+| `url` | `string` | No | - | New repo URL. |
+| `name` | `string` | No | - | New repo name. |
+| `clonePath` | `string` | No | - | New clone path. |
+| `defaultBranch` | `string` | No | - | New default branch. |
+| `autoClone` | `boolean` | No | - | Whether to auto-clone. |
+| `hooks` | `unknown` | No | - | Repository hook install config. Set { enabled: true } to opt into best-effort worker hook installation, or null to disable. |
+| `guidelines` | `unknown` | No | - | Repository guidelines: prChecks (commands before PR), mergeChecks (conditions before merge), allowMerge (default false), review (guidance for reviewers). Pass null to clear. |
 
 ## Scheduling Tools
 
-*Scheduling*
+*Scheduling capability - scheduled task management*
+
+Capability: `scheduling` (enabled by default)
 
 ### list-schedules
 
@@ -1068,7 +913,9 @@ Immediately execute a scheduled task, creating a task right away. Does not affec
 
 ## Memory Tools
 
-*Memory*
+*Memory capability - persistent memory with vector search*
+
+Capability: `memory` (enabled by default)
 
 ### memory-search
 
@@ -1148,9 +995,73 @@ Allows the lead agent to push learnings into a worker's memory. The learning wil
 | `learning` | `string` | Yes | - | The learning content to inject |
 | `category` | `unknown` | Yes | - | Category of the learning: mistake-pattern, best-practice, codebase-knowledge, or preference |
 
+## Tracker Tools
+
+*Tracker capability - external issue tracker integration*
+
+Capability: `tracker` (enabled by default)
+
+### tracker-status
+
+**Tracker Status**
+
+Show all connected trackers and their OAuth status (token expiry, workspace info). Proactively refreshes near-expiry tokens before reporting, so the returned `tokenExpiresAt` reflects the row that subsequent API calls (and direct DB reads) will see.
+
+*No parameters*
+
+### tracker-link-task
+
+**Link Task to Tracker**
+
+Link a swarm task to an external tracker issue.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear', 'jira') |
+| `swarmTaskId` | `string` | Yes | - | The swarm task ID to link |
+| `externalId` | `string` | Yes | - | The external issue ID in the tracker |
+| `externalIdentifier` | `string` | No | - | Human-readable identifier (e.g. 'ENG-42') |
+| `externalUrl` | `string` | No | - | URL to the external issue |
+
+### tracker-unlink
+
+**Unlink Tracker Sync**
+
+Remove a tracker sync mapping by ID.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `syncId` | `string` | Yes | - | The tracker sync mapping ID to remove |
+
+### tracker-sync-status
+
+**Tracker Sync Status**
+
+Show all tracker sync mappings with their state.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `string` | No | - | Filter by provider (e.g. 'linear', 'jira') |
+| `entityType` | `task` | No | - | Filter by entity type |
+
+### tracker-map-agent
+
+**Map Agent to Tracker User**
+
+Map a swarm agent to an external tracker user (for assignment sync).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear', 'jira') |
+| `agentId` | `string` | Yes | - | The swarm agent ID |
+| `externalUserId` | `string` | Yes | - | The external user ID in the tracker |
+| `agentName` | `string` | Yes | - | Display name for the agent mapping |
+
 ## Workflows Tools
 
-*Tracker*
+*Workflows capability - DAG-based automation workflows*
+
+Capability: `workflows` (enabled by default)
 
 ### create-workflow
 
@@ -1319,9 +1230,154 @@ Create an approval request that pauses until a human responds. Supports multiple
 | `questions` | `array` | Yes | - | Questions to ask the human |
 | `timeoutSeconds` | `number` | No | - | Timeout in seconds (auto-rejects on timeout) |
 
+## Skills Tools
+
+*Skills capability - installable skill packages (create, search, install, publish)*
+
+Capability: `skills` (enabled by default)
+
+### skill-create
+
+**Create Skill**
+
+Create a personal skill from SKILL.md content. Parses frontmatter for name, description, and metadata.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `content` | `string` | Yes | - | Full SKILL.md content (YAML frontmatter + markdown body) |
+| `scope` | `agent \| swarm` | No | "agent" | Scope: agent (personal) or swarm (shared). Default: agent |
+
+### skill-update
+
+**Update Skill**
+
+Update a skill's content or settings. Re-parses frontmatter if content changes.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | No | - | Skill ID to update |
+| `content` | `string` | No | - | New SKILL.md content (re-parses frontmatter) |
+| `isEnabled` | `boolean` | No | - | Toggle enabled/disabled |
+| `scope` | `agent \| swarm` | No | - | Scope: agent (personal) or swarm (shared). Only leads can promote a skill to swarm scope (used by the skill-approval flow). |
+
+### skill-delete
+
+**Delete Skill**
+
+Delete a skill. Only the owning agent or lead can delete.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | Yes | - | ID of the skill to delete |
+
+### skill-get
+
+**Get Skill**
+
+Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | No | - | Skill ID |
+| `name` | `string` | No | - | Skill name (resolved with precedence) |
+
+### skill-get-file
+
+**Get Skill File**
+
+Fetch a bundled reference file from a complex skill by skillId and relative path. Use this when the file is not available on disk.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | Yes | - | Skill ID |
+| `path` | `string` | Yes | - | Relative path, e.g. references/animations.md |
+
+### skill-list
+
+**List Skills**
+
+List available skills with optional filters.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `type` | `remote \| personal` | No | - | Filter by type |
+| `scope` | `global \| swarm \| agent` | No | - | Filter by scope |
+| `agentId` | `string` | No | - | Filter by owning agent |
+| `installedOnly` | `boolean` | No | - | Only show skills installed for calling agent |
+| `includeContent` | `boolean` | No | false | Include full content (default false) |
+
+### skill-search
+
+**Search Skills**
+
+Search skills by keyword (name and description).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | `string` | Yes | - | Search query |
+| `limit` | `number` | No | 20 | - |
+
+### skill-install
+
+**Install Skill**
+
+Install/assign a skill to an agent. Leads can install for other agents.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | Yes | - | ID of the skill to install |
+| `agentId` | `string` | No | - | Target agent (default: calling agent). Lead can install for others. |
+
+### skill-uninstall
+
+**Uninstall Skill**
+
+Remove a skill from an agent.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | Yes | - | ID of the skill to uninstall |
+| `agentId` | `string` | No | - | Target agent (default: calling agent) |
+
+### skill-install-remote
+
+**Install Remote Skill**
+
+Fetch and install a remote skill from a GitHub repository. Fetches SKILL.md via GitHub raw content API.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `sourceRepo` | `string` | Yes | - | GitHub repo (e.g. "vercel-labs/skills") |
+| `sourcePath` | `string` | No | - | Path within repo (e.g. "skills/nextjs") |
+| `scope` | `global \| swarm` | No | "global" | Scope for the installed skill |
+| `isComplex` | `boolean` | No | false | If true, registers for npx install (metadata only) |
+
+### skill-sync-remote
+
+**Sync Remote Skills**
+
+Check and update remote skills from their GitHub sources. Compares content and updates if changed.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | No | - | Sync a specific skill, or all remote skills if omitted |
+| `force` | `boolean` | No | false | Force re-fetch even if hash matches |
+
+### skill-publish
+
+**Publish Skill**
+
+Publish a personal skill to swarm scope. Creates an approval task for the lead agent.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | Yes | - | ID of the personal skill to publish |
+
 ## Pages Tools
 
-*Pages*
+*Pages capability - DB-backed lightweight artifacts (HTML / JSON specs).*
+
+Capability: `pages` (enabled by default)
 
 ### create_page
 
@@ -1352,9 +1408,30 @@ Permanently delete one page by pageId, or by slug in the caller's page namespace
 | `pageId` | `string` | No | - | Page ID to delete. |
 | `slug` | `string` | No | - | Page slug to delete from the caller's own (agentId, slug) namespace. Alternative to pageId. |
 
-## Kv Tools
+## Metrics Tools
 
-*KV*
+*Metrics capability - time-series metrics (DB-backed, for dashboards).*
+
+Capability: `metrics` (enabled by default)
+
+### create_metric
+
+**Create or update a metric**
+
+Stores a config-driven dashboard backed by read-only SQL widget queries. Calls are upsert-by-(agent, slug), mirroring create_page: same slug updates the existing dashboard and snapshots the prior JSON definition.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `title` | `string` | Yes | - | Human-readable dashboard title. |
+| `slug` | `string` | No | - | URL-safe slug. Defaults to the kebab-cased title. |
+| `description` | `string` | No | - | Short description shown in the dashboard. |
+| `definition` | `unknown` | Yes | - | Dashboard JSON definition: a list of widgets, each with SELECT/WITH SQL and viz config. |
+
+## KV Tools
+
+*KV capability — namespaced Redis-like key/value (see src/be/migrations/061_kv_store.sql).*
+
+Capability: `kv` (enabled by default)
 
 ### kv-get
 
@@ -1417,22 +1494,294 @@ List KV entries in the resolved namespace (optionally filtered by key prefix). E
 | `offset` | `number` | No | - | - |
 | `namespace` | `unknown` | No | - | - |
 
-## Other Tools
+## Slack Tools
 
-*Tools not assigned to a capability group*
+*Slack capability - Slack integration tools (no-op if Slack is not configured)*
 
-### create_metric
+Capability: `slack` (enabled by default)
 
-**Create or update a metric**
+### slack-reply
 
-Stores a config-driven dashboard backed by read-only SQL widget queries. Calls are upsert-by-(agent, slug), mirroring create_page: same slug updates the existing dashboard and snapshots the prior JSON definition.
+**Reply to Slack thread**
+
+Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `title` | `string` | Yes | - | Human-readable dashboard title. |
-| `slug` | `string` | No | - | URL-safe slug. Defaults to the kebab-cased title. |
-| `description` | `string` | No | - | Short description shown in the dashboard. |
-| `definition` | `unknown` | Yes | - | Dashboard JSON definition: a list of widgets, each with SELECT/WITH SQL and viz config. |
+| `inboxMessageId` | `uuid` | No | - | The inbox message ID to reply to (for leads responding to inbox). |
+| `taskId` | `uuid` | No | - | The task ID with Slack context (for task-related threads). |
+| `message` | `string` | Yes | - | The message to send to the Slack thread. |
+
+### slack-read
+
+**Read Slack thread/channel history**
+
+Read messages from a Slack thread or channel. Use inboxMessageId or taskId to read from a thread you have context for, or provide channelId directly for channel history (leads only).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `inboxMessageId` | `uuid` | No | - | Read thread history for an inbox message. |
+| `taskId` | `uuid` | No | - | Read thread history for a task. |
+| `channelId` | `string` | No | - | Slack channel ID to read from (requires lead privileges). |
+| `threadTs` | `string` | No | - | Thread timestamp (required with channelId for thread history). |
+| `limit` | `number` | No | 20 | Maximum number of messages to retrieve (default: 20, max: 100). |
+| `includeFiles` | `boolean` | No | true | Include file attachments in the response (default: true). |
+
+### slack-post
+
+**Post message to Slack channel**
+
+Post a message to a Slack channel. By default creates a new top-level message; pass `threadTs` to post as a threaded reply under an existing message (obtain the ts from `slack-start-thread`). Requires lead privileges.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `channelId` | `string` | Yes | - | The Slack channel ID to post to. |
+| `message` | `string` | Yes | - | The message content to post. |
+| `threadTs` | `string` | No | - | Optional parent message ts to thread under. Obtain via `slack-start-thread`. When omitted, posts as a new top-level message. |
+
+### slack-start-thread
+
+**Start a new Slack thread**
+
+Post a new top-level message to a Slack channel and return its ts so the caller can thread replies under it. Pass the returned `ts` as `threadTs` on subsequent `slack-post` calls to keep replies in the same thread. Requires lead privileges.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `channelId` | `string` | Yes | - | The Slack channel ID to post to. |
+| `message` | `string` | Yes | - | The message content to post. |
+
+### slack-list-channels
+
+**List Slack channels**
+
+List Slack channels the bot is a member of. Use this to discover available channels for reading messages.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `types` | `array` | No | - | Filter by channel types. Options: public (public channels), private (private channels), dm (direct messages), mpim (group DMs). Default: all types. |
+| `limit` | `number` | No | 100 | Maximum number of channels to retrieve (default: 100, max: 200). |
+
+### slack-upload-file
+
+**Upload file to Slack**
+
+Upload a file (image, document, etc.) to a Slack channel or thread. Use inboxMessageId or taskId for context, or provide channelId directly (leads only). Maximum file size is 1 GB.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `inboxMessageId` | `uuid` | No | - | The inbox message ID for thread context (leads only). |
+| `taskId` | `uuid` | No | - | The task ID with Slack context (for task-related threads). |
+| `channelId` | `string` | No | - | Direct channel ID to upload to (requires lead privileges). |
+| `threadTs` | `string` | No | - | Thread timestamp to upload as a thread reply (used with channelId). |
+| `filePath` | `string` | No | - | Path to the file to upload. Either filePath OR content must be provided. IMPORTANT: the file is read on the API server's filesystem (where this tool runs), NOT on the caller's. Worker/lead containers do NOT share /tmp or /workspace/personal/ with the API server — the only shared volume is /workspace/shared/. Use /workspace/shared/<agent-id>/file.png (or a relative path like 'shared/<agent-id>/file.png'). For files that only live on the caller (e.g. /tmp), pass them inline via `content` (base64) instead. |
+| `content` | `string` | No | - | Base64-encoded file content. Use this when the file lives on the caller's filesystem and isn't reachable by the API server (e.g. anything under /tmp on a worker/lead container). Either filePath OR content must be provided. |
+| `filename` | `string` | No | - | Name to give the file in Slack. Required when using content, defaults to original filename when using filePath. |
+| `initialComment` | `string` | No | - | Optional message to post with the file. |
+
+### slack-download-file
+
+**Download file from Slack**
+
+Download a file from Slack by file ID or URL. Files are saved to the agent's download directory on the shared disk by default.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `fileId` | `string` | No | - | The Slack file ID to download (e.g., 'F0RDC39U1'). |
+| `url` | `string` | No | - | Direct URL to download (url_private_download from a file object). |
+| `savePath` | `string` | No | - | Where to save the file. Can be a directory or full path. Defaults to /workspace/shared/downloads/{agentId}/slack/ |
+| `filename` | `string` | No | - | Filename to use when saving. Only used if savePath is a directory. |
+
+### slack-delete
+
+**Delete a Slack message**
+
+Deletes a Slack message that THIS bot authored (e.g. a message previously posted via `slack-post`/`slack-reply`). Cannot delete messages authored by humans or other apps. Requires lead privileges.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `channelId` | `string` | Yes | - | The Slack channel ID the message is in. |
+| `messageTs` | `string` | Yes | - | Timestamp of the message to delete. Accepts the dotted form (1783411554.596189), the 'p' deep-link form (p1783411554596189), or a full Slack permalink URL. |
+
+### slack-update
+
+**Edit a Slack message**
+
+Edits (in place) the text of a Slack message that THIS bot authored — use it to post corrections to your own messages. Cannot edit messages authored by humans or other apps. Note: editing may reset the message's display name/icon to the app default (Slack's chat.update cannot set the crown persona). Requires lead privileges.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `channelId` | `string` | Yes | - | The Slack channel ID the message is in. |
+| `messageTs` | `string` | Yes | - | Timestamp of the message to edit (dotted, 'p' deep-link, or full permalink URL). |
+| `message` | `string` | Yes | - | The new message content. |
+
+## Prompt Templates Tools
+
+*Prompt-templates capability - prompt template management (list/get/set/delete/preview)*
+
+Capability: `prompt-templates` — **disabled by default**; add `prompt-templates` to `CAPABILITIES` to enable.
+
+### list-prompt-templates
+
+**List Prompt Templates**
+
+List prompt templates with optional filters. Returns all templates matching the specified criteria, including defaults and overrides at all scope levels.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `eventType` | `string` | No | - | Filter by event type (e.g. 'github.pull_request.opened'). |
+| `scope` | `unknown` | No | - | Filter by scope: 'global', 'agent', or 'repo'. |
+| `scopeId` | `string` | No | - | Filter by scope ID (agent ID or repo ID). |
+| `isDefault` | `boolean` | No | - | Filter by default status. |
+
+### get-prompt-template
+
+**Get Prompt Template**
+
+Get a prompt template by ID, including its version history and the code-defined variable definitions for its event type.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | The prompt template ID. |
+
+### set-prompt-template
+
+**Set Prompt Template**
+
+Create or update a prompt template override. Upserts by (eventType, scope, scopeId). Use scope='global' for server-wide, 'agent' for agent-specific, or 'repo' for repo-specific overrides.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `eventType` | `string` | Yes | - | Event type identifier (e.g. 'github.pull_request.opened'). |
+| `scope` | `unknown` | No | - | Template scope: 'global' (default), 'agent', or 'repo'. |
+| `scopeId` | `string` | No | - | Agent ID or repo ID. Required for 'agent' and 'repo' scopes, omit for 'global'. |
+| `state` | `unknown` | No | - | Template state: 'enabled' (default), 'default_prompt_fallback', or 'skip_event'. |
+| `body` | `string` | Yes | - | The template body text with {{variable}} placeholders. |
+| `changeReason` | `string` | No | - | Reason for the change (recorded in history). |
+
+### delete-prompt-template
+
+**Delete Prompt Template**
+
+Delete a prompt template override by ID. Cannot delete default templates — use reset instead. Use list-prompt-templates to find template IDs first.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | The prompt template ID to delete. |
+
+### preview-prompt-template
+
+**Preview Prompt Template**
+
+Dry-run render a prompt template with provided variables. Optionally supply a custom body to preview before saving. Returns the interpolated text and any unresolved {{variable}} tokens.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `eventType` | `string` | Yes | - | Event type to preview (used to look up header and default body). |
+| `body` | `string` | No | - | Custom body to preview instead of the default. |
+| `variables` | `object` | No | - | Variables to interpolate into the template. |
+
+## AgentMail Tools
+
+*Agentmail capability - AgentMail integration (self-service inbox mapping)*
+
+Capability: `agentmail` — **disabled by default**; add `agentmail` to `CAPABILITIES` to enable.
+
+### register-agentmail-inbox
+
+**Register AgentMail Inbox**
+
+Register an AgentMail inbox ID to route incoming emails to this agent. When emails arrive at this inbox, they will be routed to you as tasks (for workers) or inbox messages (for leads). Use action 'register' to add a mapping, 'unregister' to remove one, or 'list' to see your current mappings.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `action` | `register \| unregister \| list` | Yes | - | Action to perform: register, unregister, or list inbox mappings. |
+| `inboxId` | `string` | No | - | The AgentMail inbox ID (e.g., 'inb_xxx'). Required for register/unregister. |
+| `inboxEmail` | `string` | No | - | Optional email address for this inbox (for reference only). |
+
+## Kapso (WhatsApp) Tools
+
+*Kapso capability - Kapso/WhatsApp integration (native inbound provisioning + outbound)*
+
+Capability: `kapso` — **disabled by default**; add `kapso` to `CAPABILITIES` to enable.
+
+### register-kapso-number
+
+**Register Kapso WhatsApp Number**
+
+Provision a Kapso WhatsApp phone number for native inbound routing. Lead-only. Points the number's Kapso webhook at the swarm's native handler (signed with KAPSO_WEBHOOK_HMAC_SECRET) and stores a KV mapping so inbound messages route to an agent (defaults to the lead, or a workflow if workflowId is given). Returns the stored mapping + the registered webhook URL.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `phoneNumberId` | `string` | Yes | - | Kapso/Meta phone-number ID to provision (KAPSO_PHONE_NUMBER_ID). |
+| `agentId` | `string` | No | - | Agent to route inbound messages to as a `kapso-inbound` task. Defaults to the lead agent when omitted. |
+| `workflowId` | `string` | No | - | Advanced override: dispatch inbound via this workflow's webhook trigger instead of a task. |
+| `name` | `string` | No | - | Human-friendly display name for the number. |
+
+### unregister-kapso-number
+
+**Unregister Kapso WhatsApp Number**
+
+Remove a Kapso phone number's native routing mapping from the KV store. Lead-only. Inbound messages for the number stop routing through the native handler. The Kapso-side webhook is not deleted automatically — remove it in the Kapso dashboard if you want deliveries to stop.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `phoneNumberId` | `string` | Yes | - | Kapso/Meta phone-number ID whose mapping should be removed. |
+
+### send-whatsapp-message
+
+**Send WhatsApp Message**
+
+Send a free-form WhatsApp text via Kapso (within the 24h session window). Thin wrapper over the Kapso Meta-proxy send. For templates/media/reactions use the `kapso-whatsapp` skill. If the recipient is outside the 24h window the call returns a structured error pointing at the template path.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `phoneNumberId` | `string` | Yes | - | The swarm's Kapso/Meta phone-number ID to send from (KAPSO_PHONE_NUMBER_ID). |
+| `to` | `string` | Yes | - | Recipient phone in E.164 WITHOUT '+' (e.g. '15551234567'). |
+| `body` | `string` | Yes | - | Message text. |
+| `previewUrl` | `boolean` | No | - | Render a link preview for URLs in the body (default false). |
+
+### reply-whatsapp-message
+
+**Reply to WhatsApp Message**
+
+Quote-reply a WhatsApp message via Kapso — same as send-whatsapp-message but threads to a specific inbound WAMID via context.message_id. Recipient is inferred from the conversation; pass the original sender's phone as `to`.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `phoneNumberId` | `string` | Yes | - | The swarm's Kapso/Meta phone-number ID to send from (KAPSO_PHONE_NUMBER_ID). |
+| `to` | `string` | Yes | - | Recipient phone in E.164 WITHOUT '+'. |
+| `inReplyTo` | `string` | Yes | - | The inbound WAMID to quote-reply (set as context.message_id). |
+| `body` | `string` | Yes | - | Reply text. |
+
+## Swarm X Tools
+
+*Swarm-x capability - external command routes mirroring the `agent-swarm x ...` CLI surface*
+
+Capability: `swarm-x` — **disabled by default**; add `swarm-x` to `CAPABILITIES` to enable.
+
+### swarm_x
+
+**Swarm X**
+
+Execute an Agent Swarm external command route. v1 supports target='composio' and mirrors `agent-swarm x composio <method> <path>` with the Composio API key injected server-side.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `target` | `unknown` | No | "composio" | External route target. Only 'composio' is supported in v1. |
+| `method` | `unknown` | Yes | - | HTTP method to route to Composio. |
+| `path` | `string` | Yes | - | Composio API path relative to the configured base URL, e.g. /tool_router/session. |
+| `body` | `unknown` | No | - | Optional JSON request body. |
+| `query` | `object` | No | - | Optional query parameters appended to the Composio path. |
+| `headers` | `object` | No | - | Optional extra headers. Auth headers are injected by the server. |
+| `baseUrl` | `string` | No | - | Optional Composio API base URL override. |
+| `useOrgKey` | `boolean` | No | false | Use COMPOSIO_ORG_API_KEY/x-org-api-key instead of COMPOSIO_API_KEY/x-api-key. |
+| `raw` | `boolean` | No | false | Return raw text instead of JSON-pretty output text. |
+
+## Messaging Tools
+
+*Messaging capability - internal swarm chat (post/read messages, channel CRUD)*
+
+Capability: `messaging` — **disabled by default**; add `messaging` to `CAPABILITIES` to enable.
 
 ### post-message
 
@@ -1446,6 +1795,116 @@ Posts a message to a channel for cross-agent communication.
 | `content` | `string` | Yes | - | Message content. |
 | `replyTo` | `uuid` | No | - | Message ID to reply to (for threading). |
 | `mentions` | `array` | No | - | Agent IDs to @mention (they'll see it in unread). |
+
+### read-messages
+
+**Read Messages**
+
+Reads messages from a channel. If no channel is specified, returns unread messages from ALL channels. Supports filtering by unread, mentions, and time range. Automatically marks messages as read.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `channel` | `string` | No | - | Channel name or ID. If omitted, returns unread messages from all channels. |
+| `limit` | `number` | No | 20 | Max messages to return per channel (default: 20). |
+| `since` | `unknown` | No | - | Only messages after this ISO timestamp. |
+| `unreadOnly` | `boolean` | No | false | Only return unread messages. |
+| `mentionsOnly` | `boolean` | No | false | Only return messages that @mention you. |
+| `markAsRead` | `boolean` | No | true | Update your read position after fetching (default: true). |
+
+### list-channels
+
+**List Channels**
+
+Lists all available channels for cross-agent communication.
+
+*No parameters*
+
+### create-channel
+
+**Create Channel**
+
+Creates a new channel for cross-agent communication.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | Yes | - | Channel name (must be unique). |
+| `description` | `string` | No | - | Channel description. |
+| `type` | `unknown` | No | - | Channel type: 'public' (default) or 'dm'. |
+| `participants` | `array` | No | - | Agent IDs for DM channels. |
+
+### delete-channel
+
+**Delete Channel**
+
+Deletes a channel and all its messages. Only the lead agent can delete channels. The default 'general' channel cannot be deleted.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `channelId` | `string` | No | - | The ID of the channel to delete. |
+| `name` | `string` | No | - | Channel name (alternative to channelId). |
+
+## Services Tools
+
+*Services capability - PM2/background service registry*
+
+Capability: `services` — **disabled by default**; add `services` to `CAPABILITIES` to enable.
+
+### register-service
+
+**Register Service**
+
+Register a background service (e.g., PM2 process) for discovery by other agents. The service URL is automatically derived from your agent ID (https://{AGENT_ID}.{SWARM_URL}). Each agent can only run one service on port 3000.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `script` | `string` | Yes | - | Path to the script to run (required for PM2 restart). |
+| `description` | `string` | No | - | What this service does. |
+| `healthCheckPath` | `string` | No | - | Health check endpoint path (default: /health). |
+| `cwd` | `string` | No | - | Working directory for the script. |
+| `interpreter` | `string` | No | - | Interpreter to use (e.g., 'node', 'bun'). Auto-detected from extension if not set. |
+| `args` | `array` | No | - | Command line arguments for the script. |
+| `env` | `object` | No | - | Environment variables for the process. |
+| `metadata` | `object` | No | - | Additional metadata. |
+
+### unregister-service
+
+**Unregister Service**
+
+Remove a service from the registry. Use this after stopping a PM2 process. You can only unregister your own services.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `serviceId` | `uuid` | No | - | Service ID to unregister. |
+| `name` | `string` | No | - | Service name to unregister (alternative to serviceId). |
+
+### list-services
+
+**List Services**
+
+Query services registered by agents in the swarm. Use this to discover services exposed by other agents.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `agentId` | `uuid` | No | - | Filter by specific agent ID. |
+| `name` | `string` | No | - | Filter by service name (partial match). |
+| `status` | `unknown` | No | - | Filter by health status. |
+| `includeOwn` | `boolean` | No | true | Include services registered by calling agent (default: true). |
+
+### update-service-status
+
+**Update Service Status**
+
+Update the health status of a registered service. Use this after a service becomes healthy or needs to be marked as stopped/unhealthy.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `serviceId` | `uuid` | No | - | Service ID to update. |
+| `name` | `string` | No | - | Service name to update (alternative to serviceId). |
+| `status` | `unknown` | Yes | - | New status: 'starting', 'healthy', 'unhealthy', or 'stopped'. |
+
+## Other Tools
+
+*Tools not assigned to a capability group*
 
 ### launch-script-run
 
@@ -1477,309 +1936,4 @@ Posts a message to a channel for cross-agent communication.
 | `agentId` | `string` | No | - | Optional agent ID filter. |
 | `limit` | `number` | No | 50 | Maximum runs to return. |
 | `offset` | `number` | No | 0 | Pagination offset. |
-
-### read-messages
-
-**Read Messages**
-
-Reads messages from a channel. If no channel is specified, returns unread messages from ALL channels. Supports filtering by unread, mentions, and time range. Automatically marks messages as read.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `channel` | `string` | No | - | Channel name or ID. If omitted, returns unread messages from all channels. |
-| `limit` | `number` | No | 20 | Max messages to return per channel (default: 20). |
-| `since` | `unknown` | No | - | Only messages after this ISO timestamp. |
-| `unreadOnly` | `boolean` | No | false | Only return unread messages. |
-| `mentionsOnly` | `boolean` | No | false | Only return messages that @mention you. |
-| `markAsRead` | `boolean` | No | true | Update your read position after fetching (default: true). |
-
-### tracker-map-agent
-
-**Map Agent to Tracker User**
-
-Map a swarm agent to an external tracker user (for assignment sync).
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear', 'jira') |
-| `agentId` | `string` | Yes | - | The swarm agent ID |
-| `externalUserId` | `string` | Yes | - | The external user ID in the tracker |
-| `agentName` | `string` | Yes | - | Display name for the agent mapping |
-
-### tracker-unlink
-
-**Unlink Tracker Sync**
-
-Remove a tracker sync mapping by ID.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `syncId` | `string` | Yes | - | The tracker sync mapping ID to remove |
-
-### tracker-status
-
-**Tracker Status**
-
-Show all connected trackers and their OAuth status (token expiry, workspace info). Proactively refreshes near-expiry tokens before reporting, so the returned `tokenExpiresAt` reflects the row that subsequent API calls (and direct DB reads) will see.
-
-*No parameters*
-
-### tracker-link-task
-
-**Link Task to Tracker**
-
-Link a swarm task to an external tracker issue.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear', 'jira') |
-| `swarmTaskId` | `string` | Yes | - | The swarm task ID to link |
-| `externalId` | `string` | Yes | - | The external issue ID in the tracker |
-| `externalIdentifier` | `string` | No | - | Human-readable identifier (e.g. 'ENG-42') |
-| `externalUrl` | `string` | No | - | URL to the external issue |
-
-### tracker-sync-status
-
-**Tracker Sync Status**
-
-Show all tracker sync mappings with their state.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `provider` | `string` | No | - | Filter by provider (e.g. 'linear', 'jira') |
-| `entityType` | `task` | No | - | Filter by entity type |
-
-### skill-install
-
-**Install Skill**
-
-Install/assign a skill to an agent. Leads can install for other agents.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `skillId` | `string` | Yes | - | ID of the skill to install |
-| `agentId` | `string` | No | - | Target agent (default: calling agent). Lead can install for others. |
-
-### skill-uninstall
-
-**Uninstall Skill**
-
-Remove a skill from an agent.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `skillId` | `string` | Yes | - | ID of the skill to uninstall |
-| `agentId` | `string` | No | - | Target agent (default: calling agent) |
-
-### skill-publish
-
-**Publish Skill**
-
-Publish a personal skill to swarm scope. Creates an approval task for the lead agent.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `skillId` | `string` | Yes | - | ID of the personal skill to publish |
-
-### skill-delete
-
-**Delete Skill**
-
-Delete a skill. Only the owning agent or lead can delete.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `skillId` | `string` | Yes | - | ID of the skill to delete |
-
-### skill-sync-remote
-
-**Sync Remote Skills**
-
-Check and update remote skills from their GitHub sources. Compares content and updates if changed.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `skillId` | `string` | No | - | Sync a specific skill, or all remote skills if omitted |
-| `force` | `boolean` | No | false | Force re-fetch even if hash matches |
-
-### skill-install-remote
-
-**Install Remote Skill**
-
-Fetch and install a remote skill from a GitHub repository. Fetches SKILL.md via GitHub raw content API.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `sourceRepo` | `string` | Yes | - | GitHub repo (e.g. "vercel-labs/skills") |
-| `sourcePath` | `string` | No | - | Path within repo (e.g. "skills/nextjs") |
-| `scope` | `global \| swarm` | No | "global" | Scope for the installed skill |
-| `isComplex` | `boolean` | No | false | If true, registers for npx install (metadata only) |
-
-### skill-get
-
-**Get Skill**
-
-Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `skillId` | `string` | No | - | Skill ID |
-| `name` | `string` | No | - | Skill name (resolved with precedence) |
-
-### skill-get-file
-
-**Get Skill File**
-
-Fetch a bundled reference file from a complex skill by skillId and relative path. Use this when the file is not available on disk.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `skillId` | `string` | Yes | - | Skill ID |
-| `path` | `string` | Yes | - | Relative path, e.g. references/animations.md |
-
-### skill-search
-
-**Search Skills**
-
-Search skills by keyword (name and description).
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `query` | `string` | Yes | - | Search query |
-| `limit` | `number` | No | 20 | - |
-
-### skill-update
-
-**Update Skill**
-
-Update a skill's content or settings. Re-parses frontmatter if content changes.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `skillId` | `string` | No | - | Skill ID to update |
-| `content` | `string` | No | - | New SKILL.md content (re-parses frontmatter) |
-| `isEnabled` | `boolean` | No | - | Toggle enabled/disabled |
-| `scope` | `agent \| swarm` | No | - | Scope: agent (personal) or swarm (shared). Only leads can promote a skill to swarm scope (used by the skill-approval flow). |
-
-### skill-list
-
-**List Skills**
-
-List available skills with optional filters.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `type` | `remote \| personal` | No | - | Filter by type |
-| `scope` | `global \| swarm \| agent` | No | - | Filter by scope |
-| `agentId` | `string` | No | - | Filter by owning agent |
-| `installedOnly` | `boolean` | No | - | Only show skills installed for calling agent |
-| `includeContent` | `boolean` | No | false | Include full content (default false) |
-
-### skill-create
-
-**Create Skill**
-
-Create a personal skill from SKILL.md content. Parses frontmatter for name, description, and metadata.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `content` | `string` | Yes | - | Full SKILL.md content (YAML frontmatter + markdown body) |
-| `scope` | `agent \| swarm` | No | "agent" | Scope: agent (personal) or swarm (shared). Default: agent |
-
-### mcp-server-get
-
-**Get MCP Server**
-
-Get MCP server details by ID or name. Name resolution uses scope cascade: agent > swarm > global.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `id` | `string` | No | - | MCP server ID |
-| `name` | `string` | No | - | MCP server name (resolved with scope cascade) |
-
-### mcp-server-create
-
-**Create MCP Server**
-
-Create a new MCP server definition. Agent-scope servers are auto-installed for the creating agent. Swarm/global scope requires lead.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `name` | `string` | Yes | - | Server name |
-| `description` | `string` | No | - | Server description |
-| `transport` | `stdio \| http \| sse` | Yes | - | Transport type |
-| `scope` | `global \| swarm \| agent` | No | "agent" | Scope: agent (personal), swarm (shared), or global. Default: agent |
-| `command` | `string` | No | - | Command to run (required for stdio transport) |
-| `args` | `string` | No | - | JSON array of command arguments (stdio only) |
-| `url` | `string` | No | - | Server URL (required for http/sse transport) |
-| `headers` | `string` | No | - | JSON object of non-secret headers (http/sse only) |
-| `envConfigKeys` | `string` | No | - | JSON object mapping env var names to config key paths |
-| `headerConfigKeys` | `string` | No | - | JSON object mapping header names to config key paths for secret headers |
-| `extraAuthorizeParams` | `string` | No | - | JSON object string of extra OAuth authorize-request params, e.g. {"access_type":"offline","prompt":"consent"} |
-
-### mcp-server-install
-
-**Install MCP Server**
-
-Install an MCP server for an agent. Self-install is always allowed; cross-agent install requires lead.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `mcpServerId` | `string` | Yes | - | ID of the MCP server to install |
-| `agentId` | `string` | No | - | Target agent (default: calling agent). Lead can install for others. |
-
-### mcp-server-uninstall
-
-**Uninstall MCP Server**
-
-Uninstall an MCP server from an agent. Self-uninstall is always allowed; cross-agent requires lead.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `mcpServerId` | `string` | Yes | - | ID of the MCP server to uninstall |
-| `agentId` | `string` | No | - | Target agent (default: calling agent) |
-
-### mcp-server-list
-
-**List MCP Servers**
-
-List MCP servers with optional filters. Use installedOnly to see servers installed for the calling agent.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `scope` | `global \| swarm \| agent` | No | - | Filter by scope |
-| `transport` | `stdio \| http \| sse` | No | - | Filter by transport type |
-| `search` | `string` | No | - | Search by name or description |
-| `installedOnly` | `boolean` | No | - | Only show servers installed for the calling agent |
-
-### mcp-server-update
-
-**Update MCP Server**
-
-Update an MCP server's configuration. Only the owner or lead can update.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `id` | `string` | Yes | - | ID of the MCP server to update |
-| `name` | `string` | No | - | New name |
-| `description` | `string` | No | - | New description |
-| `transport` | `stdio \| http \| sse` | No | - | New transport type |
-| `command` | `string` | No | - | New command (stdio) |
-| `args` | `string` | No | - | New JSON array of arguments (stdio) |
-| `url` | `string` | No | - | New URL (http/sse) |
-| `headers` | `string` | No | - | New JSON object of non-secret headers |
-| `envConfigKeys` | `string` | No | - | New env config key mappings |
-| `headerConfigKeys` | `string` | No | - | New header config key mappings |
-| `extraAuthorizeParams` | `string` | No | - | JSON object string of extra OAuth authorize-request params, e.g. {"access_type":"offline","prompt":"consent"} |
-| `isEnabled` | `boolean` | No | - | Toggle enabled/disabled |
-
-### mcp-server-delete
-
-**Delete MCP Server**
-
-Delete an MCP server definition. Only the owning agent or lead can delete.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `id` | `string` | Yes | - | ID of the MCP server to delete |
 

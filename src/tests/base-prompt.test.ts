@@ -739,3 +739,57 @@ describe("getBasePrompt — conditional Slack templates", () => {
     expect(result).toContain("C123");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Server capability gating (serverCapabilities = the API server's enabled
+// tool groups, reported on registration; distinct from agent skill tags)
+// ---------------------------------------------------------------------------
+
+describe("getBasePrompt — serverCapabilities gating", () => {
+  test("messaging section omitted when serverCapabilities is unknown (legacy server)", async () => {
+    const result = await getBasePrompt(minimalArgs);
+    expect(result).not.toContain("post-message");
+    expect(result).not.toContain("read-messages");
+  });
+
+  test("messaging section included when the server enables messaging", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      serverCapabilities: ["core", "messaging"],
+    });
+    expect(result).toContain("#### Swarm Messaging");
+    expect(result).toContain("post-message");
+    expect(result).toContain("read-messages");
+  });
+
+  test("services section dropped when server capabilities omit services", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      serverCapabilities: ["core"],
+    });
+    expect(result).not.toContain("register-service");
+  });
+
+  test("services section kept for legacy servers that report no capabilities", async () => {
+    const result = await getBasePrompt(minimalArgs);
+    expect(result).toContain("register-service");
+  });
+
+  test("slack section dropped when server capabilities omit slack", async () => {
+    enableSlackPromptTools();
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      serverCapabilities: ["core"],
+    });
+    expect(result).not.toContain("slack-list-channels");
+  });
+
+  test("slack section kept when the server enables slack", async () => {
+    enableSlackPromptTools();
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      serverCapabilities: ["core", "slack"],
+    });
+    expect(result).toContain("slack-list-channels");
+  });
+});

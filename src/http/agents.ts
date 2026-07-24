@@ -23,6 +23,7 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import { reasoningCapability } from "../providers/reasoning-effort";
+import { getEnabledCapabilities } from "../server";
 import { telemetry } from "../telemetry";
 import {
   AgentCredStatusSchema,
@@ -58,8 +59,11 @@ const registerAgent = route({
     harness_provider: ProviderNameSchema.optional(),
   }),
   responses: {
-    200: { description: "Agent re-registered (already existed)" },
-    201: { description: "Agent created" },
+    200: {
+      description:
+        "Agent re-registered (already existed). Response includes `enabledCapabilities` — the server's capability flags (registered MCP tool groups), not the agent's declared skill tags.",
+    },
+    201: { description: "Agent created. Response includes `enabledCapabilities` (see 200)." },
     400: { description: "Validation error" },
   },
 });
@@ -364,7 +368,14 @@ export async function handleAgentRegister(
       });
     }
 
-    json(res, result.agent, result.created ? 201 : 200);
+    // `enabledCapabilities` = the server's capability flags (which MCP tool
+    // groups are registered), NOT the agent's declared skill tags. Workers use
+    // it to drop prompt sections that instruct unregistered tools.
+    json(
+      res,
+      { ...result.agent, enabledCapabilities: getEnabledCapabilities() },
+      result.created ? 201 : 200,
+    );
     return true;
   }
 

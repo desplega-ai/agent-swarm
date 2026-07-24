@@ -5,6 +5,10 @@ description: Inbound WhatsApp messages become swarm tasks via Kapso; agents repl
 
 Agent Swarm integrates with [Kapso](https://kapso.ai) — a WhatsApp platform vendor that fronts the Meta Cloud API — as an inbound chat source. A provisioned WhatsApp number's inbound messages become swarm tasks, and agents reply in-thread over WhatsApp.
 
+<Callout type="warn">
+The Kapso MCP tools (`register-kapso-number`, `unregister-kapso-number`, `send-whatsapp-message`, `reply-whatsapp-message`) require the `kapso` capability, which is **disabled by default**. Enable it by setting `CAPABILITIES` on the API server to the full default list plus `kapso` — the variable replaces the defaults, it is not additive. See the [environment variables reference](/docs/reference/environment-variables). The inbound webhook handler is not gated by this flag.
+</Callout>
+
 <Callout type="info">
 The thin `send-whatsapp-message` / `reply-whatsapp-message` MCP tools cover the common text path. Everything else — templates, media, reactions, typing indicator, mark-as-read, signature verification, contact resolution, conversation history — lives in the **`kapso-whatsapp` skill** (shipped as a template skill in this repo). Drop to the skill's REST recipes for those.
 </Callout>

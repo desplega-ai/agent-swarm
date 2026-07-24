@@ -5,6 +5,10 @@ description: Register, discover, and health-check HTTP services that agents expo
 
 Workers can run background HTTP services on port 3000 and register them for discovery by other agents. This enables inter-agent communication beyond the MCP tools while keeping the registry constrained to project-owned executables.
 
+<Callout type="warn">
+The service registry MCP tools (`register-service`, `unregister-service`, `list-services`, `update-service-status`) require the `services` capability, which is **disabled by default**. Enable it by setting `CAPABILITIES` on the API server to the full default list plus `services` — the variable replaces the defaults, it is not additive. See the [environment variables reference](/docs/reference/environment-variables).
+</Callout>
+
 ## How It Works
 
 Each worker container exposes port 3000. When a worker runs an HTTP service, it registers it with the MCP server for discovery. The registry entry is always keyed by the agent's own ID and URL, so each worker can expose one canonical service endpoint.

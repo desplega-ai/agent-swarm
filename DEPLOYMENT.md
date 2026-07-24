@@ -474,7 +474,9 @@ When a worker starts, it:
 | `SCHEDULER_INTERVAL_MS` | Polling interval for scheduled tasks | `10000` |
 | `DATABASE_PATH` | SQLite database file path | `./agent-swarm-db.sqlite` |
 | `OPENAI_API_KEY` | OpenAI key for memory embeddings (optional) | - |
-| `CAPABILITIES` | Comma-separated feature flags | All enabled |
+| `CAPABILITIES` | Comma-separated capability flags gating which MCP tool groups the server registers | `core,task-pool,scripts,config,mcp,profiles,scheduling,memory,workflows,pages,metrics,kv,slack,tracker,skills,repo` |
+
+> **Capabilities:** `services`, `prompt-templates`, `messaging`, `swarm-x`, `agentmail`, and `kapso` are **disabled by default** — add them to `CAPABILITIES` to enable. Setting `CAPABILITIES` replaces the whole default list (it is not additive), so an explicit value set before this default changed may silently drop groups like `scripts`, `config`, `mcp`, `slack`, `tracker`, `skills`, and `repo` — include them explicitly. The value can also be stored as a global swarm-config entry, which overrides the env var at server creation. Capability flags shape the externally exposed MCP tool list only — they are not feature kill-switches: the scripts SDK bridge always sees the full tool surface (governed by its own allowlist), and HTTP REST routes are generally not gated. See [MCP.md](./MCP.md) for the tool-to-capability mapping.
 
 > **Split / Helm deploys:** In topologies where `MCP_BASE_URL` points at an internal/cluster address (e.g. a Kubernetes Service DNS name reachable only inside the cluster), set `PUBLIC_MCP_BASE_URL` to the public ingress origin. OAuth redirect URIs and webhook URLs handed to external providers (Linear, Jira, GitHub) are built from `PUBLIC_MCP_BASE_URL` when it is set, falling back to `MCP_BASE_URL` otherwise.
 

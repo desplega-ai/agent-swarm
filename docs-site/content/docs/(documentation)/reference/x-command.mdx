@@ -18,6 +18,10 @@ the same external routes from either the CLI or the swarm MCP server. Today:
 Future targets can use the same pattern without becoming top-level CLI
 commands.
 
+<Callout type="warn">
+The `swarm_x` MCP tool requires the `swarm-x` capability, which is **disabled by default**. Enable it by setting `CAPABILITIES` on the API server to the full default list plus `swarm-x` (the variable replaces the defaults — it is not additive). The `agent-swarm x` CLI surface is not affected by this flag. See the [environment variables reference](/docs/reference/environment-variables).
+</Callout>
+
 ## Composio
 
 Composio routes are HTTP requests to the Composio Tool Router API. The CLI reads

@@ -301,6 +301,10 @@ services:
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/content-writer
       - MODEL_OVERRIDE=opus
+      # On workers, CAPABILITIES is the agent's declared skill tags for join-swarm /
+      # task routing (free-form strings allowed). This is distinct from the API
+      # server's CAPABILITIES env, which gates which MCP tool groups the server
+      # registers (see DEPLOYMENT.md).
       - CAPABILITIES=core,task-pool,messaging,profiles,services,scheduling,epics,memory,content-writing
 
       # If in the same Docker network, use the service name
