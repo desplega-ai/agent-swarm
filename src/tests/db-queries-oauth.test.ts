@@ -3,14 +3,17 @@ import { unlink } from "node:fs/promises";
 import { closeDb, getDb, initDb } from "../be/db";
 import {
   acquireOAuthRefreshLock,
+  createOAuthApp,
   deleteOAuthTokens,
   getDefaultAuthorizationIdForProvider,
   getOAuthApp,
+  getOAuthAppById,
   getOAuthTokens,
   isTokenExpiringSoon,
   listAuthorizationSweepRows,
   releaseOAuthRefreshLock,
   storeOAuthTokens,
+  updateOAuthAppById,
   updateOAuthTokensAfterRefresh,
   upsertOAuthApp,
 } from "../be/db-queries/oauth";
@@ -96,6 +99,47 @@ describe("OAuth Apps CRUD", () => {
     const b = getOAuthApp("provider-b");
     expect(a!.clientId).toBe("a-client");
     expect(b!.clientId).toBe("b-client");
+  });
+});
+
+describe("OAuth Apps create vs update-by-id (N apps per provider)", () => {
+  const seed = (clientId: string, clientSecret: string) => ({
+    clientId,
+    clientSecret,
+    authorizeUrl: "https://multi.example.com/authorize",
+    tokenUrl: "https://multi.example.com/token",
+    redirectUri: "https://multi.example.com/callback",
+    scopes: "read",
+  });
+
+  test("createOAuthApp always inserts a distinct row and never clobbers a sibling", () => {
+    const firstId = createOAuthApp("multi-create", seed("create-first", "secret-first"));
+    const secondId = createOAuthApp("multi-create", seed("create-second", "secret-second"));
+
+    expect(firstId).not.toBe(secondId);
+    const first = getOAuthAppById(firstId);
+    const second = getOAuthAppById(secondId);
+    expect(first!.clientId).toBe("create-first");
+    expect(first!.clientSecret).toBe("secret-first");
+    expect(second!.clientId).toBe("create-second");
+    expect(second!.clientSecret).toBe("secret-second");
+  });
+
+  test("updateOAuthAppById updates only the targeted row", () => {
+    const firstId = createOAuthApp("multi-update", seed("upd-first", "sec-first"));
+    const secondId = createOAuthApp("multi-update", seed("upd-second", "sec-second"));
+
+    updateOAuthAppById(firstId, seed("upd-first-edited", "sec-first-edited"));
+
+    expect(getOAuthAppById(firstId)!.clientId).toBe("upd-first-edited");
+    expect(getOAuthAppById(firstId)!.clientSecret).toBe("sec-first-edited");
+    // Sibling untouched.
+    expect(getOAuthAppById(secondId)!.clientId).toBe("upd-second");
+    expect(getOAuthAppById(secondId)!.clientSecret).toBe("sec-second");
+  });
+
+  test("updateOAuthAppById throws for an unknown id", () => {
+    expect(() => updateOAuthAppById("does-not-exist", seed("x", "y"))).toThrow(/not found/);
   });
 });
 

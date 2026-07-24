@@ -656,7 +656,9 @@ describe("/api/script-connections HTTP", () => {
     expect(res.text).not.toContain("leaky-client-secret-should-not-leak");
   });
 
-  test("oauth app upsert without clientSecret keeps existing secret", async () => {
+  test("oauth app edit (by id) without clientSecret keeps existing secret", async () => {
+    // Editing an existing row (id supplied) may inherit the stored secret. A
+    // no-id create must NOT — that path always inserts (see the create tests).
     upsertOAuthApp("vendor_oauth", {
       clientId: "vendor-client",
       clientSecret: "existing-client-secret",
@@ -665,11 +667,14 @@ describe("/api/script-connections HTTP", () => {
       redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
       scopes: "read",
     });
+    const existing = getOAuthApp("vendor_oauth");
+    if (!existing) throw new Error("seed app not created");
 
     const res = await dispatch("/api/oauth-apps", {
       method: "POST",
       agentId: leadAgentId,
       body: {
+        id: existing.id,
         provider: "vendor_oauth",
         clientId: "updated-client",
         authorizeUrl: "https://oauth.vendor.test/oauth2/authorize",
@@ -678,11 +683,130 @@ describe("/api/script-connections HTTP", () => {
       },
     });
     expect(res.status).toBe(200);
-    const app = getOAuthApp("vendor_oauth");
+    const app = getOAuthAppById(existing.id);
     expect(app?.clientId).toBe("updated-client");
     expect(app?.clientSecret).toBe("existing-client-secret");
     expect(app?.scopes).toBe("");
     expect(JSON.stringify(await res.json())).not.toContain("existing-client-secret");
+  });
+
+  test("POST without id always creates a new row and never clobbers a same-provider sibling", async () => {
+    const first = await dispatch("/api/oauth-apps", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        provider: "multi_vendor",
+        clientId: "first-client",
+        clientSecret: "first-secret",
+        authorizeUrl: "https://oauth.vendor.test/authorize",
+        tokenUrl: "https://oauth.vendor.test/token",
+        scopes: ["read"],
+      },
+    });
+    expect(first.status).toBe(200);
+    const firstId = ((await first.json()) as { oauthApp: { id: string } }).oauthApp.id;
+
+    // Second app for the SAME provider, again with no id.
+    const second = await dispatch("/api/oauth-apps", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        provider: "multi_vendor",
+        clientId: "second-client",
+        clientSecret: "second-secret",
+        authorizeUrl: "https://oauth.vendor.test/authorize2",
+        tokenUrl: "https://oauth.vendor.test/token2",
+        scopes: ["write"],
+      },
+    });
+    expect(second.status).toBe(200);
+    const secondId = ((await second.json()) as { oauthApp: { id: string } }).oauthApp.id;
+
+    // Two distinct rows; the first row's credentials are untouched.
+    expect(secondId).not.toBe(firstId);
+    const firstApp = getOAuthAppById(firstId);
+    const secondApp = getOAuthAppById(secondId);
+    expect(firstApp?.clientId).toBe("first-client");
+    expect(firstApp?.clientSecret).toBe("first-secret");
+    expect(firstApp?.authorizeUrl).toBe("https://oauth.vendor.test/authorize");
+    expect(secondApp?.clientId).toBe("second-client");
+    expect(secondApp?.clientSecret).toBe("second-secret");
+  });
+
+  test("POST with id updates only the targeted row, leaving siblings intact", async () => {
+    const first = await dispatch("/api/oauth-apps", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        provider: "target_vendor",
+        clientId: "orig-a",
+        clientSecret: "secret-a",
+        authorizeUrl: "https://oauth.vendor.test/authorize",
+        tokenUrl: "https://oauth.vendor.test/token",
+        scopes: ["read"],
+      },
+    });
+    const firstId = ((await first.json()) as { oauthApp: { id: string } }).oauthApp.id;
+    const second = await dispatch("/api/oauth-apps", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        provider: "target_vendor",
+        clientId: "orig-b",
+        clientSecret: "secret-b",
+        authorizeUrl: "https://oauth.vendor.test/authorize",
+        tokenUrl: "https://oauth.vendor.test/token",
+        scopes: ["read"],
+      },
+    });
+    const secondId = ((await second.json()) as { oauthApp: { id: string } }).oauthApp.id;
+
+    const edit = await dispatch("/api/oauth-apps", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        id: firstId,
+        provider: "target_vendor",
+        clientId: "edited-a",
+        clientSecret: "secret-a-new",
+        authorizeUrl: "https://oauth.vendor.test/authorize",
+        tokenUrl: "https://oauth.vendor.test/token",
+        scopes: ["read"],
+      },
+    });
+    expect(edit.status).toBe(200);
+    expect(getOAuthAppById(firstId)?.clientId).toBe("edited-a");
+    expect(getOAuthAppById(firstId)?.clientSecret).toBe("secret-a-new");
+    // Sibling is untouched.
+    expect(getOAuthAppById(secondId)?.clientId).toBe("orig-b");
+    expect(getOAuthAppById(secondId)?.clientSecret).toBe("secret-b");
+  });
+
+  test("POST without id and without clientSecret is rejected (create requires a secret)", async () => {
+    // A pre-existing sibling for the same provider must NOT be used as a secret
+    // fallback for a no-id create.
+    upsertOAuthApp("needs_secret", {
+      clientId: "sibling-client",
+      clientSecret: "sibling-secret",
+      authorizeUrl: "https://oauth.vendor.test/authorize",
+      tokenUrl: "https://oauth.vendor.test/token",
+      redirectUri: "https://api.public.test/api/oauth/needs_secret/callback",
+      scopes: "read",
+    });
+
+    const res = await dispatch("/api/oauth-apps", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        provider: "needs_secret",
+        clientId: "no-secret-client",
+        authorizeUrl: "https://oauth.vendor.test/authorize",
+        tokenUrl: "https://oauth.vendor.test/token",
+        scopes: [],
+      },
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/clientSecret is required/);
   });
 
   test("oauth app upsert accepts tracker providers (reserved carve-out removed in step-8)", async () => {

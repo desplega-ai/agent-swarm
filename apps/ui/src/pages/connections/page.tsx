@@ -2035,10 +2035,14 @@ function CredentialBindingsSection({
   // Resolve an oauth authorization id back to its owning app's provider + label
   // so the grid can label + link the credential's account.
   const authorizationIndex = useMemo(() => {
-    const index = new Map<string, { provider: string; label: string }>();
+    const index = new Map<string, { provider: string; label: string; appId: string }>();
     for (const app of oauthApps) {
       for (const authorization of app.authorizations ?? []) {
-        index.set(authorization.id, { provider: app.provider, label: authorization.label });
+        index.set(authorization.id, {
+          provider: app.provider,
+          label: authorization.label,
+          appId: app.id,
+        });
       }
     }
     return index;
@@ -2091,7 +2095,7 @@ function CredentialBindingsSection({
           }
           return (
             <Link
-              to={`/connections/oauth-apps/${encodeURIComponent(resolved.provider)}`}
+              to={`/connections/oauth-apps/${encodeURIComponent(resolved.appId)}`}
               className="inline-flex max-w-full items-center gap-1 text-action-default hover:underline"
               onClick={(event) => event.stopPropagation()}
             >

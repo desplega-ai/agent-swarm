@@ -2,9 +2,9 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import {
+  createOAuthApp,
   getOAuthAppIdByProvider,
   listAuthorizationsForApp,
-  upsertOAuthApp,
 } from "@/be/db-queries/oauth";
 import {
   getOAuthBindingTokenStatus,
@@ -345,8 +345,10 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         const tokenAuthStyle = hydrated?.tokenAuthStyle ?? args.tokenAuthStyle;
         const tokenBodyFormat = hydrated?.tokenBodyFormat ?? args.tokenBodyFormat;
 
+        // The MCP surface has no by-id targeting, so every call creates a fresh
+        // row (N apps per provider) rather than clobbering an existing one.
         const redirectUri = staticOAuthCallbackUri();
-        upsertOAuthApp(provider, {
+        createOAuthApp(provider, {
           clientId: args.clientId,
           clientSecret: args.clientSecret,
           authorizeUrl,

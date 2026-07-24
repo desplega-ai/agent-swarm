@@ -109,6 +109,15 @@ export default function ConnectionDetailPage() {
   const authStatus = connection.auth?.status ?? connection.credentialBinding?.tokenStatus;
   const authBroken =
     connection.credentialBinding?.authKind === "oauth" && isBrokenTokenStatus(authStatus);
+  // N apps per provider are possible, so link to the specific app that owns this
+  // authorization rather than by provider (which resolves to an arbitrary row).
+  // Falls back to the provider slug when the owning app isn't in the loaded set.
+  const oauthAuthorizationId = connection.auth?.authorizationId;
+  const oauthAppId = oauthAuthorizationId
+    ? (oauthApps.find((app) =>
+        app.authorizations?.some((authorization) => authorization.id === oauthAuthorizationId),
+      )?.id ?? null)
+    : null;
 
   return (
     <div className="flex flex-col gap-4 lg:flex-1 lg:min-h-0 lg:overflow-y-hidden">
@@ -233,7 +242,7 @@ export default function ConnectionDetailPage() {
                         </Link>
                         {connection.credentialBinding.oauthProvider ? (
                           <Link
-                            to={`/connections/oauth-apps/${encodeURIComponent(connection.credentialBinding.oauthProvider)}`}
+                            to={`/connections/oauth-apps/${encodeURIComponent(oauthAppId ?? connection.credentialBinding.oauthProvider)}`}
                             className="text-muted-foreground hover:text-foreground hover:underline"
                             title="View OAuth app"
                           >

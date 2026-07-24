@@ -204,30 +204,36 @@ export function getOAuthAppIdByProvider(provider: string): string | null {
   return rawOAuthAppByProvider(provider)?.id ?? null;
 }
 
-export function upsertOAuthApp(
+/** Shared write payload for the OAuth-app create / update / provider-upsert
+ * paths. The row-resolution strategy is chosen by the calling function — never
+ * by this payload — so `id` is intentionally absent here. */
+type OAuthAppWriteData = {
+  clientId: string;
+  clientSecret: string;
+  authorizeUrl: string;
+  tokenUrl: string;
+  redirectUri: string;
+  scopes: string;
+  metadata?: string;
+  displayName?: string | null;
+  revocationUrl?: string | null;
+  userinfoUrl?: string | null;
+  scopeSeparator?: string;
+  tokenAuthStyle?: "body" | "basic";
+  tokenBodyFormat?: "form" | "json";
+  requiresRefreshTokenRotation?: boolean;
+  extraParams?: Record<string, string> | null;
+  source?: "manual" | "dcr" | "curated-prefill";
+};
+
+/** Insert a new row (when `existing` is null) or update the given row in place.
+ * Returns the row id either way. Callers pick the row-resolution strategy up
+ * front — this helper never resolves by provider on its own. */
+function writeOAuthApp(
+  existing: OAuthAppRow | null,
   provider: string,
-  data: {
-    /** Target a specific existing row by id (N apps per provider allowed). */
-    id?: string;
-    clientId: string;
-    clientSecret: string;
-    authorizeUrl: string;
-    tokenUrl: string;
-    redirectUri: string;
-    scopes: string;
-    metadata?: string;
-    displayName?: string | null;
-    revocationUrl?: string | null;
-    userinfoUrl?: string | null;
-    scopeSeparator?: string;
-    tokenAuthStyle?: "body" | "basic";
-    tokenBodyFormat?: "form" | "json";
-    requiresRefreshTokenRotation?: boolean;
-    extraParams?: Record<string, string> | null;
-    source?: "manual" | "dcr" | "curated-prefill";
-  },
-): void {
-  const existing = data.id ? rawOAuthAppById(data.id) : rawOAuthAppByProvider(provider);
+  data: OAuthAppWriteData,
+): string {
   const metadataProvided = data.metadata !== undefined;
   const lifted = metadataProvided ? storageMetadata(data.metadata as string) : null;
   const encryptedSecret = encryptSecret(data.clientSecret, getEncryptionKey());
@@ -285,19 +291,20 @@ export function upsertOAuthApp(
         lifted?.metadata ?? existing.metadata,
         existing.id,
       );
-    return;
+    return existing.id;
   }
 
-  getDb()
+  const inserted = getDb()
     .query(
       `INSERT INTO oauth_apps (
          provider, displayName, clientId, clientSecret, clientSecretEncrypted,
          authorizeUrl, tokenUrl, revocationUrl, userinfoUrl, redirectUri, scopes,
          scopeSeparator, tokenAuthStyle, tokenBodyFormat,
          requiresRefreshTokenRotation, extraParamsJson, source, metadata
-       ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING id`,
     )
-    .run(
+    .get(
       provider,
       data.displayName ?? null,
       data.clientId,
@@ -315,7 +322,35 @@ export function upsertOAuthApp(
       extraParamsJson,
       data.source ?? "manual",
       lifted?.metadata ?? "{}",
-    );
+    ) as { id: string };
+  return inserted.id;
+}
+
+/** Create a brand-new OAuth app row and return its id. ALWAYS inserts — it never
+ * resolves by provider, so a second app for the same provider can never clobber
+ * the first. User-facing create paths (HTTP `POST /api/oauth-apps` without an
+ * id, the MCP `oauth-app-upsert` action) MUST use this. */
+export function createOAuthApp(provider: string, data: OAuthAppWriteData): string {
+  return writeOAuthApp(null, provider, data);
+}
+
+/** Update exactly one existing (non-MCP) app by id. Throws when the id is
+ * unknown or refers to an MCP-managed app. Provider is immutable on edit. */
+export function updateOAuthAppById(id: string, data: OAuthAppWriteData): void {
+  const existing = rawOAuthAppById(id);
+  if (!existing) {
+    throw new Error(`OAuth app ${id} not found.`);
+  }
+  writeOAuthApp(existing, existing.provider, data);
+}
+
+/** Provider-keyed upsert — reserved for BOOT reconciliation (initLinear /
+ * initJira) and test seeding. Updates the oldest row for the provider, or
+ * inserts when none exists. Do NOT use for user-facing create/edit: with N apps
+ * per provider this silently clobbers a sibling row — the create path must use
+ * createOAuthApp and the edit path updateOAuthAppById. */
+export function upsertOAuthApp(provider: string, data: OAuthAppWriteData): void {
+  writeOAuthApp(rawOAuthAppByProvider(provider), provider, data);
 }
 
 // ── OAuth Authorizations ──

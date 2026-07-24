@@ -4,6 +4,7 @@ import { resolveHttpAuditUserId } from "@/be/audit-user";
 import { normalizeDate } from "@/be/date-utils";
 import { getAgentById, getDb } from "@/be/db";
 import {
+  createOAuthApp,
   deleteAuthorizationById,
   deleteAuthorizationsForApp,
   deleteOAuthTokens,
@@ -13,7 +14,7 @@ import {
   getOAuthTokens,
   listAuthorizationsForApp,
   type OAuthAuthorization,
-  upsertOAuthApp,
+  updateOAuthAppById,
 } from "@/be/db-queries/oauth";
 import {
   getOAuthBindingTokenStatus,
@@ -1823,8 +1824,11 @@ export async function handleScriptConnections(
       // ordinary rows on this surface now.)
       assertOAuthAppUrlsSafe({ authorizeUrl, tokenUrl, userinfoUrl, revocationUrl });
 
-      const existing = editing ?? getOAuthApp(provider);
-      const clientSecret = body.clientSecret ?? existing?.clientSecret;
+      // Only an edit (id given) may inherit the stored secret; a create must
+      // always supply its own. Never fall back to a provider-matched row — that
+      // would let a second app for the provider silently reuse a sibling's
+      // secret (the same clobber hazard the create path itself now avoids).
+      const clientSecret = body.clientSecret ?? editing?.clientSecret;
       if (!clientSecret) {
         jsonError(res, "clientSecret is required when creating a new OAuth app.", 400);
         return true;
@@ -1837,8 +1841,7 @@ export async function handleScriptConnections(
 
       // All flows now redirect to the single static callback (step-4).
       const redirectUri = staticOAuthCallbackUri();
-      upsertOAuthApp(provider, {
-        ...(editing ? { id: editing.id } : {}),
+      const appData = {
         clientId: body.clientId,
         clientSecret,
         authorizeUrl,
@@ -1855,10 +1858,17 @@ export async function handleScriptConnections(
           ? { requiresRefreshTokenRotation: hydrated.requiresRefreshTokenRotation }
           : {}),
         ...(hydrated ? { source: hydrated.source } : {}),
-      });
-      const app = listOAuthApps().find((row) =>
-        editing ? row.id === editing.id : row.provider === provider,
-      );
+      };
+      // No id → always create a fresh row (N apps per provider). With an id →
+      // update exactly that row (existence + non-MCP already checked above).
+      let savedId: string;
+      if (editing) {
+        updateOAuthAppById(editing.id, appData);
+        savedId = editing.id;
+      } else {
+        savedId = createOAuthApp(provider, appData);
+      }
+      const app = listOAuthApps().find((row) => row.id === savedId);
       json(res, {
         oauthApp: app,
         redirectUri,
