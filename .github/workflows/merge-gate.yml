@@ -18,6 +18,7 @@ jobs:
       lint: ${{ steps.check.outputs.lint }}
       test: ${{ steps.check.outputs.test }}
       pi_skills: ${{ steps.check.outputs.pi_skills }}
+      script_types: ${{ steps.check.outputs.script_types }}
       openapi: ${{ steps.check.outputs.openapi }}
       vendored_openapi: ${{ steps.check.outputs.vendored_openapi }}
       docker: ${{ steps.check.outputs.docker }}
@@ -79,6 +80,10 @@ jobs:
           # pi-skills freshness: generator inputs + outputs.
           PI_SKILLS=$(match '^(plugin/commands/|plugin/pi-skills/|plugin/build-pi-skills\.ts$)')
 
+          # script SDK types freshness: source constants + generator + outputs +
+          # allowlist/registry (generation validates SDK_ALLOWLIST against server.ts).
+          SCRIPT_TYPES=$(match '^(src/be/scripts/typecheck\.ts$|src/scripts-runtime/types/|src/scripts-runtime/sdk-allowlist\.ts$|scripts/bundle-script-types\.ts$|src/server\.ts$)')
+
           # openapi freshness: routes, types, generator, version, generated artifacts.
           OPENAPI=$(match '^(src/http/|src/types\.ts$|scripts/generate-openapi\.ts$|openapi\.json$|docs-site/content/docs/api-reference/|package\.json$)')
 
@@ -96,7 +101,7 @@ jobs:
           # workflow template validation: content.md changes in templates/workflows/.
           TEMPLATES_WORKFLOWS=$(match '^(templates/workflows/|scripts/validate-template-workflows\.ts$|src/workflows/definition\.ts$|src/types\.ts$)')
 
-          for k in LINT TEST PI_SKILLS OPENAPI VENDORED_OPENAPI DOCKER UI TEMPLATES_WORKFLOWS; do
+          for k in LINT TEST PI_SKILLS SCRIPT_TYPES OPENAPI VENDORED_OPENAPI DOCKER UI TEMPLATES_WORKFLOWS; do
             v=$(eval echo \$$k)
             key=$(echo "$k" | tr '[:upper:]' '[:lower:]')
             echo "${key}=${v}" >> $GITHUB_OUTPUT
@@ -222,6 +227,27 @@ jobs:
             exit 1
           fi
           echo "pi-skills are up to date."
+
+  script-types-freshness:
+    name: Script SDK Types Freshness Check
+    needs: detect-changes
+    if: needs.detect-changes.outputs.script_types == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Rebuild script SDK types and check for drift
+        run: bun run check:script-types
 
   openapi-freshness:
     name: OpenAPI Spec Freshness Check
@@ -364,7 +390,7 @@ jobs:
 
   gate:
     name: Merge Gate
-    needs: [detect-changes, lint-and-typecheck, test, pi-skills-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation]
+    needs: [detect-changes, lint-and-typecheck, test, pi-skills-freshness, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation]
     if: always()
     runs-on: ubuntu-latest
 
