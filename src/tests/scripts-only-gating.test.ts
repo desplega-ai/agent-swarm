@@ -8,6 +8,7 @@ import {
 } from "node:http";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { closeDb, createAgent, getDb, initDb, upsertSwarmConfig } from "../be/db";
+import { _resetAutoReloadForTests, flushPendingIntegrationsReload } from "../http/core";
 import { handleMcp } from "../http/mcp";
 import { getBasePrompt } from "../prompts/base-prompt";
 import { createServer } from "../server";
@@ -141,6 +142,21 @@ function expectFullSurface(toolNames: string[]): void {
 }
 
 beforeAll(async () => {
+  // Other HTTP integration tests can leave the process-global config reload
+  // debounce queued after their server closes. Drain it before installing the
+  // fake Slack credentials or mutating SCRIPTS_ONLY_MCP; otherwise the leaked
+  // reload races this suite, attempts a real Slack connection, and rewrites
+  // the gating environment between MCP initialize and tools/list.
+  const originalSlackDisable = process.env.SLACK_DISABLE;
+  const originalScriptsOnlyMcp = process.env.SCRIPTS_ONLY_MCP;
+  process.env.SLACK_DISABLE = "true";
+  await flushPendingIntegrationsReload();
+  _resetAutoReloadForTests();
+  if (originalSlackDisable === undefined) delete process.env.SLACK_DISABLE;
+  else process.env.SLACK_DISABLE = originalSlackDisable;
+  if (originalScriptsOnlyMcp === undefined) delete process.env.SCRIPTS_ONLY_MCP;
+  else process.env.SCRIPTS_ONLY_MCP = originalScriptsOnlyMcp;
+
   await removeDbFiles(TEST_DB_PATH);
   closeDb();
   initDb(TEST_DB_PATH);
