@@ -5,6 +5,19 @@ description: Complete reference for Agent Swarm MCP tools — core and deferred 
 
 Agent Swarm exposes its functionality through MCP (Model Context Protocol) tools. Tools are grouped by capability.
 
+## Capability Flags
+
+Every tool group is gated by a capability flag on the API server, controlled by the `CAPABILITIES` environment variable (or a `CAPABILITIES` global swarm-config entry, which takes precedence at server creation). When unset, the defaults apply:
+
+- **Enabled by default:** `core`, `task-pool`, `config`, `scripts`, `mcp`, `profiles`, `repo`, `scheduling`, `memory`, `tracker`, `workflows`, `skills`, `pages`, `metrics`, `kv`, `slack`
+- **Disabled by default:** `messaging` (post/read messages, channels), `services` (background service registry), `prompt-templates`, `swarm-x` (external command routes), `agentmail`, `kapso` (WhatsApp)
+
+Setting `CAPABILITIES` **replaces** the whole list — it is not additive. To enable a disabled capability, provide the full default list plus the extras, e.g. `CAPABILITIES=core,task-pool,...,repo,messaging`. Sections below note when a tool group is disabled by default.
+
+Capability flags shape the **externally exposed MCP tool list only** — they hide tools from agents' tool lists, they are not feature kill-switches. The scripts SDK bridge always builds a full-surface server instance, so scripts keep their full typed SDK (governed by the [scripts SDK allowlist](/docs/guides/scripts-only-mode)) regardless of `CAPABILITIES`. HTTP REST routes are generally not gated either.
+
+Workers learn the server's enabled capabilities at registration (`POST /api/agents` returns `enabledCapabilities`) and automatically drop system-prompt sections that would instruct tools from disabled groups (messaging, services, Slack).
+
 ## Tool Search & Annotations
 
 All MCP tools have structured annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) to improve Claude Code's Tool Search discoverability. Tools are split into two tiers:
@@ -180,6 +193,14 @@ Lead-only registry for typed script API connections. Supports OpenAPI-backed
 `ctx.mcp.<slug>.<toolName>(args)` clients, with optional credential bindings
 for authenticated requests.
 
+## Prompt Template Tools
+
+Requires the `prompt-templates` capability (**disabled by default**).
+
+### list-prompt-templates / get-prompt-template / set-prompt-template / delete-prompt-template / preview-prompt-template
+
+Manage the prompt-template registry (system-prompt and task-prompt sections) at runtime: list registered templates, inspect or override a template's content, delete an override to fall back to the default, and preview a template rendered with sample variables. The equivalent HTTP endpoints under `/api/prompt-templates` are not gated by this capability.
+
 ## Slack Tools
 
 ### slack-reply
@@ -251,6 +272,8 @@ Download a file from Slack by file ID or URL.
 
 Register an AgentMail inbox ID to route incoming emails to this agent.
 
+Requires the `agentmail` capability (**disabled by default**). See the [AgentMail integration guide](/docs/guides/agentmail-integration) for credentials and setup.
+
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `action` | string | Yes | `register`, `unregister`, or `list` |
@@ -258,6 +281,8 @@ Register an AgentMail inbox ID to route incoming emails to this agent.
 | `inboxEmail` | string | No | Email address for reference |
 
 ### register-kapso-number
+
+This tool and the other Kapso/WhatsApp tools below require the `kapso` capability (**disabled by default**). See the [Kapso integration guide](/docs/integrations/kapso) for credentials and setup.
 
 Provision a Kapso WhatsApp phone number for native inbound routing. Lead-only. Points the number's Kapso webhook at the swarm's native handler (signed with `KAPSO_WEBHOOK_HMAC_SECRET`) and stores a KV mapping so inbound messages route to an agent, defaulting to the lead, or to a workflow.
 
@@ -299,6 +324,8 @@ Quote-reply a WhatsApp message via Kapso. Same text-send path as `send-whatsapp-
 | `body` | string | Yes | Reply text |
 
 ## External Route Tools
+
+Requires the `swarm-x` capability (**disabled by default**).
 
 ### swarm_x
 
@@ -357,6 +384,8 @@ Manage tasks in the pool: create, claim, release, accept, reject, or move to/fro
 
 ## Messaging Tools
 
+Requires the `messaging` capability (**disabled by default**). Note: the `swarm-chat` plugin skill relies on `post-message` / `read-messages` — enable this capability if your agents use it.
+
 ### post-message / read-messages
 
 Inter-agent communication via channels.
@@ -410,6 +439,8 @@ Compare two versions of a context file. Shows a unified diff.
 | `compareToVersionId` | uuid | No | The older version (default: previous) |
 
 ## Service Tools
+
+Requires the `services` capability (**disabled by default**).
 
 ### register-service / unregister-service / list-services / update-service-status
 

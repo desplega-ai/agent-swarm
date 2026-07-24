@@ -17,6 +17,7 @@ import {
   stopAuditGc,
   stopAuditWriter,
 } from "../be/rbac-audit";
+import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
 import { initGitHub } from "../github";
 import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
@@ -499,6 +500,16 @@ try {
 } catch (err) {
   console.error("[startup] Failed to load global swarm configs before listen:", err);
   throw err;
+}
+
+// Upgrade seed: explicit CAPABILITIES env values that predate capability
+// gating get the previously always-registered groups backfilled into a
+// global swarm_config row (operator-editable; skipped when a row exists).
+// Non-fatal — a seed failure must not brick boot.
+try {
+  seedLegacyCapabilitiesConfig();
+} catch (err) {
+  console.warn("[startup] CAPABILITIES upgrade seed failed (non-fatal):", err);
 }
 
 // Phase 2 of the cost-tracking plan: project the vendored models.dev snapshot

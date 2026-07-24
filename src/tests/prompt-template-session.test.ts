@@ -60,12 +60,13 @@ describe("Session templates — registration", () => {
     await ensureTemplatesRegistered();
   });
 
-  test("all 16 system templates are registered", () => {
+  test("all 17 system templates are registered", () => {
     const systemTemplates = [
       "system.agent.role",
       "system.agent.register",
       "system.agent.lead",
       "system.agent.slack",
+      "system.agent.messaging",
       "system.agent.worker",
       "system.agent.worker.slack",
       "system.agent.filesystem",
@@ -98,13 +99,13 @@ describe("Session templates — registration", () => {
     }
   });
 
-  test("total of 24 session/system templates registered", () => {
+  test("total of 25 session/system templates registered", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    // 24 = the original 19 + `system.session.worker.pi` + `system.agent.seed_scripts`
+    // 25 = the original 19 + `system.session.worker.pi` + `system.agent.seed_scripts`
     // + `system.agent.script_rubric` + `system.agent.scripts_only_mode`
-    // + `system.agent.scripts_only_mode.slack`.
-    expect(sessionSystem.length).toBe(24);
+    // + `system.agent.scripts_only_mode.slack` + `system.agent.messaging`.
+    expect(sessionSystem.length).toBe(25);
   });
 });
 

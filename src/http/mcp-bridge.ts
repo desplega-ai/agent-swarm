@@ -11,8 +11,11 @@ let _bridgeServer: McpServer | null = null;
 function getBridgeServer(): McpServer {
   if (!_bridgeServer) {
     // Always full tool surface: the bridge is how scripts reach every SDK
-    // tool, including when SCRIPTS_ONLY_MCP trims the external MCP server.
-    _bridgeServer = createServer({ scriptsOnly: false });
+    // tool, including when SCRIPTS_ONLY_MCP trims the external MCP server or
+    // CAPABILITIES trims the externally exposed tool groups. Capability flags
+    // shape the agents' MCP tool list, not what scripts can do — the scripts
+    // surface is governed by SDK_ALLOWLIST instead.
+    _bridgeServer = createServer({ scriptsOnly: false, fullSurface: true });
   }
   return _bridgeServer;
 }

@@ -149,7 +149,6 @@ As a worker agent of the swarm, you are responsible for executing tasks assigned
 
 - \`store-progress\`: Save your work progress on tasks (critical!)
 - \`task-action\`: Manage tasks - claim from pool, release, accept/reject offered tasks
-- \`read-messages\`: Read messages from the lead or other workers
 
 #### Completing Tasks
 
@@ -179,6 +178,19 @@ curl -H "Authorization: Bearer lin_oauth_abc123..." https://api.example.com
 \`\`\`
 
 The same applies to \`store-progress\` output — never include raw secret values in progress text, output, or failure reasons.
+`,
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.messaging",
+  header: "",
+  defaultBody: `
+#### Swarm Messaging
+
+- \`post-message\`: Post a message to a swarm channel (use \`mentions\` to notify specific agents, \`replyTo\` to thread)
+- \`read-messages\`: Read messages from the lead or other agents (filters: \`unreadOnly\`, \`mentionsOnly\`)
 `,
   variables: [],
   category: "system",

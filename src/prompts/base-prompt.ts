@@ -55,6 +55,16 @@ export type BasePromptArgs = {
   agentId: string;
   swarmUrl: string;
   capabilities?: string[];
+  /**
+   * The API server's enabled capability flags (which MCP tool groups it
+   * registers), from the register response. Distinct from `capabilities`
+   * above, which is the agent's own declared skill tags used for task
+   * routing. Gates prompt sections that instruct capability-gated tools so
+   * agents aren't told about tools the server doesn't expose. Undefined when
+   * the server is older and doesn't report it — sections then fall back to
+   * their legacy inclusion rules.
+   */
+  serverCapabilities?: string[];
   traits?: ProviderTraits;
   /**
    * Harness provider for this session. Gates provider-specific prompt blocks
@@ -133,16 +143,31 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
 
   const slackPromptToolsEnabled = areSlackPromptToolsEnabled();
 
+  // Server-side capability flags gate which MCP tool groups the API server
+  // registers — don't instruct tools the server doesn't expose. When the
+  // server is older and didn't report its capabilities, `whenUnknown` picks
+  // the legacy behavior per section.
+  const serverHasCapability = (cap: string, whenUnknown: boolean): boolean =>
+    args.serverCapabilities ? args.serverCapabilities.includes(cap) : whenUnknown;
+
   // The named-Slack-tool templates would instruct tools that don't exist in
   // scripts-only mode; the scripts_only_mode(.slack) templates cover Slack via
   // ctx.swarm.slack_* instead.
-  if (hasMcp && slackPromptToolsEnabled && !scriptsOnlyMode) {
+  if (hasMcp && slackPromptToolsEnabled && !scriptsOnlyMode && serverHasCapability("slack", true)) {
     const slackResult = await resolveTemplateAsync("system.agent.slack", {});
     prompt += slackResult.text;
   }
 
-  // Conditionally inject Slack instructions for workers with Slack-originated tasks
-  if (role !== "lead" && args.slackContext && hasMcp && slackPromptToolsEnabled) {
+  // Conditionally inject Slack instructions for workers with Slack-originated
+  // tasks. The scripts-only branch reaches Slack via the scripts SDK (always
+  // full surface), so only the named-tool branch needs the capability gate.
+  if (
+    role !== "lead" &&
+    args.slackContext &&
+    hasMcp &&
+    slackPromptToolsEnabled &&
+    (scriptsOnlyMode || serverHasCapability("slack", true))
+  ) {
     const slackResult = await resolveTemplateAsync(
       scriptsOnlyMode ? "system.agent.scripts_only_mode.slack" : "system.agent.worker.slack",
       {
@@ -151,6 +176,15 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
       },
     );
     prompt += slackResult.text;
+  }
+
+  // Swarm messaging (post-message / read-messages) is a default-disabled
+  // capability — only describe the tools when the server registers them.
+  // Unknown server => include: servers that predate capability reporting
+  // registered these tools unconditionally, so the guidance stays accurate.
+  if (hasMcp && !scriptsOnlyMode && serverHasCapability("messaging", true)) {
+    const messagingResult = await resolveTemplateAsync("system.agent.messaging", {});
+    prompt += messagingResult.text;
   }
 
   // Inject agent identity
@@ -283,7 +317,17 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
       conditionalSuffix += agentFsResult.text;
     }
 
-    if (!args.capabilities || args.capabilities.includes("services")) {
+    // Services tools exist only when the server enables the (default-disabled)
+    // `services` capability. When the server reports its capabilities, that is
+    // authoritative — agent skill tags default from the same list the server
+    // no longer includes `services` in, so requiring both would suppress the
+    // section for default workers even on servers that enable it. The legacy
+    // agent-tag opt-out only applies against older servers that don't report.
+    if (
+      args.serverCapabilities
+        ? args.serverCapabilities.includes("services")
+        : !args.capabilities || args.capabilities.includes("services")
+    ) {
       const servicesResult = await resolveTemplateAsync("system.agent.services", {
         agentId,
         swarmUrl,

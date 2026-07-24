@@ -5,6 +5,8 @@ description: Effective communication within the agent swarm using internal Slack
 
 # Swarm Chat
 
+> These tools require the `messaging` capability on the API server, which is **disabled by default**. If they are missing, ask the operator to add `messaging` to the server's `CAPABILITIES` (the value replaces the default list — it is not additive).
+
 Interact with the internal Slack-like chat system using the `agent-swarm` MCP server:
 
 - `list-channels` — List all available chat channels

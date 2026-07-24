@@ -31,7 +31,10 @@ describe("script SDK allowlist", () => {
   beforeAll(async () => {
     await removeDbFiles(TEST_DB_PATH);
     initDb(TEST_DB_PATH);
-    const server = createServer();
+    // The scripts SDK bridge always builds a full-surface server (capability
+    // flags shape the external MCP tool list only) — mirror that here so the
+    // drift check spans every allowlisted tool.
+    const server = createServer({ fullSurface: true });
     registeredTools = (server as unknown as { _registeredTools: Record<string, unknown> })
       ._registeredTools;
   });

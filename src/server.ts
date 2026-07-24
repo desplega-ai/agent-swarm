@@ -5,6 +5,7 @@ import { startPricingRefreshLoop } from "./be/pricing-refresh";
 import { ensureRbacSeedsSynced } from "./be/rbac-roles";
 import { seedPricingFromModelsDev } from "./be/seed-pricing";
 import { registerGithubTaskReactions } from "./github/task-reactions";
+import { loadGlobalConfigsIntoEnv } from "./http/core";
 import { isRbacEnabled } from "./rbac";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
@@ -160,20 +161,83 @@ import {
 } from "./tools/workflows";
 import { resolveScriptsOnlyMode } from "./utils/scripts-only-mode";
 
-// Capability-based feature flags
-// Default: all capabilities enabled
-const DEFAULT_CAPABILITIES =
-  "core,task-pool,profiles,services,scheduling,memory,workflows,pages,metrics,kv";
-const CAPABILITIES = new Set(
-  (process.env.CAPABILITIES || DEFAULT_CAPABILITIES).split(",").map((s) => s.trim()),
-);
+// Every known capability, including the ones disabled by default. Exported for
+// surfaces that must see the full tool registry regardless of deployment
+// defaults (tests, drift checks).
+export const ALL_CAPABILITIES = [
+  "core",
+  "task-pool",
+  "scripts",
+  "config",
+  "prompt-templates",
+  "mcp",
+  "profiles",
+  "services",
+  "scheduling",
+  "memory",
+  "workflows",
+  "pages",
+  "metrics",
+  "kv",
+  "slack",
+  "tracker",
+  "skills",
+  "messaging",
+  "repo",
+  "agentmail",
+  "kapso",
+  "swarm-x",
+] as const;
 
-export function hasCapability(cap: string): boolean {
-  return CAPABILITIES.has(cap);
+type CAPABILITIES_T = (typeof ALL_CAPABILITIES)[number];
+
+// Capability-based feature flags
+const DEFAULT_CAPABILITIES: string = [
+  "core",
+  "task-pool",
+  "scripts",
+  "config",
+  "mcp",
+  "profiles",
+  "scheduling",
+  "memory",
+  "workflows",
+  "pages",
+  "metrics",
+  "kv",
+  "slack",
+  "tracker",
+  "skills",
+  "repo",
+  //
+  // Disabled by default
+  //
+  // "services",
+  // "prompt-templates",
+  // "messaging",
+  // "swarm-x",
+  // "agentmail",
+  // "kapso",
+].join(",");
+
+// Note: unknown names are kept (they never match hasCapability); workers
+// reuse this env var for free-form skill tags, so dropping them here would
+// break agent capability declarations. Empty entries (trailing commas) are
+// filtered so they can't leak into enabledCapabilities payloads.
+const getCapabilities = (): Set<CAPABILITIES_T> =>
+  new Set(
+    (process.env.CAPABILITIES || DEFAULT_CAPABILITIES)
+      .split(",")
+      .map((s) => s.trim() as CAPABILITIES_T)
+      .filter((s) => s.length > 0),
+  );
+
+export function hasCapability(cap: CAPABILITIES_T): boolean {
+  return getCapabilities().has(cap);
 }
 
-export function getEnabledCapabilities(): string[] {
-  return Array.from(CAPABILITIES);
+export function getEnabledCapabilities(): CAPABILITIES_T[] {
+  return Array.from(getCapabilities());
 }
 
 /**
@@ -187,16 +251,28 @@ export function isScriptsOnlyMcp(): boolean {
   return resolveScriptsOnlyMode({ env: process.env.SCRIPTS_ONLY_MCP });
 }
 
-export function createServer(opts: { scriptsOnly?: boolean } = {}) {
+export function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolean } = {}) {
+  // Reload env
+  loadGlobalConfigsIntoEnv(true);
+
+  // Capability flags shape the externally exposed MCP tool list only. Internal
+  // full-surface consumers (the scripts SDK bridge, drift-check tests) pass
+  // fullSurface to register every tool group regardless of CAPABILITIES.
+  // This shadows the module-level hasCapability for the registrations below.
+  const hasCapability = (cap: CAPABILITIES_T): boolean =>
+    opts.fullSurface === true || getCapabilities().has(cap);
+
   // Initialize database with WAL mode
   // Uses DATABASE_PATH env var for Docker volume compatibility (WAL needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
   initDb(process.env.DATABASE_PATH);
+
   // Phase 2: project the vendored models.dev snapshot into the pricing table.
   // Idempotent (INSERT OR IGNORE keyed on PK with effective_from=0); safe to
   // call on every boot. See src/be/seed-pricing.ts for the projection logic
   // and the manual-override constants for runtime-fee / ACU pricing.
   seedPricingFromModelsDev();
   startPricingRefreshLoop();
+
   try {
     ensureRbacSeedsSynced();
   } catch (err) {
@@ -233,94 +309,69 @@ export function createServer(opts: { scriptsOnly?: boolean } = {}) {
     registerScriptDeleteTool(server);
     registerScriptQueryTypesTool(server);
     registerScriptRunsTools(server);
+
     return server;
   }
 
-  // Core tools - always registered
-  registerJoinSwarmTool(server);
-  registerPollTaskTool(server);
-  registerGetSwarmTool(server);
-  registerGetTasksTool(server);
-  registerGetMetricsTool(server);
-  registerSendTaskTool(server);
-  registerGetTaskDetailsTool(server);
-  registerStoreProgressTool(server);
-  registerMyAgentInfoTool(server);
-  registerCancelTaskTool(server);
+  // Start of default-enabled capabilities
 
-  // User identity tools - always registered
-  registerResolveUserTool(server);
-  registerManageUserTool(server); // self-guards with lead check
+  // Core capability - swarm membership, task flow, progress, user identity, and lead debug tools
+  if (hasCapability("core")) {
+    registerJoinSwarmTool(server);
+    registerPollTaskTool(server);
+    registerGetSwarmTool(server);
+    registerGetTasksTool(server);
+    registerGetMetricsTool(server);
+    registerSendTaskTool(server);
+    registerGetTaskDetailsTool(server);
+    registerStoreProgressTool(server);
+    registerMyAgentInfoTool(server);
+    registerCancelTaskTool(server);
 
-  // Debug tools - always registered (self-guards with lead check)
-  registerDbQueryTool(server);
-  registerGetOauthAccessTokenTool(server);
+    // User identity tools
+    registerResolveUserTool(server);
+    registerManageUserTool(server); // self-guards with lead check
 
-  // Swarm config tools - always registered (config management is fundamental)
-  registerSetConfigTool(server);
-  registerGetConfigTool(server);
-  registerListConfigTool(server);
-  registerDeleteConfigTool(server);
-  registerCredentialBindingsTool(server);
-
-  // Repo management tools - always registered (repo config is fundamental)
-  registerGetReposTool(server);
-  registerUpdateRepoTool(server);
-
-  // Prompt template tools - always registered (prompt management is fundamental)
-  registerListPromptTemplatesTool(server);
-  registerGetPromptTemplateTool(server);
-  registerSetPromptTemplateTool(server);
-  registerDeletePromptTemplateTool(server);
-  registerPreviewPromptTemplateTool(server);
-
-  // Reusable script catalog tools - always registered (HTTP MCP only in v1).
-  registerScriptSearchTool(server);
-  registerScriptConnectionsTool(server);
-  registerScriptApisTool(server);
-  registerScriptRunTool(server);
-  registerScriptUpsertTool(server);
-  registerScriptDeleteTool(server);
-  registerScriptQueryTypesTool(server);
-  registerScriptRunsTools(server);
-
-  // External command routes - mirrors the `agent-swarm x ...` CLI surface.
-  registerSwarmXTool(server);
-
-  // Slack integration tools (always registered, will no-op if Slack not configured)
-  registerSlackReplyTool(server);
-  registerSlackReadTool(server);
-  registerSlackPostTool(server);
-  registerSlackStartThreadTool(server);
-  registerSlackListChannelsTool(server);
-  registerSlackUploadFileTool(server);
-  registerSlackDownloadFileTool(server);
-  registerSlackDeleteTool(server);
-  registerSlackUpdateTool(server);
-
-  // AgentMail integration tool (always registered, self-service inbox mapping)
-  registerRegisterAgentmailInboxTool(server);
-
-  // Kapso/WhatsApp integration tools (native inbound provisioning + outbound)
-  registerRegisterKapsoNumberTool(server);
-  registerUnregisterKapsoNumberTool(server);
-  registerSendWhatsappMessageTool(server);
-  registerReplyWhatsappMessageTool(server);
+    // Debug tools (self-guard with lead check)
+    registerDbQueryTool(server);
+    registerGetOauthAccessTokenTool(server);
+  }
 
   // Task pool capability - task pool operations (create unassigned, claim, release, accept, reject)
   if (hasCapability("task-pool")) {
     registerTaskActionTool(server);
   }
 
-  // Core messaging tools - always registered (post/read are CORE_TOOLS)
-  registerPostMessageTool(server);
-  registerReadMessagesTool(server);
+  // Config capability - swarm config management and credential bindings
+  if (hasCapability("config")) {
+    registerSetConfigTool(server);
+    registerGetConfigTool(server);
+    registerListConfigTool(server);
+    registerDeleteConfigTool(server);
+    registerCredentialBindingsTool(server);
+  }
 
-  // Messaging capability - channel management (CRUD on channels)
-  if (hasCapability("messaging")) {
-    registerListChannelsTool(server);
-    registerCreateChannelTool(server);
-    registerDeleteChannelTool(server);
+  // Scripts capability - reusable script catalog (HTTP MCP only in v1)
+  if (hasCapability("scripts")) {
+    registerScriptSearchTool(server);
+    registerScriptConnectionsTool(server);
+    registerScriptApisTool(server);
+    registerScriptRunTool(server);
+    registerScriptUpsertTool(server);
+    registerScriptDeleteTool(server);
+    registerScriptQueryTypesTool(server);
+    registerScriptRunsTools(server);
+  }
+
+  // MCP capability - managed MCP server registry (CRUD + install/uninstall)
+  if (hasCapability("mcp")) {
+    registerMcpServerCreateTool(server);
+    registerMcpServerUpdateTool(server);
+    registerMcpServerDeleteTool(server);
+    registerMcpServerGetTool(server);
+    registerMcpServerListTool(server);
+    registerMcpServerInstallTool(server);
+    registerMcpServerUninstallTool(server);
   }
 
   // Profiles capability - agent profile management
@@ -330,12 +381,10 @@ export function createServer(opts: { scriptsOnly?: boolean } = {}) {
     registerContextDiffTool(server);
   }
 
-  // Services capability - PM2/background service registry
-  if (hasCapability("services")) {
-    registerRegisterServiceTool(server);
-    registerUnregisterServiceTool(server);
-    registerListServicesTool(server);
-    registerUpdateServiceStatusTool(server);
+  // Repo capability - repository configuration management
+  if (hasCapability("repo")) {
+    registerGetReposTool(server);
+    registerUpdateRepoTool(server);
   }
 
   // Scheduling capability - scheduled task management
@@ -359,11 +408,13 @@ export function createServer(opts: { scriptsOnly?: boolean } = {}) {
   }
 
   // Tracker capability - external issue tracker integration
-  registerTrackerStatusTool(server);
-  registerTrackerLinkTaskTool(server);
-  registerTrackerUnlinkTool(server);
-  registerTrackerSyncStatusTool(server);
-  registerTrackerMapAgentTool(server);
+  if (hasCapability("tracker")) {
+    registerTrackerStatusTool(server);
+    registerTrackerLinkTaskTool(server);
+    registerTrackerUnlinkTool(server);
+    registerTrackerSyncStatusTool(server);
+    registerTrackerMapAgentTool(server);
+  }
 
   // Workflows capability - DAG-based automation workflows
   if (hasCapability("workflows")) {
@@ -382,35 +433,34 @@ export function createServer(opts: { scriptsOnly?: boolean } = {}) {
     registerRequestHumanInputTool(server);
   }
 
-  // Skills - always registered (skill management is available to all agents)
-  registerSkillCreateTool(server);
-  registerSkillUpdateTool(server);
-  registerSkillDeleteTool(server);
-  registerSkillGetTool(server);
-  registerSkillGetFileTool(server);
-  registerSkillListTool(server);
-  registerSkillSearchTool(server);
-  registerSkillInstallTool(server);
-  registerSkillUninstallTool(server);
-  registerSkillInstallRemoteTool(server);
-  registerSkillSyncRemoteTool(server);
-  registerSkillPublishTool(server);
+  // Skills capability - installable skill packages (create, search, install, publish)
+  if (hasCapability("skills")) {
+    registerSkillCreateTool(server);
+    registerSkillUpdateTool(server);
+    registerSkillDeleteTool(server);
+    registerSkillGetTool(server);
+    registerSkillGetFileTool(server);
+    registerSkillListTool(server);
+    registerSkillSearchTool(server);
+    registerSkillInstallTool(server);
+    registerSkillUninstallTool(server);
+    registerSkillInstallRemoteTool(server);
+    registerSkillSyncRemoteTool(server);
+    registerSkillPublishTool(server);
+  }
 
   // Pages capability - DB-backed lightweight artifacts (HTML / JSON specs).
-  // Enabled by default (added to DEFAULT_CAPABILITIES in step-9 of the
-  // db-backed-pages plan). Operators can disable via explicit
-  // `CAPABILITIES=...` env without `pages`.
   if (hasCapability("pages")) {
     registerCreatePageTool(server);
     registerDeletePageTool(server);
   }
 
+  // Metrics capability - time-series metrics (DB-backed, for dashboards).
   if (hasCapability("metrics")) {
     registerCreateMetricTool(server);
   }
 
   // KV capability — namespaced Redis-like key/value (see src/be/migrations/061_kv_store.sql).
-  // Enabled by default; opt out via `CAPABILITIES=...` without `kv`.
   if (hasCapability("kv")) {
     registerKvGetTool(server);
     registerKvSetTool(server);
@@ -419,14 +469,68 @@ export function createServer(opts: { scriptsOnly?: boolean } = {}) {
     registerKvListTool(server);
   }
 
-  // MCP Servers - always registered
-  registerMcpServerCreateTool(server);
-  registerMcpServerUpdateTool(server);
-  registerMcpServerDeleteTool(server);
-  registerMcpServerGetTool(server);
-  registerMcpServerListTool(server);
-  registerMcpServerInstallTool(server);
-  registerMcpServerUninstallTool(server);
+  // Slack capability - Slack integration tools (no-op if Slack is not configured)
+  if (hasCapability("slack")) {
+    registerSlackReplyTool(server);
+    registerSlackReadTool(server);
+    registerSlackPostTool(server);
+    registerSlackStartThreadTool(server);
+    registerSlackListChannelsTool(server);
+    registerSlackUploadFileTool(server);
+    registerSlackDownloadFileTool(server);
+    registerSlackDeleteTool(server);
+    registerSlackUpdateTool(server);
+  }
+
+  // End of default-enabled capabilities
+  // ----------------------------
+  // Start of default-disabled capabilities
+
+  // Prompt-templates capability - prompt template management (list/get/set/delete/preview)
+  if (hasCapability("prompt-templates")) {
+    registerListPromptTemplatesTool(server);
+    registerGetPromptTemplateTool(server);
+    registerSetPromptTemplateTool(server);
+    registerDeletePromptTemplateTool(server);
+    registerPreviewPromptTemplateTool(server);
+  }
+
+  // Agentmail capability - AgentMail integration (self-service inbox mapping)
+  if (hasCapability("agentmail")) {
+    registerRegisterAgentmailInboxTool(server);
+  }
+
+  // Kapso capability - Kapso/WhatsApp integration (native inbound provisioning + outbound)
+  if (hasCapability("kapso")) {
+    registerRegisterKapsoNumberTool(server);
+    registerUnregisterKapsoNumberTool(server);
+    registerSendWhatsappMessageTool(server);
+    registerReplyWhatsappMessageTool(server);
+  }
+
+  // Swarm-x capability - external command routes mirroring the `agent-swarm x ...` CLI surface
+  if (hasCapability("swarm-x")) {
+    registerSwarmXTool(server);
+  }
+
+  // Messaging capability - internal swarm chat (post/read messages, channel CRUD)
+  if (hasCapability("messaging")) {
+    registerPostMessageTool(server);
+    registerReadMessagesTool(server);
+
+    // Channel management (CRUD on channels)
+    registerListChannelsTool(server);
+    registerCreateChannelTool(server);
+    registerDeleteChannelTool(server);
+  }
+
+  // Services capability - PM2/background service registry
+  if (hasCapability("services")) {
+    registerRegisterServiceTool(server);
+    registerUnregisterServiceTool(server);
+    registerListServicesTool(server);
+    registerUpdateServiceStatusTool(server);
+  }
 
   return server;
 }

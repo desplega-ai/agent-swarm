@@ -41,7 +41,9 @@ describe("Tool Annotations & Classification", () => {
       }
     }
     initDb(TEST_DB_PATH);
-    server = createServer();
+    // Tier classification (core vs deferred) spans every tool, including ones
+    // behind default-disabled capabilities — build the full-surface server.
+    server = createServer({ fullSurface: true });
     tools = getRegisteredTools(server);
   });
 
@@ -327,11 +329,12 @@ describe("Tool Annotations & Classification", () => {
 
   test("registered tool count matches expected total", () => {
     const count = Object.keys(tools).length;
-    // We expect all tools to be registered when all capabilities are enabled (default)
+    // We expect all tools to be registered when all capabilities are enabled
+    // (this suite forces ALL_CAPABILITIES, including default-disabled ones).
     // Includes 11 skill tools, 7 MCP server tools, reusable script tools, and the
     // native Kapso/WhatsApp tools (register/unregister number + send/reply message).
     expect(count).toBeGreaterThanOrEqual(45);
-    expect(count).toBeLessThanOrEqual(120);
+    expect(count).toBeLessThanOrEqual(140);
   });
 
   test("core tools are fewer than deferred tools", () => {

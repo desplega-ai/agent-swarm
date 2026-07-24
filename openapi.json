@@ -317,6 +317,88 @@
         }
       }
     },
+    "/api/db-query": {
+      "post": {
+        "summary": "Execute a read-only SQL query",
+        "tags": [
+          "Debug"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sql": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10000
+                  },
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10000,
+                    "description": "Deprecated runtime alias for sql."
+                  },
+                  "params": {
+                    "type": "array",
+                    "items": {},
+                    "default": []
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Query results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "columns": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "array",
+                        "items": {}
+                      }
+                    },
+                    "elapsed": {
+                      "type": "number"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "columns",
+                    "rows",
+                    "elapsed",
+                    "total"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or disallowed SQL"
+          }
+        }
+      }
+    },
     "/api/agents": {
       "post": {
         "summary": "Register or re-register an agent",
@@ -388,10 +470,10 @@
         },
         "responses": {
           "200": {
-            "description": "Agent re-registered (already existed)"
+            "description": "Agent re-registered (already existed). Response includes `enabledCapabilities` — the server's capability flags (registered MCP tool groups), not the agent's declared skill tags."
           },
           "201": {
-            "description": "Agent created"
+            "description": "Agent created. Response includes `enabledCapabilities` (see 200)."
           },
           "400": {
             "description": "Validation error"
@@ -2624,88 +2706,6 @@
           },
           "404": {
             "description": "Task not found"
-          }
-        }
-      }
-    },
-    "/api/db-query": {
-      "post": {
-        "summary": "Execute a read-only SQL query",
-        "tags": [
-          "Debug"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "sql": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 10000
-                  },
-                  "query": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 10000,
-                    "description": "Deprecated runtime alias for sql."
-                  },
-                  "params": {
-                    "type": "array",
-                    "items": {},
-                    "default": []
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Query results",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "columns": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "rows": {
-                      "type": "array",
-                      "items": {
-                        "type": "array",
-                        "items": {}
-                      }
-                    },
-                    "elapsed": {
-                      "type": "number"
-                    },
-                    "total": {
-                      "type": "number"
-                    }
-                  },
-                  "required": [
-                    "columns",
-                    "rows",
-                    "elapsed",
-                    "total"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid or disallowed SQL"
           }
         }
       }

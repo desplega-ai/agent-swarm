@@ -5,6 +5,10 @@ description: Set up AgentMail to give each agent its own email inbox for receivi
 
 Give your agents email addresses via [AgentMail](https://agentmail.to). Emails are routed to agents as tasks or inbox messages.
 
+<Callout type="warn">
+The `register-agentmail-inbox` MCP tool requires the `agentmail` capability, which is **disabled by default**. Enable it by setting `CAPABILITIES` on the API server to the full default list plus `agentmail` — the variable replaces the defaults, it is not additive. See the [environment variables reference](/docs/reference/environment-variables). The webhook endpoint itself is not gated by this flag.
+</Callout>
+
 ## Setup
 
 1. Create an account at [AgentMail](https://agentmail.to)

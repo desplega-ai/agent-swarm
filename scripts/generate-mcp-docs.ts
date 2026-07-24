@@ -20,6 +20,7 @@ interface ToolCategory {
   title: string;
   description: string;
   tools: string[];
+  enabledByDefault: boolean;
 }
 
 interface ToolInfo {
@@ -38,56 +39,101 @@ interface FieldInfo {
 }
 
 /**
- * Dynamically discover tool categories from server.ts
+ * Parse the DEFAULT_CAPABILITIES array literal in server.ts. Commented-out
+ * entries (`// "services",`) are the disabled-by-default set, so comment
+ * lines are skipped.
+ */
+function parseDefaultCapabilities(serverContent: string): Set<string> {
+  const defaults = new Set<string>();
+  const arrMatch = serverContent.match(/const DEFAULT_CAPABILITIES[^=]*=\s*\[([\s\S]*?)\]\s*\.join/);
+  if (!arrMatch) return defaults;
+  for (const rawLine of arrMatch[1]!.split("\n")) {
+    const line = rawLine.trim();
+    if (line.startsWith("//")) continue;
+    const literal = line.match(/["']([\w-]+)["']/);
+    if (literal) defaults.add(literal[1]!);
+  }
+  return defaults;
+}
+
+/**
+ * Collect the contiguous `//` comment lines immediately above `idx`
+ * (the start of a `if (hasCapability(...))` statement) as the category
+ * description. Stops at the first blank or non-comment line.
+ */
+function commentAbove(serverContent: string, idx: number): string {
+  const lines = serverContent.slice(0, idx).split("\n");
+  // Last element is the indentation of the `if` line itself; skip it.
+  lines.pop();
+  const collected: string[] = [];
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!.trim();
+    if (!line.startsWith("//") || /^\/\/\s*-{3,}/.test(line)) break;
+    collected.unshift(line.replace(/^\/\/\s?/, ""));
+  }
+  return collected.join(" ").trim();
+}
+
+// Titles that formatCategoryTitle would mangle (acronyms, product names).
+const CATEGORY_TITLE_OVERRIDES: Record<string, string> = {
+  mcp: "MCP Server Tools",
+  kv: "KV Tools",
+  agentmail: "AgentMail Tools",
+  kapso: "Kapso (WhatsApp) Tools",
+  "swarm-x": "Swarm X Tools",
+};
+
+/**
+ * Dynamically discover tool categories from server.ts. Every tool group in
+ * createServer() is gated by `if (hasCapability("<cap>"))`; whether the
+ * capability is on by default comes from the DEFAULT_CAPABILITIES array.
  */
 async function discoverCategories(): Promise<ToolCategory[]> {
   const serverContent = await Bun.file(SERVER_FILE).text();
+  const defaults = parseDefaultCapabilities(serverContent);
   const categories: ToolCategory[] = [];
 
-  // Extract core tools (always registered, no capability check)
-  const coreTools: string[] = [];
-  const coreMatch = serverContent.match(
-    /\/\/ Core tools[\s\S]*?(?=\/\/.*capability|if \(hasCapability)/,
-  );
-  if (coreMatch) {
-    const registerCalls = coreMatch[0].matchAll(/register(\w+)Tool\(server\)/g);
-    for (const match of registerCalls) {
-      const funcName = match[1];
-      const toolName = camelToKebab(funcName);
-      coreTools.push(toolName);
+  const ifRe = /if\s*\(hasCapability\(["']([\w-]+)["']\)\)\s*\{/g;
+  let match: RegExpExecArray | null;
+  while ((match = ifRe.exec(serverContent)) !== null) {
+    const capName = match[1]!;
+
+    // Brace-match the block body (register calls may sit under nested comments
+    // but never nested braces today; counting keeps this robust anyway).
+    let i = ifRe.lastIndex;
+    const bodyStart = i;
+    let depth = 1;
+    while (i < serverContent.length && depth > 0) {
+      const c = serverContent[i];
+      if (c === "{") depth++;
+      else if (c === "}") depth--;
+      i++;
     }
-  }
-  categories.push({
-    name: "core",
-    title: "Core Tools",
-    description: "Always available tools for basic swarm operations.",
-    tools: coreTools,
-  });
+    const block = serverContent.slice(bodyStart, i - 1);
 
-  // Extract capability-based tools
-  const capabilityBlocks = serverContent.matchAll(
-    /\/\/\s*([\w\s]+)\s*capability[\s\S]*?if\s*\(hasCapability\(["'](\w+(?:-\w+)*)["']\)\)\s*\{([\s\S]*?)\}/g,
-  );
-
-  for (const match of capabilityBlocks) {
-    const [, commentDesc, capName, block] = match;
+    // Both singular (`registerFooTool`) and plural (`registerFooTools`)
+    // registrars are captured; plural ones name a tool FILE that registers
+    // several tools and are expanded against the parsed files in
+    // generateDocs (e.g. registerScriptRunsTools → script-runs.ts's tools).
     const tools: string[] = [];
+    for (const call of block.matchAll(/register(\w+?)Tools?\(server\)/g)) {
+      tools.push(camelToKebab(call[1]!));
+    }
+    if (tools.length === 0) continue;
 
-    const registerCalls = block.matchAll(/register(\w+)Tool\(server\)/g);
-    for (const call of registerCalls) {
-      const funcName = call[1];
-      const toolName = camelToKebab(funcName);
-      tools.push(toolName);
+    const existing = categories.find((c) => c.name === capName);
+    if (existing) {
+      existing.tools.push(...tools);
+      continue;
     }
 
-    if (tools.length > 0) {
-      categories.push({
-        name: capName,
-        title: formatCategoryTitle(capName),
-        description: commentDesc.trim(),
-        tools,
-      });
-    }
+    categories.push({
+      name: capName,
+      title: CATEGORY_TITLE_OVERRIDES[capName] ?? formatCategoryTitle(capName),
+      description: commentAbove(serverContent, match.index),
+      tools,
+      enabledByDefault: defaults.has(capName),
+    });
   }
 
   return categories;
@@ -490,22 +536,56 @@ async function generateDocs() {
     console.log(`  - ${cat.name}: ${cat.tools.length} tools`);
   }
 
-  // Parse all tool files
+  // Parse all tool files. fileToolsMap keys on the file's base name so plural
+  // registrar entries (registerScriptRunsTools → "script-runs") can be
+  // expanded to the tools that file actually registers.
   const toolInfoMap = new Map<string, ToolInfo>();
+  const fileToolsMap = new Map<string, string[]>();
   for (const fileName of allToolFiles) {
     const infos = await parseToolFile(fileName);
+    const baseName = fileName.split("/").pop()!;
     for (const info of infos) {
       toolInfoMap.set(info.name, info);
+      fileToolsMap.set(baseName, [...(fileToolsMap.get(baseName) ?? []), info.name]);
     }
+  }
+
+  const toolExists = (name: string): boolean =>
+    toolInfoMap.has(name) || toolInfoMap.has(name.replace(/-/g, "_"));
+
+  // Expand plural-registrar placeholders into their file's tools.
+  for (const category of categories) {
+    category.tools = category.tools.flatMap((t) =>
+      toolExists(t) ? [t] : (fileToolsMap.get(t) ?? [t]),
+    );
   }
 
   console.log(`Parsed ${toolInfoMap.size} tools`);
 
   // Generate markdown
+  const defaultOn = categories.filter((c) => c.enabledByDefault).map((c) => c.name);
+  const defaultOff = categories.filter((c) => !c.enabledByDefault).map((c) => c.name);
+
   let markdown = `# MCP Tools Reference
 
 > Auto-generated from source. Do not edit manually.
 > Run \`bun run docs:mcp\` to regenerate.
+
+## Capability Flags
+
+Every tool group is gated by a capability flag on the API server. The set of
+enabled capabilities comes from the \`CAPABILITIES\` env var (or the
+\`CAPABILITIES\` global swarm-config entry); when unset, the defaults apply.
+Setting \`CAPABILITIES\` **replaces** the whole list — it is not additive — so
+include every capability you want, not just the extras.
+
+Capability flags shape the **externally exposed MCP tool list only** — they
+hide tools from agents, they are not feature kill-switches. The scripts SDK
+bridge always builds a full-surface server (its surface is governed by the
+SDK allowlist instead), and HTTP REST routes are generally not gated.
+
+- Enabled by default: ${defaultOn.map((c) => `\`${c}\``).join(", ")}
+- Disabled by default: ${defaultOff.map((c) => `\`${c}\``).join(", ")}
 
 ## Table of Contents
 
@@ -541,7 +621,12 @@ async function generateDocs() {
   // Generate tool documentation by category
   for (const category of categories) {
     markdown += `## ${category.title}\n\n`;
-    markdown += `*${category.description}*\n\n`;
+    if (category.description) {
+      markdown += `*${category.description}*\n\n`;
+    }
+    markdown += category.enabledByDefault
+      ? `Capability: \`${category.name}\` (enabled by default)\n\n`
+      : `Capability: \`${category.name}\` — **disabled by default**; add \`${category.name}\` to \`CAPABILITIES\` to enable.\n\n`;
 
     for (const toolName of category.tools) {
       const tool = lookupTool(toolName);
