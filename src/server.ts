@@ -118,6 +118,12 @@ import { registerSlackStartThreadTool } from "./tools/slack-start-thread";
 import { registerSlackUpdateTool } from "./tools/slack-update";
 import { registerSlackUploadFileTool } from "./tools/slack-upload-file";
 import { registerStoreProgressTool } from "./tools/store-progress";
+import {
+  registerCreateSubscriptionTool,
+  registerDeleteSubscriptionTool,
+  registerListSubscriptionsTool,
+  registerPatchSubscriptionTool,
+} from "./tools/subscriptions";
 // Swarm config tools
 import {
   registerDeleteConfigTool,
@@ -396,6 +402,12 @@ export function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolea
     registerDeleteScheduleTool(server);
     registerRunScheduleNowTool(server);
   }
+
+  // Event subscriptions: event → script/workflow bindings.
+  registerCreateSubscriptionTool(server);
+  registerListSubscriptionsTool(server);
+  registerPatchSubscriptionTool(server);
+  registerDeleteSubscriptionTool(server);
 
   // Memory capability - persistent memory with vector search
   if (hasCapability("memory")) {

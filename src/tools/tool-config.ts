@@ -39,6 +39,12 @@ export const CORE_TOOLS = new Set([
 
 /** Tools that can be discovered via Tool Search on demand */
 export const DEFERRED_TOOLS = new Set([
+  // Subscriptions (4)
+  "create-subscription",
+  "list-subscriptions",
+  "patch-subscription",
+  "delete-subscription",
+
   // Scheduling (6)
   "list-schedules",
   "create-schedule",

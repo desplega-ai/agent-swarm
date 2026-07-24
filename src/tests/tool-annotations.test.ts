@@ -334,7 +334,7 @@ describe("Tool Annotations & Classification", () => {
     // Includes 11 skill tools, 7 MCP server tools, reusable script tools, and the
     // native Kapso/WhatsApp tools (register/unregister number + send/reply message).
     expect(count).toBeGreaterThanOrEqual(45);
-    expect(count).toBeLessThanOrEqual(140);
+    expect(count).toBeLessThanOrEqual(145);
   });
 
   test("core tools are fewer than deferred tools", () => {

@@ -58,6 +58,8 @@ const PIN_REASON =
   "no hard authorization gate at the slice-1 pin (plan Appendix A) — open to all authenticated agents";
 
 const UNGATED_TOOL_FILES: Record<string, string> = {
+  "src/tools/subscriptions/list-subscriptions.ts":
+    "read-only listing of event subscriptions — no mutation, mirrors list-schedules posture",
   "src/tools/create-channel.ts": PIN_REASON,
   "src/tools/create-metric.ts": PIN_REASON,
   "src/tools/create-page.ts": PIN_REASON,

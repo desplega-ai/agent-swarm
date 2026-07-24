@@ -27,6 +27,12 @@ export const SDK_TOOL_NAME_MAP = {
   repo_list: "get-repos",
   repo_update: "update-repo",
 
+  // ── subscriptions ──
+  subscription_create: "create-subscription",
+  subscription_list: "list-subscriptions",
+  subscription_patch: "patch-subscription",
+  subscription_delete: "delete-subscription", // destructive
+
   // ── schedules ──
   schedule_list: "list-schedules",
   schedule_create: "create-schedule",

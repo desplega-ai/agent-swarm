@@ -2527,3 +2527,58 @@ export const KvEntrySchema = z.object({
   updatedAt: z.number().int(),
 });
 export type KvEntry = z.infer<typeof KvEntrySchema>;
+
+// ── Event subscriptions (Layer 1) ───────────────────────────────────────────
+// Keep in sync with src/be/migrations/118_swarm_events_subscriptions.sql.
+
+export const SubscriptionTargetTypeSchema = z.enum(["script", "workflow"]);
+export type SubscriptionTargetType = z.infer<typeof SubscriptionTargetTypeSchema>;
+
+export const SubscriptionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  eventPattern: z.string(),
+  filter: z.unknown().optional(),
+  targetType: SubscriptionTargetTypeSchema,
+  scriptName: z.string().optional(),
+  scriptArgs: z.record(z.string(), z.unknown()).optional(),
+  workflowId: z.string().optional(),
+  enabled: z.boolean(),
+  createdByAgentId: z.string().optional(),
+  createdBy: z.string().optional(),
+  updatedBy: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Subscription = z.infer<typeof SubscriptionSchema>;
+
+export const SwarmBusEventSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  data: z.unknown().optional(),
+  emittedAt: z.string(),
+});
+export type SwarmBusEvent = z.infer<typeof SwarmBusEventSchema>;
+
+export const SubscriptionDeliveryStatusSchema = z.enum([
+  "pending",
+  "running",
+  "succeeded",
+  "failed",
+]);
+export type SubscriptionDeliveryStatus = z.infer<typeof SubscriptionDeliveryStatusSchema>;
+
+export const SubscriptionDeliverySchema = z.object({
+  id: z.string(),
+  subscriptionId: z.string(),
+  eventId: z.string(),
+  status: SubscriptionDeliveryStatusSchema,
+  attempts: z.number().int(),
+  claimedAt: z.string().optional(),
+  finishedAt: z.string().optional(),
+  error: z.string().optional(),
+  result: z.unknown().optional(),
+  createdAt: z.string(),
+});
+export type SubscriptionDelivery = z.infer<typeof SubscriptionDeliverySchema>;
