@@ -8,7 +8,7 @@
  */
 
 import type { ProviderTraits } from "../providers/types";
-import type { ProviderName } from "../types";
+import type { ProviderName, RoutingDirectives } from "../types";
 import { resolveTemplateAsync } from "./resolver";
 
 // Side-effect import: register all system + session templates
@@ -101,6 +101,8 @@ export type BasePromptArgs = {
   skillsSummary?: { name: string; description: string }[];
   /** Pre-fetched MCP server summaries for the installed MCP servers section */
   mcpServersSummary?: string;
+  /** Per-task soft-routing guidance, resolved through the template registry. */
+  routingDirectives?: RoutingDirectives;
 };
 
 export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
@@ -151,6 +153,23 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   ) {
     const routingAuthoringResult = await resolveTemplateAsync("system.agent.routing_authoring", {});
     prompt += `\n${routingAuthoringResult.text}`;
+  }
+
+  if (args.routingDirectives) {
+    const directives = args.routingDirectives.directives
+      .map((directive) => `- ${directive}`)
+      .join("\n");
+    const suggestedAgent = args.routingDirectives.suggestions.find(
+      (suggestion) => suggestion.assignTo,
+    )?.assignTo;
+    const suggestion = suggestedAgent
+      ? `\n\nRouting suggested assigning this to ${suggestedAgent} — if you delegate elsewhere, note why.`
+      : "";
+    const routingDirectivesResult = await resolveTemplateAsync("system.task.routing_directives", {
+      directives,
+      suggestion,
+    });
+    prompt += `\n${routingDirectivesResult.text}`;
   }
 
   const slackPromptToolsEnabled = areSlackPromptToolsEnabled();

@@ -366,6 +366,24 @@ export const RoutingAffinitySchema = z.object({
 });
 export type RoutingAffinity = z.infer<typeof RoutingAffinitySchema>;
 
+/** Durable soft-routing guidance attached to a task. */
+export const RoutingDirectivesSchema = z
+  .object({
+    directives: z.array(z.string()),
+    suggestions: z.array(
+      z
+        .object({
+          handlerName: z.string(),
+          assignTo: z.string().optional(),
+          block: z.object({ reason: z.string() }).optional(),
+        })
+        .strict(),
+    ),
+    routingRunId: z.string().optional(),
+  })
+  .strict();
+export type RoutingDirectives = z.infer<typeof RoutingDirectivesSchema>;
+
 export const AgentTaskSchema = z.object({
   id: z.uuid(),
   key: AssetKeySchema,
@@ -499,6 +517,7 @@ export const AgentTaskSchema = z.object({
   // behavior. Inherited from parentTaskId when not explicitly set (see
   // `createTaskExtended` in src/be/db.ts). See `isAgentEligibleForTask`.
   routingAffinity: RoutingAffinitySchema.optional(),
+  routingDirectives: RoutingDirectivesSchema.optional(),
 });
 
 // ============================================================================
@@ -1130,6 +1149,7 @@ export const EventNameSchema = z.enum([
   "routing.applied",
   "routing.blocked",
   "routing.handler_failed",
+  "routing.lead_deviated",
 ]);
 
 export const SwarmEventSchema = z.object({

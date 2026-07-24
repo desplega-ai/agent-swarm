@@ -1,4 +1,4 @@
-import { hasNonTerminalRerouteDecisionChild } from "../be/db";
+import { hasNonTerminalRerouteDecisionChild, updateTaskRoutingDirectives } from "../be/db";
 import {
   type CreateRoutingBlockDecisionResult,
   createRoutingBlockDecisionTaskForExistingTask,
@@ -6,6 +6,8 @@ import {
 import type { AgentTask } from "../types";
 import { buildRoutingCtx } from "./ctx";
 import { runBeforeAssign } from "./engine";
+
+const MAX_STORED_DIRECTIVES = 20;
 
 export type ClaimRoutingResult =
   | { kind: "proceed" }
@@ -23,9 +25,8 @@ export type ClaimRoutingResult =
  * this before entering their claim transaction; the later atomic claim UPDATE
  * remains the race-safe final arbiter.
  *
- * Claim-time mutations/directives are traced by the engine but intentionally
- * not persisted: there is no existing synchronous helper for updating all
- * supported routing mutation fields on an existing task row.
+ * Claim-time directives are persisted before the atomic claim UPDATE. Other
+ * mutations remain intentionally unsupported for existing rows.
  */
 export async function runClaimRouting(
   task: AgentTask,
@@ -42,6 +43,34 @@ export async function runClaimRouting(
       proposedAgentId,
     }),
   );
+
+  if (decision.promptDirectives.length > 0 || decision.suggestions.length > 0) {
+    // Pooled tasks are re-evaluated on every poll until claimed (e.g. while a
+    // redirect target hasn't polled yet), so persistence must be idempotent:
+    // dedupe against what's already stored and cap growth, and skip the write
+    // entirely when nothing new arrived.
+    const existing = task.routingDirectives;
+    const directives = [
+      ...new Set([...(existing?.directives ?? []), ...decision.promptDirectives]),
+    ].slice(0, MAX_STORED_DIRECTIVES);
+    const suggestionKey = (s: { handlerName: string; assignTo?: string }) =>
+      `${s.handlerName}|${s.assignTo ?? ""}`;
+    const seen = new Set((existing?.suggestions ?? []).map(suggestionKey));
+    const suggestions = [
+      ...(existing?.suggestions ?? []),
+      ...decision.suggestions.filter((s) => !seen.has(suggestionKey(s))),
+    ].slice(0, MAX_STORED_DIRECTIVES);
+    const changed =
+      directives.length !== (existing?.directives?.length ?? 0) ||
+      suggestions.length !== (existing?.suggestions?.length ?? 0);
+    if (changed) {
+      updateTaskRoutingDirectives(task.id, {
+        directives,
+        suggestions,
+        routingRunId: decision.routingRunId,
+      });
+    }
+  }
 
   if (decision.final?.block) {
     return {

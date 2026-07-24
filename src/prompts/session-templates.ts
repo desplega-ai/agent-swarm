@@ -854,3 +854,16 @@ registerTemplate({
   ],
   category: "session",
 });
+
+registerTemplate({
+  eventType: "system.task.routing_directives",
+  header: "",
+  defaultBody: `## Routing guidance
+
+{{directives}}{{suggestion}}`,
+  variables: [
+    { name: "directives", description: "Routing directives rendered as Markdown bullets" },
+    { name: "suggestion", description: "Optional soft assignment suggestion" },
+  ],
+  category: "task_lifecycle",
+});

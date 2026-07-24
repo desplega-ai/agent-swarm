@@ -1,5 +1,5 @@
 import type { CreateTaskOptions } from "../be/db";
-import type { RoutingDecision, RoutingSuggestion } from "./types";
+import type { RoutingDecision } from "./types";
 
 export type RoutedCreateTaskOptions = CreateTaskOptions & {
   /**
@@ -7,11 +7,6 @@ export type RoutedCreateTaskOptions = CreateTaskOptions & {
    * engine, then stamp downstream creation so via=creation does not fire too.
    */
   _routingDone?: boolean;
-};
-
-type Phase6RoutingCarrier = {
-  promptDirectives?: string[];
-  routingSuggestions?: RoutingSuggestion[];
 };
 
 export function applyRoutingDecisionToOptions(
@@ -33,15 +28,18 @@ export function applyRoutingDecisionToOptions(
     finalOptions.priority = decision.mutations.priority;
   }
 
-  // Phase 6 adds durable prompt-routing fields. Until then, preserve these
-  // values only for callers that already supplied in-memory carrier fields;
-  // do not invent or persist a new task column here.
-  const carrier = finalOptions as RoutedCreateTaskOptions & Phase6RoutingCarrier;
-  if (Object.hasOwn(finalOptions, "promptDirectives")) {
-    carrier.promptDirectives = [...(carrier.promptDirectives ?? []), ...decision.promptDirectives];
-  }
-  if (Object.hasOwn(finalOptions, "routingSuggestions")) {
-    carrier.routingSuggestions = [...(carrier.routingSuggestions ?? []), ...decision.suggestions];
+  if (decision.promptDirectives.length > 0 || decision.suggestions.length > 0) {
+    finalOptions.routingDirectives = {
+      directives: [
+        ...(finalOptions.routingDirectives?.directives ?? []),
+        ...decision.promptDirectives,
+      ],
+      suggestions: [
+        ...(finalOptions.routingDirectives?.suggestions ?? []),
+        ...decision.suggestions,
+      ],
+      routingRunId: decision.routingRunId,
+    };
   }
   return finalOptions;
 }

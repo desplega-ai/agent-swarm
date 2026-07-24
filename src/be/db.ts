@@ -68,6 +68,7 @@ import type {
   ReasoningEffort,
   RepoGuidelines,
   RoutingAffinity,
+  RoutingDirectives,
   ScheduledTask,
   ScheduledTaskSummary,
   ScriptRun,
@@ -115,6 +116,7 @@ import {
   parseModelTier,
   ReasoningEffortSchema,
   RoutingAffinitySchema,
+  RoutingDirectivesSchema,
 } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
@@ -1181,6 +1183,7 @@ type AgentTaskRow = {
   harnessVariantMeta: string | null;
   totalCostUsd?: number | null;
   routingAffinity: string | null;
+  routingDirectives: string | null;
 };
 
 function rowToAgentTask(row: AgentTaskRow): AgentTask {
@@ -1220,6 +1223,26 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     } catch (error) {
       console.warn(
         `[db] Ignoring malformed agent_tasks.routingAffinity for task ${row.id}:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  let routingDirectives: RoutingDirectives | undefined;
+  if (row.routingDirectives) {
+    try {
+      const parsed = RoutingDirectivesSchema.safeParse(JSON.parse(row.routingDirectives));
+      if (parsed.success) {
+        routingDirectives = parsed.data;
+      } else {
+        console.warn(
+          `[db] Ignoring invalid agent_tasks.routingDirectives for task ${row.id}:`,
+          parsed.error.message,
+        );
+      }
+    } catch (error) {
+      console.warn(
+        `[db] Ignoring malformed agent_tasks.routingDirectives for task ${row.id}:`,
         error instanceof Error ? error.message : String(error),
       );
     }
@@ -1297,6 +1320,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     harnessVariantMeta: row.harnessVariantMeta ? JSON.parse(row.harnessVariantMeta) : undefined,
     totalCostUsd: row.totalCostUsd ?? undefined,
     routingAffinity,
+    routingDirectives,
   };
 }
 
@@ -3874,6 +3898,8 @@ export interface CreateTaskOptions {
    * when not explicitly set — same treatment as `vcsRepo`/`contextKey`.
    */
   routingAffinity?: RoutingAffinity;
+  /** Durable soft-routing guidance from lifecycle routing handlers. */
+  routingDirectives?: RoutingDirectives;
 }
 
 /**
@@ -4175,8 +4201,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, scheduleId,
-        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, contextKey, routingAffinity, routingDirectives, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -4222,6 +4248,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.requestedByUserId ?? null,
       options?.contextKey ?? null,
       options?.routingAffinity ? JSON.stringify(options.routingAffinity) : null,
+      options?.routingDirectives ? JSON.stringify(options.routingDirectives) : null,
       pkg.version,
       now,
       now,
@@ -4268,6 +4295,13 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
   } catch {}
 
   return rowToAgentTask(row);
+}
+
+/** Persist soft-routing guidance for an existing task before it is claimed. */
+export function updateTaskRoutingDirectives(taskId: string, payload: RoutingDirectives): void {
+  getDb()
+    .prepare("UPDATE agent_tasks SET routingDirectives = ?, lastUpdatedAt = ? WHERE id = ?")
+    .run(JSON.stringify(payload), new Date().toISOString(), taskId);
 }
 
 export function claimTask(taskId: string, agentId: string): AgentTask | null {

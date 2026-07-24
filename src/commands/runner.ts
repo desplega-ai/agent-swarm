@@ -37,6 +37,7 @@ import {
   type ProviderName,
   type ReasoningEffort,
   type RepoGuidelines,
+  type RoutingDirectives,
   resolveTaskModelSelection,
 } from "../types.ts";
 import { getApiKey } from "../utils/api-key.ts";
@@ -4206,6 +4207,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let currentRepoContext: BasePromptArgs["repoContext"] | undefined;
   // Slack context for current task (gates Slack instructions in prompt)
   let currentTaskSlackContext: BasePromptArgs["slackContext"] | undefined;
+  let currentTaskRoutingDirectives: RoutingDirectives | undefined;
 
   // Generate base prompt (identity fields injected after profile fetch below).
   // Traits are read fresh on each call so a live adapter swap (Section 4)
@@ -4231,6 +4233,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       }),
       repoContext: currentRepoContext,
       slackContext: currentTaskSlackContext,
+      routingDirectives: currentTaskRoutingDirectives,
       ...(traits.hasMcp && {
         skillsSummary: agentSkillsSummary,
         mcpServersSummary: agentMcpServersSummary,
@@ -5432,6 +5435,41 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         currentTaskSlackContext = taskSlackChannelId
           ? { channelId: taskSlackChannelId, threadTs: taskSlackThreadTs }
           : undefined;
+        currentTaskRoutingDirectives = (
+          trigger.task as { routingDirectives?: RoutingDirectives } | undefined
+        )?.routingDirectives;
+        if (trigger.taskId && apiUrl) {
+          try {
+            const response = await fetch(
+              `${apiUrl}/api/routing/prompt-compose/${encodeURIComponent(trigger.taskId)}`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${apiKey}`,
+                  "X-Agent-ID": agentId,
+                },
+                // A hung server must not stall prompt composition — fall back
+                // to the directives already carried on the task trigger.
+                signal: AbortSignal.timeout(5_000),
+              },
+            );
+            if (response.ok) {
+              const payload = (await response.json()) as { routingDirectives?: RoutingDirectives };
+              currentTaskRoutingDirectives = payload.routingDirectives;
+            } else {
+              console.warn(
+                `[${role}] prompt.compose routing request failed: HTTP ${response.status}`,
+              );
+            }
+          } catch (error) {
+            // Guidance must fail open; the durable task directives still render.
+            console.warn(
+              `[${role}] prompt.compose routing request failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+        }
 
         // Handle repo context for tasks with vcsRepo (GitHub/GitLab)
         const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;

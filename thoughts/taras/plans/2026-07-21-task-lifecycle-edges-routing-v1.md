@@ -425,15 +425,15 @@ Soft rules become real: suggestions and `promptDirectives` from soft handlers ar
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun test src/tests/routing-prompt-compose.test.ts` — directive storage, template resolution (agent/repo/global precedence respected), deviation event on mismatch, no event on match
-- [ ] `bun test && bun run tsc:check && bun run lint`
-- [ ] Migration boots on fresh DB: `rm -f /tmp/routing-e2e.sqlite && DB_PATH=/tmp/routing-e2e.sqlite bun run start:http` — and on the existing dev DB: `bun run start:http` (column added, data retained)
+- [x] `bun test src/tests/routing-prompt-compose.test.ts` — directive storage, template resolution (agent/repo/global precedence respected), deviation event on mismatch, no event on match
+- [x] `bun test && bun run tsc:check && bun run lint`
+- [x] Migration boots on fresh DB: `rm -f /tmp/routing-e2e.sqlite && DB_PATH=/tmp/routing-e2e.sqlite bun run start:http` — and on the existing dev DB: `bun run start:http` (column added, data retained)
 
 #### Automated QA:
-- [ ] Fresh-DB: soft handler suggests agent A with a "non-technical audience" directive; inspect the Lead's composed prompt (session log / prompt render endpoint) contains the directive block; delegate to agent B via send-task → `routing.lead_deviated` event exists.
+- [x] Fresh-DB: soft handler suggests agent A with a "non-technical audience" directive; inspect the Lead's composed prompt (session log / prompt render endpoint) contains the directive block; delegate to agent B via send-task → `routing.lead_deviated` event exists.
 
 #### Manual Verification:
-- [ ] Read the rendered Lead prompt — directive block reads naturally, doesn't fight the session template.
+- [x] Read the rendered Lead prompt — directive block reads naturally, doesn't fight the session template.
 
 **Implementation Note**: Pause + commit `[phase 6] prompt.compose + soft directives + deviation`.
 

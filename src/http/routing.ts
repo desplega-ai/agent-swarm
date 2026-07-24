@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "../be/audit-user";
-import { getAgentById } from "../be/db";
+import { getAgentById, getTaskById } from "../be/db";
 import {
   createEdgeHandler,
   deleteEdgeHandler,
@@ -11,6 +11,7 @@ import {
 } from "../be/edge-handlers-db";
 import { getScript } from "../be/scripts/db";
 import { can } from "../rbac";
+import { composeTaskRoutingDirectives } from "../routing/prompt-compose";
 import {
   EdgeHandlerEdgeSchema,
   EdgeHandlerFlavorSchema,
@@ -172,6 +173,22 @@ function requireGlobalScript(res: ServerResponse, scriptName: string): boolean {
   return true;
 }
 
+const promptComposeRoute = route({
+  method: "post",
+  path: "/api/routing/prompt-compose/{taskId}",
+  pattern: ["api", "routing", "prompt-compose", null],
+  operationId: "routing_prompt_compose",
+  summary: "Compose per-task routing directives for an assigned agent",
+  tags: ["Routing"],
+  params: z.object({ taskId: z.string().uuid() }),
+  responses: {
+    200: { description: "Prompt routing directives" },
+    404: { description: "Task is not assigned to this agent" },
+  },
+  auth: { agentId: true },
+  rbac: { ungated: "Assigned agents may resolve only their own task prompt guidance." },
+});
+
 export async function handleRouting(
   req: IncomingMessage,
   res: ServerResponse,
@@ -179,6 +196,19 @@ export async function handleRouting(
   queryParams: URLSearchParams,
   agentId: string | undefined,
 ): Promise<boolean> {
+  if (promptComposeRoute.match(req.method, pathSegments)) {
+    const parsed = await promptComposeRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const agent = requireAgent(res, agentId);
+    if (!agent) return true;
+    const task = getTaskById(parsed.params.taskId);
+    if (!task || task.agentId !== agent.id) {
+      jsonError(res, "Task is not assigned to this agent", 404);
+      return true;
+    }
+    json(res, { routingDirectives: await composeTaskRoutingDirectives(task, agent.id) });
+    return true;
+  }
   if (registerHandlerRoute.match(req.method, pathSegments)) {
     const parsed = await registerHandlerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;

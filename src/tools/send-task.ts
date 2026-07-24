@@ -16,7 +16,8 @@ import {
   resolveEffectiveTaskOptions,
 } from "@/be/db";
 import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
-import { backfillTraceTaskId } from "@/be/routing-trace-db";
+import { createEvent } from "@/be/events";
+import { backfillTraceTaskId, insertRoutingTrace } from "@/be/routing-trace-db";
 import { buildRoutingCtx } from "@/routing/ctx";
 import { runBeforeAssign } from "@/routing/engine";
 import { applyRoutingDecisionToOptions } from "@/tasks/create-task-routed";
@@ -34,6 +35,7 @@ import {
   ReasoningEffortSchema,
   splitLegacyModelAlias,
 } from "@/types";
+import { workflowEventBus } from "@/workflows/event-bus";
 
 export const sendTaskInputSchema = z
   .object({
@@ -549,6 +551,59 @@ export async function sendTaskHandler(
     };
   });
   const result = txn();
+  const suggestion = effectiveParentTask?.routingDirectives?.suggestions.find(
+    (candidate) => candidate.assignTo,
+  );
+  if (
+    result.success &&
+    effectiveAgentId &&
+    suggestion?.assignTo &&
+    suggestion.assignTo !== effectiveAgentId &&
+    effectiveParentTask
+  ) {
+    const routingRunId = effectiveParentTask.routingDirectives?.routingRunId ?? crypto.randomUUID();
+    const payload = {
+      taskId: effectiveParentTask.id,
+      suggestedAgentId: suggestion.assignTo,
+      chosenAgentId: effectiveAgentId,
+      handlerName: suggestion.handlerName,
+      routingRunId,
+    };
+    try {
+      createEvent({
+        category: "task",
+        event: "routing.lead_deviated",
+        status: "ok",
+        source: "hook",
+        agentId: creatorAgentId,
+        taskId: effectiveParentTask.id,
+        data: payload,
+      });
+      workflowEventBus.emit("routing.lead_deviated", payload);
+    } catch {
+      // Deviation telemetry must not affect task delivery.
+    }
+    try {
+      insertRoutingTrace({
+        routingRunId,
+        taskId: effectiveParentTask.id,
+        edge: "task.before_assign",
+        via: "delegation",
+        handlerId: "lead-deviation",
+        handlerName: suggestion.handlerName,
+        flavor: "route",
+        mode: "soft",
+        matched: true,
+        decisive: false,
+        suggestion: suggestion.assignTo,
+        deviated: true,
+        dryRun: false,
+        durationMs: 0,
+      });
+    } catch {
+      // Trace persistence is best effort, matching routing engine behavior.
+    }
+  }
   const structuredContent = {
     yourAgentId: creatorAgentId,
     ...result,

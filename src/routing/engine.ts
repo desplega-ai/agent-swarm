@@ -118,7 +118,10 @@ export function hasHandlersForVia(edge: EdgeHandlerEdge, via: RoutingCtx["via"])
   );
 }
 
-export function createRoutingEngine(scriptRunner: RoutingScriptRunner = runGlobalScriptByName) {
+export function createRoutingEngine(
+  scriptRunner: RoutingScriptRunner = runGlobalScriptByName,
+  edge: EdgeHandlerEdge = "task.before_assign",
+) {
   return async function runBeforeAssignWithRunner(
     ctx: RoutingCtx,
     opts: { dryRun?: boolean } = {},
@@ -133,7 +136,7 @@ export function createRoutingEngine(scriptRunner: RoutingScriptRunner = runGloba
       trace: [],
     };
 
-    const enabled = listEnabledHandlersForEdge("task.before_assign");
+    const enabled = listEnabledHandlersForEdge(edge);
     const matched: EdgeHandler[] = [];
     for (const handler of enabled) {
       if (await matchesHandler(handler, ctx)) matched.push(handler);
@@ -163,7 +166,9 @@ export function createRoutingEngine(scriptRunner: RoutingScriptRunner = runGloba
       const durationMs = Date.now() - startedAt;
 
       if (error) {
-        const guardFailure = handler.flavor === "guard";
+        // Prompt composition is advisory. Even guard failures must fail open
+        // so a task can always receive its prompt.
+        const guardFailure = edge === "task.before_assign" && handler.flavor === "guard";
         const trace: RoutingDecisionTrace = {
           handlerId: handler.id,
           handlerName: handler.name,
@@ -177,7 +182,7 @@ export function createRoutingEngine(scriptRunner: RoutingScriptRunner = runGloba
         safeInsertTrace({
           routingRunId,
           taskId: ctx.task.id,
-          edge: "task.before_assign",
+          edge,
           via: ctx.via,
           handlerId: handler.id,
           handlerName: handler.name,
@@ -216,7 +221,9 @@ export function createRoutingEngine(scriptRunner: RoutingScriptRunner = runGloba
       if (result.promptDirectives) decision.promptDirectives.push(...result.promptDirectives);
       if (result.note) decision.notes.push(result.note);
 
-      const decisiveResult = isDecisive(result);
+      // prompt.compose may add guidance and notes only; assignment/block
+      // results are deliberately ignored at this edge.
+      const decisiveResult = edge === "task.before_assign" && isDecisive(result);
       const hardDecisive = decisiveResult && handler.mode === "hard";
       const suggestion =
         decisiveResult && handler.mode === "soft"
@@ -244,7 +251,7 @@ export function createRoutingEngine(scriptRunner: RoutingScriptRunner = runGloba
       safeInsertTrace({
         routingRunId,
         taskId: ctx.task.id,
-        edge: "task.before_assign",
+        edge,
         via: ctx.via,
         handlerId: handler.id,
         handlerName: handler.name,
@@ -279,3 +286,4 @@ export function createRoutingEngine(scriptRunner: RoutingScriptRunner = runGloba
 }
 
 export const runBeforeAssign = createRoutingEngine();
+export const runPromptCompose = createRoutingEngine(runGlobalScriptByName, "prompt.compose");

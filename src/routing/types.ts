@@ -8,7 +8,14 @@ import {
   RoutingAffinitySchema,
 } from "../types";
 
-export const RoutingViaSchema = z.enum(["creation", "delegation", "claim", "resume", "completion"]);
+export const RoutingViaSchema = z.enum([
+  "creation",
+  "delegation",
+  "claim",
+  "resume",
+  "completion",
+  "prompt",
+]);
 export type RoutingVia = z.infer<typeof RoutingViaSchema>;
 
 // Id fields are plain strings, not z.uuid(): agents/tasks created through

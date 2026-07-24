@@ -3356,7 +3356,12 @@
                       "system.migration",
                       "system.error",
                       "script.global_upsert",
-                      "schedule.deleted"
+                      "schedule.deleted",
+                      "routing.matched",
+                      "routing.applied",
+                      "routing.blocked",
+                      "routing.handler_failed",
+                      "routing.lead_deviated"
                     ]
                   },
                   "status": {
@@ -3472,7 +3477,12 @@
                 "system.migration",
                 "system.error",
                 "script.global_upsert",
-                "schedule.deleted"
+                "schedule.deleted",
+                "routing.matched",
+                "routing.applied",
+                "routing.blocked",
+                "routing.handler_failed",
+                "routing.lead_deviated"
               ]
             },
             "required": false,
@@ -3624,7 +3634,12 @@
                             "system.migration",
                             "system.error",
                             "script.global_upsert",
-                            "schedule.deleted"
+                            "schedule.deleted",
+                            "routing.matched",
+                            "routing.applied",
+                            "routing.blocked",
+                            "routing.handler_failed",
+                            "routing.lead_deviated"
                           ]
                         },
                         "status": {
@@ -10067,6 +10082,39 @@
           },
           "404": {
             "description": "Handler not found"
+          }
+        }
+      }
+    },
+    "/api/routing/prompt-compose/{taskId}": {
+      "post": {
+        "operationId": "routing_prompt_compose",
+        "summary": "Compose per-task routing directives for an assigned agent",
+        "tags": [
+          "Routing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Prompt routing directives"
+          },
+          "404": {
+            "description": "Task is not assigned to this agent"
           }
         }
       }
