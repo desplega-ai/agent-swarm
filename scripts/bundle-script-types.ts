@@ -1,4 +1,7 @@
 #!/usr/bin/env bun
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { closeDb } from "../src/be/db";
 import {
   SCRIPT_STDLIB_TYPES,
@@ -9,8 +12,16 @@ import { SDK_ALLOWLIST, mcpToolNameForSdkMethod } from "../src/scripts-runtime/s
 
 type RegisteredTools = Record<string, unknown>;
 
+let tmpDir: string | undefined;
+
 async function main() {
-  process.env.DATABASE_PATH ??= "/tmp/agent-swarm-script-types.sqlite";
+  // Always generate against a fresh throwaway DB — even when DATABASE_PATH is
+  // set in the shell or .env. Generation appends connection/MCP-derived API
+  // types read from the database, so an inherited dev DB would bake local
+  // state into the committed baseline (and diverge from the CI freshness
+  // check, which expects clean-DB output).
+  tmpDir = mkdtempSync(join(tmpdir(), "agent-swarm-script-types-"));
+  process.env.DATABASE_PATH = join(tmpDir, "db.sqlite");
   // The SDK is derived from the full MCP registry regardless of deployment
   // CAPABILITIES — the scripts bridge is always full-surface, so the .d.ts
   // must be too (and generation must not depend on the local env's flags).
@@ -40,4 +51,5 @@ main()
   })
   .finally(() => {
     closeDb();
+    if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
   });

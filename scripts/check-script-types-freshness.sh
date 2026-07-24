@@ -6,13 +6,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Fresh throwaway DB: the generator appends connection/MCP-derived API types
-# read from the database, so a reused local DB would make output
-# non-deterministic. An empty DB matches the committed baseline.
-tmpdir=$(mktemp -d)
-trap 'rm -rf "$tmpdir"' EXIT
-
-DATABASE_PATH="$tmpdir/script-types.sqlite" bun scripts/bundle-script-types.ts
+# The bundler itself forces a fresh throwaway DB (ignoring any inherited
+# DATABASE_PATH), so build:script-types and this check see the same
+# deterministic clean-DB baseline.
+bun scripts/bundle-script-types.ts
 
 if [ -n "$(git diff --name-only src/scripts-runtime/types/)" ]; then
   echo "::error::script SDK types are out of date! Run 'bun run build:script-types' and commit the changes. Source of truth: src/be/scripts/typecheck.ts — never edit the .d.ts files directly."
