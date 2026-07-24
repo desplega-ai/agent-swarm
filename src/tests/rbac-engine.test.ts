@@ -76,6 +76,7 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
   "script.api.update",
   "script.api.rotate",
   "script.api.delete",
+  "routing.write",
 ];
 
 const LEAD_OR_RESOURCE_OWNER_VERBS: PermissionVerb[] = [
@@ -85,6 +86,7 @@ const LEAD_OR_RESOURCE_OWNER_VERBS: PermissionVerb[] = [
   "mcp-server.update.any",
   "page.delete.any",
   "subscription.mutate.any",
+  "routing.mutate.any",
 ];
 
 const LEAD_OR_TASK_CREATOR_VERBS: PermissionVerb[] = ["task.cancel.any"];

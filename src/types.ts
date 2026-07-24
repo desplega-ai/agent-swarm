@@ -1,5 +1,6 @@
 import * as z from "zod";
 import { normalizeAssetKey } from "./assets/key";
+import { compileStringFilter } from "./workflows/wait-filter";
 // ─── Asset namespaces ──────────────────────────────────────────────────────
 
 export const AssetKeySchema = z
@@ -2582,3 +2583,62 @@ export const SubscriptionDeliverySchema = z.object({
   createdAt: z.string(),
 });
 export type SubscriptionDelivery = z.infer<typeof SubscriptionDeliverySchema>;
+
+// ── Lifecycle edge handlers (routing v1, Phase 2) ──────────────────────────
+// Keep in sync with src/be/migrations/119_edge_handlers.sql.
+
+export const EdgeHandlerEdgeSchema = z.enum(["task.before_assign", "prompt.compose"]);
+export type EdgeHandlerEdge = z.infer<typeof EdgeHandlerEdgeSchema>;
+
+export const EdgeHandlerFlavorSchema = z.enum(["route", "guard"]);
+export type EdgeHandlerFlavor = z.infer<typeof EdgeHandlerFlavorSchema>;
+
+export const EdgeHandlerModeSchema = z.enum(["soft", "hard"]);
+export type EdgeHandlerMode = z.infer<typeof EdgeHandlerModeSchema>;
+
+export const EdgeHandlerMatcherSchema = z
+  .object({
+    via: z.enum(["creation", "delegation", "claim", "resume", "completion"]).optional(),
+    source: z.string().min(1).max(200).optional(),
+    slackChannelId: z.string().min(1).max(200).optional(),
+    vcsRepo: z.string().min(1).max(500).optional(),
+    agentId: z.string().min(1).max(200).optional(),
+    taskType: z.string().min(1).max(200).optional(),
+    filter: z
+      .string()
+      .min(1)
+      .max(2048)
+      .superRefine((value, ctx) => {
+        try {
+          compileStringFilter(value);
+        } catch (error) {
+          ctx.addIssue({
+            code: "custom",
+            message: error instanceof Error ? error.message : "Invalid matcher filter",
+          });
+        }
+      })
+      .optional(),
+  })
+  .strict();
+export type EdgeHandlerMatcher = z.infer<typeof EdgeHandlerMatcherSchema>;
+
+export const EdgeHandlerSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  edge: EdgeHandlerEdgeSchema,
+  scriptName: z.string(),
+  description: z.string().optional(),
+  flavor: EdgeHandlerFlavorSchema,
+  mode: EdgeHandlerModeSchema,
+  priority: z.number().int(),
+  matcher: EdgeHandlerMatcherSchema.optional(),
+  timeoutMs: z.number().int().positive().optional(),
+  enabled: z.boolean(),
+  createdByAgentId: z.string().optional(),
+  createdBy: z.string().optional(),
+  updatedBy: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type EdgeHandler = z.infer<typeof EdgeHandlerSchema>;

@@ -141,6 +141,18 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     prompt += `\n${scriptsOnlyResult.text}`;
   }
 
+  // Routing authoring is a Lead-only capability prompt. It is enabled by
+  // default but can be removed for constrained deployments without changing
+  // the registered template itself.
+  if (
+    role === "lead" &&
+    process.env.ROUTING_AUTHORING_PROMPT_DISABLE !== "true" &&
+    process.env.ROUTING_AUTHORING_PROMPT_DISABLE !== "1"
+  ) {
+    const routingAuthoringResult = await resolveTemplateAsync("system.agent.routing_authoring", {});
+    prompt += `\n${routingAuthoringResult.text}`;
+  }
+
   const slackPromptToolsEnabled = areSlackPromptToolsEnabled();
 
   // Server-side capability flags gate which MCP tool groups the API server

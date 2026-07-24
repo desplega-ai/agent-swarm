@@ -233,6 +233,14 @@ export const PERMISSIONS = {
     description: "Modify, pause, or delete event subscriptions beyond the caller's own.",
     namespace: "subscription",
   },
+  "routing.write": {
+    description: "Register lifecycle edge handlers.",
+    namespace: "routing",
+  },
+  "routing.mutate.any": {
+    description: "Modify or delete lifecycle edge handlers beyond the caller's own.",
+    namespace: "routing",
+  },
 } as const satisfies Record<string, { description: string; namespace: string }>;
 
 export type PermissionVerb = keyof typeof PERMISSIONS;

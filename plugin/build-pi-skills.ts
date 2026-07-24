@@ -31,6 +31,7 @@ const SKILLS_TO_CONVERT = [
   "respond-github",
   "review-offered-task",
   "review-pr",
+  "routing-rules",
   "todos",
   "user-management",
 ];

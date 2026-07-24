@@ -155,19 +155,19 @@ The durable event spine exists on main: `swarm_events` journal + `subscriptions`
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Subscription tests pass: `bun test src/tests/subscriptions.test.ts`
-- [ ] Full suite green: `bun test`
-- [ ] Types + lint: `bun run tsc:check && bun run lint`
-- [ ] Boundaries: `bash scripts/check-db-boundary.sh && bun run check:dep-graph`
-- [ ] RBAC coverage: `bun run check:rbac-coverage`
-- [ ] SDK registration: `bun run scripts/check-sdk-tool-registration.ts`
-- [ ] Fresh-DB migration boots: `rm -f /tmp/routing-e2e.sqlite && DB_PATH=/tmp/routing-e2e.sqlite bun run start:http` (starts clean, then Ctrl-C)
+- [x] Subscription tests pass: `bun test src/tests/subscriptions.test.ts`
+- [x] Full suite green: `bun test`
+- [x] Types + lint: `bun run tsc:check && bun run lint`
+- [x] Boundaries: `bash scripts/check-db-boundary.sh && bun run check:dep-graph`
+- [x] RBAC coverage: `bun run check:rbac-coverage`
+- [x] SDK registration: `bun run scripts/check-sdk-tool-registration.ts`
+- [x] Fresh-DB migration boots: `rm -f /tmp/routing-e2e.sqlite && DB_PATH=/tmp/routing-e2e.sqlite bun run start:http` (starts clean, then Ctrl-C)
 
 #### Automated QA:
-- [ ] Via MCP curl handshake (LOCAL_TESTING.md sequence): `create-subscription` binding `task.*` → a scratch global script; create a task via `send-task`; verify a `subscription_deliveries` row reaches `succeeded` and `list-subscriptions` with `includeDeliveries` shows it.
+- [x] Via MCP curl handshake (LOCAL_TESTING.md sequence): `create-subscription` binding `task.*` → a scratch global script; create a task via `send-task`; verify a `subscription_deliveries` row reaches `succeeded` and `list-subscriptions` with `includeDeliveries` shows it.
 
 #### Manual Verification:
-- [ ] Review the re-landed diff vs `git diff main...spike/extension-system` — confirm nothing Layer-3 leaked in.
+- [x] Review the re-landed diff vs `git diff main...spike/extension-system` — confirm nothing Layer-3 leaked in.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit `[phase 1] re-land Layer 1 event bus + subscriptions`.
 
@@ -196,17 +196,17 @@ An `edge_handlers` table + REST/scripts-SDK CRUD + `routing.write` RBAC verb + a
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] New tests pass: `bun test src/tests/edge-handlers.test.ts` (CRUD, validation rejections, RBAC create-vs-mutate)
-- [ ] `bun test && bun run tsc:check && bun run lint`
-- [ ] `bun run check:rbac-coverage && bun run scripts/check-sdk-tool-registration.ts`
-- [ ] OpenAPI fresh: `bun run docs:openapi && git diff --exit-code openapi.json`
+- [x] New tests pass: `bun test src/tests/edge-handlers.test.ts` (CRUD, validation rejections, RBAC create-vs-mutate)
+- [x] `bun test && bun run tsc:check && bun run lint`
+- [x] `bun run check:rbac-coverage && bun run scripts/check-sdk-tool-registration.ts`
+- [x] OpenAPI fresh: `bun run docs:openapi && git diff --exit-code openapi.json`
 
 #### Automated QA:
-- [ ] REST: `POST /api/routing/handlers` referencing a real global script on `task.before_assign` with matcher `{via:"delegation"}` succeeds (curl + Bearer 123123); nonexistent script and bad edge name rejected with clear errors; `GET /api/routing/handlers` returns the row.
-- [ ] SDK: an inline `script_run` calling `swarm.routing_handler_list()` returns the registered handler (proves the bridge shortcut + typing).
+- [x] REST: `POST /api/routing/handlers` referencing a real global script on `task.before_assign` with matcher `{via:"delegation"}` succeeds (curl + Bearer 123123); nonexistent script and bad edge name rejected with clear errors; `GET /api/routing/handlers` returns the row.
+- [x] SDK: an inline `script_run` calling `swarm.routing_handler_list()` returns the registered handler (proves the bridge shortcut + typing).
 
 #### Manual Verification:
-- [ ] Table/field naming review — this is the long-lived public registration surface.
+- [x] Table/field naming review — this is the long-lived public registration surface.
 
 **Implementation Note**: Pause + commit `[phase 2] edge_handlers registration substrate`.
 

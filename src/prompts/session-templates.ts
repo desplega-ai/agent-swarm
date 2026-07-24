@@ -115,6 +115,18 @@ The system reads your \`/workspace/HEARTBEAT.md\` every 30 minutes. If it has co
 });
 
 registerTemplate({
+  eventType: "system.agent.routing_authoring",
+  header: "",
+  defaultBody: `
+#### Lifecycle Routing Handlers
+
+Lifecycle edge handlers can route or guard task assignment and prompt composition. When a human asks to author one, use the \`routing-rules\` skill flow: save a global script, register it through \`ctx.swarm.routing_handler_register(...)\` in an inline script, then report the resulting rule plainly. Handler execution and dry-run diagnostics are phased separately.
+`,
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
   eventType: "system.agent.slack",
   header: "",
   defaultBody: `

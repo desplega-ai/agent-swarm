@@ -9625,6 +9625,350 @@
         }
       }
     },
+    "/api/routing/handlers": {
+      "post": {
+        "operationId": "routing_handler_register",
+        "summary": "Register a lifecycle edge handler",
+        "description": "Registers an enabled or disabled global-script handler; execution is not part of this endpoint.",
+        "tags": [
+          "Routing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "edge": {
+                    "type": "string",
+                    "enum": [
+                      "task.before_assign",
+                      "prompt.compose"
+                    ]
+                  },
+                  "scriptName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "flavor": {
+                    "type": "string",
+                    "enum": [
+                      "route",
+                      "guard"
+                    ]
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "soft",
+                      "hard"
+                    ]
+                  },
+                  "priority": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000,
+                    "default": 100
+                  },
+                  "matcher": {
+                    "type": "object",
+                    "properties": {
+                      "via": {
+                        "type": "string",
+                        "enum": [
+                          "creation",
+                          "delegation",
+                          "claim",
+                          "resume",
+                          "completion"
+                        ]
+                      },
+                      "source": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "slackChannelId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "vcsRepo": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      },
+                      "agentId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "taskType": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "filter": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2048
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "timeoutMs": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 300000
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                },
+                "required": [
+                  "name",
+                  "edge",
+                  "scriptName",
+                  "flavor",
+                  "mode"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Handler registered"
+          },
+          "400": {
+            "description": "Validation error or unknown global script"
+          },
+          "403": {
+            "description": "Registration requires lead agent"
+          }
+        }
+      },
+      "get": {
+        "operationId": "routing_handler_list",
+        "summary": "List lifecycle edge handlers",
+        "tags": [
+          "Routing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Registered handlers"
+          }
+        }
+      }
+    },
+    "/api/routing/handlers/{id}": {
+      "patch": {
+        "operationId": "routing_handler_patch",
+        "summary": "Update a lifecycle edge handler",
+        "tags": [
+          "Routing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "edge": {
+                    "type": "string",
+                    "enum": [
+                      "task.before_assign",
+                      "prompt.compose"
+                    ]
+                  },
+                  "scriptName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 2000
+                  },
+                  "flavor": {
+                    "type": "string",
+                    "enum": [
+                      "route",
+                      "guard"
+                    ]
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "soft",
+                      "hard"
+                    ]
+                  },
+                  "priority": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                  },
+                  "matcher": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "via": {
+                        "type": "string",
+                        "enum": [
+                          "creation",
+                          "delegation",
+                          "claim",
+                          "resume",
+                          "completion"
+                        ]
+                      },
+                      "source": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "slackChannelId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "vcsRepo": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      },
+                      "agentId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "taskType": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "filter": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2048
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "timeoutMs": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "exclusiveMinimum": 0,
+                    "maximum": 300000
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Handler updated"
+          },
+          "400": {
+            "description": "Validation error or unknown global script"
+          },
+          "403": {
+            "description": "Requires lead agent or handler owner"
+          },
+          "404": {
+            "description": "Handler not found"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "routing_handler_delete",
+        "summary": "Delete a lifecycle edge handler",
+        "tags": [
+          "Routing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handler deleted"
+          },
+          "403": {
+            "description": "Requires lead agent or handler owner"
+          },
+          "404": {
+            "description": "Handler not found"
+          }
+        }
+      }
+    },
     "/api/schedules": {
       "post": {
         "summary": "Create a new schedule",

@@ -190,6 +190,27 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
       return { method: "POST", path: `/api/schedules/${encodeURIComponent(id)}/run` };
     }
 
+    // ── routing (REST-only; no corresponding MCP tools) ──
+    case "routing_handler_register":
+      return { method: "POST", path: "/api/routing/handlers", body };
+    case "routing_handler_list":
+      return { method: "GET", path: "/api/routing/handlers" };
+    case "routing_handler_patch": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      if (!id) throw new Error("routing_handler_patch requires string `id`");
+      const { id: _id, ...rest } = body;
+      return {
+        method: "PATCH",
+        path: `/api/routing/handlers/${encodeURIComponent(id)}`,
+        body: rest,
+      };
+    }
+    case "routing_handler_delete": {
+      const id = typeof body.id === "string" ? body.id : undefined;
+      if (!id) throw new Error("routing_handler_delete requires string `id`");
+      return { method: "DELETE", path: `/api/routing/handlers/${encodeURIComponent(id)}` };
+    }
+
     // ── scripts ──
     case "script_search":
       return { method: "POST", path: "/api/scripts/search", body };

@@ -39,6 +39,7 @@ import "./prompt-templates";
 import "./poll";
 import "./pricing";
 import "./repos";
+import "./routing";
 import "./schedules";
 import "./script-connections";
 import "./script-runs";

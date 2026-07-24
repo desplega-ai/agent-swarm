@@ -82,6 +82,7 @@ import { handlePricing } from "./pricing";
 import { handlePromptTemplates } from "./prompt-templates";
 import { handleRepos } from "./repos";
 import { describeRequestRoute } from "./route-def";
+import { handleRouting } from "./routing";
 import { handleSchedules } from "./schedules";
 import { handleScriptConnectionProxy } from "./script-connection-proxy";
 import { handleScriptConnections } from "./script-connections";
@@ -329,6 +330,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleDbQuery(req, res, pathSegments, queryParams),
         () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),
         () => handleRepos(req, res, pathSegments, queryParams),
+        () => handleRouting(req, res, pathSegments, queryParams, myAgentId),
         () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
         () => handleScriptConnections(req, res, pathSegments, queryParams, myAgentId),
         () => handleScriptConnectionProxy(req, res, pathSegments, queryParams, myAgentId),

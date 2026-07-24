@@ -156,11 +156,27 @@ export const SDK_ALLOWLIST = Object.keys(SDK_TOOL_NAME_MAP) as Array<
   keyof typeof SDK_TOOL_NAME_MAP
 >;
 
+/**
+ * Script SDK methods served by first-party REST routes rather than MCP tools.
+ * Keep these separate from SDK_TOOL_NAME_MAP: generated script types validate
+ * every map entry against the MCP registry, and routing handler CRUD is
+ * intentionally REST-only.
+ */
+export const SDK_REST_BRIDGE_METHODS = [
+  "routing_handler_register",
+  "routing_handler_list",
+  "routing_handler_patch",
+  "routing_handler_delete",
+] as const;
+
 /** Set of MCP tool names (values of SDK_TOOL_NAME_MAP) that scripts may call via the bridge. */
 const MCP_TOOL_NAMES: ReadonlySet<string> = new Set<string>(Object.values(SDK_TOOL_NAME_MAP));
 
 export function isSdkToolAllowed(name: string): boolean {
-  return (SDK_ALLOWLIST as readonly string[]).includes(name);
+  return (
+    (SDK_ALLOWLIST as readonly string[]).includes(name) ||
+    (SDK_REST_BRIDGE_METHODS as readonly string[]).includes(name)
+  );
 }
 
 /** True if `mcpToolName` (e.g. "trigger-workflow") corresponds to an allowlisted SDK method. */

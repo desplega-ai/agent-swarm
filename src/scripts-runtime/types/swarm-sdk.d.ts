@@ -39,6 +39,38 @@ declare module "swarm-sdk" {
     get<T = string>(key: string): Redacted<T> | undefined;
   }
 
+  export type RoutingEdge = "task.before_assign" | "prompt.compose";
+  export type RoutingHandlerFlavor = "route" | "guard";
+  export type RoutingHandlerMode = "soft" | "hard";
+  export type RoutingHandlerMatcher = {
+    via?: "creation" | "delegation" | "claim" | "resume" | "completion";
+    source?: string;
+    slackChannelId?: string;
+    vcsRepo?: string;
+    agentId?: string;
+    taskType?: string;
+    filter?: string;
+  };
+  export type RoutingHandler = {
+    id: string;
+    name: string;
+    edge: RoutingEdge;
+    scriptName: string;
+    description?: string;
+    flavor: RoutingHandlerFlavor;
+    mode: RoutingHandlerMode;
+    priority: number;
+    matcher?: RoutingHandlerMatcher;
+    timeoutMs?: number;
+    enabled: boolean;
+    createdByAgentId?: string;
+    createdBy?: string;
+    updatedBy?: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+  export type RoutingBridgeResponse<T> = { success: boolean; status: number; data: T };
+
   export interface SwarmSdk {
     // --- memory ---
     memory_search(args: {
@@ -86,6 +118,10 @@ declare module "swarm-sdk" {
       enabledOnly?: boolean;
       includeDeliveries?: boolean;
     }): Promise<unknown>;
+    // --- routing handlers (REST-only; no MCP tools) ---
+    routing_handler_list(
+      args?: Record<string, never>,
+    ): Promise<RoutingBridgeResponse<{ handlers: RoutingHandler[] }>>;
     // --- scripts ---
     script_search(args: { query?: string; scope?: ScriptScope; limit?: number }): Promise<unknown>;
     script_run(args: {
@@ -286,6 +322,36 @@ declare module "swarm-sdk" {
       enabled?: boolean;
     }): Promise<unknown>;
     subscription_delete(args: { name: string }): Promise<unknown>;
+
+    // --- write: routing handlers (REST-only; no MCP tools) ---
+    routing_handler_register(args: {
+      name: string;
+      edge: RoutingEdge;
+      scriptName: string;
+      flavor: RoutingHandlerFlavor;
+      mode: RoutingHandlerMode;
+      description?: string;
+      priority?: number;
+      matcher?: RoutingHandlerMatcher;
+      timeoutMs?: number;
+      enabled?: boolean;
+    }): Promise<RoutingBridgeResponse<{ handler: RoutingHandler }>>;
+    routing_handler_patch(args: {
+      id: string;
+      name?: string;
+      edge?: RoutingEdge;
+      scriptName?: string;
+      flavor?: RoutingHandlerFlavor;
+      mode?: RoutingHandlerMode;
+      description?: string | null;
+      priority?: number;
+      matcher?: RoutingHandlerMatcher | null;
+      timeoutMs?: number | null;
+      enabled?: boolean;
+    }): Promise<RoutingBridgeResponse<{ handler: RoutingHandler | null }>>;
+    routing_handler_delete(args: {
+      id: string;
+    }): Promise<RoutingBridgeResponse<{ deleted: boolean }>>;
 
     // --- write: workflows ---
     workflow_create(args: Record<string, unknown>): Promise<unknown>;
