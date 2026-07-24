@@ -775,6 +775,15 @@ describe("getBasePrompt — serverCapabilities gating", () => {
     expect(result).toContain("register-service");
   });
 
+  test("server-enabled services shows section even without the agent skill tag", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      capabilities: ["typescript"],
+      serverCapabilities: ["core", "services"],
+    });
+    expect(result).toContain("register-service");
+  });
+
   test("slack section dropped when server capabilities omit slack", async () => {
     enableSlackPromptTools();
     const result = await getBasePrompt({

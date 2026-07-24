@@ -220,11 +220,16 @@ const DEFAULT_CAPABILITIES: string = [
   // "kapso",
 ].join(",");
 
+// Note: unknown names are kept (they never match hasCapability); workers
+// reuse this env var for free-form skill tags, so dropping them here would
+// break agent capability declarations. Empty entries (trailing commas) are
+// filtered so they can't leak into enabledCapabilities payloads.
 const getCapabilities = (): Set<CAPABILITIES_T> =>
   new Set(
     (process.env.CAPABILITIES || DEFAULT_CAPABILITIES)
       .split(",")
-      .map((s) => s.trim() as CAPABILITIES_T),
+      .map((s) => s.trim() as CAPABILITIES_T)
+      .filter((s) => s.length > 0),
   );
 
 export function hasCapability(cap: CAPABILITIES_T): boolean {

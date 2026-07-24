@@ -317,11 +317,15 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     }
 
     // Services tools exist only when the server enables the (default-disabled)
-    // `services` capability; the agent-side tag check preserves the original
-    // per-agent opt-out on top of that.
+    // `services` capability. When the server reports its capabilities, that is
+    // authoritative — agent skill tags default from the same list the server
+    // no longer includes `services` in, so requiring both would suppress the
+    // section for default workers even on servers that enable it. The legacy
+    // agent-tag opt-out only applies against older servers that don't report.
     if (
-      serverHasCapability("services", true) &&
-      (!args.capabilities || args.capabilities.includes("services"))
+      args.serverCapabilities
+        ? args.serverCapabilities.includes("services")
+        : !args.capabilities || args.capabilities.includes("services")
     ) {
       const servicesResult = await resolveTemplateAsync("system.agent.services", {
         agentId,

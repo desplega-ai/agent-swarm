@@ -4356,6 +4356,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // immediate effect from a UX perspective without hammering the API.
   let lastHarnessReconcileAt = 0;
   const HARNESS_RECONCILE_INTERVAL_MS = 10_000;
+  // Throttled refresh of the server's enabled-capability flags: an operator
+  // can flip the global CAPABILITIES config while a worker is running (new
+  // MCP sessions pick it up immediately), so re-register periodically to
+  // resync serverCapabilities + prompt gating even when nothing agent-visible
+  // changed. Any reregisterAgent() call resets the clock.
+  let lastServerCapsRefreshAt = 0;
+  const SERVER_CAPS_REFRESH_INTERVAL_MS = 300_000;
 
   // Throttle for the periodic Bedrock model-enumeration refresh. The credential
   // report below only re-runs on a harness_provider change (boot + provider
@@ -4466,6 +4473,29 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     return { agentVisibleChanged };
   };
 
+  /**
+   * Apply a freshly learned server capability set. Rebuilds the system prompt
+   * when the set actually changed so capability-gated sections (slack,
+   * services, messaging) track the server's live tool surface.
+   */
+  const applyServerCapabilities = async (next: string[] | undefined) => {
+    if (!next) return;
+    const changed =
+      !serverCapabilities ||
+      next.length !== serverCapabilities.length ||
+      next.some((c) => !serverCapabilities?.includes(c));
+    serverCapabilities = next;
+    if (changed) {
+      basePrompt = await buildSystemPrompt();
+      resolvedSystemPrompt = additionalSystemPrompt
+        ? `${basePrompt}\n\n${additionalSystemPrompt}`
+        : basePrompt;
+      console.log(
+        `[${role}] [config] Server capabilities updated (${next.length} flags) — system prompt rebuilt`,
+      );
+    }
+  };
+
   /** Push the current live state back to the API so the dashboard reflects it. */
   const reregisterAgent = async () => {
     try {
@@ -4480,7 +4510,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         maxTasks: state.maxConcurrent,
         harnessProvider: state.harnessProvider,
       });
-      if (reg.serverCapabilities) serverCapabilities = reg.serverCapabilities;
+      lastServerCapsRefreshAt = Date.now();
+      await applyServerCapabilities(reg.serverCapabilities);
     } catch (err) {
       console.warn(`[${role}] [config] Re-register failed (non-fatal): ${err}`);
     }
@@ -4497,7 +4528,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       maxTasks: maxConcurrent,
       harnessProvider: bootProvider,
     });
-    if (reg.serverCapabilities) serverCapabilities = reg.serverCapabilities;
+    lastServerCapsRefreshAt = Date.now();
+    // Rebuilds the prompt immediately: the initial build above ran before
+    // registration (serverCapabilities unknown), and the later identity
+    // rebuild only happens when the profile fetch succeeds.
+    await applyServerCapabilities(reg.serverCapabilities);
     console.log(`[${role}] Registered as "${agentName}" (ID: ${agentId})`);
   } catch (error) {
     console.error(`[${role}] Failed to register: ${error}`);
@@ -5133,10 +5168,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           resolvedProvider,
           nextScriptsOnly,
         );
-        if (agentVisibleChanged) {
+        if (
+          agentVisibleChanged ||
+          Date.now() - lastServerCapsRefreshAt > SERVER_CAPS_REFRESH_INTERVAL_MS
+        ) {
           // Re-register so the agents row + dashboard reflect the live
-          // harness_provider / maxTasks. Idempotent: only writes columns
-          // that actually changed (see src/http/agents.ts).
+          // harness_provider / maxTasks, and to resync serverCapabilities
+          // (prompt gating) against operator CAPABILITIES flips. Idempotent:
+          // only writes columns that actually changed (see src/http/agents.ts).
           await reregisterAgent();
         }
       } catch (err) {
