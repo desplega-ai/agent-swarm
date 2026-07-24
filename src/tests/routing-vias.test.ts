@@ -1,14 +1,25 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
-import { closeDb, createAgent, createTaskExtended, getDb, initDb } from "../be/db";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  claimTask,
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  getDb,
+  getTaskById,
+  initDb,
+} from "../be/db";
 import { createEdgeHandler } from "../be/edge-handlers-db";
 import { getEventsByEvent } from "../be/events";
 import { listTraceForTask } from "../be/routing-trace-db";
 import { upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
+import { handlePoll } from "../http/poll";
 import { createTaskRouted } from "../tasks/create-task-routed";
+import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import { sendTaskHandler } from "../tools/send-task";
-import type { AgentTask } from "../types";
+import type { AgentTask, EdgeHandlerMatcher } from "../types";
 
 const TEST_DB_PATH = "./test-routing-vias.sqlite";
 const API_KEY = "test-routing-vias-key-1234567890";
@@ -57,12 +68,7 @@ async function registerHandler(args: {
   result: unknown;
   flavor?: "route" | "guard";
   mode?: "soft" | "hard";
-  matcher: {
-    via: "creation" | "delegation";
-    slackChannelId?: string;
-    agentId?: string;
-    taskType?: string;
-  };
+  matcher: EdgeHandlerMatcher;
 }): Promise<void> {
   await saveRoutingScript(args.name, args.result);
   createEdgeHandler({
@@ -74,6 +80,37 @@ async function registerHandler(args: {
     matcher: args.matcher,
     createdByAgentId: leadId,
   });
+}
+
+async function pollForTrigger(agentId: string): Promise<{
+  trigger: { type: string; taskId?: string } | null;
+}> {
+  let body = "";
+  const req = { method: "GET", headers: {} } as IncomingMessage;
+  const res = {
+    writeHead() {
+      return this;
+    },
+    end(chunk?: string) {
+      body = chunk ?? "";
+      return this;
+    },
+  } as unknown as ServerResponse;
+
+  expect(await handlePoll(req, res, ["api", "poll"], new URLSearchParams(), agentId)).toBe(true);
+  return JSON.parse(body) as { trigger: { type: string; taskId?: string } | null };
+}
+
+function countRerouteDecisionChildren(parentTaskId: string): number {
+  return (
+    getDb()
+      .prepare<{ count: number }, [string]>(
+        `SELECT COUNT(*) AS count
+         FROM agent_tasks
+         WHERE parentTaskId = ? AND taskType = 'reroute-decision'`,
+      )
+      .get(parentTaskId)?.count ?? 0
+  );
 }
 
 beforeAll(async () => {
@@ -105,6 +142,12 @@ beforeAll(async () => {
 
 afterEach(() => {
   getDb().run("DELETE FROM edge_handlers");
+  // Poll tests must not consume live fixtures left by an earlier creation or
+  // delegation case. Each test is self-contained, so terminalize all remaining
+  // claimable work between cases (also isolates Bun's retry attempts).
+  getDb().run(
+    "UPDATE agent_tasks SET status = 'cancelled' WHERE status IN ('unassigned', 'pending', 'in_progress', 'offered')",
+  );
 });
 
 afterAll(() => {
@@ -263,5 +306,162 @@ describe("routing creation and delegation vias", () => {
       suggestion: workerBId,
       decisive: false,
     });
+  });
+});
+
+describe("routing claim, resume, and completion vias", () => {
+  test("claim assigns another agent so this poller skips and the task stays pooled", async () => {
+    const task = createTaskExtended("claim redirected away from poller", {
+      taskType: "claim-skip-other",
+      priority: 100,
+    });
+    await registerHandler({
+      name: "claim-skip-other",
+      result: { assignTo: workerBId },
+      matcher: { via: "claim", agentId: workerAId, taskType: "claim-skip-other" },
+    });
+
+    expect((await pollForTrigger(workerAId)).trigger).toBeNull();
+    expect(getTaskById(task.id)).toMatchObject({
+      agentId: null,
+      status: "unassigned",
+    });
+    expect(listTraceForTask(task.id)).toHaveLength(1);
+
+    // Keep this pooled fixture from becoming a candidate in later tests.
+    expect(claimTask(task.id, workerBId)).not.toBeNull();
+  });
+
+  test("claim proceeds when the handler assigns the proposed poller", async () => {
+    const task = createTaskExtended("claim accepted for proposer", {
+      taskType: "claim-proceed",
+      priority: 100,
+    });
+    await registerHandler({
+      name: "claim-proceed",
+      result: { assignTo: workerAId },
+      matcher: { via: "claim", agentId: workerAId, taskType: "claim-proceed" },
+    });
+
+    const response = await pollForTrigger(workerAId);
+    expect(response.trigger).toMatchObject({
+      type: "task_assigned",
+      taskId: task.id,
+    });
+    expect(getTaskById(task.id)).toMatchObject({
+      agentId: workerAId,
+      status: "in_progress",
+    });
+    expect(listTraceForTask(task.id)).toHaveLength(1);
+  });
+
+  test("claim block creates one idempotent Lead reroute decision", async () => {
+    const task = createTaskExtended("claim blocked by guard", {
+      taskType: "claim-block",
+      priority: 100,
+    });
+    await registerHandler({
+      name: "claim-block",
+      result: { block: { reason: "claim policy denied" } },
+      flavor: "guard",
+      matcher: { via: "claim", agentId: workerAId, taskType: "claim-block" },
+    });
+
+    expect((await pollForTrigger(workerAId)).trigger).toBeNull();
+    expect(countRerouteDecisionChildren(task.id)).toBe(1);
+    expect(getTaskById(task.id)?.status).toBe("unassigned");
+
+    expect((await pollForTrigger(workerAId)).trigger).toBeNull();
+    expect(countRerouteDecisionChildren(task.id)).toBe(1);
+    expect(getTaskById(task.id)?.status).toBe("unassigned");
+
+    expect(claimTask(task.id, workerBId)).not.toBeNull();
+  });
+
+  test("resume hard assignment overrides the same-agent pin", async () => {
+    const parent = createTaskExtended("resume pin override parent", {
+      agentId: workerAId,
+      taskType: "resume-pin-override",
+    });
+    await registerHandler({
+      name: "resume-pin-override",
+      result: { assignTo: workerBId },
+      matcher: { via: "resume", agentId: workerAId, taskType: "resume-pin-override" },
+    });
+
+    const result = await createResumeFollowUp({
+      parentId: parent.id,
+      reason: "context_limits",
+    });
+
+    expect(result.kind).toBe("created");
+    if (result.kind !== "created") throw new Error("expected routed resume");
+    expect(result.task).toMatchObject({
+      agentId: workerBId,
+      status: "pending",
+      parentTaskId: parent.id,
+      taskType: "resume",
+    });
+    expect(listTraceForTask(parent.id)).toHaveLength(1);
+  });
+
+  test("completion tag filter redirects the follow-up to a reviewer", async () => {
+    const task = createTaskExtended("completion review route", {
+      agentId: workerAId,
+      tags: ["needs-review"],
+    });
+    await registerHandler({
+      name: "completion-reviewer",
+      result: { assignTo: workerBId },
+      matcher: {
+        via: "completion",
+        filter: "(payload) => payload.task.tags.includes('needs-review')",
+      },
+    });
+
+    const followUp = await createWorkerTaskFollowUp({
+      task,
+      status: "completed",
+      output: "implementation ready for review",
+    });
+
+    expect(followUp).toMatchObject({
+      agentId: workerBId,
+      parentTaskId: task.id,
+      taskType: "follow-up",
+    });
+    expect(listTraceForTask(task.id)).toHaveLength(1);
+  });
+
+  test("completion block suppresses the follow-up", async () => {
+    const task = createTaskExtended("completion blocked route", {
+      agentId: workerAId,
+      tags: ["no-follow-up"],
+    });
+    await registerHandler({
+      name: "completion-block",
+      result: { block: { reason: "completion policy denied" } },
+      flavor: "guard",
+      matcher: {
+        via: "completion",
+        filter: "(payload) => payload.task.tags.includes('no-follow-up')",
+      },
+    });
+
+    const followUp = await createWorkerTaskFollowUp({
+      task,
+      status: "completed",
+      output: "should not produce a follow-up",
+    });
+
+    expect(followUp).toBeNull();
+    expect(
+      getDb()
+        .prepare<{ count: number }, [string]>(
+          "SELECT COUNT(*) AS count FROM agent_tasks WHERE parentTaskId = ? AND taskType = 'follow-up'",
+        )
+        .get(task.id)?.count ?? 0,
+    ).toBe(0);
+    expect(listTraceForTask(task.id)).toHaveLength(1);
   });
 });

@@ -2,6 +2,7 @@ import {
   assignUnassignedTaskPending,
   backfillSupersedeTaskResumeTaskId,
   buildRoutingAffinityFromAgent,
+  type CreateTaskOptions,
   cleanupStaleSessions,
   createTaskExtended,
   deleteActiveSession,
@@ -35,10 +36,15 @@ import {
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { resolveTemplate } from "../prompts/resolver";
+import { applyRoutingDecisionToOptions } from "../routing/apply";
+import { runClaimRouting } from "../routing/claim";
+import { buildRoutingCtx } from "../routing/ctx";
+import { hasHandlersForVia, runBeforeAssign } from "../routing/engine";
 import {
   createPoolStarvationDecisionTask,
   createRerouteDecisionTask,
   createResumeFollowUp,
+  createRoutingBlockDecisionTaskForExistingTask,
   getNextResumeGeneration,
   getPinCandidateAgent,
   getResumeGeneration,
@@ -257,13 +263,13 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
   };
 
   // 1. Detect and remediate stalled tasks (tiered: auto-fail dead workers)
-  detectAndRemediateStalledTasks(findings);
+  await detectAndRemediateStalledTasks(findings);
 
   // 2. Check and fix worker health
   checkWorkerHealth(findings);
 
   // 3. Auto-assign pool tasks to idle workers
-  autoAssignPoolTasks(findings);
+  await autoAssignPoolTasks(findings);
 
   // 4. Cleanup stale resources (including workflow run recovery)
   await cleanupStaleResources(findings);
@@ -279,7 +285,7 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
  * - Stale session heartbeat → worker likely crashed → auto-fail (15 min threshold)
  * - Fresh session heartbeat → worker alive but task stale → escalate to lead (30 min threshold)
  */
-function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
+async function detectAndRemediateStalledTasks(findings: HeartbeatFindings): Promise<void> {
   // Use the shortest threshold to catch all potentially stalled tasks
   const candidates = getStalledInProgressTasks(STALL_THRESHOLD_NO_SESSION_MIN);
 
@@ -292,7 +298,7 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
     if (!session) {
       // Case A: No active session — worker is dead
       if (taskAgeMs >= STALL_THRESHOLD_NO_SESSION_MIN * 60 * 1000) {
-        remediateCrashedWorkerTask(findings, task, {
+        await remediateCrashedWorkerTask(findings, task, {
           supersedeReason:
             "Auto-superseded by heartbeat: worker session not found (no active session for task)",
           legacyFailReason:
@@ -308,7 +314,7 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
       if (isStaleHeartbeat) {
         // Case B: Session exists but heartbeat is stale — worker likely crashed
         if (taskAgeMs >= STALL_THRESHOLD_STALE_HEARTBEAT_MIN * 60 * 1000) {
-          remediateCrashedWorkerTask(findings, task, {
+          await remediateCrashedWorkerTask(findings, task, {
             supersedeReason:
               "Auto-superseded by heartbeat: worker session heartbeat is stale (likely crashed)",
             legacyFailReason:
@@ -337,7 +343,7 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
  *   - a non-terminal child already exists — a prior sweep already created a resume,
  *   - `createResumeFollowUp` returns `workflow-skip` — workflow engine owns retries.
  */
-function remediateCrashedWorkerTask(
+async function remediateCrashedWorkerTask(
   findings: HeartbeatFindings,
   task: AgentTask,
   opts: {
@@ -346,7 +352,7 @@ function remediateCrashedWorkerTask(
     shortLabel: string;
     cleanupActiveSession?: boolean;
   },
-): void {
+): Promise<void> {
   if (!task.agentId) return; // Type guard — caller already checked.
 
   const skipAutoResume = SKIP_AUTO_RESUME_TYPES.has(task.taskType ?? "");
@@ -430,7 +436,7 @@ function remediateCrashedWorkerTask(
     return;
   }
 
-  const resume = createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });
+  const resume = await createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });
 
   if (resume.kind === "created") {
     backfillSupersedeTaskResumeTaskId(task.id, resume.task.id);
@@ -455,6 +461,10 @@ function remediateCrashedWorkerTask(
         `[Heartbeat] Auto-superseded task ${task.id.slice(0, 8)} — created resume ${resume.task.id.slice(0, 8)} in unassigned pool (${opts.shortLabel})`,
       );
     }
+  } else if (resume.kind === "blocked") {
+    console.warn(
+      `[Heartbeat] Auto-superseded task ${task.id.slice(0, 8)} but resume assignment was blocked by routing: ${resume.reason}`,
+    );
   } else {
     const reason =
       resume.kind === "skipped"
@@ -609,18 +619,36 @@ export async function runRebootSweep(): Promise<void> {
             }
           }
 
-          const tags = ["reboot-retry", "auto-generated"];
-          if (preferredAgentId !== undefined) tags.push(REBOOT_RETRY_PIN_TAG);
-
-          const retryTask = createTaskExtended(task.task, {
+          const baseOptions: CreateTaskOptions = {
             parentTaskId: task.id,
             agentId: preferredAgentId,
-            tags,
+            tags: ["reboot-retry", "auto-generated"],
             priority: task.priority,
             source: task.source,
             taskType: task.taskType ?? undefined,
             routingAffinity: buildRoutingAffinityFromAgent(task.agentId) ?? undefined,
-          });
+          };
+          let finalOptions = baseOptions;
+          if (hasHandlersForVia("task.before_assign", "resume")) {
+            const decision = await runBeforeAssign(
+              buildRoutingCtx("resume", task, { proposedAgentId: preferredAgentId }),
+            );
+            if (decision.final?.block) {
+              createRoutingBlockDecisionTaskForExistingTask({
+                task,
+                reason: decision.final.block.reason,
+                proposedAgentId: preferredAgentId,
+              });
+              rebootAffectedTasks.push({ original: failed, retryTaskId: null });
+              continue;
+            }
+            finalOptions = applyRoutingDecisionToOptions(baseOptions, decision);
+          }
+          if (finalOptions.agentId === task.agentId) {
+            finalOptions.tags = [...(finalOptions.tags ?? []), REBOOT_RETRY_PIN_TAG];
+          }
+
+          const retryTask = createTaskExtended(task.task, finalOptions);
           retryTaskId = retryTask.id;
           console.log(`[Heartbeat] Reboot retry created: ${retryTaskId} (parent: ${task.id})`);
         } catch (err) {
@@ -695,58 +723,63 @@ function checkWorkerHealth(findings: HeartbeatFindings): void {
  * `MAX_AUTO_ASSIGN_PER_SWEEP` tasks or exhausted the pool (capped at
  * `POOL_SCAN_CAP` rows scanned).
  */
-function autoAssignPoolTasks(findings: HeartbeatFindings): void {
-  getDb().transaction(() => {
-    // Skip idle workers whose accumulated empty-poll count has hit the gate;
-    // assigning to them would just have them exit on their next poll. Filter on
-    // the rows already returned (emptyPollCount is populated) rather than
-    // re-querying per worker via shouldBlockPolling().
-    const idleWorkers = getIdleWorkersWithCapacity().filter(
-      (w) => (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS,
-    );
-    if (idleWorkers.length === 0) return;
+async function autoAssignPoolTasks(findings: HeartbeatFindings): Promise<void> {
+  // Skip idle workers whose accumulated empty-poll count has hit the gate;
+  // assigning to them would just have them exit on their next poll. Filter on
+  // the rows already returned (emptyPollCount is populated) rather than
+  // re-querying per worker via shouldBlockPolling().
+  const idleWorkers = getIdleWorkersWithCapacity().filter(
+    (w) => (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS,
+  );
+  if (idleWorkers.length === 0) return;
 
-    const reservedByWorker = new Map<string, number>();
-    const reservedForWorker = (agentId: string): number => {
-      const cached = reservedByWorker.get(agentId);
-      if (cached !== undefined) return cached;
-      const row = getDb()
-        .prepare<{ count: number }, [string]>(
-          "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status IN ('pending', 'in_progress')",
-        )
-        .get(agentId);
-      const reserved = row?.count ?? 0;
-      reservedByWorker.set(agentId, reserved);
-      return reserved;
-    };
+  const reservedByWorker = new Map<string, number>();
+  const reservedForWorker = (agentId: string): number => {
+    const cached = reservedByWorker.get(agentId);
+    if (cached !== undefined) return cached;
+    const row = getDb()
+      .prepare<{ count: number }, [string]>(
+        "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status IN ('pending', 'in_progress')",
+      )
+      .get(agentId);
+    const reserved = row?.count ?? 0;
+    reservedByWorker.set(agentId, reserved);
+    return reserved;
+  };
 
-    let assignedCount = 0;
-    let offset = 0;
+  const routeClaims = hasHandlersForVia("task.before_assign", "claim");
+  let assignedCount = 0;
+  let offset = 0;
 
-    while (assignedCount < MAX_AUTO_ASSIGN_PER_SWEEP && offset < POOL_SCAN_CAP) {
-      const batch = getUnassignedPoolTasks(POOL_SCAN_BATCH_SIZE, offset);
-      if (batch.length === 0) break;
+  while (assignedCount < MAX_AUTO_ASSIGN_PER_SWEEP && offset < POOL_SCAN_CAP) {
+    const batch = getUnassignedPoolTasks(POOL_SCAN_BATCH_SIZE, offset);
+    if (batch.length === 0) break;
 
-      for (const task of batch) {
-        if (assignedCount >= MAX_AUTO_ASSIGN_PER_SWEEP) break;
+    for (const task of batch) {
+      if (assignedCount >= MAX_AUTO_ASSIGN_PER_SWEEP) break;
 
-        const worker = idleWorkers.find(
-          (w) => reservedForWorker(w.id) < (w.maxTasks ?? 1) && isAgentEligibleForTask(w, task),
-        );
-        if (!worker) continue; // No eligible worker with capacity this sweep — leave queued.
+      const worker = idleWorkers.find(
+        (w) => reservedForWorker(w.id) < (w.maxTasks ?? 1) && isAgentEligibleForTask(w, task),
+      );
+      if (!worker) continue; // No eligible worker with capacity this sweep — leave queued.
 
-        const assigned = assignUnassignedTaskPending(task.id, worker.id);
-        if (assigned) {
-          findings.autoAssigned.push({ taskId: task.id, agentId: worker.id });
-          reservedByWorker.set(worker.id, reservedForWorker(worker.id) + 1);
-          assignedCount++;
-        }
+      if (routeClaims) {
+        const routing = await runClaimRouting(task, worker.id);
+        if (routing.kind !== "proceed") continue;
       }
 
-      offset += batch.length;
-      if (batch.length < POOL_SCAN_BATCH_SIZE) break; // Exhausted the pool.
+      // Atomic status re-check remains the final arbiter after the async hook gap.
+      const assigned = assignUnassignedTaskPending(task.id, worker.id);
+      if (assigned) {
+        findings.autoAssigned.push({ taskId: task.id, agentId: worker.id });
+        reservedByWorker.set(worker.id, reservedForWorker(worker.id) + 1);
+        assignedCount++;
+      }
     }
-  })();
+
+    offset += batch.length;
+    if (batch.length < POOL_SCAN_BATCH_SIZE) break; // Exhausted the pool.
+  }
 }
 
 /**

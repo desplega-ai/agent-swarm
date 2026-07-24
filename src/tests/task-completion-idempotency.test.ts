@@ -344,7 +344,7 @@ function listFollowUpTasks(parentTaskId: string): FollowUpRow[] {
 }
 
 describe("worker task follow-up creation", () => {
-  test("creates lead follow-up for completed worker task", () => {
+  test("creates lead follow-up for completed worker task", async () => {
     const lead = createAgent({
       name: "follow-up-lead-1",
       isLead: true,
@@ -368,7 +368,7 @@ describe("worker task follow-up creation", () => {
     const completed = completeTask(task.id, "Worker output");
     expect(completed).not.toBeNull();
 
-    const followUp = createWorkerTaskFollowUp({
+    const followUp = await createWorkerTaskFollowUp({
       task: completed!,
       status: "completed",
       output: "Worker output",
@@ -386,7 +386,7 @@ describe("worker task follow-up creation", () => {
     expect(rows[0]!.task).not.toContain("{{follow_up_instructions}}");
   });
 
-  test("skips lead follow-up when followUpConfig disables it", () => {
+  test("skips lead follow-up when followUpConfig disables it", async () => {
     createAgent({
       name: "follow-up-lead-disabled",
       isLead: true,
@@ -408,7 +408,7 @@ describe("worker task follow-up creation", () => {
     const completed = completeTask(task.id, "Worker output");
     expect(completed).not.toBeNull();
 
-    const followUp = createWorkerTaskFollowUp({
+    const followUp = await createWorkerTaskFollowUp({
       task: completed!,
       status: "completed",
       output: "Worker output",
@@ -418,7 +418,7 @@ describe("worker task follow-up creation", () => {
     expect(listFollowUpTasks(task.id)).toHaveLength(0);
   });
 
-  test("injects onCompleted instructions into completed follow-up", () => {
+  test("injects onCompleted instructions into completed follow-up", async () => {
     createAgent({
       name: "follow-up-lead-completed-instructions",
       isLead: true,
@@ -441,7 +441,7 @@ describe("worker task follow-up creation", () => {
     const completed = completeTask(task.id, "Worker output");
     expect(completed).not.toBeNull();
 
-    const followUp = createWorkerTaskFollowUp({
+    const followUp = await createWorkerTaskFollowUp({
       task: completed!,
       status: "completed",
       output: "Worker output",
@@ -455,7 +455,7 @@ describe("worker task follow-up creation", () => {
     expect(rows[0]!.task).toContain("post the URL");
   });
 
-  test("injects only onFailed instructions into failed follow-up", () => {
+  test("injects only onFailed instructions into failed follow-up", async () => {
     createAgent({
       name: "follow-up-lead-failed-instructions",
       isLead: true,
@@ -478,7 +478,7 @@ describe("worker task follow-up creation", () => {
     const failed = failTask(task.id, "boom");
     expect(failed).not.toBeNull();
 
-    const followUp = createWorkerTaskFollowUp({
+    const followUp = await createWorkerTaskFollowUp({
       task: failed!,
       status: "failed",
       failureReason: "boom",
@@ -492,7 +492,7 @@ describe("worker task follow-up creation", () => {
     expect(rows[0]!.task).not.toContain("post the URL");
   });
 
-  test("inherits followUpConfig from parent task when child has no override", () => {
+  test("inherits followUpConfig from parent task when child has no override", async () => {
     createAgent({
       name: "follow-up-lead-inheritance",
       isLead: true,
@@ -521,7 +521,7 @@ describe("worker task follow-up creation", () => {
     const completed = completeTask(child.id, "Child output");
     expect(completed).not.toBeNull();
 
-    const followUp = createWorkerTaskFollowUp({
+    const followUp = await createWorkerTaskFollowUp({
       task: completed!,
       status: "completed",
       output: "Child output",
@@ -531,7 +531,7 @@ describe("worker task follow-up creation", () => {
     expect(listFollowUpTasks(child.id)).toHaveLength(0);
   });
 
-  test("does not create follow-up for lead-owned task", () => {
+  test("does not create follow-up for lead-owned task", async () => {
     const lead = createAgent({
       name: "follow-up-lead-2",
       isLead: true,
@@ -544,7 +544,7 @@ describe("worker task follow-up creation", () => {
     const completed = completeTask(task.id, "Lead output");
     expect(completed).not.toBeNull();
 
-    const followUp = createWorkerTaskFollowUp({
+    const followUp = await createWorkerTaskFollowUp({
       task: completed!,
       status: "completed",
       output: "Lead output",
@@ -554,7 +554,7 @@ describe("worker task follow-up creation", () => {
     expect(listFollowUpTasks(task.id)).toHaveLength(0);
   });
 
-  test("marks original creator as you when lead created the worker task", () => {
+  test("marks original creator as you when lead created the worker task", async () => {
     const lead =
       getLeadAgent() ??
       createAgent({
@@ -578,7 +578,7 @@ describe("worker task follow-up creation", () => {
     const completed = completeTask(task.id, "Worker output");
     expect(completed).not.toBeNull();
 
-    const followUp = createWorkerTaskFollowUp({
+    const followUp = await createWorkerTaskFollowUp({
       task: completed!,
       status: "completed",
       output: "Worker output",

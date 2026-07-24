@@ -690,7 +690,7 @@ export async function handleTasks(
       });
 
       try {
-        const followUp = createWorkerTaskFollowUp({
+        const followUp = await createWorkerTaskFollowUp({
           task: result.task,
           status: parsed.body.status,
           output: parsed.body.output,
@@ -909,7 +909,7 @@ export async function handleTasks(
     }
 
     // Parent is now superseded. Create the resume child.
-    const followUp = createResumeFollowUp({
+    const followUp = await createResumeFollowUp({
       parentId: parsed.params.id,
       reason: parsed.body.reason,
     });

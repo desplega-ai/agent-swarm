@@ -26,6 +26,8 @@ import {
   upsertChannelActivityCursor,
 } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
+import { runClaimRouting } from "../routing/claim";
+import { hasHandlersForVia } from "../routing/engine";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
 import { telemetry } from "../telemetry";
@@ -175,6 +177,32 @@ export async function handlePoll(
           refusalSideEffects?: { context: BudgetRefusalContext; inserted: boolean };
         };
     let result: PollTxnResult;
+
+    // `runBeforeAssign` can spawn a script subprocess, so claim routing must
+    // happen before the transaction below. When no claim-reachable handlers
+    // exist this is one cheap declarative DB preflight and the hot path remains
+    // unchanged. The transaction re-queries the pool and `claimTask` still
+    // performs the final atomic status check after this async gap.
+    let routedClaimCandidateIds: Set<string> | undefined;
+    if (hasHandlersForVia("task.before_assign", "claim")) {
+      routedClaimCandidateIds = new Set();
+      const agent = getAgentById(myAgentId);
+      if (agent && !agent.isLead && hasCapacity(myAgentId)) {
+        const candidateIds = getUnassignedTaskIdsForAgent(myAgentId, 5);
+        for (const candidateId of candidateIds) {
+          const candidate = getTaskById(candidateId);
+          if (!candidate) continue;
+          const routing = await runClaimRouting(candidate, myAgentId);
+          if (routing.kind === "proceed") {
+            // The transaction claims at most one task — stop evaluating (and
+            // spawning handler subprocesses for) further candidates.
+            routedClaimCandidateIds.add(candidateId);
+            break;
+          }
+        }
+      }
+    }
+
     try {
       result = getDb().transaction(() => {
         const agent = getAgentById(myAgentId);
@@ -355,7 +383,10 @@ export async function handlePoll(
           // `isAgentEligibleForTask`, so an ineligible task is never even
           // offered to the budget gate below or the claim loop.
           if (hasCapacity(myAgentId)) {
-            const unassignedIds = getUnassignedTaskIdsForAgent(myAgentId, 5);
+            const unassignedIds = getUnassignedTaskIdsForAgent(myAgentId, 5).filter(
+              (candidateId) =>
+                routedClaimCandidateIds === undefined || routedClaimCandidateIds.has(candidateId),
+            );
             // Budget admission gate (Phase 3). Pool path is workers-only —
             // per-agent budgets matter most here, but we still check global.
             // Only run the gate when there's at least one candidate task; an

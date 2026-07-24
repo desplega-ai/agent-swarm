@@ -2,7 +2,7 @@ import { listEnabledHandlersForEdge } from "../be/edge-handlers-db";
 import { createEvent } from "../be/events";
 import { insertRoutingTrace } from "../be/routing-trace-db";
 import { runGlobalScriptByName } from "../be/scripts/run-global";
-import type { EdgeHandler } from "../types";
+import type { EdgeHandler, EdgeHandlerEdge } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "../workflows/event-bus";
 import { matchesFilter } from "../workflows/wait-filter";
@@ -104,6 +104,18 @@ function safeInsertTrace(...args: Parameters<typeof insertRoutingTrace>): void {
 function failureMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   return scrubSecrets(raw);
+}
+
+/**
+ * Cheap lifecycle-via preflight for hot assignment paths. A handler with no
+ * `matcher.via` is reachable from every via; a handler scoped to another via
+ * is not. Remaining matcher fields require a full RoutingCtx and are evaluated
+ * by `runBeforeAssign`.
+ */
+export function hasHandlersForVia(edge: EdgeHandlerEdge, via: RoutingCtx["via"]): boolean {
+  return listEnabledHandlersForEdge(edge).some(
+    (handler) => handler.matcher?.via === undefined || handler.matcher.via === via,
+  );
 }
 
 export function createRoutingEngine(scriptRunner: RoutingScriptRunner = runGlobalScriptByName) {

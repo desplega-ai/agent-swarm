@@ -392,15 +392,15 @@ export default async function route(ctx: RoutingCtx): Promise<RoutingResult> {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun test src/tests/routing-vias.test.ts` extended: claim skip/redirect, resume pin override, completion redirect
-- [ ] Heartbeat suite still green: `bun test src/tests/heartbeat*.test.ts`
-- [ ] `bun test && bun run tsc:check && bun run lint`
+- [x] `bun test src/tests/routing-vias.test.ts` extended: claim skip/redirect, resume pin override, completion redirect
+- [x] Heartbeat suite still green: `bun test src/tests/heartbeat*.test.ts`
+- [x] `bun test && bun run tsc:check && bun run lint`
 
 #### Automated QA:
-- [ ] Fresh-DB scenario: handler `{via:"completion", filter: tags contains "gtm"}` → `{assignTo: <reviewer-id>}`; run a task to completion (scripted via task-action); follow-up task lands on reviewer, trace + events recorded.
+- [x] Fresh-DB scenario: handler `{via:"completion", filter: tags contains "gtm"}` → `{assignTo: <reviewer-id>}`; run a task to completion (scripted via task-action); follow-up task lands on reviewer, trace + events recorded.
 
 #### Manual Verification:
-- [ ] `runbooks/heartbeat-crash-recovery.md` updated in this phase (same-PR rule) — diagrams/pseudocode reflect the hook points.
+- [x] `runbooks/heartbeat-crash-recovery.md` updated in this phase (same-PR rule) — diagrams/pseudocode reflect the hook points.
 
 **Implementation Note**: Pause + commit `[phase 5] claim/resume/completion vias`.
 

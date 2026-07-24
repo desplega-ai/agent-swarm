@@ -375,7 +375,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     // Pin via the real path: supersede frees capacity, then createResumeFollowUp pins
     // R1 to agentA AND repoints the tracker original → R1.
     supersedeTask(original.id, { reason: "crash", resumeTaskId: null });
-    const pin = createResumeFollowUp({ parentId: original.id, reason: "crash_recovery" });
+    const pin = await createResumeFollowUp({ parentId: original.id, reason: "crash_recovery" });
     expect(pin.kind).toBe("created");
     if (pin.kind !== "created") throw new Error("expected pin");
     const r1 = pin.task;

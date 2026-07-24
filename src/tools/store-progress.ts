@@ -449,7 +449,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         !("wasNoOp" in result && result.wasNoOp)
       ) {
         try {
-          const followUp = createWorkerTaskFollowUp({
+          const followUp = await createWorkerTaskFollowUp({
             task: result.task,
             status,
             output,

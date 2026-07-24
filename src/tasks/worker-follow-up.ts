@@ -12,6 +12,9 @@ import {
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { resolveTemplate } from "../prompts/resolver";
+import { applyRoutingDecisionToOptions } from "../routing/apply";
+import { buildRoutingCtx } from "../routing/ctx";
+import { hasHandlersForVia, runBeforeAssign } from "../routing/engine";
 import type { Agent, AgentTask, ResumeReason, TaskAttachment } from "../types";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
@@ -117,12 +120,12 @@ function formatAttachmentsBlock(attachments: TaskAttachment[]): string {
   return `\n\nAttachments (${attachments.length}):\n${lines.join("\n")}`;
 }
 
-export function createWorkerTaskFollowUp(args: {
+export async function createWorkerTaskFollowUp(args: {
   task: AgentTask;
   status: "completed" | "failed";
   output?: string;
   failureReason?: string;
-}): AgentTask | null {
+}): Promise<AgentTask | null> {
   const { task, status, output, failureReason } = args;
 
   if (task.workflowRunId) return null;
@@ -186,7 +189,7 @@ export function createWorkerTaskFollowUp(args: {
     }
   }
 
-  return createTaskExtended(followUpDescription, {
+  const baseOptions: CreateTaskOptions = {
     agentId: leadAgent.id,
     source: "system",
     taskType: "follow-up",
@@ -194,12 +197,27 @@ export function createWorkerTaskFollowUp(args: {
     slackChannelId: task.slackChannelId,
     slackThreadTs: task.slackThreadTs,
     slackUserId: task.slackUserId,
-  });
+  };
+
+  if (!hasHandlersForVia("task.before_assign", "completion")) {
+    return createTaskExtended(followUpDescription, baseOptions);
+  }
+
+  const decision = await runBeforeAssign(
+    buildRoutingCtx("completion", task, { proposedAgentId: leadAgent.id }),
+  );
+  if (decision.final?.block) return null;
+
+  return createTaskExtended(
+    followUpDescription,
+    applyRoutingDecisionToOptions(baseOptions, decision),
+  );
 }
 
 /** Result of `createResumeFollowUp`. */
 export type CreateResumeFollowUpResult =
   | { kind: "created"; task: AgentTask }
+  | { kind: "blocked"; reason: string; decision: CreateRoutingBlockDecisionResult }
   | { kind: "workflow-skip"; stepId: string }
   | { kind: "skipped"; reason: "parent_not_found" | "lead_not_found" };
 
@@ -246,10 +264,10 @@ export type CreateResumeFollowUpResult =
  * The crash pin is gated by `HEARTBEAT_PIN_CRASH_RESUME`; the graceful shutdown
  * pin is gated by `HEARTBEAT_PIN_GRACEFUL_RESUME`. Both default on.
  */
-export function createResumeFollowUp(args: {
+export async function createResumeFollowUp(args: {
   parentId: string;
   reason: ResumeReason;
-}): CreateResumeFollowUpResult {
+}): Promise<CreateResumeFollowUpResult> {
   const parent = getTaskById(args.parentId);
   if (!parent) return { kind: "skipped", reason: "parent_not_found" };
 
@@ -361,7 +379,7 @@ export function createResumeFollowUp(args: {
   const routingAffinity = parent.agentId
     ? (buildRoutingAffinityFromAgent(parent.agentId) ?? undefined)
     : undefined;
-  const created = createTaskExtended(followUpDescription, {
+  const baseOptions: CreateTaskOptions = {
     agentId: preferredAgentId,
     creatorAgentId: parent.creatorAgentId,
     source: "system",
@@ -370,7 +388,37 @@ export function createResumeFollowUp(args: {
     priority,
     parentTaskId: parent.id,
     routingAffinity,
-  });
+  };
+  let finalOptions = baseOptions;
+  if (hasHandlersForVia("task.before_assign", "resume")) {
+    const decision = await runBeforeAssign(
+      buildRoutingCtx("resume", parent, { proposedAgentId: preferredAgentId }),
+    );
+    if (decision.final?.block) {
+      return {
+        kind: "blocked",
+        reason: decision.final.block.reason,
+        decision: createRoutingBlockDecisionTaskForExistingTask({
+          task: parent,
+          reason: decision.final.block.reason,
+          proposedAgentId: preferredAgentId,
+        }),
+      };
+    }
+    finalOptions = applyRoutingDecisionToOptions(baseOptions, decision);
+  }
+  const finalPinnedToOriginal =
+    finalOptions.agentId !== undefined && finalOptions.agentId === parent.agentId;
+  finalOptions.tags = (finalOptions.tags ?? []).filter(
+    (tag) => tag !== CRASH_RECOVERY_PIN_TAG && tag !== GRACEFUL_SHUTDOWN_PIN_TAG,
+  );
+  if (args.reason === "crash_recovery" && finalPinnedToOriginal) {
+    finalOptions.tags.push(CRASH_RECOVERY_PIN_TAG);
+  }
+  if (args.reason === "graceful_shutdown" && finalPinnedToOriginal) {
+    finalOptions.tags.push(GRACEFUL_SHUTDOWN_PIN_TAG);
+  }
+  const created = createTaskExtended(followUpDescription, finalOptions);
 
   // Repoint Linear / Jira `tracker_sync` rows from the (now terminal) parent
   // to the resume child. Without this, outbound completion posts for the
@@ -458,6 +506,53 @@ export function createRoutingBlockDecisionTask(args: {
     parentTaskId: args.options?.parentTaskId,
     context: args.options,
   });
+}
+
+export type CreateRoutingBlockDecisionResult =
+  | { kind: "created"; task: AgentTask }
+  | { kind: "skipped"; reason: "lead_not_found" | "duplicate_exists" };
+
+/**
+ * Idempotent block-decision helper for lifecycle vias operating on an existing
+ * task. The decision is a child of that task, so the shared non-terminal
+ * reroute-decision lookup suppresses repeat polls/sweeps.
+ */
+export function createRoutingBlockDecisionTaskForExistingTask(args: {
+  task: AgentTask;
+  reason: string;
+  proposedAgentId?: string;
+}): CreateRoutingBlockDecisionResult {
+  if (!getLeadAgent()) return { kind: "skipped", reason: "lead_not_found" };
+  if (hasNonTerminalRerouteDecisionChild(args.task.id)) {
+    return { kind: "skipped", reason: "duplicate_exists" };
+  }
+
+  const task = createRoutingBlockDecisionTask({
+    description: args.task.task,
+    reason: args.reason,
+    options: {
+      agentId: args.proposedAgentId,
+      creatorAgentId: args.task.creatorAgentId,
+      parentTaskId: args.task.id,
+      priority: args.task.priority,
+      slackChannelId: args.task.slackChannelId,
+      slackThreadTs: args.task.slackThreadTs,
+      slackUserId: args.task.slackUserId,
+      vcsProvider: args.task.vcsProvider,
+      vcsRepo: args.task.vcsRepo,
+      vcsEventType: args.task.vcsEventType,
+      vcsNumber: args.task.vcsNumber,
+      vcsCommentId: args.task.vcsCommentId,
+      vcsAuthor: args.task.vcsAuthor,
+      vcsUrl: args.task.vcsUrl,
+      vcsInstallationId: args.task.vcsInstallationId,
+      vcsNodeId: args.task.vcsNodeId,
+      dir: args.task.dir,
+      requestedByUserId: args.task.requestedByUserId,
+      contextKey: args.task.contextKey,
+    },
+  });
+  return { kind: "created", task };
 }
 
 /**

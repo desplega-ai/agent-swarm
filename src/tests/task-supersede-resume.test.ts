@@ -154,7 +154,7 @@ describe("Task Supersede + Resume", () => {
   // ──────────────────────────────────────────────────────────────────────────
 
   describe("createResumeFollowUp()", () => {
-    test("non-workflow parent → creates resume task with inherited fields", () => {
+    test("non-workflow parent → creates resume task with inherited fields", async () => {
       const worker = freshAgent("worker-6", { lastActivityAt: new Date().toISOString() });
       const parent = createTaskExtended("Parent with model+dir+vcs", {
         agentId: worker.id,
@@ -165,7 +165,7 @@ describe("Task Supersede + Resume", () => {
       });
       startTask(parent.id);
 
-      const result = createResumeFollowUp({
+      const result = await createResumeFollowUp({
         parentId: parent.id,
         reason: "graceful_shutdown",
       });
@@ -226,7 +226,7 @@ describe("Task Supersede + Resume", () => {
       expect(explicitChild.model).toBe("sonnet");
     });
 
-    test("non-workflow parent with outputSchema → schema carries forward to resume child", () => {
+    test("non-workflow parent with outputSchema → schema carries forward to resume child", async () => {
       const worker = freshAgent("worker-6-schema", {
         lastActivityAt: new Date().toISOString(),
       });
@@ -244,7 +244,7 @@ describe("Task Supersede + Resume", () => {
       });
       startTask(parent.id);
 
-      const result = createResumeFollowUp({
+      const result = await createResumeFollowUp({
         parentId: parent.id,
         reason: "graceful_shutdown",
       });
@@ -257,7 +257,7 @@ describe("Task Supersede + Resume", () => {
       expect(result.task.outputSchema).toEqual(schema);
     });
 
-    test("non-workflow parent with full VCS identity → all VCS fields carry forward", () => {
+    test("non-workflow parent with full VCS identity → all VCS fields carry forward", async () => {
       // PR #594 review: codex flagged that `vcsNumber` (+ url/comment/installation/etc.)
       // were dropped on resume, breaking webhook routing via findTaskByVcs.
       // The fix lives in `createTaskExtended`'s parent-inheritance block —
@@ -279,7 +279,7 @@ describe("Task Supersede + Resume", () => {
       });
       startTask(parent.id);
 
-      const result = createResumeFollowUp({
+      const result = await createResumeFollowUp({
         parentId: parent.id,
         reason: "context_limits",
       });
@@ -296,7 +296,7 @@ describe("Task Supersede + Resume", () => {
       expect(result.task.vcsNodeId).toBe("PR_kwDOQr3Tmc7abcdef");
     });
 
-    test("Linear-backed parent → tracker_sync row repoints to resume child", () => {
+    test("Linear-backed parent → tracker_sync row repoints to resume child", async () => {
       // PR #594 review: tracker_sync rows stayed keyed to the (now-terminal)
       // parent after supersede. Linear outbound completion posts look up by
       // swarmId, so the resume child's completion never made it back; and
@@ -324,7 +324,7 @@ describe("Task Supersede + Resume", () => {
       const before = getTrackerSync("linear", "task", parent.id);
       expect(before).not.toBeNull();
 
-      const result = createResumeFollowUp({
+      const result = await createResumeFollowUp({
         parentId: parent.id,
         reason: "graceful_shutdown",
       });
@@ -341,14 +341,14 @@ describe("Task Supersede + Resume", () => {
       expect(byExternal?.externalIdentifier).toBe("ENG-42");
     });
 
-    test("Parent with no tracker_sync → resume creation is a no-op on tracker_sync", () => {
+    test("Parent with no tracker_sync → resume creation is a no-op on tracker_sync", async () => {
       const worker = freshAgent("worker-no-tracker", {
         lastActivityAt: new Date().toISOString(),
       });
       const parent = createTaskExtended("Parent without tracker", { agentId: worker.id });
       startTask(parent.id);
 
-      const result = createResumeFollowUp({
+      const result = await createResumeFollowUp({
         parentId: parent.id,
         reason: "graceful_shutdown",
       });
@@ -357,7 +357,7 @@ describe("Task Supersede + Resume", () => {
       expect(result.kind).toBe("created");
     });
 
-    test("workflow-step parent → returns workflow-skip (no task created)", () => {
+    test("workflow-step parent → returns workflow-skip (no task created)", async () => {
       const worker = freshAgent("worker-7");
       const parent = createTaskExtended("Workflow-step parent", {
         agentId: worker.id,
@@ -384,7 +384,7 @@ describe("Task Supersede + Resume", () => {
         .get();
       const beforeCount = before?.count ?? 0;
 
-      const result = createResumeFollowUp({
+      const result = await createResumeFollowUp({
         parentId: parent.id,
         reason: "graceful_shutdown",
       });
@@ -402,7 +402,7 @@ describe("Task Supersede + Resume", () => {
       expect(afterCount).toBe(beforeCount);
     });
 
-    test("routing: graceful_shutdown pins to original online agent with capacity and tags the pin", () => {
+    test("routing: graceful_shutdown pins to original online agent with capacity and tags the pin", async () => {
       const worker = freshAgent("worker-fresh-shutdown", {
         maxTasks: 5,
         // Stale activity proves graceful_shutdown skips the fresh-agent gate,
@@ -413,7 +413,7 @@ describe("Task Supersede + Resume", () => {
       startTask(parent.id);
       supersedeTask(parent.id, { reason: "graceful_shutdown", resumeTaskId: null });
 
-      const result = createResumeFollowUp({
+      const result = await createResumeFollowUp({
         parentId: parent.id,
         reason: "graceful_shutdown",
       });
@@ -424,7 +424,7 @@ describe("Task Supersede + Resume", () => {
       expect(result.task.tags).not.toContain(CRASH_RECOVERY_PIN_TAG);
     });
 
-    test("routing: HEARTBEAT_PIN_GRACEFUL_RESUME=0 restores graceful_shutdown pool behavior", () => {
+    test("routing: HEARTBEAT_PIN_GRACEFUL_RESUME=0 restores graceful_shutdown pool behavior", async () => {
       const previous = process.env.HEARTBEAT_PIN_GRACEFUL_RESUME;
       process.env.HEARTBEAT_PIN_GRACEFUL_RESUME = "0";
       try {
@@ -438,7 +438,7 @@ describe("Task Supersede + Resume", () => {
         startTask(parent.id);
         supersedeTask(parent.id, { reason: "graceful_shutdown", resumeTaskId: null });
 
-        const result = createResumeFollowUp({
+        const result = await createResumeFollowUp({
           parentId: parent.id,
           reason: "graceful_shutdown",
         });
@@ -455,7 +455,7 @@ describe("Task Supersede + Resume", () => {
       }
     });
 
-    test("routing: graceful_shutdown at capacity → unassigned pool fail-open", () => {
+    test("routing: graceful_shutdown at capacity → unassigned pool fail-open", async () => {
       const worker = freshAgent("worker-full-shutdown", {
         maxTasks: 1,
         lastActivityAt: new Date().toISOString(),
@@ -464,7 +464,7 @@ describe("Task Supersede + Resume", () => {
       const parent = createTaskExtended("Routing graceful_shutdown capped", { agentId: worker.id });
       startTask(parent.id);
 
-      const result = createResumeFollowUp({
+      const result = await createResumeFollowUp({
         parentId: parent.id,
         reason: "graceful_shutdown",
       });
@@ -474,7 +474,7 @@ describe("Task Supersede + Resume", () => {
       expect(result.task.tags).not.toContain(GRACEFUL_SHUTDOWN_PIN_TAG);
     });
 
-    test("routing: graceful_shutdown offline worker → unassigned pool fail-open", () => {
+    test("routing: graceful_shutdown offline worker → unassigned pool fail-open", async () => {
       const worker = freshAgent("worker-offline-shutdown", {
         maxTasks: 5,
         lastActivityAt: new Date().toISOString(),
@@ -485,7 +485,7 @@ describe("Task Supersede + Resume", () => {
       });
       startTask(parent.id);
 
-      const result = createResumeFollowUp({
+      const result = await createResumeFollowUp({
         parentId: parent.id,
         reason: "graceful_shutdown",
       });
@@ -495,7 +495,7 @@ describe("Task Supersede + Resume", () => {
       expect(result.task.tags).not.toContain(GRACEFUL_SHUTDOWN_PIN_TAG);
     });
 
-    test("routing: fresh worker + capacity (non-shutdown) → resume pre-assigned to same worker", () => {
+    test("routing: fresh worker + capacity (non-shutdown) → resume pre-assigned to same worker", async () => {
       // For context_limits / manual_supersede the worker is alive and can
       // continue handling the resume on a fresh session.
       const worker = freshAgent("worker-fresh", {
@@ -505,7 +505,7 @@ describe("Task Supersede + Resume", () => {
       const parent = createTaskExtended("Routing fresh", { agentId: worker.id });
       startTask(parent.id);
 
-      const result = createResumeFollowUp({
+      const result = await createResumeFollowUp({
         parentId: parent.id,
         reason: "context_limits",
       });
@@ -514,7 +514,7 @@ describe("Task Supersede + Resume", () => {
       expect(result.task.status).toBe("pending");
     });
 
-    test("routing: stale heartbeat → unassigned", () => {
+    test("routing: stale heartbeat → unassigned", async () => {
       const worker = freshAgent("worker-stale", {
         maxTasks: 5,
         lastActivityAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
@@ -522,7 +522,7 @@ describe("Task Supersede + Resume", () => {
       const parent = createTaskExtended("Routing stale", { agentId: worker.id });
       startTask(parent.id);
 
-      const result = createResumeFollowUp({
+      const result = await createResumeFollowUp({
         parentId: parent.id,
         reason: "context_limits",
       });
@@ -531,7 +531,7 @@ describe("Task Supersede + Resume", () => {
       expect(result.task.status).toBe("unassigned");
     });
 
-    test("routing: worker at capacity → unassigned", () => {
+    test("routing: worker at capacity → unassigned", async () => {
       const worker = freshAgent("worker-full", {
         maxTasks: 1,
         lastActivityAt: new Date().toISOString(),
@@ -541,7 +541,7 @@ describe("Task Supersede + Resume", () => {
       const parent = createTaskExtended("Routing capped", { agentId: worker.id });
       startTask(parent.id);
 
-      const result = createResumeFollowUp({
+      const result = await createResumeFollowUp({
         parentId: parent.id,
         reason: "context_limits",
       });
@@ -549,7 +549,7 @@ describe("Task Supersede + Resume", () => {
       expect(result.task.agentId).toBeNull();
     });
 
-    test("routing: offline worker → unassigned", () => {
+    test("routing: offline worker → unassigned", async () => {
       const worker = freshAgent("worker-offline", {
         maxTasks: 5,
         lastActivityAt: new Date().toISOString(),
@@ -558,7 +558,7 @@ describe("Task Supersede + Resume", () => {
       const parent = createTaskExtended("Routing offline", { agentId: worker.id });
       startTask(parent.id);
 
-      const result = createResumeFollowUp({
+      const result = await createResumeFollowUp({
         parentId: parent.id,
         reason: "context_limits",
       });
@@ -566,8 +566,8 @@ describe("Task Supersede + Resume", () => {
       expect(result.task.agentId).toBeNull();
     });
 
-    test("missing parent → skipped(parent_not_found)", () => {
-      const result = createResumeFollowUp({
+    test("missing parent → skipped(parent_not_found)", async () => {
+      const result = await createResumeFollowUp({
         parentId: "00000000-0000-0000-0000-000000000000",
         reason: "graceful_shutdown",
       });

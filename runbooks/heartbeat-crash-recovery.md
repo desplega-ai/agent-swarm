@@ -14,15 +14,16 @@ Owner code: `src/heartbeat/heartbeat.ts`, `src/tasks/worker-follow-up.ts`, plus 
 flowchart TD
   tick["Heartbeat tick (~90s)<br/>codeLevelTriage()"] --> detect["detectAndRemediateStalledTasks()"]
   detect --> health["checkWorkerHealth()<br/>busy ↔ idle (skips offline)"]
-  health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
-  cleanup --> assign["autoAssignPoolTasks()<br/>per-task: first idle worker satisfying<br/>isAgentEligibleForTask (§4) — else leave queued"]
+  health --> assign["autoAssignPoolTasks()<br/>eligible worker candidate → task.before_assign(via=claim)<br/>proceed: atomic pending assignment<br/>other/block: leave queued"]
+  assign --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
 
   boot["Server boot (once)"] --> reboot["runRebootSweep()<br/>in_progress w/ no session<br/>OR pre-boot stale session<br/>→ failTask + retry child<br/>(pinned to original agent when recoverable, §4)"]
+  reboot --> rebootHook["task.before_assign(via=resume)<br/>hard assign overrides pin;<br/>block → Lead reroute decision, no retry child"]
 ```
 
 - **Reboot sweep liveness predicate** (`runRebootSweep`): a session is considered "live, skip" only if `lastHeartbeatAt >= bootEpoch - 5s` (boot epoch parsed from `globalThis.__runId` = `run_<epochMs>`). Sessions with pre-boot heartbeats are stale artifacts that survived the WAL-mode SQLite restart and are treated as absent → auto-fail + retry child. If `__runId` is missing/unparseable, falls back to the legacy behavior (session exists → skip) — never more aggressive than before. This is **concurrency-safe**: a worker with N concurrent tasks keeps fresh (post-boot) heartbeats on its live sessions; only genuinely stale ones get classified.
 - The **boot-triage seed script** (`src/be/seed-scripts/catalog/boot-triage.ts`) mirrors this logic: it flags `in_progress` tasks that are on an offline agent OR whose session's `lastHeartbeatAt` is older than `stuckMinutes` ago (no fresh session heartbeat).
-- `autoAssignPoolTasks` and `claimTask`/`assignUnassignedTaskPending` are gated by the **routing-affinity eligibility check** (§4, `isAgentEligibleForTask`) — a pooled task tagged with a `routingAffinity` snapshot (from a resume/retry, or an explicit `requiredCapabilities` on a fresh `send-task`) can only go to a role/capability-matching agent. Untagged tasks are unaffected — assignment stays open to any idle (non-lead) worker, exactly as before. `autoAssignPoolTasks` **does** skip idle workers whose `emptyPollCount >= MAX_EMPTY_POLLS` (the poll gate) — assigning to them would just have them exit on their next poll. The filter reads `emptyPollCount` off the rows `getIdleWorkersWithCapacity()` already returns (no per-worker re-query). Note the poll gate is cleared on a genuine `waiting_for_credentials -> ready` recovery (`updateAgentCredentialState`) and on re-register, but **not** by routine post-task `ready:true` credential reports.
+- `autoAssignPoolTasks` and `claimTask`/`assignUnassignedTaskPending` are gated by the **routing-affinity eligibility check** (§4, `isAgentEligibleForTask`) — a pooled task tagged with a `routingAffinity` snapshot (from a resume/retry, or an explicit `requiredCapabilities` on a fresh `send-task`) can only go to a role/capability-matching agent. Untagged tasks are unaffected — assignment stays open to any idle (non-lead) worker, exactly as before. Before `autoAssignPoolTasks` writes an assignee, it runs `task.before_assign` with `via=claim` outside any transaction. A hard assignment to the proposed worker proceeds; a different target or block leaves the task queued, and a block creates one idempotent Lead reroute-decision child. The final `assignUnassignedTaskPending` update still atomically re-checks `status='unassigned'`. `autoAssignPoolTasks` **does** skip idle workers whose `emptyPollCount >= MAX_EMPTY_POLLS` (the poll gate) — assigning to them would just have them exit on their next poll. The filter reads `emptyPollCount` off the rows `getIdleWorkersWithCapacity()` already returns (no per-worker re-query). Note the poll gate is cleared on a genuine `waiting_for_credentials -> ready` recovery (`updateAgentCredentialState`) and on re-register, but **not** by routine post-task `ready:true` credential reports.
 - `checkWorkerHealth` only flips `busy↔idle` (it pre-filters `offline`) and never sets `offline`. The **lead stays `idle`**: the busy-flip lives in the worker-only `poll-task` tool, and the lead is structurally excluded from assignment (`getIdleWorkersWithCapacity` and the pool dispatch query filter `isLead=0`). The **only** writer of `offline` is the graceful `POST /close` handler (`src/http/core.ts`); a hard-crashed (SIGKILL) worker is never auto-offlined.
 
 ## 2. The stalled-task classifier (`detectAndRemediateStalledTasks`)
@@ -31,8 +32,8 @@ flowchart TD
 flowchart TD
   cand{"candidate?<br/>status = in_progress<br/>AND lastUpdatedAt > 5m"} -- no --> skip["leave as-is"]
   cand -- yes --> cls{"classify (per task)"}
-  cls -->|"A — no active session<br/>AND taskAge ≥ 5m"| remA["remediateCrashedWorkerTask<br/>reason = crash_recovery"]
-  cls -->|"B — session stale<br/>hb ≥ 15m AND taskAge ≥ 15m"| remB["remediateCrashedWorkerTask<br/>reason = crash_recovery<br/>(+ cleanup session)"]
+  cls -->|"A — no active session<br/>AND taskAge ≥ 5m"| remA["remediateCrashedWorkerTask<br/>supersede → resume pin decision<br/>→ task.before_assign(via=resume)"]
+  cls -->|"B — session stale<br/>hb ≥ 15m AND taskAge ≥ 15m"| remB["remediateCrashedWorkerTask<br/>supersede → resume pin decision<br/>→ task.before_assign(via=resume)<br/>(+ cleanup session)"]
   cls -->|"C — session fresh<br/>AND taskAge ≥ 30m"| esc["escalate to Lead<br/>(stalledTasks, no auto-fail)"]
 ```
 
@@ -46,17 +47,24 @@ flowchart TD
 flowchart TD
   entry["supersedeTask(parent) → frees capacity,<br/>then createResumeFollowUp(crash_recovery<br/>or graceful_shutdown)"]
   entry --> gate{"original agent row exists,<br/>status≠offline, hasCap?<br/>(protected reasons IGNORE the 30s fresh gate)"}
-  gate -->|"yes (recoverable / restarting)"| pin["resume = PENDING, agentId = parent<br/>(reclaimed on the agent's next poll —<br/>never enters the pool)"]
-  gate -->|"no — offline / row gone / at capacity /<br/>pin kill-switch=0"| pool["resume = UNASSIGNED → pool<br/>(genuinely-gone / rollback path)"]
+  gate --> hook{"task.before_assign<br/>via=resume, proposed=pin candidate"}
+  hook -->|"hard assign"| override["override the pin target"]
+  hook -->|"block"| blocked["no resume child;<br/>one Lead reroute-decision child"]
+  hook -->|"no decisive override"| defaultRoute["keep pin decision"]
+  override --> final{"final assignee?"}
+  defaultRoute --> final
+  final -->|"original agent"| pin["resume = PENDING, agentId = parent<br/>(reclaimed on the agent's next poll —<br/>never enters the pool)"]
+  final -->|"other registered agent"| redirected["resume = PENDING on routed agent"]
+  final -->|"none — offline / row gone / at capacity /<br/>pin kill-switch=0"| pool["resume = UNASSIGNED → pool<br/>(genuinely-gone / rollback path)"]
   pin --> reap{"reaper (every sweep, in cleanupStaleResources):<br/>still PENDING after<br/>HEARTBEAT_RESUME_PIN_GRACE_MIN?"}
   reap -->|"no — agent reclaimed it"| ok["runs on the original agent"]
   reap -->|"yes — never reclaimed"| esc["atomically cancel the pin, then<br/>createRerouteDecisionTask → Lead<br/>(over generation cap → fail, no decision)"]
   esc --> lead["Lead re-delegates via send-task(agentId=…)<br/>— explicit agent, never re-pooled"]
 ```
 
-**Heuristic (current):** `crash_recovery` and `graceful_shutdown` resumes are **pinned back to their own (stable-ID) agent**. `createResumeFollowUp` sets `agentId = parent.agentId` whenever the agent row still exists, is not `offline`, and has capacity — *regardless of the 30s `WORKER_LIVENESS_WINDOW_SECONDS` freshness*. The agent ID survives both crash recovery and deploy/SIGTERM graceful shutdown, so "stale" usually means "restarting", not "gone". The resume is `pending` and reclaimed on the agent's next poll; it **never enters the role-blind pool**, so no wrong-specialization worker can grab it (DES-523). It falls back to the pool only when the agent is genuinely gone (`offline`), its row is absent, capacity is full, or the reason-specific rollback switch is `0` (`HEARTBEAT_PIN_CRASH_RESUME` for crash recovery, `HEARTBEAT_PIN_GRACEFUL_RESUME` for graceful shutdown). Other reasons (`context_limits` / `manual_supersede`) still require `fresh`.
+**Heuristic (current):** `crash_recovery` and `graceful_shutdown` resumes first prefer their own (stable-ID) agent. `createResumeFollowUp` proposes `parent.agentId` whenever the agent row still exists, is not `offline`, and has capacity — *regardless of the 30s `WORKER_LIVENESS_WINDOW_SECONDS` freshness*. It then runs `task.before_assign` with `via=resume`: a hard assignment may redirect the resume to another registered agent, while a block creates one idempotent Lead reroute-decision child and suppresses the resume child. Without a decisive override, the stable agent ID survives both crash recovery and deploy/SIGTERM graceful shutdown, so "stale" usually means "restarting", not "gone". The resume is `pending` and reclaimed on the chosen agent's next poll; it **never enters the role-blind pool** when an assignee is chosen, so no arbitrary worker can grab it (DES-523). It falls back to the pool only when the agent is genuinely gone (`offline`), its row is absent, capacity is full, or the reason-specific rollback switch is `0` (`HEARTBEAT_PIN_CRASH_RESUME` for crash recovery, `HEARTBEAT_PIN_GRACEFUL_RESUME` for graceful shutdown). Other reasons (`context_limits` / `manual_supersede`) still require `fresh`.
 
-A pin **never reclaimed within `HEARTBEAT_RESUME_PIN_GRACE_MIN`** (the agent that looked recoverable never returned) is escalated by the **reaper** (`escalateUnreclaimedResumes`, run inside `cleanupStaleResources` on *every* sweep, including the post-reboot sweep): it atomically cancels the still-`pending` resume (skipping if the agent reclaimed it in the gap — TOCTOU-safe) and creates a Lead-owned `task.reroute.decision` follow-up. The Lead re-delegates via `send-task` with an **explicit `agentId`** — the work is never re-pooled. A resume already at the generation cap (`MAX_RESUME_GENERATIONS`) is failed instead of escalated, bounding a flapping task. Net: protected pinned reasons touch the unassigned pool **zero times** unless a fail-open guard or rollback switch sends them there.
+A same-original-agent pin **never reclaimed within `HEARTBEAT_RESUME_PIN_GRACE_MIN`** (the agent that looked recoverable never returned) is escalated by the **reaper** (`escalateUnreclaimedResumes`, run inside `cleanupStaleResources` on *every* sweep, including the post-reboot sweep): it atomically cancels the still-`pending` resume (skipping if the agent reclaimed it in the gap — TOCTOU-safe) and creates a Lead-owned `task.reroute.decision` follow-up. The Lead re-delegates via `send-task` with an **explicit `agentId`** — the work is never re-pooled. A resume already at the generation cap (`MAX_RESUME_GENERATIONS`) is failed instead of escalated, bounding a flapping task. Net: protected pinned reasons touch the unassigned pool **zero times** unless no assignee is available or a rollback switch sends them there.
 
 ### Pseudocode (current)
 
@@ -74,9 +82,14 @@ resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdow
             if isCrash or isGraceful or isFreshReason:   # protected reasons IGNORE the fresh gate
                 preferredAgentId = cand.id
     tags = [auto-resume, reason:<r>, resume-generation:<n>]
-    if reason == crash_recovery and preferredAgentId: tags += [crash-recovery-pin]   # mark a GENUINE pin
-    if reason == graceful_shutdown and preferredAgentId: tags += [graceful-shutdown-pin]
-    createTaskExtended(resume, agentId = preferredAgentId, tags = tags)
+    decision = task.before_assign(via=resume, proposedAgentId=preferredAgentId, task=parent)
+    if decision.block:
+        createRoutingBlockDecisionTaskForExistingTask(parent)  # idempotent
+        return blocked                                        # no resume child
+    finalAgentId = decision.assignTo ?? preferredAgentId
+    if reason == crash_recovery and finalAgentId == parent.agentId: tags += [crash-recovery-pin]
+    if reason == graceful_shutdown and finalAgentId == parent.agentId: tags += [graceful-shutdown-pin]
+    createTaskExtended(resume, agentId = finalAgentId, tags = tags)
     #   agentId set  → status = pending  (PINNED to the original agent)
     #   agentId none → status = unassigned (pool — only genuinely-gone / rollback)
 
@@ -145,8 +158,13 @@ preferredAgentId = undefined
 cand = getPinCandidateAgent(task.agentId)                   # row exists, not offline
 if cand and activeCount(cand) < cand.maxTasks:
     preferredAgentId = cand.id
-createTaskExtended(task.task, parentTaskId=task.id, agentId=preferredAgentId,
-                    tags=[reboot-retry, auto-generated, (reboot-retry-pin if preferredAgentId)],
+decision = task.before_assign(via=resume, proposedAgentId=preferredAgentId, task=task)
+if decision.block:
+    createRoutingBlockDecisionTaskForExistingTask(task)        # idempotent
+    skip retry child
+finalAgentId = decision.assignTo ?? preferredAgentId
+createTaskExtended(task.task, parentTaskId=task.id, agentId=finalAgentId,
+                    tags=[reboot-retry, auto-generated, (reboot-retry-pin if finalAgentId == task.agentId)],
                     routingAffinity=buildRoutingAffinityFromAgent(task.agentId))
 #   agentId set  → status = pending  (PINNED — never enters the pool)
 #   agentId none → status = unassigned (pool — but still routingAffinity-gated)
@@ -159,7 +177,15 @@ while assignedCount < MAX_AUTO_ASSIGN_PER_SWEEP and offset < POOL_SCAN_CAP:
     for task in batch:
         if assignedCount >= MAX_AUTO_ASSIGN_PER_SWEEP: break
         worker = first idle worker w/ capacity where isAgentEligibleForTask(w, task)
-        if worker: assign(task, worker); assignedCount += 1        # else: leave queued, keep scanning
+        if not worker: continue
+        decision = task.before_assign(via=claim, proposedAgentId=worker.id, task=task)
+        if decision.block:
+            createRoutingBlockDecisionTaskForExistingTask(task)   # idempotent
+            continue                                              # leave queued
+        if decision.assignTo and decision.assignTo != worker.id:
+            continue                                              # designated agent must claim it itself
+        if assignUnassignedTaskPending(task, worker):              # atomic status re-check
+            assignedCount += 1
     offset += len(batch)
     if len(batch) < POOL_SCAN_BATCH_SIZE: break                    # pool exhausted
 

@@ -27,6 +27,8 @@ import {
   releaseTask,
   updateTaskClaudeSessionId,
 } from "@/be/db";
+import { runClaimRouting } from "@/routing/claim";
+import { hasHandlersForVia } from "@/routing/engine";
 import { createTaskRouted } from "@/tasks/create-task-routed";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
@@ -310,6 +312,56 @@ export async function taskActionHandler(
       },
       agentId,
     );
+  }
+
+  // Claim routing is async and must never run while the synchronous
+  // transaction below is held. Repeat the cheap eligibility/readiness checks
+  // here so handlers only run for a task this agent is actually about to
+  // claim; the transaction repeats them after the async gap and `claimTask`
+  // remains the atomic final arbiter.
+  if (action === "claim" && taskId && hasHandlersForVia("task.before_assign", "claim")) {
+    const existingTask = getTaskById(taskId);
+    const claimingAgent = getAgentById(agentId);
+    const dependencies = checkDependencies(taskId);
+    if (
+      existingTask?.status === "unassigned" &&
+      hasCapacity(agentId) &&
+      dependencies.ready &&
+      (!claimingAgent || isAgentEligibleForTask(claimingAgent, existingTask))
+    ) {
+      const routing = await runClaimRouting(existingTask, agentId);
+      if (routing.kind === "redirected") {
+        return taskActionCallResult(
+          {
+            success: false,
+            message: `Task "${taskId}" was routed to agent "${routing.agentId}" and remains in the unassigned pool.`,
+          },
+          agentId,
+        );
+      }
+      if (routing.kind === "blocked") {
+        const decisionNote =
+          routing.decision.kind === "created"
+            ? ` Created Lead reroute-decision task "${routing.decision.task.id}".`
+            : " An existing Lead reroute-decision task already covers this block.";
+        return taskActionCallResult(
+          {
+            success: false,
+            message: `Task "${taskId}" claim blocked by routing: ${routing.reason}.${decisionNote}`,
+          },
+          agentId,
+        );
+      }
+      if (routing.kind === "pending-decision") {
+        return taskActionCallResult(
+          {
+            success: false,
+            message: `Task "${taskId}" is awaiting a Lead reroute decision from an earlier routing block; it cannot be claimed until the Lead resolves it.`,
+          },
+          agentId,
+        );
+      }
+    }
   }
 
   const txn = getDb().transaction((): TaskActionResult => {
