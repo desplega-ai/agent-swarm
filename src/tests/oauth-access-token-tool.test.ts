@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, initDb } from "../be/db";
 import {
   deleteOAuthTokens,
@@ -7,7 +8,10 @@ import {
   storeOAuthTokens,
   upsertOAuthApp,
 } from "../be/db-queries/oauth";
-import { resolveOAuthAccessToken } from "../tools/oauth-access-token";
+import {
+  registerGetOauthAccessTokenTool,
+  resolveOAuthAccessToken,
+} from "../tools/oauth-access-token";
 import {
   clearVolatileSecretsForTesting,
   refreshSecretScrubberCache,
@@ -63,6 +67,38 @@ afterAll(async () => {
 });
 
 describe("resolveOAuthAccessToken", () => {
+  test("registered MCP tool returns a seeded provider token", async () => {
+    storeOAuthTokens("custom-provider", {
+      accessToken: "mcp-tool-access-token-plain-value",
+      refreshToken: "mcp-tool-refresh-token",
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    const server = new McpServer({ name: "oauth-access-token-test", version: "1.0.0" });
+    registerGetOauthAccessTokenTool(server);
+    const tool = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          { handler: (args: unknown, extra: unknown) => Promise<unknown> }
+        >;
+      }
+    )._registeredTools["get-oauth-access-token"];
+    if (!tool) throw new Error("get-oauth-access-token tool was not registered");
+
+    const result = (await tool.handler(
+      { provider: "custom-provider", minValiditySeconds: 300 },
+      {},
+    )) as {
+      structuredContent: { success: boolean; provider?: string; accessToken?: string };
+    };
+
+    expect(result.structuredContent).toMatchObject({
+      success: true,
+      provider: "custom-provider",
+      accessToken: "mcp-tool-access-token-plain-value",
+    });
+  });
+
   test("returns a fresh access token and registers it for scrubber redaction", async () => {
     const accessToken = "linear-access-token-plain-value-1234567890";
     storeOAuthTokens("linear", {

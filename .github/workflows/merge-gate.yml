@@ -19,6 +19,7 @@ jobs:
       test: ${{ steps.check.outputs.test }}
       pi_skills: ${{ steps.check.outputs.pi_skills }}
       openapi: ${{ steps.check.outputs.openapi }}
+      vendored_openapi: ${{ steps.check.outputs.vendored_openapi }}
       docker: ${{ steps.check.outputs.docker }}
       ui: ${{ steps.check.outputs.ui }}
       templates_workflows: ${{ steps.check.outputs.templates_workflows }}
@@ -81,10 +82,12 @@ jobs:
           # openapi freshness: routes, types, generator, version, generated artifacts.
           OPENAPI=$(match '^(src/http/|src/types\.ts$|scripts/generate-openapi\.ts$|openapi\.json$|docs-site/content/docs/api-reference/|package\.json$)')
 
+          VENDORED_OPENAPI=$(match '^(vendored-openapi/|src/be/vendored-openapi\.ts$|src/be/script-connections\.ts$|src/http/script-connections\.ts$|src/tools/script-connections/|scripts/(check|refresh)-vendored-openapi\.ts$|scripts/vendored-openapi-utils\.ts$|package\.json$)')
+
           # docker build test: mirrors docker-and-deploy.yml paths. All Dockerfiles now
           # COPY bunfig.toml + the member manifests, .dockerignore shapes the context,
           # and apps/evals/ feeds the evals-service image.
-          DOCKER=$(match '^(src/|Dockerfile$|Dockerfile\.worker$|apps/evals/|\.dockerignore$|docker-entrypoint\.sh$|api-entrypoint\.sh$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|scripts/|templates/|plugin/|deploy/|apps/(ui|templates-ui)/package\.json$)')
+          DOCKER=$(match '^(src/|vendored-openapi/|Dockerfile$|Dockerfile\.worker$|apps/evals/|\.dockerignore$|docker-entrypoint\.sh$|api-entrypoint\.sh$|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|scripts/|templates/|plugin/|deploy/|apps/(ui|templates-ui)/package\.json$)')
 
           # ui app lint + typecheck. ui's dependency tree is resolved by the ROOT
           # bun.lock + root overrides since the workspace migration.
@@ -93,7 +96,7 @@ jobs:
           # workflow template validation: content.md changes in templates/workflows/.
           TEMPLATES_WORKFLOWS=$(match '^(templates/workflows/|scripts/validate-template-workflows\.ts$|src/workflows/definition\.ts$|src/types\.ts$)')
 
-          for k in LINT TEST PI_SKILLS OPENAPI DOCKER UI TEMPLATES_WORKFLOWS; do
+          for k in LINT TEST PI_SKILLS OPENAPI VENDORED_OPENAPI DOCKER UI TEMPLATES_WORKFLOWS; do
             v=$(eval echo \$$k)
             key=$(echo "$k" | tr '[:upper:]' '[:lower:]')
             echo "${key}=${v}" >> $GITHUB_OUTPUT
@@ -261,6 +264,23 @@ jobs:
           fi
           echo "No raw matchRoute() calls found."
 
+  vendored-openapi:
+    name: Vendored OpenAPI Check
+    needs: detect-changes
+    if: needs.detect-changes.outputs.vendored_openapi == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Check vendored OpenAPI determinism
+        run: bun run check:vendored-openapi
+
   docker-build:
     name: Docker Build Test
     needs: detect-changes
@@ -344,7 +364,7 @@ jobs:
 
   gate:
     name: Merge Gate
-    needs: [detect-changes, lint-and-typecheck, test, pi-skills-freshness, openapi-freshness, docker-build, ui-lint, template-workflow-validation]
+    needs: [detect-changes, lint-and-typecheck, test, pi-skills-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation]
     if: always()
     runs-on: ubuntu-latest
 

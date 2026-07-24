@@ -2,15 +2,15 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import {
+  ConnectionAuthInputSchema,
+  connectionAuthInputFromFlat,
   getScriptConnectionById,
   listScriptConnections,
   refreshScriptConnection,
   setScriptConnectionEnabled,
-  upsertCredentialBinding,
   upsertScriptConnection,
 } from "@/be/script-connections";
 import { can } from "@/rbac";
-import { placeholderForConfigKey } from "@/scripts-runtime/credential-broker";
 import { createToolRegistrar } from "@/tools/utils";
 import { resolveScopedResourceId, scopedResourceScopeIdSchema } from "@/utils/scoped-resource";
 
@@ -51,24 +51,29 @@ const scriptConnectionsInputSchema = z.object({
     .nullable()
     .optional()
     .describe("Existing credential binding ID to attach to the connection."),
+  auth: ConnectionAuthInputSchema.optional().describe(
+    "Inline connection auth. type=bearer|header|query with an inline `secret` (stored encrypted under a derived key) or a shared `configKey`; type=oauth with an `authorizationId`; type=none clears auth. Auto-manages the connection's credential binding.",
+  ),
   configKey: z
     .string()
     .min(1)
     .max(255)
     .optional()
-    .describe(
-      "Config key used to create a credential binding when credentialBindingId is omitted.",
-    ),
+    .describe("Deprecated flat alias for auth: config key for a derived credential binding."),
   headerTemplate: z
     .string()
     .min(1)
     .optional()
-    .describe("Header template containing the config-key placeholder."),
+    .describe(
+      "Deprecated flat alias for auth: header template containing the config-key placeholder.",
+    ),
   queryTemplate: z
     .string()
     .min(1)
     .optional()
-    .describe("Query parameter template containing the config-key placeholder."),
+    .describe(
+      "Deprecated flat alias for auth: query parameter template containing the config-key placeholder.",
+    ),
   openapiSpecUrl: z
     .string()
     .url()
@@ -78,6 +83,12 @@ const scriptConnectionsInputSchema = z.object({
     .string()
     .optional()
     .describe("Inline OpenAPI JSON for upsert-openapi. Mutually exclusive with openapiSpecUrl."),
+  specSource: z
+    .object({ kind: z.literal("vendored"), slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/) })
+    .optional()
+    .describe(
+      "Vendored OpenAPI source. Mutually exclusive with openapiSpecUrl and openapiSpecJson.",
+    ),
   enabled: z.boolean().optional().describe("Whether the connection is enabled."),
 });
 
@@ -90,6 +101,14 @@ const scriptConnectionsOutputSchema = z.object({
 
 type ScriptConnectionsArgs = z.infer<typeof scriptConnectionsInputSchema>;
 type ExistingConnection = NonNullable<ReturnType<typeof getScriptConnectionById>>;
+
+function baseUrlProvenanceText(connection: {
+  slug: string;
+  baseUrlSource: string;
+  baseUrlMismatch?: { specUrl: string; effectiveUrl: string };
+}): string {
+  return `${connection.slug}: baseUrlSource=${connection.baseUrlSource}${connection.baseUrlMismatch ? `, baseUrlMismatch=${JSON.stringify(connection.baseUrlMismatch)}` : ""}`;
+}
 
 function resolveConnectionScope(
   args: ScriptConnectionsArgs,
@@ -164,8 +183,16 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
 
       if (args.action === "list") {
         const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
+        const provenanceLines = connections
+          .filter((connection) => connection.kind === "openapi" || connection.baseUrl !== null)
+          .map(baseUrlProvenanceText);
         return {
-          content: [{ type: "text", text: `Found ${connections.length} script connection(s).` }],
+          content: [
+            {
+              type: "text",
+              text: `Found ${connections.length} script connection(s).${provenanceLines.length ? `\n${provenanceLines.join("\n")}` : ""}`,
+            },
+          ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: true,
@@ -226,7 +253,12 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
           };
         }
         return {
-          content: [{ type: "text", text: `Script connection ${refreshed.slug} refreshed.` }],
+          content: [
+            {
+              type: "text",
+              text: `Script connection ${refreshed.slug} refreshed (${baseUrlProvenanceText(refreshed)}).`,
+            },
+          ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: !refreshed.generationError,
@@ -292,23 +324,6 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
           };
         }
 
-        let credentialBindingId = args.credentialBindingId ?? null;
-        if (!credentialBindingId && args.configKey) {
-          const placeholder = placeholderForConfigKey(args.configKey);
-          const bindingScope = args.scope ?? "global";
-          const binding = upsertCredentialBinding({
-            configKey: args.configKey,
-            allowedHosts: args.allowedHosts,
-            headerTemplate:
-              args.headerTemplate ??
-              (args.queryTemplate ? undefined : `Authorization: Bearer ${placeholder}`),
-            queryTemplate: args.queryTemplate,
-            scope: bindingScope,
-            scopeId: resolveScopedResourceId(bindingScope, args.scopeId, "bindings"),
-          });
-          credentialBindingId = binding.id;
-        }
-
         const existing = args.id ? getScriptConnectionById(args.id) : null;
         const { scope, scopeId } = resolveConnectionScope(args, existing);
         const connection = await upsertScriptConnection({
@@ -320,7 +335,14 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
           scopeId,
           baseUrl: args.baseUrl,
           allowedHosts: args.allowedHosts,
-          credentialBindingId,
+          auth: connectionAuthInputFromFlat({
+            auth: args.auth,
+            configKey: args.configKey,
+            headerTemplate: args.headerTemplate,
+            queryTemplate: args.queryTemplate,
+            allowedHosts: args.allowedHosts,
+          }),
+          credentialBindingId: args.credentialBindingId ?? undefined,
           enabled: resolveConnectionEnabled(args, existing),
         });
 
@@ -338,54 +360,38 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         };
       }
 
-      if (!args.slug || !args.baseUrl || (!args.openapiSpecJson && !args.openapiSpecUrl)) {
+      if (!args.slug || (!args.openapiSpecJson && !args.openapiSpecUrl && !args.specSource)) {
         return {
           content: [
             {
               type: "text",
-              text: "slug, baseUrl, and either openapiSpecJson or openapiSpecUrl are required.",
+              text: "slug and exactly one OpenAPI spec source (openapiSpecJson, openapiSpecUrl, or specSource) are required.",
             },
           ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
-            message: "slug, baseUrl, and either openapiSpecJson or openapiSpecUrl are required.",
+            message:
+              "slug and exactly one OpenAPI spec source (openapiSpecJson, openapiSpecUrl, or specSource) are required.",
             connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
           },
         };
       }
-      if (args.openapiSpecJson && args.openapiSpecUrl) {
+      if ([args.openapiSpecJson, args.openapiSpecUrl, args.specSource].filter(Boolean).length > 1) {
         return {
           content: [
             {
               type: "text",
-              text: "Provide either openapiSpecJson or openapiSpecUrl, not both.",
+              text: "Provide exactly one OpenAPI spec source.",
             },
           ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
-            message: "Provide either openapiSpecJson or openapiSpecUrl, not both.",
+            message: "Provide exactly one OpenAPI spec source.",
             connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
           },
         };
-      }
-
-      let credentialBindingId = args.credentialBindingId ?? null;
-      if (!credentialBindingId && args.configKey) {
-        const placeholder = placeholderForConfigKey(args.configKey);
-        const bindingScope = args.scope ?? "global";
-        const binding = upsertCredentialBinding({
-          configKey: args.configKey,
-          allowedHosts: args.allowedHosts ?? [new URL(args.baseUrl).hostname],
-          headerTemplate:
-            args.headerTemplate ??
-            (args.queryTemplate ? undefined : `Authorization: Bearer ${placeholder}`),
-          queryTemplate: args.queryTemplate,
-          scope: bindingScope,
-          scopeId: resolveScopedResourceId(bindingScope, args.scopeId, "bindings"),
-        });
-        credentialBindingId = binding.id;
       }
 
       const existing = args.id ? getScriptConnectionById(args.id) : null;
@@ -398,8 +404,17 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         scope,
         scopeId,
         baseUrl: args.baseUrl,
-        allowedHosts: args.allowedHosts ?? [new URL(args.baseUrl).hostname],
-        credentialBindingId,
+        allowedHosts: args.allowedHosts,
+        auth: connectionAuthInputFromFlat({
+          auth: args.auth,
+          configKey: args.configKey,
+          headerTemplate: args.headerTemplate,
+          queryTemplate: args.queryTemplate,
+          allowedHosts: args.allowedHosts,
+        }),
+        credentialBindingId: args.credentialBindingId ?? undefined,
+        openapiSpecSourceKind: args.specSource ? "vendored" : undefined,
+        openapiSpecSource: args.specSource?.slug,
         openapiSpecUrl: args.openapiSpecUrl,
         openapiSpecJson: args.openapiSpecJson,
         enabled: resolveConnectionEnabled(args, existing),
@@ -407,7 +422,12 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
 
       const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
       return {
-        content: [{ type: "text", text: `Script connection ${connection.slug} saved.` }],
+        content: [
+          {
+            type: "text",
+            text: `Script connection ${connection.slug} saved (${baseUrlProvenanceText(connection)}).`,
+          },
+        ],
         structuredContent: {
           yourAgentId: requestInfo.agentId,
           success: !connection.generationError,

@@ -1,0 +1,128 @@
+{
+  "integrations": [
+    {
+      "baseUrl": "https://api.github.com",
+      "blessedOperations": [
+        "GET /repos/{owner}/{repo}",
+        "GET /repos/{owner}/{repo}/issues",
+        "POST /repos/{owner}/{repo}/issues",
+        "GET /repos/{owner}/{repo}/pulls",
+        "POST /repos/{owner}/{repo}/pulls"
+      ],
+      "categories": [
+        "developer-tools",
+        "source-control"
+      ],
+      "docsUrl": "https://docs.github.com/rest",
+      "domain": "github.com",
+      "name": "GitHub",
+      "presetId": "github",
+      "slug": "github",
+      "sourceSemantics": "machine-openapi",
+      "sourceSha256": "49e3b140ed05727cd8b693618ad5f31cd41f8879767c2990b0491ae415811941",
+      "specFile": "github.json",
+      "specSha256": "3437d26fa6bef4ccbea557f3f998a61bcce3a81fe8db68769aeca25240b95a04",
+      "specSourceUrl": "https://raw.githubusercontent.com/github/rest-api-description/417c4fb368fc6a7162ce5f3eeeddce1a9a217747/descriptions/api.github.com/api.github.com.json",
+      "specVersionPin": "417c4fb368fc6a7162ce5f3eeeddce1a9a217747",
+      "upstreamVersion": "1.1.4"
+    },
+    {
+      "baseUrl": "https://slack.com/api",
+      "blessedOperations": [
+        "POST /chat.postMessage",
+        "GET /conversations.history",
+        "GET /conversations.list",
+        "GET /conversations.replies",
+        "GET /search.messages"
+      ],
+      "categories": [
+        "communication",
+        "collaboration"
+      ],
+      "docsUrl": "https://api.slack.com/web",
+      "domain": "slack.com",
+      "name": "Slack",
+      "presetId": "slack",
+      "slug": "slack",
+      "sourceSemantics": "machine-openapi",
+      "sourceSha256": "742a5c977180a829df8767cf57bc417d99b3713583aee83741efb9c08ca731e7",
+      "specFile": "slack.json",
+      "specSha256": "f18cf328acf8c0689fc9b4048c8aa6a4eb1002d21ebf4f5c6c6f1f73e4baf226",
+      "specSourceUrl": "https://raw.githubusercontent.com/slackapi/slack-api-specs/bc08db49625630e3585bf2f1322128ea04f2a7f3/web-api/slack_web_openapi_v2.json",
+      "specVersionPin": "bc08db49625630e3585bf2f1322128ea04f2a7f3",
+      "upstreamVersion": "1.7.0"
+    },
+    {
+      "baseUrl": "https://api.linear.app",
+      "blessedOperations": [
+        "POST /graphql"
+      ],
+      "categories": [
+        "project-management",
+        "issue-tracking"
+      ],
+      "docsUrl": "https://developers.linear.app/docs/graphql/working-with-the-graphql-api",
+      "domain": "linear.app",
+      "name": "Linear",
+      "presetId": "linear",
+      "refreshMode": "operator-review",
+      "slug": "linear",
+      "sourceSemantics": "operator-reference",
+      "specFile": "linear.json",
+      "specSha256": "aa74a518f46333ec06d41d54fe32775eba8e263b26f1efdfc55eb4babb31dc2f",
+      "specSourceUrl": "https://developers.linear.app/docs/graphql/working-with-the-graphql-api",
+      "specVersionPin": "manual-2026-07-22"
+    },
+    {
+      "baseUrl": "https://your-domain.atlassian.net",
+      "blessedOperations": [
+        "POST /rest/api/3/issue",
+        "GET /rest/api/3/issue/{issueIdOrKey}",
+        "PUT /rest/api/3/issue/{issueIdOrKey}",
+        "GET /rest/api/3/project/search",
+        "GET /rest/api/3/search/jql"
+      ],
+      "categories": [
+        "project-management",
+        "issue-tracking"
+      ],
+      "docsUrl": "https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/",
+      "domain": "atlassian.net",
+      "name": "Jira",
+      "presetId": "jira",
+      "slug": "jira",
+      "sourceSemantics": "machine-openapi",
+      "sourceSha256": "211976f287961314e4c730a2acc34e21fcdcb775e2e63d330cea1989aa23184a",
+      "specFile": "jira.json",
+      "specSha256": "167196fd6ed6f7e36df7bf4d1c582e8dc6200424c31e95c1b4827ec85d81ce5d",
+      "specSourceUrl": "https://dac-static.atlassian.com/cloud/jira/platform/swagger-v3.v3.json",
+      "specVersionPin": "211976f287961314e4c730a2acc34e21fcdcb775e2e63d330cea1989aa23184a",
+      "upstreamVersion": "1001.0.0-SNAPSHOT-f6b6eead949dbe0e9c4be63fb2c0832e34686933"
+    },
+    {
+      "baseUrl": "https://gmail.googleapis.com",
+      "blessedOperations": [
+        "GET /gmail/v1/users/{userId}/messages",
+        "GET /gmail/v1/users/{userId}/messages/{id}",
+        "POST /gmail/v1/users/{userId}/messages/send",
+        "GET /gmail/v1/users/{userId}/threads/{id}"
+      ],
+      "categories": [
+        "email",
+        "communication"
+      ],
+      "docsUrl": "https://developers.google.com/workspace/gmail/api/reference/rest",
+      "domain": "gmail.googleapis.com",
+      "name": "Gmail",
+      "presetId": "google",
+      "refreshMode": "operator-review",
+      "slug": "gmail",
+      "sourceSemantics": "operator-reference",
+      "specFile": "gmail.json",
+      "specSha256": "780dac30c4c0bd4346626666d958b5fd63071f39b06f9c0b0273a4a1bb878977",
+      "specSourceUrl": "https://www.googleapis.com/discovery/v1/apis/gmail/v1/rest",
+      "specVersionPin": "gmail-discovery-v1-2026-07-22"
+    }
+  ],
+  "version": 1
+}

@@ -1,10 +1,9 @@
-import { Maximize2, Pencil, Power, PowerOff, RefreshCw } from "lucide-react";
+import { AlertTriangle, Maximize2, Pencil, Power, PowerOff, RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMcpServers } from "@/api/hooks/use-mcp-servers";
 import {
-  useCredentialBindings,
   useOAuthApps,
   useRefreshScriptConnection,
   useScriptConnection,
@@ -12,6 +11,7 @@ import {
 } from "@/api/hooks/use-script-connections";
 import type { ScriptConnectionTool } from "@/api/types";
 import { ScriptSourceEditor } from "@/components/scripts/script-source-editor";
+import { AlertCallout } from "@/components/ui/alert-callout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,6 +35,7 @@ import { OperationsTable } from "@/pages/connections/components/operations-table
 import {
   AddConnectionDialog,
   InlineError,
+  isBrokenTokenStatus,
   KindBadge,
   TokenStatusBadge,
   toastMutationError,
@@ -73,7 +74,6 @@ function ExpandButton({ label, onClick }: { label: string; onClick: () => void }
 export default function ConnectionDetailPage() {
   const { id } = useParams();
   const { data: connection, isLoading, error } = useScriptConnection(id);
-  const { data: bindings = [] } = useCredentialBindings();
   const { data: oauthApps = [] } = useOAuthApps();
   const { data: mcpServersData } = useMcpServers();
   const refreshConnection = useRefreshScriptConnection();
@@ -103,6 +103,21 @@ export default function ConnectionDetailPage() {
   const target = connection.baseUrl ?? connection.mcpServerId ?? "-";
   const specUrl =
     connection.openapiSpecSourceKind === "url" ? (connection.openapiSpecSource ?? "") : "";
+  // Tolerant of both shapes: the embedded auth summary (step-7) or the binding
+  // token status. `missing` / `refresh-failed` / `revoked` flag a broken
+  // OAuth authorization.
+  const authStatus = connection.auth?.status ?? connection.credentialBinding?.tokenStatus;
+  const authBroken =
+    connection.credentialBinding?.authKind === "oauth" && isBrokenTokenStatus(authStatus);
+  // N apps per provider are possible, so link to the specific app that owns this
+  // authorization rather than by provider (which resolves to an arbitrary row).
+  // Falls back to the provider slug when the owning app isn't in the loaded set.
+  const oauthAuthorizationId = connection.auth?.authorizationId;
+  const oauthAppId = oauthAuthorizationId
+    ? (oauthApps.find((app) =>
+        app.authorizations?.some((authorization) => authorization.id === oauthAuthorizationId),
+      )?.id ?? null)
+    : null;
 
   return (
     <div className="flex flex-col gap-4 lg:flex-1 lg:min-h-0 lg:overflow-y-hidden">
@@ -227,7 +242,7 @@ export default function ConnectionDetailPage() {
                         </Link>
                         {connection.credentialBinding.oauthProvider ? (
                           <Link
-                            to={`/connections/oauth-apps/${encodeURIComponent(connection.credentialBinding.oauthProvider)}`}
+                            to={`/connections/oauth-apps/${encodeURIComponent(oauthAppId ?? connection.credentialBinding.oauthProvider)}`}
                             className="text-muted-foreground hover:text-foreground hover:underline"
                             title="View OAuth app"
                           >
@@ -243,6 +258,17 @@ export default function ConnectionDetailPage() {
                 />
               </CardContent>
             </Card>
+
+            {authBroken ? (
+              <AlertCallout tone="error" icon={AlertTriangle}>
+                This connection's OAuth authorization
+                {connection.credentialBinding?.oauthProvider
+                  ? ` (${connection.credentialBinding.oauthProvider})`
+                  : ""}{" "}
+                needs attention — the token is missing, expired, or the last refresh failed.
+                Re-authorize it from the OAuth Apps tab; calls will fail until then.
+              </AlertCallout>
+            ) : null}
 
             <Card>
               <CardHeader>
@@ -345,7 +371,6 @@ export default function ConnectionDetailPage() {
         open={editOpen}
         onOpenChange={setEditOpen}
         connection={connection}
-        bindings={bindings}
         oauthApps={oauthApps}
         mcpServers={(mcpServersData?.servers ?? []).map((server) => ({
           id: server.id,

@@ -18,8 +18,9 @@ memory_link
 memory_rating
 memory_retrieval
 oauth_apps
+oauth_authorizations   # attribution via connectedByUserId (117)
+oauth_pending          # ephemeral PKCE state, 10-min GC (117)
 oauth_refresh_locks
-oauth_tokens
 permission_audit
 script_embeddings
 seed_state

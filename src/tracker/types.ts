@@ -3,12 +3,23 @@ export type TrackerProvider = "linear" | "jira"; // extend as providers are adde
 export interface OAuthApp {
   id: string;
   provider: string;
+  displayName: string | null;
   clientId: string;
   clientSecret: string;
+  clientSecretEncrypted: boolean;
   authorizeUrl: string;
   tokenUrl: string;
+  revocationUrl: string | null;
+  userinfoUrl: string | null;
   redirectUri: string;
   scopes: string;
+  scopeSeparator: string;
+  tokenAuthStyle: "body" | "basic";
+  tokenBodyFormat: "form" | "json";
+  requiresRefreshTokenRotation: boolean;
+  extraParamsJson: string | null;
+  source: "manual" | "dcr" | "curated-prefill";
+  mcpServerId: string | null;
   metadata: string; // JSON string
   createdAt: string;
   updatedAt: string;
@@ -21,6 +32,7 @@ export interface OAuthTokens {
   refreshToken: string | null;
   expiresAt: string;
   scope: string | null;
+  tokenVersion: number;
   createdAt: string;
   updatedAt: string;
 }

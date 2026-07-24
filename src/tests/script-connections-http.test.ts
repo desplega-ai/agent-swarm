@@ -4,9 +4,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { closeDb, createAgent, getDb, initDb, upsertSwarmConfig } from "../be/db";
 import {
+  getAuthorizationById,
   getOAuthApp,
+  getOAuthAppById,
   getOAuthTokens,
   storeOAuthTokens,
+  upsertAuthorization,
   upsertOAuthApp,
 } from "../be/db-queries/oauth";
 import {
@@ -16,7 +19,10 @@ import {
   upsertCredentialBinding,
   upsertScriptConnection,
 } from "../be/script-connections";
-import { handleScriptConnections } from "../http/script-connections";
+import {
+  handleScriptConnections,
+  resetIntegrationsCatalogCacheForTesting,
+} from "../http/script-connections";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 
 const TEST_DB_PATH = "./test-script-connections-http.sqlite";
@@ -138,9 +144,10 @@ afterAll(async () => {
 beforeEach(() => {
   globalThis.fetch = originalFetch;
   setOpenapiSpecFetchForTesting(null);
+  resetIntegrationsCatalogCacheForTesting();
   getDb().run("DELETE FROM script_connections");
   getDb().run("DELETE FROM script_credential_bindings");
-  getDb().run("DELETE FROM oauth_tokens");
+  getDb().run("DELETE FROM oauth_authorizations");
   getDb().run("DELETE FROM oauth_apps");
   getDb().run("DELETE FROM swarm_config");
 });
@@ -197,6 +204,33 @@ describe("/api/script-connections HTTP", () => {
 
     expect(bindingRow?.header_template).toBeNull();
     expect(bindingRow?.query_template).toBe("api_key=[REDACTED:QUERY_AUTH_VENDOR_KEY]");
+  });
+
+  test("POST upsert defaults connection and inline binding allowedHosts from baseUrl", async () => {
+    const res = await dispatch("/api/script-connections", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        kind: "openapi",
+        slug: "defaultAllowedHostVendor",
+        baseUrl: "https://api.vendor.test/v1",
+        configKey: "DEFAULT_ALLOWED_HOST_VENDOR_KEY",
+        openapiSpecJson: inlineOpenApiSpec(),
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { connection: { id: string; allowedHosts: string[] } };
+    expect(body.connection.allowedHosts).toEqual(["api.vendor.test"]);
+    const bindingRow = getDb()
+      .prepare<{ allowed_hosts_json: string }, [string]>(
+        `SELECT b.allowed_hosts_json
+         FROM script_credential_bindings b
+         JOIN script_connections c ON c.credential_binding_id = b.id
+         WHERE c.id = ?`,
+      )
+      .get(body.connection.id);
+    expect(JSON.parse(bindingRow?.allowed_hosts_json ?? "[]")).toEqual(["api.vendor.test"]);
   });
 
   test("POST upsert is forbidden for non-lead agent principal", async () => {
@@ -529,7 +563,102 @@ describe("/api/script-connections HTTP", () => {
     expect(getOAuthTokens("vendor_oauth")).toBeNull();
   });
 
-  test("oauth app upsert without clientSecret keeps existing secret", async () => {
+  test("DELETE oauth app by id does not revoke a same-provider sibling", async () => {
+    // First (oldest) app for the provider + its default authorization.
+    upsertOAuthApp("sibling_oauth", {
+      clientId: "first-client",
+      clientSecret: "first-secret",
+      authorizeUrl: "https://oauth.vendor.test/authorize",
+      tokenUrl: "https://oauth.vendor.test/token",
+      redirectUri: "https://api.public.test/api/oauth/callback",
+      scopes: "read",
+    });
+    const first = getOAuthApp("sibling_oauth");
+    if (!first) throw new Error("first app not created");
+    const firstAuth = upsertAuthorization({
+      appId: first.id,
+      accessToken: "first-access-token",
+      status: "active",
+    });
+
+    // Second (newer) same-provider app — inserted directly because
+    // upsertOAuthApp updates the existing provider row.
+    const secondId = crypto.randomUUID();
+    getDb().run(
+      `INSERT INTO oauth_apps
+         (id, provider, clientId, clientSecret, clientSecretEncrypted,
+          authorizeUrl, tokenUrl, redirectUri, scopes, createdAt)
+       VALUES (?, 'sibling_oauth', 'second-client', 'second-secret', 0,
+               'https://oauth.vendor.test/authorize', 'https://oauth.vendor.test/token',
+               'https://api.public.test/api/oauth/callback', '[]', ?)`,
+      secondId,
+      "2035-06-01T00:00:00.000Z",
+    );
+    const secondAuth = upsertAuthorization({
+      appId: secondId,
+      accessToken: "second-access-token",
+      status: "active",
+    });
+
+    // Delete the SECOND (newer) app by its exact id.
+    const res = await dispatch(`/api/oauth-apps/${secondId}`, {
+      method: "DELETE",
+      agentId: leadAgentId,
+    });
+    expect(res.status).toBe(200);
+
+    // Second app + its authorization are gone.
+    expect(getOAuthAppById(secondId)).toBeNull();
+    expect(getAuthorizationById(secondAuth.id)).toBeNull();
+
+    // The oldest sibling's authorization is UNTOUCHED — the provider-keyed
+    // revoke would have marked it 'revoked' (or dropped it).
+    expect(getAuthorizationById(firstAuth.id)?.status).toBe("active");
+    expect(getOAuthApp("sibling_oauth")?.id).toBe(first.id);
+  });
+
+  test("manual authorization refresh failure scrubs echoed secrets from the error", async () => {
+    upsertOAuthApp("leaky_oauth", {
+      clientId: "leaky-client",
+      clientSecret: "leaky-client-secret-should-not-leak",
+      authorizeUrl: "https://oauth.vendor.test/authorize",
+      tokenUrl: "https://oauth.vendor.test/token",
+      redirectUri: "https://api.public.test/api/oauth/callback",
+      scopes: "read",
+    });
+    const app = getOAuthApp("leaky_oauth");
+    if (!app) throw new Error("app not created");
+    const authorization = upsertAuthorization({
+      appId: app.id,
+      accessToken: "leaky-access-token",
+      refreshToken: "refresh-secret-should-not-leak",
+      status: "active",
+    });
+
+    // Provider rejects the refresh and echoes the submitted refresh_token AND
+    // client_secret back in the error body.
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          error: "invalid_grant",
+          error_description:
+            "bad refresh_token=refresh-secret-should-not-leak client_secret=leaky-client-secret-should-not-leak",
+        }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+
+    const res = await dispatch(`/api/oauth-authorizations/${authorization.id}/refresh`, {
+      method: "POST",
+      agentId: leadAgentId,
+    });
+    expect(res.status).toBe(502);
+    expect(res.text).not.toContain("refresh-secret-should-not-leak");
+    expect(res.text).not.toContain("leaky-client-secret-should-not-leak");
+  });
+
+  test("oauth app edit (by id) without clientSecret keeps existing secret", async () => {
+    // Editing an existing row (id supplied) may inherit the stored secret. A
+    // no-id create must NOT — that path always inserts (see the create tests).
     upsertOAuthApp("vendor_oauth", {
       clientId: "vendor-client",
       clientSecret: "existing-client-secret",
@@ -538,11 +667,14 @@ describe("/api/script-connections HTTP", () => {
       redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
       scopes: "read",
     });
+    const existing = getOAuthApp("vendor_oauth");
+    if (!existing) throw new Error("seed app not created");
 
     const res = await dispatch("/api/oauth-apps", {
       method: "POST",
       agentId: leadAgentId,
       body: {
+        id: existing.id,
         provider: "vendor_oauth",
         clientId: "updated-client",
         authorizeUrl: "https://oauth.vendor.test/oauth2/authorize",
@@ -551,14 +683,133 @@ describe("/api/script-connections HTTP", () => {
       },
     });
     expect(res.status).toBe(200);
-    const app = getOAuthApp("vendor_oauth");
+    const app = getOAuthAppById(existing.id);
     expect(app?.clientId).toBe("updated-client");
     expect(app?.clientSecret).toBe("existing-client-secret");
     expect(app?.scopes).toBe("");
     expect(JSON.stringify(await res.json())).not.toContain("existing-client-secret");
   });
 
-  test("oauth app upsert rejects reserved tracker providers", async () => {
+  test("POST without id always creates a new row and never clobbers a same-provider sibling", async () => {
+    const first = await dispatch("/api/oauth-apps", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        provider: "multi_vendor",
+        clientId: "first-client",
+        clientSecret: "first-secret",
+        authorizeUrl: "https://oauth.vendor.test/authorize",
+        tokenUrl: "https://oauth.vendor.test/token",
+        scopes: ["read"],
+      },
+    });
+    expect(first.status).toBe(200);
+    const firstId = ((await first.json()) as { oauthApp: { id: string } }).oauthApp.id;
+
+    // Second app for the SAME provider, again with no id.
+    const second = await dispatch("/api/oauth-apps", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        provider: "multi_vendor",
+        clientId: "second-client",
+        clientSecret: "second-secret",
+        authorizeUrl: "https://oauth.vendor.test/authorize2",
+        tokenUrl: "https://oauth.vendor.test/token2",
+        scopes: ["write"],
+      },
+    });
+    expect(second.status).toBe(200);
+    const secondId = ((await second.json()) as { oauthApp: { id: string } }).oauthApp.id;
+
+    // Two distinct rows; the first row's credentials are untouched.
+    expect(secondId).not.toBe(firstId);
+    const firstApp = getOAuthAppById(firstId);
+    const secondApp = getOAuthAppById(secondId);
+    expect(firstApp?.clientId).toBe("first-client");
+    expect(firstApp?.clientSecret).toBe("first-secret");
+    expect(firstApp?.authorizeUrl).toBe("https://oauth.vendor.test/authorize");
+    expect(secondApp?.clientId).toBe("second-client");
+    expect(secondApp?.clientSecret).toBe("second-secret");
+  });
+
+  test("POST with id updates only the targeted row, leaving siblings intact", async () => {
+    const first = await dispatch("/api/oauth-apps", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        provider: "target_vendor",
+        clientId: "orig-a",
+        clientSecret: "secret-a",
+        authorizeUrl: "https://oauth.vendor.test/authorize",
+        tokenUrl: "https://oauth.vendor.test/token",
+        scopes: ["read"],
+      },
+    });
+    const firstId = ((await first.json()) as { oauthApp: { id: string } }).oauthApp.id;
+    const second = await dispatch("/api/oauth-apps", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        provider: "target_vendor",
+        clientId: "orig-b",
+        clientSecret: "secret-b",
+        authorizeUrl: "https://oauth.vendor.test/authorize",
+        tokenUrl: "https://oauth.vendor.test/token",
+        scopes: ["read"],
+      },
+    });
+    const secondId = ((await second.json()) as { oauthApp: { id: string } }).oauthApp.id;
+
+    const edit = await dispatch("/api/oauth-apps", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        id: firstId,
+        provider: "target_vendor",
+        clientId: "edited-a",
+        clientSecret: "secret-a-new",
+        authorizeUrl: "https://oauth.vendor.test/authorize",
+        tokenUrl: "https://oauth.vendor.test/token",
+        scopes: ["read"],
+      },
+    });
+    expect(edit.status).toBe(200);
+    expect(getOAuthAppById(firstId)?.clientId).toBe("edited-a");
+    expect(getOAuthAppById(firstId)?.clientSecret).toBe("secret-a-new");
+    // Sibling is untouched.
+    expect(getOAuthAppById(secondId)?.clientId).toBe("orig-b");
+    expect(getOAuthAppById(secondId)?.clientSecret).toBe("secret-b");
+  });
+
+  test("POST without id and without clientSecret is rejected (create requires a secret)", async () => {
+    // A pre-existing sibling for the same provider must NOT be used as a secret
+    // fallback for a no-id create.
+    upsertOAuthApp("needs_secret", {
+      clientId: "sibling-client",
+      clientSecret: "sibling-secret",
+      authorizeUrl: "https://oauth.vendor.test/authorize",
+      tokenUrl: "https://oauth.vendor.test/token",
+      redirectUri: "https://api.public.test/api/oauth/needs_secret/callback",
+      scopes: "read",
+    });
+
+    const res = await dispatch("/api/oauth-apps", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        provider: "needs_secret",
+        clientId: "no-secret-client",
+        authorizeUrl: "https://oauth.vendor.test/authorize",
+        tokenUrl: "https://oauth.vendor.test/token",
+        scopes: [],
+      },
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/clientSecret is required/);
+  });
+
+  test("oauth app upsert accepts tracker providers (reserved carve-out removed in step-8)", async () => {
     const res = await dispatch("/api/oauth-apps", {
       method: "POST",
       agentId: leadAgentId,
@@ -572,9 +823,9 @@ describe("/api/script-connections HTTP", () => {
       },
     });
 
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toContain("dedicated tracker");
-    expect(getOAuthApp("linear")).toBeNull();
+    // linear/jira are ordinary rows now — the generic surface manages them.
+    expect(res.status).toBe(200);
+    expect(getOAuthApp("linear")?.clientId).toBe("linear-client");
   });
 
   test("oauth app upsert rejects unsafe endpoint URLs in production and accepts public HTTPS", async () => {
@@ -683,7 +934,7 @@ describe("/api/script-connections HTTP", () => {
     }
   });
 
-  test("integrations catalog proxy filters cli entries", async () => {
+  test("integrations catalog puts blessed entries first and filters cli entries", async () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("https://integrations.sh/api.json");
       return new Response(
@@ -713,9 +964,19 @@ describe("/api/script-connections HTTP", () => {
     const res = await dispatch("/api/integrations-catalog");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      entries: Array<{ id: string; kind: string; slug: string; name: string }>;
+      entries: Array<{ id: string; kind: string; slug: string; name: string; feeds: string[] }>;
+      partial: boolean;
     };
-    expect(body.entries).toEqual([
+    expect(body.partial).toBe(false);
+    expect(body.entries.slice(0, 5).map((entry) => entry.slug)).toEqual([
+      "github",
+      "slack",
+      "linear",
+      "jira",
+      "gmail",
+    ]);
+    expect(body.entries.slice(0, 5).every((entry) => entry.feeds.includes("blessed"))).toBe(true);
+    expect(body.entries.slice(5)).toEqual([
       {
         id: "stripe",
         kind: "openapi",
@@ -1154,5 +1415,89 @@ describe("POST /api/oauth-apps/{provider}/refresh", () => {
       agentId: workerAgentId,
     });
     expect(res.status).toBe(403);
+  });
+});
+
+describe("POST /api/oauth-authorizations/{id}/refresh", () => {
+  const realFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  function seedRotatingAuthorization() {
+    upsertOAuthApp("rotator", {
+      clientId: "rotator-client",
+      clientSecret: "rotator-secret-should-not-leak",
+      authorizeUrl: "https://rotator.test/authorize",
+      tokenUrl: "https://rotator.test/token",
+      redirectUri: "https://api.public.test/api/oauth/callback",
+      scopes: "read,write",
+      requiresRefreshTokenRotation: true,
+    });
+    const app = getOAuthApp("rotator");
+    if (!app) throw new Error("app not created");
+    return upsertAuthorization({
+      appId: app.id,
+      accessToken: "old-access-should-not-leak",
+      refreshToken: "old-refresh-should-not-leak",
+      status: "active",
+    });
+  }
+
+  test("502 and does NOT persist when a rotating provider omits the new refresh_token", async () => {
+    const authorization = seedRotatingAuthorization();
+    // 200 with a new access token but no rotated refresh_token — the rotation
+    // core must reject rather than silently keep the (possibly invalidated) old
+    // refresh token.
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ access_token: "new-access-should-not-leak", token_type: "bearer" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+
+    const res = await dispatch(`/api/oauth-authorizations/${authorization.id}/refresh`, {
+      method: "POST",
+      agentId: leadAgentId,
+    });
+
+    expect(res.status).toBe(502);
+    expect(res.text).toContain("did not include a rotated refresh_token");
+    // Tokens were never rotated (no successful refresh persisted). Routing
+    // through the shared locked refresh core means a genuine rotation failure
+    // now also marks the row refresh-failed — correct, since the old refresh
+    // token may be provider-invalidated, so the sweep must retry it.
+    const after = getAuthorizationById(authorization.id);
+    expect(after?.lastRefreshedAt).toBeNull();
+    expect(after?.accessToken).toBe("old-access-should-not-leak");
+    expect(after?.refreshToken).toBe("old-refresh-should-not-leak");
+    expect(after?.status).toBe("refresh-failed");
+  });
+
+  test("200 and rotates when the provider returns a new refresh_token", async () => {
+    const authorization = seedRotatingAuthorization();
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          access_token: "new-access-should-not-leak",
+          token_type: "bearer",
+          expires_in: 7200,
+          refresh_token: "rotated-refresh-should-not-leak",
+          scope: "read,write",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+
+    const res = await dispatch(`/api/oauth-authorizations/${authorization.id}/refresh`, {
+      method: "POST",
+      agentId: leadAgentId,
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.text).not.toContain("rotated-refresh-should-not-leak");
+    const body = (await res.json()) as { ok: boolean; status: string };
+    expect(body.ok).toBe(true);
+    const after = getAuthorizationById(authorization.id);
+    expect(after?.lastRefreshedAt).not.toBeNull();
   });
 });

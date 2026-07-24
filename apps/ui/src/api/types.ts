@@ -1159,8 +1159,48 @@ export interface ScriptsResponse {
 // Script connections (`ctx.api.<slug>` / `ctx.mcp.<slug>`)
 export type ScriptConnectionKind = "openapi" | "graphql" | "mcp";
 export type ScriptConnectionScope = "global" | "agent" | "repo";
-export type OAuthBindingTokenStatus = "ok" | "expiring" | "missing";
+export type OAuthBindingTokenStatus = "ok" | "expiring" | "refresh-failed" | "revoked" | "missing";
 export type CredentialAuthKind = "config" | "oauth";
+
+// Embedded connection auth (step-7). A connection carries a single inline auth
+// intent that the server resolves into an auto-managed credential binding.
+export type ConnectionAuthType = "none" | "bearer" | "header" | "query" | "oauth";
+
+export type ConnectionAuthInput =
+  | { type: "none" }
+  | { type: "bearer"; secret?: string; configKey?: string; template?: string; hosts?: string[] }
+  | {
+      type: "header";
+      headerName: string;
+      secret?: string;
+      configKey?: string;
+      template?: string;
+      hosts?: string[];
+    }
+  | {
+      type: "query";
+      paramName: string;
+      secret?: string;
+      configKey?: string;
+      template?: string;
+      hosts?: string[];
+    }
+  | {
+      type: "oauth";
+      authorizationId: string;
+      configKey?: string;
+      template?: string;
+      hosts?: string[];
+    };
+
+// Write-only summary of a connection's embedded auth (never returns the secret).
+export interface ConnectionAuthSummary {
+  type: ConnectionAuthType;
+  configKey?: string;
+  authorizationId?: string;
+  paramName?: string;
+  status?: OAuthBindingTokenStatus;
+}
 
 export interface ScriptCredentialBinding {
   id: string;
@@ -1172,7 +1212,8 @@ export interface ScriptCredentialBinding {
   scopeId: string | null;
   active: boolean;
   authKind: CredentialAuthKind;
-  oauthProvider?: string;
+  /** OAuth authorization the binding resolves its token from (authKind==="oauth"). */
+  oauthAuthorizationId?: string;
   source?: "default" | "user" | "migration";
   tokenStatus?: OAuthBindingTokenStatus;
   createdAt: string;
@@ -1200,6 +1241,12 @@ export interface ScriptConnection {
   allowedHosts: string[];
   credentialBindingId: string | null;
   credentialBinding: ScriptConnectionCredentialSummary | null;
+  /**
+   * Embedded connection auth summary (step-7), present on list + detail.
+   * `status` mirrors the binding token status; broken states raise the
+   * dependent-connection warning badge.
+   */
+  auth?: ConnectionAuthSummary | null;
   openapiSpecSourceKind: "url" | "inline" | "agent_fs" | null;
   openapiSpecSource: string | null;
   openapiSpecEtag: string | null;
@@ -1266,9 +1313,13 @@ export type UpsertScriptConnectionInput =
       displayName?: string;
       scope?: ScriptConnectionScope;
       scopeId?: string | null;
-      baseUrl: string;
+      // Optional: the server extracts spec-declared server URLs (step-3), so
+      // spec-backed connections may leave this empty.
+      baseUrl?: string;
       allowedHosts?: string[];
       credentialBindingId?: string | null;
+      // Embedded auth (step-7). Supersedes the legacy flat credential fields.
+      auth?: ConnectionAuthInput;
       configKey?: string;
       headerTemplate?: string;
       queryTemplate?: string;
@@ -1276,6 +1327,8 @@ export type UpsertScriptConnectionInput =
       oauthProvider?: string;
       openapiSpecUrl?: string;
       openapiSpecJson?: string;
+      // Vendored blessed spec source (step-2).
+      specSource?: { kind: "vendored"; slug: string };
       enabled?: boolean;
     }
   | {
@@ -1288,6 +1341,7 @@ export type UpsertScriptConnectionInput =
       baseUrl: string;
       allowedHosts: string[];
       credentialBindingId?: string | null;
+      auth?: ConnectionAuthInput;
       configKey?: string;
       headerTemplate?: string;
       queryTemplate?: string;
@@ -1316,8 +1370,36 @@ export interface UpsertCredentialBindingInput {
   scopeId?: string | null;
   active?: boolean;
   authKind?: CredentialAuthKind;
-  oauthProvider?: string;
+  /** Selected OAuth authorization id (required when authKind==="oauth"). */
+  oauthAuthorizationId?: string;
 }
+
+/** Lifecycle status of a single labeled authorization (mirrors the API). */
+export type OAuthAuthorizationStatus = "active" | "refresh-failed" | "expired" | "revoked";
+
+/** Provenance of an OAuth app row. */
+export type OAuthAppSource = "manual" | "dcr" | "curated-prefill";
+
+/**
+ * A single labeled authorization under an OAuth app (never carries token
+ * material — mirrors the server's `sanitizeAuthorization`).
+ */
+export interface OAuthAuthorization {
+  id: string;
+  label: string;
+  accountEmail: string | null;
+  status: OAuthAuthorizationStatus;
+  expiresAt: string | null;
+  scope: string | null;
+  hasRefreshToken: boolean;
+  lastErrorMessage: string | null;
+  lastRefreshedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Alias kept for call sites written against the single-flow dialog work. */
+export type OAuthAuthorizationSummary = OAuthAuthorization;
 
 export interface OAuthAppSummary {
   id: string;
@@ -1330,23 +1412,67 @@ export interface OAuthAppSummary {
   extraParams?: Record<string, string>;
   tokenAuthStyle: "body" | "basic";
   tokenBodyFormat: "form" | "json";
+  source: OAuthAppSource;
+  /** Legacy default-authorization token status (kept for back-compat). */
   tokenStatus: OAuthBindingTokenStatus;
   expiresAt?: string | null;
   lastRefreshedAt?: string | null;
+  /** N labeled authorizations under this app (empty until first authorize). */
+  authorizations: OAuthAuthorization[];
   createdAt: string;
   updatedAt: string;
 }
 
 export interface UpsertOAuthAppInput {
-  provider: string;
+  /** Target an exact existing app on edit (avoids mutating a same-provider row). */
+  id?: string;
+  /** When set, the server hydrates endpoints/quirks from the curated preset. */
+  presetId?: string;
+  provider?: string;
   clientId: string;
   clientSecret?: string;
-  authorizeUrl: string;
-  tokenUrl: string;
+  authorizeUrl?: string;
+  tokenUrl?: string;
+  userinfoUrl?: string;
+  revocationUrl?: string;
   scopes?: string[];
+  scopeSeparator?: string;
   extraParams?: Record<string, string>;
   tokenAuthStyle?: "body" | "basic";
   tokenBodyFormat?: "form" | "json";
+  requiresRefreshTokenRotation?: boolean;
+}
+
+// Curated OAuth preset surfaced by GET /api/oauth-presets (step-6). No secrets.
+export interface OAuthPreset {
+  id: string;
+  displayName: string;
+  provider: string;
+  authorizeUrl: string;
+  tokenUrl: string;
+  revocationUrl?: string;
+  userinfoUrl?: string;
+  scopes: string[];
+  scopeSeparator?: string;
+  tokenAuthStyle?: "body" | "basic";
+  tokenBodyFormat?: "form" | "json";
+  requiresRefreshTokenRotation?: boolean;
+  extraParams?: Record<string, string>;
+  setupHints: string[];
+}
+
+export interface UpsertOAuthAppResult {
+  oauthApp: OAuthAppSummary;
+  redirectUri: string;
+  setupHints?: string[];
+}
+
+/** Result of building an authorization URL for a labeled authorization. */
+export interface OAuthAuthorizeUrlResult {
+  authorizeUrl: string;
+  state: string;
+  label: string;
+  redirectUri: string;
 }
 
 export interface OAuthAppDiscoveryResult {
@@ -1366,8 +1492,12 @@ export interface IntegrationsCatalogEntry {
   icon: string | null;
   domain: string;
   categories: string[];
-  /** Upstream catalog feeds; "apis-guru" marks bulk-imported entries. */
+  /** Upstream catalog feeds; "apis-guru" marks bulk-imported entries, "blessed" curated ones. */
   feeds?: string[];
+  /** Blessed entries reference an in-repo vendored OpenAPI spec (step-2). */
+  vendoredSlug?: string;
+  /** Blessed entries may suggest a curated OAuth preset for the auth flow (step-6). */
+  presetId?: string;
 }
 
 export interface IntegrationsCatalogResponse {

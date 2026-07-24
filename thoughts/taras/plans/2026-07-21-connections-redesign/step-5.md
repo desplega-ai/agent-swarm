@@ -2,7 +2,10 @@
 id: step-5
 name: Refresh re-key + refresh-failed semantics
 depends_on: [step-1]
-status: ready
+status: done
+assignee: fable-orchestrator-opus-step5
+completed_at: 2026-07-23T02:30:00+0200
+claimed_at: 2026-07-23T00:30:00+0200
 ---
 
 # step-5: Refresh re-key + refresh-failed semantics

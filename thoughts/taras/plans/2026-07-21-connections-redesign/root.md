@@ -114,6 +114,8 @@ Steps reference this contract instead of restating DDL. Canonical DDL lives in s
 
 **Migration number assignments** (pre-assigned to avoid parallel-step collisions): **117** step-1 (OAuth restructure), **118** step-3 (baseUrl provenance), **119** step-2 (`vendored` spec source kind), **120** step-7 (embedded connection auth columns). If a number is taken by the time a step lands, take the next free one and update this table.
 
+> **2026-07-23 consolidation**: pre-merge cleanup collapsed 118–121 (incl. step-5/8's `121_oauth_keepalive_flag`) into a single `117_unified_oauth.sql` — none were released, so one migration ships. Filename kept so dev DBs that applied all five stay consistent (runner keys by version; stale 118–121 `_migrations` rows are harmless).
+
 ## Quick Verification Reference
 
 - `bun test` (single file: `bun test src/tests/<file>.test.ts`)
@@ -160,16 +162,16 @@ graph TD
 
 | ID | Name | Depends on | Status | File |
 |----|------|------------|--------|------|
-| step-1 | Unified OAuth schema + migration 117 + store adapters | — | ready | [step-1.md](./step-1.md) |
-| step-2 | Vendored specs + blessed manifest + catalog merge | — | ready | [step-2.md](./step-2.md) |
-| step-3 | Spec server extraction + baseUrl provenance | — | ready | [step-3.md](./step-3.md) |
-| step-4 | Static callback + DB pending + multi-authorization flow | step-1 | ready | [step-4.md](./step-4.md) |
-| step-5 | Refresh re-key + refresh-failed semantics | step-1 | ready | [step-5.md](./step-5.md) |
-| step-6 | OAuth presets + curated app hydration | step-1, step-2 | ready | [step-6.md](./step-6.md) |
-| step-7 | Embedded connection auth + derived bindings | step-1 | ready | [step-7.md](./step-7.md) |
-| step-8 | Tracker fold — Linear/Jira on the unified core | step-4, step-5 | ready | [step-8.md](./step-8.md) |
-| step-9 | UI — OAuth apps & authorizations | step-4, step-6 | ready | [step-9.md](./step-9.md) |
-| step-10 | UI — single-flow connection creation | step-6, step-7 | ready | [step-10.md](./step-10.md) |
+| step-1 | Unified OAuth schema + migration 117 + store adapters | — | done | [step-1.md](./step-1.md) |
+| step-2 | Vendored specs + blessed manifest + catalog merge | — | done | [step-2.md](./step-2.md) |
+| step-3 | Spec server extraction + baseUrl provenance | — | done | [step-3.md](./step-3.md) |
+| step-4 | Static callback + DB pending + multi-authorization flow | step-1 | done | [step-4.md](./step-4.md) |
+| step-5 | Refresh re-key + refresh-failed semantics | step-1 | done | [step-5.md](./step-5.md) |
+| step-6 | OAuth presets + curated app hydration | step-1, step-2 | done | [step-6.md](./step-6.md) |
+| step-7 | Embedded connection auth + derived bindings | step-1 | done | [step-7.md](./step-7.md) |
+| step-8 | Tracker fold — Linear/Jira on the unified core | step-4, step-5 | done | [step-8.md](./step-8.md) |
+| step-9 | UI — OAuth apps & authorizations | step-4, step-6 | done | [step-9.md](./step-9.md) |
+| step-10 | UI — single-flow connection creation | step-6, step-7 | done | [step-10.md](./step-10.md) |
 | step-11 | Integration — E2E gauntlet + docs | step-3, step-8, step-9, step-10 | ready | [step-11.md](./step-11.md) |
 
 > **Canonical dependencies and execution status live in each `step-<n>.md`'s frontmatter.** This table is a derived snapshot at plan creation. During `/v-implement`, frontmatter `status` (`ready` → `claimed` → `done`) is the source of truth — re-render this table when you want a current view.
@@ -195,6 +197,12 @@ graph TD
 ## Appendix
 
 - **Follow-up plans**: user/role-level authorization scoping (schema leaves `userId` dormant); self-serve connection setup (post user/role scoping); possible manifest generation from integrations.sh if it's Desplega-owned (open question).
+- **Post-QA follow-ups (2026-07-23)**:
+  - UI: configKey inputs (embedded auth + binding dialogs) should be a selector of existing swarm-config keys instead of free text. NOTE: resolution is scope-aware (`getResolvedConfig` merges global→agent→repo, `src/be/script-credential-broker.ts:36-43`), NOT global-only — selector should use `GET /api/config` with scope filtering (endpoint exists, unconsumed by connections UI).
+  - Step-11 docs MUST include an upgrade note: pre-redesign generic script-connections OAuth apps have the old `/api/oauth/{provider}/callback` registered at the provider; new authorize attempts force the static `/api/oauth/callback` (`src/http/script-connections.ts:1923-1924` overrides stored redirectUri) → redirect_uri_mismatch on re-auth until the registration adds the static URL. Refresh of existing tokens unaffected; legacy route still completes in-flight callbacks. Trackers + MCP-DCR callbacks unchanged (no action for those users).
+  - ~~Security-hygiene gap: pending carryover plaintext~~ **CORRECTED 2026-07-23**: legacy `mcp_oauth_pending` already stored `codeVerifier`/`dcrClientSecret` encrypted (main `src/be/db-queries/mcp-oauth.ts:385,394`), so the carryover copied ciphertext — no plaintext exposure existed. The carryover was nonetheless removed from 117 as a simplification (10-min TTL makes mid-upgrade pending state dead on arrival; drops ~50 lines of correlated-subquery SQL). DONE same day.
+  - Informational (TC-9): real Linear rotates refresh tokens despite `requiresRefreshTokenRotation=0` seed + "Linear does not rotate" comment; wrapper's `refreshed ?? old` handles it — fix the comment.
+  - Create-path clobber FIXED pre-merge (`7160d144`): POST /api/oauth-apps no-id now always inserts (`createOAuthApp`), id → `updateOAuthAppById`; provider-keyed `upsertOAuthApp` reserved for boot reconciliation. Remaining sibling: `DELETE /api/oauth-apps/{provider}` addressed by provider still deletes the oldest row — delete-by-id exists and the UI uses it; deprecate/disambiguate the provider-keyed delete as a follow-up.
 - **Derail notes**:
   - Phase-0 bug (query-only auth header default) found **already fixed on main** with a regression test (`src/tests/script-connections-http.test.ts:172-200`) — plan treats it as verify-only, diverging from brainstorm requirement #11 (decided 2026-07-21).
   - `updateOAuthTokensAfterRefresh`'s optimistic concurrency compares raw `refreshToken` equality — breaks once tokens are encrypted with per-write IVs; replaced by `tokenVersion` counter (schema contract).

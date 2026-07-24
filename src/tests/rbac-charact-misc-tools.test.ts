@@ -31,6 +31,7 @@ import {
   upsertKv,
 } from "../be/db";
 import { getMemoryStore } from "../be/memory";
+import { clearAuditSink, setAuditSink } from "../rbac";
 import { registerCancelTaskTool } from "../tools/cancel-task";
 import { registerContextDiffTool } from "../tools/context-diff";
 import { registerContextHistoryTool } from "../tools/context-history";
@@ -372,6 +373,65 @@ describe("credential-bindings / script-connections gates (characterization)", ()
     const result = await callTool("script-connections", LEAD_ID, { action: "list" });
 
     expect(result.structuredContent.success).toBe(true);
+  });
+});
+
+describe("credential-bindings per-action RBAC verb (mirrors HTTP route gates)", () => {
+  // The tool now exposes OAuth app/authorization actions. Each must gate on the
+  // SAME verb its HTTP route uses (oauth_apps_upsert → oauth-app.manage,
+  // oauth_apps_authorize_url → oauth-authorization.manage), not the blanket
+  // credential-binding.manage — otherwise a future custom role granting only
+  // credential-binding.manage would gain OAuth powers the HTTP routes deny.
+  // `can()` is isLead-only today, so we observe the *verb* it is asked about via
+  // the audit sink rather than an allow/deny that legacy policy cannot yet split.
+  const cases: Array<{ action: string; verb: string; extra?: Record<string, unknown> }> = [
+    { action: "list", verb: "credential-binding.manage" },
+    { action: "upsert", verb: "credential-binding.manage" },
+    { action: "disable", verb: "credential-binding.manage" },
+    {
+      action: "oauth-authorizations-list",
+      verb: "credential-binding.manage",
+      extra: { provider: "acme" },
+    },
+    { action: "oauth-app-upsert", verb: "oauth-app.manage" },
+    {
+      action: "oauth-authorize-url",
+      verb: "oauth-authorization.manage",
+      extra: { provider: "acme" },
+    },
+  ];
+
+  for (const { action, verb, extra } of cases) {
+    test(`action '${action}' gates on ${verb}`, async () => {
+      const seen: string[] = [];
+      setAuditSink((check) => {
+        if (check.verb.startsWith("credential-binding") || check.verb.startsWith("oauth-")) {
+          seen.push(check.verb);
+        }
+      });
+      try {
+        await callTool("credential-bindings", LEAD_ID, { action, ...(extra ?? {}) });
+      } finally {
+        clearAuditSink();
+      }
+      // The gate is the first (and only) credential/oauth verb can() is asked.
+      expect(seen[0]).toBe(verb);
+    });
+  }
+
+  test("worker is denied the OAuth app action with the OAuth-app deny message", async () => {
+    const res = await callTool("credential-bindings", WORKER_ID, { action: "oauth-app-upsert" });
+    expect(res.structuredContent.success).toBe(false);
+    expect(res.structuredContent.message).toBe("Only the lead can manage OAuth apps.");
+  });
+
+  test("worker is denied the authorize-url action with the OAuth-authorization deny message", async () => {
+    const res = await callTool("credential-bindings", WORKER_ID, {
+      action: "oauth-authorize-url",
+      provider: "acme",
+    });
+    expect(res.structuredContent.success).toBe(false);
+    expect(res.structuredContent.message).toBe("Only the lead can manage OAuth authorizations.");
   });
 });
 

@@ -1,14 +1,16 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { deleteOAuthTokens, getOAuthTokens } from "../../be/db-queries/oauth";
-import { isLinearEnabled } from "../../linear/app";
 import {
-  getLinearAuthorizationUrl,
-  handleLinearCallback,
-  revokeLinearToken,
-} from "../../linear/oauth";
+  deleteOAuthTokens,
+  getAuthorizationById,
+  getDefaultAuthorizationIdForProvider,
+  getOAuthTokens,
+} from "../../be/db-queries/oauth";
+import { isLinearEnabled } from "../../linear/app";
+import { getLinearAuthorizationUrl, revokeLinearToken } from "../../linear/oauth";
 import { handleLinearWebhook } from "../../linear/webhook";
-import { ensureTokenOrThrow } from "../../oauth/ensure-token";
+import { forceRefreshAuthorizationOrThrow } from "../../oauth/ensure-token";
+import { completeGenericOAuthCallback } from "../oauth-callback";
 import { route } from "../route-def";
 import { deriveApiBaseUrl, parseQueryParams } from "../utils";
 
@@ -158,32 +160,14 @@ export async function handleLinearTracker(
     const parsed = await linearCallback.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true; // parse() already sent 400
 
-    const { code, state } = parsed.query;
-
-    try {
-      await handleLinearCallback(code, state);
-      res.writeHead(200, { "Content-Type": "text/html" });
-      res.end(`<!DOCTYPE html>
-<html>
-<head><title>Linear Connected</title></head>
-<body style="font-family: system-ui; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0;">
-  <div style="text-align: center;">
-    <h1>Linear Connected</h1>
-    <p>OAuth authorization complete. You can close this window.</p>
-  </div>
-</body>
-</html>`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error("[Linear] OAuth callback failed:", message);
-
-      if (message.includes("Invalid or expired OAuth state")) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Invalid or expired OAuth state" }));
-      } else {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Token exchange failed", details: message }));
-      }
+    // Delegate to the unified, state-keyed callback. The redirect URI still
+    // points here (registered with Linear), so this route stays valid; it now
+    // consumes the DB-backed pending row, lands tokens on the default
+    // authorization, and runs the tracker post-processing (appUserId capture).
+    const { handled } = await completeGenericOAuthCallback(res, parsed.query);
+    if (!handled) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid or expired OAuth state" }));
     }
     return true;
   }
@@ -211,8 +195,9 @@ export async function handleLinearTracker(
       return true;
     }
 
-    const tokens = getOAuthTokens("linear");
-    if (!tokens?.refreshToken) {
+    const authorizationId = getDefaultAuthorizationIdForProvider("linear");
+    const authorization = authorizationId ? getAuthorizationById(authorizationId) : null;
+    if (!authorization?.refreshToken) {
       res.writeHead(409, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
@@ -223,7 +208,7 @@ export async function handleLinearTracker(
     }
 
     try {
-      await ensureTokenOrThrow("linear", Number.MAX_SAFE_INTEGER);
+      await forceRefreshAuthorizationOrThrow(authorizationId as string);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[Linear] Forced token refresh failed:", message);

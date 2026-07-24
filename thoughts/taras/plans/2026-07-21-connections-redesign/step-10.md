@@ -2,7 +2,7 @@
 id: step-10
 name: UI — single-flow connection creation
 depends_on: [step-6, step-7]
-status: ready
+status: done
 ---
 
 # step-10: UI — single-flow connection creation

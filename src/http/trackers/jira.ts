@@ -1,12 +1,18 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { deleteOAuthTokens, getOAuthTokens } from "../../be/db-queries/oauth";
+import {
+  deleteOAuthTokens,
+  getAuthorizationById,
+  getDefaultAuthorizationIdForProvider,
+  getOAuthTokens,
+} from "../../be/db-queries/oauth";
 import { isJiraEnabled } from "../../jira/app";
 import { clearJiraMetadata, getJiraMetadata } from "../../jira/metadata";
-import { getJiraAuthorizationUrl, handleJiraCallback } from "../../jira/oauth";
+import { getJiraAuthorizationUrl } from "../../jira/oauth";
 import { handleJiraWebhook } from "../../jira/webhook";
 import { deleteJiraWebhook, registerJiraWebhook } from "../../jira/webhook-lifecycle";
-import { ensureTokenOrThrow } from "../../oauth/ensure-token";
+import { forceRefreshAuthorizationOrThrow } from "../../oauth/ensure-token";
+import { completeGenericOAuthCallback } from "../oauth-callback";
 import { route } from "../route-def";
 import { deriveApiBaseUrl, parseQueryParams } from "../utils";
 
@@ -232,32 +238,14 @@ export async function handleJiraTracker(
     const parsed = await jiraCallback.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true; // parse() already sent 400
 
-    const { code, state } = parsed.query;
-
-    try {
-      await handleJiraCallback(code, state);
-      res.writeHead(200, { "Content-Type": "text/html" });
-      res.end(`<!DOCTYPE html>
-<html>
-<head><title>Jira Connected</title></head>
-<body style="font-family: system-ui; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0;">
-  <div style="text-align: center;">
-    <h1>Jira Connected</h1>
-    <p>OAuth authorization complete. You can close this window.</p>
-  </div>
-</body>
-</html>`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error("[Jira] OAuth callback failed:", message);
-
-      if (message.includes("Invalid or expired OAuth state")) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Invalid or expired OAuth state" }));
-      } else {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "OAuth callback failed", details: message }));
-      }
+    // Delegate to the unified, state-keyed callback. The redirect URI still
+    // points here (registered with Atlassian), so this route stays valid; it
+    // now consumes the DB-backed pending row, lands tokens on the default
+    // authorization, and runs the tracker post-processing (cloudId capture).
+    const { handled } = await completeGenericOAuthCallback(res, parsed.query);
+    if (!handled) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid or expired OAuth state" }));
     }
     return true;
   }
@@ -285,8 +273,9 @@ export async function handleJiraTracker(
       return true;
     }
 
-    const tokens = getOAuthTokens("jira");
-    if (!tokens?.refreshToken) {
+    const authorizationId = getDefaultAuthorizationIdForProvider("jira");
+    const authorization = authorizationId ? getAuthorizationById(authorizationId) : null;
+    if (!authorization?.refreshToken) {
       res.writeHead(409, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
@@ -297,9 +286,8 @@ export async function handleJiraTracker(
     }
 
     try {
-      // Pass a buffer larger than any plausible token lifetime so
-      // isTokenExpiringSoon() always returns true and a refresh always fires.
-      await ensureTokenOrThrow("jira", Number.MAX_SAFE_INTEGER);
+      // Unconditional refresh of the default authorization (force buffer).
+      await forceRefreshAuthorizationOrThrow(authorizationId as string);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[Jira] Forced token refresh failed:", message);

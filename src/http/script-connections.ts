@@ -4,17 +4,28 @@ import { resolveHttpAuditUserId } from "@/be/audit-user";
 import { normalizeDate } from "@/be/date-utils";
 import { getAgentById, getDb } from "@/be/db";
 import {
+  createOAuthApp,
+  deleteAuthorizationById,
+  deleteAuthorizationsForApp,
   deleteOAuthTokens,
+  getAuthorizationById,
   getOAuthApp,
+  getOAuthAppById,
   getOAuthTokens,
-  upsertOAuthApp,
+  listAuthorizationsForApp,
+  type OAuthAuthorization,
+  updateOAuthAppById,
 } from "@/be/db-queries/oauth";
 import {
   getOAuthBindingTokenStatus,
-  getOAuthProviderConfig,
   type OAuthBindingTokenStatus,
+  oauthAppToProviderConfig,
 } from "@/be/oauth-credential-bindings";
 import {
+  ConnectionAuthInputSchema,
+  type ConnectionAuthSummary,
+  connectionAuthInputFromFlat,
+  connectionAuthSummary,
   getScriptConnectionById,
   listRelationalCredentialBindings,
   listScriptConnections,
@@ -26,9 +37,16 @@ import {
   upsertCredentialBinding,
   upsertScriptConnection,
 } from "@/be/script-connections";
-import { assertOAuthAppUrlsSafe, assertOAuthProviderIsNotReserved } from "@/oauth/app-validation";
-import { forceRefreshTokenOrThrow } from "@/oauth/ensure-token";
+import { listVendoredOpenapiEntries } from "@/be/vendored-openapi";
+import { assertOAuthAppUrlsSafe, assertOAuthEgressUrlSafe } from "@/oauth/app-validation";
+import { forceRefreshAuthorizationOrThrow, forceRefreshTokenOrThrow } from "@/oauth/ensure-token";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
+import {
+  getOAuthPreset,
+  hydrateOAuthAppFromPreset,
+  listOAuthPresetIds,
+  listOAuthPresets,
+} from "@/oauth/presets";
 import { buildAuthorizationUrl } from "@/oauth/wrapper";
 import { can } from "@/rbac";
 import {
@@ -36,10 +54,10 @@ import {
   placeholderForConfigKey,
 } from "@/scripts-runtime/credential-broker";
 import type { OAuthApp } from "@/tracker/types";
-import { getPublicMcpBaseUrl } from "@/utils/constants";
 import { getRequestAuth } from "@/utils/request-auth-context";
 import { resolveScopedResourceId, scopedResourceScopeIdSchema } from "@/utils/scoped-resource";
-import { scrubSecrets } from "@/utils/secret-scrubber";
+import { registerVolatileSecret, scrubSecrets } from "@/utils/secret-scrubber";
+import { staticOAuthCallbackUri } from "./oauth-callback";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -54,6 +72,9 @@ const connectionKindSchema = z.enum(["openapi", "graphql", "mcp"]);
 
 const idParamsSchema = z.object({ id: z.string().uuid() });
 const providerParamsSchema = z.object({ provider: providerSchema });
+// OAuth app ids are `hex(randomblob(16))` and authorization ids may be
+// migrated (non-UUID) identifiers — accept any opaque id, not just UUIDs.
+const oauthResourceIdParamsSchema = z.object({ id: z.string().min(1).max(255) });
 
 const listConnectionsQuerySchema = z.object({
   kind: connectionKindSchema.optional(),
@@ -69,20 +90,27 @@ const connectionBaseBodySchema = z.object({
   scopeId: scopedResourceScopeIdSchema.nullable().optional(),
   allowedHosts: z.array(z.string().min(1)).optional(),
   credentialBindingId: z.string().uuid().nullable().optional(),
+  auth: ConnectionAuthInputSchema.optional(),
   configKey: z.string().min(1).max(255).optional(),
   headerTemplate: z.string().min(1).optional(),
   queryTemplate: z.string().min(1).optional(),
   authKind: z.enum(["config", "oauth"]).optional(),
-  oauthProvider: providerSchema.optional(),
+  oauthAuthorizationId: z.string().min(1).max(255).optional(),
   enabled: z.boolean().optional(),
+});
+
+const vendoredSpecSourceSchema = z.object({
+  kind: z.literal("vendored"),
+  slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
 });
 
 const upsertConnectionBodySchema = z.discriminatedUnion("kind", [
   connectionBaseBodySchema.extend({
     kind: z.literal("openapi"),
-    baseUrl: z.string().url(),
+    baseUrl: z.string().url().optional(),
     openapiSpecUrl: z.string().url().optional(),
     openapiSpecJson: z.string().optional(),
+    specSource: vendoredSpecSourceSchema.optional(),
   }),
   connectionBaseBodySchema.extend({
     kind: z.literal("graphql"),
@@ -107,16 +135,25 @@ const credentialBindingBodySchema = z.object({
   scopeId: scopedResourceScopeIdSchema.nullable().optional(),
   active: z.boolean().default(true).optional(),
   authKind: z.enum(["config", "oauth"]).default("config").optional(),
-  oauthProvider: providerSchema.optional(),
+  oauthAuthorizationId: z.string().min(1).max(255).optional(),
 });
 
 const oauthAppBodySchema = z.object({
-  provider: providerSchema,
+  // Target a specific existing app on edit. Required to avoid mutating the
+  // wrong row when multiple apps share a provider slug.
+  id: z.string().min(1).max(255).optional(),
+  // provider / authorizeUrl / tokenUrl are optional when a presetId supplies
+  // them; the handler enforces presence after preset hydration.
+  presetId: z.string().min(1).optional(),
+  provider: providerSchema.optional(),
   clientId: z.string().min(1),
   clientSecret: z.string().min(1).optional(),
-  authorizeUrl: z.string().url(),
-  tokenUrl: z.string().url(),
-  scopes: z.array(z.string().min(1)).default([]).optional(),
+  authorizeUrl: z.string().url().optional(),
+  tokenUrl: z.string().url().optional(),
+  // Fetched server-side with credentials — SSRF-validated on write.
+  userinfoUrl: z.string().url().optional(),
+  revocationUrl: z.string().url().optional(),
+  scopes: z.array(z.string().min(1)).optional(),
   extraParams: z.record(z.string(), z.string()).optional(),
   tokenAuthStyle: z.enum(["body", "basic"]).optional(),
   tokenBodyFormat: z.enum(["form", "json"]).optional(),
@@ -211,8 +248,11 @@ const listCredentialBindingsRoute = route({
   path: "/api/credential-bindings",
   pattern: ["api", "credential-bindings"],
   operationId: "credential_bindings_list",
-  summary: "List script credential bindings",
+  summary: "List standalone script credential bindings",
+  description:
+    "Lists standalone (raw fetch()) credential bindings. Auto-managed bindings that back embedded connection auth are hidden by default; pass includeManaged=true to include them.",
   tags: ["Script Connections"],
+  query: z.object({ includeManaged: z.enum(["true", "false"]).optional() }),
   responses: {
     200: { description: "Credential bindings" },
   },
@@ -246,6 +286,20 @@ const listOAuthAppsRoute = route({
   },
 });
 
+const listOAuthPresetsRoute = route({
+  method: "get",
+  path: "/api/oauth-presets",
+  pattern: ["api", "oauth-presets"],
+  operationId: "oauth_presets_list",
+  summary: "List curated OAuth presets for app-creation pickers",
+  description:
+    "Static curated OAuth presets (endpoints, scopes, quirks, and setup hints). Contains no secrets; client credentials are always customer-supplied.",
+  tags: ["Script Connections"],
+  responses: {
+    200: { description: "Curated OAuth presets" },
+  },
+});
+
 const upsertOAuthAppRoute = route({
   method: "post",
   path: "/api/oauth-apps",
@@ -259,7 +313,7 @@ const upsertOAuthAppRoute = route({
     400: { description: "Validation error" },
     403: { description: "Only the lead agent can manage script connections" },
   },
-  rbac: { permission: "script-connection.manage" },
+  rbac: { permission: "oauth-app.manage" },
 });
 
 const discoverOAuthAppRoute = route({
@@ -275,7 +329,7 @@ const discoverOAuthAppRoute = route({
     400: { description: "Discovery failed" },
     403: { description: "Only the lead agent can manage script connections" },
   },
-  rbac: { permission: "script-connection.manage" },
+  rbac: { permission: "oauth-app.manage" },
 });
 
 const deleteOAuthAppRoute = route({
@@ -291,23 +345,87 @@ const deleteOAuthAppRoute = route({
     403: { description: "Only the lead agent can manage script connections" },
     404: { description: "OAuth app not found" },
   },
-  rbac: { permission: "script-connection.manage" },
+  rbac: { permission: "oauth-app.manage" },
 });
+
+const authorizeUrlBodySchema = z
+  .object({
+    label: z.string().min(1).max(255).default("default").optional(),
+    // Emitted verbatim in the 302 Location — restrict to http(s) so it can't
+    // be a javascript:/data: URL. Origin allowlisting is a follow-up (noted).
+    finalRedirect: z
+      .string()
+      .url()
+      .refine((value) => /^https?:$/.test(new URL(value).protocol), {
+        message: "finalRedirect must be an http(s) URL.",
+      })
+      .optional(),
+  })
+  .optional();
 
 const authorizeUrlRoute = route({
   method: "post",
-  path: "/api/oauth-apps/{provider}/authorize-url",
+  path: "/api/oauth-apps/{id}/authorize-url",
   pattern: ["api", "oauth-apps", null, "authorize-url"],
   operationId: "oauth_apps_authorize_url",
-  summary: "Build an OAuth authorization URL",
+  summary: "Build an OAuth authorization URL for a labeled authorization",
   tags: ["Script Connections"],
-  params: providerParamsSchema,
+  params: oauthResourceIdParamsSchema,
+  body: authorizeUrlBodySchema,
   responses: {
-    200: { description: "OAuth authorization URL" },
-    403: { description: "Only the lead agent can manage script connections" },
+    200: { description: "OAuth authorization URL + state" },
+    403: { description: "Only the lead agent can manage OAuth authorizations" },
     404: { description: "OAuth app not found" },
   },
-  rbac: { permission: "script-connection.manage" },
+  rbac: { permission: "oauth-authorization.manage" },
+});
+
+const listAuthorizationsRoute = route({
+  method: "get",
+  path: "/api/oauth-apps/{id}/authorizations",
+  pattern: ["api", "oauth-apps", null, "authorizations"],
+  operationId: "oauth_app_authorizations_list",
+  summary: "List the labeled authorizations for an OAuth app (never token material)",
+  tags: ["Script Connections"],
+  params: oauthResourceIdParamsSchema,
+  responses: {
+    200: { description: "Authorizations without token material" },
+    404: { description: "OAuth app not found" },
+  },
+});
+
+const deleteAuthorizationRoute = route({
+  method: "delete",
+  path: "/api/oauth-authorizations/{id}",
+  pattern: ["api", "oauth-authorizations", null],
+  operationId: "oauth_authorization_delete",
+  summary: "Revoke (best-effort) and delete a single OAuth authorization",
+  tags: ["Script Connections"],
+  params: oauthResourceIdParamsSchema,
+  responses: {
+    200: { description: "Authorization revoked + deleted" },
+    403: { description: "Only the lead agent can manage OAuth authorizations" },
+    404: { description: "Authorization not found" },
+  },
+  rbac: { permission: "oauth-authorization.manage" },
+});
+
+const refreshAuthorizationRoute = route({
+  method: "post",
+  path: "/api/oauth-authorizations/{id}/refresh",
+  pattern: ["api", "oauth-authorizations", null, "refresh"],
+  operationId: "oauth_authorization_refresh",
+  summary: "Force-refresh a single OAuth authorization (never returns token values)",
+  tags: ["Script Connections"],
+  params: oauthResourceIdParamsSchema,
+  responses: {
+    200: { description: "Refresh result with token status and new expiry" },
+    400: { description: "No refresh token stored" },
+    403: { description: "Only the lead agent can manage OAuth authorizations" },
+    404: { description: "Authorization not found" },
+    502: { description: "Provider token endpoint rejected the refresh" },
+  },
+  rbac: { permission: "oauth-authorization.manage" },
 });
 
 const integrationsCatalogRoute = route({
@@ -358,7 +476,7 @@ const disconnectOAuthAppRoute = route({
     403: { description: "Only the lead agent can manage script connections" },
     404: { description: "OAuth app not found" },
   },
-  rbac: { permission: "script-connection.manage" },
+  rbac: { permission: "oauth-app.manage" },
 });
 
 const refreshOAuthAppTokensRoute = route({
@@ -376,19 +494,23 @@ const refreshOAuthAppTokensRoute = route({
     404: { description: "OAuth app not found" },
     502: { description: "Provider token endpoint rejected the refresh" },
   },
-  rbac: { permission: "script-connection.manage" },
+  rbac: { permission: "oauth-app.manage" },
 });
 
 type BindingSummary = {
   id: string;
   configKey: string;
   authKind: "config" | "oauth";
-  oauthProvider?: string;
+  oauthAuthorizationId?: string;
   tokenStatus?: OAuthBindingTokenStatus;
 };
 
 type DecoratedBinding = ScriptCredentialBindingRecord & {
   tokenStatus?: OAuthBindingTokenStatus;
+};
+
+type ConnectionAuthSummaryResponse = ConnectionAuthSummary & {
+  status?: OAuthBindingTokenStatus;
 };
 
 type DecoratedConnection = Omit<
@@ -398,6 +520,7 @@ type DecoratedConnection = Omit<
   operationCount: number;
   toolCount: number;
   credentialBinding: BindingSummary | null;
+  auth: ConnectionAuthSummaryResponse;
 };
 
 type ConnectionOperationParameter = {
@@ -433,9 +556,13 @@ type OAuthAppRow = {
   tokenUrl: string;
   redirectUri: string;
   scopes: string;
-  metadata: string;
   tokenExpiresAt: string | null;
   tokenUpdatedAt: string | null;
+  authorizationId: string | null;
+  extraParamsJson: string | null;
+  tokenAuthStyle: "body" | "basic";
+  tokenBodyFormat: "form" | "json";
+  source: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -451,7 +578,26 @@ type IntegrationsCatalogEntry = {
   domain: string;
   categories: string[];
   feeds: string[];
+  vendoredSlug?: string;
+  presetId?: string;
 };
+
+const BLESSED_CATALOG_ENTRIES: IntegrationsCatalogEntry[] = listVendoredOpenapiEntries().map(
+  (entry) => ({
+    id: entry.slug,
+    kind: "openapi",
+    slug: entry.slug,
+    name: entry.name,
+    description: `Blessed ${entry.name} integration`,
+    url: entry.docsUrl,
+    icon: null,
+    domain: entry.domain,
+    categories: entry.categories,
+    feeds: ["blessed"],
+    vendoredSlug: entry.slug,
+    ...(entry.presetId ? { presetId: entry.presetId } : {}),
+  }),
+);
 
 const DISCOVERY_TIMEOUT_MS = 10_000;
 const INTEGRATIONS_CATALOG_TIMEOUT_MS = 15_000;
@@ -462,6 +608,10 @@ let integrationsCatalogCache: {
   expiresAtMs: number;
   payload: { entries: IntegrationsCatalogEntry[]; cachedAt: string };
 } | null = null;
+
+export function resetIntegrationsCatalogCacheForTesting(): void {
+  integrationsCatalogCache = null;
+}
 
 type IntegrationsSurfaceMechanics = {
   in: string;
@@ -537,17 +687,91 @@ function ensureConnectionAdmin(
   return true;
 }
 
+/**
+ * Generic principal gate for OAuth-app / OAuth-authorization management. Mirrors
+ * {@link ensureConnectionAdmin} but keys on the OAuth-specific verbs so the two
+ * surfaces can diverge in a future role-based rollout.
+ */
+function ensureVerbAdmin(
+  req: IncomingMessage,
+  res: ServerResponse,
+  agentId: string | undefined,
+  verb: "oauth-app.manage" | "oauth-authorization.manage",
+  denyMessage: string,
+): boolean {
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "operator" || auth?.kind === "user") return true;
+
+  const callerAgentId = agentId ?? singleHeader(req, "x-agent-id");
+  const agent = callerAgentId ? getAgentById(callerAgentId) : undefined;
+  const decision = can({
+    principal: { kind: "agent", agentId: callerAgentId ?? "", isLead: agent?.isLead ?? false },
+    verb,
+    resource: { kind: "none" },
+    source: "http",
+  });
+  if (!decision.allow) {
+    jsonError(res, denyMessage, 403);
+    return false;
+  }
+  return true;
+}
+
+function ensureOAuthAppAdmin(
+  req: IncomingMessage,
+  res: ServerResponse,
+  agentId: string | undefined,
+): boolean {
+  return ensureVerbAdmin(
+    req,
+    res,
+    agentId,
+    "oauth-app.manage",
+    "Only the lead can manage OAuth apps.",
+  );
+}
+
+function ensureOAuthAuthorizationAdmin(
+  req: IncomingMessage,
+  res: ServerResponse,
+  agentId: string | undefined,
+): boolean {
+  return ensureVerbAdmin(
+    req,
+    res,
+    agentId,
+    "oauth-authorization.manage",
+    "Only the lead can manage OAuth authorizations.",
+  );
+}
+
 function tokenStatusForBinding(
   binding: ScriptCredentialBindingRecord,
 ): OAuthBindingTokenStatus | undefined {
-  return binding.authKind === "oauth" && binding.oauthProvider
-    ? getOAuthBindingTokenStatus(binding.oauthProvider)
-    : undefined;
+  if (binding.authKind !== "oauth") return undefined;
+  return binding.oauthAuthorizationId
+    ? getOAuthBindingTokenStatus(binding.oauthAuthorizationId)
+    : "missing";
 }
 
 function decorateBinding(binding: ScriptCredentialBindingRecord): DecoratedBinding {
   const tokenStatus = tokenStatusForBinding(binding);
   return tokenStatus ? { ...binding, tokenStatus } : binding;
+}
+
+function authSummaryForConnection(
+  connection: ScriptConnectionRecord,
+): ConnectionAuthSummaryResponse {
+  const base = connectionAuthSummary(connection);
+  if (connection.authType === "oauth") {
+    return {
+      ...base,
+      status: connection.authAuthorizationId
+        ? getOAuthBindingTokenStatus(connection.authAuthorizationId)
+        : "missing",
+    };
+  }
+  return base;
 }
 
 function bindingSummary(binding: ScriptCredentialBindingRecord | undefined): BindingSummary | null {
@@ -557,7 +781,7 @@ function bindingSummary(binding: ScriptCredentialBindingRecord | undefined): Bin
     id: binding.id,
     configKey: binding.configKey,
     authKind: binding.authKind ?? "config",
-    ...(binding.oauthProvider ? { oauthProvider: binding.oauthProvider } : {}),
+    ...(binding.oauthAuthorizationId ? { oauthAuthorizationId: binding.oauthAuthorizationId } : {}),
     ...(tokenStatus ? { tokenStatus } : {}),
   };
 }
@@ -715,6 +939,7 @@ function decorateConnections(connections: ScriptConnectionRecord[]): DecoratedCo
       credentialBinding: bindingSummary(
         connection.credentialBindingId ? bindings.get(connection.credentialBindingId) : undefined,
       ),
+      auth: authSummaryForConnection(connection),
     };
   });
 }
@@ -758,51 +983,9 @@ function validateCredentialTemplate(input: {
   }
 }
 
-function maybeCreateInlineBinding(
-  data: z.infer<typeof upsertConnectionBodySchema>,
-  resolvedScope?: "global" | "agent" | "repo",
-  resolvedScopeId?: string | null,
-) {
-  if (data.credentialBindingId || !data.configKey) return data.credentialBindingId ?? null;
-
-  const scope = resolvedScope ?? data.scope ?? "global";
-  const scopeId =
-    resolvedScopeId !== undefined
-      ? resolvedScopeId
-      : connectionScopeId(scope, data.scopeId, "bindings");
-  const allowedHosts =
-    data.allowedHosts ?? ("baseUrl" in data ? [new URL(data.baseUrl).hostname] : []);
-  const authKind = data.authKind ?? "config";
-  const placeholder = placeholderForConfigKey(data.configKey);
-  const headerTemplate =
-    data.headerTemplate ??
-    (data.queryTemplate ? undefined : `Authorization: Bearer ${placeholder}`);
-
-  validateCredentialTemplate({
-    configKey: data.configKey,
-    headerTemplate,
-    queryTemplate: data.queryTemplate,
-  });
-  if (authKind === "oauth" && !data.oauthProvider) {
-    throw new Error("oauthProvider is required for oauth credential bindings.");
-  }
-
-  return upsertCredentialBinding({
-    configKey: data.configKey,
-    allowedHosts,
-    headerTemplate,
-    queryTemplate: data.queryTemplate,
-    scope,
-    scopeId,
-    active: true,
-    authKind,
-    oauthProvider: data.oauthProvider ?? null,
-  }).id;
-}
-
-function parseMetadata(metadata: string): Record<string, unknown> {
+function parseMetadata(metadata: string | null): Record<string, unknown> {
   try {
-    const parsed = JSON.parse(metadata);
+    const parsed = JSON.parse(metadata ?? "{}");
     return parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : {};
@@ -812,24 +995,46 @@ function parseMetadata(metadata: string): Record<string, unknown> {
 }
 
 function parseScopes(scopes: string): string[] {
+  try {
+    const parsed = JSON.parse(scopes);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((scope): scope is string => typeof scope === "string");
+    }
+  } catch {
+    // Provider adapters accepted comma-delimited scopes before migration 117.
+  }
   return scopes
     .split(",")
     .map((scope) => scope.trim())
     .filter(Boolean);
 }
 
+/** Sanitized view of an authorization — never includes token material. */
+function sanitizeAuthorization(authorization: OAuthAuthorization) {
+  return {
+    id: authorization.id,
+    label: authorization.label,
+    accountEmail: authorization.accountEmail,
+    status: authorization.status,
+    expiresAt: authorization.expiresAt,
+    scope: authorization.scope,
+    hasRefreshToken: authorization.refreshToken != null && authorization.refreshToken !== "",
+    // Non-sensitive: the refresh-failure reason is scrubbed at write time and
+    // surfaced in the UI tooltip on `refresh-failed` authorizations. Never a token.
+    lastErrorMessage: authorization.lastErrorMessage,
+    lastRefreshedAt: authorization.lastRefreshedAt,
+    createdAt: authorization.createdAt,
+    updatedAt: authorization.updatedAt,
+  };
+}
+
 function sanitizeOAuthApp(row: OAuthAppRow) {
-  const metadata = parseMetadata(row.metadata);
-  const extraParams =
-    metadata.extraParams &&
-    typeof metadata.extraParams === "object" &&
-    !Array.isArray(metadata.extraParams)
-      ? Object.fromEntries(
-          Object.entries(metadata.extraParams as Record<string, unknown>).filter(
-            (entry): entry is [string, string] => typeof entry[1] === "string",
-          ),
-        )
-      : undefined;
+  const extraParamsObject = parseMetadata(row.extraParamsJson);
+  const extraParams = Object.fromEntries(
+    Object.entries(extraParamsObject).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
   return {
     id: row.id,
     provider: row.provider,
@@ -838,12 +1043,14 @@ function sanitizeOAuthApp(row: OAuthAppRow) {
     tokenUrl: row.tokenUrl,
     redirectUri: row.redirectUri,
     scopes: parseScopes(row.scopes),
-    extraParams,
-    tokenAuthStyle: metadata.tokenAuthStyle === "basic" ? "basic" : "body",
-    tokenBodyFormat: metadata.tokenBodyFormat === "json" ? "json" : "form",
-    tokenStatus: getOAuthBindingTokenStatus(row.provider),
+    ...(Object.keys(extraParams).length > 0 ? { extraParams } : {}),
+    tokenAuthStyle: row.tokenAuthStyle,
+    tokenBodyFormat: row.tokenBodyFormat,
+    source: row.source,
+    tokenStatus: row.authorizationId ? getOAuthBindingTokenStatus(row.authorizationId) : "missing",
     expiresAt: row.tokenExpiresAt,
     lastRefreshedAt: normalizeDate(row.tokenUpdatedAt),
+    authorizations: listAuthorizationsForApp(row.id).map(sanitizeAuthorization),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -853,10 +1060,12 @@ function listOAuthApps() {
   const rows = getDb()
     .prepare<OAuthAppRow, []>(
       `SELECT a.id, a.provider, a.clientId, a.authorizeUrl, a.tokenUrl, a.redirectUri,
-              a.scopes, a.metadata, t.expiresAt AS tokenExpiresAt,
-              t.updatedAt AS tokenUpdatedAt, a.createdAt, a.updatedAt
+              a.scopes, a.extraParamsJson, a.tokenAuthStyle, a.tokenBodyFormat, a.source,
+              z.id AS authorizationId, z.expiresAt AS tokenExpiresAt,
+              z.updatedAt AS tokenUpdatedAt, a.createdAt, a.updatedAt
        FROM oauth_apps a
-       LEFT JOIN oauth_tokens t ON t.provider = a.provider
+       LEFT JOIN oauth_authorizations z ON z.appId = a.id AND z.label = 'default'
+       WHERE a.mcpServerId IS NULL
        ORDER BY a.provider ASC`,
     )
     .all();
@@ -869,10 +1078,23 @@ function listOAuthApps() {
  * Network/HTTP failures are logged (scrubbed) and never fail the caller.
  */
 async function attemptRemoteRevocation(app: OAuthApp, accessToken: string): Promise<boolean> {
-  const metadata = parseMetadata(app.metadata);
-  const revocationUrl =
-    typeof metadata.revocationUrl === "string" ? metadata.revocationUrl : undefined;
+  const revocationUrl = app.revocationUrl ?? undefined;
   if (!revocationUrl) return false;
+
+  // Fail-closed host re-check at egress: this POST carries the client_secret +
+  // token. A stored revocationUrl must not be able to reach an internal host.
+  try {
+    assertOAuthEgressUrlSafe(revocationUrl);
+  } catch (err) {
+    console.warn(
+      scrubSecrets(
+        `OAuth token revocation skipped for provider ${app.provider} (unsafe revocation URL): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      ),
+    );
+    return false;
+  }
 
   const body = new URLSearchParams({
     token: accessToken,
@@ -881,7 +1103,7 @@ async function attemptRemoteRevocation(app: OAuthApp, accessToken: string): Prom
   const headers: Record<string, string> = {
     "content-type": "application/x-www-form-urlencoded",
   };
-  if (metadata.tokenAuthStyle === "basic") {
+  if (app.tokenAuthStyle === "basic") {
     headers.authorization = `Basic ${Buffer.from(`${app.clientId}:${app.clientSecret}`).toString("base64")}`;
   } else {
     body.set("client_id", app.clientId);
@@ -896,6 +1118,8 @@ async function attemptRemoteRevocation(app: OAuthApp, accessToken: string): Prom
       headers,
       body: body.toString(),
       signal: controller.signal,
+      // A public revocationUrl must not 302 the client_secret to an internal host.
+      redirect: "manual",
     });
   } catch (err) {
     console.warn(
@@ -909,10 +1133,6 @@ async function attemptRemoteRevocation(app: OAuthApp, accessToken: string): Prom
     clearTimeout(timeout);
   }
   return true;
-}
-
-function genericOAuthRedirectUri(provider: string): string {
-  return `${getPublicMcpBaseUrl()}/api/oauth/${encodeURIComponent(provider)}/callback`;
 }
 
 function oauthDiscoveryUrls(inputUrl: string): string[] {
@@ -1093,6 +1313,18 @@ async function fetchIntegrationsCatalog() {
   }
 }
 
+function mergeBlessedCatalogEntries(
+  entries: IntegrationsCatalogEntry[],
+): IntegrationsCatalogEntry[] {
+  const blessedDomains = new Set(
+    BLESSED_CATALOG_ENTRIES.map((entry) => entry.domain.toLowerCase()),
+  );
+  return [
+    ...BLESSED_CATALOG_ENTRIES,
+    ...entries.filter((entry) => !blessedDomains.has(entry.domain.toLowerCase())),
+  ];
+}
+
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
 }
@@ -1221,15 +1453,48 @@ async function fetchIntegrationsSurface(domain: string): Promise<IntegrationsSur
   }
 }
 
-function deleteOAuthApp(provider: string): boolean {
-  const existing = getOAuthApp(provider);
-  if (!existing) return false;
+/**
+ * Foot-gun warnings for deleting an OAuth app from the generic surface. Since
+ * step-8 removed the linear/jira reserved-provider carve-out, these apps are
+ * deletable here — but doing so degrades the tracker integration, so surface
+ * (don't block) the consequences.
+ */
+function collectOAuthAppDeletionWarnings(app: OAuthApp): string[] {
+  const warnings: string[] = [];
+  if (app.provider === "linear" || app.provider === "jira") {
+    warnings.push(
+      `'${app.provider}' is the seeded tracker OAuth app; deleting it disconnects the ${app.provider} integration until the server re-seeds it on next start (you must re-run the OAuth flow to reconnect).`,
+    );
+  }
+  try {
+    const metadata = JSON.parse(app.metadata || "{}") as { webhookIds?: unknown };
+    if (Array.isArray(metadata.webhookIds) && metadata.webhookIds.length > 0) {
+      warnings.push(
+        `This app has ${metadata.webhookIds.length} registered webhook(s); deleting it drops the local record without deregistering them upstream.`,
+      );
+    }
+  } catch {
+    // Unparseable metadata — nothing to warn about.
+  }
+  return warnings;
+}
+
+function deleteOAuthApp(idOrProvider: string): { deleted: boolean; warnings: string[] } {
+  // Resolve id first (exact — N apps per provider allowed), then provider slug
+  // for old provider-keyed callers. Never touches DCR/MCP apps.
+  const existing = getOAuthAppById(idOrProvider) ?? getOAuthApp(idOrProvider);
+  if (!existing || existing.mcpServerId !== null) return { deleted: false, warnings: [] };
+  const warnings = collectOAuthAppDeletionWarnings(existing);
   const tx = getDb().transaction(() => {
-    deleteOAuthTokens(provider);
-    getDb().query("DELETE FROM oauth_apps WHERE provider = ?").run(provider);
+    // Revoke by THIS app's id — not the provider-keyed `deleteOAuthTokens`,
+    // which targets the oldest same-provider app and would disconnect a
+    // surviving sibling. The app DELETE also CASCADEs its authorizations; this
+    // explicit delete keeps the scoping correct regardless of FK enforcement.
+    deleteAuthorizationsForApp(existing.id);
+    getDb().query("DELETE FROM oauth_apps WHERE id = ?").run(existing.id);
   });
   tx();
-  return true;
+  return { deleted: true, warnings };
 }
 
 async function refreshHttpConnection(
@@ -1277,10 +1542,11 @@ export async function handleScriptConnections(
     try {
       if (
         parsed.body.kind === "openapi" &&
-        Boolean(parsed.body.openapiSpecJson) &&
-        Boolean(parsed.body.openapiSpecUrl)
+        [parsed.body.openapiSpecJson, parsed.body.openapiSpecUrl, parsed.body.specSource].filter(
+          Boolean,
+        ).length > 1
       ) {
-        jsonError(res, "Provide exactly one of openapiSpecJson or openapiSpecUrl.", 400);
+        jsonError(res, "Provide exactly one OpenAPI spec source.", 400);
         return true;
       }
       const existingConnection = parsed.body.id ? getScriptConnectionById(parsed.body.id) : null;
@@ -1290,9 +1556,10 @@ export async function handleScriptConnections(
         parsed.body.kind === "openapi" &&
         !parsed.body.openapiSpecJson &&
         !parsed.body.openapiSpecUrl &&
+        !parsed.body.specSource &&
         !existingOpenapiConnection
       ) {
-        jsonError(res, "Provide exactly one of openapiSpecJson or openapiSpecUrl.", 400);
+        jsonError(res, "Provide exactly one OpenAPI spec source.", 400);
         return true;
       }
 
@@ -1309,12 +1576,25 @@ export async function handleScriptConnections(
       const enabled = enabledWasProvided
         ? parsed.body.enabled !== false
         : (existingConnection?.enabled ?? true);
-      const credentialBindingId = maybeCreateInlineBinding(parsed.body, scope, scopeId);
+      const authInput =
+        parsed.body.kind === "mcp"
+          ? undefined
+          : connectionAuthInputFromFlat({
+              auth: parsed.body.auth,
+              configKey: parsed.body.configKey,
+              headerTemplate: parsed.body.headerTemplate,
+              queryTemplate: parsed.body.queryTemplate,
+              authKind: parsed.body.authKind,
+              oauthAuthorizationId: parsed.body.oauthAuthorizationId,
+              allowedHosts: parsed.body.allowedHosts,
+            });
       const userId = resolveHttpAuditUserId(req, agentId);
       const openapiSpecUrl =
         parsed.body.kind === "openapi" ? parsed.body.openapiSpecUrl : undefined;
       const openapiSpecJson =
         parsed.body.kind === "openapi" ? parsed.body.openapiSpecJson : undefined;
+      const vendoredSpecSource =
+        parsed.body.kind === "openapi" ? parsed.body.specSource : undefined;
       const openapiSpecUrlChanged =
         parsed.body.kind === "openapi" &&
         Boolean(openapiSpecUrl) &&
@@ -1332,19 +1612,20 @@ export async function handleScriptConnections(
         kind: parsed.body.kind,
         scope,
         scopeId,
-        baseUrl: "baseUrl" in parsed.body ? parsed.body.baseUrl : null,
-        allowedHosts:
-          parsed.body.allowedHosts ??
-          ("baseUrl" in parsed.body ? [new URL(parsed.body.baseUrl).hostname] : []),
-        credentialBindingId,
-        openapiSpecSourceKind:
-          reuseExistingOpenapiSpec && !openapiSpecUrl
+        baseUrl: "baseUrl" in parsed.body ? parsed.body.baseUrl : undefined,
+        allowedHosts: parsed.body.allowedHosts,
+        auth: authInput,
+        credentialBindingId: parsed.body.credentialBindingId ?? undefined,
+        openapiSpecSourceKind: vendoredSpecSource
+          ? "vendored"
+          : reuseExistingOpenapiSpec && !openapiSpecUrl
             ? existingOpenapiConnection?.openapiSpecSourceKind
             : undefined,
         openapiSpecSource:
-          reuseExistingOpenapiSpec && !openapiSpecUrl
+          vendoredSpecSource?.slug ??
+          (reuseExistingOpenapiSpec && !openapiSpecUrl
             ? existingOpenapiConnection?.openapiSpecSource
-            : undefined,
+            : undefined),
         openapiSpecUrl,
         openapiSpecJson:
           parsed.body.kind === "openapi"
@@ -1411,8 +1692,12 @@ export async function handleScriptConnections(
   }
 
   if (listCredentialBindingsRoute.match(req.method, pathSegments)) {
+    const includeManaged = queryParams.get("includeManaged") === "true";
     json(res, {
-      bindings: listRelationalCredentialBindings({ includeInactive: true }).map(decorateBinding),
+      bindings: listRelationalCredentialBindings({
+        includeInactive: true,
+        excludeManaged: !includeManaged,
+      }).map(decorateBinding),
     });
     return true;
   }
@@ -1429,8 +1714,8 @@ export async function handleScriptConnections(
         jsonError(res, "At least one of headerTemplate or queryTemplate is required.", 400);
         return true;
       }
-      if ((parsed.body.authKind ?? "config") === "oauth" && !parsed.body.oauthProvider) {
-        jsonError(res, "oauthProvider is required for oauth credential bindings.", 400);
+      if ((parsed.body.authKind ?? "config") === "oauth" && !parsed.body.oauthAuthorizationId) {
+        jsonError(res, "oauthAuthorizationId is required for oauth credential bindings.", 400);
         return true;
       }
       validateCredentialTemplate({
@@ -1448,7 +1733,7 @@ export async function handleScriptConnections(
         scopeId,
         active: parsed.body.active ?? true,
         authKind: parsed.body.authKind ?? "config",
-        oauthProvider: parsed.body.oauthProvider,
+        oauthAuthorizationId: parsed.body.oauthAuthorizationId,
       });
       const binding = upsertCredentialBinding({
         id: parsed.body.id,
@@ -1460,13 +1745,18 @@ export async function handleScriptConnections(
         scopeId: nextBinding.scopeId ?? null,
         active: nextBinding.active,
         authKind: nextBinding.authKind,
-        oauthProvider: nextBinding.oauthProvider ?? null,
+        oauthAuthorizationId: nextBinding.oauthAuthorizationId ?? null,
         userId: resolveHttpAuditUserId(req, agentId),
       });
       json(res, { binding: decorateBinding(binding) });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err), 400);
     }
+    return true;
+  }
+
+  if (listOAuthPresetsRoute.match(req.method, pathSegments)) {
+    json(res, { presets: listOAuthPresets() });
     return true;
   }
 
@@ -1478,42 +1768,112 @@ export async function handleScriptConnections(
   if (upsertOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await upsertOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
 
     try {
-      assertOAuthProviderIsNotReserved(parsed.body.provider);
-      assertOAuthAppUrlsSafe(parsed.body);
-      const existing = getOAuthApp(parsed.body.provider);
-      const clientSecret = parsed.body.clientSecret ?? existing?.clientSecret;
+      const body = parsed.body;
+      // Resolve the preset (if any), then merge with explicit body fields —
+      // explicit fields always win. Client credentials are never prefilled.
+      const preset = body.presetId ? getOAuthPreset(body.presetId) : null;
+      if (body.presetId && !preset) {
+        jsonError(
+          res,
+          `Unknown presetId "${body.presetId}". Valid preset ids: ${listOAuthPresetIds().join(", ")}.`,
+          400,
+        );
+        return true;
+      }
+
+      // Edit targets an exact row by id (N apps per provider allowed); provider
+      // is immutable on edit. 404 if the id is unknown or an MCP/DCR app.
+      const editing = body.id ? getOAuthAppById(body.id) : null;
+      if (body.id && (!editing || editing.mcpServerId !== null)) {
+        jsonError(res, `OAuth app ${body.id} not found.`, 404);
+        return true;
+      }
+
+      const hydrated = preset
+        ? hydrateOAuthAppFromPreset(preset, {
+            provider: body.provider,
+            authorizeUrl: body.authorizeUrl,
+            tokenUrl: body.tokenUrl,
+            scopes: body.scopes,
+            extraParams: body.extraParams,
+            tokenAuthStyle: body.tokenAuthStyle,
+            tokenBodyFormat: body.tokenBodyFormat,
+          })
+        : null;
+
+      const provider = editing?.provider ?? hydrated?.provider ?? body.provider;
+      const authorizeUrl = hydrated?.authorizeUrl ?? body.authorizeUrl;
+      const tokenUrl = hydrated?.tokenUrl ?? body.tokenUrl;
+      const userinfoUrl = hydrated?.userinfoUrl ?? body.userinfoUrl ?? null;
+      const revocationUrl = hydrated?.revocationUrl ?? body.revocationUrl ?? null;
+      if (!provider || !authorizeUrl || !tokenUrl) {
+        jsonError(
+          res,
+          "provider, authorizeUrl, and tokenUrl are required (supply them directly or via a presetId).",
+          400,
+        );
+        return true;
+      }
+
+      // Defense in depth: SSRF-check the merged endpoints (incl. preset-supplied
+      // userinfo/revocation URLs), not just raw input. (The former linear/jira
+      // reserved-provider carve-out was removed in step-8 — trackers are
+      // ordinary rows on this surface now.)
+      assertOAuthAppUrlsSafe({ authorizeUrl, tokenUrl, userinfoUrl, revocationUrl });
+
+      // Only an edit (id given) may inherit the stored secret; a create must
+      // always supply its own. Never fall back to a provider-matched row — that
+      // would let a second app for the provider silently reuse a sibling's
+      // secret (the same clobber hazard the create path itself now avoids).
+      const clientSecret = body.clientSecret ?? editing?.clientSecret;
       if (!clientSecret) {
         jsonError(res, "clientSecret is required when creating a new OAuth app.", 400);
         return true;
       }
 
-      const redirectUri = genericOAuthRedirectUri(parsed.body.provider);
-      upsertOAuthApp(parsed.body.provider, {
-        clientId: parsed.body.clientId,
+      const scopes = hydrated?.scopes ?? body.scopes ?? [];
+      const extraParams = hydrated?.extraParams ?? body.extraParams;
+      const tokenAuthStyle = hydrated?.tokenAuthStyle ?? body.tokenAuthStyle;
+      const tokenBodyFormat = hydrated?.tokenBodyFormat ?? body.tokenBodyFormat;
+
+      // All flows now redirect to the single static callback (step-4).
+      const redirectUri = staticOAuthCallbackUri();
+      const appData = {
+        clientId: body.clientId,
         clientSecret,
-        authorizeUrl: parsed.body.authorizeUrl,
-        tokenUrl: parsed.body.tokenUrl,
+        authorizeUrl,
+        tokenUrl,
         redirectUri,
-        scopes: (parsed.body.scopes ?? []).join(","),
-        ...(parsed.body.extraParams || parsed.body.tokenAuthStyle || parsed.body.tokenBodyFormat
-          ? {
-              metadata: JSON.stringify({
-                ...(parsed.body.extraParams ? { extraParams: parsed.body.extraParams } : {}),
-                ...(parsed.body.tokenAuthStyle
-                  ? { tokenAuthStyle: parsed.body.tokenAuthStyle }
-                  : {}),
-                ...(parsed.body.tokenBodyFormat
-                  ? { tokenBodyFormat: parsed.body.tokenBodyFormat }
-                  : {}),
-              }),
-            }
+        scopes: scopes.join(","),
+        ...(userinfoUrl ? { userinfoUrl } : {}),
+        ...(revocationUrl ? { revocationUrl } : {}),
+        ...(extraParams ? { extraParams } : {}),
+        ...(tokenAuthStyle ? { tokenAuthStyle } : {}),
+        ...(tokenBodyFormat ? { tokenBodyFormat } : {}),
+        ...(hydrated?.scopeSeparator ? { scopeSeparator: hydrated.scopeSeparator } : {}),
+        ...(hydrated?.requiresRefreshTokenRotation !== undefined
+          ? { requiresRefreshTokenRotation: hydrated.requiresRefreshTokenRotation }
           : {}),
+        ...(hydrated ? { source: hydrated.source } : {}),
+      };
+      // No id → always create a fresh row (N apps per provider). With an id →
+      // update exactly that row (existence + non-MCP already checked above).
+      let savedId: string;
+      if (editing) {
+        updateOAuthAppById(editing.id, appData);
+        savedId = editing.id;
+      } else {
+        savedId = createOAuthApp(provider, appData);
+      }
+      const app = listOAuthApps().find((row) => row.id === savedId);
+      json(res, {
+        oauthApp: app,
+        redirectUri,
+        ...(hydrated ? { setupHints: hydrated.setupHints } : {}),
       });
-      const app = listOAuthApps().find((row) => row.provider === parsed.body.provider);
-      json(res, { oauthApp: app });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err), 400);
     }
@@ -1523,7 +1883,7 @@ export async function handleScriptConnections(
   if (discoverOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await discoverOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
     try {
       const discovered = await discoverOAuthApp(parsed.body.url);
       json(res, discovered);
@@ -1536,39 +1896,160 @@ export async function handleScriptConnections(
   if (deleteOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await deleteOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
-    if (!deleteOAuthApp(parsed.params.provider)) {
+    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
+    const deletion = deleteOAuthApp(parsed.params.provider);
+    if (!deletion.deleted) {
       jsonError(res, `OAuth app ${parsed.params.provider} not found.`, 404);
       return true;
     }
-    json(res, { success: true });
+    json(res, {
+      success: true,
+      ...(deletion.warnings.length > 0 ? { warnings: deletion.warnings } : {}),
+    });
+    return true;
+  }
+
+  if (listAuthorizationsRoute.match(req.method, pathSegments)) {
+    const parsed = await listAuthorizationsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const app = getOAuthAppById(parsed.params.id);
+    if (!app || app.mcpServerId !== null) {
+      jsonError(res, `OAuth app ${parsed.params.id} not found.`, 404);
+      return true;
+    }
+    json(res, {
+      authorizations: listAuthorizationsForApp(app.id).map(sanitizeAuthorization),
+    });
     return true;
   }
 
   if (authorizeUrlRoute.match(req.method, pathSegments)) {
     const parsed = await authorizeUrlRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!ensureOAuthAuthorizationAdmin(req, res, agentId)) return true;
 
-    const config = getOAuthProviderConfig(parsed.params.provider);
-    if (!config) {
-      jsonError(res, `OAuth app ${parsed.params.provider} is not configured.`, 404);
+    const app = getOAuthAppById(parsed.params.id);
+    if (!app || app.mcpServerId !== null) {
+      jsonError(res, `OAuth app ${parsed.params.id} is not configured.`, 404);
       return true;
     }
-    const result = await buildAuthorizationUrl(config);
-    json(res, { authorizeUrl: result.url, redirectUri: config.redirectUri });
+    const label = parsed.body?.label ?? "default";
+    // Every authorization redirects to the single static callback.
+    const config = { ...oauthAppToProviderConfig(app), redirectUri: staticOAuthCallbackUri() };
+    try {
+      const result = await buildAuthorizationUrl(config, {
+        appId: app.id,
+        label,
+        flow: "generic",
+        ...(parsed.body?.finalRedirect ? { finalRedirect: parsed.body.finalRedirect } : {}),
+        userId: resolveHttpAuditUserId(req, agentId),
+      });
+      json(res, {
+        authorizeUrl: result.url,
+        state: result.state,
+        label,
+        redirectUri: config.redirectUri,
+      });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : String(err), 400);
+    }
+    return true;
+  }
+
+  if (deleteAuthorizationRoute.match(req.method, pathSegments)) {
+    const parsed = await deleteAuthorizationRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!ensureOAuthAuthorizationAdmin(req, res, agentId)) return true;
+
+    const authorization = getAuthorizationById(parsed.params.id);
+    if (!authorization) {
+      jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
+      return true;
+    }
+    const app = getOAuthAppById(authorization.appId);
+    let revocationAttempted = false;
+    if (app && authorization.accessToken && authorization.status !== "revoked") {
+      revocationAttempted = await attemptRemoteRevocation(app, authorization.accessToken);
+    }
+    deleteAuthorizationById(authorization.id);
+    json(res, { deleted: true, revocationAttempted });
+    return true;
+  }
+
+  if (refreshAuthorizationRoute.match(req.method, pathSegments)) {
+    const parsed = await refreshAuthorizationRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!ensureOAuthAuthorizationAdmin(req, res, agentId)) return true;
+
+    const authorization = getAuthorizationById(parsed.params.id);
+    if (!authorization) {
+      jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
+      return true;
+    }
+    const app = getOAuthAppById(authorization.appId);
+    if (!app || app.mcpServerId !== null) {
+      jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
+      return true;
+    }
+    if (!authorization.refreshToken) {
+      jsonError(res, "Authorization has no refresh token stored.", 400);
+      return true;
+    }
+    try {
+      // Route through the shared locked refresh core (per-authorization
+      // in-process queue + cross-process DB lock + optimistic-concurrency CAS)
+      // with force semantics — it refreshes even when the token isn't near
+      // expiry. This prevents double-exchanging a rotating refresh token against
+      // a concurrent sweep/reactive refresh, and — because the core detects a
+      // concurrent tokenVersion bump and no-ops rather than losing a CAS — a
+      // provider-side rotation performed by that other writer is never
+      // discarded (the 409 path used to brick the stored refresh token).
+      // Rotation enforcement (requiresRefreshTokenRotation → reject a 200 that
+      // omits a new refresh_token) and secret-scrubbed failure messages both
+      // come from the core; a genuine failure also marks the row refresh-failed.
+      await forceRefreshAuthorizationOrThrow(authorization.id);
+    } catch (err) {
+      // The core already registers the attempt's refresh_token / access_token /
+      // client_secret as volatile and scrubs them out of OAuthRefreshError.message
+      // before it is thrown; scrub again defensively for any non-core error.
+      if (authorization.refreshToken)
+        registerVolatileSecret(authorization.refreshToken, "oauth-refresh-token");
+      if (app.clientSecret) registerVolatileSecret(app.clientSecret, "oauth-client-secret");
+      const message = scrubSecrets(err instanceof Error ? err.message : String(err));
+      jsonError(res, `Refresh failed: ${message}`, 502);
+      return true;
+    }
+    const refreshed = getAuthorizationById(authorization.id);
+    if (!refreshed) {
+      jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
+      return true;
+    }
+    json(res, { ok: true, status: refreshed.status, expiresAt: refreshed.expiresAt });
     return true;
   }
 
   if (integrationsCatalogRoute.match(req.method, pathSegments)) {
     try {
-      json(res, await fetchIntegrationsCatalog());
+      const catalog = await fetchIntegrationsCatalog();
+      json(res, {
+        ...catalog,
+        entries: mergeBlessedCatalogEntries(catalog.entries),
+        partial: false,
+      });
     } catch (err) {
-      jsonError(
-        res,
-        `Failed to fetch integrations catalog: ${err instanceof Error ? err.message : String(err)}`,
-        502,
-      );
+      if (BLESSED_CATALOG_ENTRIES.length > 0) {
+        json(res, {
+          entries: BLESSED_CATALOG_ENTRIES,
+          cachedAt: new Date().toISOString(),
+          partial: true,
+        });
+      } else {
+        jsonError(
+          res,
+          `Failed to fetch integrations catalog: ${err instanceof Error ? err.message : String(err)}`,
+          502,
+        );
+      }
     }
     return true;
   }
@@ -1595,7 +2076,7 @@ export async function handleScriptConnections(
   if (disconnectOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await disconnectOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
 
     const app = getOAuthApp(parsed.params.provider);
     if (!app) {
@@ -1616,7 +2097,7 @@ export async function handleScriptConnections(
   if (refreshOAuthAppTokensRoute.match(req.method, pathSegments)) {
     const parsed = await refreshOAuthAppTokensRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
 
     const provider = parsed.params.provider;
     if (!getOAuthApp(provider)) {
@@ -1647,7 +2128,7 @@ export async function handleScriptConnections(
 
     json(res, {
       refreshed: true,
-      tokenStatus: getOAuthBindingTokenStatus(provider),
+      tokenStatus: getOAuthBindingTokenStatus(tokens.id),
       expiresAt: getOAuthTokens(provider)?.expiresAt ?? null,
     });
     return true;

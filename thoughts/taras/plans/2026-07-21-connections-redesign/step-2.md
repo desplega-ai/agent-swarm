@@ -2,7 +2,10 @@
 id: step-2
 name: Vendored specs + blessed manifest + catalog merge
 depends_on: []
-status: ready
+status: done
+assignee: fable-orchestrator-codex-terra-step2
+claimed_at: 2026-07-22T00:00:00+0200
+completed_at: 2026-07-22T18:10:00+0200
 ---
 
 # step-2: Vendored specs + blessed manifest + catalog merge

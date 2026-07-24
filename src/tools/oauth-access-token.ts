@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getOAuthTokens } from "@/be/db-queries/oauth";
-import { ensureTokenOrThrow } from "@/oauth/ensure-token";
+import { getAuthorizationById, getOAuthAppById, getOAuthTokens } from "@/be/db-queries/oauth";
+import { ensureAuthorizationTokenOrThrow, ensureTokenOrThrow } from "@/oauth/ensure-token";
 import { createToolRegistrar } from "@/tools/utils";
 import { registerVolatileSecret } from "@/utils/secret-scrubber";
 
@@ -53,6 +53,39 @@ export async function resolveOAuthAccessToken(
   };
 }
 
+/**
+ * Authorization-keyed resolution: refresh (if near expiry) and return the
+ * access token for a specific `oauth_authorizations` row. The explicit-key
+ * counterpart to {@link resolveOAuthAccessToken}, used by callers that hold an
+ * `authorizationId` rather than a provider slug.
+ */
+export async function resolveOAuthAccessTokenByAuthorization(
+  authorizationId: string,
+  minValiditySeconds = 300,
+): Promise<OAuthAccessTokenResult> {
+  const minValidityMs = minValiditySeconds * 1000;
+  await ensureAuthorizationTokenOrThrow(authorizationId, minValidityMs);
+
+  const authorization = getAuthorizationById(authorizationId);
+  if (!authorization || authorization.status === "revoked" || !authorization.accessToken) {
+    throw new Error(`OAuth authorization ${authorizationId} is not connected`);
+  }
+
+  const app = getOAuthAppById(authorization.appId);
+  const provider = app?.provider ?? authorizationId;
+  if (authorization.expiresAt) {
+    assertTokenUsable(provider, authorization.expiresAt, minValidityMs);
+  }
+  registerVolatileSecret(authorization.accessToken, `${provider.toUpperCase()}_OAUTH_ACCESS_TOKEN`);
+
+  return {
+    provider,
+    accessToken: authorization.accessToken,
+    expiresAt: authorization.expiresAt ?? "",
+    tokenType: "Bearer",
+  };
+}
+
 export const registerGetOauthAccessTokenTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "get-oauth-access-token",
@@ -67,7 +100,18 @@ export const registerGetOauthAccessTokenTool = (server: McpServer) => {
           .min(1)
           .max(64)
           .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, "provider must be a slug")
-          .describe("OAuth provider slug to read from oauth_tokens (for example: linear, jira)."),
+          .optional()
+          .describe(
+            "OAuth provider slug to resolve the default authorization (for example: linear, jira). Provide this OR authorizationId.",
+          ),
+        authorizationId: z
+          .string()
+          .min(1)
+          .max(128)
+          .optional()
+          .describe(
+            "Explicit oauth_authorizations id to resolve. Takes precedence over provider when both are given.",
+          ),
         minValiditySeconds: z
           .number()
           .int()
@@ -86,10 +130,15 @@ export const registerGetOauthAccessTokenTool = (server: McpServer) => {
         tokenType: z.literal("Bearer").optional(),
       }),
     },
-    async ({ provider, minValiditySeconds }, _requestInfo, _meta) => {
+    async ({ provider, authorizationId, minValiditySeconds }, _requestInfo, _meta) => {
       try {
-        const token = await resolveOAuthAccessToken(provider, minValiditySeconds);
-        const message = `${provider} OAuth access token resolved; expires at ${token.expiresAt}.`;
+        if (!provider && !authorizationId) {
+          throw new Error("Provide either provider or authorizationId.");
+        }
+        const token = authorizationId
+          ? await resolveOAuthAccessTokenByAuthorization(authorizationId, minValiditySeconds)
+          : await resolveOAuthAccessToken(provider as string, minValiditySeconds);
+        const message = `${token.provider} OAuth access token resolved; expires at ${token.expiresAt}.`;
         return {
           content: [
             {

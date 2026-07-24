@@ -121,9 +121,11 @@ import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { auditAssetKeys, enforceAssetKeyStartupAudit } from "./asset-key-audit";
+import { migrateLegacyCredentialBindingBlob } from "./connection-bindings-blob-migration";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import { runMigrations } from "./migrations/runner";
+import { autoEncryptLegacyOAuthSecrets } from "./oauth-encryption-backfill";
 import { seedDefaultTemplates } from "./seed-prompt-templates";
 import { isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
 import { emitTaskStarted } from "./task-lifecycle-events";
@@ -328,7 +330,14 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   const hasExistingEncryptedSecrets =
     (database
       .prepare<{ present: number }, []>(
-        "SELECT EXISTS(SELECT 1 FROM swarm_config WHERE isSecret = 1 AND encrypted = 1) as present",
+        `SELECT EXISTS(
+           SELECT 1 FROM swarm_config WHERE isSecret = 1 AND encrypted = 1
+           UNION ALL
+           SELECT 1 FROM oauth_apps
+             WHERE clientSecretEncrypted = 1 AND clientSecret IS NOT NULL
+           UNION ALL
+           SELECT 1 FROM oauth_authorizations WHERE tokensEncrypted = 1
+         ) AS present`,
       )
       .get()?.present ?? 0) === 1;
 
@@ -343,6 +352,19 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   // auto-migrating legacy plaintext rows).
   resolveEncryptionKey(dbPath, { allowGenerate: !hasExistingEncryptedSecrets });
 
+  // Migration 117 carries plaintext tracker OAuth rows with explicit flags;
+  // encrypt them only after the shared key has been resolved. This pass is
+  // idempotent and intentionally fatal on failure so boot never continues
+  // with OAuth credentials left in plaintext.
+  try {
+    autoEncryptLegacyOAuthSecrets(database);
+  } catch (err) {
+    console.error(
+      `[oauth-encryption] FATAL: failed to auto-encrypt legacy OAuth secrets: ${(err as Error).message}`,
+    );
+    throw err;
+  }
+
   // Auto-encrypt any legacy plaintext secrets that predate the encryption
   // feature. Runs after all compatibility guards; failures are fatal because
   // continuing would leave secrets at rest in plaintext — the opposite of the
@@ -352,6 +374,19 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   } catch (err) {
     console.error(
       `[secrets] FATAL: failed to auto-encrypt legacy secrets: ${(err as Error).message}`,
+    );
+    throw err;
+  }
+
+  // Retire the legacy SCRIPT_CREDENTIAL_BINDINGS swarm-config blob: promote any
+  // remaining entries to relational rows so the credential broker is
+  // relational-only. Idempotent; failures are fatal because a silently-dropped
+  // binding would leave scripts unable to authenticate.
+  try {
+    migrateLegacyCredentialBindingBlob(database);
+  } catch (err) {
+    console.error(
+      `[credential-bindings] FATAL: failed to migrate legacy credential binding blob: ${(err as Error).message}`,
     );
     throw err;
   }

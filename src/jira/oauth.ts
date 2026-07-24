@@ -1,4 +1,5 @@
 import { getOAuthApp } from "../be/db-queries/oauth";
+import { oauthAppRowToProviderConfig } from "../oauth/ensure-token";
 import { buildAuthorizationUrl, exchangeCode, type OAuthProviderConfig } from "../oauth/wrapper";
 import { updateJiraMetadata } from "./metadata";
 import type { JiraAccessibleResource } from "./types";
@@ -8,66 +9,41 @@ const ACCESSIBLE_RESOURCES_URL = "https://api.atlassian.com/oauth/token/accessib
 /**
  * Build the OAuth provider config for the generic wrapper.
  *
- * - `audience=api.atlassian.com` is required by the Atlassian 3LO flow.
- * - We intentionally OMIT `prompt: "consent"`: forcing consent on every reconnect
- *   is UX noise. Atlassian's default (skip consent if scopes haven't changed)
- *   is what we want. (Plan errata I6.)
- * - `scopeSeparator: " "` is critical — Atlassian wants space-separated scopes
- *   per RFC 6749, unlike Linear which requires commas.
+ * All provider quirks (space-separated scopes, `audience=api.atlassian.com`,
+ * refresh-token rotation) are now first-class `oauth_apps` columns seeded by
+ * `initJira()`, so this is a thin projection of the row — the drift-prone
+ * hardcoding it used to carry moved into the seeding call + schema.
  */
 export function getJiraOAuthConfig(): OAuthProviderConfig | null {
   const app = getOAuthApp("jira");
-  if (!app) return null;
-
-  return {
-    provider: "jira",
-    clientId: app.clientId,
-    clientSecret: app.clientSecret,
-    authorizeUrl: app.authorizeUrl,
-    tokenUrl: app.tokenUrl,
-    redirectUri: app.redirectUri,
-    scopes: app.scopes.split(","),
-    scopeSeparator: " ",
-    extraParams: { audience: "api.atlassian.com" },
-    requiresRefreshTokenRotation: true,
-  };
+  return app ? oauthAppRowToProviderConfig(app) : null;
 }
 
 export async function getJiraAuthorizationUrl(): Promise<string | null> {
   const config = getJiraOAuthConfig();
   if (!config) return null;
-  const result = await buildAuthorizationUrl(config);
+  // flow='tracker' so the unified state-keyed callback runs the tracker
+  // post-processing (cloudId capture) after landing tokens on the default
+  // authorization.
+  const result = await buildAuthorizationUrl(config, { flow: "tracker", label: "default" });
   return result.url;
 }
 
 /**
- * Handle the OAuth callback: exchange the authorization code for tokens (which
- * `exchangeCode` persists via storeOAuthTokens), then resolve the workspace
- * `cloudId` via the Atlassian accessible-resources endpoint and persist it
- * into `oauth_apps.metadata`.
+ * Resolve the workspace `cloudId`/`siteUrl` from Atlassian's
+ * accessible-resources endpoint using a freshly-exchanged access token, and
+ * persist both into `oauth_apps.metadata`.
  *
  * v1 single-workspace constraint: we always pick the first resource and throw
- * if the list is empty. Multi-workspace is a v2 concern.
+ * if the list is empty. Multi-workspace is a v2 concern. Shared by the unified
+ * `flow='tracker'` callback branch and the legacy {@link handleJiraCallback}.
  */
-export async function handleJiraCallback(
-  code: string,
-  state: string,
-): Promise<{
-  accessToken: string;
-  refreshToken?: string;
-  expiresIn?: number;
-  scope?: string;
-  cloudId: string;
-  siteUrl: string;
-}> {
-  const config = getJiraOAuthConfig();
-  if (!config) throw new Error("Jira OAuth not configured");
-
-  const tokens = await exchangeCode(config, code, state);
-
+export async function resolveAndStoreJiraCloudId(
+  accessToken: string,
+): Promise<{ cloudId: string; siteUrl: string }> {
   const response = await fetch(ACCESSIBLE_RESOURCES_URL, {
     headers: {
-      Authorization: `Bearer ${tokens.accessToken}`,
+      Authorization: `Bearer ${accessToken}`,
       Accept: "application/json",
     },
   });
@@ -90,10 +66,34 @@ export async function handleJiraCallback(
   }
 
   updateJiraMetadata({ cloudId: first.id, siteUrl: first.url });
+  return { cloudId: first.id, siteUrl: first.url };
+}
 
-  return {
-    ...tokens,
-    cloudId: first.id,
-    siteUrl: first.url,
-  };
+/**
+ * Legacy provider-string callback: exchange the code (persisted onto the
+ * default authorization by `exchangeCode`), then resolve + persist cloudId.
+ *
+ * The production tracker callback route now delegates to the unified
+ * state-keyed handler (which invokes {@link resolveAndStoreJiraCloudId} in its
+ * `flow='tracker'` branch); this wrapper is retained for the direct unit-test
+ * surface and any provider-string caller.
+ */
+export async function handleJiraCallback(
+  code: string,
+  state: string,
+): Promise<{
+  accessToken: string;
+  refreshToken?: string;
+  expiresIn?: number;
+  scope?: string;
+  cloudId: string;
+  siteUrl: string;
+}> {
+  const config = getJiraOAuthConfig();
+  if (!config) throw new Error("Jira OAuth not configured");
+
+  const tokens = await exchangeCode(config, code, state);
+  const { cloudId, siteUrl } = await resolveAndStoreJiraCloudId(tokens.accessToken);
+
+  return { ...tokens, cloudId, siteUrl };
 }

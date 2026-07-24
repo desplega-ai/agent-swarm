@@ -1,14 +1,19 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, initDb } from "../be/db";
+import { closeDb, getDb, initDb } from "../be/db";
 import {
   acquireOAuthRefreshLock,
+  createOAuthApp,
   deleteOAuthTokens,
+  getDefaultAuthorizationIdForProvider,
   getOAuthApp,
+  getOAuthAppById,
   getOAuthTokens,
   isTokenExpiringSoon,
+  listAuthorizationSweepRows,
   releaseOAuthRefreshLock,
   storeOAuthTokens,
+  updateOAuthAppById,
   updateOAuthTokensAfterRefresh,
   upsertOAuthApp,
 } from "../be/db-queries/oauth";
@@ -97,6 +102,47 @@ describe("OAuth Apps CRUD", () => {
   });
 });
 
+describe("OAuth Apps create vs update-by-id (N apps per provider)", () => {
+  const seed = (clientId: string, clientSecret: string) => ({
+    clientId,
+    clientSecret,
+    authorizeUrl: "https://multi.example.com/authorize",
+    tokenUrl: "https://multi.example.com/token",
+    redirectUri: "https://multi.example.com/callback",
+    scopes: "read",
+  });
+
+  test("createOAuthApp always inserts a distinct row and never clobbers a sibling", () => {
+    const firstId = createOAuthApp("multi-create", seed("create-first", "secret-first"));
+    const secondId = createOAuthApp("multi-create", seed("create-second", "secret-second"));
+
+    expect(firstId).not.toBe(secondId);
+    const first = getOAuthAppById(firstId);
+    const second = getOAuthAppById(secondId);
+    expect(first!.clientId).toBe("create-first");
+    expect(first!.clientSecret).toBe("secret-first");
+    expect(second!.clientId).toBe("create-second");
+    expect(second!.clientSecret).toBe("secret-second");
+  });
+
+  test("updateOAuthAppById updates only the targeted row", () => {
+    const firstId = createOAuthApp("multi-update", seed("upd-first", "sec-first"));
+    const secondId = createOAuthApp("multi-update", seed("upd-second", "sec-second"));
+
+    updateOAuthAppById(firstId, seed("upd-first-edited", "sec-first-edited"));
+
+    expect(getOAuthAppById(firstId)!.clientId).toBe("upd-first-edited");
+    expect(getOAuthAppById(firstId)!.clientSecret).toBe("sec-first-edited");
+    // Sibling untouched.
+    expect(getOAuthAppById(secondId)!.clientId).toBe("upd-second");
+    expect(getOAuthAppById(secondId)!.clientSecret).toBe("sec-second");
+  });
+
+  test("updateOAuthAppById throws for an unknown id", () => {
+    expect(() => updateOAuthAppById("does-not-exist", seed("x", "y"))).toThrow(/not found/);
+  });
+});
+
 describe("OAuth Tokens CRUD", () => {
   test("getOAuthTokens returns null for unknown provider", () => {
     const result = getOAuthTokens("nonexistent-tokens");
@@ -150,12 +196,14 @@ describe("OAuth Tokens CRUD", () => {
       refreshToken: "refresh-before-refresh",
       expiresAt: new Date(Date.now() + 60000).toISOString(),
     });
+    const observed = getOAuthTokens("token-test")!;
 
     updateOAuthTokensAfterRefresh("token-test", "refresh-before-refresh", {
       accessToken: "access-after-refresh",
       refreshToken: "refresh-after-refresh",
       expiresAt: futureDate,
       scope: "read,write",
+      expectedTokenVersion: observed.tokenVersion,
     });
 
     const tokens = getOAuthTokens("token-test");
@@ -185,10 +233,87 @@ describe("OAuth Tokens CRUD", () => {
     expect(tokens!.refreshToken).toBe("refresh-current");
   });
 
+  test("updateOAuthTokensAfterRefresh rejects a stale version even when the refresh token is unchanged", () => {
+    storeOAuthTokens("token-test", {
+      accessToken: "access-observed",
+      refreshToken: "refresh-stable",
+      expiresAt: new Date(Date.now() + 60000).toISOString(),
+    });
+    const observed = getOAuthTokens("token-test")!;
+
+    storeOAuthTokens("token-test", {
+      accessToken: "access-concurrent-winner",
+      refreshToken: "refresh-stable",
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    });
+
+    expect(() =>
+      updateOAuthTokensAfterRefresh("token-test", "refresh-stable", {
+        accessToken: "access-stale-result",
+        refreshToken: "refresh-stale-result",
+        expiresAt: new Date(Date.now() + 7200000).toISOString(),
+        expectedTokenVersion: observed.tokenVersion,
+      }),
+    ).toThrow(/no rows updated/);
+
+    const tokens = getOAuthTokens("token-test");
+    expect(tokens?.accessToken).toBe("access-concurrent-winner");
+    expect(tokens?.refreshToken).toBe("refresh-stable");
+  });
+
+  test("listAuthorizationSweepRows normalizes legacy bare expiresAt values", () => {
+    getDb()
+      .query(
+        `UPDATE oauth_authorizations SET expiresAt = '2030-01-02 03:04:05'
+         WHERE appId = (SELECT id FROM oauth_apps WHERE provider = 'token-test')
+           AND label = 'default'`,
+      )
+      .run();
+
+    expect(
+      listAuthorizationSweepRows().find((row) => row.provider === "token-test")?.expiresAt,
+    ).toBe("2030-01-02T03:04:05.000Z");
+  });
+
   test("deleteOAuthTokens removes tokens", () => {
     deleteOAuthTokens("token-test");
     const tokens = getOAuthTokens("token-test");
     expect(tokens).toBeNull();
+  });
+
+  test("deleteOAuthTokens revokes in place and reconnect reuses the authorization id", () => {
+    upsertOAuthApp("disconnect-continuity", {
+      clientId: "client-dc",
+      clientSecret: "secret-dc",
+      authorizeUrl: "https://example.com/authorize",
+      tokenUrl: "https://example.com/token",
+      redirectUri: "https://example.com/callback",
+      scopes: "read",
+    });
+    storeOAuthTokens("disconnect-continuity", {
+      accessToken: "access-original",
+      refreshToken: "refresh-original",
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    });
+    const originalId = getDefaultAuthorizationIdForProvider("disconnect-continuity");
+    expect(originalId).not.toBeNull();
+
+    deleteOAuthTokens("disconnect-continuity");
+    // Disconnect reads as "no tokens" to provider-string callers ...
+    expect(getOAuthTokens("disconnect-continuity")).toBeNull();
+    // ... but the row is KEPT so the binding FK survives.
+    expect(getDefaultAuthorizationIdForProvider("disconnect-continuity")).toBe(originalId);
+
+    storeOAuthTokens("disconnect-continuity", {
+      accessToken: "access-reconnected",
+      refreshToken: "refresh-reconnected",
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    });
+    // Reconnect reuses the same authorization id.
+    expect(getDefaultAuthorizationIdForProvider("disconnect-continuity")).toBe(originalId);
+    const reconnected = getOAuthTokens("disconnect-continuity");
+    expect(reconnected?.id).toBe(originalId);
+    expect(reconnected?.accessToken).toBe("access-reconnected");
   });
 });
 

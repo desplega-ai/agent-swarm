@@ -6648,10 +6648,492 @@
         }
       }
     },
+    "/api/mcp-oauth/{mcpServerId}/metadata": {
+      "get": {
+        "summary": "Probe OAuth metadata (PRMD + AS) for an MCP server",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "mcpServerId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth metadata or { requiresOAuth: false }"
+          },
+          "400": {
+            "description": "MCP has no URL / invalid transport"
+          },
+          "404": {
+            "description": "MCP server not found"
+          }
+        }
+      }
+    },
+    "/api/mcp-oauth/{mcpServerId}/status": {
+      "get": {
+        "summary": "Get the current OAuth connection status for an MCP server",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "mcpServerId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "userId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token status (never includes the token value itself)"
+          },
+          "404": {
+            "description": "MCP server not found"
+          }
+        }
+      }
+    },
+    "/api/mcp-oauth/{mcpServerId}/authorize": {
+      "get": {
+        "summary": "Start an OAuth flow. Redirects to the provider.",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "mcpServerId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "redirect",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "userId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scopes",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to authorization server"
+          },
+          "400": {
+            "description": "MCP has no URL / does not require OAuth"
+          },
+          "404": {
+            "description": "MCP server not found"
+          }
+        }
+      }
+    },
+    "/api/mcp-oauth/{mcpServerId}/authorize-url": {
+      "get": {
+        "summary": "Build an OAuth authorize URL. Returns JSON so the browser can navigate without losing the Bearer auth header.",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "mcpServerId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "redirect",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "userId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scopes",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ providerUrl: string }"
+          },
+          "400": {
+            "description": "MCP has no URL / does not require OAuth"
+          },
+          "404": {
+            "description": "MCP server not found"
+          }
+        }
+      }
+    },
+    "/api/mcp-oauth/callback": {
+      "get": {
+        "summary": "OAuth redirect target. Exchanges code -> tokens and redirects back to dashboard.",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "error",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "error_description",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect back to dashboard with oauth=success or oauth=error"
+          },
+          "400": {
+            "description": "Bad state / missing code"
+          }
+        }
+      }
+    },
+    "/api/mcp-oauth/{mcpServerId}/refresh": {
+      "post": {
+        "summary": "Force-refresh the access token for an MCP server",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "mcpServerId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Refreshed token"
+          },
+          "404": {
+            "description": "No token for this MCP server"
+          },
+          "500": {
+            "description": "Refresh failed"
+          }
+        }
+      }
+    },
+    "/api/mcp-oauth/{mcpServerId}": {
+      "delete": {
+        "summary": "Revoke and delete the OAuth token for an MCP server",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "mcpServerId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "userId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token revoked/deleted"
+          },
+          "404": {
+            "description": "No token for this MCP server"
+          }
+        }
+      }
+    },
+    "/api/mcp-oauth/{mcpServerId}/manual-client": {
+      "post": {
+        "summary": "Register a pre-existing OAuth client (DCR fallback)",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "mcpServerId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "clientSecret": {
+                    "type": "string"
+                  },
+                  "authorizationServerIssuer": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "authorizeUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "tokenUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "revocationUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "clientId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pending client stored. Call /authorize to start the flow."
+          },
+          "400": {
+            "description": "Bad input"
+          },
+          "404": {
+            "description": "MCP server not found"
+          }
+        }
+      }
+    },
+    "/api/oauth/callback": {
+      "get": {
+        "operationId": "oauth_static_callback",
+        "summary": "Single static OAuth redirect target (state-keyed, all flows)",
+        "tags": [
+          "OAuth"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "error",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "error_description",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth authorization completed"
+          },
+          "302": {
+            "description": "Redirect back to the final destination"
+          },
+          "400": {
+            "description": "Missing or invalid OAuth callback parameters"
+          },
+          "404": {
+            "description": "OAuth app not configured"
+          },
+          "502": {
+            "description": "Token exchange failed"
+          }
+        }
+      }
+    },
+    "/api/oauth/redirect-uri": {
+      "get": {
+        "operationId": "oauth_redirect_uri",
+        "summary": "The static OAuth callback URL to register with providers (pre-creation display)",
+        "tags": [
+          "OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ redirectUri: string }"
+          }
+        }
+      }
+    },
     "/api/oauth/{provider}/callback": {
       "get": {
         "operationId": "oauth_generic_callback",
-        "summary": "Generic OAuth redirect target for script credential bindings",
+        "summary": "Legacy per-provider OAuth redirect target (delegates to the static callback)",
         "tags": [
           "OAuth"
         ],
@@ -6709,9 +7191,6 @@
           },
           "404": {
             "description": "OAuth app not configured"
-          },
-          "409": {
-            "description": "Provider has a dedicated OAuth callback"
           },
           "502": {
             "description": "Token exchange failed"
@@ -9945,6 +10424,174 @@
                         ],
                         "format": "uuid"
                       },
+                      "auth": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "none"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "bearer"
+                                ]
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "header"
+                                ]
+                              },
+                              "headerName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "headerName"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "query"
+                                ]
+                              },
+                              "paramName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "paramName"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "oauth"
+                                ]
+                              },
+                              "authorizationId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "authorizationId"
+                            ]
+                          }
+                        ]
+                      },
                       "configKey": {
                         "type": "string",
                         "minLength": 1,
@@ -9965,11 +10612,10 @@
                           "oauth"
                         ]
                       },
-                      "oauthProvider": {
+                      "oauthAuthorizationId": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 255,
-                        "pattern": "^[A-Za-z0-9_-]+$"
+                        "maxLength": 255
                       },
                       "enabled": {
                         "type": "boolean"
@@ -9990,12 +10636,30 @@
                       },
                       "openapiSpecJson": {
                         "type": "string"
+                      },
+                      "specSource": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "vendored"
+                            ]
+                          },
+                          "slug": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]*$"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "slug"
+                        ]
                       }
                     },
                     "required": [
                       "slug",
-                      "kind",
-                      "baseUrl"
+                      "kind"
                     ]
                   },
                   {
@@ -10045,6 +10709,174 @@
                         ],
                         "format": "uuid"
                       },
+                      "auth": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "none"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "bearer"
+                                ]
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "header"
+                                ]
+                              },
+                              "headerName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "headerName"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "query"
+                                ]
+                              },
+                              "paramName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "paramName"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "oauth"
+                                ]
+                              },
+                              "authorizationId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "authorizationId"
+                            ]
+                          }
+                        ]
+                      },
                       "configKey": {
                         "type": "string",
                         "minLength": 1,
@@ -10065,11 +10897,10 @@
                           "oauth"
                         ]
                       },
-                      "oauthProvider": {
+                      "oauthAuthorizationId": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 255,
-                        "pattern": "^[A-Za-z0-9_-]+$"
+                        "maxLength": 255
                       },
                       "enabled": {
                         "type": "boolean"
@@ -10138,6 +10969,174 @@
                         ],
                         "format": "uuid"
                       },
+                      "auth": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "none"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "bearer"
+                                ]
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "header"
+                                ]
+                              },
+                              "headerName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "headerName"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "query"
+                                ]
+                              },
+                              "paramName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "secret": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "paramName"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "oauth"
+                                ]
+                              },
+                              "authorizationId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "configKey": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "template": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "hosts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "authorizationId"
+                            ]
+                          }
+                        ]
+                      },
                       "configKey": {
                         "type": "string",
                         "minLength": 1,
@@ -10158,11 +11157,10 @@
                           "oauth"
                         ]
                       },
-                      "oauthProvider": {
+                      "oauthAuthorizationId": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 255,
-                        "pattern": "^[A-Za-z0-9_-]+$"
+                        "maxLength": 255
                       },
                       "enabled": {
                         "type": "boolean"
@@ -10330,13 +11328,28 @@
     "/api/credential-bindings": {
       "get": {
         "operationId": "credential_bindings_list",
-        "summary": "List script credential bindings",
+        "summary": "List standalone script credential bindings",
+        "description": "Lists standalone (raw fetch()) credential bindings. Auto-managed bindings that back embedded connection auth are hidden by default; pass includeManaged=true to include them.",
         "tags": [
           "Script Connections"
         ],
         "security": [
           {
             "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "includeManaged",
+            "in": "query"
           }
         ],
         "responses": {
@@ -10416,11 +11429,10 @@
                     ],
                     "default": "config"
                   },
-                  "oauthProvider": {
+                  "oauthAuthorizationId": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 255,
-                    "pattern": "^[A-Za-z0-9_-]+$"
+                    "maxLength": 255
                   }
                 },
                 "required": [
@@ -10479,6 +11491,15 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                  },
+                  "presetId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
                   "provider": {
                     "type": "string",
                     "minLength": 1,
@@ -10501,13 +11522,20 @@
                     "type": "string",
                     "format": "uri"
                   },
+                  "userinfoUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "revocationUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
                   "scopes": {
                     "type": "array",
                     "items": {
                       "type": "string",
                       "minLength": 1
-                    },
-                    "default": []
+                    }
                   },
                   "extraParams": {
                     "type": "object",
@@ -10531,10 +11559,7 @@
                   }
                 },
                 "required": [
-                  "provider",
-                  "clientId",
-                  "authorizeUrl",
-                  "tokenUrl"
+                  "clientId"
                 ]
               }
             }
@@ -10549,6 +11574,26 @@
           },
           "403": {
             "description": "Only the lead agent can manage script connections"
+          }
+        }
+      }
+    },
+    "/api/oauth-presets": {
+      "get": {
+        "operationId": "oauth_presets_list",
+        "summary": "List curated OAuth presets for app-creation pickers",
+        "description": "Static curated OAuth presets (endpoints, scopes, quirks, and setup hints). Contains no secrets; client credentials are always customer-supplied.",
+        "tags": [
+          "Script Connections"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Curated OAuth presets"
           }
         }
       }
@@ -10634,10 +11679,10 @@
         }
       }
     },
-    "/api/oauth-apps/{provider}/authorize-url": {
+    "/api/oauth-apps/{id}/authorize-url": {
       "post": {
         "operationId": "oauth_apps_authorize_url",
-        "summary": "Build an OAuth authorization URL",
+        "summary": "Build an OAuth authorization URL for a labeled authorization",
         "tags": [
           "Script Connections"
         ],
@@ -10651,23 +11696,157 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 255,
-              "pattern": "^[A-Za-z0-9_-]+$"
+              "maxLength": 255
             },
             "required": true,
-            "name": "provider",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "default": "default"
+                  },
+                  "finalRedirect": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OAuth authorization URL + state"
+          },
+          "403": {
+            "description": "Only the lead agent can manage OAuth authorizations"
+          },
+          "404": {
+            "description": "OAuth app not found"
+          }
+        }
+      }
+    },
+    "/api/oauth-apps/{id}/authorizations": {
+      "get": {
+        "operationId": "oauth_app_authorizations_list",
+        "summary": "List the labeled authorizations for an OAuth app (never token material)",
+        "tags": [
+          "Script Connections"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "required": true,
+            "name": "id",
             "in": "path"
           }
         ],
         "responses": {
           "200": {
-            "description": "OAuth authorization URL"
-          },
-          "403": {
-            "description": "Only the lead agent can manage script connections"
+            "description": "Authorizations without token material"
           },
           "404": {
             "description": "OAuth app not found"
+          }
+        }
+      }
+    },
+    "/api/oauth-authorizations/{id}": {
+      "delete": {
+        "operationId": "oauth_authorization_delete",
+        "summary": "Revoke (best-effort) and delete a single OAuth authorization",
+        "tags": [
+          "Script Connections"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorization revoked + deleted"
+          },
+          "403": {
+            "description": "Only the lead agent can manage OAuth authorizations"
+          },
+          "404": {
+            "description": "Authorization not found"
+          }
+        }
+      }
+    },
+    "/api/oauth-authorizations/{id}/refresh": {
+      "post": {
+        "operationId": "oauth_authorization_refresh",
+        "summary": "Force-refresh a single OAuth authorization (never returns token values)",
+        "tags": [
+          "Script Connections"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Refresh result with token status and new expiry"
+          },
+          "400": {
+            "description": "No refresh token stored"
+          },
+          "403": {
+            "description": "Only the lead agent can manage OAuth authorizations"
+          },
+          "404": {
+            "description": "Authorization not found"
+          },
+          "502": {
+            "description": "Provider token endpoint rejected the refresh"
           }
         }
       }
@@ -13398,409 +14577,6 @@
           },
           "404": {
             "description": "Tool not found"
-          }
-        }
-      }
-    },
-    "/api/mcp-oauth/{mcpServerId}/metadata": {
-      "get": {
-        "summary": "Probe OAuth metadata (PRMD + AS) for an MCP server",
-        "tags": [
-          "MCP OAuth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "mcpServerId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OAuth metadata or { requiresOAuth: false }"
-          },
-          "400": {
-            "description": "MCP has no URL / invalid transport"
-          },
-          "404": {
-            "description": "MCP server not found"
-          }
-        }
-      }
-    },
-    "/api/mcp-oauth/{mcpServerId}/status": {
-      "get": {
-        "summary": "Get the current OAuth connection status for an MCP server",
-        "tags": [
-          "MCP OAuth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "mcpServerId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "userId",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Token status (never includes the token value itself)"
-          },
-          "404": {
-            "description": "MCP server not found"
-          }
-        }
-      }
-    },
-    "/api/mcp-oauth/{mcpServerId}/authorize": {
-      "get": {
-        "summary": "Start an OAuth flow. Redirects to the provider.",
-        "tags": [
-          "MCP OAuth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "mcpServerId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "redirect",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "userId",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "scopes",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "302": {
-            "description": "Redirect to authorization server"
-          },
-          "400": {
-            "description": "MCP has no URL / does not require OAuth"
-          },
-          "404": {
-            "description": "MCP server not found"
-          }
-        }
-      }
-    },
-    "/api/mcp-oauth/{mcpServerId}/authorize-url": {
-      "get": {
-        "summary": "Build an OAuth authorize URL. Returns JSON so the browser can navigate without losing the Bearer auth header.",
-        "tags": [
-          "MCP OAuth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "mcpServerId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "redirect",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "userId",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "scopes",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "{ providerUrl: string }"
-          },
-          "400": {
-            "description": "MCP has no URL / does not require OAuth"
-          },
-          "404": {
-            "description": "MCP server not found"
-          }
-        }
-      }
-    },
-    "/api/mcp-oauth/callback": {
-      "get": {
-        "summary": "OAuth redirect target. Exchanges code -> tokens and redirects back to dashboard.",
-        "tags": [
-          "MCP OAuth"
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "code",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "state",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "error",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "error_description",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "302": {
-            "description": "Redirect back to dashboard with oauth=success or oauth=error"
-          },
-          "400": {
-            "description": "Bad state / missing code"
-          }
-        }
-      }
-    },
-    "/api/mcp-oauth/{mcpServerId}/refresh": {
-      "post": {
-        "summary": "Force-refresh the access token for an MCP server",
-        "tags": [
-          "MCP OAuth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "mcpServerId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "userId": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Refreshed token"
-          },
-          "404": {
-            "description": "No token for this MCP server"
-          },
-          "500": {
-            "description": "Refresh failed"
-          }
-        }
-      }
-    },
-    "/api/mcp-oauth/{mcpServerId}": {
-      "delete": {
-        "summary": "Revoke and delete the OAuth token for an MCP server",
-        "tags": [
-          "MCP OAuth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "mcpServerId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "userId",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Token revoked/deleted"
-          },
-          "404": {
-            "description": "No token for this MCP server"
-          }
-        }
-      }
-    },
-    "/api/mcp-oauth/{mcpServerId}/manual-client": {
-      "post": {
-        "summary": "Register a pre-existing OAuth client (DCR fallback)",
-        "tags": [
-          "MCP OAuth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "mcpServerId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "clientId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "clientSecret": {
-                    "type": "string"
-                  },
-                  "authorizationServerIssuer": {
-                    "type": "string",
-                    "format": "uri"
-                  },
-                  "authorizeUrl": {
-                    "type": "string",
-                    "format": "uri"
-                  },
-                  "tokenUrl": {
-                    "type": "string",
-                    "format": "uri"
-                  },
-                  "revocationUrl": {
-                    "type": "string",
-                    "format": "uri"
-                  },
-                  "scopes": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "required": [
-                  "clientId"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Pending client stored. Call /authorize to start the flow."
-          },
-          "400": {
-            "description": "Bad input"
-          },
-          "404": {
-            "description": "MCP server not found"
           }
         }
       }

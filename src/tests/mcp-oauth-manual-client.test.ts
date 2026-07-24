@@ -92,6 +92,7 @@ describe("MCP OAuth manual client flow", () => {
   let originalPublicMcpBaseUrl: string | undefined;
   let originalAppUrl: string | undefined;
   let originalDashboardUrl: string | undefined;
+  let includeRefreshToken: boolean;
 
   beforeEach(async () => {
     originalFetch = globalThis.fetch;
@@ -99,6 +100,7 @@ describe("MCP OAuth manual client flow", () => {
     originalPublicMcpBaseUrl = process.env.PUBLIC_MCP_BASE_URL;
     originalAppUrl = process.env.APP_URL;
     originalDashboardUrl = process.env.DASHBOARD_URL;
+    includeRefreshToken = true;
     process.env.SECRETS_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString("base64");
 
     await removeDbFiles();
@@ -116,7 +118,7 @@ describe("MCP OAuth manual client flow", () => {
             access_token: "sf-access-token",
             token_type: "Bearer",
             expires_in: 3600,
-            refresh_token: "sf-refresh-token",
+            ...(includeRefreshToken ? { refresh_token: "sf-refresh-token" } : {}),
             scope: "mcp_api refresh_token",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
@@ -209,5 +211,22 @@ describe("MCP OAuth manual client flow", () => {
     expect(connectedToken?.refreshToken).toBe("sf-refresh-token");
     expect(connectedToken?.dcrClientId).toBe("sf-client-id");
     expect(connectedToken?.dcrClientSecret).toBe("sf-client-secret");
+
+    includeRefreshToken = false;
+    const reconnectAuthorizeRes = await dispatch(`/api/mcp-oauth/${mcpServer.id}/authorize-url`, {
+      headers: { Authorization: `Bearer ${API_KEY}` },
+    });
+    expect(reconnectAuthorizeRes.status).toBe(200);
+    const reconnectProvider = new URL(
+      ((await reconnectAuthorizeRes.json()) as { providerUrl: string }).providerUrl,
+    );
+    const reconnectState = reconnectProvider.searchParams.get("state");
+    expect(reconnectState).toBeTruthy();
+
+    const reconnectCallbackRes = await dispatch(
+      `/api/mcp-oauth/callback?state=${encodeURIComponent(reconnectState!)}&code=sf-reconnect-code`,
+    );
+    expect(reconnectCallbackRes.status).toBe(302);
+    expect(getMcpOAuthToken(mcpServer.id)?.refreshToken).toBe("sf-refresh-token");
   });
 });

@@ -8,7 +8,6 @@ import {
 } from "@/be/swarm-config-guard";
 import { scheduleIntegrationsReload } from "@/http/core";
 import { can } from "@/rbac";
-import { CREDENTIAL_BINDINGS_CONFIG_KEY } from "@/scripts-runtime/credential-broker";
 import { createToolRegistrar } from "@/tools/utils";
 import { SwarmConfigSchema, SwarmConfigScopeSchema } from "@/types";
 
@@ -96,56 +95,31 @@ export const registerSetConfigTool = (server: McpServer) => {
           };
         }
 
-        if (key.toUpperCase() === CREDENTIAL_BINDINGS_CONFIG_KEY) {
-          const agent = getAgentById(requestInfo.agentId);
-          const decision = can({
-            principal: {
-              kind: "agent",
-              agentId: requestInfo.agentId,
-              isLead: agent?.isLead ?? false,
+        // Every swarm-config write is lead-gated (DES-445 follow-up): previously
+        // ANY agent could write arbitrary config (incl. secret values). The
+        // legacy SCRIPT_CREDENTIAL_BINDINGS blob is retired, so there is no
+        // special-cased key here anymore.
+        const agent = getAgentById(requestInfo.agentId);
+        const decision = can({
+          principal: {
+            kind: "agent",
+            agentId: requestInfo.agentId,
+            isLead: agent?.isLead ?? false,
+          },
+          verb: "config.write.any",
+          resource: { kind: "none" },
+          source: "mcp",
+        });
+        if (!decision.allow) {
+          const message = "Writing swarm config requires the lead agent.";
+          return {
+            content: [{ type: "text", text: message }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message,
             },
-            verb: "config.credential-bindings.write",
-            resource: { kind: "none" },
-            source: "mcp",
-          });
-          if (!decision.allow) {
-            const message =
-              "Only the lead can manage SCRIPT_CREDENTIAL_BINDINGS. Use the credential-bindings tool.";
-            return {
-              content: [{ type: "text", text: message }],
-              structuredContent: {
-                yourAgentId: requestInfo.agentId,
-                success: false,
-                message,
-              },
-            };
-          }
-        } else {
-          // Every other swarm-config key is lead-gated (DES-445 follow-up):
-          // previously ANY agent could write arbitrary config (incl. secret
-          // values), routing around the credential-bindings gate above.
-          const agent = getAgentById(requestInfo.agentId);
-          const decision = can({
-            principal: {
-              kind: "agent",
-              agentId: requestInfo.agentId,
-              isLead: agent?.isLead ?? false,
-            },
-            verb: "config.write.any",
-            resource: { kind: "none" },
-            source: "mcp",
-          });
-          if (!decision.allow) {
-            const message = "Writing swarm config requires the lead agent.";
-            return {
-              content: [{ type: "text", text: message }],
-              structuredContent: {
-                yourAgentId: requestInfo.agentId,
-                success: false,
-                message,
-              },
-            };
-          }
+          };
         }
 
         const validationError = validateConfigValue(key, value);

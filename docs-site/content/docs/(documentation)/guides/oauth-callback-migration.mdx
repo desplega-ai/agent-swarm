@@ -1,0 +1,75 @@
+---
+title: OAuth callback migration
+description: The connections redesign moves generic OAuth apps to a single static callback URL. Add it to your provider app registration so re-authorization keeps working.
+---
+
+The connections redesign consolidated every generic OAuth app onto a **single
+static callback URL**. If you registered a script-connections OAuth app before
+the redesign, add the new callback to your provider's app registration —
+otherwise the next authorization will fail.
+
+## What changed
+
+Previously, each generic OAuth app authorized against a per-provider callback of
+the shape:
+
+```
+<your-base-url>/api/oauth/<provider>/callback
+```
+
+After the redesign, every generic authorization redirects to one static callback
+that never changes:
+
+```
+<your-base-url>/api/oauth/callback
+```
+
+The value is derived from the server's public base URL
+(`PUBLIC_MCP_BASE_URL`). You can copy the exact URL from the OAuth-app
+create/edit dialog or the app detail page in the dashboard.
+
+## Who is affected
+
+**Affected — generic script-connections OAuth apps** registered through the
+pre-redesign flow (the ones you manage under **Connections → OAuth Apps**).
+Their stored redirect URI still points at the legacy
+`/api/oauth/<provider>/callback` path, but new authorizations are sent to the
+static `/api/oauth/callback`. The dashboard flags these apps with an amber
+warning triangle.
+
+**Not affected:**
+
+- **Tracker apps** (Linear, Jira) — they use their own dedicated callbacks,
+  which are unchanged, and authorization still uses their stored redirect URIs.
+- **MCP dynamic-client-registration (DCR) apps** — they use their MCP-specific
+  callback and are never migrated.
+
+## The symptom
+
+Existing tokens and token refresh keep working. The problem only surfaces on a
+**new authorization or re-authorization**: the provider rejects the request with
+
+```
+error=redirect_uri_mismatch
+```
+
+because the static callback the swarm now sends is not in the provider app's
+list of registered redirect URIs.
+
+## The fix
+
+Add the static callback to your provider app's registered redirect URIs:
+
+1. Copy the static callback from the OAuth-app dialog or detail page — it looks
+   like `<your-base-url>/api/oauth/callback`.
+2. Open your provider's app/console (e.g. GitHub OAuth App settings, Google
+   Cloud console, etc.).
+3. Add `<your-base-url>/api/oauth/callback` to the **Authorized redirect URIs**
+   (or equivalent) list.
+4. Save, then re-authorize the app from **Connections → OAuth Apps** in the
+   dashboard.
+
+It is safe to keep the old `/api/oauth/<provider>/callback` entry registered
+during the transition — the legacy callback route still completes any in-flight
+authorizations. Once every app is re-authorized against the static callback, you
+can remove the legacy entries.

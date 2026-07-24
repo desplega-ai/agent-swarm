@@ -528,6 +528,9 @@ describe("script connections", () => {
       markMigrationApplied(database, "114_backfill_gpt_5_6_pricing.sql");
       markMigrationApplied(database, "115_asset_namespace_keys.sql");
       markMigrationApplied(database, "116_favorite_principal_scope.sql");
+      // The consolidated connections-redesign migration depends on OAuth tables
+      // and binding columns this intentionally partial fixture does not create.
+      markMigrationApplied(database, "117_unified_oauth.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
@@ -630,6 +633,104 @@ describe("script connections", () => {
       }).not.toThrow();
     } finally {
       database.close();
+    }
+  });
+
+  test("migration 117 keeps a user-attached shared binding standalone (adopts only derived-key bindings)", () => {
+    const dbPath = "./test-script-connections-migration-117-adoption.sqlite";
+    removeDbFiles(dbPath);
+    const database = new Database(dbPath, { create: true });
+    try {
+      // Materialize the pre-redesign schema through 116 by temporarily marking
+      // the consolidated migration as applied.
+      database.run(`
+        CREATE TABLE IF NOT EXISTS _migrations (
+          version INTEGER PRIMARY KEY, name TEXT NOT NULL,
+          applied_at TEXT NOT NULL, checksum TEXT NOT NULL
+        )
+      `);
+      const migration117 = "117_unified_oauth.sql";
+      const sql117 = migrationSql(migration117);
+      database
+        .prepare(
+          "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
+        )
+        .run(
+          117,
+          migration117.replace(".sql", ""),
+          new Date().toISOString(),
+          createHash("sha256").update(sql117).digest("hex"),
+        );
+      runMigrations(database); // applies 001..116
+
+      const now = new Date().toISOString();
+      // A user-created STANDALONE binding: source='user', arbitrary config_key
+      // (the shape a real pre-redesign inline OR attached binding has — they are
+      // indistinguishable by source/key, so neither the loose adopt-any-single-
+      // referencer rule nor a source check is safe here).
+      const bindingId = crypto.randomUUID();
+      database.run(
+        `INSERT INTO script_credential_bindings
+          (id, config_key, allowed_hosts_json, header_template, scope, active, source,
+           created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'global', 1, 'user', ?, ?)`,
+        [
+          bindingId,
+          "SHARED_USER_KEY",
+          JSON.stringify(["api.vendor.test"]),
+          "Authorization: Bearer [REDACTED:SHARED_USER_KEY]",
+          now,
+          now,
+        ],
+      );
+      // Exactly ONE connection references it — the loose COUNT=1 predicate would
+      // wrongly adopt (hide + CASCADE-arm) this shared binding.
+      const connectionId = crypto.randomUUID();
+      database.run(
+        `INSERT INTO script_connections (
+          id, slug, kind, scope, base_url, allowed_hosts_json, credential_binding_id,
+          generated_types, generated_runtime_json, generated_at, created_at, updated_at
+        )
+        VALUES (?, ?, 'graphql', 'global', ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          connectionId,
+          "attachVendor",
+          "https://api.vendor.test",
+          JSON.stringify(["api.vendor.test"]),
+          bindingId,
+          "export interface AttachVendorApi {}",
+          JSON.stringify({ slug: "attachVendor", baseUrl: "https://api.vendor.test" }),
+          now,
+          now,
+          now,
+        ],
+      );
+
+      // Now run the consolidated migration for real (FKs off, mirroring the
+      // runner's pass — the rebuild DROPs + RENAMEs a table in a reference cycle).
+      database.run("PRAGMA foreign_keys = OFF");
+      database.exec(sql117);
+      database.run("PRAGMA foreign_keys = ON");
+
+      const migrated = database
+        .prepare<{ source: string; managed_by_connection_id: string | null }, [string]>(
+          "SELECT source, managed_by_connection_id FROM script_credential_bindings WHERE id = ?",
+        )
+        .get(bindingId);
+      // Stays standalone: not adopted, not reclassified.
+      expect(migrated?.managed_by_connection_id).toBeNull();
+      expect(migrated?.source).toBe("user");
+
+      // And the connection does NOT get embedded auth backfilled off it.
+      const conn = database
+        .prepare<{ auth_type: string }, [string]>(
+          "SELECT auth_type FROM script_connections WHERE id = ?",
+        )
+        .get(connectionId);
+      expect(conn?.auth_type).toBe("none");
+    } finally {
+      database.close();
+      removeDbFiles(dbPath);
     }
   });
 

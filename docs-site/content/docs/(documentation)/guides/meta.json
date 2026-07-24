@@ -17,6 +17,7 @@
     "scripts-runtime",
     "scripts-only-mode",
     "script-connections",
+    "oauth-callback-migration",
     "scripts-external-apis",
     "scripts-credential-broker",
     "script-workflow-runs",
