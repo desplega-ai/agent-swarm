@@ -26,6 +26,7 @@ import {
   upsertChannelActivityCursor,
 } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
+import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
 import { telemetry } from "../telemetry";
 import { route } from "./route-def";
@@ -317,7 +318,10 @@ export async function handlePoll(
         // Check for unread mentions (internal chat) - all agents can be woken by @mentions
         // Uses atomic claiming via processing_since to prevent duplicate processing.
         // Only idle agents poll, so busy workers won't be interrupted.
-        const claimedChannels = claimMentions(myAgentId);
+        // Gated on the messaging capability: without it the read-messages /
+        // post-message tools aren't registered, so an unread_mentions trigger
+        // would instruct a missing tool and strand the claimed mentions.
+        const claimedChannels = hasCapability("messaging") ? claimMentions(myAgentId) : [];
         if (claimedChannels.length > 0) {
           // Recalculate inbox summary now that we've claimed
           const inbox = getInboxSummary(myAgentId);

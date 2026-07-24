@@ -746,8 +746,17 @@ describe("getBasePrompt — conditional Slack templates", () => {
 // ---------------------------------------------------------------------------
 
 describe("getBasePrompt — serverCapabilities gating", () => {
-  test("messaging section omitted when serverCapabilities is unknown (legacy server)", async () => {
+  test("messaging section kept when serverCapabilities is unknown (legacy servers registered the tools unconditionally)", async () => {
     const result = await getBasePrompt(minimalArgs);
+    expect(result).toContain("post-message");
+    expect(result).toContain("read-messages");
+  });
+
+  test("messaging section omitted when server capabilities omit messaging", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      serverCapabilities: ["core"],
+    });
     expect(result).not.toContain("post-message");
     expect(result).not.toContain("read-messages");
   });

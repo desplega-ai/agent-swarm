@@ -180,8 +180,9 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
 
   // Swarm messaging (post-message / read-messages) is a default-disabled
   // capability — only describe the tools when the server registers them.
-  // Unknown server => omit, matching the new server defaults.
-  if (hasMcp && !scriptsOnlyMode && serverHasCapability("messaging", false)) {
+  // Unknown server => include: servers that predate capability reporting
+  // registered these tools unconditionally, so the guidance stays accurate.
+  if (hasMcp && !scriptsOnlyMode && serverHasCapability("messaging", true)) {
     const messagingResult = await resolveTemplateAsync("system.agent.messaging", {});
     prompt += messagingResult.text;
   }

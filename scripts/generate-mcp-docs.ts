@@ -111,8 +111,12 @@ async function discoverCategories(): Promise<ToolCategory[]> {
     }
     const block = serverContent.slice(bodyStart, i - 1);
 
+    // Both singular (`registerFooTool`) and plural (`registerFooTools`)
+    // registrars are captured; plural ones name a tool FILE that registers
+    // several tools and are expanded against the parsed files in
+    // generateDocs (e.g. registerScriptRunsTools → script-runs.ts's tools).
     const tools: string[] = [];
-    for (const call of block.matchAll(/register(\w+)Tool\(server\)/g)) {
+    for (const call of block.matchAll(/register(\w+?)Tools?\(server\)/g)) {
       tools.push(camelToKebab(call[1]!));
     }
     if (tools.length === 0) continue;
@@ -532,13 +536,28 @@ async function generateDocs() {
     console.log(`  - ${cat.name}: ${cat.tools.length} tools`);
   }
 
-  // Parse all tool files
+  // Parse all tool files. fileToolsMap keys on the file's base name so plural
+  // registrar entries (registerScriptRunsTools → "script-runs") can be
+  // expanded to the tools that file actually registers.
   const toolInfoMap = new Map<string, ToolInfo>();
+  const fileToolsMap = new Map<string, string[]>();
   for (const fileName of allToolFiles) {
     const infos = await parseToolFile(fileName);
+    const baseName = fileName.split("/").pop()!;
     for (const info of infos) {
       toolInfoMap.set(info.name, info);
+      fileToolsMap.set(baseName, [...(fileToolsMap.get(baseName) ?? []), info.name]);
     }
+  }
+
+  const toolExists = (name: string): boolean =>
+    toolInfoMap.has(name) || toolInfoMap.has(name.replace(/-/g, "_"));
+
+  // Expand plural-registrar placeholders into their file's tools.
+  for (const category of categories) {
+    category.tools = category.tools.flatMap((t) =>
+      toolExists(t) ? [t] : (fileToolsMap.get(t) ?? [t]),
+    );
   }
 
   console.log(`Parsed ${toolInfoMap.size} tools`);

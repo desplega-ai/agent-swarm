@@ -52,6 +52,9 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [script-upsert](#script-upsert)
   - [script-delete](#script-delete)
   - [script-query-types](#script-query-types)
+  - [launch-script-run](#launch-script-run)
+  - [get-script-run](#get-script-run)
+  - [list-script-runs](#list-script-runs)
 - [MCP Server Tools](#mcp-server-tools)
   - [mcp-server-create](#mcp-server-create)
   - [mcp-server-update](#mcp-server-update)
@@ -161,7 +164,6 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [unregister-service](#unregister-service)
   - [list-services](#list-services)
   - [update-service-status](#update-service-status)
-- [Other Tools](#other-tools)
 
 ---
 
@@ -591,6 +593,37 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 |-----------|------|----------|---------|-------------|
 | `name` | `unknown` | Yes | - | Script name whose signature should be fetched. |
 | `scope` | `unknown` | No | - | Optional scope for script resolution. |
+
+### launch-script-run
+
+**Launch Script Run**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `source` | `string` | Yes | - | TypeScript script workflow source. |
+| `args` | `unknown` | No | - | JSON-serializable workflow arguments. |
+| `idempotencyKey` | `string` | No | - | Optional key that returns the existing run instead of launching a duplicate. |
+| `scriptName` | `unknown` | No | - | Optional human-readable script/workflow name for the run. |
+| `requestedByUserId` | `string` | No | - | Optional canonical user ID to attribute the run to. |
+
+### get-script-run
+
+**Get Script Run**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Script run ID. |
+
+### list-script-runs
+
+**List Script Runs**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `status` | `unknown` | No | - | Optional script run status filter. |
+| `agentId` | `string` | No | - | Optional agent ID filter. |
+| `limit` | `number` | No | 50 | Maximum runs to return. |
+| `offset` | `number` | No | 0 | Pagination offset. |
 
 ## MCP Server Tools
 
@@ -1901,39 +1934,4 @@ Update the health status of a registered service. Use this after a service becom
 | `serviceId` | `uuid` | No | - | Service ID to update. |
 | `name` | `string` | No | - | Service name to update (alternative to serviceId). |
 | `status` | `unknown` | Yes | - | New status: 'starting', 'healthy', 'unhealthy', or 'stopped'. |
-
-## Other Tools
-
-*Tools not assigned to a capability group*
-
-### launch-script-run
-
-**Launch Script Run**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `source` | `string` | Yes | - | TypeScript script workflow source. |
-| `args` | `unknown` | No | - | JSON-serializable workflow arguments. |
-| `idempotencyKey` | `string` | No | - | Optional key that returns the existing run instead of launching a duplicate. |
-| `scriptName` | `unknown` | No | - | Optional human-readable script/workflow name for the run. |
-| `requestedByUserId` | `string` | No | - | Optional canonical user ID to attribute the run to. |
-
-### get-script-run
-
-**Get Script Run**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `id` | `string` | Yes | - | Script run ID. |
-
-### list-script-runs
-
-**List Script Runs**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `status` | `unknown` | No | - | Optional script run status filter. |
-| `agentId` | `string` | No | - | Optional agent ID filter. |
-| `limit` | `number` | No | 50 | Maximum runs to return. |
-| `offset` | `number` | No | 0 | Pagination offset. |
 

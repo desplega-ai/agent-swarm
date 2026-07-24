@@ -11,7 +11,10 @@ type RegisteredTools = Record<string, unknown>;
 
 async function main() {
   process.env.DATABASE_PATH ??= "/tmp/agent-swarm-script-types.sqlite";
-  const server = createServer();
+  // The SDK is derived from the full MCP registry regardless of deployment
+  // CAPABILITIES — the scripts bridge is always full-surface, so the .d.ts
+  // must be too (and generation must not depend on the local env's flags).
+  const server = createServer({ fullSurface: true });
   const tools = (server as unknown as { _registeredTools: RegisteredTools })._registeredTools;
   const missing = SDK_ALLOWLIST.map((name) => mcpToolNameForSdkMethod(name)).filter(
     (name) => !(name in tools),
