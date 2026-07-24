@@ -338,7 +338,7 @@ export function OAuthSourceBadge({ source }: { source: OAuthAppSummary["source"]
 // Docs entry covering the single-static-callback migration. Linked from the
 // OAuth-app dialog, the app detail page, and the legacy-callback warning.
 export const OAUTH_CALLBACK_MIGRATION_DOCS_URL =
-  "https://docs.agent-swarm.dev/guides/oauth-callback-migration";
+  "https://docs.agent-swarm.dev/docs/guides/oauth-callback-migration";
 
 // A generic-connections OAuth app registered before the redesign points its
 // stored redirectUri at the legacy per-provider callback

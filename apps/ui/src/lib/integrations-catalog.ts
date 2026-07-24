@@ -152,7 +152,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Chat with the swarm from Slack — assign tasks, get alerts, follow-up in threads.",
     category: "comm",
     iconKey: "message-square",
-    docsUrl: "https://docs.agent-swarm.dev/integrations/slack",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/slack-integration",
     disableKey: "SLACK_DISABLE",
     restartRequired: true,
     fields: [
@@ -241,7 +241,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Chat with the swarm over WhatsApp via Kapso — inbound messages become tasks, agents reply in-thread.",
     category: "comm",
     iconKey: "message-circle",
-    docsUrl: "https://docs.agent-swarm.dev/integrations/kapso",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/kapso",
     recommendedSkills: [
       {
         name: "kapso-whatsapp",
@@ -299,7 +299,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "React to issues/PRs, run CI, open PRs from agents. Defaults to PAT mode; App mode available under Advanced.",
     category: "issues",
     iconKey: "github",
-    docsUrl: "https://docs.agent-swarm.dev/integrations/github",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/github-integration",
     disableKey: "GITHUB_DISABLE",
     restartRequired: true,
     fields: [
@@ -392,7 +392,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "React to GitLab issues/MRs and push commits from agents. Supports self-hosted instances.",
     category: "issues",
     iconKey: "git-merge",
-    docsUrl: "https://docs.agent-swarm.dev/integrations/gitlab",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/gitlab-integration",
     disableKey: "GITLAB_DISABLE",
     restartRequired: true,
     fields: [
@@ -457,7 +457,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Sync Linear issues to tasks, comment from agents, respond to mentions. Uses OAuth.",
     category: "issues",
     iconKey: "square-check-big",
-    docsUrl: "https://docs.agent-swarm.dev/integrations/linear",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/linear",
     disableKey: "LINEAR_DISABLE",
     restartRequired: true,
     specialFlow: "linear-oauth",
@@ -499,7 +499,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Sync Jira Cloud issues to tasks via OAuth 3LO. Inbound on assignee→bot or @-mention; outbound lifecycle comments back to the issue.",
     category: "issues",
     iconKey: "square-check-big",
-    docsUrl: "https://docs.agent-swarm.dev/guides/jira-integration",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/jira-integration",
     disableKey: "JIRA_DISABLE",
     restartRequired: true,
     specialFlow: "jira-oauth",
@@ -589,7 +589,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Give agents access to Sentry issues and project info via the Sentry CLI.",
     category: "observability",
     iconKey: "activity",
-    docsUrl: "https://docs.agent-swarm.dev/integrations/sentry",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/sentry-integration",
     fields: [
       {
         key: "SENTRY_AUTH_TOKEN",
@@ -618,7 +618,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Receive email and reply from agents. Useful for customer-support-like flows.",
     category: "email",
     iconKey: "mail",
-    docsUrl: "https://docs.agent-swarm.dev/integrations/agentmail",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/agentmail-integration",
     disableKey: "AGENTMAIL_DISABLE",
     restartRequired: true,
     recommendedSkills: [
@@ -680,7 +680,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Route agents to connected user accounts in Composio through the `x composio` CLI and `swarm_x` MCP tool.",
     category: "other",
     iconKey: "route",
-    docsUrl: "https://docs.agent-swarm.dev/integrations/composio",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/composio",
     restartRequired: true,
     recommendedSkills: [
       {
@@ -733,7 +733,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Claude API access for workers. Supports API key or OAuth (Claude Code).",
     category: "llm",
     iconKey: "brain",
-    docsUrl: "https://docs.agent-swarm.dev/integrations/anthropic",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration",
     restartRequired: true,
     fields: [
       {
@@ -768,7 +768,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Route model calls through OpenRouter (Claude, Gemini, GPT, Mistral, etc.).",
     category: "llm",
     iconKey: "route",
-    docsUrl: "https://docs.agent-swarm.dev/integrations/openrouter",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration",
     restartRequired: true,
     fields: [
       {
@@ -792,7 +792,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "OpenAI API access for Codex workers and other OpenAI-backed harnesses.",
     category: "llm",
     iconKey: "sparkles",
-    docsUrl: "https://docs.agent-swarm.dev/integrations/openai",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration",
     restartRequired: true,
     fields: [
       {
@@ -1028,7 +1028,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Authenticate codex workers with your ChatGPT account. Requires a CLI step — cannot be configured from the UI.",
     category: "llm",
     iconKey: "key-round",
-    docsUrl: "https://docs.agent-swarm.dev/integrations/codex-oauth",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/provider-auth/codex-oauth",
     specialFlow: "codex-cli",
     restartRequired: true,
     fields: [],
@@ -1042,7 +1042,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Run swarm tasks in Anthropic's managed cloud sandbox. Requires running the claude-managed-setup CLI once to create the Anthropic-side agent + environment.",
     category: "llm",
     iconKey: "cloud",
-    docsUrl: "https://docs.agent-swarm.dev/guides/harness-configuration#claude-managed-agents",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/harness-configuration#claude-managed-agents",
     specialFlow: "claude-managed-cli",
     restartRequired: true,
     fields: [
@@ -1101,7 +1101,8 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Emit system invariants to business-use for flow tracking. No-op when unset.",
     category: "observability",
     iconKey: "chart-line",
-    docsUrl: "https://docs.agent-swarm.dev/integrations/business-use",
+    // No docs-site page exists for business-use; the in-repo doc is canonical.
+    docsUrl: "https://github.com/desplega-ai/agent-swarm/blob/main/BUSINESS_USE.md",
     fields: [
       {
         key: "BUSINESS_USE_API_KEY",
