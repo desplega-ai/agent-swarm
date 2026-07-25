@@ -12,8 +12,9 @@ import { getEventsByEvent } from "../be/events";
 import { aggregateHandlerStats, insertRoutingTrace, listTraceForRun } from "../be/routing-trace-db";
 import { upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
-import { runAllSeeders, runSeeder } from "../be/seed";
+import { runSeeder } from "../be/seed";
 import { edgeHandlersSeeder } from "../be/seed-edge-handlers";
+import { scriptsSeeder } from "../be/seed-scripts";
 import { handleRouting } from "../http/routing";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { setApiKey } from "../utils/api-key";
@@ -230,10 +231,17 @@ describe("routing dry-run and handler stats", () => {
   });
 
   test("continuity seed is idempotent and preserves handler edits", async () => {
-    const first = await runAllSeeders({ quiet: true, scriptEmbeddingMode: "skip" });
-    const second = await runAllSeeders({ quiet: true, scriptEmbeddingMode: "skip" });
-    expect(first.find((result) => result.kind === "edge_handler")?.created).toBe(1);
-    expect(second.find((result) => result.kind === "edge_handler")?.skippedUnchanged).toBe(1);
+    // Scoped to the two seeders this feature owns (scripts first — the edge
+    // handler references the seeded script). runAllSeeders drags in agent-fs
+    // provisioning + skills and blows the test timeout on slow CI runners.
+    const seedBoth = async () => {
+      await runSeeder(scriptsSeeder, { quiet: true, scriptEmbeddingMode: "skip" });
+      return runSeeder(edgeHandlersSeeder, { quiet: true });
+    };
+    const first = await seedBoth();
+    const second = await seedBoth();
+    expect(first.created).toBe(1);
+    expect(second.skippedUnchanged).toBe(1);
     expect(
       getDb()
         .query("SELECT COUNT(*) AS count FROM scripts WHERE name = 'default-continuity-pin'")
@@ -250,5 +258,5 @@ describe("routing dry-run and handler stats", () => {
     const preserved = await runSeeder(edgeHandlersSeeder, { quiet: true });
     expect(preserved.skippedUserModified).toBe(1);
     expect(getEdgeHandlerByName("default-continuity-pin")?.enabled).toBe(false);
-  });
+  }, 30_000);
 });

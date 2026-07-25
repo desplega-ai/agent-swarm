@@ -49,6 +49,8 @@ ALLOWED_PATTERNS=(
   'src/tools/join-swarm.ts|agent\.isLead \? "Lead" : "Worker"'
   'src/tools/send-task.ts|if \(agent\.isLead\) \{'
   'src/http/poll.ts|if \(agent\??\.isLead\) \{'
+  # routing claim pre-pass mirrors branch-5's worker-only pool condition (trigger routing, not authz)
+  'src/http/poll.ts|if \(agent && !agent\.isLead && hasCapacity\(myAgentId\)\) \{'
   'src/http/kv.ts|let isLead = false;'
   'src/http/kv.ts|isLead = agent\?\.isLead === true;'
 )
