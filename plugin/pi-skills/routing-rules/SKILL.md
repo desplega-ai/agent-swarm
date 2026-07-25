@@ -43,3 +43,5 @@ export default async function register(_args: unknown, ctx: ScriptContext) {
 ```
 
 Use only the supported matcher keys: `via`, `source`, `slackChannelId`, `vcsRepo`, `agentId`, `taskType`, and `filter`. The `filter` is a string-form payload predicate and is validated during registration.
+
+Matcher gotcha — `source` is the task's INGRESS channel, not a topic tag: only tasks created by the real Slack message ingestion carry `source: "slack"`. A task created through `send-task`/`task-action` has `source: "mcp"` even when it carries `slackChannelId`/`slackThreadTs`. To match "anything tied to a Slack channel", match on `slackChannelId` (or use `filter`) instead of `source`. Always confirm your matcher with `swarm.routing_dry_run` using an envelope shaped like the real ingress.

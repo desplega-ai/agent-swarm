@@ -3,7 +3,7 @@ date: 2026-07-21T00:00:00+02:00
 author: Taras
 topic: "Task-lifecycle edges & routing handlers v1 — extension-system Layer 2"
 tags: [plan, extension-system, routing, before-assign, hooks, rbac, lifecycle-ui]
-status: in-progress
+status: completed
 autonomy: verbose
 brainstorm: thoughts/taras/brainstorms/2026-07-21-swarm-extensibility-routing.md
 last_updated: 2026-07-22
