@@ -58,8 +58,8 @@ Before starting each task, the runner automatically searches for relevant memori
 1. Task description is used as the search query
 2. An embedding is generated via the `EmbeddingProvider`
 3. Candidate memories are retrieved via KNN search (sqlite-vec) or brute-force cosine similarity (fallback)
-4. When `MEMORY_HYBRID_SEARCH=1`, reciprocal-rank fusion blends vector matches with a full-text pass before reranking; otherwise retrieval stays vector-only
-5. When `MEMORY_GRAPH_EXPANSION=1`, the candidate set is expanded with 1-hop memory-link neighbors (see [Graph Expansion](#graph-expansion))
+4. Reciprocal-rank fusion blends vector matches with a full-text pass before reranking by default; set `MEMORY_HYBRID_SEARCH=0` to use vector-only retrieval
+5. The candidate set is expanded with 1-hop memory-link neighbors by default; set `MEMORY_GRAPH_EXPANSION=0` to disable it (see [Graph Expansion](#graph-expansion))
 6. Candidates below the minimum similarity floor are dropped, then the survivors are **reranked** using a composite score
 7. Top matches are included in the task context as "Relevant Past Knowledge"
 
@@ -83,7 +83,7 @@ Before reranking, candidates with raw cosine similarity below `MEMORY_MIN_SIMILA
 
 ### Graph Expansion
 
-With `MEMORY_GRAPH_EXPANSION=1` (default off), search results gain **1-hop graph neighbors**: after the store returns its candidates and before reranking, the expander follows outgoing `memory_link` rows (resolved wikilinks pointing at live memories) from each candidate and injects the linked memories as additional candidates. A memory that is lexically and semantically distant from the query can therefore still surface because a strong hit links to it — `"Auth flow gotchas, see [[deploy-checklist]]"` pulls the checklist into results for an auth query.
+By default, search results gain **1-hop graph neighbors**: after the store returns its candidates and before reranking, the expander follows outgoing `memory_link` rows (resolved wikilinks pointing at live memories) from each candidate and injects the linked memories as additional candidates. A memory that is lexically and semantically distant from the query can therefore still surface because a strong hit links to it — `"Auth flow gotchas, see [[deploy-checklist]]"` pulls the checklist into results for an auth query. Set `MEMORY_GRAPH_EXPANSION=0` or `false` to disable expansion.
 
 Mechanics:
 
@@ -93,7 +93,7 @@ Mechanics:
 - **Provenance** — expanded results carry `retrievalSource: "graph"`, so the usefulness readout measures whether graph hits earn citations before the flag is enabled more widely.
 - **Fail-open** — an expansion failure never poisons search; the original candidates are returned unchanged. With the flag off, results are byte-identical to no-expansion.
 
-The flag follows the same rollout pattern as `MEMORY_HYBRID_SEARCH`: ship dark, enable per-deployment, judge with the per-arm citation data.
+Both memory retrieval features retain explicit rollback flags so operators can compare per-arm citation data or restore the previous retrieval path without changing code.
 
 ### Usefulness Readout
 
@@ -174,8 +174,8 @@ Reranking parameters are tunable via environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Optional global override for recency half-life across all memory sources. Leave unset to use the source-aware defaults above. |
-| `MEMORY_HYBRID_SEARCH` | `0` | Enable reciprocal-rank-fusion hybrid retrieval (vector + full-text) instead of vector-only search. |
-| `MEMORY_GRAPH_EXPANSION` | `0` | Expand search candidates with 1-hop memory-link neighbors before reranking (`retrievalSource: "graph"` provenance). See [Graph Expansion](#graph-expansion). |
+| `MEMORY_HYBRID_SEARCH` | `1` | Enable reciprocal-rank-fusion hybrid retrieval (vector + full-text) instead of vector-only search. Set to `0` or `false` to disable. |
+| `MEMORY_GRAPH_EXPANSION` | `1` | Expand search candidates with 1-hop memory-link neighbors before reranking (`retrievalSource: "graph"` provenance). Set to `0` or `false` to disable. See [Graph Expansion](#graph-expansion). |
 | `MEMORY_MIN_SIMILARITY` | `0.1` | Minimum raw cosine similarity a candidate must meet before reranking. |
 | `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier |
 | `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |

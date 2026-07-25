@@ -506,7 +506,8 @@ export async function handleMemory(
         isLead: false,
         queryText: query,
       });
-      // 1-hop memory_link neighbor expansion (no-op unless MEMORY_GRAPH_EXPANSION=1).
+      // Default-on 1-hop memory_link neighbor expansion (disable with
+      // MEMORY_GRAPH_EXPANSION=0|false).
       const expanded = expandCandidatesWithGraph(candidates, myAgentId, {
         scope,
         source,

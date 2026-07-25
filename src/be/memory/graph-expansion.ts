@@ -12,9 +12,9 @@
  * - `rerank()` stays pure (no DB access),
  * - `recordRetrievals` downstream picks up `retrievalSource: "graph"` for free.
  *
- * Flag-gated: `MEMORY_GRAPH_EXPANSION=1|true` (default off — same rollout
- * pattern as MEMORY_HYBRID_SEARCH). With the flag off the input array is
- * returned unchanged (same reference), keeping results byte-identical.
+ * Enabled by default; set `MEMORY_GRAPH_EXPANSION=0|false` to disable it.
+ * With the flag off the input array is returned unchanged (same reference),
+ * keeping results byte-identical to the vector/hybrid candidate set.
  *
  * Plan: thoughts/taras/plans/2026-07-02-memory-retrieval-v2-graph-and-measurement.md Phase 4
  */

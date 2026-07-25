@@ -59,16 +59,17 @@ export const ACCESS_BOOST_MAX_MULTIPLIER = numEnv("MEMORY_ACCESS_BOOST_MAX", 1.5
 export const ACCESS_BOOST_RECENCY_WINDOW_HOURS = numEnv("MEMORY_ACCESS_RECENCY_HOURS", 48);
 export const CANDIDATE_SET_MULTIPLIER = numEnv("MEMORY_CANDIDATE_MULTIPLIER", 3);
 
-// Feature flag: enable hybrid (FTS+vec) search. Off by default; set MEMORY_HYBRID_SEARCH=1 to enable.
+// Feature flag: enable hybrid (FTS+vec) search. On by default; set
+// MEMORY_HYBRID_SEARCH=0|false to fall back to vector-only search.
 export function isHybridSearchEnabled(): boolean {
-  const val = process.env.MEMORY_HYBRID_SEARCH ?? "0";
+  const val = process.env.MEMORY_HYBRID_SEARCH ?? "1";
   return val === "1" || val.toLowerCase() === "true";
 }
 
 // Feature flag: expand search candidates with 1-hop memory_link graph neighbors
-// (DES-639a). Off by default; set MEMORY_GRAPH_EXPANSION=1 to enable.
+// (DES-639a). On by default; set MEMORY_GRAPH_EXPANSION=0|false to disable.
 export function isGraphExpansionEnabled(): boolean {
-  const val = process.env.MEMORY_GRAPH_EXPANSION ?? "0";
+  const val = process.env.MEMORY_GRAPH_EXPANSION ?? "1";
   return val === "1" || val.toLowerCase() === "true";
 }
 
