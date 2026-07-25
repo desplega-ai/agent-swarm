@@ -1856,6 +1856,53 @@ export interface TaskContextResponse {
   summary: ContextSummary;
 }
 
+// Routing v1 — per-task decision trace (see src/http/routing.ts
+// task_routing_trace). Names are resolved server-side so the UI needn't fetch
+// the agent roster.
+export interface RoutingTraceResult {
+  assignTo?: string;
+  block?: { reason: string };
+  mutate?: {
+    tags?: string[];
+    routingAffinity?: string;
+    modelTier?: string;
+    priority?: number;
+  };
+  promptDirectives?: string[];
+  note?: string;
+}
+
+export interface RoutingTraceRow {
+  id: string;
+  routingRunId: string;
+  taskId?: string;
+  edge: string;
+  via: string;
+  handlerId: string;
+  handlerName: string;
+  flavor: "route" | "guard";
+  mode: "soft" | "hard";
+  matched: boolean;
+  result?: RoutingTraceResult;
+  decisive: boolean;
+  suggestion?: string;
+  deviated?: boolean;
+  dryRun: boolean;
+  error?: string;
+  durationMs?: number;
+  createdAt: string;
+  assignedAgentId: string | null;
+  assignedAgentName: string | null;
+  suggestedAgentId: string | null;
+  suggestedAgentName: string | null;
+}
+
+export interface TaskRoutingResponse {
+  trace: RoutingTraceRow[];
+  finalAgentId: string | null;
+  finalAgentName: string | null;
+}
+
 // API Key Status
 export type ApiKeyStatusType = "available" | "rate_limited";
 

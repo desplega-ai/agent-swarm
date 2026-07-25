@@ -9,13 +9,18 @@ import {
   listEdgeHandlers,
   patchEdgeHandler,
 } from "../be/edge-handlers-db";
-import { aggregateHandlerStats } from "../be/routing-trace-db";
+import { aggregateHandlerStats, listTraceForTask } from "../be/routing-trace-db";
 import { getScript } from "../be/scripts/db";
 import { can } from "../rbac";
 import { buildRoutingCtx } from "../routing/ctx";
 import { runBeforeAssign, runPromptCompose } from "../routing/engine";
 import { composeTaskRoutingDirectives } from "../routing/prompt-compose";
-import { type RoutingCtx, RoutingTaskSchema, RoutingViaSchema } from "../routing/types";
+import {
+  type RoutingCtx,
+  type RoutingResult,
+  RoutingTaskSchema,
+  RoutingViaSchema,
+} from "../routing/types";
 import {
   EdgeHandlerEdgeSchema,
   EdgeHandlerFlavorSchema,
@@ -118,6 +123,22 @@ const handlerStatsRoute = route({
   tags: ["Routing"],
   query: z.object({ windowHours: z.coerce.number().positive().optional() }),
   responses: { 200: { description: "Per-handler routing statistics" } },
+});
+
+const taskRoutingTraceRoute = route({
+  method: "get",
+  path: "/api/tasks/{id}/routing-trace",
+  pattern: ["api", "tasks", null, "routing-trace"],
+  operationId: "task_routing_trace",
+  summary: "Get the routing decision trace for a task",
+  description:
+    "Ordered per-task routing trace (guards, routes, soft suggestions, deviations, errors) with suggested/assigned agent names resolved server-side.",
+  tags: ["Routing"],
+  params: z.object({ id: z.string().min(1) }),
+  responses: {
+    200: { description: "Ordered routing trace for the task" },
+    404: { description: "Task not found" },
+  },
 });
 
 const dryRunRoute = route({
@@ -246,6 +267,39 @@ export async function handleRouting(
   queryParams: URLSearchParams,
   agentId: string | undefined,
 ): Promise<boolean> {
+  if (taskRoutingTraceRoute.match(req.method, pathSegments)) {
+    const parsed = await taskRoutingTraceRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = getTaskById(parsed.params.id);
+    if (!task) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    const agentName = (id: string | null | undefined): string | null =>
+      id ? (getAgentById(id)?.name ?? null) : null;
+    const trace = listTraceForTask(parsed.params.id).map((row) => {
+      const result = row.result as RoutingResult | undefined;
+      const assignedAgentId = result?.assignTo;
+      // `suggestion` doubles as a `block:<reason>` marker for soft blocks —
+      // only resolve it as an agent id when it isn't a block sentinel.
+      const suggestedAgentId =
+        row.suggestion && !row.suggestion.startsWith("block:") ? row.suggestion : undefined;
+      return {
+        ...row,
+        assignedAgentId: assignedAgentId ?? null,
+        assignedAgentName: agentName(assignedAgentId),
+        suggestedAgentId: suggestedAgentId ?? null,
+        suggestedAgentName: agentName(suggestedAgentId),
+      };
+    });
+    json(res, {
+      trace,
+      finalAgentId: task.agentId ?? null,
+      finalAgentName: agentName(task.agentId),
+    });
+    return true;
+  }
+
   if (dryRunRoute.match(req.method, pathSegments)) {
     const parsed = await dryRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;

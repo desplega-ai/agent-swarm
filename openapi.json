@@ -9929,6 +9929,40 @@
         }
       }
     },
+    "/api/tasks/{id}/routing-trace": {
+      "get": {
+        "operationId": "task_routing_trace",
+        "summary": "Get the routing decision trace for a task",
+        "description": "Ordered per-task routing trace (guards, routes, soft suggestions, deviations, errors) with suggested/assigned agent names resolved server-side.",
+        "tags": [
+          "Routing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ordered routing trace for the task"
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      }
+    },
     "/api/routing/dry-run": {
       "post": {
         "operationId": "routing_dry_run",

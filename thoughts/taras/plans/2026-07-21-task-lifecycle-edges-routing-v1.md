@@ -515,11 +515,11 @@ Row anatomy: status dot (decisive=filled/error=red/no-match=hollow) · flavor+mo
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
-- [ ] Server route in openapi: `bun run docs:openapi && git diff --exit-code openapi.json`
+- [x] `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
+- [x] Server route in openapi: `bun run docs:openapi && git diff --exit-code openapi.json`
 
 #### Automated QA:
-- [ ] agent-browser session against local UI (`bun run pm2-start`, UI :5274): open a task routed in Phase 4/5 QA, screenshot the routing section showing the chain + decisive highlight; open an un-routed task, section shows a sane empty state.
+- [x] agent-browser session against local UI (`bun run pm2-start`, UI :5274): open a task routed in Phase 4/5 QA, screenshot the routing section showing the chain + decisive highlight; open an un-routed task, section shows a sane empty state.
 
 #### Manual Verification:
 - [ ] Taras visual pass on the trace section (desktop + mobile tab).

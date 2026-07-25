@@ -78,6 +78,14 @@ export function useTaskContext(taskId: string) {
   });
 }
 
+export function useTaskRouting(taskId: string) {
+  return useQuery({
+    queryKey: ["task", taskId, "routing"],
+    queryFn: () => api.fetchTaskRouting(taskId),
+    enabled: !!taskId,
+  });
+}
+
 interface CreateTaskInput {
   task: string;
   key?: string;

@@ -27,6 +27,7 @@ import {
   Terminal,
   Timer,
   User,
+  Waypoints,
   Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo } from "react";
@@ -40,6 +41,7 @@ import {
   useResumeTask,
   useTask,
   useTaskContext,
+  useTaskRouting,
   useTaskSessionLogs,
 } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
@@ -47,8 +49,10 @@ import type {
   AgentLog,
   DevinProviderMeta,
   ProviderName,
+  RoutingTraceRow,
   SessionCost,
   TaskContextResponse,
+  TaskRoutingResponse,
 } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleDescription } from "@/components/shared/collapsible-description";
@@ -88,7 +92,7 @@ import { statusTextClass } from "@/lib/status-tone";
 import { taskIsRunning } from "@/lib/task-activity";
 import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
 
-const TASK_DETAIL_TABS = new Set(["details", "outcome", "logs"]);
+const TASK_DETAIL_TABS = new Set(["details", "outcome", "routing", "logs"]);
 
 function coerceTaskDetailTab(value: string): string {
   return TASK_DETAIL_TABS.has(value) ? value : "details";
@@ -251,6 +255,181 @@ function StructuredOutputContent({ raw, maxH }: { raw: string; maxH: string }) {
           <div className="mt-1 text-sm leading-relaxed text-foreground/80">
             <MarkdownView text={structured.output} />
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Routing trace ───────────────────────────────────────────────────────────
+// Renders the per-task routing decision chain ("why did this task land here?").
+// Follows the dotted-rail visual language of LogTimeline above.
+
+function clipText(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max).trimEnd()}…` : text;
+}
+
+/** Dot tone: decisive = filled accent, error = red, otherwise a hollow ring. */
+function routingDotClass(row: RoutingTraceRow): string {
+  if (row.error) return "bg-status-error";
+  if (row.decisive) return "bg-primary";
+  return "border border-muted-foreground/40 bg-transparent";
+}
+
+/** One-line summary of what a handler did, drawn from its parsed result. */
+function routingResultSummary(row: RoutingTraceRow): string {
+  if (row.error) return "error";
+  if (row.deviated) return "deviated";
+  const result = row.result;
+  if (!result) return row.matched ? "continue" : "skipped";
+  if (result.block) return `block: ${clipText(result.block.reason, 48)}`;
+  if (result.assignTo) {
+    if (row.mode === "soft" && !row.decisive) return "SOFT suggest →";
+    return `assign → ${row.assignedAgentName ?? result.assignTo}`;
+  }
+  const parts: string[] = [];
+  if (result.mutate) parts.push("mutate");
+  const directives = result.promptDirectives?.length ?? 0;
+  if (directives > 0) parts.push(`+${directives} directive${directives === 1 ? "" : "s"}`);
+  if (result.note) parts.push("note");
+  return parts.length > 0 ? parts.join(" · ") : "continue";
+}
+
+interface RoutingRunGroup {
+  runId: string;
+  vias: string[];
+  edges: string[];
+  rows: RoutingTraceRow[];
+}
+
+/** Group trace rows by engine invocation (routingRunId), preserving order. */
+function groupRoutingTrace(trace: RoutingTraceRow[]): RoutingRunGroup[] {
+  const order: string[] = [];
+  const byRun = new Map<string, RoutingTraceRow[]>();
+  for (const row of trace) {
+    const rows = byRun.get(row.routingRunId);
+    if (rows) {
+      rows.push(row);
+    } else {
+      byRun.set(row.routingRunId, [row]);
+      order.push(row.routingRunId);
+    }
+  }
+  return order.map((runId) => {
+    const rows = byRun.get(runId) ?? [];
+    return {
+      runId,
+      vias: [...new Set(rows.map((r) => r.via))],
+      edges: [...new Set(rows.map((r) => r.edge))],
+      rows,
+    };
+  });
+}
+
+function RoutingTraceRowView({
+  row,
+  finalAgentName,
+  isLast,
+}: {
+  row: RoutingTraceRow;
+  finalAgentName: string | null;
+  isLast: boolean;
+}) {
+  const directives = row.result?.promptDirectives ?? [];
+  const showSuggestion = !row.deviated && !!row.suggestedAgentName;
+  const showDetail = showSuggestion || directives.length > 0 || !!row.error;
+  return (
+    <div className="flex gap-3 text-sm">
+      {/* Rail column — mirrors LogTimeline's dotted rail. */}
+      <div className="flex flex-col items-center">
+        <div className={cn("h-2 w-2 rounded-full mt-[6px] shrink-0", routingDotClass(row))} />
+        {!isLast && <div className="flex-1 w-px bg-border mt-[2px]" />}
+      </div>
+      <div className="min-w-0 flex-1 pb-3">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" size="tag">
+            {row.flavor}
+          </Badge>
+          <Badge
+            variant="outline"
+            size="tag"
+            className={row.mode === "hard" ? "text-foreground" : "text-muted-foreground"}
+          >
+            {row.mode}
+          </Badge>
+          <span className="font-medium truncate">{row.handlerName}</span>
+          <span className="text-xs text-muted-foreground truncate">
+            {routingResultSummary(row)}
+          </span>
+          <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/70">
+            {row.durationMs != null ? formatDurationMs(row.durationMs) : "—"}
+          </span>
+        </div>
+        {showDetail && (
+          <div className="mt-1 space-y-1 text-xs text-muted-foreground">
+            {(showSuggestion || directives.length > 0) && (
+              <div>
+                {showSuggestion && (
+                  <span className="font-medium text-foreground/80">{row.suggestedAgentName}</span>
+                )}
+                {directives.length > 0 && (
+                  <span className={showSuggestion ? "ml-1.5" : undefined}>
+                    +{directives.length} directive{directives.length === 1 ? "" : "s"}
+                    {directives[0] ? ` (“${clipText(directives[0], 60)}”)` : ""}
+                  </span>
+                )}
+              </div>
+            )}
+            {row.error && <div className="text-status-error/80">{clipText(row.error, 240)}</div>}
+          </div>
+        )}
+        {row.deviated && (
+          <div className="mt-1 flex items-start gap-1.5 text-xs text-status-warning">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-px" />
+            <span>
+              Lead deviated: suggested {row.suggestedAgentName ?? row.suggestedAgentId ?? "—"} →
+              delegated to {finalAgentName ?? "—"}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RoutingTraceView({ routing }: { routing: TaskRoutingResponse }) {
+  const groups = useMemo(() => groupRoutingTrace(routing.trace), [routing.trace]);
+  const deviated = routing.trace.some((row) => row.deviated);
+  return (
+    <div className="space-y-4">
+      {groups.map((group) => (
+        <div key={group.runId} className="space-y-1">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 pb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+            <span>
+              via: <span className="text-foreground/70">{group.vias.join(" → ")}</span>
+            </span>
+            <span>
+              edge: <span className="text-foreground/70">{group.edges.join(", ")}</span>
+            </span>
+          </div>
+          <div className="space-y-0">
+            {group.rows.map((row, i) => (
+              <RoutingTraceRowView
+                key={row.id}
+                row={row}
+                finalAgentName={routing.finalAgentName}
+                isLast={i === group.rows.length - 1}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+      {routing.finalAgentName && (
+        <div className="flex items-center gap-1.5 border-t border-border pt-2 text-xs">
+          <span className="font-semibold text-foreground">Final:</span>
+          <span className="text-muted-foreground">assigned to</span>
+          <span className="font-medium text-foreground">{routing.finalAgentName}</span>
+          {deviated && <span className="text-muted-foreground">(Lead decision)</span>}
         </div>
       )}
     </div>
@@ -498,6 +677,7 @@ export default function TaskDetailPage() {
   const { data: users } = useUsers();
   const { data: costs, isLoading: costsLoading } = useSessionCosts({ taskId: id });
   const { data: contextData, isLoading: contextLoading } = useTaskContext(id!);
+  const { data: routing } = useTaskRouting(id!);
   const cancelTask = useCancelTask();
   const pauseTask = usePauseTask();
   const resumeTask = useResumeTask();
@@ -561,6 +741,7 @@ export default function TaskDetailPage() {
   const hasSessionLogs = sessionLogs && sessionLogs.length > 0;
   const hasOutput = !!task.output;
   const hasEvents = task.logs && task.logs.length > 0;
+  const hasRouting = !!routing && routing.trace.length > 0;
   const hasAttachments = !!(task.attachments && task.attachments.length > 0);
 
   // LEFT RAIL — meta info + SCM card + Dependencies + Progress + Context budget +
@@ -871,6 +1052,17 @@ export default function TaskDetailPage() {
     </div>
   );
 
+  // Mobile `routing` tab body — same trace view as the desktop card, with an
+  // explicit empty state (desktop renders nothing when there's no trace).
+  const routingContent =
+    hasRouting && routing ? (
+      <RoutingTraceView routing={routing} />
+    ) : (
+      <div className="flex items-center justify-center py-8 text-muted-foreground">
+        <p className="text-xs">No routing decisions were recorded for this task.</p>
+      </div>
+    );
+
   // HERO — status badge + tags / priority / source / provider / model badges +
   // collapsible description + action buttons. Rendered inside the center column
   // on desktop (lg+) and above the Tabs on mobile/tablet (<lg). Same JSX in both
@@ -1054,6 +1246,7 @@ export default function TaskDetailPage() {
           <TabsList className="shrink-0 mx-1 mt-2">
             <TabsTrigger value="details">Details</TabsTrigger>
             <TabsTrigger value="outcome">Outcome</TabsTrigger>
+            <TabsTrigger value="routing">Routing</TabsTrigger>
             <TabsTrigger value="logs">Session Logs</TabsTrigger>
           </TabsList>
           <TabsContent value="details" className="flex-1 overflow-y-auto px-1 py-3 space-y-4">
@@ -1062,6 +1255,9 @@ export default function TaskDetailPage() {
           </TabsContent>
           <TabsContent value="outcome" className="flex-1 overflow-y-auto px-1 py-3">
             {outcomeContent}
+          </TabsContent>
+          <TabsContent value="routing" className="flex-1 overflow-y-auto px-1 py-3">
+            {routingContent}
           </TabsContent>
           <TabsContent value="logs" className="flex flex-col flex-1 min-h-0 px-1 py-3">
             {sessionLogsContent}
@@ -1125,6 +1321,19 @@ export default function TaskDetailPage() {
             )}
 
             <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
+
+            {hasRouting && routing && (
+              <CollapsibleSection
+                variant="card"
+                title="Routing"
+                icon={Waypoints}
+                iconColor="text-muted-foreground"
+              >
+                <div className="max-h-[60vh] overflow-auto">
+                  <RoutingTraceView routing={routing} />
+                </div>
+              </CollapsibleSection>
+            )}
 
             {hasSessionLogs ? (
               <SessionLogViewer

@@ -97,6 +97,7 @@ import type {
   SwarmRepo,
   SwarmReposResponse,
   TaskContextResponse,
+  TaskRoutingResponse,
   TasksResponse,
   TaskTemplate,
   TaskTemplateKind,
@@ -410,6 +411,16 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/tasks/${taskId}/context`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch task context: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchTaskRouting(taskId: string): Promise<TaskRoutingResponse> {
+    const url = `${this.getBaseUrl()}/api/tasks/${taskId}/routing-trace`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    // A task with no routing decisions (or one predating routing v1) 404s or
+    // returns an empty trace — treat both as an empty state, not an error.
+    if (res.status === 404) return { trace: [], finalAgentId: null, finalAgentName: null };
+    if (!res.ok) throw new Error(`Failed to fetch task routing: ${res.status}`);
     return res.json();
   }
 
