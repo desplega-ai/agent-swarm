@@ -164,6 +164,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [unregister-service](#unregister-service)
   - [list-services](#list-services)
   - [update-service-status](#update-service-status)
+- [Other Tools](#other-tools)
 
 ---
 
@@ -1934,4 +1935,62 @@ Update the health status of a registered service. Use this after a service becom
 | `serviceId` | `uuid` | No | - | Service ID to update. |
 | `name` | `string` | No | - | Service name to update (alternative to serviceId). |
 | `status` | `unknown` | Yes | - | New status: 'starting', 'healthy', 'unhealthy', or 'stopped'. |
+
+## Other Tools
+
+*Tools not assigned to a capability group*
+
+### patch-subscription
+
+**Patch Event Subscription**
+
+Update fields of an event subscription: pause/resume (enabled), description, eventPattern, filter, or scriptArgs. Target (script/workflow) is immutable — delete and recreate to retarget.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | Yes | - | Subscription name to patch |
+| `description` | `string` | No | - | - |
+| `eventPattern` | `string` | No | - | - |
+| `filter` | `unknown` | No | - | New payload filter; pass null to clear |
+| `scriptArgs` | `unknown` | No | - | New extra script args; pass null to clear |
+| `enabled` | `boolean` | No | - | false pauses the subscription |
+
+### list-subscriptions
+
+**List Event Subscriptions**
+
+List event subscriptions (event pattern → script/workflow bindings), optionally with recent delivery attempts per subscription.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `enabledOnly` | `boolean` | No | false | - |
+| `includeDeliveries` | `boolean` | No | false | Include the 5 most recent deliveries per subscription |
+
+### delete-subscription
+
+**Delete Event Subscription**
+
+Delete an event subscription by name. Pending deliveries are not executed.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | Yes | - | Subscription name to delete |
+
+### create-subscription
+
+**Create Event Subscription**
+
+Subscribe a catalog script or workflow to swarm events (task lifecycle, GitHub/GitLab webhooks, approvals, …). When a matching event fires, the target runs with the event payload. Delivery is at-least-once with retries.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | Yes | - | Unique name for the subscription (e.g., 'triage-failed-tasks') |
+| `description` | `string` | No | - | Human-readable description |
+| `eventPattern` | `string` | Yes | - | Glob over dot-separated event names: '*' matches one segment, '**' (last segment only) matches the rest. Examples: 'task.completed', 'task.*', 'github.**'. |
+| `filter` | `unknown` | No | - | Optional payload filter (wait-node filter language): object of dot-path → expected value for deep-equal matching, or a string expression over the event payload. |
+| `targetType` | `unknown` | Yes | - | What to run when the event fires: 'script' (global catalog script, receives the event as args.event) or 'workflow' (triggered with { event, subscriptionId } as trigger data). |
+| `scriptName` | `string` | No | - | Catalog script name (global scope). Required when targetType is 'script'. |
+| `scriptArgs` | `object` | No | - | Extra JSON args merged into the script invocation (event wins on key 'event'). |
+| `workflowId` | `string` | No | - | Workflow ID to trigger. Required when targetType is 'workflow'. |
+| `enabled` | `boolean` | No | true | - |
 
