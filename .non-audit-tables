@@ -33,3 +33,4 @@ tracker_agent_mapping
 tracker_sync
 user_identity_events
 wait_states
+routing_trace

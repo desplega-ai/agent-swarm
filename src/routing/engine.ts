@@ -200,13 +200,18 @@ export function createRoutingEngine(
           error,
           durationMs,
         });
-        emitRoutingEvent(
-          "routing.handler_failed",
-          ctx,
-          routingRunId,
-          { handlerId: handler.id, handlerName: handler.name },
-          "error",
-        );
+        // Dry-run must emit nothing on the bus: the subscriptions tap turns
+        // every emit into real deliveries, so an author probing a broken
+        // handler would trigger live subscription targets.
+        if (!opts.dryRun) {
+          emitRoutingEvent(
+            "routing.handler_failed",
+            ctx,
+            routingRunId,
+            { handlerId: handler.id, handlerName: handler.name },
+            "error",
+          );
+        }
         if (guardFailure) {
           decision.final = { block: { reason: `guard ${handler.name} failed: ${error}` } };
           if (!opts.dryRun) {

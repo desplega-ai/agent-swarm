@@ -11,6 +11,7 @@ import {
   recordSwarmBusEvent,
   requeueOrphanedRunningDeliveries,
 } from "@/be/subscriptions-db";
+import { scrubSecrets } from "@/utils/secret-scrubber";
 import { getExecutorRegistry as getWorkflowExecutorRegistry } from "@/workflows";
 import { startWorkflowExecution } from "@/workflows/engine";
 import { workflowEventBus } from "@/workflows/event-bus";
@@ -170,7 +171,10 @@ export async function processPendingDeliveries(limit = CLAIM_BATCH_SIZE): Promis
           : await executeWorkflowTarget(sub, event);
       finishDelivery(delivery.id, { status: "succeeded", result });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      // Scrub before persisting/logging: script/workflow failures can echo
+      // credential material and delivery rows are readable via
+      // list-subscriptions includeDeliveries.
+      const message = scrubSecrets(err instanceof Error ? err.message : String(err));
       const retry = delivery.attempts < MAX_ATTEMPTS;
       finishDelivery(delivery.id, { status: "failed", error: message, retry });
       console.error(
