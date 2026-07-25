@@ -119,6 +119,7 @@ export {
   useUpsertTemplate,
 } from "./use-prompt-templates";
 export { useCreateRepo, useDeleteRepo, useRepos, useUpdateRepo } from "./use-repos";
+export { useRoutingHandlers, useRoutingStats } from "./use-routing";
 export type { ScheduledTaskFilters } from "./use-schedules";
 export {
   useCreateSchedule,

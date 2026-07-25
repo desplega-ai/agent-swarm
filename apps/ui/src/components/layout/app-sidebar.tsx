@@ -15,6 +15,7 @@ import {
   MessageSquare,
   Settings,
   Users,
+  Waypoints,
   Workflow,
 } from "lucide-react";
 import { useRef, useState } from "react";
@@ -101,6 +102,7 @@ const navGroups: NavGroup[] = [
       { title: "Agents", path: "/agents", icon: Users },
       { title: "People", path: "/people", icon: Contact, gate: { minVersion: "1.80.0" } },
       { title: "Workflows", path: "/workflows", icon: Workflow },
+      { title: "Routing", path: "/routing", icon: Waypoints, gate: { minVersion: "1.120.0" } },
       { title: "Scripts", path: "/scripts", icon: FileClock },
       { title: "Schedules", path: "/schedules", icon: Clock },
     ],
@@ -277,6 +279,7 @@ export function AppSidebar() {
     "1.79.0": useFeatureGate("1.79.0"), // Pages
     "1.80.0": useFeatureGate("1.80.0"), // People
     "1.82.0": useFeatureGate("1.82.0"), // Live nav-item counts
+    "1.120.0": useFeatureGate("1.120.0"), // Routing
   };
   const isGated = (item: NavItem) =>
     !!item.gate && gates[item.gate.minVersion]?.supported === false;

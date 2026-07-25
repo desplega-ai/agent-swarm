@@ -547,11 +547,11 @@ A read-only `/routing` page renders the task lifecycle as a React-Flow graph —
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cd apps/ui && bun run lint && bunx tsc -b`
-- [ ] `bun run check:tokens` (if separate from lint)
+- [x] `cd apps/ui && bun run lint && bunx tsc -b`
+- [x] `bun run check:tokens` (if separate from lint)
 
 #### Automated QA:
-- [ ] agent-browser: load `/routing` with the Phase 4-7 handlers registered — screenshot graph with edge badges; click `task.before_assign` edge → panel lists handlers with stats; empty-state screenshot with no handlers (fresh DB).
+- [x] agent-browser: load `/routing` with the Phase 4-7 handlers registered — screenshot graph with edge badges; click `task.before_assign` edge → panel lists handlers with stats; empty-state screenshot with no handlers (fresh DB).
 
 #### Manual Verification:
 - [ ] Taras visual pass: graph legibility (this page is the product surface for "routing policy becomes legible") — layout, edge labels, non-tech readability.

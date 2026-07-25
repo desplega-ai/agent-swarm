@@ -1903,6 +1903,67 @@ export interface TaskRoutingResponse {
   finalAgentName: string | null;
 }
 
+// Routing v1 — lifecycle edge handlers (mirrors `EdgeHandler` /
+// `RoutingHandlerStats` in the backend `src/types.ts`). `GET /api/routing/handlers`
+// embeds per-handler aggregate stats; `GET /api/routing/stats` returns the same
+// stats list on its own.
+export type RoutingEdgeKind = "task.before_assign" | "prompt.compose";
+export type RoutingHandlerFlavor = "route" | "guard";
+export type RoutingHandlerMode = "soft" | "hard";
+export type RoutingVia = "creation" | "delegation" | "claim" | "resume" | "completion";
+
+export interface RoutingHandlerMatcher {
+  /** Undefined `via` on a `task.before_assign` handler applies to every via. */
+  via?: RoutingVia;
+  source?: string;
+  slackChannelId?: string;
+  vcsRepo?: string;
+  agentId?: string;
+  taskType?: string;
+  /** Compiled string-filter expression evaluated against the routing envelope. */
+  filter?: string;
+}
+
+export interface RoutingHandlerStats {
+  handlerName: string;
+  /** Non-dry-run trace rows where the handler matched. */
+  hits: number;
+  decisive: number;
+  errors: number;
+  deviations: number;
+  avgDurationMs: number | null;
+  lastHitAt: string | null;
+}
+
+export interface RoutingHandler {
+  id: string;
+  name: string;
+  edge: RoutingEdgeKind;
+  scriptName: string;
+  description?: string;
+  flavor: RoutingHandlerFlavor;
+  mode: RoutingHandlerMode;
+  priority: number;
+  matcher?: RoutingHandlerMatcher;
+  timeoutMs?: number;
+  enabled: boolean;
+  createdByAgentId?: string;
+  createdBy?: string;
+  updatedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Aggregate stats embedded by `GET /api/routing/handlers`. */
+  stats: RoutingHandlerStats;
+}
+
+export interface RoutingHandlersResponse {
+  handlers: RoutingHandler[];
+}
+
+export interface RoutingStatsResponse {
+  stats: RoutingHandlerStats[];
+}
+
 // API Key Status
 export type ApiKeyStatusType = "available" | "rate_limited";
 

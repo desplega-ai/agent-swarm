@@ -64,6 +64,8 @@ import type {
   PromptTemplateHistory,
   ReasoningEffortLevel,
   ResolveUnmappedInput,
+  RoutingHandlersResponse,
+  RoutingStatsResponse,
   ScheduledTask,
   ScheduledTasksResponse,
   ScriptApiAuthMode,
@@ -421,6 +423,25 @@ class ApiClient {
     // returns an empty trace — treat both as an empty state, not an error.
     if (res.status === 404) return { trace: [], finalAgentId: null, finalAgentName: null };
     if (!res.ok) throw new Error(`Failed to fetch task routing: ${res.status}`);
+    return res.json();
+  }
+
+  /** Registered lifecycle edge handlers, each with embedded aggregate stats. */
+  async fetchRoutingHandlers(): Promise<RoutingHandlersResponse> {
+    const url = `${this.getBaseUrl()}/api/routing/handlers`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch routing handlers: ${res.status}`);
+    return res.json();
+  }
+
+  /** Per-handler routing statistics, optionally scoped to a trailing window. */
+  async fetchRoutingStats(windowHours?: number): Promise<RoutingStatsResponse> {
+    const params = new URLSearchParams();
+    if (windowHours != null) params.set("windowHours", String(windowHours));
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/routing/stats${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch routing stats: ${res.status}`);
     return res.json();
   }
 
