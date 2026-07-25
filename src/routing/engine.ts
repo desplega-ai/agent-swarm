@@ -1,3 +1,4 @@
+import { getLeadAgent } from "../be/db";
 import { listEnabledHandlersForEdge } from "../be/edge-handlers-db";
 import { createEvent } from "../be/events";
 import { insertRoutingTrace } from "../be/routing-trace-db";
@@ -144,9 +145,11 @@ export function createRoutingEngine(
     if (matched.length === 0) return decision;
 
     const ordered = orderedHandlers(matched);
-    emitRoutingEvent("routing.matched", ctx, routingRunId, {
-      handlerNames: ordered.map((handler) => handler.name),
-    });
+    if (!opts.dryRun) {
+      emitRoutingEvent("routing.matched", ctx, routingRunId, {
+        handlerNames: ordered.map((handler) => handler.name),
+      });
+    }
 
     for (const handler of ordered) {
       const startedAt = Date.now();
@@ -156,7 +159,10 @@ export function createRoutingEngine(
         const output = await scriptRunner({
           scriptName: handler.scriptName,
           args: ctx,
-          agentId: handler.createdByAgentId ?? "routing",
+          // Seeded handlers have no creator; run their scripts as the lead so
+          // SDK bridge calls with registered-agent checks (e.g. classify)
+          // resolve to a real agent instead of 404ing and failing open.
+          agentId: handler.createdByAgentId ?? getLeadAgent()?.id ?? "routing",
           timeoutMs: handler.timeoutMs ?? 5000,
         });
         parsedResult = RoutingResultSchema.parse(output.result);
@@ -203,14 +209,16 @@ export function createRoutingEngine(
         );
         if (guardFailure) {
           decision.final = { block: { reason: `guard ${handler.name} failed: ${error}` } };
-          emitRoutingEvent("routing.applied", ctx, routingRunId, {
-            handlerId: handler.id,
-            handlerName: handler.name,
-          });
-          emitRoutingEvent("routing.blocked", ctx, routingRunId, {
-            handlerId: handler.id,
-            handlerName: handler.name,
-          });
+          if (!opts.dryRun) {
+            emitRoutingEvent("routing.applied", ctx, routingRunId, {
+              handlerId: handler.id,
+              handlerName: handler.name,
+            });
+            emitRoutingEvent("routing.blocked", ctx, routingRunId, {
+              handlerId: handler.id,
+              handlerName: handler.name,
+            });
+          }
           break;
         }
         continue;
@@ -267,15 +275,17 @@ export function createRoutingEngine(
 
       if (hardDecisive) {
         decision.final = result;
-        emitRoutingEvent("routing.applied", ctx, routingRunId, {
-          handlerId: handler.id,
-          handlerName: handler.name,
-        });
-        if (result.block) {
-          emitRoutingEvent("routing.blocked", ctx, routingRunId, {
+        if (!opts.dryRun) {
+          emitRoutingEvent("routing.applied", ctx, routingRunId, {
             handlerId: handler.id,
             handlerName: handler.name,
           });
+          if (result.block) {
+            emitRoutingEvent("routing.blocked", ctx, routingRunId, {
+              handlerId: handler.id,
+              handlerName: handler.name,
+            });
+          }
         }
         break;
       }

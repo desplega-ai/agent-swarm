@@ -28,6 +28,9 @@ import catalogReportSrc from "./catalog/catalog-report.inline.ts" with { type: "
 import completeTaskSrc from "./catalog/complete-task.ts" with { type: "text" };
 import compoundInsightsSrc from "./catalog/compound-insights.inline.ts" with { type: "text" };
 import dateResolveSrc from "./catalog/date-resolve.ts" with { type: "text" };
+import defaultContinuityPinSrc from "./catalog/default-continuity-pin.inline.ts" with {
+  type: "text",
+};
 import delegateSrc from "./catalog/delegate.ts" with { type: "text" };
 import fetchReadableSrc from "./catalog/fetch-readable.ts" with { type: "text" };
 import getChildOutputsSrc from "./catalog/get-child-outputs.ts" with { type: "text" };
@@ -69,6 +72,14 @@ function bundleCatalogReport(source: string): string {
 }
 
 export const SEED_SCRIPTS: SeedScript[] = [
+  {
+    name: "default-continuity-pin",
+    description:
+      "Suggest continuing delegated follow-up work with the parent task's agent unless a short intent classification finds a different intent.",
+    intent:
+      "Default continuity routing for delegated follow-up tasks: preserve the parent agent's context when the follow-up continues the same activity, but advise a fresh assignment when it switches to a different type of activity.",
+    source: asText(defaultContinuityPinSrc),
+  },
   {
     name: "gh-pr-snapshot",
     description:

@@ -2668,6 +2668,17 @@ export const EdgeHandlerSchema = z.object({
 });
 export type EdgeHandler = z.infer<typeof EdgeHandlerSchema>;
 
+export const RoutingHandlerStatsSchema = z.object({
+  handlerName: z.string(),
+  hits: z.number().int().nonnegative(),
+  decisive: z.number().int().nonnegative(),
+  errors: z.number().int().nonnegative(),
+  deviations: z.number().int().nonnegative(),
+  avgDurationMs: z.number().nonnegative().nullable(),
+  lastHitAt: z.string().nullable(),
+});
+export type RoutingHandlerStats = z.infer<typeof RoutingHandlerStatsSchema>;
+
 export const RoutingTraceSchema = z.object({
   id: z.string(),
   routingRunId: z.string(),

@@ -9899,6 +9899,216 @@
         }
       }
     },
+    "/api/routing/stats": {
+      "get": {
+        "operationId": "routing_handler_stats",
+        "summary": "Aggregate lifecycle handler statistics",
+        "tags": [
+          "Routing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "required": false,
+            "name": "windowHours",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-handler routing statistics"
+          }
+        }
+      }
+    },
+    "/api/routing/dry-run": {
+      "post": {
+        "operationId": "routing_dry_run",
+        "summary": "Dry-run a routing edge without applying lifecycle mutations",
+        "tags": [
+          "Routing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "edge": {
+                    "type": "string",
+                    "enum": [
+                      "task.before_assign",
+                      "prompt.compose"
+                    ]
+                  },
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "envelope": {
+                    "type": "object",
+                    "properties": {
+                      "via": {
+                        "type": "string",
+                        "enum": [
+                          "creation",
+                          "delegation",
+                          "claim",
+                          "resume",
+                          "completion",
+                          "prompt"
+                        ]
+                      },
+                      "task": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "mcp",
+                              "slack",
+                              "api",
+                              "ui",
+                              "github",
+                              "gitlab",
+                              "agentmail",
+                              "system",
+                              "schedule",
+                              "workflow",
+                              "linear",
+                              "jira"
+                            ]
+                          },
+                          "taskType": {
+                            "type": "string",
+                            "maxLength": 50
+                          },
+                          "tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "default": []
+                          },
+                          "parentTaskId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "modelTier": {
+                            "type": "string",
+                            "enum": [
+                              "smol",
+                              "regular",
+                              "smart",
+                              "ultra"
+                            ]
+                          },
+                          "priority": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100,
+                            "default": 50
+                          },
+                          "routingAffinity": {
+                            "type": "object",
+                            "properties": {
+                              "sourceAgentId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "role": {
+                                "type": "string",
+                                "maxLength": 100
+                              },
+                              "harnessProvider": {
+                                "type": "string",
+                                "enum": [
+                                  "claude",
+                                  "codex",
+                                  "pi",
+                                  "devin",
+                                  "claude-managed",
+                                  "opencode"
+                                ]
+                              },
+                              "capabilities": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "default": []
+                              }
+                            }
+                          },
+                          "slackChannelId": {
+                            "type": "string"
+                          },
+                          "slackThreadTs": {
+                            "type": "string"
+                          },
+                          "vcsProvider": {
+                            "type": "string",
+                            "enum": [
+                              "github",
+                              "gitlab"
+                            ]
+                          },
+                          "vcsRepo": {
+                            "type": "string"
+                          },
+                          "contextKey": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "proposedAgentId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "edge"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Would-be routing decision and ordered handler trace"
+          },
+          "403": {
+            "description": "Dry-running routing requires lead agent"
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      }
+    },
     "/api/routing/handlers/{id}": {
       "patch": {
         "operationId": "routing_handler_patch",

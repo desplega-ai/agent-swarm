@@ -195,6 +195,8 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
     }
 
     // ── routing (REST-only; no corresponding MCP tools) ──
+    case "routing_dry_run":
+      return { method: "POST", path: "/api/routing/dry-run", body };
     case "routing_handler_register":
       return { method: "POST", path: "/api/routing/handlers", body };
     case "routing_handler_list":

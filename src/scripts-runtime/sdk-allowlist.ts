@@ -168,6 +168,7 @@ export const SDK_REST_BRIDGE_METHODS = [
   "routing_handler_list",
   "routing_handler_patch",
   "routing_handler_delete",
+  "routing_dry_run",
 ] as const;
 
 /** Set of MCP tool names (values of SDK_TOOL_NAME_MAP) that scripts may call via the bridge. */

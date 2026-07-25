@@ -1,6 +1,16 @@
 import type { RoutingTrace } from "../types";
 import { getDb } from "./db";
 
+export type RoutingHandlerStats = {
+  handlerName: string;
+  hits: number;
+  decisive: number;
+  errors: number;
+  deviations: number;
+  avgDurationMs: number | null;
+  lastHitAt: string | null;
+};
+
 interface RoutingTraceRow {
   id: string;
   routingRunId: string;
@@ -102,4 +112,40 @@ export function listTraceForRun(routingRunId: string): RoutingTrace[] {
       .prepare("SELECT * FROM routing_trace WHERE routingRunId = ? ORDER BY createdAt, rowid")
       .all(routingRunId) as RoutingTraceRow[]
   ).map(rowToRoutingTrace);
+}
+
+/** Aggregate non-dry-run trace rows for the routing authoring surfaces. */
+export function aggregateHandlerStats({
+  windowHours,
+}: {
+  windowHours?: number;
+} = {}): RoutingHandlerStats[] {
+  const cutoff = windowHours === undefined ? null : `-${windowHours} hours`;
+  return getDb()
+    .prepare(
+      `SELECT handlerName,
+              SUM(matched) AS hits,
+              SUM(decisive) AS decisive,
+              SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) AS errors,
+              SUM(CASE WHEN deviated = 1 THEN 1 ELSE 0 END) AS deviations,
+              AVG(durationMs) AS avgDurationMs,
+              MAX(createdAt) AS lastHitAt
+         FROM routing_trace
+        WHERE dryRun = 0
+          AND (? IS NULL OR createdAt >= datetime('now', ?))
+        GROUP BY handlerName
+        ORDER BY handlerName`,
+    )
+    .all(cutoff, cutoff)
+    .map((row) => {
+      const stats = row as RoutingHandlerStats;
+      return {
+        ...stats,
+        hits: Number(stats.hits),
+        decisive: Number(stats.decisive),
+        errors: Number(stats.errors),
+        deviations: Number(stats.deviations),
+        avgDurationMs: stats.avgDurationMs === null ? null : Number(stats.avgDurationMs),
+      };
+    });
 }

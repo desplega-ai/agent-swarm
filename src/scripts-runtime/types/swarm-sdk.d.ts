@@ -68,6 +68,45 @@ declare module "swarm-sdk" {
     updatedBy?: string;
     createdAt: string;
     updatedAt: string;
+    stats?: RoutingHandlerStats;
+  };
+  export type RoutingHandlerStats = {
+    handlerName: string;
+    hits: number;
+    decisive: number;
+    errors: number;
+    deviations: number;
+    avgDurationMs: number | null;
+    lastHitAt: string | null;
+  };
+  export type RoutingDryRunInput = {
+    edge: RoutingEdge;
+    taskId?: string;
+    envelope?: {
+      via?: RoutingVia;
+      task?: Partial<RoutingTask>;
+      proposedAgentId?: string;
+    };
+  };
+  export type RoutingDecisionTrace = {
+    handlerId: string;
+    handlerName: string;
+    flavor: RoutingHandlerFlavor;
+    mode: RoutingHandlerMode;
+    result?: RoutingResult;
+    decisive: boolean;
+    suggestion?: string;
+    error?: string;
+    durationMs: number;
+  };
+  export type RoutingDecision = {
+    final?: RoutingResult;
+    suggestions: Array<{ handlerName: string; assignTo?: string; block?: { reason: string } }>;
+    mutations: NonNullable<RoutingResult["mutate"]>;
+    promptDirectives: string[];
+    notes: string[];
+    routingRunId: string;
+    trace: RoutingDecisionTrace[];
   };
   export type RoutingBridgeResponse<T> = { success: boolean; status: number; data: T };
 
@@ -219,6 +258,7 @@ declare module "swarm-sdk" {
     routing_handler_list(
       args?: Record<string, never>,
     ): Promise<RoutingBridgeResponse<{ handlers: RoutingHandler[] }>>;
+    routing_dry_run(args: RoutingDryRunInput): Promise<RoutingBridgeResponse<RoutingDecision>>;
     // --- scripts ---
     script_search(args: { query?: string; scope?: ScriptScope; limit?: number }): Promise<unknown>;
     script_run(args: {

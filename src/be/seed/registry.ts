@@ -6,13 +6,19 @@
  * automatically.
  */
 
+import { edgeHandlersSeeder } from "../seed-edge-handlers";
 import { scriptsSeeder } from "../seed-scripts";
 import { skillsSeeder } from "../seed-skills";
 import { agentFsProvisionSeeder } from "./agent-fs-provision";
 import { runSeeders } from "./runner";
 import type { Seeder, SeederResult, SeederRunOptions } from "./types";
 
-export const SEEDERS: Seeder[] = [agentFsProvisionSeeder, scriptsSeeder, skillsSeeder];
+export const SEEDERS: Seeder[] = [
+  agentFsProvisionSeeder,
+  scriptsSeeder,
+  edgeHandlersSeeder,
+  skillsSeeder,
+];
 
 /** Apply every registered seeder. Called at API boot and by the seed CLI. */
 export function runAllSeeders(opts?: SeederRunOptions): Promise<SeederResult[]> {

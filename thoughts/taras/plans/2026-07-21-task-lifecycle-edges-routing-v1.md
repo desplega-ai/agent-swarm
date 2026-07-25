@@ -462,15 +462,15 @@ The first built-in becomes a visible handler: a pre-installed `default-continuit
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun test src/tests/routing-dryrun-stats.test.ts` — dry-run applies nothing (no task/trace mutation beyond flagged rows), stats aggregation correctness, continuity handler suggest-pin/suggest-pool branches (classify mocked)
-- [ ] `bun test && bun run tsc:check && bun run lint && bun run check:rbac-coverage`
-- [ ] `bun run docs:openapi && git diff --exit-code openapi.json`
+- [x] `bun test src/tests/routing-dryrun-stats.test.ts` — dry-run applies nothing (no task/trace mutation beyond flagged rows), stats aggregation correctness, continuity handler suggest-pin/suggest-pool branches (classify mocked)
+- [x] `bun test && bun run tsc:check && bun run lint && bun run check:rbac-coverage`
+- [x] `bun run docs:openapi && git diff --exit-code openapi.json`
 
 #### Automated QA:
-- [ ] `curl -s -X POST http://localhost:3013/api/routing/dry-run -H "Authorization: Bearer 123123" -H "Content-Type: application/json" -d '{"edge":"task.before_assign","envelope":{"via":"creation","task":{"description":"test","source":"slack","slackChannelId":"C0AR967K0KZ"}}}' | jq` returns the chain with would-be decision; `GET /api/routing/stats | jq` shows hit counts after Phase 4/5 QA runs.
+- [x] `curl -s -X POST http://localhost:3013/api/routing/dry-run -H "Authorization: Bearer 123123" -H "Content-Type: application/json" -d '{"edge":"task.before_assign","envelope":{"via":"creation","task":{"description":"test","source":"slack","slackChannelId":"C0AR967K0KZ"}}}' | jq` returns the chain with would-be decision; `GET /api/routing/stats | jq` shows hit counts after Phase 4/5 QA runs.
 
 #### Manual Verification:
-- [ ] Reproduce Daniel's scenario locally: research-parent task → follow-up with different intent (Notion-write-shaped) → default handler suggests breaking continuity; confirm the suggestion text is actionable for a Lead.
+- [x] Reproduce Daniel's scenario locally: research-parent task → follow-up with different intent (Notion-write-shaped) → default handler suggests breaking continuity; confirm the suggestion text is actionable for a Lead.
 
 **Implementation Note**: Pause + commit `[phase 7] continuity default handler + dry-run + stats`.
 

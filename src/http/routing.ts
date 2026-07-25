@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "../be/audit-user";
-import { getAgentById, getTaskById } from "../be/db";
+import { getAgentById, getTaskById, resolveEffectiveTaskOptions } from "../be/db";
 import {
   createEdgeHandler,
   deleteEdgeHandler,
@@ -9,9 +9,13 @@ import {
   listEdgeHandlers,
   patchEdgeHandler,
 } from "../be/edge-handlers-db";
+import { aggregateHandlerStats } from "../be/routing-trace-db";
 import { getScript } from "../be/scripts/db";
 import { can } from "../rbac";
+import { buildRoutingCtx } from "../routing/ctx";
+import { runBeforeAssign, runPromptCompose } from "../routing/engine";
 import { composeTaskRoutingDirectives } from "../routing/prompt-compose";
+import { type RoutingCtx, RoutingTaskSchema, RoutingViaSchema } from "../routing/types";
 import {
   EdgeHandlerEdgeSchema,
   EdgeHandlerFlavorSchema,
@@ -25,6 +29,25 @@ const handlerNameSchema = z.string().min(1).max(200);
 const handlerIdSchema = z.object({ id: z.string().uuid() });
 const prioritySchema = z.number().int().min(0).max(1_000_000);
 const timeoutMsSchema = z.number().int().positive().max(300_000);
+
+const dryRunBodySchema = z
+  .object({
+    edge: EdgeHandlerEdgeSchema,
+    taskId: z.string().min(1).optional(),
+    envelope: z
+      .object({
+        via: RoutingViaSchema.optional(),
+        task: RoutingTaskSchema.partial().optional(),
+        proposedAgentId: z.string().min(1).optional(),
+      })
+      .optional(),
+  })
+  .refine((body) => body.taskId !== undefined || body.envelope?.task !== undefined, {
+    message: "Provide taskId or envelope.task",
+  })
+  .refine((body) => !(body.taskId !== undefined && body.envelope?.task !== undefined), {
+    message: "Provide either taskId or envelope.task, not both",
+  });
 
 const createBodySchema = z.object({
   name: handlerNameSchema,
@@ -84,6 +107,33 @@ const listHandlersRoute = route({
   responses: {
     200: { description: "Registered handlers" },
   },
+});
+
+const handlerStatsRoute = route({
+  method: "get",
+  path: "/api/routing/stats",
+  pattern: ["api", "routing", "stats"],
+  operationId: "routing_handler_stats",
+  summary: "Aggregate lifecycle handler statistics",
+  tags: ["Routing"],
+  query: z.object({ windowHours: z.coerce.number().positive().optional() }),
+  responses: { 200: { description: "Per-handler routing statistics" } },
+});
+
+const dryRunRoute = route({
+  method: "post",
+  path: "/api/routing/dry-run",
+  pattern: ["api", "routing", "dry-run"],
+  operationId: "routing_dry_run",
+  summary: "Dry-run a routing edge without applying lifecycle mutations",
+  tags: ["Routing"],
+  body: dryRunBodySchema,
+  responses: {
+    200: { description: "Would-be routing decision and ordered handler trace" },
+    403: { description: "Dry-running routing requires lead agent" },
+    404: { description: "Task not found" },
+  },
+  rbac: { permission: "routing.write" },
 });
 
 const patchHandlerRoute = route({
@@ -196,6 +246,48 @@ export async function handleRouting(
   queryParams: URLSearchParams,
   agentId: string | undefined,
 ): Promise<boolean> {
+  if (dryRunRoute.match(req.method, pathSegments)) {
+    const parsed = await dryRunRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const agent = requireAgent(res, agentId);
+    if (!agent || !canRegister(res, agent)) return true;
+
+    const { edge, taskId, envelope } = parsed.body;
+    let ctx: RoutingCtx;
+    if (taskId) {
+      const task = getTaskById(taskId);
+      if (!task) {
+        jsonError(res, "Task not found", 404);
+        return true;
+      }
+      // Replay default: infer the via from the task shape instead of silently
+      // assuming creation — a delegated follow-up replayed without an explicit
+      // via would otherwise match zero delegation handlers.
+      const inferredVia = envelope?.via ?? (task.parentTaskId ? "delegation" : "creation");
+      ctx = buildRoutingCtx(inferredVia, task, {
+        proposedAgentId: envelope?.proposedAgentId ?? task.agentId ?? undefined,
+      });
+    } else {
+      const task = envelope?.task;
+      if (!task?.description) {
+        jsonError(res, "envelope.task.description required", 400);
+        return true;
+      }
+      const { id: _id, description, ...options } = task;
+      ctx = buildRoutingCtx(
+        envelope?.via ?? "creation",
+        resolveEffectiveTaskOptions(description, options),
+        { proposedAgentId: envelope?.proposedAgentId },
+      );
+    }
+
+    const decision = await (edge === "prompt.compose" ? runPromptCompose : runBeforeAssign)(ctx, {
+      dryRun: true,
+    });
+    json(res, decision);
+    return true;
+  }
+
   if (promptComposeRoute.match(req.method, pathSegments)) {
     const parsed = await promptComposeRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
@@ -228,7 +320,30 @@ export async function handleRouting(
   if (listHandlersRoute.match(req.method, pathSegments)) {
     const parsed = await listHandlersRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    json(res, { handlers: listEdgeHandlers() });
+    const statsByHandler = new Map(
+      aggregateHandlerStats().map((stats) => [stats.handlerName, stats]),
+    );
+    json(res, {
+      handlers: listEdgeHandlers().map((handler) => ({
+        ...handler,
+        stats: statsByHandler.get(handler.name) ?? {
+          handlerName: handler.name,
+          hits: 0,
+          decisive: 0,
+          errors: 0,
+          deviations: 0,
+          avgDurationMs: null,
+          lastHitAt: null,
+        },
+      })),
+    });
+    return true;
+  }
+
+  if (handlerStatsRoute.match(req.method, pathSegments)) {
+    const parsed = await handlerStatsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    json(res, { stats: aggregateHandlerStats(parsed.query) });
     return true;
   }
 
