@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.121.0] - 2026-07-25
+
+### Added
+- **Connections now share a unified OAuth core with embedded authentication and a curated integrations catalog** (#990) — generic, tracker, and MCP OAuth flows use encrypted app credentials and labeled authorizations behind one static callback, while OpenAPI/GraphQL connections can own bearer, header, query, or OAuth auth without a separately managed binding.
+- **Every externally exposed MCP tool group is now capability-gated** (#996) — deployments can trim the server tool surface, worker prompts omit disabled integrations, and scripts retain the full independently allowlisted SDK bridge.
+
+### Changed
+- **The merge gate now enforces generated script SDK type freshness** (#997) — CI rebuilds the vendored SDK declarations and fails when source changes are not accompanied by regenerated `.d.ts` artifacts.
+
+### Fixed
+- **Dashboard integration links now resolve to the current documentation routes** (#994) — connection and integration pages include the `/docs` prefix and no longer point to removed paths.
+
 ## [1.119.6] - 2026-07-24
 
 ### Changed

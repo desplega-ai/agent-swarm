@@ -20,9 +20,11 @@ export default async function (args, ctx) {
 }
 ```
 
-Credentials attach to connections as **bindings** and are injected at network
-egress — script code never holds a raw secret (see
-[Security model](#security-model)).
+Authentication is declared directly on each connection. The server derives and
+owns the corresponding credential binding, then injects the credential at
+network egress — script code never holds a raw secret (see
+[Security model](#security-model)). Standalone bindings remain available only
+as an advanced escape hatch for spec-less raw `fetch()` calls.
 
 | Kind      | Script surface                        | Registered from                          |
 | --------- | ------------------------------------- | ---------------------------------------- |
@@ -47,10 +49,11 @@ Management is **lead-only** (RBAC verb `script-connection.manage`) through the
   "displayName": "Notion API",
   "baseUrl": "https://api.notion.com",
   "openapiSpecUrl": "https://api.apis.guru/v2/specs/notion.com/1.0.0/openapi.json",
-  "allowedHosts": ["api.notion.com"],
-  // optional: create a credential binding in the same call
-  "configKey": "NOTION_TOKEN",
-  "headerTemplate": "Authorization: Bearer [REDACTED:NOTION_TOKEN]"
+  // optional: embed auth in the connection
+  "auth": {
+    "type": "bearer",
+    "configKey": "NOTION_TOKEN"
+  }
 }
 ```
 
@@ -83,9 +86,10 @@ paths are resolved against it.
   "slug": "gh",
   "displayName": "GitHub GraphQL",
   "baseUrl": "https://api.github.com/graphql",
-  "allowedHosts": ["api.github.com"],
-  "configKey": "GH_GRAPHQL_TOKEN",
-  "headerTemplate": "Authorization: Bearer [REDACTED:GH_GRAPHQL_TOKEN]"
+  "auth": {
+    "type": "bearer",
+    "configKey": "GH_GRAPHQL_TOKEN"
+  }
 }
 ```
 
@@ -131,132 +135,90 @@ connection's scope, so an agent-scoped server's secrets resolve as that agent.
 
 Re-run discovery after a server adds tools with `{"action": "refresh"}`.
 
-## Credentials
+## Authentication
 
-Bindings are managed with the `credential-bindings` MCP tool (`list`, `upsert`,
-`oauth-app-upsert`, `oauth-authorize-url`, `import-legacy`, `disable`) and are
-stored relationally (`script_credential_bindings`). A binding is:
+The `auth` object on `script-connections` is the preferred way to authenticate
+OpenAPI and GraphQL connections:
 
-- `configKey` — the placeholder identity, e.g. `NOTION_TOKEN`
-- `authKind` — `config` (resolve from swarm config / env) or `oauth` (resolve
-  from stored OAuth tokens)
-- `allowedHosts` — exact hostnames where substitution may happen
-- `headerTemplate` / `queryTemplate` — where the credential goes
+| Type | Required fields | Result |
+| --- | --- | --- |
+| `bearer` | `secret` or `configKey` | `Authorization: Bearer ...` |
+| `header` | `headerName`, plus `secret` or `configKey` | Custom header |
+| `query` | `paramName`, plus `secret` or `configKey` | Query-string credential |
+| `oauth` | `authorizationId` | Refreshed OAuth token as a bearer header |
+| `none` | none | Clears the connection's managed authentication |
 
-The template must contain the **exact placeholder** `[REDACTED:<configKey>]`:
-
-```
-Authorization: Bearer [REDACTED:NOTION_TOKEN]
-```
-
-A template without that placeholder is silently ignored (the request goes out
-unauthenticated) — this is the most common misconfiguration; `{{KEY}}`-style
-templates do not work.
-
-For `authKind: "config"`, store the secret first:
+An inline `secret` is write-only and stored under an encrypted,
+connection-owned config key. Use `configKey` when several connections should
+share a separately rotated secret:
 
 ```jsonc
 // set-config
 { "key": "NOTION_TOKEN", "value": "ntn_...", "isSecret": true, "scope": "global" }
+
+// script-connections
+{
+  "action": "upsert-openapi",
+  "slug": "notion",
+  "baseUrl": "https://api.notion.com",
+  "openapiSpecUrl": "https://example.com/notion-openapi.json",
+  "auth": { "type": "bearer", "configKey": "NOTION_TOKEN" }
+}
 ```
 
-Secrets are AES-256-GCM encrypted at rest when `SECRETS_ENCRYPTION_KEY` is set
-— see [Secrets encryption](./secrets-encryption).
+The destination hostname defaults to the connection's `baseUrl`. Set
+`auth.hosts` only when the credential must be allowed at additional exact
+hostnames. Custom templates are supported, but must include the generated
+`[REDACTED:<configKey>]` placeholder.
+
+Use `credential-bindings` directly only for scripts that authenticate
+spec-less raw `fetch()` egress. Connection-managed bindings are hidden from its
+normal list to keep connection auth lifecycle-owned.
 
 ### OAuth flow
 
-For APIs where a user authorizes an OAuth app (GitHub, Google, Slack, ...):
+OAuth apps and their authorizations now share one core across generic
+connections, trackers, and installed MCP servers. An app can have several
+labeled authorizations, and connections bind to the exact authorization ID:
 
 ```jsonc
-// 1. register the OAuth app (client id/secret from the provider's dev console)
+// 1. Register an app. A curated preset fills provider endpoints and quirks.
 // credential-bindings
 {
   "action": "oauth-app-upsert",
+  "presetId": "github",
   "provider": "github",
   "clientId": "...",
-  "clientSecret": "...",
-  "authorizeUrl": "https://github.com/login/oauth/authorize",
-  "tokenUrl": "https://github.com/login/oauth/access_token",
-  "scopes": ["repo", "read:org"]
+  "clientSecret": "..."
 }
 
-// 2. get the authorization URL — the swarm generates state + PKCE (S256)
-{ "action": "oauth-authorize-url", "provider": "github" }
-```
+// 2. Create a labeled authorization URL (state + PKCE are server-managed).
+{ "action": "oauth-authorize-url", "provider": "github", "label": "work" }
 
-The user opens the returned URL, authorizes, and the provider redirects to
-`GET /api/oauth/{provider}/callback`, where the swarm exchanges the code
-(client secret + PKCE verifier), stores access + refresh tokens, and shows a
-"you can close this tab" page.
+// 3. After the callback, list authorizations and copy the desired id.
+{ "action": "oauth-authorizations-list", "provider": "github" }
 
-By default client credentials are sent as form-encoded body parameters. For
-providers that require HTTP Basic auth and/or a JSON token request (e.g.
-Notion), set the token-endpoint knobs on the app:
-
-```jsonc
-{ "action": "oauth-app-upsert", "provider": "notion", ..., "tokenAuthStyle": "basic", "tokenBodyFormat": "json" }
-```
-
-Then bind the token:
-
-```jsonc
-// 3. bind — the token resolves from oauth_tokens at run time
+// 4. Attach that authorization directly to the connection.
+// script-connections
 {
-  "action": "upsert",
-  "configKey": "GITHUB_OAUTH",
-  "authKind": "oauth",
-  "oauthProvider": "github",
-  "allowedHosts": ["api.github.com"],
-  "headerTemplate": "Authorization: Bearer [REDACTED:GITHUB_OAUTH]"
+  "action": "upsert-graphql",
+  "slug": "gh",
+  "baseUrl": "https://api.github.com/graphql",
+  "auth": { "type": "oauth", "authorizationId": "<authorization id>" }
 }
 ```
 
-Tokens expiring within 5 minutes are refreshed automatically (refresh is
-serialized per provider via a lock). A provider whose refresh fails is skipped
-for that run — the placeholder stays unsubstituted and other bindings are
-unaffected. Scopes are space-separated in the authorize URL per the OAuth spec.
+All generic apps use the single static callback
+`<PUBLIC_MCP_BASE_URL>/api/oauth/callback`. Existing tokens continue to work
+after upgrading, but provider registrations created before the redesign must
+allow this URI before re-authorization. See
+[OAuth callback migration](./oauth-callback-migration).
 
-Three identifiers are involved, deliberately independent:
-
-```
-script_connection   slug: "notion"        → what scripts call: ctx.api.notion
-  └ credential_binding  configKey: NOTION_TOKEN, oauthProvider: "notion"  → the link
-      └ oauth_app       provider: "notion"    → the callback URL segment
-```
-
-The callback path segment is the **OAuth app's provider slug**, not the
-connection slug. One authorization can back many connections — e.g. a single
-`google` OAuth app + token bound into separate `gcal`, `gmail`, and `gdrive`
-connections. The redirect URI you register in the provider's dev console stays
-stable per app regardless of how many connections reference it.
-
-### Worked example: Notion (public integration)
-
-Verified end-to-end against a real Notion workspace:
-
-```jsonc
-// credential-bindings — note owner=user (Notion-required authorize param)
-// and the Basic+JSON token-endpoint style
-{
-  "action": "oauth-app-upsert",
-  "provider": "notion",
-  "clientId": "<integration client id>",
-  "clientSecret": "<integration secret>",
-  "authorizeUrl": "https://api.notion.com/v1/oauth/authorize",
-  "tokenUrl": "https://api.notion.com/v1/oauth/token",
-  "scopes": [],
-  "extraParams": { "owner": "user" },
-  "tokenAuthStyle": "basic",
-  "tokenBodyFormat": "json"
-}
-```
-
-Register `http://<your-host>/api/oauth/notion/callback` as the redirect URI in
-Notion's integration settings, open the `oauth-authorize-url` result in a
-browser, authorize — then bind with `authKind: "oauth"`, `oauthProvider:
-"notion"` and attach to a connection. Google works the same way with
-`extraParams: { "access_type": "offline", "prompt": "consent" }` (required to
-receive a refresh token) and the default body/form token style.
+Curated presets currently cover Google, Slack, GitHub, Jira, Linear, and
+Notion. They fill authorization/token endpoints, scopes, and provider-specific
+token rules; client credentials always come from your own provider app. Tokens
+near expiry are refreshed under an authorization-scoped lock, so multiple
+labeled accounts for one provider rotate independently.
 
 ## Security model
 
@@ -270,9 +232,8 @@ receive a refresh token) and the default body/form token style.
   MCP session and its auth.
 - **Scrubbed logs.** Resolved values are registered as volatile secrets, so
   stdout/stderr and session logs render them as `[REDACTED:KEY]`.
-- **Encrypted at rest.** Config-backed secrets use the swarm secrets cipher.
-  OAuth tokens are stored in `oauth_tokens` (plaintext in v1 —
-  `TODO(secrets-cipher)`).
+- **Encrypted at rest.** Connection secrets, OAuth app client secrets, PKCE
+  verifiers, and authorization tokens use the swarm secrets cipher.
 
 ## Where connections resolve
 
@@ -290,7 +251,6 @@ endpoint's run-as agent).
   `structuredContent`); unwrap it in the script.
 - GraphQL results are untyped (`any`); OpenAPI response types are generated
   from the spec on a best-effort basis.
-- OAuth tokens are not yet encrypted at rest.
 
 ## Trying it out
 
