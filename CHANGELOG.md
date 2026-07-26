@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.120.1] - 2026-07-26
+
+### Changed
+- **Harness steering guidance now documents current provider capabilities and exposure surfaces** (#998) — the research reference compares supported controls across harnesses and records where model, reasoning, service-tier, and configuration options are exposed.
+
 ## [1.119.6] - 2026-07-24
 
 ### Changed
