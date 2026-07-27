@@ -52,6 +52,7 @@ import {
   REBOOT_RETRY_PIN_TAG,
 } from "../tasks/worker-follow-up";
 import type { AgentTask } from "../types";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { getExecutorRegistry } from "../workflows";
 import { recoverIncompleteRuns } from "../workflows/recovery";
 // Side-effect import: registers heartbeat event templates in the in-memory registry
@@ -463,8 +464,10 @@ async function remediateCrashedWorkerTask(
       );
     }
   } else if (resume.kind === "blocked") {
+    // The block reason is handler-controlled script output — scrub at this
+    // logging egress rather than trusting upstream to have done it.
     console.warn(
-      `[Heartbeat] Auto-superseded task ${task.id.slice(0, 8)} but resume assignment was blocked by routing: ${resume.reason}`,
+      `[Heartbeat] Auto-superseded task ${task.id.slice(0, 8)} but resume assignment was blocked by routing: ${scrubSecrets(resume.reason)}`,
     );
   } else {
     const reason =

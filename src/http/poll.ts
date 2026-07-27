@@ -408,7 +408,15 @@ export async function handlePoll(
           // `isAgentEligibleForTask`, so an ineligible task is never even
           // offered to the budget gate below or the claim loop.
           if (hasCapacity(myAgentId)) {
-            const unassignedIds = getUnassignedTaskIdsForAgent(myAgentId, 5).filter(
+            // Must fetch as deep as the routing pre-pass scanned, otherwise a
+            // candidate it approved below the top 5 is filtered out here and
+            // never claimed — which would strand the worker even though a
+            // claimable task exists. Without claim routing the original
+            // shallow window is preserved exactly.
+            const unassignedIds = getUnassignedTaskIdsForAgent(
+              myAgentId,
+              routedClaimCandidateIds === undefined ? 5 : CLAIM_ROUTING_SCAN_LIMIT,
+            ).filter(
               (candidateId) =>
                 routedClaimCandidateIds === undefined || routedClaimCandidateIds.has(candidateId),
             );

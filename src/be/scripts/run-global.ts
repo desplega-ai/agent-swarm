@@ -28,14 +28,20 @@ export async function runGlobalScriptByName(input: {
   if (!script) {
     throw new Error(`Script '${input.scriptName}' not found`);
   }
+  // Gating `ctx.swarm` alone is not enough: `ctx.api` / `ctx.mcp` hand the
+  // script authenticated descriptors for EXTERNAL services, and the egress
+  // broker substitutes real credentials into its fetches. A handler that
+  // normally writes through one of those could mutate a third-party system
+  // during a dry run, so a read-only run gets none of them.
+  const readOnly = input.readOnly === true;
   const output = await runScript({
     source: script.source,
     args: input.args,
     fsMode: "none",
     agentId: input.agentId,
-    egressSecrets: await buildScriptCredentialBindings({ agentId: input.agentId }),
-    apiConnections: getScriptApiConnectionDescriptors({ agentId: input.agentId }),
-    mcpConnections: getScriptMcpConnectionDescriptors({ agentId: input.agentId }),
+    egressSecrets: readOnly ? [] : await buildScriptCredentialBindings({ agentId: input.agentId }),
+    apiConnections: readOnly ? [] : getScriptApiConnectionDescriptors({ agentId: input.agentId }),
+    mcpConnections: readOnly ? [] : getScriptMcpConnectionDescriptors({ agentId: input.agentId }),
     timeoutMs: input.timeoutMs ?? 60_000,
     readOnly: input.readOnly,
   });

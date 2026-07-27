@@ -575,8 +575,15 @@ export async function sendTaskHandler(
   const suggestion = effectiveParentTask?.routingDirectives?.suggestions.find(
     (candidate) => candidate.assignTo,
   );
+  // `routing.lead_deviated` measures whether the LEAD followed a soft
+  // suggestion — it is the signal that promotes a rule from soft to hard. But
+  // send-task is callable by workers too, and counting a worker's delegation
+  // as a Lead deviation would distort the very metric the promotion decision
+  // rests on. Gate on the caller actually being the Lead.
+  const callerIsLead = creatorAgentId ? (getAgentById(creatorAgentId)?.isLead ?? false) : false;
   if (
     result.success &&
+    callerIsLead &&
     leadChosenAgentId &&
     suggestion?.assignTo &&
     suggestion.assignTo !== leadChosenAgentId &&

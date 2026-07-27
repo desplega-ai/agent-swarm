@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { scrubSecrets } from "../utils/secret-scrubber";
 
 export interface WorkflowEventBus {
   emit(event: string, data: unknown): void;
@@ -29,12 +30,12 @@ export class InProcessEventBus implements WorkflowEventBus {
         handler(event, data);
       } catch (err) {
         // A failing tap must never break the emitting call site. Log only the
-        // message: a raw error object dumps a stack (and any payload material
-        // captured in it) straight into container logs.
+        // message, scrubbed: a raw error object dumps a stack, and a tap can
+        // throw an error derived from the event payload.
         console.error(
-          `[EventBus] onAny handler failed for '${event}': ${
-            err instanceof Error ? err.message : String(err)
-          }`,
+          `[EventBus] onAny handler failed for '${event}': ${scrubSecrets(
+            err instanceof Error ? err.message : String(err),
+          )}`,
         );
       }
     }
