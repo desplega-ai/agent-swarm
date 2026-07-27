@@ -325,6 +325,75 @@ export const ProviderNameSchema = z.enum([
 ]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
+// ============================================================================
+// Task Steering Messages
+// ============================================================================
+//
+// `mode`, `status`, and `createdByKind` MUST stay in sync with the SQL CHECK
+// constraints in migration 121. `source` is intentionally Zod-only.
+
+export const SteerModeSchema = z.enum(["steer", "queue"]);
+export type SteerMode = z.infer<typeof SteerModeSchema>;
+
+export const SteeringStatusSchema = z.enum([
+  "pending",
+  "delivered",
+  "handled",
+  "promoted",
+  "cancelled",
+]);
+export type SteeringStatus = z.infer<typeof SteeringStatusSchema>;
+
+export const SteeringSourceSchema = z.enum(["ui", "mcp", "script", "slack", "api"]);
+export type SteeringSource = z.infer<typeof SteeringSourceSchema>;
+
+export const SteeringMessageSchema = z.object({
+  id: z.uuid(),
+  taskId: z.uuid(),
+  body: z.string().min(1),
+  mode: SteerModeSchema,
+  status: SteeringStatusSchema,
+  deliveredMode: SteerModeSchema.optional(),
+  source: SteeringSourceSchema,
+  createdByKind: z.enum(["user", "agent", "system"]),
+  createdByUserId: z.string().optional(),
+  createdByAgentId: z.string().optional(),
+  promotedTaskId: z.uuid().optional(),
+  createdAt: z.iso.datetime(),
+  deliveredAt: z.iso.datetime().optional(),
+  handledAt: z.iso.datetime().optional(),
+});
+export type SteeringMessage = z.infer<typeof SteeringMessageSchema>;
+
+export const SteerOutcomeSchema = z.enum(["steered", "queued", "promoted"]);
+export type SteerOutcome = z.infer<typeof SteerOutcomeSchema>;
+
+/** Decision 16 — callers opt into a hard failure instead of a silent downgrade. */
+export const OnUnsupportedSchema = z.enum(["degrade", "fail"]).default("degrade");
+export type OnUnsupported = z.infer<typeof OnUnsupportedSchema>;
+
+export const SteerResultSchema = z.object({
+  outcome: SteerOutcomeSchema,
+  steeringMessageId: z.uuid().optional(),
+  promotedTaskId: z.uuid().optional(),
+  effectiveMode: SteerModeSchema,
+  degradedFrom: SteerModeSchema.optional(),
+});
+export type SteerResult = z.infer<typeof SteerResultSchema>;
+
+/**
+ * Static per-provider capability map. MUST stay in sync with each adapter's
+ * `traits.steerModes` (step-3) — asserted by a test, not by convention.
+ */
+export const PROVIDER_STEER_CAPABILITIES: Record<ProviderName, SteerMode[]> = {
+  pi: ["steer", "queue"],
+  "claude-managed": ["steer", "queue"],
+  devin: ["steer", "queue"],
+  opencode: ["steer", "queue"],
+  claude: ["queue"],
+  codex: [],
+};
+
 export type DevinProviderMeta = {
   sessionUrl: string;
   maxAcuLimit?: number;
@@ -1004,6 +1073,7 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_created",
   "task_status_change",
   "task_progress",
+  "task_steering",
   // Task pool events
   "task_offered",
   "task_accepted",

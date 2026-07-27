@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { countSessions, getRootTaskChain, getTaskById, listRecentSessions } from "../be/db";
+import { getTaskSteeringFields } from "../be/steering";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -106,7 +107,10 @@ export async function handleSessions(
       return true;
     }
     const chain = getRootTaskChain(parsed.params.rootTaskId);
-    json(res, { root, chain });
+    json(res, {
+      root: { ...root, ...getTaskSteeringFields(root) },
+      chain: chain.map((task) => ({ ...task, ...getTaskSteeringFields(task) })),
+    });
     return true;
   }
 

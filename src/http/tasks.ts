@@ -8,14 +8,20 @@ import {
   cancelTask,
   completeTask,
   failTask,
+  getAgentById,
   getAllTasks,
   getDb,
   getLeadAgent,
   getLogsByTaskId,
   getPausedTasksForAgent,
+  getPendingSteeringForAgent,
+  getPendingSteeringForTask,
+  getSteeringMessageById,
+  getSteeringMessagesForTask,
   getTaskAttachments,
   getTaskById,
   getTasksCount,
+  markSteeringDelivered,
   pauseTask,
   resumeTask,
   supersedeTask,
@@ -25,10 +31,18 @@ import {
   updateTaskTitle,
   updateTaskVcs,
 } from "../be/db";
+import {
+  getTaskSteeringFields,
+  markSteeringUndeliverable,
+  requestSteering,
+  SteeringRequestError,
+} from "../be/steering";
 import { findUserById } from "../be/users";
+import { can, type RbacPrincipal, type RbacResource } from "../rbac";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import {
+  type AgentTask,
   type AgentTaskSource,
   AgentTaskSourceSchema,
   type AgentTaskStatus,
@@ -36,11 +50,14 @@ import {
   AssetKeySchema,
   isTerminalTaskStatus,
   ModelTierSchema,
+  OnUnsupportedSchema,
   ProviderNameSchema,
   ReasoningEffortSchema,
   ResumeReasonSchema,
+  SteerModeSchema,
   splitLegacyModelAlias,
 } from "../types";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -157,6 +174,101 @@ const cancelTaskRoute = route({
     200: { description: "Task cancelled" },
     400: { description: "Cannot cancel terminal task" },
     404: { description: "Task not found" },
+  },
+});
+
+const steerTaskRoute = route({
+  method: "post",
+  path: "/api/tasks/{id}/steer",
+  pattern: ["api", "tasks", null, "steer"],
+  summary: "Deliver a steering message to a running task",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    message: z.string().min(1),
+    mode: SteerModeSchema.default("queue"),
+    onUnsupported: OnUnsupportedSchema,
+    requestedByUserId: z.string().optional(),
+  }),
+  rbac: { permission: "task.steer.own" },
+  responses: {
+    200: { description: "Steering accepted (see `outcome` for what actually happened)" },
+    400: { description: "Validation error" },
+    403: { description: "Caller cannot steer this task" },
+    404: { description: "Task not found" },
+    422: {
+      description: "Requested mode unsupported by the target harness and onUnsupported=fail",
+    },
+  },
+});
+
+const getTaskSteeringMessagesRoute = route({
+  method: "get",
+  path: "/api/tasks/{id}/steering-messages",
+  pattern: ["api", "tasks", null, "steering-messages"],
+  summary: "List steering messages for a task",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Steering messages" },
+    404: { description: "Task not found" },
+  },
+});
+
+const getPendingSteeringMessagesRoute = route({
+  method: "get",
+  path: "/api/steering-messages",
+  pattern: ["api", "steering-messages"],
+  summary: "List pending steering messages for the current worker",
+  tags: ["Tasks"],
+  query: z.object({ taskId: z.string().optional() }),
+  auth: { apiKey: true, agentId: true },
+  responses: {
+    200: { description: "Pending steering messages" },
+    400: { description: "Missing X-Agent-ID header" },
+    404: { description: "Agent not found" },
+  },
+});
+
+const markSteeringDeliveredRoute = route({
+  method: "post",
+  path: "/api/steering-messages/{id}/delivered",
+  pattern: ["api", "steering-messages", null, "delivered"],
+  summary: "Mark a steering message delivered",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  body: z.object({ mode: SteerModeSchema }),
+  auth: { apiKey: true, agentId: true },
+  rbac: {
+    ungated:
+      "worker callback scoped by required X-Agent-ID and verified against the steering message task assignee",
+  },
+  responses: {
+    200: { description: "Steering message delivery recorded" },
+    400: { description: "Missing X-Agent-ID header or validation error" },
+    403: { description: "Steering message task is assigned to another agent" },
+    404: { description: "Agent or steering message not found" },
+  },
+});
+
+const markSteeringUndeliverableRoute = route({
+  method: "post",
+  path: "/api/steering-messages/{id}/undeliverable",
+  pattern: ["api", "steering-messages", null, "undeliverable"],
+  summary: "Promote an undeliverable steering message",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  body: z.object({ reason: z.string().min(1) }),
+  auth: { apiKey: true, agentId: true },
+  rbac: {
+    ungated:
+      "worker callback scoped by required X-Agent-ID and verified against the steering message task assignee",
+  },
+  responses: {
+    200: { description: "Steering message promoted to a follow-up task" },
+    400: { description: "Missing X-Agent-ID header or validation error" },
+    403: { description: "Steering message task is assigned to another agent" },
+    404: { description: "Agent or steering message not found" },
   },
 });
 
@@ -316,6 +428,39 @@ const updateTaskTitleRoute = route({
     ungated: "mirrors the pre-RBAC PATCH /api/tasks/{id}/vcs sibling route: bearer auth only",
   },
 });
+
+function canSteerTask(
+  req: IncomingMessage,
+  myAgentId: string | undefined,
+  task: AgentTask,
+): boolean {
+  const resource: RbacResource = {
+    kind: "task",
+    taskId: task.id,
+    requestedByUserId: task.requestedByUserId,
+    creatorAgentId: task.creatorAgentId,
+    agentId: task.agentId,
+  };
+  let principal: RbacPrincipal;
+  let verb: "task.steer.any" | "task.steer.own";
+
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "operator") {
+    principal = { kind: "operator" };
+    verb = "task.steer.own";
+  } else if (auth?.kind === "user") {
+    principal = { kind: "user", userId: auth.userId };
+    verb = "task.steer.own";
+  } else {
+    if (!myAgentId) return false;
+    const agent = getAgentById(myAgentId);
+    if (!agent) return false;
+    principal = { kind: "agent", agentId: myAgentId, isLead: agent.isLead };
+    verb = "task.steer.any";
+  }
+
+  return can({ principal, verb, resource, source: "http" }).allow;
+}
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
@@ -600,6 +745,174 @@ export async function handleTasks(
     return true;
   }
 
+  if (steerTaskRoute.match(req.method, pathSegments)) {
+    const parsed = await steerTaskRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = getTaskById(parsed.params.id);
+
+    if (!task) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    if (!canSteerTask(req, myAgentId, task)) {
+      jsonError(res, "Forbidden: caller cannot steer this task", 403);
+      return true;
+    }
+
+    const trustedUserId = resolveHttpAuditUserId(req, myAgentId);
+    let requestedByUserId = trustedUserId ?? undefined;
+    if (
+      process.env.TRUST_BODY_REQUESTED_BY_USER_ID === "true" &&
+      !requestedByUserId &&
+      parsed.body.requestedByUserId
+    ) {
+      requestedByUserId = findUserById(parsed.body.requestedByUserId)?.id;
+    }
+
+    try {
+      const auth = getRequestAuth(req);
+      const createdByAgentId =
+        !auth && myAgentId && getAgentById(myAgentId) ? myAgentId : undefined;
+      const result = requestSteering({
+        taskId: task.id,
+        message: parsed.body.message,
+        mode: parsed.body.mode,
+        onUnsupported: parsed.body.onUnsupported,
+        source: "api",
+        createdByKind:
+          auth?.kind === "user" || requestedByUserId
+            ? "user"
+            : createdByAgentId
+              ? "agent"
+              : "system",
+        createdByAgentId,
+        createdByUserId: requestedByUserId,
+      });
+      json(res, result);
+    } catch (error) {
+      if (error instanceof SteeringRequestError) {
+        jsonError(res, error.message, error.statusCode);
+        return true;
+      }
+      throw error;
+    }
+    return true;
+  }
+
+  if (getTaskSteeringMessagesRoute.match(req.method, pathSegments)) {
+    const parsed = await getTaskSteeringMessagesRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!getTaskById(parsed.params.id)) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    json(res, { messages: getSteeringMessagesForTask(parsed.params.id) });
+    return true;
+  }
+
+  if (getPendingSteeringMessagesRoute.match(req.method, pathSegments)) {
+    if (!myAgentId) {
+      jsonError(res, "Missing X-Agent-ID header", 400);
+      return true;
+    }
+    const parsed = await getPendingSteeringMessagesRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!getAgentById(myAgentId)) {
+      jsonError(res, "Agent not found", 404);
+      return true;
+    }
+
+    if (parsed.query.taskId) {
+      const task = getTaskById(parsed.query.taskId);
+      const messages =
+        task?.agentId === myAgentId ? getPendingSteeringForTask(parsed.query.taskId) : [];
+      json(res, { messages });
+      return true;
+    }
+
+    json(res, { messages: getPendingSteeringForAgent(myAgentId) });
+    return true;
+  }
+
+  if (markSteeringDeliveredRoute.match(req.method, pathSegments)) {
+    if (!myAgentId) {
+      jsonError(res, "Missing X-Agent-ID header", 400);
+      return true;
+    }
+    const parsed = await markSteeringDeliveredRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!getAgentById(myAgentId)) {
+      jsonError(res, "Agent not found", 404);
+      return true;
+    }
+
+    const message = getSteeringMessageById(parsed.params.id);
+    if (!message) {
+      jsonError(res, "Steering message not found", 404);
+      return true;
+    }
+    const task = getTaskById(message.taskId);
+    if (task?.agentId !== myAgentId) {
+      jsonError(res, "Steering message task is assigned to another agent", 403);
+      return true;
+    }
+    if (message.status !== "pending") {
+      json(res, { message });
+      return true;
+    }
+
+    const delivered =
+      markSteeringDelivered(message.id, parsed.body.mode) ?? getSteeringMessageById(message.id);
+    if (!delivered) {
+      jsonError(res, "Failed to mark steering message delivered", 500);
+      return true;
+    }
+    json(res, { message: delivered });
+    return true;
+  }
+
+  if (markSteeringUndeliverableRoute.match(req.method, pathSegments)) {
+    if (!myAgentId) {
+      jsonError(res, "Missing X-Agent-ID header", 400);
+      return true;
+    }
+    const parsed = await markSteeringUndeliverableRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!getAgentById(myAgentId)) {
+      jsonError(res, "Agent not found", 404);
+      return true;
+    }
+
+    const message = getSteeringMessageById(parsed.params.id);
+    if (!message) {
+      jsonError(res, "Steering message not found", 404);
+      return true;
+    }
+    const task = getTaskById(message.taskId);
+    if (task?.agentId !== myAgentId) {
+      jsonError(res, "Steering message task is assigned to another agent", 403);
+      return true;
+    }
+    if (message.status !== "pending") {
+      json(res, {
+        message,
+        promotedTaskId: message.promotedTaskId,
+      });
+      return true;
+    }
+
+    try {
+      json(res, markSteeringUndeliverable(message.id, parsed.body.reason));
+    } catch (error) {
+      if (error instanceof SteeringRequestError) {
+        jsonError(res, error.message, error.statusCode);
+        return true;
+      }
+      throw error;
+    }
+    return true;
+  }
+
   if (getTask.match(req.method, pathSegments)) {
     const parsed = await getTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
@@ -612,7 +925,7 @@ export async function handleTasks(
 
     const logs = getLogsByTaskId(parsed.params.id, parsed.query.logsLimit ?? 200);
     const attachments = getTaskAttachments(parsed.params.id);
-    json(res, { ...task, logs, attachments });
+    json(res, { ...task, ...getTaskSteeringFields(task), logs, attachments });
     return true;
   }
 

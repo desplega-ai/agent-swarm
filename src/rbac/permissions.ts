@@ -33,6 +33,10 @@ export const PERMISSIONS = {
     description: "Cancel any task (beyond tasks the caller created).",
     namespace: "task",
   },
+  "task.steer.any": {
+    description: "Steer any task (beyond tasks the caller created).",
+    namespace: "task",
+  },
   "task.create.own": {
     description: "Create a task the caller owns.",
     namespace: "task",
@@ -43,6 +47,10 @@ export const PERMISSIONS = {
   },
   "task.cancel.own": {
     description: "Cancel a task the principal requested.",
+    namespace: "task",
+  },
+  "task.steer.own": {
+    description: "Steer a task the principal requested.",
     namespace: "task",
   },
   "task.action.own": {

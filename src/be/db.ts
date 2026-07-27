@@ -86,6 +86,10 @@ import type {
   SkillScope,
   SkillType,
   SkillWithInstallInfo,
+  SteeringMessage,
+  SteeringSource,
+  SteeringStatus,
+  SteerMode,
   SwarmConfig,
   SwarmRepo,
   TaskAttachment,
@@ -2350,6 +2354,29 @@ export function getLatestActiveTaskInThread(channelId: string, threadTs: string)
 }
 
 /**
+ * Find the latest task assigned to a lead agent in a specific Slack thread.
+ * Source is deliberately restricted to Slack ingress so inherited worker-task
+ * metadata cannot become the thread's steering target.
+ */
+export function getLatestLeadTaskInThread(channelId: string, threadTs: string): AgentTask | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `SELECT t.*
+       FROM agent_tasks t
+       JOIN agents a ON a.id = t.agentId
+       WHERE t.source = 'slack'
+         AND t.slackChannelId = ?
+         AND t.slackThreadTs = ?
+         AND a.isLead = 1
+       ORDER BY t.createdAt DESC, t.rowid DESC
+       LIMIT 1`,
+    )
+    .get(channelId, threadTs);
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
  * Find the most recent task in a Slack thread, regardless of source or status.
  * Unlike getAgentWorkingOnThread (which filters source='slack'), this finds ALL tasks
  * including worker tasks that inherited Slack metadata via parentTaskId.
@@ -3683,6 +3710,228 @@ export function getTaskAttachments(taskId: string): TaskAttachment[] {
 }
 
 // ============================================================================
+// Task Steering Messages
+// ============================================================================
+
+type TaskSteeringMessageRow = {
+  id: string;
+  task_id: string;
+  body: string;
+  mode: string;
+  status: string;
+  delivered_mode: string | null;
+  source: string;
+  created_by_kind: string;
+  created_by_user_id: string | null;
+  created_by_agent_id: string | null;
+  promoted_task_id: string | null;
+  created_at: string;
+  delivered_at: string | null;
+  handled_at: string | null;
+};
+
+function rowToSteeringMessage(row: TaskSteeringMessageRow): SteeringMessage {
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    body: row.body,
+    mode: row.mode as SteerMode,
+    status: row.status as SteeringStatus,
+    deliveredMode: (row.delivered_mode as SteerMode | null) ?? undefined,
+    source: row.source as SteeringSource,
+    createdByKind: row.created_by_kind as SteeringMessage["createdByKind"],
+    createdByUserId: row.created_by_user_id ?? undefined,
+    createdByAgentId: row.created_by_agent_id ?? undefined,
+    promotedTaskId: row.promoted_task_id ?? undefined,
+    createdAt: row.created_at,
+    deliveredAt: row.delivered_at ?? undefined,
+    handledAt: row.handled_at ?? undefined,
+  };
+}
+
+export interface CreateSteeringMessageArgs {
+  taskId: string;
+  body: string;
+  mode: SteerMode;
+  source: SteeringSource;
+  createdByKind: SteeringMessage["createdByKind"];
+  createdByUserId?: string;
+  createdByAgentId?: string;
+}
+
+export function createSteeringMessage(args: CreateSteeringMessageArgs): SteeringMessage {
+  const id = crypto.randomUUID();
+  const row = getDb()
+    .prepare<
+      TaskSteeringMessageRow,
+      [string, string, string, SteerMode, SteeringSource, string, string | null, string | null]
+    >(
+      `INSERT INTO task_steering_messages
+         (id, task_id, body, mode, source, created_by_kind,
+          created_by_user_id, created_by_agent_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING *`,
+    )
+    .get(
+      id,
+      args.taskId,
+      args.body,
+      args.mode,
+      args.source,
+      args.createdByKind,
+      args.createdByUserId ?? null,
+      args.createdByAgentId ?? null,
+    );
+  if (!row) throw new Error("Failed to create steering message");
+
+  try {
+    createLogEntry({
+      eventType: "task_steering",
+      taskId: args.taskId,
+      agentId: args.createdByAgentId,
+      newValue: "pending",
+      metadata: {
+        steeringMessageId: id,
+        mode: args.mode,
+        source: args.source,
+      },
+    });
+  } catch {}
+
+  return rowToSteeringMessage(row);
+}
+
+export function getSteeringMessagesForTask(
+  taskId: string,
+  opts?: { status?: SteeringStatus },
+): SteeringMessage[] {
+  const rows = opts?.status
+    ? getDb()
+        .prepare<TaskSteeringMessageRow, [string, SteeringStatus]>(
+          `SELECT * FROM task_steering_messages
+           WHERE task_id = ? AND status = ?
+           ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(taskId, opts.status)
+    : getDb()
+        .prepare<TaskSteeringMessageRow, [string]>(
+          `SELECT * FROM task_steering_messages
+           WHERE task_id = ?
+           ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(taskId);
+  return rows.map(rowToSteeringMessage);
+}
+
+export function getSteeringMessageById(id: string): SteeringMessage | null {
+  const row = getDb()
+    .prepare<TaskSteeringMessageRow, [string]>(
+      `SELECT * FROM task_steering_messages
+       WHERE id = ?`,
+    )
+    .get(id);
+  return row ? rowToSteeringMessage(row) : null;
+}
+
+export function getPendingSteeringForTask(taskId: string): SteeringMessage[] {
+  return getSteeringMessagesForTask(taskId, { status: "pending" });
+}
+
+export function getPendingSteeringForAgent(agentId: string): SteeringMessage[] {
+  return getDb()
+    .prepare<TaskSteeringMessageRow, [string]>(
+      `SELECT m.*
+       FROM task_steering_messages m
+       JOIN agent_tasks t ON t.id = m.task_id
+       WHERE t.agentId = ? AND m.status = 'pending'
+       ORDER BY m.created_at ASC, m.rowid ASC`,
+    )
+    .all(agentId)
+    .map(rowToSteeringMessage);
+}
+
+export function markSteeringDelivered(
+  id: string,
+  deliveredMode: SteerMode,
+): SteeringMessage | null {
+  const row = getDb()
+    .prepare<TaskSteeringMessageRow, [SteerMode, string]>(
+      `UPDATE task_steering_messages
+       SET status = 'delivered',
+           delivered_mode = ?,
+           delivered_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND status = 'pending'
+       RETURNING *`,
+    )
+    .get(deliveredMode, id);
+
+  if (row) {
+    try {
+      createLogEntry({
+        eventType: "task_steering",
+        taskId: row.task_id,
+        newValue: "delivered",
+        metadata: {
+          steeringMessageId: id,
+          requestedMode: row.mode,
+          deliveredMode,
+        },
+      });
+    } catch {}
+  }
+
+  return row ? rowToSteeringMessage(row) : null;
+}
+
+export function markSteeringHandled(id: string): SteeringMessage | null {
+  const row = getDb()
+    .prepare<TaskSteeringMessageRow, [string]>(
+      `UPDATE task_steering_messages
+       SET status = 'handled',
+           handled_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND status = 'delivered'
+       RETURNING *`,
+    )
+    .get(id);
+  return row ? rowToSteeringMessage(row) : null;
+}
+
+export function markSteeringPromoted(id: string, promotedTaskId: string): SteeringMessage | null {
+  const row = getDb()
+    .prepare<TaskSteeringMessageRow, [string, string]>(
+      `UPDATE task_steering_messages
+       SET status = 'promoted',
+           promoted_task_id = ?
+       WHERE id = ? AND status = 'pending'
+       RETURNING *`,
+    )
+    .get(promotedTaskId, id);
+  return row ? rowToSteeringMessage(row) : null;
+}
+
+export function cancelPendingSteeringForTask(taskId: string): number {
+  return getDb().run(
+    `UPDATE task_steering_messages
+       SET status = 'cancelled'
+       WHERE task_id = ? AND status = 'pending'`,
+    [taskId],
+  ).changes;
+}
+
+export function hasPendingSteering(taskId: string): boolean {
+  return (
+    getDb()
+      .prepare<{ present: number }, [string]>(
+        `SELECT 1 AS present
+         FROM task_steering_messages
+         WHERE task_id = ? AND status = 'pending'
+         LIMIT 1`,
+      )
+      .get(taskId) !== null
+  );
+}
+
+// ============================================================================
 // Combined Queries (Agent with Tasks)
 // ============================================================================
 
@@ -3906,6 +4155,12 @@ export interface CreateTaskOptions {
   requestedByUserId?: string;
   contextKey?: string;
   /**
+   * Internal control-plane escape hatch for continuations that MUST coexist
+   * with their active Linear parent (for example promoted steering). General
+   * task creation keeps tracker-context dedup enabled.
+   */
+  bypassTrackerContextDedup?: boolean;
+  /**
    * Routing-affinity snapshot gating pool eligibility (see
    * `isAgentEligibleForTask`). Inherited from the parent (via `parentTaskId`)
    * when not explicitly set — same treatment as `vcsRepo`/`contextKey`.
@@ -4101,7 +4356,9 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
     }
   }
 
-  const existingTrackerWork = findExistingLinearTrackerContextWork(options?.contextKey);
+  const existingTrackerWork = options?.bypassTrackerContextDedup
+    ? null
+    : findExistingLinearTrackerContextWork(options?.contextKey);
   if (existingTrackerWork) {
     console.log(
       `[task-dedup] Skipping Linear tracker task creation for ${options?.contextKey}: ${existingTrackerWork.reason} ${existingTrackerWork.task.id.slice(0, 8)} already exists`,

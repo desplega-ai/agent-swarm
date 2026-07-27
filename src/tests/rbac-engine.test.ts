@@ -86,7 +86,7 @@ const LEAD_OR_RESOURCE_OWNER_VERBS: PermissionVerb[] = [
   "page.delete.any",
 ];
 
-const LEAD_OR_TASK_CREATOR_VERBS: PermissionVerb[] = ["task.cancel.any"];
+const LEAD_OR_TASK_CREATOR_VERBS: PermissionVerb[] = ["task.cancel.any", "task.steer.any"];
 
 const LEAD_OR_OWN_NAMESPACE_VERBS: PermissionVerb[] = ["kv.write.any"];
 
@@ -101,6 +101,7 @@ const ANY_AUTHENTICATED_VERBS: PermissionVerb[] = [
 const REQUESTER_OWNS_TASK_VERBS: PermissionVerb[] = [
   "task.read.own",
   "task.cancel.own",
+  "task.steer.own",
   "task.action.own",
 ];
 
