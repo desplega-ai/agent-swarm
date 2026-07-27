@@ -26,7 +26,8 @@
 #        src/tools/slack-reply.ts   — cosmetic icon_emoji pick
 #        src/tools/join-swarm.ts    — registration-time lead assignment
 #                                     (increment-4 hardening surface)
-#        src/tools/send-task.ts     — target-shape guard (task TO lead)
+#        src/tools/send-task.ts     — target-shape guard (task TO lead);
+#                                     routing.lead_deviated metric attribution
 #        src/http/poll.ts           — lead-vs-worker trigger routing
 #   4. Principal-construction plumbing:
 #        src/http/kv.ts             — buildAuthCtx isLead local feeding can()
@@ -51,6 +52,9 @@ ALLOWED_PATTERNS=(
   'src/http/poll.ts|if \(agent\??\.isLead\) \{'
   # routing claim pre-pass mirrors branch-5's worker-only pool condition (trigger routing, not authz)
   'src/http/poll.ts|if \(agent && !agent\.isLead && hasCapacity\(myAgentId\)\) \{'
+  # routing.lead_deviated attribution: decides whether to EMIT a metric after
+  # the task is already created — never whether the delegation is permitted
+  'src/tools/send-task.ts|const callerIsLead = creatorAgentId'
   'src/http/kv.ts|let isLead = false;'
   'src/http/kv.ts|isLead = agent\?\.isLead === true;'
 )
