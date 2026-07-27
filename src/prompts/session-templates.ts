@@ -197,6 +197,18 @@ registerTemplate({
 });
 
 registerTemplate({
+  eventType: "system.agent.steering",
+  header: "",
+  defaultBody: `
+#### Live Task Steering
+
+You may receive steering messages while this task is running. Incorporate each message into your current work. After you have acted on a steering message, call \`accept-steer\` with its steering message ID. Do not acknowledge a message before acting on it.
+`,
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
   eventType: "system.agent.worker.slack",
   header: "",
   defaultBody: `

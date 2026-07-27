@@ -1738,7 +1738,8 @@ class CodexSubprocessSession implements ProviderSession {
 
 export class CodexAdapter implements ProviderAdapter {
   readonly name = "codex";
-  readonly traits = { hasMcp: true, hasLocalEnvironment: true };
+  // Decision 4: Codex never accepts live steering; the server promotes it to a follow-up task.
+  readonly traits = { hasMcp: true, hasLocalEnvironment: true, steerModes: [] };
 
   /**
    * Optional override for the skill resolver's skills directory. When unset,

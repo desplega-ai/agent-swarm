@@ -99,13 +99,14 @@ describe("Session templates — registration", () => {
     }
   });
 
-  test("total of 25 session/system templates registered", () => {
+  test("total of 26 session/system templates registered", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    // 25 = the original 19 + `system.session.worker.pi` + `system.agent.seed_scripts`
+    // 26 = the original 19 + `system.session.worker.pi` + `system.agent.seed_scripts`
     // + `system.agent.script_rubric` + `system.agent.scripts_only_mode`
-    // + `system.agent.scripts_only_mode.slack` + `system.agent.messaging`.
-    expect(sessionSystem.length).toBe(25);
+    // + `system.agent.scripts_only_mode.slack` + `system.agent.messaging`
+    // + `system.agent.steering`.
+    expect(sessionSystem.length).toBe(26);
   });
 });
 

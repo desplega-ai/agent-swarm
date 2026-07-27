@@ -1,0 +1,320 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { unlink } from "node:fs/promises";
+import {
+  createServer as createHttpServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
+import {
+  closeDb,
+  createAgent,
+  createSteeringMessage,
+  createTaskExtended,
+  getChildTasks,
+  getPendingSteeringForTask,
+  getSteeringMessageById,
+  initDb,
+  markSteeringDelivered,
+  startTask,
+} from "../be/db";
+import { requestSteering } from "../be/steering";
+import { createSteeringDispatchState, pollAndDispatchSteering } from "../commands/runner";
+import { handleTasks } from "../http/tasks";
+import { getPathSegments, parseQueryParams } from "../http/utils";
+import { getBasePrompt } from "../prompts/base-prompt";
+import type { ProviderSession } from "../providers/types";
+import { acceptSteerHandler } from "../tools/accept-steer";
+import type { SteeringMessage } from "../types";
+
+const TEST_DB_PATH = `/tmp/agent-swarm-steering-transport-${process.pid}.sqlite`;
+let server: Server;
+let baseUrl: string;
+
+async function removeTestDb(): Promise<void> {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      await unlink(`${TEST_DB_PATH}${suffix}`);
+    } catch {}
+  }
+}
+
+function session(deliverSteering?: ProviderSession["deliverSteering"]): ProviderSession {
+  return {
+    sessionId: "steering-test-session",
+    onEvent: () => {},
+    waitForCompletion: async () => ({ exitCode: 0, isError: false }),
+    abort: async () => {},
+    ...(deliverSteering ? { deliverSteering } : {}),
+  };
+}
+
+function pendingMessage(overrides: Partial<SteeringMessage> = {}): SteeringMessage {
+  return {
+    id: crypto.randomUUID(),
+    taskId: crypto.randomUUID(),
+    body: "change course",
+    mode: "steer",
+    status: "pending",
+    source: "api",
+    createdByKind: "system",
+    createdAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+beforeAll(async () => {
+  await removeTestDb();
+  initDb(TEST_DB_PATH);
+  server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
+    res.setHeader("Content-Type", "application/json");
+    const pathSegments = getPathSegments(req.url ?? "");
+    const query = parseQueryParams(req.url ?? "");
+    const callerAgentId = req.headers["x-agent-id"] as string | undefined;
+    if (await handleTasks(req, res, pathSegments, query, callerAgentId)) return;
+    res.writeHead(404);
+    res.end(JSON.stringify({ error: "Not found" }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("test server did not listen");
+  baseUrl = `http://127.0.0.1:${address.port}`;
+});
+
+afterAll(async () => {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  closeDb();
+  await removeTestDb();
+});
+
+describe("steering worker transport", () => {
+  test("delivers pending rows once and reports the adapter's actual mode", async () => {
+    const pending = pendingMessage();
+    const nonPending = pendingMessage({ id: crypto.randomUUID(), status: "delivered" });
+    const deliveries: Array<{ mode: string; text: string }> = [];
+    const reports: Array<{ path: string; body: unknown }> = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/steering-messages?")) {
+        return Response.json({ messages: [pending, nonPending] });
+      }
+      reports.push({
+        path: new URL(url).pathname,
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      return Response.json({ message: { ...pending, status: "delivered" } });
+    }) as typeof fetch;
+    const providerSession = session(async (delivery) => {
+      deliveries.push(delivery);
+      return { delivered: true, mode: "queue" };
+    });
+    const state = createSteeringDispatchState();
+    const config = { apiUrl: "http://steering.test", apiKey: "key", agentId: "agent" };
+
+    await pollAndDispatchSteering(config, pending.taskId, providerSession, state, fetchImpl);
+    await pollAndDispatchSteering(config, pending.taskId, providerSession, state, fetchImpl);
+
+    expect(deliveries).toEqual([{ mode: "steer", text: "change course" }]);
+    expect(state.dispatchedIds.has(pending.id)).toBe(true);
+    expect(reports).toHaveLength(2);
+    expect(reports[0]).toEqual({
+      path: `/api/steering-messages/${pending.id}/delivered`,
+      body: { mode: "queue" },
+    });
+  });
+
+  test("scrubs provider errors before reporting an undeliverable reason", async () => {
+    const pending = pendingMessage();
+    const secret = "sk-proj-steering-transport-secret-1234567890";
+    let reportedBody = "";
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes("/api/steering-messages?")) {
+        return Response.json({ messages: [pending] });
+      }
+      reportedBody = String(init?.body);
+      return Response.json({ message: { ...pending, status: "promoted" } });
+    }) as typeof fetch;
+
+    await pollAndDispatchSteering(
+      { apiUrl: "http://steering.test", apiKey: "key", agentId: "agent" },
+      pending.taskId,
+      session(async () => {
+        throw new Error(`provider rejected bearer ${secret}`);
+      }),
+      createSteeringDispatchState(),
+      fetchImpl,
+    );
+
+    expect(reportedBody).not.toContain(secret);
+    expect(reportedBody).toContain("[REDACTED");
+  });
+
+  test("missing provider delivery promotes a non-codex pending row to a follow-up", async () => {
+    const agent = createAgent({
+      name: "transport fallback worker",
+      isLead: false,
+      status: "busy",
+      maxTasks: 2,
+      harnessProvider: "pi",
+    });
+    const task = createTaskExtended("transport fallback parent", {
+      agentId: agent.id,
+      source: "api",
+    });
+    expect(startTask(task.id)?.status).toBe("in_progress");
+    const requested = requestSteering({
+      taskId: task.id,
+      message: "continue as a follow-up",
+      mode: "queue",
+      source: "api",
+      createdByKind: "system",
+    });
+    expect(requested.outcome).toBe("queued");
+
+    await pollAndDispatchSteering(
+      { apiUrl: baseUrl, apiKey: "test-key", agentId: agent.id },
+      task.id,
+      session(),
+      createSteeringDispatchState(),
+    );
+
+    expect(getPendingSteeringForTask(task.id)).toEqual([]);
+    expect(getSteeringMessageById(requested.steeringMessageId!)).toMatchObject({
+      status: "promoted",
+      promotedTaskId: expect.any(String),
+    });
+    expect(getChildTasks(task.id)).toEqual([
+      expect.objectContaining({
+        parentTaskId: task.id,
+        task: "continue as a follow-up",
+      }),
+    ]);
+  });
+
+  test("codex steering is promoted before the runner can poll it", () => {
+    const agent = createAgent({
+      name: "codex steering worker",
+      isLead: false,
+      status: "busy",
+      maxTasks: 1,
+      harnessProvider: "codex",
+    });
+    const task = createTaskExtended("codex steering parent", {
+      agentId: agent.id,
+      source: "api",
+    });
+    expect(startTask(task.id)?.status).toBe("in_progress");
+
+    const requested = requestSteering({
+      taskId: task.id,
+      message: "codex follow-up",
+      mode: "steer",
+      source: "api",
+      createdByKind: "system",
+    });
+
+    expect(requested.outcome).toBe("promoted");
+    expect(getPendingSteeringForTask(task.id)).toEqual([]);
+  });
+
+  test("accept-steer marks a delivered row handled and is idempotent", async () => {
+    const previousBaseUrl = process.env.MCP_BASE_URL;
+    const previousApiKey = process.env.AGENT_SWARM_API_KEY;
+    process.env.MCP_BASE_URL = baseUrl;
+    process.env.AGENT_SWARM_API_KEY = "test-key";
+    try {
+      const agent = createAgent({
+        name: "accept steering worker",
+        isLead: false,
+        status: "busy",
+        maxTasks: 1,
+        harnessProvider: "pi",
+      });
+      const task = createTaskExtended("accept steering parent", {
+        agentId: agent.id,
+        source: "api",
+      });
+      expect(startTask(task.id)?.status).toBe("in_progress");
+      const steering = createSteeringMessage({
+        taskId: task.id,
+        body: "acknowledge this",
+        mode: "queue",
+        source: "api",
+        createdByKind: "system",
+      });
+      expect(markSteeringDelivered(steering.id, "queue")?.status).toBe("delivered");
+      const otherAgent = createAgent({
+        name: "other accept steering worker",
+        isLead: false,
+        status: "busy",
+        maxTasks: 1,
+        harnessProvider: "pi",
+      });
+      const otherTask = createTaskExtended("other accept steering parent", {
+        agentId: otherAgent.id,
+        source: "api",
+      });
+      expect(startTask(otherTask.id)?.status).toBe("in_progress");
+      const denied = await acceptSteerHandler(
+        {
+          kind: "owner",
+          agentId: otherAgent.id,
+          sourceTaskId: otherTask.id,
+        },
+        { steeringMessageId: steering.id },
+      );
+      expect(denied.isError).toBe(true);
+      expect(denied.content[0]?.type).toBe("text");
+      expect(denied.content[0]?.text).toContain("assigned to another agent");
+      expect(getSteeringMessageById(steering.id)?.status).toBe("delivered");
+
+      const ctx = {
+        kind: "owner" as const,
+        agentId: agent.id,
+        sourceTaskId: task.id,
+      };
+
+      const first = await acceptSteerHandler(ctx, { steeringMessageId: steering.id });
+      const second = await acceptSteerHandler(ctx, { steeringMessageId: steering.id });
+
+      expect(first.isError).not.toBe(true);
+      expect(second.isError).not.toBe(true);
+      expect(getSteeringMessageById(steering.id)).toMatchObject({
+        status: "handled",
+        handledAt: expect.any(String),
+      });
+    } finally {
+      if (previousBaseUrl === undefined) delete process.env.MCP_BASE_URL;
+      else process.env.MCP_BASE_URL = previousBaseUrl;
+      if (previousApiKey === undefined) delete process.env.AGENT_SWARM_API_KEY;
+      else process.env.AGENT_SWARM_API_KEY = previousApiKey;
+    }
+  });
+
+  test("steering prompt follows provider traits and task-pool capability", async () => {
+    const args = {
+      role: "worker",
+      agentId: crypto.randomUUID(),
+      swarmUrl: "localhost",
+      serverCapabilities: ["task-pool"],
+    };
+    const capable = await getBasePrompt({
+      ...args,
+      traits: { hasMcp: true, hasLocalEnvironment: true, steerModes: ["queue"] },
+    });
+    const absentTrait = await getBasePrompt({
+      ...args,
+      traits: { hasMcp: true, hasLocalEnvironment: true },
+    });
+    const capabilityDisabled = await getBasePrompt({
+      ...args,
+      serverCapabilities: [],
+      traits: { hasMcp: true, hasLocalEnvironment: true, steerModes: ["queue"] },
+    });
+
+    expect(capable).toContain("Live Task Steering");
+    expect(capable).toContain("accept-steer");
+    expect(absentTrait).not.toContain("Live Task Steering");
+    expect(capabilityDisabled).not.toContain("Live Task Steering");
+  });
+});

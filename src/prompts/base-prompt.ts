@@ -106,6 +106,7 @@ export type BasePromptArgs = {
 export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   const { role, agentId, swarmUrl, traits } = args;
   const { hasMcp = true, hasLocalEnvironment: hasLocalEnv = true } = traits ?? {};
+  const steerModes = traits?.steerModes ?? [];
 
   const vars: Record<string, string> = { role, agentId, swarmUrl };
 
@@ -185,6 +186,16 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   if (hasMcp && !scriptsOnlyMode && serverHasCapability("messaging", true)) {
     const messagingResult = await resolveTemplateAsync("system.agent.messaging", {});
     prompt += messagingResult.text;
+  }
+
+  if (
+    hasMcp &&
+    steerModes.length > 0 &&
+    !scriptsOnlyMode &&
+    serverHasCapability("task-pool", true)
+  ) {
+    const steeringResult = await resolveTemplateAsync("system.agent.steering", {});
+    prompt += steeringResult.text;
   }
 
   // Inject agent identity

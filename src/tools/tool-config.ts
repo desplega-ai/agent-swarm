@@ -189,6 +189,7 @@ export const DEFERRED_TOOLS = new Set([
   "swarm_x",
 
   // Other (4)
+  "accept-steer",
   "cancel-task",
   "inject-learning",
   "get-metrics",
