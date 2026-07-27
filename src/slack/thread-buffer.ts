@@ -6,6 +6,7 @@ import { getSlackApp } from "./app";
 import { buildBufferFlushBlocks } from "./blocks";
 import { rewriteSlackMentions } from "./enrich";
 import { extractSlackMessageText } from "./message-text";
+import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { registerTreeMessage } from "./watcher";
 
 interface BufferedMessage {
@@ -150,6 +151,44 @@ async function slackFlush(
     console.log(
       `[Slack] Dependency chaining: latest active task ${latestActiveTask.id} (status: ${latestActiveTask.status})`,
     );
+  }
+
+  const steering = requestSlackThreadSteering({
+    channelId,
+    threadTs,
+    message: combinedText,
+  });
+  if (steering) {
+    console.log(
+      `[Slack] Buffer flushed → steering ${steering.result.outcome} for task ${steering.task.id}`,
+    );
+
+    const app = getSlackApp();
+    if (app) {
+      const lastItem = items.at(-1)!;
+      try {
+        await app.client.reactions.add({
+          channel: channelId,
+          name: "eyes",
+          timestamp: lastItem.ts,
+        });
+      } catch (error) {
+        console.log(
+          `[Slack] Steering reaction failed: ${error instanceof Error ? error.message : error}`,
+        );
+      }
+
+      try {
+        await app.client.chat.postMessage({
+          channel: channelId,
+          thread_ts: threadTs,
+          text: formatSlackSteeringAck(steering.result),
+        });
+      } catch (error) {
+        console.error("[Slack] Failed to post steering feedback:", error);
+      }
+    }
+    return;
   }
 
   const lead = getLeadAgent();

@@ -207,6 +207,7 @@ export interface TreeNode {
   slackReplySent?: boolean;
   output?: string; // Only used when !slackReplySent on completion
   failureReason?: string; // Always shown on failure
+  steered?: boolean;
   /**
    * Pointer-based attachments to surface on the tree-message render. The
    * watcher populates this for completed/terminal nodes so links survive on
@@ -412,6 +413,7 @@ function renderNodeLine(node: TreeNode): string {
   const taskLink = getTaskLink(node.taskId);
   let line = `${icon} *${node.agentName}* (${taskLink})`;
   if (node.duration) line += ` · ${node.duration}`;
+  if (node.steered) line += " · _steered_";
   return line;
 }
 

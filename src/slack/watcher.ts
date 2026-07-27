@@ -3,6 +3,7 @@ import {
   getChildTasks,
   getCompletedSlackTasks,
   getInProgressSlackTasks,
+  getSteeringMessagesForTask,
   getTaskAttachments,
   getTaskById,
   setSlackMessageTracking,
@@ -152,6 +153,7 @@ export function buildTreeNodes(tree: TreeMessageState): TreeNode[] {
         // hot-path queries for every in-progress poll tick.
         const childAttachments =
           child.status === "completed" ? getTaskAttachments(child.id) : undefined;
+        const childSteered = getSteeringMessagesForTask(child.id).length > 0;
 
         childNodes.push({
           taskId: child.id,
@@ -163,6 +165,7 @@ export function buildTreeNodes(tree: TreeMessageState): TreeNode[] {
           output: child.output ?? undefined,
           failureReason: child.failureReason ?? undefined,
           attachments: childAttachments,
+          steered: childSteered,
           children: [],
         });
 
@@ -172,6 +175,7 @@ export function buildTreeNodes(tree: TreeMessageState): TreeNode[] {
     }
 
     const rootAttachments = task.status === "completed" ? getTaskAttachments(task.id) : undefined;
+    const rootSteered = getSteeringMessagesForTask(task.id).length > 0;
 
     nodes.push({
       taskId: task.id,
@@ -183,6 +187,7 @@ export function buildTreeNodes(tree: TreeMessageState): TreeNode[] {
       output: task.output ?? undefined,
       failureReason: task.failureReason ?? undefined,
       attachments: rootAttachments,
+      steered: rootSteered,
       children: childNodes,
     });
   }
