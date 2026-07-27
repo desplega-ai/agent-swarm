@@ -356,6 +356,12 @@ export async function sendTaskHandler(
         ? { capabilities: requiredCapabilities }
         : undefined,
   });
+  // The Lead's own pick, captured BEFORE routing can overwrite it. The
+  // `routing.lead_deviated` telemetry below is about whether the LEAD followed
+  // the parent's suggestion, so it must compare against this — not against the
+  // post-routing assignee, which a hard handler override would otherwise
+  // report as a Lead deviation that never happened.
+  const leadChosenAgentId = effectiveAgentId;
   const routingCtx = buildRoutingCtx("delegation", effective, {
     proposedAgentId: effectiveAgentId,
   });
@@ -571,16 +577,16 @@ export async function sendTaskHandler(
   );
   if (
     result.success &&
-    effectiveAgentId &&
+    leadChosenAgentId &&
     suggestion?.assignTo &&
-    suggestion.assignTo !== effectiveAgentId &&
+    suggestion.assignTo !== leadChosenAgentId &&
     effectiveParentTask
   ) {
     const routingRunId = effectiveParentTask.routingDirectives?.routingRunId ?? crypto.randomUUID();
     const payload = {
       taskId: effectiveParentTask.id,
       suggestedAgentId: suggestion.assignTo,
-      chosenAgentId: effectiveAgentId,
+      chosenAgentId: leadChosenAgentId,
       handlerName: suggestion.handlerName,
       routingRunId,
     };

@@ -209,6 +209,15 @@ export async function createWorkerTaskFollowUp(args: {
     buildRoutingCtx("completion", task, { proposedAgentId: leadAgent.id }),
   );
   if (decision.final?.block) return null;
+  // Same fail-open guard as the resume path: an unknown or concurrently
+  // deleted target would produce a `pending` follow-up that no worker can
+  // poll. Dropping it retains the Lead fallback in `baseOptions`.
+  if (
+    decision.final?.assignTo &&
+    !validateRoutingAssignTarget(decision.final.assignTo, "completion")
+  ) {
+    decision.final = undefined;
+  }
 
   return createTaskExtended(
     followUpDescription,

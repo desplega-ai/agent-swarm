@@ -199,7 +199,7 @@ describe("updateSubscription", () => {
 });
 
 describe("capture: bus emit → deliveries", () => {
-  test("matching enabled subscription enqueues a delivery; filter mismatch does not", async () => {
+  test("pattern match enqueues a delivery; the filter resolves it as a no-op at dispatch", async () => {
     await saveGlobalScript(
       "sub-noop",
       `export default async function run(args: Record<string, unknown>) { return { ok: true }; }`,
@@ -232,8 +232,44 @@ describe("capture: bus emit → deliveries", () => {
 
     expect(listDeliveriesForSubscription(matching.id)).toHaveLength(1);
     expect(listDeliveriesForSubscription(matching.id)[0]?.status).toBe("pending");
-    expect(listDeliveriesForSubscription(filtered.id)).toHaveLength(0);
+    // Capture is synchronous so the emit cannot be lost to a crash, which
+    // means the (async, timeout-raced) filter cannot run there. A pattern
+    // match is therefore enqueued even when the filter will reject it.
+    expect(listDeliveriesForSubscription(filtered.id)).toHaveLength(1);
+    expect(listDeliveriesForSubscription(filtered.id)[0]?.status).toBe("pending");
+    // Disabled subscriptions are excluded at capture (enabledOnly).
     expect(listDeliveriesForSubscription(disabled.id)).toHaveLength(0);
+
+    await drain();
+
+    // The filter is applied at dispatch: a terminal no-op, never a failure,
+    // and the target is not executed.
+    const settledFiltered = listDeliveriesForSubscription(filtered.id)[0];
+    expect(settledFiltered?.status).toBe("succeeded");
+    expect(settledFiltered?.result).toEqual({ filtered: true });
+    expect(listDeliveriesForSubscription(matching.id)[0]?.status).toBe("succeeded");
+  });
+
+  test("capture is durable before emit() returns", async () => {
+    await saveGlobalScript(
+      "sub-noop-sync",
+      `export default async function run(args: Record<string, unknown>) { return { ok: true }; }`,
+    );
+    const sub = createSubscription({
+      name: `capture-sync-${crypto.randomUUID()}`,
+      eventPattern: "spikesync.*",
+      filter: { kind: "demo" },
+      targetType: "script",
+      scriptName: "sub-noop-sync",
+      createdByAgentId: agentId,
+    });
+
+    // No await, no tick: if the emitting call site crashed right here, the
+    // event and its fan-out must already be on disk. A filter is set to prove
+    // the async filter path no longer delays the journal write.
+    workflowEventBus.emit("spikesync.created", { kind: "demo", taskId: "t-sync" });
+
+    expect(listDeliveriesForSubscription(sub.id)).toHaveLength(1);
 
     await drain();
   });

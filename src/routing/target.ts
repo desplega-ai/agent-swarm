@@ -1,4 +1,5 @@
 import { getAgentById } from "../be/db";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import type { RoutingVia } from "./types";
 
 /**
@@ -20,8 +21,10 @@ export function validateRoutingAssignTarget(
   if (!assignTo) return undefined;
   const target = getAgentById(assignTo);
   if (!target || target.isLead) {
+    // `assignTo` is raw handler-script output, so a malformed script can put a
+    // token-shaped value here — scrub at this logging egress.
     console.warn(
-      `[routing] Ignoring handler assignTo "${assignTo}" (${
+      `[routing] Ignoring handler assignTo "${scrubSecrets(assignTo)}" (${
         target ? "lead agent" : "unknown agent"
       }) on via=${via} — falling back to default assignment`,
     );

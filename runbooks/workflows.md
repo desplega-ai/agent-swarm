@@ -287,6 +287,8 @@ Until those land, fire signals manually via the HTTP endpoints above.
 
 Beyond in-run `wait` nodes, standing bindings live in the `subscriptions` table (`create-subscription` / `list-subscriptions` / `patch-subscription` / `delete-subscription` MCP tools, or `swarm.subscription_*` from scripts): an event-name glob (`*` = one segment, `**` = rest) plus optional wait-filter-language payload filter, targeting a global catalog script (event injected as `args.event`) or a workflow (trigger data `{ event, subscriptionId, subscriptionName }`, `triggerType: "subscription"`). Delivery is at-least-once via the `subscription_deliveries` outbox (3 attempts, journal pruned after 14/30 days). See `src/subscriptions/`.
 
+**Capture is synchronous, and the filter is not applied there.** The bus tap journals the event and its whole fan-out in one transaction before `workflowEventBus.emit()` returns, so an emit that follows a committed state change can never be lost to a crash (startup recovery only re-claims delivery rows that already exist — it cannot reconstruct a missing event). Filter evaluation races a 50ms wall-clock timeout and is therefore async, so awaiting it at capture would reopen exactly that window; it runs in the dispatcher instead, against the already-durable row. Consequence: a subscription whose **pattern** matches always gets a delivery row, and a filter rejection settles it as `succeeded` with `result: { filtered: true }` without executing the target. Only `enabled` is applied at capture.
+
 ### Filters (event mode)
 
 The `filter` field accepts two shapes:

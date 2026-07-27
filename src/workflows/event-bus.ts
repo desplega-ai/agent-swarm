@@ -25,8 +25,14 @@ export class InProcessEventBus implements WorkflowEventBus {
       try {
         handler(event, data);
       } catch (err) {
-        // A failing tap must never break the emitting call site.
-        console.error(`[EventBus] onAny handler failed for '${event}':`, err);
+        // A failing tap must never break the emitting call site. Log only the
+        // message: a raw error object dumps a stack (and any payload material
+        // captured in it) straight into container logs.
+        console.error(
+          `[EventBus] onAny handler failed for '${event}': ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
       }
     }
     this.emitter.emit(event, data);

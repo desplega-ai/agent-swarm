@@ -1884,6 +1884,8 @@ export interface RoutingTraceAffinity {
 
 export interface RoutingTraceResult {
   assignTo?: string;
+  /** Drop the inherited pin and pool the task. Mutually exclusive with `assignTo`. */
+  unassign?: boolean;
   block?: { reason: string };
   mutate?: {
     tags?: string[];
@@ -1933,7 +1935,8 @@ export interface TaskRoutingResponse {
 export type RoutingEdgeKind = "task.before_assign" | "prompt.compose";
 export type RoutingHandlerFlavor = "route" | "guard";
 export type RoutingHandlerMode = "soft" | "hard";
-export type RoutingVia = "creation" | "delegation" | "claim" | "resume" | "completion";
+/** Mirrors `RoutingViaSchema` in src/routing/types.ts — `prompt.compose` invokes handlers with "prompt". */
+export type RoutingVia = "creation" | "delegation" | "claim" | "resume" | "completion" | "prompt";
 
 export interface RoutingHandlerMatcher {
   /** Undefined `via` on a `task.before_assign` handler applies to every via. */

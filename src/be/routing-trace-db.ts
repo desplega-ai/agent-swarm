@@ -1,4 +1,5 @@
 import type { RoutingTrace } from "../types";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { getDb } from "./db";
 
 export type RoutingHandlerStats = {
@@ -59,6 +60,12 @@ export function insertRoutingTrace(
   trace: Omit<RoutingTrace, "id" | "createdAt"> & { id?: string },
 ): RoutingTrace {
   const id = trace.id ?? crypto.randomUUID();
+  // `result` and `suggestion` are raw handler-script output and this table is
+  // readable via GET /api/tasks/{id}/routing-trace, so a buggy or hostile
+  // handler could park a credential in `note`/`promptDirectives`. Scrub at
+  // this persistence egress — same treatment `error` already gets upstream,
+  // and it covers every caller rather than just the engine.
+  const resultJson = trace.result === undefined ? null : scrubSecrets(JSON.stringify(trace.result));
   getDb()
     .prepare(
       `INSERT INTO routing_trace (
@@ -77,9 +84,9 @@ export function insertRoutingTrace(
       trace.flavor,
       trace.mode,
       trace.matched === false ? 0 : 1,
-      trace.result === undefined ? null : JSON.stringify(trace.result),
+      resultJson,
       trace.decisive ? 1 : 0,
-      trace.suggestion ?? null,
+      trace.suggestion === undefined ? null : scrubSecrets(trace.suggestion),
       trace.deviated === undefined ? null : trace.deviated ? 1 : 0,
       trace.dryRun ? 1 : 0,
       trace.error ?? null,

@@ -60,14 +60,25 @@ function resolveExecutorRegistry(): ExecutorRegistry | null {
   }
 }
 
-async function captureEvent(name: string, data: unknown): Promise<void> {
-  const enabled = listSubscriptions({ enabledOnly: true });
-  const matching: Subscription[] = [];
-  for (const sub of enabled) {
-    if (!matchesEventPattern(sub.eventPattern, name)) continue;
-    if (sub.filter !== undefined && !(await matchesFilter(data, sub.filter))) continue;
-    matching.push(sub);
-  }
+/**
+ * Capture is FULLY SYNCHRONOUS on purpose — the whole point of the journal is
+ * that `workflowEventBus.emit()` does not return until the event and its
+ * fan-out are committed. Any await before the write reopens a crash window in
+ * which a durable state change (e.g. a committed `completeTask`) emits an
+ * event that is never persisted, which startup recovery cannot repair because
+ * it only re-claims delivery rows that already exist.
+ *
+ * That is why only the (synchronous) pattern match runs here. `filter`
+ * evaluation is inherently async — it races a 50ms wall-clock timeout — so it
+ * is deferred to the dispatcher, which applies it at execution time against
+ * the already-durable row. Subscriptions whose filter ends up rejecting the
+ * event cost one extra journal row; losing events did not seem like a fair
+ * trade for that.
+ */
+function captureEvent(name: string, data: unknown): void {
+  const matching = listSubscriptions({ enabledOnly: true }).filter((sub) =>
+    matchesEventPattern(sub.eventPattern, name),
+  );
   if (matching.length === 0) return;
 
   // Event + full fan-out in one transaction: a partial commit would strand
@@ -81,9 +92,17 @@ async function captureEvent(name: string, data: unknown): Promise<void> {
 }
 
 function onBusEvent(name: string, data: unknown): void {
-  captureEvent(name, data).catch((err) => {
-    console.error(`[Subscriptions] Failed to capture event '${name}':`, err);
-  });
+  try {
+    captureEvent(name, data);
+  } catch (err) {
+    // Scrub at this egress: capture failures can echo payload material, and a
+    // raw error object would also dump a stack into container logs.
+    console.error(
+      `[Subscriptions] Failed to capture event '${name}': ${scrubSecrets(
+        err instanceof Error ? err.message : String(err),
+      )}`,
+    );
+  }
 }
 
 export function initSubscriptions(): void {
@@ -167,6 +186,15 @@ export async function processPendingDeliveries(limit = CLAIM_BATCH_SIZE): Promis
       });
       continue;
     }
+    // Filters are evaluated HERE, not at capture time: they race a 50ms
+    // timeout and so are async, and awaiting anything before the journal write
+    // would reopen the crash window that loses events entirely. A rejected
+    // filter is a successful no-op delivery, not a failure — keeping it out of
+    // the failure metrics and out of the retry path.
+    if (sub.filter !== undefined && !(await matchesFilter(event.data, sub.filter))) {
+      finishDelivery(delivery.id, { status: "succeeded", result: { filtered: true } });
+      continue;
+    }
     try {
       const result =
         sub.targetType === "script"
@@ -201,7 +229,13 @@ export function startSubscriptionDispatcher(intervalMs = 2000): void {
     if (ticking) return;
     ticking = true;
     processPendingDeliveries()
-      .catch((err) => console.error("[Subscriptions] Dispatcher tick failed:", err))
+      .catch((err) =>
+        console.error(
+          `[Subscriptions] Dispatcher tick failed: ${scrubSecrets(
+            err instanceof Error ? err.message : String(err),
+          )}`,
+        ),
+      )
       .finally(() => {
         ticking = false;
       });
