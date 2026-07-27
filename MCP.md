@@ -32,6 +32,8 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [store-progress](#store-progress)
   - [my-agent-info](#my-agent-info)
   - [cancel-task](#cancel-task)
+  - [steer-task](#steer-task)
+  - [accept-steer](#accept-steer)
   - [resolve-user](#resolve-user)
   - [manage-user](#manage-user)
   - [db-query](#db-query)
@@ -313,6 +315,36 @@ Cancel a task that is pending or in progress. Only the lead or task creator can 
 |-----------|------|----------|---------|-------------|
 | `taskId` | `uuid` | Yes | - | The ID of the task to cancel. |
 | `reason` | `string` | No | - | Reason for cancellation. |
+
+### steer-task
+
+**Steer a running task**
+
+Send additional instructions to a task that is already running. This tool is registered on both the agent and user MCP surfaces. Agents may steer tasks they created, while the lead may steer any task; user calls are restricted by `task.steer.own`.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `taskId` | `uuid` | Yes | - | The running task to steer. |
+| `message` | `string` | Yes | - | Additional instructions to deliver. Empty messages are rejected. |
+| `mode` | `steer \| queue` | No | `queue` | `steer` requests an interrupt; `queue` delivers at the next turn boundary. |
+| `onUnsupported` | `degrade \| fail` | No | `degrade` | Degrade through queue/follow-up when the harness cannot honor the mode, or fail without creating a steering row. |
+
+The structured result includes `success`, `outcome` (`steered`, `queued`, or `promoted`), `effectiveMode`, and the `steeringMessageId`. A degraded result also includes `degradedFrom`; a promoted result includes `promotedTaskId`.
+
+Provider support: pi and Claude Managed support both modes; opencode supports both with a lossy abort-and-re-prompt interrupt; Devin and raw Claude are queue-only; Codex promotes steering to a follow-up task.
+
+### accept-steer
+
+**Acknowledge a steering message**
+
+Agent-only acknowledgement used after the assigned worker has incorporated a delivered steering message. It changes the message from `delivered` to `handled`; it does not deliver or re-run the message.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `steeringMessageId` | `uuid` | Yes | - | Delivered steering message to acknowledge. |
+| `note` | `string` | No | - | Optional note (maximum 500 characters) describing how the instruction was incorporated. Secrets are scrubbed before the note is returned. |
+
+The caller must have an `X-Agent-ID`, own the active source task, and be assigned the task associated with the steering message.
 
 ### resolve-user
 
@@ -1935,4 +1967,3 @@ Update the health status of a registered service. Use this after a service becom
 | `serviceId` | `uuid` | No | - | Service ID to update. |
 | `name` | `string` | No | - | Service name to update (alternative to serviceId). |
 | `status` | `unknown` | Yes | - | New status: 'starting', 'healthy', 'unhealthy', or 'stopped'. |
-

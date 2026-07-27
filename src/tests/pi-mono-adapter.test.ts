@@ -596,6 +596,9 @@ function autoRetryEnd(success: boolean, finalError?: string): AgentSessionEvent 
 function makeMockAgentSession(opts: {
   events?: AgentSessionEvent[];
   throwError?: string;
+  steerCalls?: string[];
+  followUpCalls?: string[];
+  steeringError?: string;
 }): AgentSession {
   const listeners: Array<(event: AgentSessionEvent) => void> = [];
   return {
@@ -623,6 +626,14 @@ function makeMockAgentSession(opts: {
       assistantMessages: 0,
     }),
     abort: async () => {},
+    async steer(text: string) {
+      opts.steerCalls?.push(text);
+      if (opts.steeringError) throw new Error(opts.steeringError);
+    },
+    async followUp(text: string) {
+      opts.followUpCalls?.push(text);
+      if (opts.steeringError) throw new Error(opts.steeringError);
+    },
     dispose: () => {},
   } as unknown as AgentSession;
 }
@@ -652,6 +663,54 @@ async function runWithEvents(events: AgentSessionEvent[]): Promise<{
   const result = await session.waitForCompletion();
   return { events: emitted, result };
 }
+
+describe("PiMonoSession.deliverSteering", () => {
+  test("steer mode calls the native steer API", async () => {
+    const steerCalls: string[] = [];
+    const session = new PiMonoSession(
+      makeMockAgentSession({ steerCalls }),
+      makeSessionConfig(join(tmpLogDir, "steering-steer.log")),
+      false,
+    );
+
+    await expect(
+      session.deliverSteering({ mode: "steer", text: "Change the implementation approach." }),
+    ).resolves.toEqual({ delivered: true, mode: "steer" });
+    expect(steerCalls).toEqual(["Change the implementation approach."]);
+    await session.waitForCompletion();
+  });
+
+  test("queue mode calls the native followUp API", async () => {
+    const followUpCalls: string[] = [];
+    const session = new PiMonoSession(
+      makeMockAgentSession({ followUpCalls }),
+      makeSessionConfig(join(tmpLogDir, "steering-queue.log")),
+      false,
+    );
+
+    await expect(
+      session.deliverSteering({ mode: "queue", text: "Continue with this additional context." }),
+    ).resolves.toEqual({ delivered: true, mode: "queue" });
+    expect(followUpCalls).toEqual(["Continue with this additional context."]);
+    await session.waitForCompletion();
+  });
+
+  test("returns an undeliverable result when the pi SDK rejects steering", async () => {
+    const session = new PiMonoSession(
+      makeMockAgentSession({ steeringError: "pi steering rejected" }),
+      makeSessionConfig(join(tmpLogDir, "steering-rejected.log")),
+      false,
+    );
+
+    await expect(
+      session.deliverSteering({ mode: "steer", text: "Try a different approach." }),
+    ).resolves.toEqual({
+      delivered: false,
+      reason: "Error: pi steering rejected",
+    });
+    await session.waitForCompletion();
+  });
+});
 
 function findError(events: ProviderEvent[]): Extract<ProviderEvent, { type: "error" }> | undefined {
   return events.find((e) => e.type === "error") as

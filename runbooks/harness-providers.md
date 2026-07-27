@@ -34,6 +34,34 @@ The `docker-entrypoint.sh` swarm_config-fetch step explicitly **skips** `HARNESS
 
 **Canonical conceptual reference:** [docs-site/.../guides/harness-providers.mdx](../docs-site/content/docs/(documentation)/guides/harness-providers.mdx). That guide is the source of truth for how the `ProviderAdapter` interface, the runner's poll→spawn→events→finish flow, system-prompt composition, entrypoint credential restoration, and OAuth flows fit together. Read it before non-trivial work.
 
+## Live task steering
+
+`ProviderSession.deliverSteering?(delivery: SteerDelivery): Promise<SteerDeliveryResult>` is the optional live-input seam. `ProviderTraits.steerModes` advertises the modes an adapter can provide; an absent field means `[]`.
+
+| Provider | `steer` | `queue` | Delivery behavior |
+|---|---|---|---|
+| `pi` | Native `agentSession.steer()` | Native `agentSession.followUp()` | Richest semantics; both modes preserve the session. |
+| `claude-managed` | Yes | Yes | Sends ordered `user.message` events to the managed session. |
+| `opencode` | Lossy: SDK abort, then `promptAsync` | Native `promptAsync` | Interrupt discards the in-flight turn before re-prompting; queue is the zero-loss path. |
+| `devin` | No | Yes | `sendMessage` accepts a working session but does not guarantee interruption, so the adapter always reports `mode: "queue"`. |
+| `claude` | No | Conditional | Raw CLI stream-json queues input at a turn boundary; it does not interrupt. See the gate below. |
+| `codex` | No | No | No live stdin remains after session startup; steering is promoted to a follow-up task. |
+
+The server-side `PROVIDER_STEER_CAPABILITIES` map in `src/types.ts` must deep-equal each adapter's `traits.steerModes ?? []`. `src/tests/provider-steering-capabilities.test.ts` iterates the canonical `ProviderNameSchema` list through `createProviderAdapter()` and names the offending provider on drift. Adding a provider requires updating the schema, factory, adapter traits, and capability map together.
+
+### Claude queue-steering gate
+
+Claude's queued steering needs `--input-format stream-json`. That input mode is mutually exclusive with the long-standing `-p <prompt>` invocation, so enabling it changes startup for every Claude task, including tasks that are never steered.
+
+With `CLAUDE_QUEUE_STEERING` unset, the adapter enables stream-json input only when the effective Claude binary:
+
+1. reports Claude Code `>= 2.1.205` from `--version`, and
+2. is the stock binary rather than the claude-bridge/tmux wrapper path.
+
+`CLAUDE_QUEUE_STEERING=0|false|off|no` forces the feature off and keeps `-p`. `CLAUDE_QUEUE_STEERING=1|true|on|yes` is an operator force-on override and skips the automatic version/wrapper decision. Invalid or empty values behave like unset.
+
+When disabled, the adapter keeps `-p <prompt>` and the live session exposes no `deliverSteering`; an undeliverable message is promoted to a follow-up task. The provider trait remains queue-capable because the stock, supported Claude runtime implements that mode; the per-session gate is an operational availability check.
+
 ## Per-task `outputSchema` support
 
 Tasks may carry an optional JSON Schema on `outputSchema` (see `CreateTaskOptions` in `src/be/db.ts`). Enforcement depends on the harness:
@@ -156,6 +184,7 @@ Any **observable** change must update the docs-site guide in the **same PR** as 
 - Factory dispatch logic
 - Adapter event-translation, log format, or abort semantics
 - Runner's poll→spawn→events→finish flow
+- Provider steering traits or `deliverSteering` behavior
 - System-prompt composition (`src/prompts/`)
 - `docker-entrypoint.sh` credential restoration
 - OAuth flows
@@ -166,13 +195,14 @@ Internal refactors that don't change observable behavior don't need a doc update
 
 1. Read the docs-site guide's "Reference implementations" section to see how `claude`, `pi`, `codex`, and `devin` are wired.
 2. Implement the `ProviderAdapter` in `src/providers/<name>/`.
-3. Wire factory dispatch in `src/commands/runner.ts`.
+3. Add its name to `ProviderNameSchema`, wire `createProviderAdapter`, and keep `traits.steerModes` synchronized with `PROVIDER_STEER_CAPABILITIES`.
 4. Branch in `docker-entrypoint.sh` for credential restoration if the provider needs auth files.
 5. Update the docs-site guide:
    - Add to "Reference implementations" table.
    - Add to "Files to touch" checklist.
 6. Add the new provider to `README.md`'s multi-provider bullet.
-7. Verify the docs build per [docs-site/CLAUDE.md](../docs-site/CLAUDE.md).
+7. Add adapter tests for advertised steering modes and SDK rejection.
+8. Verify the docs build per [docs-site/CLAUDE.md](../docs-site/CLAUDE.md).
 
 ## Alt-binary: claude-bridge (subscription-pool variant)
 

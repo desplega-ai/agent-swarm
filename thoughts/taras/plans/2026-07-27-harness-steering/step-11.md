@@ -2,7 +2,8 @@
 id: step-11
 name: Integration, docs, cross-provider E2E
 depends_on: [step-2, step-4, step-5, step-6, step-7, step-8, step-9, step-10]
-status: ready
+status: done
+completed_at: 2026-07-28
 ---
 
 # step-11: Integration, docs, and the cross-provider E2E matrix

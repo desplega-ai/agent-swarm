@@ -11,6 +11,7 @@
     "secrets-encryption",
     "harness-configuration",
     "harness-providers",
+    "task-steering",
     "observability-opentelemetry",
     "performance-resource-sizing",
     "cost-and-context-computation",

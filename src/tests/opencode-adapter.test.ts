@@ -10,7 +10,12 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Event as OpencodeEvent } from "@opencode-ai/sdk";
-import type { ProviderEvent, ProviderResult, ProviderSessionConfig } from "../providers/types";
+import type {
+  ProviderEvent,
+  ProviderResult,
+  ProviderSession,
+  ProviderSessionConfig,
+} from "../providers/types";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -139,7 +144,148 @@ async function inspectSessionBeforeIdle(
   await session.waitForCompletion();
 }
 
+async function inspectSteeringBeforeIdle(
+  sessionMethods: {
+    abort: (args: unknown) => Promise<unknown>;
+    promptAsync: (args: unknown) => Promise<unknown>;
+  },
+  inspect: (session: ProviderSession, serverCloseCalls: () => number) => Promise<void>,
+): Promise<void> {
+  const fakeSessionId = "sess-steering-123";
+  let releaseIdle!: () => void;
+  const idleReleased = new Promise<void>((resolve) => {
+    releaseIdle = resolve;
+  });
+  const fakeClient = {
+    session: {
+      create: async () => ({ data: { id: fakeSessionId }, error: undefined }),
+      prompt: async () => ({ data: {}, error: undefined }),
+      ...sessionMethods,
+    },
+    event: {
+      subscribe: async () => ({
+        stream: (async function* (): AsyncGenerator<OpencodeEvent> {
+          await idleReleased;
+          yield { type: "session.idle", properties: { sessionID: fakeSessionId } };
+        })(),
+      }),
+    },
+  };
+  const closeServer = mock(() => {});
+  const fakeServer = { url: "http://127.0.0.1:12345", close: closeServer };
+
+  mock.module("@opencode-ai/sdk", () => ({
+    createOpencode: async () => ({ client: fakeClient, server: fakeServer }),
+  }));
+
+  const { OpencodeAdapter } = await import("../providers/opencode-adapter");
+  const session = await new OpencodeAdapter().createSession(
+    testConfig({ taskId: "task-steering" }),
+  );
+  session.onEvent(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  try {
+    await inspect(session, () => closeServer.mock.calls.length);
+  } finally {
+    releaseIdle();
+    await session.waitForCompletion();
+  }
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
+
+describe("OpencodeSession.deliverSteering", () => {
+  beforeEach(() => {
+    mock.restore();
+  });
+
+  test("queue mode prompts asynchronously without aborting", async () => {
+    const abortCalls: unknown[] = [];
+    const promptAsyncCalls: unknown[] = [];
+    await inspectSteeringBeforeIdle(
+      {
+        abort: async (args) => {
+          abortCalls.push(args);
+          return {};
+        },
+        promptAsync: async (args) => {
+          promptAsyncCalls.push(args);
+          return {};
+        },
+      },
+      async (session) => {
+        await expect(
+          session.deliverSteering?.({ mode: "queue", text: "Use this extra context." }),
+        ).resolves.toEqual({ delivered: true, mode: "queue" });
+        expect(abortCalls).toEqual([]);
+        expect(promptAsyncCalls).toEqual([
+          {
+            path: { id: "sess-steering-123" },
+            body: { parts: [{ type: "text", text: "Use this extra context." }] },
+          },
+        ]);
+      },
+    );
+  });
+
+  test("steer mode aborts the in-flight turn, re-prompts, and keeps the session alive", async () => {
+    const calls: Array<{ method: "abort" | "promptAsync"; args: unknown }> = [];
+    await inspectSteeringBeforeIdle(
+      {
+        abort: async (args) => {
+          calls.push({ method: "abort", args });
+          return {};
+        },
+        promptAsync: async (args) => {
+          calls.push({ method: "promptAsync", args });
+          return {};
+        },
+      },
+      async (session, serverCloseCalls) => {
+        await expect(
+          session.deliverSteering?.({ mode: "steer", text: "Stop and revise." }),
+        ).resolves.toEqual({ delivered: true, mode: "steer" });
+        expect(calls).toEqual([
+          { method: "abort", args: { path: { id: "sess-steering-123" } } },
+          {
+            method: "promptAsync",
+            args: {
+              path: { id: "sess-steering-123" },
+              body: { parts: [{ type: "text", text: "Stop and revise." }] },
+            },
+          },
+        ]);
+        expect(serverCloseCalls()).toBe(0);
+        await expect(
+          Promise.race([
+            session.waitForCompletion().then(() => "completed"),
+            Promise.resolve("still-running"),
+          ]),
+        ).resolves.toBe("still-running");
+      },
+    );
+  });
+
+  test("returns an undeliverable result when the opencode SDK rejects the prompt", async () => {
+    await inspectSteeringBeforeIdle(
+      {
+        abort: async () => ({}),
+        promptAsync: async () => {
+          throw new Error("opencode prompt rejected");
+        },
+      },
+      async (session) => {
+        await expect(
+          session.deliverSteering?.({ mode: "queue", text: "Try again later." }),
+        ).resolves.toEqual({
+          delivered: false,
+          reason: "Error: opencode prompt rejected",
+        });
+      },
+    );
+  });
+});
 
 describe("OpencodeSession — SSE→ProviderEvent mapping", () => {
   beforeEach(() => {

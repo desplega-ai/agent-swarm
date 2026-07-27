@@ -1,0 +1,133 @@
+---
+title: Steer a Running Task
+description: Add context to a running agent, request an interrupt, and understand degradation and delivery states
+---
+
+Task steering sends new instructions to work that has already started. Use it to correct an assumption, add missing context, or redirect an agent without cancelling the task and starting over.
+
+## Choose a delivery mode
+
+| Mode | Meaning | Use when |
+|---|---|---|
+| `queue` | Deliver the message at the next turn boundary. | The current turn can finish safely and you want to add context without discarding work. |
+| `steer` | Interrupt the current turn and deliver the message immediately. | Letting the current turn continue would be wrong or unsafe. |
+
+Not every harness can interrupt. Task responses include `supportedSteerModes`, and the dashboard disables modes the assigned harness does not advertise.
+
+| Provider | Supported modes | A `steer` request normally becomes |
+|---|---|---|
+| pi-mono | `steer`, `queue` | `steered` |
+| Claude Managed | `steer`, `queue` | `steered` |
+| opencode | `steer`, `queue` | `steered` by aborting the current turn and re-prompting; this is lossy |
+| Devin | `queue` | `queued` |
+| Claude Code | `queue` | `queued` |
+| Codex | none | `promoted` to a follow-up task |
+
+Claude Code queue delivery additionally depends on a supported stock CLI invocation. See [Harness Providers: Claude queue-steering gate](/docs/guides/harness-providers#claude-queue-steering-gate).
+
+## Degradation and `onUnsupported`
+
+The server uses a durable fallback ladder:
+
+```text
+requested steer
+  -> deliver as steer when supported
+  -> otherwise queue at a turn boundary
+  -> otherwise create a follow-up task
+```
+
+`onUnsupported` controls whether the fallback is allowed:
+
+- `degrade` (default) preserves the message by moving down the ladder. Read `outcome`, `effectiveMode`, `degradedFrom`, and `promotedTaskId` to learn what happened.
+- `fail` rejects an unsupported mode. HTTP callers receive `422`, MCP/script callers receive an error, and no steering-message row is created.
+
+Choose `fail` when true interrupt semantics are required. For example, an instruction to stop a destructive operation should not silently wait until the operation finishes.
+
+## Send steering
+
+### Dashboard
+
+Open an in-progress task and use the steering composer. The mode selector follows `supportedSteerModes`, and the result reports whether the message interrupted, queued, or became a follow-up. The task page's Steering section refreshes the message lifecycle from the API.
+
+### MCP
+
+`steer-task` is available on both the agent and user MCP surfaces:
+
+```json
+{
+  "taskId": "00000000-0000-0000-0000-000000000000",
+  "message": "Stop changing the schema; keep the fix application-only.",
+  "mode": "steer",
+  "onUnsupported": "fail"
+}
+```
+
+Agents may steer tasks they created, and the lead may steer any task. User calls are limited to tasks allowed by `task.steer.own`.
+
+After incorporating a delivered message, the assigned agent calls `accept-steer`:
+
+```json
+{
+  "steeringMessageId": "00000000-0000-0000-0000-000000000000",
+  "note": "Kept the existing schema and moved validation into the service."
+}
+```
+
+### Script SDK
+
+Scripts use the same MCP handler through `task_steer`:
+
+```ts
+const result = await swarm.task_steer({
+  taskId,
+  message: "Use the cached result; do not repeat the external request.",
+  mode: "queue",
+  onUnsupported: "degrade",
+});
+```
+
+### HTTP
+
+```bash
+curl -X POST "http://localhost:3013/api/tasks/$TASK_ID/steer" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Stop and verify the migration against an existing database.",
+    "mode": "steer",
+    "onUnsupported": "degrade"
+  }'
+```
+
+Inspect the audit trail with `GET /api/tasks/{id}/steering-messages`. Worker delivery callbacks live under `/api/steering-messages/{id}/{delivered,undeliverable,handled}` and require the assigned worker's `X-Agent-ID`; normal clients should not call them.
+
+### Slack
+
+Slack thread steering is opt-in:
+
+```bash
+SLACK_THREAD_STEERING=lead       # or all
+SLACK_THREAD_STEERING_MODE=queue # or steer
+```
+
+`lead` targets the latest in-progress lead task in the thread. `all` targets the latest active task regardless of role. When the flag is unset, existing thread follow-up routing is unchanged. See [Slack Integration](/docs/guides/slack-integration#live-steering-instead-of-follow-up-tasks).
+
+## Message lifecycle
+
+Every accepted message has its own audit record:
+
+```text
+pending -> delivered -> handled
+   |
+   +-> promoted
+   |
+   +-> cancelled
+```
+
+- `pending`: stored and waiting for the worker to deliver it.
+- `delivered`: the provider accepted it. `deliveredMode` records what the adapter actually used.
+- `handled`: the agent acknowledged the message with `accept-steer` after incorporating it.
+- `promoted`: live delivery was unavailable, the task stopped before delivery, or the provider rejected the message. `promotedTaskId` links to the durable follow-up task.
+- `cancelled`: pending delivery was cancelled before a provider accepted it.
+
+If the parent task reaches a terminal state while messages are still pending, the server promotes each one exactly once rather than dropping it.

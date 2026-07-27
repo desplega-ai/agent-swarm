@@ -1,12 +1,12 @@
 ---
 title: Adding a Harness Provider
-description: Implement a new harness provider (like claude, pi, or codex) — the full adapter contract, reference implementations, and wiring checklist
+description: Implement a harness provider — the adapter contract, reference implementations, live steering capabilities, and wiring checklist
 ---
 
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import { Callout } from "fumadocs-ui/components/callout";
 
-This guide documents the harness-provider contract used by agent-swarm workers, the three reference implementations (`claude`, `pi`, `codex`), and every hook that must be wired when adding a new provider.
+This guide documents the harness-provider contract used by agent-swarm workers, the six reference implementations, and every hook that must be wired when adding a new provider.
 
 A *harness provider* is the runtime that actually drives an LLM: it owns the subprocess (or in-process SDK) that reads the user prompt, talks to the model, invokes tools, and streams events back. The swarm treats providers as plug-ins behind a single TypeScript interface (`ProviderAdapter`). Workers select one at boot via `HARNESS_PROVIDER`.
 
@@ -25,16 +25,30 @@ Source of truth: [`src/providers/types.ts`](https://github.com/desplega-ai/agent
 ```ts
 export interface ProviderAdapter {
   readonly name: string;
+  readonly traits: ProviderTraits;
   createSession(config: ProviderSessionConfig): Promise<ProviderSession>;
   canResume(sessionId: string): Promise<boolean>;
   formatCommand(commandName: string): string;
+}
+
+export interface ProviderTraits {
+  hasMcp: boolean;
+  hasLocalEnvironment: boolean;
+  steerModes?: Array<"steer" | "queue">;
 }
 
 export interface ProviderSession {
   readonly sessionId: string | undefined;
   onEvent(listener: (event: ProviderEvent) => void): void;
   waitForCompletion(): Promise<ProviderResult>;
-  abort(): Promise<void>;
+  abort(reason?: string): Promise<void>;
+  deliverSteering?(delivery: {
+    mode: "steer" | "queue";
+    text: string;
+  }): Promise<
+    | { delivered: true; mode: "steer" | "queue" }
+    | { delivered: false; reason: string }
+  >;
 }
 ```
 
@@ -43,12 +57,14 @@ export interface ProviderSession {
 | Member | Responsibility |
 |---|---|
 | `name` | Short identifier used in logs (`"claude"`, `"pi"`, `"codex"`). |
+| `traits` | Advertise MCP/local-environment behavior and live steering modes. An absent `steerModes` means no live steering. |
 | `createSession(config)` | Spin up a new session for a task. Must not block on model output — return a `ProviderSession` immediately and stream events asynchronously. |
 | `canResume(sessionId)` | Return `true` iff the provider can continue a previous session by ID. Used when the runner resumes paused work. |
 | `formatCommand(commandName)` | Map a swarm slash-command (e.g. `"review-pr"`) to the form the underlying CLI expects (e.g. `/review-pr`, `/skill:review-pr`, or inlined via skill resolver). |
 | `session.onEvent` | Register a listener. The adapter must call every registered listener for every `ProviderEvent`. |
 | `session.waitForCompletion()` | Resolve once the session ends; returns `{ exitCode, sessionId, cost, output, isError, errorCategory, failureReason }`. |
 | `session.abort()` | Cancel in flight (SIGTERM, SDK abort signal, etc.). Must be idempotent. |
+| `session.deliverSteering()` | Optional live-input transport. Return the mode actually delivered, or an undeliverable reason so the server can promote the message to a follow-up task. |
 
 ### `ProviderSessionConfig` inputs
 
@@ -103,6 +119,35 @@ The runner consumes these events (not the provider's native ones) to post progre
 | [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@earendil-works/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `~/.pi/agent/auth.json` — or, when `BEDROCK_AUTH_MODE=sdk` or `MODEL_OVERRIDE=amazon-bedrock/*`, AWS SDK default chain (probed via `ListFoundationModels`; see [pi-mono + Amazon Bedrock](#pi-mono--amazon-bedrock-auth) below) |
 | [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Parent adapter spawns `src/commands/codex-session-runner.ts`, sends session config over stdin, and receives line-delimited events/results over stdout; the child hosts `@openai/codex-sdk` `Codex` / `Thread` and streams `ThreadEvent`s back | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6) |
 | [`src/providers/claude-managed-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-adapter.ts) | Anthropic SDK `client.beta.sessions.events.stream` (SSE); session executes in Anthropic's managed cloud sandbox, worker is a thin relay | `ANTHROPIC_API_KEY` plus pre-existing `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` from one-time `claude-managed-setup` CLI (see §13) |
+| [`src/providers/devin-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/devin-adapter.ts) | Cognition Devin v3 REST API; worker polls the remote session | `DEVIN_API_KEY` + `DEVIN_ORG_ID` |
+| [`src/providers/opencode-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/opencode-adapter.ts) | In-process `@opencode-ai/sdk` server with SSE event mapping | Provider-specific API key, commonly `OPENROUTER_API_KEY` |
+
+### Live task steering
+
+Running tasks can receive more input through the optional `ProviderSession.deliverSteering()` method. `queue` adds context at the next turn boundary. `steer` requests an interrupt of the current turn; provider implementations must not advertise it unless they can deliver that semantic.
+
+| Provider | Advertised modes | `mode: "steer"` result | Notes |
+|---|---|---|---|
+| `pi` | `steer`, `queue` | `steered` | Native `steer()` and `followUp()`. |
+| `claude-managed` | `steer`, `queue` | `steered` | Sends ordered `user.message` events. |
+| `opencode` | `steer`, `queue` | `steered` | Lossy interrupt: abort the in-flight turn, then re-prompt without ending the session. |
+| `devin` | `queue` | `queued` | The message API accepts working sessions but does not guarantee interruption. |
+| `claude` | `queue` | `queued` | Raw CLI stream-json can queue only. |
+| `codex` | none | `promoted` | Becomes a normal follow-up task. |
+
+The static `PROVIDER_STEER_CAPABILITIES` map drives `supportedSteerModes` in task responses and `onUnsupported: "fail"` admission. It must match `adapter.traits.steerModes ?? []`. `src/tests/provider-steering-capabilities.test.ts` iterates every name in `ProviderNameSchema`, constructs its adapter, and fails with the provider name if the two drift.
+
+#### Claude queue-steering gate
+
+Claude queued input requires `--input-format stream-json`, which cannot be combined with `-p <prompt>`. With `CLAUDE_QUEUE_STEERING` unset, the adapter uses stream-json only when `claude --version` reports `>= 2.1.205` and the effective binary is not a claude-bridge/tmux wrapper. Otherwise it preserves the long-standing `-p` path and the session has no live delivery method.
+
+The operator override accepts:
+
+- `0`, `false`, `off`, `no`: force the queue-steering path off.
+- `1`, `true`, `on`, `yes`: force stream-json on without the automatic version/wrapper decision.
+- unset, empty, or another value: use automatic probing.
+
+For user-facing modes, degradation, entry points, and message states, see [Steer a running task](/docs/guides/task-steering).
 
 ### pi-mono + Amazon Bedrock auth
 
@@ -782,6 +827,7 @@ If your provider benefits from a distinct system-prompt shape, add `src/prompts/
 Add at minimum:
 
 - `src/tests/<foo>-adapter.test.ts` — unit tests for event translation (feed fake native events, assert emitted `ProviderEvent`s).
+- If the adapter advertises `steerModes`, cover each delivery mode and SDK rejection, then add the provider to `ProviderNameSchema`; `provider-steering-capabilities.test.ts` verifies its traits against the server capability map.
 - `src/tests/<foo>-oauth.test.ts` (if OAuth) — PKCE helpers, storage round-trip, token refresh.
 
 Existing analogs: `src/tests/codex-*.test.ts`, `src/tests/claude-*.test.ts`, `src/tests/pi-*.test.ts`. Tests must use isolated SQLite files and clean up `-wal` / `-shm` in `afterAll` (see the "Unit tests" block in `CLAUDE.md`).
@@ -851,6 +897,7 @@ Manual verification:
 - `HARNESS_PROVIDER=foo bun run src/cli.tsx worker` starts and connects.
 - A trivial task ("Say hi") runs to completion and posts progress + cost.
 - `cancel-task` via MCP actually aborts the in-flight run.
+- Advertised steering modes deliver as documented; unsupported modes degrade or fail according to `onUnsupported`.
 - `docker build -f Dockerfile.worker .` succeeds.
 - Full E2E with Docker (see `CLAUDE.md` "E2E testing with Docker") with `-e HARNESS_PROVIDER=foo`.
 - For OAuth providers: run `bun run src/cli.tsx <foo>-login` end-to-end, then boot a worker in Docker and verify it picks up the stored creds.

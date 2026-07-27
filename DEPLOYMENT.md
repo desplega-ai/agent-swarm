@@ -544,6 +544,15 @@ SLACK_ALLOWED_USER_IDS=U12345678,U87654321           # Comma-separated user IDs 
 # Optional: Require @mention for thread follow-up routing (default: false)
 # By default, replies to swarm-started thread roots also auto-route as follow-ups.
 # SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true
+
+# Optional: steer an in-progress task from buffered Slack thread replies.
+# Values: lead | all. Unset/off preserves normal follow-up task routing.
+# SLACK_THREAD_STEERING=lead
+# SLACK_THREAD_STEERING_MODE=queue  # queue (default) | steer
+
+# Optional: raw Claude queued steering. Unset auto-probes stock Claude >= 2.1.205.
+# 0/false/off/no keeps `-p`; 1/true/on/yes forces stream-json input.
+# CLAUDE_QUEUE_STEERING=off
 ```
 
 ### User Filtering

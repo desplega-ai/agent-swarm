@@ -263,6 +263,32 @@ describe("task steering core", () => {
     ]);
   });
 
+  test("degradation follows the capability map, not a hardcoded provider list", () => {
+    // Regression: the ladder used to special-case `provider === "claude"`, so
+    // narrowing devin to queue-only left it reporting outcome "steered" for a
+    // mode it cannot honor. Every queue-only provider must degrade identically.
+    const queueOnly = (Object.keys(PROVIDER_STEER_CAPABILITIES) as ProviderName[]).filter(
+      (provider) => {
+        const modes = PROVIDER_STEER_CAPABILITIES[provider];
+        return modes.length > 0 && !modes.includes("steer");
+      },
+    );
+    expect(queueOnly.length).toBeGreaterThan(0);
+
+    for (const provider of queueOnly) {
+      const task = runningTask(provider, `${provider} degrade`);
+      expect(
+        requestSteering({
+          taskId: task.id,
+          message: "please account for the new constraint",
+          mode: "steer",
+          source: "ui",
+          createdByKind: "user",
+        }),
+      ).toMatchObject({ outcome: "queued", effectiveMode: "queue", degradedFrom: "steer" });
+    }
+  });
+
   test("paused tasks auto-start before steering is queued", () => {
     const task = runningTask("pi", "paused auto-start");
     expect(pauseTask(task.id)?.status).toBe("paused");

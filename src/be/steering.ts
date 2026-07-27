@@ -183,8 +183,14 @@ export function requestSteering(args: RequestSteeringArgs): SteerResult {
   }
 
   const body = scrubSecrets(args.message);
+  // Degrade off the capability map, not off a hardcoded provider name — any
+  // provider that can't honor the requested mode downgrades to queue, and the
+  // caller is told via `degradedFrom`. (Providers with no live steering at all
+  // fall through to the promotion branch below.)
   const degradedFrom =
-    provider === "claude" && requestedMode === "steer" ? requestedMode : undefined;
+    requestedMode === "steer" && supportedModes.length > 0 && !supportedModes.includes("steer")
+      ? requestedMode
+      : undefined;
   const effectiveMode: SteerMode = degradedFrom ? "queue" : requestedMode;
 
   const steeringMessage = createSteeringMessage({

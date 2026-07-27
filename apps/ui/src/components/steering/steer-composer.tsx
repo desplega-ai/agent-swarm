@@ -10,8 +10,8 @@
  * Decision 16 — mode support is advertised before the user picks. The
  * available modes come from the task's derived `supportedSteerModes`
  * (server-side `PROVIDER_STEER_CAPABILITIES`):
- *   - `["steer","queue"]` → both segments live (pi / claude-managed / devin / opencode)
- *   - `["queue"]`         → Interrupt disabled with a reason (claude)
+ *   - `["steer","queue"]` → both segments live (pi / claude-managed / opencode)
+ *   - `["queue"]`         → Interrupt disabled with a reason (claude / devin)
  *   - `[]`                → no toggle at all; the send action is labelled for
  *                           what actually happens — a follow-up task (codex)
  *
