@@ -25,6 +25,7 @@ import { checkDevinCredentials } from "../providers/devin-adapter";
 import { checkOpencodeCredentials } from "../providers/opencode-adapter";
 import type { CredCheckOptions, CredStatus } from "../providers/types";
 import type { AgentCredStatus, AgentLatestModel, ProviderName, ReasoningEffort } from "../types";
+import { getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 export type SupportedProvider = "claude" | "claude-managed" | "codex" | "devin" | "opencode" | "pi";
@@ -202,7 +203,7 @@ async function checkOpenAiApiKey(apiKey: string): Promise<LiveValidationResult> 
 }
 
 async function checkOpenRouter(apiKey: string): Promise<LiveValidationResult> {
-  const r = await timedFetch("https://openrouter.ai/api/v1/models", {
+  const r = await timedFetch(`${getOpenRouterBaseUrl()}/models`, {
     method: "GET",
     headers: { Authorization: `Bearer ${apiKey}` },
   });

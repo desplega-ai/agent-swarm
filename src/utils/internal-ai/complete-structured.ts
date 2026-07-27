@@ -20,6 +20,7 @@ import { complete } from "@earendil-works/pi-ai/compat";
 import { getBuiltinModel as getModel } from "@earendil-works/pi-ai/providers/all";
 import type { TSchema } from "typebox";
 import { z } from "zod";
+import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../openrouter-base-url.js";
 import { type ResolvedCredential, resolveCredential } from "./credentials.js";
 import { parseModelStr } from "./models.js";
 
@@ -257,6 +258,13 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
       err,
     );
     return null;
+  }
+
+  // The builtin catalog hardcodes openrouter.ai; OPENROUTER_BASE_URL reroutes
+  // through a gateway (pi-ai's stream path uses `model.baseUrl` verbatim).
+  const openRouterBaseUrl = getOpenRouterBaseUrl();
+  if (provider === "openrouter" && openRouterBaseUrl !== DEFAULT_OPENROUTER_BASE_URL) {
+    model = { ...model, baseUrl: openRouterBaseUrl };
   }
 
   const completeFn = opts._complete ?? complete;

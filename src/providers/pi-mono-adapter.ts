@@ -28,6 +28,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type TSchema, Type } from "typebox";
 import { classifyAwsSdkError } from "../utils/aws-error-classifier";
+import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { readPkgVersion } from "./harness-version";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
@@ -354,6 +355,58 @@ export async function createPiRuntimeAuth(
   }
 
   return modelRuntime;
+}
+
+/**
+ * Materialize the OpenRouter gateway override into `<agentDir>/models.json`
+ * so pi-coding-agent's `ModelRuntime` (which loads that file at create time)
+ * composes every built-in OpenRouter model with the gateway `baseUrl` — see
+ * `src/utils/openrouter-base-url.ts` for the env contract.
+ *
+ * Merge-preserving: existing provider entries (and any other openrouter
+ * config keys) are kept; only `providers.openrouter.baseUrl` is set. A
+ * corrupt existing file is overwritten with just the override — for gateway
+ * deployments, guaranteed rerouting wins over preserving unparseable config.
+ * No-op when `OPENROUTER_BASE_URL` is unset/blank/default, so local pi usage
+ * is untouched.
+ */
+export async function ensureOpenRouterModelsOverride(
+  agentDir: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<void> {
+  const baseUrl = getOpenRouterBaseUrl(env as NodeJS.ProcessEnv);
+  if (baseUrl === DEFAULT_OPENROUTER_BASE_URL) return;
+
+  const modelsPath = join(agentDir, "models.json");
+  let existing: Record<string, unknown> = {};
+  try {
+    const file = Bun.file(modelsPath);
+    if (await file.exists()) {
+      existing = JSON.parse(await file.text()) as Record<string, unknown>;
+    }
+  } catch (err) {
+    console.warn(
+      `[pi-mono] ${modelsPath} is unreadable/invalid (${err instanceof Error ? err.message : err}); rewriting with the OpenRouter gateway override`,
+    );
+    existing = {};
+  }
+
+  const providers =
+    typeof existing.providers === "object" && existing.providers !== null
+      ? (existing.providers as Record<string, unknown>)
+      : {};
+  const openrouter =
+    typeof providers.openrouter === "object" && providers.openrouter !== null
+      ? (providers.openrouter as Record<string, unknown>)
+      : {};
+  const next = {
+    ...existing,
+    providers: {
+      ...providers,
+      openrouter: { ...openrouter, baseUrl },
+    },
+  };
+  await Bun.write(modelsPath, `${JSON.stringify(next, null, 2)}\n`);
 }
 
 /**
@@ -960,8 +1013,18 @@ export class PiMonoAdapter implements ProviderAdapter {
     const sessionEnv = config.env ?? process.env;
 
     // 3. Resolve model
-    const model = resolveModel(config.model, sessionEnv);
+    // Write the gateway override BEFORE ModelRuntime.create — the runtime
+    // loads `<agentDir>/models.json` exactly once at creation.
+    await ensureOpenRouterModelsOverride(getAgentDir(), sessionEnv);
+    const builtinModel = resolveModel(config.model, sessionEnv);
     const modelRuntime = await createPiRuntimeAuth(sessionEnv);
+    // models.json overrides (e.g. the OpenRouter gateway baseUrl) only apply
+    // to models resolved through the runtime's composed store; the builtin
+    // catalog object from `resolveModel` carries the hardcoded upstream URL
+    // and would be used verbatim by the session.
+    const model = builtinModel
+      ? (modelRuntime.getModel(builtinModel.provider, builtinModel.id) ?? builtinModel)
+      : builtinModel;
 
     // 4. Create swarm hooks extension
     const swarmExtension = createSwarmHooksExtension({

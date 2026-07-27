@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ExecutorMeta } from "../../types";
+import { getOpenRouterBaseUrl } from "../../utils/openrouter-base-url";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
 // ─── Schemas ────────────────────────────────────────────────
@@ -27,7 +28,7 @@ export async function executeRawLlm(
   try {
     const { createOpenAI } = await import("@ai-sdk/openai");
     const openrouter = createOpenAI({
-      baseURL: "https://openrouter.ai/api/v1",
+      baseURL: getOpenRouterBaseUrl(),
       apiKey: process.env.OPENROUTER_API_KEY,
     });
     const model = openrouter(modelName);

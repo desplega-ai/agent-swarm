@@ -81,6 +81,96 @@ describe("PiMonoAdapter.createSession — reasoning_effort", () => {
   });
 });
 
+// ─── OPENROUTER_BASE_URL gateway routing (session model composition) ─────────
+
+describe("PiMonoAdapter.createSession — OPENROUTER_BASE_URL gateway", () => {
+  const GATEWAY = "https://control-plane.example/proxy/v1";
+  const agentDir = `/tmp/pi-or-gateway-test-${Date.now()}`;
+  const origAgentDirEnv = process.env.PI_CODING_AGENT_DIR;
+
+  let createAgentSessionSpy: ReturnType<typeof spyOn>;
+  let capturedOptions: Record<string, unknown> | undefined;
+
+  beforeAll(() => {
+    mkdirSync(agentDir, { recursive: true });
+    // getAgentDir() reads process.env directly (config.env doesn't reach it).
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+  });
+
+  afterAll(() => {
+    if (origAgentDirEnv === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = origAgentDirEnv;
+    rmSync(agentDir, { recursive: true, force: true });
+  });
+
+  afterEach(() => {
+    createAgentSessionSpy?.mockRestore();
+    capturedOptions = undefined;
+  });
+
+  function makeConfig(env: Record<string, string>): ProviderSessionConfig {
+    return {
+      prompt: "hello",
+      systemPrompt: "",
+      model: "openrouter/google/gemini-3-flash-preview",
+      role: "worker",
+      agentId: "test-agent",
+      taskId: "test-task",
+      apiUrl: "",
+      apiKey: "",
+      cwd: "/tmp",
+      logFile: `/tmp/pi-or-gateway-test-${Date.now()}-${Math.random().toString(36).slice(2)}.log`,
+      env: { OPENROUTER_API_KEY: "sk-or-test", ...env },
+    };
+  }
+
+  function spyOnCreateAgentSession() {
+    createAgentSessionSpy = spyOn(piCodingAgent, "createAgentSession").mockImplementation((async (
+      opts: Record<string, unknown>,
+    ) => {
+      capturedOptions = opts;
+      return {
+        session: {
+          sessionId: "fake-session",
+          isStreaming: false,
+          model: undefined,
+          subscribe: () => () => {},
+          dispose: () => {},
+        },
+      };
+    }) as typeof piCodingAgent.createAgentSession);
+  }
+
+  test("session model carries the gateway baseUrl when OPENROUTER_BASE_URL is set", async () => {
+    spyOnCreateAgentSession();
+    const adapter = new PiMonoAdapter();
+    await adapter.createSession(makeConfig({ OPENROUTER_BASE_URL: GATEWAY }));
+    const model = capturedOptions?.model as { baseUrl?: string; id?: string } | undefined;
+    expect(model?.id).toBe("google/gemini-3-flash-preview");
+    expect(model?.baseUrl).toBe(GATEWAY);
+    // The override was materialized for the runtime to load.
+    expect(existsSync(join(agentDir, "models.json"))).toBe(true);
+  });
+
+  test("session model keeps the default openrouter.ai baseUrl when env is unset", async () => {
+    // Fresh agent dir so the previous test's models.json doesn't leak in.
+    const cleanDir = `${agentDir}-clean`;
+    mkdirSync(cleanDir, { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = cleanDir;
+    try {
+      spyOnCreateAgentSession();
+      const adapter = new PiMonoAdapter();
+      await adapter.createSession(makeConfig({}));
+      const model = capturedOptions?.model as { baseUrl?: string } | undefined;
+      expect(model?.baseUrl).toBe("https://openrouter.ai/api/v1");
+      expect(existsSync(join(cleanDir, "models.json"))).toBe(false);
+    } finally {
+      process.env.PI_CODING_AGENT_DIR = agentDir;
+      rmSync(cleanDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("AGENTS.md symlink management", () => {
   const tmpDir = `/tmp/pi-mono-test-${Date.now()}`;
 

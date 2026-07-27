@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ExecutorMeta } from "../../types";
+import { getOpenRouterBaseUrl } from "../../utils/openrouter-base-url";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
 // ─── Schemas ────────────────────────────────────────────────
@@ -115,7 +116,7 @@ export class ValidateExecutor extends BaseExecutor<
       const { generateObject, jsonSchema } = await import("ai");
 
       const openrouter = createOpenAI({
-        baseURL: "https://openrouter.ai/api/v1",
+        baseURL: getOpenRouterBaseUrl(),
         apiKey: process.env.OPENROUTER_API_KEY,
       });
 
