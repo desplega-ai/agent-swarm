@@ -21,6 +21,7 @@ export type RoutingScriptRunner = (input: {
   args: unknown;
   agentId: string;
   timeoutMs?: number;
+  readOnly?: boolean;
 }) => Promise<{ result: unknown; stdout: string }>;
 
 function mergeMutations(
@@ -89,7 +90,9 @@ function emitRoutingEvent(
     // throwing subscriber must not reject the routing/creation path.
     workflowEventBus.emit(event, payload);
   } catch (err) {
-    console.error(`[routing] event emit failed for '${event}':`, err);
+    // Message only, scrubbed: a raw error object dumps a stack that can carry
+    // payload material into container logs.
+    console.error(`[routing] event emit failed for '${event}': ${failureMessage(err)}`);
   }
 }
 
@@ -98,7 +101,7 @@ function safeInsertTrace(...args: Parameters<typeof insertRoutingTrace>): void {
   try {
     insertRoutingTrace(...args);
   } catch (err) {
-    console.error("[routing] trace insert failed:", err);
+    console.error(`[routing] trace insert failed: ${failureMessage(err)}`);
   }
 }
 
@@ -164,6 +167,11 @@ export function createRoutingEngine(
           // resolve to a real agent instead of 404ing and failing open.
           agentId: handler.createdByAgentId ?? getLeadAgent()?.id ?? "routing",
           timeoutMs: handler.timeoutMs ?? 5000,
+          // Suppressing bus events is not enough to make a dry run
+          // side-effect-free: the handler still executes with real
+          // credentials, so it could create tasks, mutate config, or message
+          // people. Run it against a read-only SDK surface instead.
+          readOnly: opts.dryRun === true,
         });
         parsedResult = RoutingResultSchema.parse(output.result);
       } catch (caught) {
@@ -238,6 +246,20 @@ export function createRoutingEngine(
       // results are deliberately ignored at this edge.
       const decisiveResult = edge === "task.before_assign" && isDecisive(result);
       const hardDecisive = decisiveResult && handler.mode === "hard";
+      /**
+       * `unassign` is the one decisive action a SOFT handler may apply.
+       *
+       * Every other decisive result takes routing authority away from the Lead
+       * — which is exactly what `hard` is the opt-in for. `unassign` does the
+       * opposite: it releases an automatic pin (send-task defaults a child to
+       * its parent's worker before routing ever runs) and hands the decision
+       * BACK to the default router. A soft handler saying "don't auto-pin
+       * this" is therefore compatible with "the Lead stays the default
+       * router", and without it a soft policy physically cannot decline the
+       * inherited pin — it could only emit advice addressed to the very worker
+       * it wanted to route away from.
+       */
+      const softUnassign = decisiveResult && handler.mode === "soft" && result.unassign === true;
       const suggestion =
         decisiveResult && handler.mode === "soft"
           ? (result.assignTo ??
@@ -262,7 +284,7 @@ export function createRoutingEngine(
         flavor: handler.flavor,
         mode: handler.mode,
         result,
-        decisive: hardDecisive,
+        decisive: hardDecisive || softUnassign,
         suggestion,
         durationMs,
       };
@@ -278,11 +300,26 @@ export function createRoutingEngine(
         mode: handler.mode,
         matched: true,
         result,
-        decisive: hardDecisive,
+        decisive: hardDecisive || softUnassign,
         suggestion,
         dryRun: opts.dryRun ?? false,
         durationMs,
       });
+
+      if (softUnassign && !hardDecisive) {
+        // Release the pin, but do NOT short-circuit: a soft handler holds no
+        // authority over what happens next, so later handlers still run and a
+        // subsequent hard decision overwrites this. Only the pin release is
+        // taken — the handler's own assignTo/block stay advisory suggestions.
+        decision.final = { unassign: true };
+        if (!opts.dryRun) {
+          emitRoutingEvent("routing.applied", ctx, routingRunId, {
+            handlerId: handler.id,
+            handlerName: handler.name,
+          });
+        }
+        continue;
+      }
 
       if (hardDecisive) {
         decision.final = result;

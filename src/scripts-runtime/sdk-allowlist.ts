@@ -171,6 +171,90 @@ export const SDK_REST_BRIDGE_METHODS = [
   "routing_dry_run",
 ] as const;
 
+/**
+ * SDK methods a script may call when it is running in READ-ONLY mode
+ * (currently: routing handlers invoked from `POST /api/routing/dry-run`).
+ *
+ * Deliberately an explicit ALLOWLIST rather than a "deny the destructive ones"
+ * list: this is a security control, so a newly added SDK method must default
+ * to denied instead of silently becoming callable from a dry run.
+ *
+ * Excluded on purpose despite looking read-ish:
+ * - `task_poll` — advertises `readOnlyHint` but actually CLAIMS a task.
+ * - `script_run` / `script_launchRun` — execute arbitrary user code, which
+ *   would trivially defeat the whole restriction.
+ * - `routing_dry_run` — would let a dry run recursively spawn dry runs.
+ * - `request_humanInput` — externally visible side effect.
+ */
+export const SDK_READ_ONLY_METHODS: ReadonlySet<string> = new Set<string>([
+  // memory
+  "memory_search",
+  "memory_get",
+  // tasks
+  "task_list",
+  "task_get",
+  // kv
+  "kv_get",
+  "kv_list",
+  // repos
+  "repo_list",
+  // subscriptions / schedules
+  "subscription_list",
+  "schedule_list",
+  // scripts (metadata only — never execution)
+  "script_search",
+  "script_queryTypes",
+  "script_getRun",
+  "script_listRuns",
+  // swarm / agent
+  "swarm_get",
+  "agent_info",
+  "metrics_get",
+  "user_resolve",
+  "db_query", // executeReadOnlyQuery — writes are rejected server-side
+  // config
+  "config_get",
+  "config_list",
+  // slack (read paths only — no post/reply/update/delete)
+  "slack_read",
+  "slack_listChannels",
+  "slack_downloadFile",
+  // messaging
+  "message_read",
+  // context
+  "context_history",
+  "context_diff",
+  // services
+  "service_list",
+  // workflows (inspection only — no trigger/retry/cancel)
+  "workflow_list",
+  "workflow_get",
+  "workflow_listRuns",
+  "workflow_getRun",
+  // prompt templates
+  "prompt_list",
+  "prompt_get",
+  "prompt_preview",
+  // tracker
+  "tracker_status",
+  "tracker_syncStatus",
+  // skills
+  "skill_list",
+  "skill_get",
+  "skill_getFile",
+  "skill_search",
+  // mcp servers
+  "mcpServer_list",
+  "mcpServer_get",
+  // REST bridge
+  "classify", // pure LLM call; the seeded continuity-pin policy needs it
+  "routing_handler_list",
+]);
+
+export function isSdkMethodReadOnly(name: string): boolean {
+  return SDK_READ_ONLY_METHODS.has(name);
+}
+
 /** Set of MCP tool names (values of SDK_TOOL_NAME_MAP) that scripts may call via the bridge. */
 const MCP_TOOL_NAMES: ReadonlySet<string> = new Set<string>(Object.values(SDK_TOOL_NAME_MAP));
 

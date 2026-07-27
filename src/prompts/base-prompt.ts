@@ -159,12 +159,25 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     const directives = args.routingDirectives.directives
       .map((directive) => `- ${directive}`)
       .join("\n");
-    const suggestedAgent = args.routingDirectives.suggestions.find(
-      (suggestion) => suggestion.assignTo,
-    )?.assignTo;
-    const suggestion = suggestedAgent
-      ? `\n\nRouting suggested assigning this to ${suggestedAgent} — if you delegate elsewhere, note why.`
-      : "";
+    // Render EVERY suggestion variant, not just `assignTo`. Soft handlers also
+    // emit `unassign` and `block` suggestions, and considering only `assignTo`
+    // left the agent with an empty "Routing guidance" section whenever a soft
+    // guard or a pool recommendation was the only thing a handler produced.
+    const suggestionLines = args.routingDirectives.suggestions
+      .map((s) => {
+        if (s.assignTo) {
+          return `Routing suggested assigning this to ${s.assignTo} — if you delegate elsewhere, note why.`;
+        }
+        if (s.unassign) {
+          return "Routing suggested this is a different kind of work from its parent — consider assigning it fresh from the pool rather than continuing in the same session.";
+        }
+        if (s.block) {
+          return `Routing raised a concern: ${s.block.reason} — address it or note why you are proceeding.`;
+        }
+        return null;
+      })
+      .filter((line): line is string => line !== null);
+    const suggestion = suggestionLines.length > 0 ? `\n\n${suggestionLines.join("\n")}` : "";
     const routingDirectivesResult = await resolveTemplateAsync("system.task.routing_directives", {
       directives,
       suggestion,

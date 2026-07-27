@@ -28,6 +28,8 @@ export type RunScriptInput = {
   failedBindings?: FailedCredentialBinding[];
   apiConnections?: ScriptApiConnectionDescriptor[];
   mcpConnections?: ScriptMcpConnectionDescriptor[];
+  /** Restrict `ctx.swarm` to read-only methods (routing dry runs). */
+  readOnly?: boolean;
 };
 
 export type RunScriptOutput = Omit<ExecutorOutput, "result" | "stdout" | "stderr"> & {
@@ -50,6 +52,7 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
         value: input.mcpBaseUrl ?? process.env.MCP_BASE_URL ?? "http://localhost:3013",
         isSecret: false,
       },
+      ...(input.readOnly ? { readOnly: true as const } : {}),
     },
     user: input.userConfig ?? {},
     egressSecrets: input.egressSecrets ?? (await buildEgressSecrets()),

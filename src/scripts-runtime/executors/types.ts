@@ -10,6 +10,13 @@ export type SwarmConfigPayload = {
     apiKey: { value: string; isSecret: true };
     agentId: { value: string; isSecret: false };
     mcpBaseUrl: { value: string; isSecret: false };
+    /**
+     * Restrict `ctx.swarm` to `SDK_READ_ONLY_METHODS`. Set for routing dry
+     * runs — suppressing bus events alone does not make a dry run
+     * side-effect-free, because the handler still executes with real
+     * credentials and can call any mutating SDK method.
+     */
+    readOnly?: boolean;
   };
   user: Record<string, { value: string; isSecret: boolean }>;
   egressSecrets?: EgressSecretEntry[];

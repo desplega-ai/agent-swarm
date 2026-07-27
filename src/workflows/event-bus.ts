@@ -21,7 +21,10 @@ export class InProcessEventBus implements WorkflowEventBus {
   }
 
   emit(event: string, data: unknown): void {
-    for (const handler of this.anyHandlers) {
+    // Snapshot: a tap that registers another tap during an emit would
+    // otherwise be invoked for the CURRENT event (the live array iterator sees
+    // newly-pushed entries), diverging from EventEmitter semantics.
+    for (const handler of [...this.anyHandlers]) {
       try {
         handler(event, data);
       } catch (err) {

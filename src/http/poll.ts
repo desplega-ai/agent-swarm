@@ -91,6 +91,22 @@ const pollTriggers = route({
 const CHANNEL_ACTIVITY_INTERVAL_MS = 60_000; // Check at most once per 60s
 let lastChannelActivityCheckAt = 0;
 
+// ─── Claim-routing pre-pass bounds ──────────────────────────────────────────
+
+/**
+ * How far down the eligible pool the claim pre-pass may look. Must exceed
+ * `CLAIM_ROUTING_MAX_EVALUATIONS` so a blocked head of line cannot hide the
+ * rows behind it from every subsequent poll.
+ */
+const CLAIM_ROUTING_SCAN_LIMIT = 25;
+
+/**
+ * Handler evaluations (i.e. script subprocess spawns, ~180ms p50) allowed per
+ * poll. Bounds worst-case poll latency; the heartbeat sweep picks up whatever
+ * this budget doesn't reach.
+ */
+const CLAIM_ROUTING_MAX_EVALUATIONS = 5;
+
 function getRequesterNotes(notes: string | undefined): string | undefined {
   return typeof notes === "string" && notes.trim().length > 0 ? notes : undefined;
 }
@@ -188,11 +204,20 @@ export async function handlePoll(
       routedClaimCandidateIds = new Set();
       const agent = getAgentById(myAgentId);
       if (agent && !agent.isLead && hasCapacity(myAgentId)) {
-        const candidateIds = getUnassignedTaskIdsForAgent(myAgentId, 5);
+        // Scan deeper than the evaluation budget. Stopping at the first N rows
+        // starved the pool: if routing rejected all N, every later poll
+        // re-fetched the same ordered N, so lower-priority work this worker was
+        // allowed to claim was never reached. Rows short-circuited as
+        // `pending-decision` spawn no subprocess, so they don't consume budget
+        // and the scan walks past a permanently-blocked head of line.
+        const candidateIds = getUnassignedTaskIdsForAgent(myAgentId, CLAIM_ROUTING_SCAN_LIMIT);
+        let evaluations = 0;
         for (const candidateId of candidateIds) {
+          if (evaluations >= CLAIM_ROUTING_MAX_EVALUATIONS) break;
           const candidate = getTaskById(candidateId);
           if (!candidate) continue;
           const routing = await runClaimRouting(candidate, myAgentId);
+          if (routing.kind !== "pending-decision") evaluations++;
           if (routing.kind === "proceed") {
             // The transaction claims at most one task — stop evaluating (and
             // spawning handler subprocesses for) further candidates.

@@ -1273,15 +1273,17 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
       if (parsed.success) {
         routingDirectives = parsed.data;
       } else {
+        // routingDirectives is handler-controlled, so parse errors echo
+        // attacker-influenced strings back into the logs — scrub at egress.
         console.warn(
           `[db] Ignoring invalid agent_tasks.routingDirectives for task ${row.id}:`,
-          parsed.error.message,
+          scrubSecrets(parsed.error.message),
         );
       }
     } catch (error) {
       console.warn(
         `[db] Ignoring malformed agent_tasks.routingDirectives for task ${row.id}:`,
-        error instanceof Error ? error.message : String(error),
+        scrubSecrets(error instanceof Error ? error.message : String(error)),
       );
     }
   }

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { SwarmConfigPayload } from "../scripts-runtime/executors/types";
 import { Redacted } from "../scripts-runtime/redacted";
 import { SwarmConfig } from "../scripts-runtime/swarm-config";
+import { createSwarmSdk } from "../scripts-runtime/swarm-sdk";
 
 const payload: SwarmConfigPayload = {
   system: {
@@ -34,5 +35,38 @@ describe("SwarmConfig", () => {
   test("missing user keys return undefined", () => {
     const config = new SwarmConfig(payload);
     expect(config.get("missing")).toBeUndefined();
+  });
+
+  test("readOnly defaults to false and is opt-in", () => {
+    expect(new SwarmConfig(payload).readOnly).toBe(false);
+    expect(
+      new SwarmConfig({ ...payload, system: { ...payload.system, readOnly: true } }).readOnly,
+    ).toBe(true);
+  });
+});
+
+describe("read-only SDK surface (routing dry-run)", () => {
+  const sdkFor = (readOnly: boolean) =>
+    createSwarmSdk(
+      new SwarmConfig(readOnly ? { ...payload, system: { ...payload.system, readOnly } } : payload),
+    );
+
+  test("rejects mutating methods in read-only mode", async () => {
+    const swarm = sdkFor(true);
+    for (const method of ["task_send", "slack_post", "config_set", "script_run", "task_poll"]) {
+      await expect(swarm[method]({})).rejects.toThrow(/not available in read-only mode/);
+    }
+  });
+
+  test("fails closed for unknown/new methods in read-only mode", async () => {
+    const swarm = sdkFor(true);
+    // A method added to the SDK later must be denied by default, not allowed.
+    await expect(swarm.some_future_method({})).rejects.toThrow(/not available in read-only mode/);
+  });
+
+  test("does not gate anything when readOnly is unset", () => {
+    // No rejection wrapper at all — the guard is strictly opt-in, so the normal
+    // routing path is unaffected.
+    expect(new SwarmConfig(payload).readOnly).toBe(false);
   });
 });

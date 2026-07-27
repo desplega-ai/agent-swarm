@@ -257,6 +257,66 @@ describe("routing creation and delegation vias", () => {
     expect(structured.task?.status).toBe("unassigned");
   });
 
+  test("a SOFT handler's unassign drops the pin; its assignTo stays advisory", async () => {
+    const parent = createTaskExtended("soft unassign parent", {
+      agentId: workerAId,
+      creatorAgentId: leadId,
+    });
+    await registerHandler({
+      name: "delegation-soft-unassign",
+      result: { unassign: true, promptDirectives: ["different kind of work"] },
+      mode: "soft",
+      matcher: { via: "delegation", agentId: workerAId, taskType: "delegation-soft-unassign" },
+    });
+
+    const response = await sendTaskHandler(
+      { kind: "owner", agentId: leadId, sourceTaskId: parent.id },
+      {
+        task: "soft-unassigned child",
+        taskType: "delegation-soft-unassign",
+        offerMode: false,
+        allowDuplicate: false,
+        overrideSlackContext: false,
+      },
+    );
+    const structured = response.structuredContent as { success: boolean; task?: AgentTask };
+
+    // `unassign` is the one decisive action a soft handler may apply: it hands
+    // routing back to the default router rather than taking authority.
+    expect(structured.success).toBe(true);
+    expect(structured.task?.agentId).toBeNull();
+    expect(structured.task?.status).toBe("unassigned");
+  });
+
+  test("a SOFT handler's assignTo remains a suggestion only", async () => {
+    const parent = createTaskExtended("soft assign parent", {
+      agentId: workerAId,
+      creatorAgentId: leadId,
+    });
+    await registerHandler({
+      name: "delegation-soft-assign",
+      result: { assignTo: workerBId },
+      mode: "soft",
+      matcher: { via: "delegation", agentId: workerAId, taskType: "delegation-soft-assign" },
+    });
+
+    const response = await sendTaskHandler(
+      { kind: "owner", agentId: leadId, sourceTaskId: parent.id },
+      {
+        task: "soft-suggested child",
+        taskType: "delegation-soft-assign",
+        offerMode: false,
+        allowDuplicate: false,
+        overrideSlackContext: false,
+      },
+    );
+    const structured = response.structuredContent as { success: boolean; task?: AgentTask };
+
+    // Guard against the soft-unassign carve-out leaking into assignTo.
+    expect(structured.success).toBe(true);
+    expect(structured.task?.agentId).toBe(workerAId);
+  });
+
   test("delegation fails open when a handler hard-assigns an unknown agent", async () => {
     const parent = createTaskExtended("delegation bogus target parent", {
       agentId: workerAId,

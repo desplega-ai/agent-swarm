@@ -314,10 +314,15 @@ export async function handleRouting(
         jsonError(res, "Task not found", 404);
         return true;
       }
-      // Replay default: infer the via from the task shape instead of silently
-      // assuming creation — a delegated follow-up replayed without an explicit
-      // via would otherwise match zero delegation handlers.
-      const inferredVia = envelope?.via ?? (task.parentTaskId ? "delegation" : "creation");
+      // Replay default: infer the via from the requested edge and the task
+      // shape instead of silently assuming creation — a delegated follow-up
+      // replayed without an explicit via would otherwise match zero delegation
+      // handlers. `prompt.compose` always invokes handlers with via="prompt",
+      // so an assignment-shaped guess there would hide every
+      // `matcher.via: "prompt"` handler behind a misleadingly empty decision.
+      const inferredVia =
+        envelope?.via ??
+        (edge === "prompt.compose" ? "prompt" : task.parentTaskId ? "delegation" : "creation");
       ctx = buildRoutingCtx(inferredVia, task, {
         proposedAgentId: envelope?.proposedAgentId ?? task.agentId ?? undefined,
       });

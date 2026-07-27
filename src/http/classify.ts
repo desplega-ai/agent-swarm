@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getAgentById } from "../be/db";
 import { ClassificationResultSchema, classify } from "../utils/internal-ai/classify";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -58,7 +59,11 @@ export async function handleClassify(
       timeoutMs: parsed.body.timeoutMs,
     });
   } catch (err) {
-    console.error("[classify] failed:", err instanceof Error ? err.message : err);
+    // Classification failures can echo the caller's prompt/input material back
+    // in the message, so scrub at this logging egress.
+    console.error(
+      `[classify] failed: ${scrubSecrets(err instanceof Error ? err.message : String(err))}`,
+    );
   }
   json(res, { result });
   return true;

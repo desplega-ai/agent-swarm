@@ -17,6 +17,12 @@ export async function runGlobalScriptByName(input: {
   args: unknown;
   agentId: string;
   timeoutMs?: number;
+  /**
+   * Restrict `ctx.swarm` to read-only methods. Used by routing dry runs, where
+   * suppressing bus events alone does NOT make the run side-effect-free — the
+   * handler still executes with real credentials.
+   */
+  readOnly?: boolean;
 }): Promise<{ result: unknown; stdout: string }> {
   const script = getScript({ name: input.scriptName, scope: "global" });
   if (!script) {
@@ -31,6 +37,7 @@ export async function runGlobalScriptByName(input: {
     apiConnections: getScriptApiConnectionDescriptors({ agentId: input.agentId }),
     mcpConnections: getScriptMcpConnectionDescriptors({ agentId: input.agentId }),
     timeoutMs: input.timeoutMs ?? 60_000,
+    readOnly: input.readOnly,
   });
   if (output.exitCode !== 0 || output.error) {
     throw new Error(

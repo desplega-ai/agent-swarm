@@ -6,9 +6,17 @@ export class SwarmConfig {
   readonly agentId: RedactedValue<string>;
   readonly mcpBaseUrl: RedactedValue<string>;
 
+  /**
+   * When true, the SDK proxy rejects every method that is not on
+   * `SDK_READ_ONLY_METHODS`. Set for routing dry runs so probing a handler
+   * cannot create tasks, mutate config, or message anyone.
+   */
+  readonly readOnly: boolean;
+
   private readonly userValues: Map<string, RedactedValue<string>>;
 
   constructor(payload: SwarmConfigPayload) {
+    this.readOnly = payload.system.readOnly === true;
     this.apiKey = Redacted.make(payload.system.apiKey.value, {
       type: "system",
       isSecret: payload.system.apiKey.isSecret,

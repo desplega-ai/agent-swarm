@@ -1,6 +1,6 @@
 import { scrubObject } from "../utils/secret-scrubber";
 import { Redacted } from "./redacted";
-import { isSdkToolAllowed, mcpToolNameForSdkMethod } from "./sdk-allowlist";
+import { isSdkMethodReadOnly, isSdkToolAllowed, mcpToolNameForSdkMethod } from "./sdk-allowlist";
 import type { SwarmConfig } from "./swarm-config";
 
 type BridgeRequest = {
@@ -521,7 +521,20 @@ export function createSwarmSdk(
     get(target, prop) {
       if (typeof prop !== "string") return undefined;
       if (prop in target) return target[prop];
-      return (...args: unknown[]) => callTool(prop, normalizeCallArgs(prop, args), config);
+      return (...args: unknown[]) => {
+        // Fail closed: in read-only mode anything not explicitly allowlisted
+        // is rejected, so a newly added SDK method cannot silently become
+        // callable from a routing dry run.
+        if (config.readOnly && !isSdkMethodReadOnly(prop)) {
+          return Promise.reject(
+            new Error(
+              `ctx.swarm.${prop}() is not available in read-only mode (routing dry-run) — ` +
+                "dry runs may only read state.",
+            ),
+          );
+        }
+        return callTool(prop, normalizeCallArgs(prop, args), config);
+      };
     },
   }) as Record<string, (...args: unknown[]) => Promise<unknown>>;
 }

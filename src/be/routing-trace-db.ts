@@ -89,7 +89,7 @@ export function insertRoutingTrace(
       trace.suggestion === undefined ? null : scrubSecrets(trace.suggestion),
       trace.deviated === undefined ? null : trace.deviated ? 1 : 0,
       trace.dryRun ? 1 : 0,
-      trace.error ?? null,
+      trace.error === undefined ? null : scrubSecrets(trace.error),
       trace.durationMs ?? null,
     );
   const created = getDb()

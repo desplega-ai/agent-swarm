@@ -40,6 +40,7 @@ import { applyRoutingDecisionToOptions } from "../routing/apply";
 import { runClaimRouting } from "../routing/claim";
 import { buildRoutingCtx } from "../routing/ctx";
 import { hasHandlersForVia, runBeforeAssign } from "../routing/engine";
+import { validateRoutingAssignTarget } from "../routing/target";
 import {
   createPoolStarvationDecisionTask,
   createRerouteDecisionTask,
@@ -641,6 +642,15 @@ export async function runRebootSweep(): Promise<void> {
               });
               rebootAffectedTasks.push({ original: failed, retryTaskId: null });
               continue;
+            }
+            // Same fail-open guard as createResumeFollowUp: an unknown or
+            // deleted target would produce a `pending` retry that no worker can
+            // poll, stranding the rebooted work.
+            if (
+              decision.final?.assignTo &&
+              !validateRoutingAssignTarget(decision.final.assignTo, "resume")
+            ) {
+              decision.final = undefined;
             }
             finalOptions = applyRoutingDecisionToOptions(baseOptions, decision);
           }
