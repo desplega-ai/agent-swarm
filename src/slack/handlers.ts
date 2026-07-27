@@ -19,6 +19,7 @@ import { extractTaskFromMessage, hasOtherUserMention, routeMessage } from "./rou
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";
 import { extractSlackMessageText } from "./message-text";
+import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
 import { registerTreeMessage } from "./watcher";
 
@@ -672,8 +673,9 @@ export function registerMessageHandler(app: App): void {
     const results: {
       assigned: Array<{ agentName: string; taskId: string }>;
       queued: Array<{ agentName: string; taskId: string }>;
+      steered: Array<{ agentName: string; acknowledgement: string }>;
       failed: Array<{ agentName: string; reason: string }>;
-    } = { assigned: [], queued: [], failed: [] };
+    } = { assigned: [], queued: [], steered: [], failed: [] };
 
     for (const match of matches) {
       const agent = getAgentById(match.agent.id);
@@ -686,6 +688,29 @@ export function registerMessageHandler(app: App): void {
       try {
         const latestTask = getMostRecentTaskInThread(msg.channel, threadTs);
         if (agent.isLead) {
+          const steering = msg.thread_ts
+            ? requestSlackThreadSteering({
+                channelId: msg.channel,
+                threadTs,
+                message: taskDescription,
+                requestedByUserId,
+              })
+            : null;
+          if (steering) {
+            try {
+              await client.reactions.add({ channel: msg.channel, name: "eyes", timestamp: msg.ts });
+            } catch (error) {
+              console.log(
+                `[Slack] Steering reaction failed: ${error instanceof Error ? error.message : error}`,
+              );
+            }
+            results.steered.push({
+              agentName: agent.name,
+              acknowledgement: formatSlackSteeringAck(steering.result),
+            });
+            continue;
+          }
+
           const task = createTaskWithSiblingAwareness(fullTaskDescription, {
             agentId: agent.id,
             source: "slack",
@@ -797,6 +822,13 @@ export function registerMessageHandler(app: App): void {
           registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
         }
       }
+    }
+
+    for (const steered of results.steered) {
+      await say({
+        text: `${steered.acknowledgement} *${steered.agentName}* will receive it.`,
+        thread_ts: threadTs,
+      });
     }
   });
 
