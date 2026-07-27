@@ -14,6 +14,7 @@ import {
   createTaskExtended,
   getAgentById,
   getDb,
+  getPendingSteeringForTask,
   getSteeringMessageById,
   getTaskById,
   markSteeringPromoted,
@@ -77,6 +78,36 @@ export function promoteSteeringToTask(task: AgentTask, message: SteeringMessage)
 export interface MarkSteeringUndeliverableResult {
   message: SteeringMessage;
   promotedTaskId?: string;
+}
+
+/**
+ * Promote every steering message that remains undelivered when its task has
+ * reached a terminal state. Each message promotion is independently
+ * transactional and idempotent, so terminal-status retries cannot create a
+ * duplicate follow-up or recursively re-promote the same message.
+ */
+export function promotePendingSteeringForTask(
+  taskId: string,
+  reason: string,
+): MarkSteeringUndeliverableResult[] {
+  if (!reason.trim()) {
+    throw new SteeringRequestError("Promotion reason must not be empty", 400);
+  }
+
+  const results: MarkSteeringUndeliverableResult[] = [];
+  for (const message of getPendingSteeringForTask(taskId)) {
+    try {
+      results.push(markSteeringUndeliverable(message.id, reason));
+    } catch (error) {
+      // One malformed or concurrently-deleted row must not keep the remaining
+      // pending steers from being promoted after the parent reaches terminal.
+      console.error(
+        `[steering] Failed to promote pending message ${message.id} for task ${taskId}:`,
+        scrubSecrets(error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+  return results;
 }
 
 /**
