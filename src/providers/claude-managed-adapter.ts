@@ -78,6 +78,9 @@ import type {
   ProviderResult,
   ProviderSession,
   ProviderSessionConfig,
+  ProviderTraits,
+  SteerDelivery,
+  SteerDeliveryResult,
 } from "./types";
 
 /**
@@ -333,6 +336,18 @@ class ClaudeManagedSession implements ProviderSession {
     void Promise.resolve(this.client.beta.sessions.archive(this._sessionId)).catch(() => {
       // Same — best-effort.
     });
+  }
+
+  /** Send a follow-up user message without interrupting or archiving the session. */
+  async deliverSteering({ mode, text }: SteerDelivery): Promise<SteerDeliveryResult> {
+    try {
+      await this.client.beta.sessions.events.send(this._sessionId, {
+        events: [{ type: "user.message", content: [{ type: "text", text }] }],
+      });
+      return { delivered: true, mode };
+    } catch (err) {
+      return { delivered: false, reason: String(err) };
+    }
   }
 
   /**
@@ -771,7 +786,11 @@ export class ClaudeManagedAdapter implements ProviderAdapter {
   readonly name = "claude-managed";
   // Anthropic's cloud sandbox calls back into our /mcp endpoint, but the worker
   // process is a thin SSE relay — no /workspace, no PM2, no agent-fs, no skills FS.
-  readonly traits = { hasMcp: true, hasLocalEnvironment: false };
+  readonly traits: ProviderTraits = {
+    hasMcp: true,
+    hasLocalEnvironment: false,
+    steerModes: ["steer", "queue"],
+  };
 
   /** Anthropic API key (kept private; never logged). */
   private readonly apiKey: string;

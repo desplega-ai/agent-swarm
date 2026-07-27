@@ -491,6 +491,65 @@ describe("ClaudeManagedAdapter (Phase 3) — session lifecycle", () => {
     }
   });
 
+  test("deliverSteering sends user.message without archiving and preserves the delivered mode", async () => {
+    const spy = makeFakeClient({
+      streamEvents: async function* () {
+        yield {
+          type: "session.status_idle",
+          id: "evt-idle",
+          processed_at: "2026-01-01T00:00:00Z",
+          stop_reason: { type: "end_turn" },
+        };
+      },
+    });
+    const session = await new ClaudeManagedAdapter({ client: spy.client }).createSession(
+      tConfig({ logFile: join(tmpLogDir, "steering.log") }),
+    );
+    await session.waitForCompletion();
+
+    await expect(
+      session.deliverSteering?.({ mode: "steer", text: "Change the implementation approach." }),
+    ).resolves.toEqual({ delivered: true, mode: "steer" });
+    expect(spy.sent.at(-1)).toEqual({
+      sessionId: "sesn_test_123",
+      events: [
+        {
+          type: "user.message",
+          content: [{ type: "text", text: "Change the implementation approach." }],
+        },
+      ],
+    });
+    expect(spy.archived).toEqual([]);
+  });
+
+  test("deliverSteering returns an undeliverable result when events.send rejects", async () => {
+    let sendCount = 0;
+    const spy = makeFakeClient({
+      streamEvents: async function* () {
+        yield {
+          type: "session.status_idle",
+          id: "evt-idle",
+          processed_at: "2026-01-01T00:00:00Z",
+          stop_reason: { type: "end_turn" },
+        };
+      },
+      onSend() {
+        sendCount += 1;
+        if (sendCount === 2) throw new Error("managed send rejected");
+      },
+    });
+    const session = await new ClaudeManagedAdapter({ client: spy.client }).createSession(
+      tConfig({ logFile: join(tmpLogDir, "steering-rejected.log") }),
+    );
+    await session.waitForCompletion();
+
+    await expect(session.deliverSteering?.({ mode: "queue", text: "Try again later." })).resolves.toEqual({
+      delivered: false,
+      reason: "Error: managed send rejected",
+    });
+    expect(spy.archived).toEqual([]);
+  });
+
   test("canResume returns true for running session, false for terminated, false for archived", async () => {
     {
       const spy = makeFakeClient({ retrieveStatus: "running" });

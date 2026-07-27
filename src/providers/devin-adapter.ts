@@ -31,6 +31,8 @@ import type {
   ProviderSession,
   ProviderSessionConfig,
   ProviderTraits,
+  SteerDelivery,
+  SteerDeliveryResult,
 } from "./types";
 
 /**
@@ -209,6 +211,21 @@ class DevinSession implements ProviderSession {
         isError: true,
         failureReason: "cancelled",
       });
+    }
+  }
+
+  /**
+   * Devin accepts messages while a session is active, including its `working`
+   * sub-state. Its API does not guarantee that a message interrupts the
+   * current turn, so delivery is always reported as queue semantics.
+   */
+  async deliverSteering({ text }: SteerDelivery): Promise<SteerDeliveryResult> {
+    if (!this._sessionId) return { delivered: false, reason: "no devin session" };
+    try {
+      await sendMessage(this.orgId, this.devinApiKey, this._sessionId, text);
+      return { delivered: true, mode: "queue" };
+    } catch (err) {
+      return { delivered: false, reason: String(err) };
     }
   }
 
@@ -814,7 +831,7 @@ export class DevinAdapter implements ProviderAdapter {
   private lastOrgId?: string;
   get traits(): ProviderTraits {
     const hasMcp = (process.env.HAS_MCP ?? "").toLowerCase() === "true";
-    return { hasMcp, hasLocalEnvironment: false };
+    return { hasMcp, hasLocalEnvironment: false, steerModes: ["queue"] };
   }
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
