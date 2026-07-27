@@ -35,6 +35,8 @@ import type {
   ProviderSession,
   ProviderSessionConfig,
   ProviderTraits,
+  SteerDelivery,
+  SteerDeliveryResult,
 } from "./types";
 
 /**
@@ -258,6 +260,7 @@ export class OpencodeSession implements ProviderSession {
   // biome-ignore lint/correctness/noUnusedPrivateClassMembers: reserved for future error-propagation paths; symmetric with completionResolve.
   private completionReject!: (err: Error) => void;
   private completionPromise: Promise<ProviderResult>;
+  private client: Awaited<ReturnType<typeof createOpencode>>["client"];
   private server: { url: string; close(): void };
   private aborted = false;
   private completed = false;
@@ -289,6 +292,7 @@ export class OpencodeSession implements ProviderSession {
 
   constructor(
     sessionId: string,
+    client: Awaited<ReturnType<typeof createOpencode>>["client"],
     server: { url: string; close(): void },
     model: string,
     agentId: string,
@@ -300,6 +304,7 @@ export class OpencodeSession implements ProviderSession {
     appliedReasoningEffort: ReasoningEffort | null = null,
   ) {
     this._sessionId = sessionId;
+    this.client = client;
     this.server = server;
     this.model = model;
     this.agentId = agentId;
@@ -628,6 +633,21 @@ export class OpencodeSession implements ProviderSession {
       failureReason: "aborted",
     });
   }
+
+  async deliverSteering({ mode, text }: SteerDelivery): Promise<SteerDeliveryResult> {
+    try {
+      if (mode === "steer") {
+        await this.client.session.abort({ path: { id: this._sessionId } });
+      }
+      await this.client.session.promptAsync({
+        path: { id: this._sessionId },
+        body: { parts: [{ type: "text", text }] },
+      });
+      return { delivered: true, mode };
+    } catch (err) {
+      return { delivered: false, reason: String(err) };
+    }
+  }
 }
 
 export class OpencodeAdapter implements ProviderAdapter {
@@ -636,6 +656,7 @@ export class OpencodeAdapter implements ProviderAdapter {
   readonly traits: ProviderTraits = {
     hasMcp: true,
     hasLocalEnvironment: true,
+    steerModes: ["steer", "queue"],
   };
 
   validateCredentials(env: Record<string, string | undefined> = {}): string {
@@ -862,6 +883,7 @@ export class OpencodeAdapter implements ProviderAdapter {
 
     session = new OpencodeSession(
       sessionId,
+      client,
       server,
       config.model,
       config.agentId,
