@@ -16137,6 +16137,43 @@
         }
       }
     },
+    "/api/steering-messages/{id}/handled": {
+      "post": {
+        "summary": "Mark a steering message handled",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Steering message acknowledgement recorded"
+          },
+          "400": {
+            "description": "Missing X-Agent-ID header or validation error"
+          },
+          "403": {
+            "description": "Steering message task is assigned to another agent"
+          },
+          "404": {
+            "description": "Agent or steering message not found"
+          }
+        }
+      }
+    },
     "/api/steering-messages/{id}/undeliverable": {
       "post": {
         "summary": "Promote an undeliverable steering message",

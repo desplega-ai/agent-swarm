@@ -33,7 +33,7 @@ export interface CostData {
   provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin";
 }
 
-import type { ProviderName } from "../types";
+import type { ProviderName, SteerMode } from "../types";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import type { ReasoningEffort } from "./reasoning-effort";
 
@@ -124,12 +124,20 @@ export interface ProviderSessionConfig {
   reasoningEffort?: ReasoningEffort;
 }
 
+export type SteerDelivery = { mode: SteerMode; text: string };
+
+export type SteerDeliveryResult =
+  | { delivered: true; mode: SteerMode }
+  | { delivered: false; reason: string };
+
 /** A running provider session. */
 export interface ProviderSession {
   readonly sessionId: string | undefined;
   onEvent(listener: (event: ProviderEvent) => void): void;
   waitForCompletion(): Promise<ProviderResult>;
   abort(reason?: string): Promise<void>;
+  /** Optional. Absent means the provider cannot accept mid-run input. */
+  deliverSteering?(delivery: SteerDelivery): Promise<SteerDeliveryResult>;
 }
 
 /** Result returned when a provider session completes. */
@@ -171,6 +179,8 @@ export interface ProviderTraits {
   hasMcp: boolean;
   /** Provider runs in the local Docker container with /workspace, identity files, agent-fs, PM2, etc. */
   hasLocalEnvironment: boolean;
+  /** Live steering modes supported by this provider. Absent means none. */
+  steerModes?: SteerMode[];
 }
 
 /** Main contract for a harness provider adapter. */

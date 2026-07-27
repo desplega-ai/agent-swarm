@@ -22,6 +22,7 @@ import {
   getTaskById,
   getTasksCount,
   markSteeringDelivered,
+  markSteeringHandled,
   pauseTask,
   resumeTask,
   supersedeTask,
@@ -245,6 +246,26 @@ const markSteeringDeliveredRoute = route({
   },
   responses: {
     200: { description: "Steering message delivery recorded" },
+    400: { description: "Missing X-Agent-ID header or validation error" },
+    403: { description: "Steering message task is assigned to another agent" },
+    404: { description: "Agent or steering message not found" },
+  },
+});
+
+const markSteeringHandledRoute = route({
+  method: "post",
+  path: "/api/steering-messages/{id}/handled",
+  pattern: ["api", "steering-messages", null, "handled"],
+  summary: "Mark a steering message handled",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  auth: { apiKey: true, agentId: true },
+  rbac: {
+    ungated:
+      "worker acknowledgement scoped by required X-Agent-ID and verified against the steering message task assignee",
+  },
+  responses: {
+    200: { description: "Steering message acknowledgement recorded" },
     400: { description: "Missing X-Agent-ID header or validation error" },
     403: { description: "Steering message task is assigned to another agent" },
     404: { description: "Agent or steering message not found" },
@@ -868,6 +889,42 @@ export async function handleTasks(
       return true;
     }
     json(res, { message: delivered });
+    return true;
+  }
+
+  if (markSteeringHandledRoute.match(req.method, pathSegments)) {
+    if (!myAgentId) {
+      jsonError(res, "Missing X-Agent-ID header", 400);
+      return true;
+    }
+    const parsed = await markSteeringHandledRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!getAgentById(myAgentId)) {
+      jsonError(res, "Agent not found", 404);
+      return true;
+    }
+
+    const message = getSteeringMessageById(parsed.params.id);
+    if (!message) {
+      jsonError(res, "Steering message not found", 404);
+      return true;
+    }
+    const task = getTaskById(message.taskId);
+    if (task?.agentId !== myAgentId) {
+      jsonError(res, "Steering message task is assigned to another agent", 403);
+      return true;
+    }
+    if (message.status !== "delivered") {
+      json(res, { message });
+      return true;
+    }
+
+    const handled = markSteeringHandled(message.id) ?? getSteeringMessageById(message.id);
+    if (!handled) {
+      jsonError(res, "Failed to mark steering message handled", 500);
+      return true;
+    }
+    json(res, { message: handled });
     return true;
   }
 

@@ -7,6 +7,7 @@ import { seedPricingFromModelsDev } from "./be/seed-pricing";
 import { registerGithubTaskReactions } from "./github/task-reactions";
 import { loadGlobalConfigsIntoEnv } from "./http/core";
 import { isRbacEnabled } from "./rbac";
+import { registerAcceptSteerTool } from "./tools/accept-steer";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";
@@ -340,6 +341,7 @@ export function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolea
 
   // Task pool capability - task pool operations (create unassigned, claim, release, accept, reject)
   if (hasCapability("task-pool")) {
+    registerAcceptSteerTool(server);
     registerTaskActionTool(server);
     registerSteerTaskTool(server);
   }
