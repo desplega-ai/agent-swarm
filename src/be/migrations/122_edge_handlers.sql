@@ -1,4 +1,4 @@
--- 119_edge_handlers.sql
+-- 122_edge_handlers.sql
 -- Task lifecycle routing, Phase 2: persisted registration catalog only.
 -- Execution and tracing are intentionally introduced in later phases.
 

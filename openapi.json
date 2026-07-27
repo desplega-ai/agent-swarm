@@ -9843,7 +9843,8 @@
                           "delegation",
                           "claim",
                           "resume",
-                          "completion"
+                          "completion",
+                          "prompt"
                         ]
                       },
                       "source": {
@@ -10259,7 +10260,8 @@
                           "delegation",
                           "claim",
                           "resume",
-                          "completion"
+                          "completion",
+                          "prompt"
                         ]
                       },
                       "source": {

@@ -31,6 +31,15 @@ export const registerListSubscriptionsTool = (server: McpServer) => {
       }),
     },
     async (args, requestInfo) => {
+      // Agent-scoped like every other listing tool (cf. list-schedules):
+      // subscription metadata — and, with includeDeliveries, stored delivery
+      // errors — must not be readable without agent attribution.
+      if (!requestInfo.agentId) {
+        return {
+          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
+          structuredContent: { subscriptions: [] },
+        };
+      }
       const subscriptions = listSubscriptions({ enabledOnly: args.enabledOnly }).map((sub) =>
         args.includeDeliveries
           ? { ...sub, recentDeliveries: listDeliveriesForSubscription(sub.id, 5) }

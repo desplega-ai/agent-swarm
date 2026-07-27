@@ -2,13 +2,12 @@ import { getWorkflow } from "@/be/db";
 import { runGlobalScriptByName } from "@/be/scripts/run-global";
 import {
   claimPendingDeliveries,
-  createDelivery,
   finishDelivery,
   getSubscriptionById,
   getSwarmBusEventById,
   listSubscriptions,
   pruneSubscriptionJournal,
-  recordSwarmBusEvent,
+  recordSwarmBusEventWithDeliveries,
   requeueOrphanedRunningDeliveries,
 } from "@/be/subscriptions-db";
 import { scrubSecrets } from "@/utils/secret-scrubber";
@@ -71,10 +70,14 @@ async function captureEvent(name: string, data: unknown): Promise<void> {
   }
   if (matching.length === 0) return;
 
-  const event = recordSwarmBusEvent(name, data);
-  for (const sub of matching) {
-    createDelivery(sub.id, event.id);
-  }
+  // Event + full fan-out in one transaction: a partial commit would strand
+  // deliveries that startup recovery can never requeue (it only re-claims
+  // rows that already exist), silently breaking at-least-once.
+  recordSwarmBusEventWithDeliveries(
+    name,
+    data,
+    matching.map((sub) => sub.id),
+  );
 }
 
 function onBusEvent(name: string, data: unknown): void {

@@ -63,8 +63,13 @@ describe("default continuity pin script", () => {
 
     expect(same).toEqual({ assignTo: workerId });
     expect(unavailable).toEqual({ assignTo: workerId });
+    // Directives alone are not enough: callers pin the child to the parent
+    // worker BEFORE routing runs, so the mismatch case must actively drop that
+    // pin via `unassign` — otherwise the advice reaches the very worker it
+    // wanted to route away from.
     expect(different).toMatchObject({
-      promptDirectives: [expect.stringContaining("consider assigning fresh")],
+      unassign: true,
+      promptDirectives: [expect.stringContaining("sent to the pool")],
       note: "continuity pin broken: intent mismatch",
     });
     expect(different.assignTo).toBeUndefined();

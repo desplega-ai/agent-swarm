@@ -43,9 +43,14 @@ export default async function defaultContinuityPin(
       args.candidates.find((candidate) => candidate.id === parent.agentId)?.name ??
       parent.agentRole ??
       parent.agentId;
+    // `unassign` — not advice alone. Callers default the child's agentId to
+    // the parent worker BEFORE routing runs, so returning only directives
+    // would leave the follow-up pinned to that worker and merely show it a
+    // note telling someone else to dispatch fresh.
     return {
+      unassign: true,
       promptDirectives: [
-        `Routing: the follow-up's intent (${args.task.description}) differs from what ${parentAgent} was doing — consider assigning fresh instead of continuing the session.`,
+        `Routing: the follow-up's intent (${args.task.description}) differs from what ${parentAgent} was doing — sent to the pool for a fresh assignment instead of continuing the session.`,
       ],
       note: "continuity pin broken: intent mismatch",
     };

@@ -375,6 +375,7 @@ export const RoutingDirectivesSchema = z
         .object({
           handlerName: z.string(),
           assignTo: z.string().optional(),
+          unassign: z.boolean().optional(),
           block: z.object({ reason: z.string() }).optional(),
         })
         .strict(),
@@ -2584,7 +2585,7 @@ export const KvEntrySchema = z.object({
 export type KvEntry = z.infer<typeof KvEntrySchema>;
 
 // ── Event subscriptions (Layer 1) ───────────────────────────────────────────
-// Keep in sync with src/be/migrations/118_swarm_events_subscriptions.sql.
+// Keep in sync with src/be/migrations/121_swarm_events_subscriptions.sql.
 
 export const SubscriptionTargetTypeSchema = z.enum(["script", "workflow"]);
 export type SubscriptionTargetType = z.infer<typeof SubscriptionTargetTypeSchema>;
@@ -2639,7 +2640,7 @@ export const SubscriptionDeliverySchema = z.object({
 export type SubscriptionDelivery = z.infer<typeof SubscriptionDeliverySchema>;
 
 // ── Lifecycle edge handlers (routing v1, Phase 2) ──────────────────────────
-// Keep in sync with src/be/migrations/119_edge_handlers.sql.
+// Keep in sync with src/be/migrations/122_edge_handlers.sql.
 
 export const EdgeHandlerEdgeSchema = z.enum(["task.before_assign", "prompt.compose"]);
 export type EdgeHandlerEdge = z.infer<typeof EdgeHandlerEdgeSchema>;
@@ -2652,7 +2653,9 @@ export type EdgeHandlerMode = z.infer<typeof EdgeHandlerModeSchema>;
 
 export const EdgeHandlerMatcherSchema = z
   .object({
-    via: z.enum(["creation", "delegation", "claim", "resume", "completion"]).optional(),
+    // Mirrors RoutingViaSchema — `prompt.compose` invokes handlers with
+    // via="prompt", so a matcher must be able to select it.
+    via: z.enum(["creation", "delegation", "claim", "resume", "completion", "prompt"]).optional(),
     source: z.string().min(1).max(200).optional(),
     slackChannelId: z.string().min(1).max(200).optional(),
     vcsRepo: z.string().min(1).max(500).optional(),

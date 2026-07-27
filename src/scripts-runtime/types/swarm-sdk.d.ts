@@ -43,7 +43,7 @@ declare module "swarm-sdk" {
   export type RoutingHandlerFlavor = "route" | "guard";
   export type RoutingHandlerMode = "soft" | "hard";
   export type RoutingHandlerMatcher = {
-    via?: "creation" | "delegation" | "claim" | "resume" | "completion";
+    via?: "creation" | "delegation" | "claim" | "resume" | "completion" | "prompt";
     source?: string;
     slackChannelId?: string;
     vcsRepo?: string;
@@ -101,7 +101,12 @@ declare module "swarm-sdk" {
   };
   export type RoutingDecision = {
     final?: RoutingResult;
-    suggestions: Array<{ handlerName: string; assignTo?: string; block?: { reason: string } }>;
+    suggestions: Array<{
+      handlerName: string;
+      assignTo?: string;
+      unassign?: boolean;
+      block?: { reason: string };
+    }>;
     mutations: NonNullable<RoutingResult["mutate"]>;
     promptDirectives: string[];
     notes: string[];
@@ -110,7 +115,7 @@ declare module "swarm-sdk" {
   };
   export type RoutingBridgeResponse<T> = { success: boolean; status: number; data: T };
 
-  export type RoutingVia = "creation" | "delegation" | "claim" | "resume" | "completion";
+  export type RoutingVia = "creation" | "delegation" | "claim" | "resume" | "completion" | "prompt";
   export type RoutingTaskSource =
     | "mcp"
     | "slack"
@@ -184,6 +189,12 @@ declare module "swarm-sdk" {
   };
   export type RoutingResult = {
     assignTo?: string;
+    /**
+     * Drop any inherited/proposed pin and send the task to the unassigned pool.
+     * Mutually exclusive with assignTo. Honoured at creation/delegation/resume;
+     * ignored at via="claim" (the task is already pooled).
+     */
+    unassign?: boolean;
     block?: { reason: string };
     mutate?: {
       tags?: string[];

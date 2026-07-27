@@ -20,6 +20,7 @@ import { createEvent } from "@/be/events";
 import { backfillTraceTaskId, insertRoutingTrace } from "@/be/routing-trace-db";
 import { buildRoutingCtx } from "@/routing/ctx";
 import { runBeforeAssign } from "@/routing/engine";
+import { validateRoutingAssignTarget } from "@/routing/target";
 import { applyRoutingDecisionToOptions } from "@/tasks/create-task-routed";
 import { checkSlackRoutingCoherence } from "@/tasks/slack-routing";
 import { createRoutingBlockDecisionTask } from "@/tasks/worker-follow-up";
@@ -359,8 +360,22 @@ export async function sendTaskHandler(
     proposedAgentId: effectiveAgentId,
   });
   const routingDecision = await runBeforeAssign(routingCtx);
+  // Fail open on bogus hard-assign targets, same as createTaskRouted: an
+  // unknown or lead agentId from a handler must not misroute (or strand) the
+  // delegation — drop it and keep the caller's own selection.
+  if (
+    routingDecision.final?.assignTo &&
+    !validateRoutingAssignTarget(routingDecision.final.assignTo, "delegation")
+  ) {
+    routingDecision.final = routingDecision.final.block
+      ? { ...routingDecision.final, assignTo: undefined }
+      : undefined;
+  }
   const routedOptions = applyRoutingDecisionToOptions(effective.options ?? {}, routingDecision);
-  effectiveAgentId = routingDecision.final?.assignTo ?? effectiveAgentId;
+  // `routedOptions.agentId` is authoritative post-routing: it carries both a
+  // hard `assignTo` and an `unassign` (pin dropped → pool), which a plain
+  // `assignTo ?? effectiveAgentId` would silently ignore.
+  effectiveAgentId = routedOptions.agentId ?? undefined;
 
   if (routingDecision.final?.block) {
     const reason = routingDecision.final.block.reason;

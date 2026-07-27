@@ -9,12 +9,14 @@ import {
   getTaskAttachments,
   getTaskById,
   hasNonTerminalRerouteDecisionChild,
+  hasRerouteDecisionChild,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { resolveTemplate } from "../prompts/resolver";
 import { applyRoutingDecisionToOptions } from "../routing/apply";
 import { buildRoutingCtx } from "../routing/ctx";
 import { hasHandlersForVia, runBeforeAssign } from "../routing/engine";
+import { validateRoutingAssignTarget } from "../routing/target";
 import type { Agent, AgentTask, ResumeReason, TaskAttachment } from "../types";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
@@ -405,6 +407,16 @@ export async function createResumeFollowUp(args: {
         }),
       };
     }
+    // The handler ran asynchronously, so its target may be stale (or bogus) by
+    // now. An unvalidated id would produce a `pending` resume that no worker
+    // can ever poll, stranding crash-recovery work — fall back to the
+    // pre-routing selection instead.
+    if (
+      decision.final?.assignTo &&
+      !validateRoutingAssignTarget(decision.final.assignTo, "resume")
+    ) {
+      decision.final = undefined;
+    }
     finalOptions = applyRoutingDecisionToOptions(baseOptions, decision);
   }
   const finalPinnedToOriginal =
@@ -523,7 +535,11 @@ export function createRoutingBlockDecisionTaskForExistingTask(args: {
   proposedAgentId?: string;
 }): CreateRoutingBlockDecisionResult {
   if (!getLeadAgent()) return { kind: "skipped", reason: "lead_not_found" };
-  if (hasNonTerminalRerouteDecisionChild(args.task.id)) {
+  // Lifetime-idempotent, not just "no live decision": a claim-blocked task
+  // stays pooled, so a non-terminal-only check let every poll after the Lead
+  // completed the first decision spawn another one — an endless decision loop
+  // that duplicated the Lead's replacement work.
+  if (hasRerouteDecisionChild(args.task.id)) {
     return { kind: "skipped", reason: "duplicate_exists" };
   }
 

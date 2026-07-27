@@ -1,4 +1,4 @@
--- 118_swarm_events_subscriptions.sql
+-- 121_swarm_events_subscriptions.sql
 -- SPIKE (extension system, Layer 1): durable event journal + subscriptions +
 -- delivery outbox. Events emitted on the workflow event bus are persisted to
 -- swarm_events; enabled subscriptions matching the event name (glob) and

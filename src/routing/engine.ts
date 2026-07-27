@@ -240,12 +240,18 @@ export function createRoutingEngine(
       const hardDecisive = decisiveResult && handler.mode === "hard";
       const suggestion =
         decisiveResult && handler.mode === "soft"
-          ? (result.assignTo ?? (result.block ? `block:${result.block.reason}` : undefined))
+          ? (result.assignTo ??
+            (result.block
+              ? `block:${result.block.reason}`
+              : result.unassign
+                ? "unassign"
+                : undefined))
           : undefined;
       if (decisiveResult && handler.mode === "soft") {
         decision.suggestions.push({
           handlerName: handler.name,
           assignTo: result.assignTo,
+          unassign: result.unassign,
           block: result.block,
         });
       }

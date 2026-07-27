@@ -1874,12 +1874,20 @@ export interface TaskContextResponse {
 // Routing v1 — per-task decision trace (see src/http/routing.ts
 // task_routing_trace). Names are resolved server-side so the UI needn't fetch
 // the agent roster.
+/** Mirrors `RoutingAffinitySchema` in src/types.ts — forwarded verbatim in `result`. */
+export interface RoutingTraceAffinity {
+  sourceAgentId?: string;
+  role?: string;
+  harnessProvider?: string;
+  capabilities: string[];
+}
+
 export interface RoutingTraceResult {
   assignTo?: string;
   block?: { reason: string };
   mutate?: {
     tags?: string[];
-    routingAffinity?: string;
+    routingAffinity?: RoutingTraceAffinity;
     modelTier?: string;
     priority?: number;
   };

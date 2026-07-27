@@ -1,8 +1,9 @@
-import { createTaskExtended, getAgentById, resolveEffectiveTaskOptions } from "../be/db";
+import { createTaskExtended, resolveEffectiveTaskOptions } from "../be/db";
 import { backfillTraceTaskId } from "../be/routing-trace-db";
 import { applyRoutingDecisionToOptions, type RoutedCreateTaskOptions } from "../routing/apply";
 import { buildRoutingCtx } from "../routing/ctx";
 import { runBeforeAssign } from "../routing/engine";
+import { validateRoutingAssignTarget } from "../routing/target";
 import type { AgentTask } from "../types";
 import { createRoutingBlockDecisionTask } from "./worker-follow-up";
 
@@ -40,18 +41,11 @@ export async function createTaskRouted(
 
   // Fail open on bogus hard-assign targets: an unknown or lead agentId from a
   // handler must not break (or misroute) task creation.
-  if (decision.final?.assignTo) {
-    const target = getAgentById(decision.final.assignTo);
-    if (!target || target.isLead) {
-      console.warn(
-        `[routing] Ignoring handler assignTo "${decision.final.assignTo}" (${
-          target ? "lead agent" : "unknown agent"
-        }) — falling back to default assignment`,
-      );
-      decision.final = decision.final.block
-        ? { ...decision.final, assignTo: undefined }
-        : undefined;
-    }
+  if (
+    decision.final?.assignTo &&
+    !validateRoutingAssignTarget(decision.final.assignTo, "creation")
+  ) {
+    decision.final = decision.final.block ? { ...decision.final, assignTo: undefined } : undefined;
   }
 
   const finalOptions = applyRoutingDecisionToOptions(settledOptions, decision);

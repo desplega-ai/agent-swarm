@@ -766,6 +766,13 @@ async function autoAssignPoolTasks(findings: HeartbeatFindings): Promise<void> {
       if (routeClaims) {
         const routing = await runClaimRouting(task, worker.id);
         if (routing.kind !== "proceed") continue;
+        // The hook yielded, so the worker may have claimed work itself in the
+        // gap. `reservedByWorker` still holds the pre-hook count, and
+        // `assignUnassignedTaskPending` only rechecks the TASK (status +
+        // affinity) — never the worker's capacity. Without this refresh the
+        // sweep can push a worker past maxTasks.
+        reservedByWorker.delete(worker.id);
+        if (reservedForWorker(worker.id) >= (worker.maxTasks ?? 1)) continue;
       }
 
       // Atomic status re-check remains the final arbiter after the async hook gap.

@@ -75,6 +75,19 @@ export type RoutingCtx = z.infer<typeof RoutingCtxSchema>;
 export const RoutingResultSchema = z
   .object({
     assignTo: z.string().min(1).optional(),
+    /**
+     * Drop any inherited/proposed pin and send the task to the unassigned pool.
+     *
+     * `assignTo` alone cannot express "not this agent": callers default
+     * `agentId` to the parent's worker BEFORE routing runs, and the engine only
+     * ever overwrites that value. Without this, a handler that decides a
+     * follow-up is a different kind of work could only emit advice — which then
+     * reaches the very worker it wanted to route away from.
+     *
+     * Honoured at creation/delegation/resume. Ignored at via=claim, where the
+     * task is already pooled and there is no pin to drop.
+     */
+    unassign: z.boolean().optional(),
     block: z
       .object({
         reason: z.string().min(1),
@@ -93,16 +106,21 @@ export const RoutingResultSchema = z
     promptDirectives: z.array(z.string()).optional(),
     note: z.string().optional(),
   })
-  .strict();
+  .strict()
+  .refine((result) => !(result.unassign && result.assignTo), {
+    message: "`unassign` and `assignTo` are mutually exclusive",
+    path: ["unassign"],
+  });
 export type RoutingResult = z.infer<typeof RoutingResultSchema>;
 
 export function isDecisive(result: RoutingResult): boolean {
-  return result.assignTo !== undefined || result.block !== undefined;
+  return result.assignTo !== undefined || result.block !== undefined || result.unassign === true;
 }
 
 export interface RoutingSuggestion {
   handlerName: string;
   assignTo?: string;
+  unassign?: boolean;
   block?: { reason: string };
 }
 

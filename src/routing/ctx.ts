@@ -1,6 +1,6 @@
 import {
   type CreateTaskOptions,
-  getActiveTaskCount,
+  getActiveTaskCountsByAgent,
   getAgentById,
   getAllAgents,
   getTaskById,
@@ -103,6 +103,9 @@ export function buildRoutingCtx(
   opts: BuildRoutingCtxOptions = {},
 ): RoutingCtx {
   const task = routingTaskFromInput(effectiveOptionsOrTaskRow);
+  // One grouped query for the whole roster — a per-agent count here is an N+1
+  // on every routing evaluation, including the claim hot path.
+  const activeCounts = getActiveTaskCountsByAgent();
   const ctx: RoutingCtx = {
     via,
     task,
@@ -114,7 +117,7 @@ export function buildRoutingCtx(
       capabilities: agent.capabilities,
       status: agent.status,
       isLead: agent.isLead,
-      activeTaskCount: getActiveTaskCount(agent.id),
+      activeTaskCount: activeCounts.get(agent.id) ?? 0,
       maxTasks: agent.maxTasks,
     })),
     continuity: buildContinuity(task.parentTaskId),

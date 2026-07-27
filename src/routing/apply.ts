@@ -16,6 +16,10 @@ export function applyRoutingDecisionToOptions(
   const finalOptions: RoutedCreateTaskOptions = { ...options };
   if (decision.final?.assignTo) {
     finalOptions.agentId = decision.final.assignTo;
+  } else if (decision.final?.unassign) {
+    // Drop the caller's pre-routing pin (e.g. send-task's parent-worker
+    // default) so the task lands in the unassigned pool instead.
+    finalOptions.agentId = undefined;
   }
   if (decision.mutations.tags) {
     finalOptions.tags = [...new Set([...(finalOptions.tags ?? []), ...decision.mutations.tags])];

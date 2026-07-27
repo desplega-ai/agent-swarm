@@ -1018,6 +1018,25 @@ export function getActiveTaskCount(agentId: string): number {
 }
 
 /**
+ * Batched form of `getActiveTaskCount` — one grouped query for every agent
+ * with at least one active task. Callers that need counts for the whole roster
+ * (routing ctx builds this on every evaluation, including the claim hot path)
+ * must use this instead of looping `getActiveTaskCount` per agent.
+ *
+ * Agents with no active tasks are absent from the map; read them as 0.
+ */
+export function getActiveTaskCountsByAgent(): Map<string, number> {
+  const rows = getDb()
+    .prepare<{ agentId: string; count: number }, []>(
+      `SELECT agentId, COUNT(*) as count FROM agent_tasks
+       WHERE agentId IS NOT NULL AND status = 'in_progress'
+       GROUP BY agentId`,
+    )
+    .all();
+  return new Map(rows.map((r) => [r.agentId, r.count]));
+}
+
+/**
  * Check if an agent has capacity to accept more tasks.
  */
 export function hasCapacity(agentId: string): boolean {
@@ -1670,6 +1689,27 @@ export function hasNonTerminalResumeChild(parentId: string): boolean {
  * children of the original cannot suppress a needed decision, and nothing else
  * is mistaken for one.
  */
+/**
+ * Any reroute-decision child, terminal or not.
+ *
+ * Distinct from `hasNonTerminalRerouteDecisionChild`, which answers "is a
+ * decision live right now" (used to skip re-running handlers). This answers
+ * "has the Lead already been asked about this task", which is what makes
+ * decision CREATION idempotent: a blocked pooled task stays `unassigned`
+ * forever, so a non-terminal-only check lets every poll after the Lead
+ * finishes spawn a fresh decision.
+ */
+export function hasRerouteDecisionChild(parentId: string): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1 FROM agent_tasks
+       WHERE parentTaskId = ? AND taskType = 'reroute-decision'
+       LIMIT 1`,
+    )
+    .get(parentId);
+  return row !== undefined && row !== null;
+}
+
 export function hasNonTerminalRerouteDecisionChild(parentId: string): boolean {
   const row = getDb()
     .prepare(

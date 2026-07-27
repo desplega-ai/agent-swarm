@@ -193,6 +193,30 @@ export function recordSwarmBusEvent(name: string, data: unknown): SwarmBusEvent 
   return event;
 }
 
+/**
+ * Journal an event AND enqueue its full fan-out in one transaction.
+ *
+ * The at-least-once guarantee depends on this atomicity: recording the event
+ * first and then looping `createDelivery` leaves a window where a crash
+ * persists the event with some (or none) of its deliveries, and startup
+ * recovery only requeues delivery rows that already exist — so that part of
+ * the fan-out is lost permanently. Callers with a matched subscription set
+ * must use this instead of `recordSwarmBusEvent` + N × `createDelivery`.
+ */
+export function recordSwarmBusEventWithDeliveries(
+  name: string,
+  data: unknown,
+  subscriptionIds: string[],
+): SwarmBusEvent {
+  return getDb().transaction(() => {
+    const event = recordSwarmBusEvent(name, data);
+    for (const subscriptionId of subscriptionIds) {
+      createDelivery(subscriptionId, event.id);
+    }
+    return event;
+  })();
+}
+
 export function getSwarmBusEventById(id: string): SwarmBusEvent | null {
   const row = getDb().prepare("SELECT * FROM swarm_events WHERE id = ?").get(id) as {
     id: string;

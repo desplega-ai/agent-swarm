@@ -227,6 +227,64 @@ describe("routing creation and delegation vias", () => {
     expect(listTraceForTask(structured.task?.id ?? "")).toHaveLength(1);
   });
 
+  test("delegation unassign drops the inherited parent-worker pin", async () => {
+    const parent = createTaskExtended("delegation unassign parent", {
+      agentId: workerAId,
+      creatorAgentId: leadId,
+    });
+    await registerHandler({
+      name: "delegation-unassign",
+      result: { unassign: true, promptDirectives: ["fresh dispatch"] },
+      matcher: { via: "delegation", agentId: workerAId, taskType: "delegation-unassign" },
+    });
+
+    const response = await sendTaskHandler(
+      { kind: "owner", agentId: leadId, sourceTaskId: parent.id },
+      {
+        task: "delegated child that should be pooled",
+        taskType: "delegation-unassign",
+        offerMode: false,
+        allowDuplicate: false,
+        overrideSlackContext: false,
+      },
+    );
+    const structured = response.structuredContent as { success: boolean; task?: AgentTask };
+
+    // send-task defaults agentId to the parent's worker BEFORE routing; the
+    // handler must be able to undo that and send the child to the pool.
+    expect(structured.success).toBe(true);
+    expect(structured.task?.agentId).toBeNull();
+    expect(structured.task?.status).toBe("unassigned");
+  });
+
+  test("delegation fails open when a handler hard-assigns an unknown agent", async () => {
+    const parent = createTaskExtended("delegation bogus target parent", {
+      agentId: workerAId,
+      creatorAgentId: leadId,
+    });
+    await registerHandler({
+      name: "delegation-bogus-target",
+      result: { assignTo: "00000000-0000-4000-8000-000000000000" },
+      matcher: { via: "delegation", agentId: workerAId, taskType: "delegation-bogus" },
+    });
+
+    const response = await sendTaskHandler(
+      { kind: "owner", agentId: leadId, sourceTaskId: parent.id },
+      {
+        task: "delegated child with a bogus routing target",
+        taskType: "delegation-bogus",
+        offerMode: false,
+        allowDuplicate: false,
+        overrideSlackContext: false,
+      },
+    );
+    const structured = response.structuredContent as { success: boolean; task?: AgentTask };
+
+    // An unknown target must be ignored, not stranded on an id no worker polls.
+    expect(structured.success).toBe(true);
+    expect(structured.task?.agentId).toBe(workerAId);
+  });
+
   test("creation block returns a Lead reroute-decision task instead of original work", async () => {
     await registerHandler({
       name: "creation-block",
@@ -375,6 +433,20 @@ describe("routing claim, resume, and completion vias", () => {
     expect(countRerouteDecisionChildren(task.id)).toBe(1);
     expect(getTaskById(task.id)?.status).toBe("unassigned");
 
+    // Once the Lead FINISHES the decision, the blocked task is still pooled and
+    // still hits the guard on the next poll. Decision creation must stay
+    // idempotent across that boundary — otherwise every subsequent poll spawns
+    // another decision (endless loop + duplicated replacement work).
+    getDb()
+      .prepare(
+        "UPDATE agent_tasks SET status = 'completed' WHERE parentTaskId = ? AND taskType = 'reroute-decision'",
+      )
+      .run(task.id);
+    expect((await pollForTrigger(workerAId)).trigger).toBeNull();
+    expect(countRerouteDecisionChildren(task.id)).toBe(1);
+    expect(getTaskById(task.id)?.status).toBe("unassigned");
+
+    // The guard is scoped to worker A, so worker B must still be able to claim.
     expect(claimTask(task.id, workerBId)).not.toBeNull();
   });
 
