@@ -43,6 +43,9 @@ import type {
   ProviderResult,
   ProviderSession,
   ProviderSessionConfig,
+  ProviderTraits,
+  SteerDelivery,
+  SteerDeliveryResult,
 } from "./types";
 
 /**
@@ -1018,11 +1021,25 @@ export class PiMonoSession implements ProviderSession {
   async abort(): Promise<void> {
     await this.agentSession.abort();
   }
+
+  async deliverSteering({ mode, text }: SteerDelivery): Promise<SteerDeliveryResult> {
+    try {
+      if (mode === "steer") await this.agentSession.steer(text);
+      else await this.agentSession.followUp(text);
+      return { delivered: true, mode };
+    } catch (err) {
+      return { delivered: false, reason: String(err) };
+    }
+  }
 }
 
 export class PiMonoAdapter implements ProviderAdapter {
   readonly name = "pi";
-  readonly traits = { hasMcp: true, hasLocalEnvironment: true };
+  readonly traits: ProviderTraits = {
+    hasMcp: true,
+    hasLocalEnvironment: true,
+    steerModes: ["steer", "queue"],
+  };
   private lastCwd = ".";
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
