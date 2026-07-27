@@ -245,7 +245,7 @@ describe("/mcp-user auth and tool surface", () => {
     expect(response.status).toBe(401);
   });
 
-  test("valid active-user token initializes and tools/list returns exactly the 5 task tools", async () => {
+  test("valid active-user token initializes and tools/list returns exactly the 6 task tools", async () => {
     const user = createUser({ name: "Active User" });
     const token = mintToken(user.id, "active", ACTOR).plaintext;
     const sessionId = await initialize(token);
@@ -261,7 +261,14 @@ describe("/mcp-user auth and tool surface", () => {
     const result = payload as { result: { tools: Array<{ name: string }> } };
     const names = result.result.tools.map((tool) => tool.name).sort();
     expect(names).toEqual(
-      ["cancel-task", "get-task-details", "get-tasks", "send-task", "task-action"].sort(),
+      [
+        "cancel-task",
+        "get-task-details",
+        "get-tasks",
+        "send-task",
+        "steer-task",
+        "task-action",
+      ].sort(),
     );
   });
 
