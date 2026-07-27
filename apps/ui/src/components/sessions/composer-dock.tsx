@@ -34,6 +34,12 @@ export interface ComposerDockProps {
   disabled?: boolean;
   /** Routing label shown on the left of the action row. Defaults to "Routes to Lead". */
   routeLabel?: string;
+  /**
+   * Optional control rendered at the far left of the action row, before the
+   * routing hint. Used by the steering composer for its Queue/Interrupt
+   * segmented toggle so both surfaces get an identical dock.
+   */
+  modeControl?: React.ReactNode;
   /** Status label shown while submit/create/upload is pending. */
   pendingLabel?: string;
   /** "Send" / "Start session" / etc. Used as button aria-label and tooltip. */
@@ -56,6 +62,7 @@ export function ComposerDock({
   placeholder,
   disabled,
   routeLabel = "Routes to Lead",
+  modeControl,
   pendingLabel = "Sending…",
   sendLabel = "Send",
   attachments = [],
@@ -167,15 +174,23 @@ export function ComposerDock({
           </div>
         ) : null}
         <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-0.5">
-          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground pl-1.5">
-            <span
-              aria-hidden="true"
+          <div className="flex items-center gap-2 min-w-0">
+            {modeControl}
+            <div
               className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                isPending ? "bg-primary animate-pulse" : "bg-primary/70",
+                "flex items-center gap-1.5 text-[11px] text-muted-foreground min-w-0",
+                modeControl ? null : "pl-1.5",
               )}
-            />
-            <span>{isPending ? pendingLabel : routeLabel}</span>
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "h-1.5 w-1.5 shrink-0 rounded-full",
+                  isPending ? "bg-primary animate-pulse" : "bg-primary/70",
+                )}
+              />
+              <span className="truncate">{isPending ? pendingLabel : routeLabel}</span>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {onAttachmentsChange ? (

@@ -22,6 +22,11 @@ export const AVATAR_SUGGESTED_SWATCHES: string[] = [
   "#64748b", // action-default
 ];
 
+/** Fallback for the native `<input type="color">`, which only accepts a
+ * concrete hex — it has no token form. Lives here so the picker component
+ * stays free of hex literals. */
+export const AVATAR_COLOR_INPUT_FALLBACK = "#000000";
+
 export type AgentColorToken =
   | "primary"
   | "action-agent-task"

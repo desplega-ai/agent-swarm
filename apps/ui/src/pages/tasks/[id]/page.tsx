@@ -34,6 +34,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import "streamdown/styles.css";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
+import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import {
   useCancelTask,
   usePauseTask,
@@ -41,6 +42,7 @@ import {
   useTask,
   useTaskContext,
   useTaskSessionLogs,
+  useTaskSteeringMessages,
 } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
 import type {
@@ -59,6 +61,8 @@ import { SessionId } from "@/components/shared/session-id";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
+import { SteerComposer } from "@/components/steering/steer-composer";
+import { SteeringMessagesSection } from "@/components/steering/steering-messages-section";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -498,6 +502,12 @@ export default function TaskDetailPage() {
   const { data: users } = useUsers();
   const { data: costs, isLoading: costsLoading } = useSessionCosts({ taskId: id });
   const { data: contextData, isLoading: contextLoading } = useTaskContext(id!);
+  // Steering (≥1.122.0) — soft-degrade against older API servers, which 404
+  // both `/steer` and `/steering-messages`.
+  const steerGate = useFeatureGate("1.122.0");
+  const { data: steeringMessages } = useTaskSteeringMessages(id!, {
+    enabled: steerGate.supported,
+  });
   const cancelTask = useCancelTask();
   const pauseTask = usePauseTask();
   const resumeTask = useResumeTask();
@@ -555,6 +565,11 @@ export default function TaskDetailPage() {
   const canCancel = !terminalStatuses.includes(task.status) && task.status !== "paused";
   const canPause = task.status === "in_progress";
   const canResume = task.status === "paused";
+
+  // Steering composer is gated on the *same* condition as Pause — a task only
+  // has a live session handle while it is `in_progress`. Everything else falls
+  // back to the existing follow-up-task paths.
+  const canSteer = steerGate.supported && task.status === "in_progress";
 
   const isFailed = task.status === "failed";
   const isCompleted = task.status === "completed";
@@ -871,6 +886,22 @@ export default function TaskDetailPage() {
     </div>
   );
 
+  // STEERING — lifecycle list (its own section, not part of the session-log IR)
+  // plus the composer. Both are rendered in the desktop centre column and in
+  // the mobile "Session Logs" tab, so the two breakpoints stay in step.
+  const steeringSection = steerGate.supported ? (
+    <SteeringMessagesSection messages={steeringMessages ?? []} />
+  ) : null;
+
+  const steerComposer = canSteer ? (
+    <SteerComposer
+      taskId={task.id}
+      supportedSteerModes={task.supportedSteerModes}
+      providerLabel={task.provider}
+      className="px-0 pt-0 pb-0"
+    />
+  ) : null;
+
   // HERO — status badge + tags / priority / source / provider / model badges +
   // collapsible description + action buttons. Rendered inside the center column
   // on desktop (lg+) and above the Tabs on mobile/tablet (<lg). Same JSX in both
@@ -1063,8 +1094,10 @@ export default function TaskDetailPage() {
           <TabsContent value="outcome" className="flex-1 overflow-y-auto px-1 py-3">
             {outcomeContent}
           </TabsContent>
-          <TabsContent value="logs" className="flex flex-col flex-1 min-h-0 px-1 py-3">
+          <TabsContent value="logs" className="flex flex-col flex-1 min-h-0 px-1 py-3 gap-3">
+            {steeringSection}
             {sessionLogsContent}
+            {steerComposer}
           </TabsContent>
         </Tabs>
       </div>
@@ -1126,6 +1159,8 @@ export default function TaskDetailPage() {
 
             <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
 
+            {steeringSection}
+
             {hasSessionLogs ? (
               <SessionLogViewer
                 logs={sessionLogs}
@@ -1141,6 +1176,8 @@ export default function TaskDetailPage() {
                 </div>
               </div>
             )}
+
+            {steerComposer}
           </div>
         </section>
 

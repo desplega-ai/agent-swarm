@@ -9,7 +9,7 @@
 import { RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { AgentAvatar } from "@/api/types";
-import { AVATAR_SUGGESTED_SWATCHES } from "@/lib/agent-color";
+import { AVATAR_COLOR_INPUT_FALLBACK, AVATAR_SUGGESTED_SWATCHES } from "@/lib/agent-color";
 import { AVATAR_ICON_CATALOG, searchAvatarIcons } from "@/lib/agent-icon";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
@@ -132,7 +132,7 @@ export function AgentAppearancePicker({ avatar, onChange, trigger }: AgentAppear
               <input
                 type="color"
                 aria-label="Custom color"
-                value={hexValid && hexDraft ? hexDraft : "#000000"}
+                value={hexValid && hexDraft ? hexDraft : AVATAR_COLOR_INPUT_FALLBACK}
                 onChange={(e) => pickColor(e.target.value)}
                 className="h-9 w-9 shrink-0 cursor-pointer rounded-md border border-input bg-transparent p-1"
               />

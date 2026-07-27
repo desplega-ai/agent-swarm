@@ -184,6 +184,19 @@ export interface AgentTask {
   contextKey?: string;
   /** Pointer-based artifacts attached to the task, when included by the API response. */
   attachments?: TaskAttachment[];
+  /**
+   * Steering (≥1.122.0), derived server-side: true when the assigned agent is
+   * the Lead. Only present on task *read* responses (`GET /api/tasks/:id`,
+   * `GET /api/sessions/:rootTaskId`) — absent on list rows and optimistic rows.
+   */
+  isLeadTask?: boolean;
+  /**
+   * Steering (≥1.122.0), derived server-side from `PROVIDER_STEER_CAPABILITIES`:
+   * the modes the target harness can actually honor. Empty array = the harness
+   * has no live-injection path at all (codex), so any steer becomes a
+   * follow-up task. Same presence caveat as `isLeadTask`.
+   */
+  supportedSteerModes?: SteerMode[];
 }
 
 export type ProviderName = "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
@@ -192,6 +205,53 @@ export type DevinProviderMeta = {
   maxAcuLimit?: number;
   acuCostUsd?: number;
 };
+
+// ============================================================================
+// Task steering (≥1.122.0) — mirrors the `Steering*` block in `src/types.ts`.
+// ============================================================================
+
+/** `"queue"` lands at the next turn boundary; `"steer"` interrupts the turn. */
+export type SteerMode = "steer" | "queue";
+
+export type SteeringStatus = "pending" | "delivered" | "handled" | "promoted" | "cancelled";
+
+export type SteeringSource = "ui" | "mcp" | "script" | "slack" | "api";
+
+/** What the server actually did with the request (the degradation ladder). */
+export type SteerOutcome = "steered" | "queued" | "promoted";
+
+export interface SteeringMessage {
+  id: string;
+  taskId: string;
+  body: string;
+  mode: SteerMode;
+  status: SteeringStatus;
+  /** Mode the worker actually delivered in — may differ from `mode` after a degrade. */
+  deliveredMode?: SteerMode;
+  source: SteeringSource;
+  createdByKind: "user" | "agent" | "system";
+  createdByUserId?: string;
+  createdByAgentId?: string;
+  /** Set when the message became a follow-up task instead of being delivered. */
+  promotedTaskId?: string;
+  createdAt: string;
+  deliveredAt?: string;
+  handledAt?: string;
+}
+
+export interface SteeringMessagesResponse {
+  messages: SteeringMessage[];
+}
+
+/** Response body of `POST /api/tasks/:id/steer`. */
+export interface SteerResult {
+  outcome: SteerOutcome;
+  steeringMessageId?: string;
+  promotedTaskId?: string;
+  effectiveMode: SteerMode;
+  /** Present when the requested mode was downgraded (e.g. `steer` → `queue` on claude). */
+  degradedFrom?: SteerMode;
+}
 
 export interface AgentWithTasks extends Agent {
   tasks: AgentTask[];

@@ -57,9 +57,9 @@ check "Tailwind dark: palette literals (e.g. dark:text-amber-400)" \
 check "Tailwind arbitrary color literals (e.g. bg-[#0d1117])" \
   "(${PREFIXES})-\[#[0-9a-fA-F]+\]"
 
-check "Hardcoded hex literals outside src/lib/monaco-themes.ts" \
+check "Hardcoded hex literals outside src/lib/{monaco-themes,agent-color}.ts" \
   '#[0-9a-fA-F]{6}' \
-  -g '*.ts' -g '*.tsx' -g '!**/monaco-themes.ts'
+  -g '*.ts' -g '*.tsx' -g '!**/monaco-themes.ts' -g '!**/agent-color.ts'
 
 echo ""
 if [ "$VIOLATIONS" -gt 0 ]; then

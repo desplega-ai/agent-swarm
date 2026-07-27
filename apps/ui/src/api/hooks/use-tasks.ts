@@ -7,7 +7,14 @@ import {
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "../client";
-import type { AgentTask, AgentTaskSource, AgentTaskStatus, TaskWithLogs } from "../types";
+import type {
+  AgentTask,
+  AgentTaskSource,
+  AgentTaskStatus,
+  SteerMode,
+  SteerResult,
+  TaskWithLogs,
+} from "../types";
 
 export interface TaskFilters {
   status?: string;
@@ -65,6 +72,20 @@ export function useTaskSessionLogs(taskId: string) {
     queryKey: ["task", taskId, "session-logs"],
     queryFn: () => api.fetchTaskSessionLogs(taskId),
     enabled: !!taskId,
+    refetchInterval: 5000,
+  });
+}
+
+/**
+ * Steering lifecycle readout (≥1.122.0). Polls on the same 5s cadence as
+ * `useTaskSessionLogs` — steering status moves `pending → delivered → handled`
+ * on the worker, and there is no websocket/SSE channel for it by design.
+ */
+export function useTaskSteeringMessages(taskId: string, opts?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["task", taskId, "steering-messages"],
+    queryFn: () => api.fetchTaskSteeringMessages(taskId),
+    enabled: !!taskId && (opts?.enabled ?? true),
     refetchInterval: 5000,
   });
 }
@@ -353,6 +374,47 @@ export function usePauseTask() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
       queryClient.invalidateQueries({ queryKey: ["task"] });
+    },
+  });
+}
+
+export interface SteerTaskInput {
+  id: string;
+  message: string;
+  mode: SteerMode;
+  requestedByUserId?: string;
+}
+
+/**
+ * Steering (≥1.122.0). Modelled on `usePauseTask`, minus the optimistic status
+ * patch: steering never changes the task's status, so there is nothing to
+ * transition. The snapshot/rollback pair is kept so a failed steer can't leave
+ * a half-invalidated cache behind.
+ */
+export function useSteerTask() {
+  const queryClient = useQueryClient();
+  return useMutation<SteerResult, Error, SteerTaskInput, TaskMutationContext>({
+    mutationFn: ({ id, message, mode, requestedByUserId }) =>
+      api.steerTask(id, { message, mode, requestedByUserId }),
+    onMutate: async ({ id }) => {
+      await queryClient.cancelQueries({ queryKey: ["task", id, "steering-messages"] });
+      return snapshotTaskQueries(queryClient, id);
+    },
+    onError: (err, _input, context) => {
+      rollbackTaskQueries(queryClient, context);
+      toast.error(err.message || "Failed to steer task");
+    },
+    onSuccess: (result, { id }) => {
+      if (result.outcome === "promoted") {
+        // The message became a follow-up task — the chain/list views changed.
+        queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        queryClient.invalidateQueries({ queryKey: ["sessions"] });
+        queryClient.invalidateQueries({ queryKey: ["session"] });
+      }
+      queryClient.invalidateQueries({ queryKey: ["task", id, "steering-messages"] });
+    },
+    onSettled: (_result, _err, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["task", id, "steering-messages"] });
     },
   });
 }

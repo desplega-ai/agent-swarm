@@ -94,6 +94,10 @@ import type {
   Skill,
   SkillsResponse,
   Stats,
+  SteeringMessage,
+  SteeringMessagesResponse,
+  SteerMode,
+  SteerResult,
   SwarmConfig,
   SwarmConfigsResponse,
   SwarmRepo,
@@ -400,6 +404,38 @@ class ApiClient {
       throw new Error(error.error || `Failed to resume task: ${res.status}`);
     }
     return res.json();
+  }
+
+  /**
+   * Steering (≥1.122.0). `mode` defaults to `"queue"` server-side; the UI always
+   * sends it explicitly (decision 14). We deliberately do NOT send
+   * `onUnsupported: "fail"` — the UI already refuses to offer a mode the target
+   * harness can't honor (decision 16), so a degrade here would be a server-side
+   * surprise rather than a user-visible one.
+   */
+  async steerTask(
+    id: string,
+    input: { message: string; mode: SteerMode; requestedByUserId?: string },
+  ): Promise<SteerResult> {
+    const url = `${this.getBaseUrl()}/api/tasks/${id}/steer`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to steer task" }));
+      throw new Error(error.error || `Failed to steer task: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async fetchTaskSteeringMessages(taskId: string): Promise<SteeringMessage[]> {
+    const url = `${this.getBaseUrl()}/api/tasks/${taskId}/steering-messages`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch steering messages: ${res.status}`);
+    const data = (await res.json()) as SteeringMessagesResponse;
+    return data.messages;
   }
 
   async fetchTaskSessionLogs(taskId: string): Promise<SessionLog[]> {
