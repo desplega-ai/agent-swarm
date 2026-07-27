@@ -13,6 +13,7 @@ import {
   getDb,
   getIdleWorkersWithCapacity,
   getLeadAgent,
+  getPendingSteeringForTask,
   getRecentCompletedCount,
   getRecentFailedCount,
   getRecentFailedTasks,
@@ -24,6 +25,7 @@ import {
   getTasksByStatus,
   getUnassignedPoolTasks,
   hasNonTerminalResumeChild,
+  hasPendingSteering,
   isAgentEligibleForTask,
   isPoolAffinityEnforcementEnabled,
   MAX_EMPTY_POLLS,
@@ -34,6 +36,7 @@ import {
   updateAgentStatus,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
+import { promotePendingSteeringForTask } from "../be/steering";
 import { resolveTemplate } from "../prompts/resolver";
 import {
   createPoolStarvationDecisionTask,
@@ -45,6 +48,7 @@ import {
   REBOOT_RETRY_PIN_TAG,
 } from "../tasks/worker-follow-up";
 import type { AgentTask } from "../types";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { getExecutorRegistry } from "../workflows";
 import { recoverIncompleteRuns } from "../workflows/recovery";
 // Side-effect import: registers heartbeat event templates in the in-memory registry
@@ -83,6 +87,9 @@ const STALL_THRESHOLD_NO_SESSION_MIN = Number(process.env.HEARTBEAT_STALL_NO_SES
 
 /** Stall threshold: tasks with stale worker heartbeat */
 const STALL_THRESHOLD_STALE_HEARTBEAT_MIN = Number(process.env.HEARTBEAT_STALL_STALE_HB_MIN) || 15;
+
+/** Grace window for a fresh pending steering message before normal stall remediation resumes. */
+export const STEERING_STALL_GRACE_MIN = Number(process.env.HEARTBEAT_STEERING_GRACE_MIN) || 5;
 
 /** Stale resource cleanup threshold (minutes) */
 const STALE_CLEANUP_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALE_CLEANUP_MIN) || 30;
@@ -288,6 +295,22 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
 
     const session = getActiveSessionForTask(task.id);
     const taskAgeMs = Date.now() - new Date(task.lastUpdatedAt).getTime();
+    const sessionHeartbeatAgeMs = session
+      ? Date.now() - new Date(session.lastHeartbeatAt).getTime()
+      : null;
+    const pendingSteering = hasPendingSteering(task.id) ? getPendingSteeringForTask(task.id) : [];
+    const newestPendingSteeringAt = pendingSteering.reduce<number>(
+      (latest, message) => Math.max(latest, new Date(message.createdAt).getTime()),
+      0,
+    );
+    const pendingSteeringAgeMs = Date.now() - newestPendingSteeringAt;
+
+    if (
+      newestPendingSteeringAt > 0 &&
+      pendingSteeringAgeMs < STEERING_STALL_GRACE_MIN * 60 * 1000
+    ) {
+      continue;
+    }
 
     if (!session) {
       // Case A: No active session — worker is dead
@@ -301,9 +324,8 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
         });
       }
     } else {
-      const sessionHeartbeatAgeMs = Date.now() - new Date(session.lastHeartbeatAt).getTime();
       const isStaleHeartbeat =
-        sessionHeartbeatAgeMs >= STALL_THRESHOLD_STALE_HEARTBEAT_MIN * 60 * 1000;
+        sessionHeartbeatAgeMs! >= STALL_THRESHOLD_STALE_HEARTBEAT_MIN * 60 * 1000;
 
       if (isStaleHeartbeat) {
         // Case B: Session exists but heartbeat is stale — worker likely crashed
@@ -428,6 +450,18 @@ function remediateCrashedWorkerTask(
   });
   if (!superseded) {
     return;
+  }
+
+  try {
+    promotePendingSteeringForTask(
+      task.id,
+      "Task was crash-recovered before steering was delivered",
+    );
+  } catch (error) {
+    console.error(
+      "[Heartbeat] pending steering promotion error:",
+      scrubSecrets(error instanceof Error ? error.message : String(error)),
+    );
   }
 
   const resume = createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });

@@ -133,6 +133,7 @@ import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import { runMigrations } from "./migrations/runner";
 import { autoEncryptLegacyOAuthSecrets } from "./oauth-encryption-backfill";
 import { seedDefaultTemplates } from "./seed-prompt-templates";
+import { promotePendingSteeringForTask } from "./steering";
 import { isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
 import { emitTaskStarted } from "./task-lifecycle-events";
 
@@ -2510,6 +2511,14 @@ export function completeTask(id: string, output?: string): AgentTask | null {
         });
       });
     } catch {}
+    try {
+      promotePendingSteeringForTask(id, "Task completed before steering was delivered");
+    } catch (error) {
+      console.error(
+        "[completeTask] pending steering promotion error:",
+        scrubSecrets(error instanceof Error ? error.message : String(error)),
+      );
+    }
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -2563,6 +2572,14 @@ export function failTask(id: string, reason: string): AgentTask | null {
         });
       });
     } catch {}
+    try {
+      promotePendingSteeringForTask(id, "Task failed before steering was delivered");
+    } catch (error) {
+      console.error(
+        "[failTask] pending steering promotion error:",
+        scrubSecrets(error instanceof Error ? error.message : String(error)),
+      );
+    }
 
     // Cascade-fail any non-terminal tasks that depend on this one.
     // The cascade is recursive (transitive closure) and cycle-safe.
@@ -2623,6 +2640,14 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
         });
       });
     } catch {}
+    try {
+      promotePendingSteeringForTask(id, "Task was cancelled before steering was delivered");
+    } catch (error) {
+      console.error(
+        "[cancelTask] pending steering promotion error:",
+        scrubSecrets(error instanceof Error ? error.message : String(error)),
+      );
+    }
 
     try {
       cascadeFailDependents(id, "cancelled");

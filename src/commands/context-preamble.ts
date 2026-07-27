@@ -34,6 +34,12 @@ export const CONTEXT_PREAMBLE_RESUME_MAX_CHARS = CONTEXT_PREAMBLE_RESUME_MAX_TOK
 /** How many of the most recent session_logs rows to inspect for tool-call summary. */
 export const CONTEXT_PREAMBLE_RESUME_SESSION_LOG_LIMIT = 50;
 
+interface SteeringMessageForPreamble {
+  body: string;
+  status: "pending" | "promoted";
+  createdAt: string;
+}
+
 export interface TaskContextForPreamble {
   id: string;
   task: string;
@@ -220,6 +226,33 @@ async function fetchSessionLogsForResume(
   }
 }
 
+async function fetchSteeringMessagesForResume(
+  apiUrl: string,
+  apiKey: string,
+  taskId: string,
+): Promise<SteeringMessageForPreamble[]> {
+  const headers: Record<string, string> = {};
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  try {
+    const response = await fetch(
+      `${apiUrl}/api/tasks/${taskId}/steering-messages?status=pending,promoted`,
+      { headers },
+    );
+    if (!response.ok) return [];
+    const data = (await response.json()) as { messages?: SteeringMessageForPreamble[] };
+    return Array.isArray(data.messages)
+      ? data.messages.filter(
+          (message): message is SteeringMessageForPreamble =>
+            (message.status === "pending" || message.status === "promoted") &&
+            typeof message.body === "string" &&
+            typeof message.createdAt === "string",
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Format a single session_log line as a one-line tool-call summary. Falls back
  * to a truncated content snippet when the line isn't recognizable as a
@@ -274,8 +307,9 @@ function summarizeSessionLogLine(line: SessionLogForPreamble): string | null {
  * `bun:sqlite` worker-side). Allocates the 4000-token budget:
  *
  *   - 40% — full parent task description (never truncated)
- *   - 35% — last-N session_logs summary (tool-call one-liners; scrubbed)
- *   - 15% — artifacts/attachments index (names + pointers only)
+ *   - 30% — last-N session_logs summary (tool-call one-liners; scrubbed)
+ *   - 10% — artifacts/attachments index (names + pointers only)
+ *   - 10% — undelivered steering messages
  *   - 10% — fixed framing (header + continuation instructions)
  *
  * Truncation order: session-log summary (oldest first), then artifacts.
@@ -334,16 +368,20 @@ export async function buildResumeContextPreamble(
   // Fetch session logs from EVERY chain member so a re-superseded resume
   // still surfaces tool-call history from earlier attempts. Merge, sort by
   // createdAt ASC, then keep the most recent N.
-  const logsBatches = await Promise.all(
-    chain.map((c) => fetchSessionLogsForResume(apiUrl, apiKey, c.id)),
-  );
+  const [logsBatches, steeringBatches] = await Promise.all([
+    Promise.all(chain.map((c) => fetchSessionLogsForResume(apiUrl, apiKey, c.id))),
+    Promise.all(chain.map((c) => fetchSteeringMessagesForResume(apiUrl, apiKey, c.id))),
+  ]);
   const merged = logsBatches.flat();
   merged.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const recentLogs = merged.slice(-CONTEXT_PREAMBLE_RESUME_SESSION_LOG_LIMIT);
+  const steeringMessages = steeringBatches.flat();
+  steeringMessages.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
   const descBudget = Math.floor(CONTEXT_PREAMBLE_RESUME_MAX_CHARS * 0.4);
-  let logsBudget = Math.floor(CONTEXT_PREAMBLE_RESUME_MAX_CHARS * 0.35);
-  let artBudget = Math.floor(CONTEXT_PREAMBLE_RESUME_MAX_CHARS * 0.15);
+  let logsBudget = Math.floor(CONTEXT_PREAMBLE_RESUME_MAX_CHARS * 0.3);
+  let artBudget = Math.floor(CONTEXT_PREAMBLE_RESUME_MAX_CHARS * 0.1);
+  const steeringBudget = Math.floor(CONTEXT_PREAMBLE_RESUME_MAX_CHARS * 0.1);
 
   const header = [
     "\n---",
@@ -399,7 +437,19 @@ export async function buildResumeContextPreamble(
     logsSection = scrubbedSummary.join("\n");
   }
 
-  // 15% — artifacts (names + pointers only)
+  // 10% — steering messages that could not be delivered before the parent
+  // stopped. Oldest entries fall away first, matching session-log truncation.
+  const steeringLines = steeringMessages.map((message) => {
+    const ts = message.createdAt.slice(11, 19);
+    return `[${ts}] ${scrubSecrets(message.body)}`;
+  });
+  let steeringSection = steeringLines.join("\n");
+  while (steeringSection.length > steeringBudget && steeringLines.length > 0) {
+    steeringLines.shift();
+    steeringSection = steeringLines.join("\n");
+  }
+
+  // 10% — artifacts (names + pointers only)
   const atts = parent.attachments?.filter((a) => a.name && (a.url || a.path || a.pageId)) ?? [];
   const artLines: string[] = [];
   for (const att of atts) {
@@ -420,6 +470,10 @@ export async function buildResumeContextPreamble(
 
   if (artSection) {
     sections.push("### Artifacts In Flight", "", artSection, "");
+  }
+
+  if (steeringSection) {
+    sections.push("### Undelivered Steering Messages", "", steeringSection, "");
   }
 
   sections.push(
