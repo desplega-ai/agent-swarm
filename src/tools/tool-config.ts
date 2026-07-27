@@ -188,8 +188,9 @@ export const DEFERRED_TOOLS = new Set([
   // External command routes (1)
   "swarm_x",
 
-  // Other (4)
+  // Other (5)
   "cancel-task",
+  "steer-task",
   "inject-learning",
   "get-metrics",
 ]);

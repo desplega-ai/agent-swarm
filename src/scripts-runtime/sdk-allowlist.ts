@@ -14,6 +14,7 @@ export const SDK_TOOL_NAME_MAP = {
   task_poll: "poll-task",
   task_send: "send-task",
   task_cancel: "cancel-task", // destructive
+  task_steer: "steer-task", // destructive
   task_action: "task-action",
 
   // ── kv ──

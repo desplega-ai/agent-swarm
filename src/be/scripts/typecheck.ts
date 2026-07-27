@@ -136,6 +136,7 @@ export interface SwarmSdk {
   // --- write: tasks ---
   task_send(args: Record<string, unknown>): Promise<unknown>;
   task_cancel(args: { taskId: string }): Promise<unknown>;
+  task_steer(args: { taskId: string; message: string; mode?: "steer" | "queue"; onUnsupported?: "degrade" | "fail" }): Promise<unknown>;
   task_action(args: Record<string, unknown>): Promise<unknown>;
 
   // --- write: config ---
