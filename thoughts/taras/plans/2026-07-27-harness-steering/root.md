@@ -35,7 +35,7 @@ Deliver **steering**: sending an additional user/lead message into a task that i
 
 ## Desired End State
 
-A user or lead agent can send a message to a running task from the UI, Slack, an MCP tool, a script, or `curl`, choosing Queue (turn-boundary, default) or Interrupt. **Modes the target harness can't honor are surfaced up front** — the UI doesn't offer Interrupt on `claude` or `codex` — and a caller who passes `onUnsupported:"fail"` gets a `422` rather than a silent downgrade. By default the message still lands: in live model context on `pi-mono`, `devin`, `claude-managed`, and `opencode`; degraded to queue on `claude`; promoted to a follow-up task on `codex` — and the caller is *told which happened*. The agent explicitly acknowledges handling. If the task dies or finishes before delivery, the message is promoted into a follow-up task rather than lost.
+A user or lead agent can send a message to a running task from the UI, Slack, an MCP tool, a script, or `curl`, choosing Queue (turn-boundary, default) or Interrupt. **Modes the target harness can't honor are surfaced up front** — the UI doesn't offer Interrupt on `claude` or `codex` — and a caller who passes `onUnsupported:"fail"` gets a `422` rather than a silent downgrade. By default the message still lands: in live model context on `pi-mono`, `claude-managed`, and `opencode`; degraded to queue on `claude` and `devin`; promoted to a follow-up task on `codex` — and the caller is *told which happened*. The agent explicitly acknowledges handling. If the task dies or finishes before delivery, the message is promoted into a follow-up task rather than lost.
 
 **Verified by**: the Global Verification block below plus the per-step Automated QA.
 
@@ -248,7 +248,7 @@ Repeat step 1 with `HARNESS_PROVIDER` set on the worker container. Expected `out
 |---|---|---|
 | pi-mono | `-e HARNESS_PROVIDER=pi` | `steered` |
 | claude-managed | `-e HARNESS_PROVIDER=claude-managed` | `steered` |
-| devin | `-e HARNESS_PROVIDER=devin` | `steered` |
+| devin | `-e HARNESS_PROVIDER=devin` | `queued` (degraded — step-7 finding: Devin does not guarantee interruption) |
 | opencode | `-e HARNESS_PROVIDER=opencode -e MODEL=openrouter/deepseek/deepseek-v4-flash` | `steered` (abort+prompt) |
 | claude | `-e HARNESS_PROVIDER=claude` | `queued` (degraded — decision 13) |
 | codex | `-e HARNESS_PROVIDER=codex` | `promoted` + a new follow-up task exists |

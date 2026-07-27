@@ -2,7 +2,8 @@
 id: step-9
 name: UI steer composer + status rendering
 depends_on: [step-1]
-status: ready
+status: done
+completed_at: 2026-07-27
 ---
 
 # step-9: UI — task-detail steer composer + SessionComposer toggle

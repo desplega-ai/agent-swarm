@@ -2,7 +2,8 @@
 id: step-8
 name: MCP tools (agent + user) + script SDK
 depends_on: [step-1]
-status: ready
+status: done
+completed_at: 2026-07-27
 ---
 
 # step-8: MCP `steer-task` (agent + user surfaces) + script SDK `task_steer`

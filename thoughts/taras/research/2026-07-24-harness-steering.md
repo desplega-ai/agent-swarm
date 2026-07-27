@@ -7,7 +7,7 @@ repository: agent-swarm
 topic: "Steering for agent harnesses — current state, harness capabilities, exposure surfaces"
 tags: [research, steering, harness-providers, mcp-tools, script-sdk, ui, slack]
 status: complete
-last_updated: 2026-07-25
+last_updated: 2026-07-27
 ---
 
 # Steering for Agent Harnesses — Research
@@ -93,7 +93,9 @@ Taras: queue-only isn't enough — we want **both** a "steer" (interrupt-style) 
 - The **officially supported interrupt path is the Agent SDK**: `query()` in streaming-input mode exposes `interrupt()` (v2.1.205+ returns `SDKControlInterruptResponse { still_queued: string[] }` — UUIDs of queued messages that survive and each run as their own turn; feature-detect via the `interrupt_receipt_v1` capability in `SDKSystemMessage.capabilities`), plus `streamInput()`, `setModel()`, `setPermissionMode()`. Steer recipe: `interrupt()` then push the new user message (with a `uuid` for tracking) into the input stream.
 - Version ladder: <2.1.199 no interrupt; 2.1.199–2.1.204 `interrupt()` resolves `undefined`; ≥2.1.205 full receipt.
 
-**Implication for the claude adapter decision (§4.2):** the approved stream-json stdin rework yields **queue-mode only** if we keep spawning the raw CLI. To get steer-mode (interrupt) on claude with official support, the adapter would need to drive Claude Code via `@anthropic-ai/claude-agent-sdk` (in-process `query()` — analogous to how pi-mono is embedded) instead of raw `Bun.spawn` of the CLI. Alternatives: (a) raw CLI + queue-only for claude (steer degrades to queue), (b) reverse-engineer the undocumented interrupt control_request (unsupported, brittle), (c) SDK adoption (both modes, officially supported). — **Decision needed at plan time.**
+**Implication for the claude adapter decision (§4.2):** the approved stream-json stdin rework yields **queue-mode only** if we keep spawning the raw CLI. To get steer-mode (interrupt) on claude with official support, the adapter would need to drive Claude Code via `@anthropic-ai/claude-agent-sdk` (in-process `query()` — analogous to how pi-mono is embedded) instead of raw `Bun.spawn` of the CLI. Alternatives: (a) raw CLI + queue-only for claude (steer degrades to queue), (b) reverse-engineer the undocumented interrupt control_request (unsupported, brittle), (c) SDK adoption (both modes, officially supported).
+
+**RESOLVED (Taras, 2026-07-27): option (a) — raw CLI, queue-only.** Keep `Bun.spawn`, add `--input-format stream-json` + piped stdin, keep the existing event pipeline. `mode: "steer"` on a claude task degrades to queue delivery. SDK adoption is explicitly **not** in scope for this plan.
 
 ### §2.2 Follow-up: opencode mid-run `session.prompt` semantics — RESOLVED (queued, supported)
 
@@ -176,7 +178,7 @@ The cancellation channel is the template. A minimal generic version:
 | devin | `sendMessage()` — already wired for approvals | Trivial extension |
 | claude-managed | `events.send(..., [{type:"user.message",content}])` mid-stream | Same call shape as init send; docs guarantee in-order processing |
 | opencode | **VERIFIED queue-mode**: `session.promptAsync` for steering writes (non-blocking; blocking `prompt` returns the whole-run's final response — see §2.2 caveat); needs client/sessionId lifted out of closures. Steer-mode = `abort` + `prompt` composition (loses in-flight turn work) | Queue semantics confirmed at our pinned version (§2.2) |
-| claude | **DECIDED: stdin rework** — spawn with `--input-format stream-json` + piped stdin, write `{"type":"user",...}` lines for queue-mode; interrupt-mode via the stdin control protocol pending §2.1 verification. Requires CLI ≥ 2.1.205 and an adapter rework. (Hook-based delivery was the incremental alternative; not chosen.) | Taras approved the stream-json adapter change |
+| claude | **DECIDED (final): stdin rework, queue-only** — spawn with `--input-format stream-json` + piped stdin, write `{"type":"user",...}` lines. Requires CLI ≥ 2.1.205. **No interrupt-mode**: `mode:"steer"` degrades to queue on claude. Agent-SDK adoption rejected for this plan (§2.1). | Taras approved; keeps the existing spawn/event pipeline |
 | codex | **DECIDED: fallback-only** — steering becomes a queued follow-up task; **no abort-and-rerun** (loses in-flight work) | Watch openai/codex#11415 for native injection |
 
 ### 4.3 Surfaces
@@ -186,8 +188,8 @@ The cancellation channel is the template. A minimal generic version:
 - **HTTP route**: `POST /api/tasks/:id/steer` via `route()` (body `{message, requestedByUserId?}`), `rbac: { permission: "task.steer.own" }`, import in `all-routes.ts`, `docs:openapi`. The UI calls this.
 - **UI**:
   - Task details: add the first input affordance on that page — a steer composer visible when `status === "in_progress"` (pattern: the cancel/pause mutation wiring in `use-tasks.ts:278-396` plus a textarea). Delivered/pending steering messages surface in the activity timeline (`task.logs`) or a new steering section; 5s log poll already gives quasi-live feedback.
-  - Sessions: `SessionComposer` currently always creates a new chained task. Option: when the latest leaf is `in_progress`, offer "steer running task" vs "queue follow-up" (auto-detect or explicit toggle — open question). Gate with `useFeatureGate("<next-version>")`.
-- **Slack (lead-only, config-gated)**: intercept the existing thread-reply path — where today a busy worker gets a queued `pending` task (`handlers.ts:714-724`) or an additive-buffer entry, a new config flag (e.g. `SLACK_THREAD_STEERING=off|lead|all`, env + `swarm_config` hot-reload like other Slack settings) routes the reply as a steering message into the thread's `in_progress` task instead. "Lead-only" needs definition (see open questions). Interactions to resolve: `ADDITIVE_SLACK` buffer (steer immediately vs buffer?), `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION`, and the `:eyes:` reaction/ack UX. The watcher's tree message could show a "steered" marker.
+  - Sessions: `SessionComposer` currently always creates a new chained task. **RESOLVED**: when the latest lead task is `in_progress`, show an **explicit** segmented toggle (Queue / Interrupt, **default Queue**) next to send; otherwise fall back to creating the chained follow-up task. Gate with `useFeatureGate("<next-version>")`.
+- **Slack (lead-only, config-gated)**: intercept the existing thread-reply path — where today a busy worker gets a queued `pending` task (`handlers.ts:714-724`) or an additive-buffer entry, a new config flag (e.g. `SLACK_THREAD_STEERING=off|lead|all`, env + `swarm_config` hot-reload like other Slack settings) routes the reply as a steering message into the thread's `in_progress` task instead. **RESOLVED**: mention gate (`SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION`) applies **unchanged**, and qualifying replies **still flow through the `ADDITIVE_SLACK` debounce buffer** — the buffer flush emits **one** steering message instead of one dependent follow-up task. Still to design in-plan: the `:eyes:` reaction/ack UX and a "steered" marker on the watcher's tree message.
 
 ### 4.4 Cross-cutting integration points
 
@@ -253,7 +255,18 @@ The cancellation channel is the template. A minimal generic version:
 
 12. **opencode — spike approved and in flight** (§2.2): empirically determine `session.prompt`-while-running semantics before assigning opencode its tier.
 
+### Decisions (Taras review, 2026-07-27) — plan-time open questions closed
+
+13. **Claude adapter — raw CLI, queue-only** (§2.1). Keep `Bun.spawn`; add `--input-format stream-json` + piped stdin. `mode:"steer"` degrades to queue on the claude provider. Adopting `@anthropic-ai/claude-agent-sdk` in-process is **out of scope** for this plan (not deferred-as-a-step; simply not planned).
+
+14. **Mode selection — explicit, default `queue`.** Every caller surface (MCP tool, script SDK, HTTP route, UI composer, Slack config) carries an explicit `mode: "steer" | "queue"` that **defaults to `queue`** (zero-loss). No server-side auto-detection heuristic. UI renders a segmented Queue/Interrupt control with Queue preselected. Per-provider degradation (steer→queue→follow-up-task) is the only implicit behavior, and it must be reported back to the caller in the response + row status.
+
+15. **Slack — steer respects the `ADDITIVE_SLACK` buffer; mention gate unchanged.** A qualifying thread reply goes through the existing debounce window, and the flush emits **one** steering message (instead of today's one dependent follow-up task). `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION` semantics are untouched — mention-gated replies that don't qualify today still don't steer.
+
+16. **Unsupported modes are advertised, and failing is opt-in.** Refines decision 1. Silent degradation is a trust problem — Interrupt and Queue differ in a way that matters when an agent is mid-destructive-action. Three parts: (a) a static server-side `PROVIDER_STEER_CAPABILITIES` map is surfaced as **`supportedSteerModes`** on task read responses, so the UI disables Interrupt on `claude` and hides the toggle entirely on `codex` **before** the user picks it, and the MCP tool description states per-provider support; (b) the steer API takes **`onUnsupported: "degrade" | "fail"`, default `"degrade"`** — callers needing true interrupt semantics get a `422` with no row created; (c) the static map must stay in sync with each adapter's `traits.steerModes`, enforced by a test. Default stays `degrade` so messages are never dropped (claude would otherwise fail every Interrupt; codex would lose steering entirely instead of falling back to a follow-up task). Slack always uses `degrade` — it has no good way to surface a 422 mid-thread — but reflects the downgrade in its ack.
+
 ### Follow-ups — all resolved
 
-- **§2.1** Claude Code: interrupt is **SDK-only**; raw CLI stream-json is queue-only. Remaining plan-time decision: raw-CLI queue-only vs adopting `@anthropic-ai/claude-agent-sdk` in-process for both modes.
+- **§2.1** Claude Code: interrupt is **SDK-only**; raw CLI stream-json is queue-only. → closed by decision 13 (raw-CLI queue-only).
 - **§2.2** opencode: mid-run `session.prompt` **queues** (verified, supported); use `promptAsync` for steering writes; steer-mode = `abort`+`prompt` composition.
+- Residual, non-blocking (resolve during implementation, not planning): devin behavior while actively `working` vs `waiting_for_user`; pi's exact session-resume verb; Slack `:eyes:` ack/reaction UX and the watcher "steered" marker.

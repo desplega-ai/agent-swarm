@@ -388,7 +388,10 @@ export type SteerResult = z.infer<typeof SteerResultSchema>;
 export const PROVIDER_STEER_CAPABILITIES: Record<ProviderName, SteerMode[]> = {
   pi: ["steer", "queue"],
   "claude-managed": ["steer", "queue"],
-  devin: ["steer", "queue"],
+  // Devin's message API accepts a session in `working` state but does not
+  // guarantee the in-flight turn is interrupted, so we advertise queue only
+  // rather than promise semantics we can't honor (step-7 finding).
+  devin: ["queue"],
   opencode: ["steer", "queue"],
   claude: ["queue"],
   codex: [],

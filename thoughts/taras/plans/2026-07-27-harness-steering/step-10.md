@@ -2,7 +2,8 @@
 id: step-10
 name: Slack thread steering (config-gated)
 depends_on: [step-1]
-status: ready
+status: done
+completed_at: 2026-07-27
 ---
 
 # step-10: Slack thread steering

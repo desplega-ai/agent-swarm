@@ -2,7 +2,8 @@
 id: step-2
 name: Promotion on terminal + heartbeat stall guard
 depends_on: [step-1]
-status: ready
+status: done
+completed_at: 2026-07-27
 ---
 
 # step-2: Promotion on terminal status + heartbeat stall guard

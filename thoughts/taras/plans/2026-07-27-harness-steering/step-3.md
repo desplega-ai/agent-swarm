@@ -2,7 +2,8 @@
 id: step-3
 name: Worker transport spine + codex fallback + ack
 depends_on: [step-1]
-status: ready
+status: done
+completed_at: 2026-07-27
 ---
 
 # step-3: Worker transport spine + codex fallback + explicit ack

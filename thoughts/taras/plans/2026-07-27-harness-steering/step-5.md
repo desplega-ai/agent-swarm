@@ -2,7 +2,8 @@
 id: step-5
 name: opencode delivery (promptAsync / abort+prompt)
 depends_on: [step-3]
-status: ready
+status: done
+completed_at: 2026-07-27
 ---
 
 # step-5: opencode steering delivery

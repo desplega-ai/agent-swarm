@@ -2,7 +2,8 @@
 id: step-4
 name: pi-mono delivery (both modes native)
 depends_on: [step-3]
-status: ready
+status: done
+completed_at: 2026-07-27
 ---
 
 # step-4: pi-mono steering delivery

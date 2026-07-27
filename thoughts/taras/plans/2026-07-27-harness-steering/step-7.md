@@ -2,7 +2,8 @@
 id: step-7
 name: devin + claude-managed delivery
 depends_on: [step-3]
-status: ready
+status: done
+completed_at: 2026-07-27
 ---
 
 # step-7: devin + claude-managed steering delivery
