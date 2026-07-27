@@ -117,6 +117,7 @@ import { registerSlackReplyTool } from "./tools/slack-reply";
 import { registerSlackStartThreadTool } from "./tools/slack-start-thread";
 import { registerSlackUpdateTool } from "./tools/slack-update";
 import { registerSlackUploadFileTool } from "./tools/slack-upload-file";
+import { registerSteerTaskTool } from "./tools/steer-task";
 import { registerStoreProgressTool } from "./tools/store-progress";
 // Swarm config tools
 import {
@@ -340,6 +341,7 @@ export function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolea
   // Task pool capability - task pool operations (create unassigned, claim, release, accept, reject)
   if (hasCapability("task-pool")) {
     registerTaskActionTool(server);
+    registerSteerTaskTool(server);
   }
 
   // Config capability - swarm config management and credential bindings
