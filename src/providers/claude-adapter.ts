@@ -27,6 +27,9 @@ import type {
   ProviderResult,
   ProviderSession,
   ProviderSessionConfig,
+  ProviderTraits,
+  SteerDelivery,
+  SteerDeliveryResult,
 } from "./types";
 
 /**
@@ -83,6 +86,31 @@ export function parseClaudeBinary(raw: string | undefined): string[] {
   const trimmed = (raw ?? "claude").trim();
   if (trimmed === "") return ["claude"];
   return trimmed.split(/\s+/);
+}
+
+const MIN_CLAUDE_QUEUE_STEERING_VERSION = [2, 1, 205] as const;
+
+function supportsClaudeQueueSteering(versionOutput: string | undefined): boolean {
+  const match =
+    versionOutput?.match(/claude(?: code)? version:\s*(\d+)\.(\d+)\.(\d+)/i) ??
+    versionOutput?.match(/(\d+)\.(\d+)\.(\d+)\s*\(Claude Code\)/i);
+  if (!match) return false;
+
+  const detected = match.slice(1, 4).map(Number);
+  for (let index = 0; index < MIN_CLAUDE_QUEUE_STEERING_VERSION.length; index++) {
+    const actual = detected[index] ?? 0;
+    const minimum = MIN_CLAUDE_QUEUE_STEERING_VERSION[index] ?? 0;
+    if (actual !== minimum) return actual > minimum;
+  }
+  return true;
+}
+
+function claudeUserMessage(text: string): string {
+  return `${JSON.stringify({
+    type: "user",
+    message: { role: "user", content: text },
+    parent_tool_use_id: null,
+  })}\n`;
 }
 
 /**
@@ -494,6 +522,13 @@ export function getSystemPromptFilePath(taskId: string): string {
 
 class ClaudeSession implements ProviderSession {
   private proc: ReturnType<typeof Bun.spawn>;
+  private stdinWriter:
+    | {
+        write(value: string): unknown;
+        flush?(): unknown;
+        end(): unknown;
+      }
+    | undefined;
   private listeners: Array<(event: ProviderEvent) => void> = [];
   private eventQueue: ProviderEvent[] = [];
   private _sessionId: string | undefined;
@@ -505,6 +540,7 @@ class ClaudeSession implements ProviderSession {
   private systemPromptFile: string | null;
   /** Reasoning/effort level actually applied (Phase 4) — null when `applyReasoningEffort()` returned noop. */
   private appliedReasoningEffort: ReasoningEffort | null;
+  readonly deliverSteering?: (delivery: SteerDelivery) => Promise<SteerDeliveryResult>;
 
   constructor(
     private config: ProviderSessionConfig,
@@ -516,6 +552,7 @@ class ClaudeSession implements ProviderSession {
     systemPromptFile: string | null = null,
     private harnessVariant?: string,
     private harnessVariantMeta?: Record<string, unknown>,
+    queueSteeringSupported = false,
   ) {
     this.taskFilePid = taskFilePid;
     this.contextWindowSize = getContextWindowSize(model);
@@ -535,10 +572,9 @@ class ClaudeSession implements ProviderSession {
     // container env might carry.
     const otelEnv = buildClaudeCodeOtelEnv(sourceEnv);
     const runtimeEnv = buildClaudeCodeRuntimeEnv(sourceEnv);
-    // Phase 4 (reasoning-effort plan): env-only path — no CLI flag (`--effort`
-    // is buggy in `-p` mode, see research doc). `additionalArgs` (pushed after
-    // `buildCommand()`'s base argv) naturally wins over this env var per the
-    // Claude CLI's own precedence if an operator puts `--effort` there.
+    // Phase 4 (reasoning-effort plan): env-only path. `additionalArgs` (pushed
+    // after `buildCommand()`'s base argv) naturally wins over this env var per
+    // the Claude CLI's own precedence if an operator puts `--effort` there.
     const reasoningApplication = applyReasoningEffort("claude", model, config.reasoningEffort);
     const reasoningEnv = reasoningApplication.kind === "claude-env" ? reasoningApplication.env : {};
     this.appliedReasoningEffort =
@@ -566,11 +602,78 @@ class ClaudeSession implements ProviderSession {
           : {}),
         CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
       } as Record<string, string>,
+      stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
     });
 
+    const stdin = this.proc.stdin;
+    if (stdin && typeof stdin !== "number") {
+      this.stdinWriter = stdin as {
+        write(value: string): unknown;
+        flush?(): unknown;
+        end(): unknown;
+      };
+      void this.writeUserMessage(this.config.prompt).catch((err) => {
+        console.warn(
+          `\x1b[33m[claude]\x1b[0m Failed to write initial prompt to Claude stdin: ${scrubSecrets(String(err))}`,
+        );
+        this.closeStdin();
+        try {
+          this.proc.kill("SIGTERM");
+        } catch {
+          // The subprocess may already have exited after the broken pipe.
+        }
+      });
+    } else {
+      console.warn(
+        "\x1b[33m[claude]\x1b[0m Claude stdin was not piped; terminating the session to avoid waiting without a prompt.",
+      );
+      try {
+        this.proc.kill("SIGTERM");
+      } catch {
+        // The subprocess may already have exited.
+      }
+    }
+
+    if (queueSteeringSupported && this.stdinWriter) {
+      this.deliverSteering = async ({
+        mode,
+        text,
+      }: SteerDelivery): Promise<SteerDeliveryResult> => {
+        if (mode === "steer") {
+          console.warn(
+            "[claude-adapter] Interrupt requested; raw Claude CLI supports queued steering only, so the message will run at the next turn boundary.",
+          );
+        }
+
+        if (!this.stdinWriter) {
+          return { delivered: false, reason: "Claude stdin is closed" };
+        }
+
+        try {
+          await this.writeUserMessage(text);
+          // Interrupt is SDK-only; raw CLI stream-json queues. Always report queue.
+          return { delivered: true, mode: "queue" };
+        } catch (err) {
+          this.closeStdin();
+          return {
+            delivered: false,
+            reason: `Claude stdin write failed: ${String(err)}`,
+          };
+        }
+      };
+    }
+
     this.completionPromise = this.processStreams();
+  }
+
+  private async writeUserMessage(text: string): Promise<void> {
+    const writer = this.stdinWriter;
+    if (!writer) throw new Error("Claude stdin is closed");
+
+    await writer.write(claudeUserMessage(text));
+    await writer.flush?.();
   }
 
   private buildCommand(): string[] {
@@ -581,12 +684,12 @@ class ClaudeSession implements ProviderSession {
       "--verbose",
       "--output-format",
       "stream-json",
+      "--input-format",
+      "stream-json",
       "--dangerously-skip-permissions",
       "--allow-dangerously-skip-permissions",
       "--permission-mode",
       "bypassPermissions",
-      "-p",
-      this.config.prompt,
     ];
 
     if (this.config.additionalArgs?.length) {
@@ -618,6 +721,19 @@ class ClaudeSession implements ProviderSession {
       }
     } else {
       this.eventQueue.push(event);
+    }
+  }
+
+  private closeStdin(): void {
+    const writer = this.stdinWriter;
+    this.stdinWriter = undefined;
+    if (!writer) return;
+
+    try {
+      const result = writer.end();
+      void Promise.resolve(result).catch(() => {});
+    } catch {
+      // Best-effort cleanup: a completed child commonly closes the pipe first.
     }
   }
 
@@ -682,7 +798,11 @@ class ClaudeSession implements ProviderSession {
       }
     })();
 
-    await Promise.all([stdoutPromise, stderrPromise]);
+    try {
+      await Promise.all([stdoutPromise, stderrPromise]);
+    } finally {
+      this.closeStdin();
+    }
     await logFileHandle.end();
     const exitCode = await this.proc.exited;
 
@@ -735,6 +855,14 @@ class ClaudeSession implements ProviderSession {
   private processJsonLine(trimmed: string, setCost: (cost: CostData) => void): void {
     try {
       const json = JSON.parse(trimmed);
+
+      // In stream-json input mode Claude waits for EOF even after emitting a
+      // successful result. End stdin at that turn boundary so normal tasks can
+      // exit; steering messages written during the turn are already buffered
+      // ahead of the EOF and are still processed as subsequent turns.
+      if (json.type === "result") {
+        this.closeStdin();
+      }
 
       // Session ID from init message
       if (json.type === "system" && json.subtype === "init" && json.session_id) {
@@ -902,13 +1030,22 @@ class ClaudeSession implements ProviderSession {
   }
 
   async abort(): Promise<void> {
-    this.proc.kill("SIGTERM");
+    this.closeStdin();
+    try {
+      this.proc.kill("SIGTERM");
+    } catch {
+      // The subprocess may already have exited.
+    }
   }
 }
 
 export class ClaudeAdapter implements ProviderAdapter {
   readonly name = "claude";
-  readonly traits = { hasMcp: true, hasLocalEnvironment: true };
+  readonly traits: ProviderTraits = {
+    hasMcp: true,
+    hasLocalEnvironment: true,
+    steerModes: ["queue"],
+  };
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     // Native resume is deprecated. Follow-up continuity is delivered via the
@@ -1042,24 +1179,30 @@ export class ClaudeAdapter implements ProviderAdapter {
 
     const harnessVariant = useClaudeBridge ? "bridge" : "stock";
     let harnessVariantMeta: Record<string, unknown> | undefined;
-    if (useClaudeBridge) {
-      try {
-        const bin = effectiveClaudeBinaryArgv[0] ?? "claude-bridge";
-        const result = await Bun.$`${bin} --version`.quiet();
-        const trimmed = result.text().trim();
-        if (trimmed) harnessVariantMeta = { version: trimmed };
-      } catch {
-        // bridge version is best-effort
+    let harnessVersion: string | undefined;
+    try {
+      const result = Bun.spawnSync([...effectiveClaudeBinaryArgv, "--version"], {
+        env: sourceEnv,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      if (result.success) {
+        const trimmed =
+          `${result.stdout?.toString() ?? ""}\n${result.stderr?.toString() ?? ""}`.trim();
+        if (trimmed) {
+          harnessVersion = trimmed;
+          harnessVariantMeta = { version: trimmed };
+        }
       }
-    } else {
-      try {
-        const bin = effectiveClaudeBinaryArgv[0] ?? "claude";
-        const result = await Bun.$`${bin} --version`.quiet();
-        const trimmed = result.text().trim();
-        if (trimmed) harnessVariantMeta = { version: trimmed };
-      } catch {
-        // stock version is best-effort
-      }
+    } catch {
+      // Harness version detection is best-effort; unknown disables steering.
+    }
+
+    const queueSteeringSupported = supportsClaudeQueueSteering(harnessVersion);
+    if (!queueSteeringSupported) {
+      console.warn(
+        `\x1b[33m[claude]\x1b[0m Queued steering requires Claude Code >= ${MIN_CLAUDE_QUEUE_STEERING_VERSION.join(".")}; detected ${harnessVersion ?? "an unknown version"}. Steering messages will be promoted to follow-up tasks.`,
+      );
     }
 
     return new ClaudeSession(
@@ -1072,6 +1215,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       systemPromptFile,
       harnessVariant,
       harnessVariantMeta,
+      queueSteeringSupported,
     );
   }
 
