@@ -47,6 +47,14 @@ export function formatRelativeTime(date: string | Date): string {
 }
 
 /**
+ * A session's display title: the user's custom title if set, otherwise the
+ * root task's prompt text. Renders identically to today when no title is set.
+ */
+export function sessionDisplayTitle(root: { task: string; title?: string }): string {
+  return root.title?.trim() || root.task;
+}
+
+/**
  * Format a date as smart time - relative for recent, absolute for older.
  * Handles both past and future dates.
  */

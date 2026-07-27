@@ -22,6 +22,7 @@ import {
   updateAgentStatusFromCapacity,
   updateTaskClaudeSessionId,
   updateTaskProgress,
+  updateTaskTitle,
   updateTaskVcs,
 } from "../be/db";
 import { findUserById } from "../be/users";
@@ -292,6 +293,28 @@ const updateTaskVcsRoute = route({
     404: { description: "Task not found" },
   },
   auth: { apiKey: true },
+});
+
+const updateTaskTitleRoute = route({
+  method: "patch",
+  path: "/api/tasks/{id}/title",
+  pattern: ["api", "tasks", null, "title"],
+  summary: "Set or clear a task's display title (session rename)",
+  description:
+    "Sets a human-facing display title override on a task. The sessions UI only reads this from root tasks (session list items), but titles on child tasks are harmless. Pass `title: null` (or an empty string) to clear the override and fall back to the task prompt.",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    title: z.string().trim().max(120).nullable(),
+  }),
+  responses: {
+    200: { description: "Title updated" },
+    404: { description: "Task not found" },
+  },
+  auth: { apiKey: true },
+  rbac: {
+    ungated: "mirrors the pre-RBAC PATCH /api/tasks/{id}/vcs sibling route: bearer auth only",
+  },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -779,6 +802,18 @@ export async function handleTasks(
       return true;
     }
     json(res, task);
+    return true;
+  }
+
+  if (updateTaskTitleRoute.match(req.method, pathSegments)) {
+    const parsed = await updateTaskTitleRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = updateTaskTitle(parsed.params.id, parsed.body.title);
+    if (!task) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    json(res, { task });
     return true;
   }
 

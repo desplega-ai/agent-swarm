@@ -42,7 +42,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime, sessionDisplayTitle } from "@/lib/utils";
 
 const COLLAPSE_STORAGE_KEY = "agent-swarm-sessions-sidebar-collapsed";
 const SHOW_SYSTEM_STORAGE_KEY = "agent-swarm-sessions-show-system";
@@ -113,7 +113,7 @@ function SessionRow({ session: s, isActive }: SessionRowProps) {
             isActive ? "font-medium text-foreground" : "text-foreground/90",
           )}
         >
-          {s.root.task}
+          {sessionDisplayTitle(s.root)}
         </span>
         <span className="text-[11px] text-muted-foreground truncate">
           {formatRelativeTime(s.lastActivityAt)} · {s.chainTaskCount}{" "}
@@ -199,7 +199,7 @@ function SessionsList({
             onChange={(e) => onQueryChange(e.target.value)}
             placeholder="Search"
             className="h-8 pl-7 text-xs bg-muted/40 border-transparent focus-visible:bg-card focus-visible:border-border"
-            aria-label="Search sessions by initial task title"
+            aria-label="Search sessions by title or initial task text"
           />
         </div>
         <DropdownMenu>
@@ -313,7 +313,7 @@ function MobileSessionPicker({
         <SelectContent className="max-h-[60vh]">
           {items.map((s) => (
             <SelectItem key={s.root.id} value={s.root.id} className="text-xs">
-              <span className="block max-w-[260px] truncate">{s.root.task}</span>
+              <span className="block max-w-[260px] truncate">{sessionDisplayTitle(s.root)}</span>
             </SelectItem>
           ))}
         </SelectContent>

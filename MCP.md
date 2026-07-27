@@ -753,6 +753,7 @@ Updates an agent's profile information (name, description, role, capabilities). 
 | `setupScript` | `string` | No | - | Setup script content (bash). Runs at container start as the worker user after privilege drop. Persists across sessions. Also written to /workspace/start-up.sh. |
 | `toolsMd` | `string` | No | - | Environment-specific operational knowledge. Repos, services, SSH hosts, APIs, device names — anything specific to your setup. Synced to /workspace/TOOLS.md. |
 | `heartbeatMd` | `string` | No | - | Heartbeat checklist content (HEARTBEAT.md). Checked periodically — add standing orders for the lead to review. Synced to /workspace/HEARTBEAT.md. |
+| `avatar` | `unknown` | No | - | Custom avatar: { type: 'lucide', icon: '<kebab-case-lucide-name>', color?: '#RRGGBB' }. Pass null to reset to the default deterministic icon/color. |
 
 ### context-history
 

@@ -1,8 +1,10 @@
 import { getConfig } from "@/lib/config";
 import type {
+  AgentAvatar,
   AgentMcpServersResponse,
   AgentSkillsResponse,
   AgentsResponse,
+  AgentTask,
   AgentWithTasks,
   ApiKeyStatusResponse,
   ApprovalRequest,
@@ -236,6 +238,8 @@ class ApiClient {
       toolsMd?: string;
       setupScript?: string;
       heartbeatMd?: string;
+      /** `null` resets to the deterministic fallback; omit to leave untouched. */
+      avatar?: AgentAvatar | null;
     },
   ): Promise<AgentWithTasks> {
     const url = `${this.getBaseUrl()}/api/agents/${id}/profile`;
@@ -2325,6 +2329,19 @@ class ApiClient {
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch session: ${res.status}`);
     return res.json();
+  }
+
+  /** Set (non-empty string) or clear (`null`) a session's custom display title. */
+  async updateTaskTitle(id: string, title: string | null): Promise<AgentTask> {
+    const url = `${this.getBaseUrl()}/api/tasks/${encodeURIComponent(id)}/title`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ title }),
+    });
+    if (!res.ok) throw new Error(`Failed to update task title: ${res.status}`);
+    const data = (await res.json()) as { task: AgentTask };
+    return data.task;
   }
 
   // ─── Task Templates (Phase 6 ≥1.76.0) ─────────────────────────────────────

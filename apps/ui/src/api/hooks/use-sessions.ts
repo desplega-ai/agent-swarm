@@ -12,7 +12,7 @@
  * older API servers (which 404 these endpoints) don't render the surface.
  */
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
 
 export interface UseSessionsOptions {
@@ -47,5 +47,19 @@ export function useSession(rootTaskId: string | undefined) {
     queryKey: ["session", rootTaskId],
     queryFn: () => api.getSession(rootTaskId!),
     enabled: !!rootTaskId,
+  });
+}
+
+/** Set (non-empty string) or clear (`null`) a session's custom display title. */
+export function useUpdateSessionTitle() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, title }: { id: string; title: string | null }) =>
+      api.updateTaskTitle(id, title),
+    onSuccess: (task) => {
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["session", task.id] });
+      queryClient.invalidateQueries({ queryKey: ["task", task.id] });
+    },
   });
 }

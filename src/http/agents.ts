@@ -26,6 +26,7 @@ import { reasoningCapability } from "../providers/reasoning-effort";
 import { getEnabledCapabilities } from "../server";
 import { telemetry } from "../telemetry";
 import {
+  AgentAvatarSchema,
   AgentCredStatusSchema,
   AgentLatestModelSchema,
   type ProviderName,
@@ -174,6 +175,8 @@ const updateAgentProfileRoute = route({
     setupScript: z.string().max(65536).optional(),
     toolsMd: z.string().max(65536).optional(),
     heartbeatMd: z.string().max(65536).optional(),
+    /** `null` resets to the deterministic fallback; omit the key to leave untouched. */
+    avatar: AgentAvatarSchema.nullable().optional(),
     changeSource: z.string().optional(),
     changedByAgentId: z.string().optional(),
     changeReason: z.string().optional(),
@@ -450,11 +453,12 @@ export async function handleAgentsRest(
       body.identityMd === undefined &&
       body.setupScript === undefined &&
       body.toolsMd === undefined &&
-      body.heartbeatMd === undefined
+      body.heartbeatMd === undefined &&
+      body.avatar === undefined
     ) {
       jsonError(
         res,
-        "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, or heartbeatMd) must be provided",
+        "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, heartbeatMd, or avatar) must be provided",
         400,
       );
       return true;
@@ -485,6 +489,9 @@ export async function handleAgentsRest(
         setupScript: body.setupScript,
         toolsMd: body.toolsMd,
         heartbeatMd: body.heartbeatMd,
+        // Only include the key when the client sent it, so `null` (reset)
+        // is distinguishable from "not provided" (leave untouched).
+        ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
       },
       versionMeta,
     );

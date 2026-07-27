@@ -8,6 +8,7 @@ import {
   createSessionCost,
   createTaskExtended,
   createWorkflow,
+  getAgentById,
   getAllAgents,
   getAllTasks,
   getScheduledTasks,
@@ -59,6 +60,7 @@ describe("list-endpoint slimming", () => {
       toolsMd: "T".repeat(500),
       heartbeatMd: "H".repeat(500),
       setupScript: "echo hi",
+      avatar: { type: "lucide", icon: "rocket", color: "#8b5cf6" },
     });
 
     const slim = getAllAgents({ slim: true }).find((a) => a.id === agent.id);
@@ -72,10 +74,53 @@ describe("list-endpoint slimming", () => {
     // Scalar fields survive.
     expect(slim?.name).toBe("Slim Agent");
     expect(slim?.status).toBe("idle");
+    // avatar is not a heavy markdown blob — must survive in BOTH slim and
+    // full, or the agents list would silently show the default avatar while
+    // the detail page shows the custom one.
+    expect(slim?.avatar).toEqual({ type: "lucide", icon: "rocket", color: "#8b5cf6" });
 
     const full = getAllAgents().find((a) => a.id === agent.id);
     expect(full?.claudeMd).toBe("C".repeat(500));
     expect(full?.setupScript).toBe("echo hi");
+    expect(full?.avatar).toEqual({ type: "lucide", icon: "rocket", color: "#8b5cf6" });
+  });
+
+  test("updateAgentProfile — avatar set/reset round-trip", () => {
+    const agent = createAgent({
+      id: "avatar-agent-1",
+      name: "Avatar Agent",
+      isLead: false,
+      status: "idle",
+    });
+
+    // No avatar set yet — falls back to the deterministic derivation (null).
+    expect(getAgentById(agent.id)?.avatar).toBeNull();
+
+    // Set a custom avatar.
+    updateAgentProfile(agent.id, {
+      avatar: { type: "lucide", icon: "cat", color: "#ff00aa" },
+    });
+    expect(getAgentById(agent.id)?.avatar).toEqual({
+      type: "lucide",
+      icon: "cat",
+      color: "#ff00aa",
+    });
+
+    // Updating an unrelated field must NOT touch (or clobber) the avatar —
+    // the COALESCE(?, col) pattern used for other fields can never write a
+    // literal NULL back, so avatar needs its own explicit-set branch that
+    // must also correctly no-op when the key is simply absent.
+    updateAgentProfile(agent.id, { role: "QA" });
+    expect(getAgentById(agent.id)?.avatar).toEqual({
+      type: "lucide",
+      icon: "cat",
+      color: "#ff00aa",
+    });
+
+    // Explicit `avatar: null` resets to the deterministic fallback — this is
+    // the case COALESCE(?, avatar) can never express.
+    updateAgentProfile(agent.id, { avatar: null });
+    expect(getAgentById(agent.id)?.avatar).toBeNull();
   });
 
   test("listWorkflows — slim drops definition, adds nodeCount", () => {

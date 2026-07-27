@@ -19,7 +19,7 @@ const listSessions = route({
     offset: z.coerce.number().int().optional(),
     /** Comma-separated source filter (e.g. `ui,slack`). Omit to include all. */
     source: z.string().optional(),
-    /** Case-insensitive substring match against the root task's text. */
+    /** Case-insensitive substring match against the root task's text or custom title. */
     q: z.string().optional(),
     /**
      * When present, restrict results to root tasks where

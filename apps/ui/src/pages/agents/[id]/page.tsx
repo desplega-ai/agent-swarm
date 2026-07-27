@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, Crown, Pencil, Search, X } from "lucide-react";
+import { ArrowLeft, Check, Pencil, Search, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAgent, useUpdateAgentName, useUpdateAgentProfile } from "@/api/hooks/use-agents";
@@ -6,7 +6,15 @@ import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useAgentMcpServers, useUninstallMcpServer } from "@/api/hooks/use-mcp-servers";
 import { useAgentSkills, useUninstallSkill } from "@/api/hooks/use-skills";
 import { useTasks } from "@/api/hooks/use-tasks";
-import type { Agent, AgentSkill, AgentTask, McpServerWithInstallInfo } from "@/api/types";
+import type {
+  Agent,
+  AgentAvatar,
+  AgentSkill,
+  AgentTask,
+  McpServerWithInstallInfo,
+} from "@/api/types";
+import { AgentAppearancePicker } from "@/components/shared/agent-appearance-picker";
+import { AgentAvatar as AgentAvatarDisc } from "@/components/shared/agent-avatar";
 import { AgentRuntimeSettings } from "@/components/shared/agent-runtime-settings";
 import { HarnessCell } from "@/components/shared/harness-cell";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -227,6 +235,12 @@ export default function AgentDetailPage() {
     }
   }
 
+  function saveAvatar(avatar: AgentAvatar | null) {
+    if (id) {
+      updateProfile.mutate({ id, profile: { avatar } });
+    }
+  }
+
   const onTaskClicked = useMemo(
     () =>
       ignoreRowClickFromInteractives<AgentTask>((event) => {
@@ -270,7 +284,19 @@ export default function AgentDetailPage() {
       <div className="flex items-center gap-3 shrink-0">
         {editing ? (
           <div className="flex items-center gap-2">
-            {agent.isLead && <Crown className="h-7 w-7 text-primary shrink-0" />}
+            <AgentAppearancePicker
+              avatar={agent.avatar}
+              onChange={saveAvatar}
+              trigger={
+                <button
+                  type="button"
+                  title="Edit avatar"
+                  className="shrink-0 rounded-full ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-ring"
+                >
+                  <AgentAvatarDisc agentId={id} agentName={agent.name} size="md" />
+                </button>
+              }
+            />
             <Input
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
@@ -290,7 +316,7 @@ export default function AgentDetailPage() {
           </div>
         ) : (
           <div className="flex items-center gap-2.5">
-            {agent.isLead && <Crown className="h-7 w-7 text-primary shrink-0" />}
+            <AgentAvatarDisc agentId={id} agentName={agent.name} size="md" />
             <h1 className="text-3xl font-bold tracking-tight">{agent.name}</h1>
             <Button size="icon" variant="ghost" onClick={startEditing}>
               <Pencil className="h-4 w-4" />

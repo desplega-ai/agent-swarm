@@ -1,13 +1,15 @@
 /**
- * Small colored disc with a per-agent icon (lead = crown, workers = one of
- * 30 deterministic icons seeded by agent id). Color is seeded by agent id
- * so the same agent appears with the same accent across the app — name
- * changes don't shift it.
+ * Small colored disc with a per-agent icon. Prefers the agent's stored
+ * `avatar` (custom icon + color, overriding even the lead crown — an
+ * explicit choice always wins); falls back to the deterministic
+ * hash-derived icon/color (lead = crown, workers = one of 30 icons seeded
+ * by agent id) when unset. Color is seeded by agent id so the same agent
+ * appears with the same accent across the app — name changes don't shift it.
  */
 
 import { useAgent } from "@/api/hooks/use-agents";
-import { getAgentColorToken, solidBg } from "@/lib/agent-color";
-import { getAgentIcon } from "@/lib/agent-icon";
+import { resolveAgentColor, solidBg } from "@/lib/agent-color";
+import { resolveAgentIcon } from "@/lib/agent-icon";
 import { cn } from "@/lib/utils";
 
 const SIZES: Record<"xs" | "sm" | "md" | "lg", { box: string; icon: string }> = {
@@ -28,12 +30,12 @@ export interface AgentAvatarProps {
 export function AgentAvatar({ agentId, agentName, size = "md", className }: AgentAvatarProps) {
   const { data: agent } = useAgent(agentId ?? "");
   const name = agentName ?? agent?.name ?? null;
-  const token = getAgentColorToken({
+  const color = resolveAgentColor(agent?.avatar, {
     agentId: agentId ?? null,
     agentName: name,
     role: agent?.role ?? null,
   });
-  const Icon = getAgentIcon({
+  const Icon = resolveAgentIcon(agent?.avatar, {
     agentId: agentId ?? null,
     isLead: agent?.isLead ?? null,
     role: agent?.role ?? null,
@@ -46,9 +48,10 @@ export function AgentAvatar({ agentId, agentName, size = "md", className }: Agen
       className={cn(
         "inline-flex items-center justify-center rounded-full text-white shadow-sm",
         dims.box,
-        solidBg(token),
+        color.kind === "token" && solidBg(color.token),
         className,
       )}
+      style={color.kind === "custom" ? { backgroundColor: color.hex } : undefined}
     >
       <Icon className={dims.icon} strokeWidth={2.25} />
     </span>

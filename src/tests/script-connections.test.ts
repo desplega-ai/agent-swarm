@@ -531,6 +531,7 @@ describe("script connections", () => {
       // The consolidated connections-redesign migration depends on OAuth tables
       // and binding columns this intentionally partial fixture does not create.
       markMigrationApplied(database, "117_unified_oauth.sql");
+      markMigrationApplied(database, "119_agent_avatar.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
