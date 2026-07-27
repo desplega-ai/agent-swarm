@@ -74,6 +74,10 @@ Each worker container includes:
 - **Utilities**: git, git-lfs, vim, nano, jq, curl, wget, ssh
 - **Runtime user**: Agent processes run as the non-root `worker` user without passwordless sudo
 
+### Operator Dashboard
+
+The dashboard presents live agent and task state over the same API. Operators can give sessions concise custom titles directly from a session header; clearing a title restores the original task text, and session search matches both fields. Agent detail pages also expose an appearance picker for an optional Lucide icon and color, with deterministic defaults when no customization is stored.
+
 ## Data Flow
 
 ### Task Creation
