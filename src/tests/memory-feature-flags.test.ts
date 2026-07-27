@@ -17,12 +17,12 @@ describe("memory retrieval feature flags", () => {
     delete process.env.MEMORY_HYBRID_SEARCH;
     expect(isHybridSearchEnabled()).toBe(true);
 
-    for (const enabled of ["1", "true", "TRUE"]) {
+    for (const enabled of ["", " ", "\t", "1", "true", "TRUE"]) {
       process.env.MEMORY_HYBRID_SEARCH = enabled;
       expect(isHybridSearchEnabled()).toBe(true);
     }
 
-    for (const disabled of ["0", "false", "FALSE"]) {
+    for (const disabled of ["0", "false", "FALSE", " 0 ", " false "]) {
       process.env.MEMORY_HYBRID_SEARCH = disabled;
       expect(isHybridSearchEnabled()).toBe(false);
     }
@@ -32,12 +32,12 @@ describe("memory retrieval feature flags", () => {
     delete process.env.MEMORY_GRAPH_EXPANSION;
     expect(isGraphExpansionEnabled()).toBe(true);
 
-    for (const enabled of ["1", "true", "TRUE"]) {
+    for (const enabled of ["", " ", "\t", "1", "true", "TRUE"]) {
       process.env.MEMORY_GRAPH_EXPANSION = enabled;
       expect(isGraphExpansionEnabled()).toBe(true);
     }
 
-    for (const disabled of ["0", "false", "FALSE"]) {
+    for (const disabled of ["0", "false", "FALSE", " 0 ", " false "]) {
       process.env.MEMORY_GRAPH_EXPANSION = disabled;
       expect(isGraphExpansionEnabled()).toBe(false);
     }

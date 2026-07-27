@@ -62,15 +62,15 @@ export const CANDIDATE_SET_MULTIPLIER = numEnv("MEMORY_CANDIDATE_MULTIPLIER", 3)
 // Feature flag: enable hybrid (FTS+vec) search. On by default; set
 // MEMORY_HYBRID_SEARCH=0|false to fall back to vector-only search.
 export function isHybridSearchEnabled(): boolean {
-  const val = process.env.MEMORY_HYBRID_SEARCH ?? "1";
-  return val === "1" || val.toLowerCase() === "true";
+  const val = process.env.MEMORY_HYBRID_SEARCH?.trim().toLowerCase();
+  return val !== "0" && val !== "false";
 }
 
 // Feature flag: expand search candidates with 1-hop memory_link graph neighbors
 // (DES-639a). On by default; set MEMORY_GRAPH_EXPANSION=0|false to disable.
 export function isGraphExpansionEnabled(): boolean {
-  const val = process.env.MEMORY_GRAPH_EXPANSION ?? "1";
-  return val === "1" || val.toLowerCase() === "true";
+  const val = process.env.MEMORY_GRAPH_EXPANSION?.trim().toLowerCase();
+  return val !== "0" && val !== "false";
 }
 
 // Embedding defaults
