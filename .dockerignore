@@ -54,6 +54,8 @@ coverage/
 *.md
 !cc-plugin/**/*.md
 !templates/skills/**/*.md
+# The baked mode40 video starter ships its README (COPY'd into the worker image).
+!assets/mode40-video-starter/**/*.md
 
 # Other dockerfiles and compose files
 Dockerfile

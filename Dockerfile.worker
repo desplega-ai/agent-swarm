@@ -55,6 +55,7 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     build-essential make cmake gcc g++ \
     python3 python3-pip python3-venv \
     jq tree htop unzip zip tar gzip sqlite3 fuse3 libfuse2 gosu tini \
+    ffmpeg \
     openssh-client \
     postgresql-client \
     postgresql-16 \
@@ -348,6 +349,15 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     && node -e 'const { chromium } = require("playwright"); (async () => { const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] }); const page = await browser.newPage(); await page.setContent("<main>chromium smoke ok</main>"); await browser.close(); })().catch((error) => { console.error(error); process.exit(1); });' \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache \
     && chmod -R a+rX /opt/playwright
+
+# Bake the mode40 Remotion video starter into the image so video tasks start
+# from an on-brand template instead of hand-installing tooling every session.
+# Read-only at /opt; workers copy it into their workspace, then `npm install`
+# the per-project Remotion deps (intentionally NOT vendored here — they're large
+# and version-specific). ffmpeg + Chromium (Playwright, at
+# $PLAYWRIGHT_BROWSERS_PATH) are already in the image; see the starter README.
+COPY assets/mode40-video-starter /opt/mode40/remotion-starter
+RUN chmod -R a+rX /opt/mode40
 
 # Install archil CLI for FUSE/R2-backed disk mounts
 RUN curl https://s3.amazonaws.com/archil-client/install | sh
