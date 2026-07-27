@@ -8,6 +8,7 @@ import { telemetry } from "../telemetry";
 import type {
   ActiveSession,
   Agent,
+  AgentAvatar,
   AgentCredStatus,
   AgentLog,
   AgentLogEventType,
@@ -110,6 +111,7 @@ import type {
   WorkflowVersion,
 } from "../types";
 import {
+  AgentAvatarSchema,
   FollowUpConfigSchema,
   isTerminalTaskStatus,
   type ModelTier,
@@ -655,7 +657,22 @@ type AgentRow = {
   harness_provider: string | null;
   /** Migration 055: worker-self-reported credential snapshot (JSON of AgentCredStatus). NULL = unreported. */
   cred_status: string | null;
+  /** Migration 119: custom avatar (JSON of AgentAvatar). NULL = deterministic hash-derived fallback. */
+  avatar: string | null;
 };
+
+/** Safe-parse the `avatar` JSON column. Malformed/invalid content (e.g. a
+ * hand-edited row, or a future downgrade) falls back to `null` so rendering
+ * always has a deterministic path — never throws. */
+function parseAgentAvatar(raw: string | null): AgentAvatar | null {
+  if (!raw) return null;
+  try {
+    const parsed = AgentAvatarSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Map an agent row to the `Agent` shape. When `slim` is true the six identity
@@ -684,6 +701,7 @@ function rowToAgent(row: AgentRow, slim = false): Agent {
       ? (JSON.parse(row.credentialMissing) as string[])
       : null,
     credStatus: row.cred_status ? (JSON.parse(row.cred_status) as AgentCredStatus) : null,
+    avatar: parseAgentAvatar(row.avatar),
   };
   if (slim) return base;
   return {
@@ -1119,6 +1137,7 @@ type AgentTaskRow = {
   agentId: string | null;
   creatorAgentId: string | null;
   task: string;
+  title: string | null;
   status: AgentTaskStatus;
   source: AgentTaskSource;
   taskType: string | null;
@@ -1254,6 +1273,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     agentId: row.agentId,
     creatorAgentId: row.creatorAgentId ?? undefined,
     task: row.task,
+    title: row.title ?? undefined,
     status: row.status,
     source: row.source,
     taskType: row.taskType ?? undefined,
@@ -1339,6 +1359,7 @@ function rowToAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
     agentId: t.agentId,
     creatorAgentId: t.creatorAgentId,
     task: previewText(t.task, TASK_PREVIEW_LENGTH),
+    title: t.title,
     status: t.status,
     source: t.source,
     taskType: t.taskType,
@@ -1702,6 +1723,22 @@ export function updateTaskClaudeSessionId(
       `UPDATE agent_tasks SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
     )
     .get(...params);
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Sets or clears a task's display title (session rename). Trims the input and
+ * normalizes an empty string to NULL (clear). Deliberately does NOT touch
+ * `lastUpdatedAt` — a rename is not activity, and the sessions sidebar sorts
+ * on chain-wide max `lastUpdatedAt`, so bumping it here would reorder the list.
+ */
+export function updateTaskTitle(taskId: string, title: string | null): AgentTask | null {
+  const normalized = title === null ? null : title.trim() || null;
+  const row = getDb()
+    .prepare<AgentTaskRow, [string | null, string]>(
+      "UPDATE agent_tasks SET title = ? WHERE id = ? RETURNING *",
+    )
+    .get(normalized, taskId);
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -4764,6 +4801,8 @@ export function updateAgentProfile(
     setupScript?: string;
     toolsMd?: string;
     heartbeatMd?: string;
+    /** `null` resets to the deterministic fallback; omit the key to leave untouched. */
+    avatar?: AgentAvatar | null;
   },
   meta?: VersionMeta,
 ): Agent | null {
@@ -4803,7 +4842,17 @@ export function updateAgentProfile(
       });
     }
 
-    // Proceed with existing UPDATE logic
+    // Proceed with existing UPDATE logic.
+    //
+    // `avatar` can't use the COALESCE(?, col) pattern the other fields use:
+    // COALESCE can never write NULL back (a bound NULL just falls through to
+    // the existing value), which would make "reset to default avatar"
+    // unimplementable. So it gets its own explicit-set CASE, gated by an
+    // `avatarProvided` flag distinguishing "key absent from updates" (leave
+    // untouched) from "key present with value null" (reset).
+    const avatarProvided = Object.hasOwn(updates, "avatar");
+    const avatarJson = updates.avatar ? JSON.stringify(updates.avatar) : null;
+
     const now = new Date().toISOString();
     const row = database
       .prepare<
@@ -4817,6 +4866,8 @@ export function updateAgentProfile(
           string | null,
           string | null,
           string | null,
+          string | null,
+          number,
           string | null,
           string,
           string,
@@ -4832,6 +4883,7 @@ export function updateAgentProfile(
           setupScript = COALESCE(?, setupScript),
           toolsMd = COALESCE(?, toolsMd),
           heartbeatMd = COALESCE(?, heartbeatMd),
+          avatar = CASE WHEN ? = 1 THEN ? ELSE avatar END,
           lastUpdatedAt = ?
          WHERE id = ? RETURNING *`,
       )
@@ -4845,6 +4897,8 @@ export function updateAgentProfile(
         updates.setupScript ?? null,
         updates.toolsMd ?? null,
         updates.heartbeatMd ?? null,
+        avatarProvided ? 1 : 0,
+        avatarJson,
         now,
         id,
       );
@@ -12492,8 +12546,9 @@ export function listRecentSessions(
     params.push(...sources);
   }
   if (q && q.length > 0) {
-    conditions.push("lower(r.task) LIKE ?");
-    params.push(`%${q.toLowerCase()}%`);
+    conditions.push("(lower(r.task) LIKE ? OR lower(COALESCE(r.title, '')) LIKE ?)");
+    const like = `%${q.toLowerCase()}%`;
+    params.push(like, like);
   }
   if (requestedByUserId) {
     conditions.push("r.requestedByUserId = ?");
@@ -12586,8 +12641,9 @@ export function countSessions(
     params.push(...sources);
   }
   if (q && q.length > 0) {
-    conditions.push("lower(task) LIKE ?");
-    params.push(`%${q.toLowerCase()}%`);
+    conditions.push("(lower(task) LIKE ? OR lower(COALESCE(title, '')) LIKE ?)");
+    const like = `%${q.toLowerCase()}%`;
+    params.push(like, like);
   }
   if (requestedByUserId) {
     conditions.push("requestedByUserId = ?");

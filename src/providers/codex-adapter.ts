@@ -1301,6 +1301,9 @@ export class CodexSession implements ProviderSession {
       },
       apiUrl,
       apiKey,
+      // Per-task resolved env — swarm_config overlays (e.g.
+      // OPENROUTER_BASE_URL) never reach process.env.
+      env: this.config.env,
     });
     // null = no auth resolved or wrapper exhausted retries (already logged inside)
     if (!result) return;

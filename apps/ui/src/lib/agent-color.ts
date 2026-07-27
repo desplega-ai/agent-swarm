@@ -6,6 +6,22 @@
  * The Lead agent always gets `--primary` (amber) so the coordinator pops.
  */
 
+import type { AgentAvatar } from "@/api/types";
+
+/** 8 curated swatches offered in the avatar picker (mirrors the theme
+ * token palette below, as concrete hex so a custom pick renders identically
+ * whether via inline style or via the token classes). */
+export const AVATAR_SUGGESTED_SWATCHES: string[] = [
+  "#f59e0b", // primary/amber
+  "#3b82f6", // action-agent-task
+  "#8b5cf6", // action-script
+  "#ec4899", // action-notify
+  "#10b981", // action-create-task
+  "#06b6d4", // action-send-message
+  "#6366f1", // action-delegate-to-agent
+  "#64748b", // action-default
+];
+
 export type AgentColorToken =
   | "primary"
   | "action-agent-task"
@@ -114,6 +130,27 @@ export function solidBg(token: AgentColorToken) {
 
 export function tokenText(token: AgentColorToken) {
   return TEXT[token];
+}
+
+export type ResolvedAgentColor =
+  | { kind: "custom"; hex: string }
+  | { kind: "token"; token: AgentColorToken };
+
+/** Resolves an agent's rendered color: a stored custom hex wins (render via
+ * inline `style`); unset falls back to the existing deterministic token
+ * derivation (render via the `solidBg` Tailwind class). */
+export function resolveAgentColor(
+  avatar: AgentAvatar | null | undefined,
+  fallbackInputs: {
+    agentId?: string | null;
+    agentName?: string | null;
+    role?: string | null;
+  },
+): ResolvedAgentColor {
+  if (avatar?.type === "lucide" && avatar.color) {
+    return { kind: "custom", hex: avatar.color };
+  }
+  return { kind: "token", token: getAgentColorToken(fallbackInputs) };
 }
 
 export function agentInitials(name: string | null | undefined, fallbackId?: string): string {

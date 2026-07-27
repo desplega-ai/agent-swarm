@@ -35,6 +35,12 @@ export interface SummarizeSessionOptions {
   /** Passed through to `completeStructured` for codex-OAuth probing. */
   apiUrl: string;
   apiKey: string;
+  /**
+   * Per-task resolved env — forwarded to `completeStructured` so credential
+   * lookup and the `OPENROUTER_BASE_URL` gateway override see swarm_config
+   * overlays that never reach `process.env`.
+   */
+  env?: Record<string, string | undefined>;
   signal?: AbortSignal;
   /**
    * Bypass `resolveCredential` entirely — opencode auth path (and tests) pass
@@ -94,6 +100,7 @@ export async function summarizeSession(
     callerTag: `session-summary:${opts.harness}`,
     apiUrl: opts.apiUrl,
     apiKey: opts.apiKey,
+    env: opts.env,
     signal: opts.signal,
     retries: 3,
     ...(opts._credentialOverride ? { _credentialOverride: opts._credentialOverride } : {}),

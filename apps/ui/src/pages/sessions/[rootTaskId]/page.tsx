@@ -8,12 +8,12 @@
  *   - A floating <ComposerDock>-backed <SessionComposer> at the bottom.
  */
 
-import { ChevronDown, Eye, EyeOff } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, Pencil } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
-import { useSession } from "@/api/hooks/use-sessions";
+import { useSession, useUpdateSessionTitle } from "@/api/hooks/use-sessions";
 import { useUsers } from "@/api/hooks/use-users";
 import { UpgradeRequired } from "@/components/feature-gate/upgrade-required";
 import { SessionComposer } from "@/components/sessions/session-composer";
@@ -21,10 +21,12 @@ import { SessionTimeline } from "@/components/sessions/session-timeline";
 import { SessionsShell } from "@/components/sessions/sessions-shell";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
+import { sessionDisplayTitle } from "@/lib/utils";
 
 const usdFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -35,9 +37,26 @@ const usdFormatter = new Intl.NumberFormat("en-US", {
 export default function SessionDetailPage() {
   const { rootTaskId } = useParams<{ rootTaskId: string }>();
   const gate = useFeatureGate("1.76.0");
+  const renameGate = useFeatureGate("1.120.0");
   const { data: detail, isLoading: detailLoading } = useSession(rootTaskId);
   const { data: users } = useUsers();
   const { data: costs } = useSessionCosts({ taskId: rootTaskId, enabled: !!rootTaskId });
+  const updateTitle = useUpdateSessionTitle();
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
+
+  const startEditingTitle = () => {
+    setDraftTitle(detail?.root.title ?? "");
+    setIsEditingTitle(true);
+  };
+
+  const saveTitle = () => {
+    if (!detail) return;
+    const trimmed = draftTitle.trim();
+    setIsEditingTitle(false);
+    if (trimmed === (detail.root.title ?? "")) return;
+    updateTitle.mutate({ id: detail.root.id, title: trimmed || null });
+  };
 
   const latestLeafTaskId = useMemo(() => {
     if (!detail || detail.chain.length === 0) return null;
@@ -100,16 +119,46 @@ export default function SessionDetailPage() {
     <SessionsShell activeRootTaskId={rootTaskId}>
       {/* Editorial header — serif title + quiet meta caption. Single 72px
           band, no double divider. */}
-      <header className="flex flex-col gap-1 border-b border-border px-6 pt-4 pb-3 shrink-0 min-w-0 bg-background">
+      <header className="group flex flex-col gap-1 border-b border-border px-6 pt-4 pb-3 shrink-0 min-w-0 bg-background">
         {detailLoading ? (
           <Skeleton className="h-6 w-72" />
         ) : detail ? (
-          <h1
-            className="text-lg md:text-xl font-semibold leading-tight text-foreground truncate"
-            title={detail.root.task}
-          >
-            {detail.root.task}
-          </h1>
+          isEditingTitle ? (
+            <Input
+              autoFocus
+              value={draftTitle}
+              placeholder={detail.root.task}
+              onChange={(e) => setDraftTitle(e.target.value)}
+              onBlur={saveTitle}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.currentTarget.blur();
+                } else if (e.key === "Escape") {
+                  setIsEditingTitle(false);
+                }
+              }}
+              className="h-auto text-lg md:text-xl font-semibold leading-tight px-1.5 py-0"
+            />
+          ) : (
+            <div className="flex items-center gap-1.5 min-w-0">
+              <h1
+                className="text-lg md:text-xl font-semibold leading-tight text-foreground truncate"
+                title={sessionDisplayTitle(detail.root)}
+              >
+                {sessionDisplayTitle(detail.root)}
+              </h1>
+              {renameGate.supported ? (
+                <button
+                  type="button"
+                  onClick={startEditingTitle}
+                  aria-label="Rename session"
+                  className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
+            </div>
+          )
         ) : (
           <p className="text-sm text-muted-foreground">Session not found.</p>
         )}

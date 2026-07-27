@@ -19,6 +19,7 @@ import {
 } from "../utils/context-window";
 import { validateOpencodeCredentials } from "../utils/credentials";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
+import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
@@ -133,6 +134,31 @@ async function readSpawnOutput(stream: ReadableStream<Uint8Array> | null): Promi
 
 function formatUnknownError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Route OpenRouter traffic through the configured gateway (see
+ * src/utils/openrouter-base-url.ts). opencode's bundled openrouter provider
+ * honors `provider.openrouter.options.baseURL`. Mutates `opencodeConfig` in
+ * place; no-op when `OPENROUTER_BASE_URL` is unset/blank/default, so default
+ * openrouter.ai behavior is preserved. Exported for tests.
+ */
+export function applyOpenRouterBaseUrlOverride(
+  opencodeConfig: Config,
+  env: Record<string, string | undefined> = process.env,
+): void {
+  const openRouterBaseUrl = getOpenRouterBaseUrl(env as NodeJS.ProcessEnv);
+  if (openRouterBaseUrl === DEFAULT_OPENROUTER_BASE_URL) return;
+  opencodeConfig.provider = {
+    ...opencodeConfig.provider,
+    openrouter: {
+      ...opencodeConfig.provider?.openrouter,
+      options: {
+        ...opencodeConfig.provider?.openrouter?.options,
+        baseURL: openRouterBaseUrl,
+      },
+    },
+  };
 }
 
 async function refreshOpenRouterModelCache(
@@ -726,6 +752,8 @@ export class OpencodeAdapter implements ProviderAdapter {
       };
     }
 
+    applyOpenRouterBaseUrlOverride(opencodeConfig, config.env ?? process.env);
+
     // Write per-task config file
     try {
       await Bun.write(configFilePath, JSON.stringify(opencodeConfig, null, 2));
@@ -743,12 +771,24 @@ export class OpencodeAdapter implements ProviderAdapter {
       SWARM_AGENT_ID: process.env.SWARM_AGENT_ID,
       SWARM_TASK_ID: process.env.SWARM_TASK_ID,
       SWARM_IS_LEAD: process.env.SWARM_IS_LEAD,
+      OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL,
     };
     process.env.SWARM_API_URL = config.apiUrl;
     process.env.SWARM_API_KEY = config.apiKey;
     process.env.SWARM_AGENT_ID = config.agentId;
     process.env.SWARM_TASK_ID = config.taskId;
     process.env.SWARM_IS_LEAD = config.role === "lead" ? "true" : "false";
+    // Mirror the resolved OpenRouter gateway into the spawn env: the
+    // summarize plugin (and any other plugin OpenRouter fetch) reads its own
+    // process.env inside the opencode subprocess, which inherits OURS — a
+    // per-task swarm_config value in `config.env` would otherwise be
+    // invisible there and the plugin would bypass the gateway.
+    const spawnOpenRouterBaseUrl = getOpenRouterBaseUrl(
+      (config.env ?? process.env) as NodeJS.ProcessEnv,
+    );
+    if (spawnOpenRouterBaseUrl !== DEFAULT_OPENROUTER_BASE_URL) {
+      process.env.OPENROUTER_BASE_URL = spawnOpenRouterBaseUrl;
+    }
     process.env.CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY = CTX_MODE_NUDGE_EVERY;
 
     // Set OPENCODE_CONFIG scoped to the spawn call (save + restore)

@@ -23,6 +23,24 @@ Each agent has four identity files that persist across sessions:
 3. **Self-editing** — Agents modify their own identity files during sessions. A PostToolUse hook syncs changes to the database in real-time
 4. **API / MCP tool** — Use the `update-profile` tool to programmatically set any identity field
 
+### Agent Appearance
+
+An agent profile can optionally store a Lucide icon and hex color. In the dashboard, open an agent's detail page, enter edit mode, and use the appearance picker to choose an icon, select a suggested color, or enter a `#RRGGBB` value. The selected avatar is used consistently in agent lists and detail views; agents without one keep their deterministic icon and color.
+
+The same setting is available through `update-profile`:
+
+```json
+{
+  "avatar": {
+    "type": "lucide",
+    "icon": "rocket",
+    "color": "#7C3AED"
+  }
+}
+```
+
+Pass `"avatar": null` to restore the deterministic default. Omitting `avatar` leaves the current appearance unchanged.
+
 ### Version History
 
 All identity file changes are tracked with version history. You can:

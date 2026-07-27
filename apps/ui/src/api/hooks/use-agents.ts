@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
-import type { AgentWithTasks, ReasoningEffortLevel } from "../types";
+import type { AgentAvatar, AgentWithTasks, ReasoningEffortLevel } from "../types";
 
 export function useAgents(includeTasks = false) {
   return useQuery({
@@ -49,6 +49,8 @@ export function useUpdateAgentProfile() {
         toolsMd?: string;
         setupScript?: string;
         heartbeatMd?: string;
+        /** `null` resets to the deterministic fallback; omit to leave untouched. */
+        avatar?: AgentAvatar | null;
       };
     }) => api.updateAgentProfile(id, profile),
     onSuccess: () => {

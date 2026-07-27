@@ -103,7 +103,10 @@ export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfig
 // so a "save" of N keys produces N upsert calls in tight succession. Reloading
 // after each one would tear Slack's socket down N times. Coalesce instead.
 let pendingReloadTimer: ReturnType<typeof setTimeout> | null = null;
-let inFlightReload: Promise<ReloadConfigResult> | null = null;
+// Resolves to `undefined` when a reload fails: the fire-and-forget chain logs
+// and swallows the error (see scheduleIntegrationsReload's doc comment) rather
+// than rejecting, so nothing is left to surface as an unhandled rejection.
+let inFlightReload: Promise<ReloadConfigResult | undefined> | null = null;
 let reloadRerunRequested = false;
 let autoReloadInvocations = 0;
 const AUTO_RELOAD_DEBOUNCE_MS = 250;
@@ -138,7 +141,7 @@ export function scheduleIntegrationsReload(delayMs = AUTO_RELOAD_DEBOUNCE_MS): v
       .catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
         console.error("[auto-reload] Failed:", message);
-        throw err;
+        return undefined;
       })
       .finally(() => {
         inFlightReload = null;
@@ -167,7 +170,7 @@ export async function flushPendingIntegrationsReload(): Promise<void> {
       })
       .finally(() => {
         inFlightReload = null;
-      }) as Promise<ReloadConfigResult>;
+      });
   }
   if (inFlightReload) {
     try {
@@ -181,10 +184,10 @@ export async function flushPendingIntegrationsReload(): Promise<void> {
     reloadRerunRequested = false;
     autoReloadInvocations += 1;
     inFlightReload = reloadGlobalConfigsAndIntegrations()
-      .catch(() => null)
+      .catch(() => undefined)
       .finally(() => {
         inFlightReload = null;
-      }) as Promise<ReloadConfigResult>;
+      });
     await inFlightReload;
   }
 }

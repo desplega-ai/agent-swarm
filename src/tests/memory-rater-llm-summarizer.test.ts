@@ -139,6 +139,30 @@ describe("runMemoryRater — request shape", () => {
     expect(body.response_format.json_schema.schema).toEqual(MEMORY_RATER_JSON_SCHEMA);
   });
 
+  test("OPENROUTER_BASE_URL reroutes the chat-completions call through the gateway", async () => {
+    const origBaseUrl = process.env.OPENROUTER_BASE_URL;
+    process.env.OPENROUTER_BASE_URL = "https://control-plane.example/proxy/v1/";
+    try {
+      let capturedUrl: string | URL | Request | undefined;
+      const fakeFetch: typeof fetch = async (url) => {
+        capturedUrl = url;
+        return makeOpenRouterResponse(JSON.stringify({ summary: "ok", ratings: [] }));
+      };
+
+      const result = await runMemoryRater({
+        prompt: "test prompt",
+        apiKey: "test-api-key-123",
+        fetchImpl: fakeFetch,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(String(capturedUrl)).toBe("https://control-plane.example/proxy/v1/chat/completions");
+    } finally {
+      if (origBaseUrl === undefined) delete process.env.OPENROUTER_BASE_URL;
+      else process.env.OPENROUTER_BASE_URL = origBaseUrl;
+    }
+  });
+
   test("MEMORY_RATER_JSON_SCHEMA reflects SummaryWithRatingsSchema (key shape only)", () => {
     // Don't assert exact JSON Schema bytes — Zod's emitter can change with
     // version bumps. Lock down the contract that matters for the OpenRouter

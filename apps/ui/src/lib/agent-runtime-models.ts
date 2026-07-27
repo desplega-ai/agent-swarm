@@ -211,6 +211,7 @@ function directModel(
 
 const DIRECT_MODELS: Record<"claude" | "codex", ModelOption[]> = {
   claude: [
+    directModel("claude", "claude-opus-5", "Claude Opus 5", ANTHROPIC_META),
     directModel("claude", "claude-fable-5", "Claude Fable 5", ANTHROPIC_META),
     directModel("claude", "claude-mythos-5", "Claude Mythos 5", ANTHROPIC_META),
     directModel("claude", "claude-sonnet-5", "Claude Sonnet 5", ANTHROPIC_META),
@@ -271,7 +272,7 @@ const SNAPSHOT_META: Record<
 };
 
 const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
-  claude: "claude-opus-4-8",
+  claude: "claude-opus-5",
   codex: "gpt-5.6-terra",
   pi: "openrouter/google/gemini-3-flash-preview",
   opencode: "openrouter/qwen/qwen3-coder-flash",
@@ -437,7 +438,7 @@ export function findModelOption(
 const ANTHROPIC_SHORTNAME_TO_ID: Record<string, string> = {
   fable: "claude-fable-5",
   mythos: "claude-mythos-5",
-  opus: "claude-opus-4-8",
+  opus: "claude-opus-5",
   sonnet: "claude-sonnet-5",
   haiku: "claude-haiku-4-5",
 };

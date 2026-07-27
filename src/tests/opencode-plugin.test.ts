@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Message, Part } from "@opencode-ai/sdk";
 import {
   flattenOpencodeTranscript,
+  runSummaryLlm,
   type SummarizeSessionForOpencodeDeps,
   type SwarmConfig,
   summarizeSessionForOpencode,
@@ -492,5 +493,47 @@ describe("summarizeSessionForOpencode", () => {
     expect(postRatingsArgs!.events.length).toBe(2);
     // Task ID is passed for cross-referencing.
     expect(postRatingsArgs!.taskId).toBe("task-oc-1");
+  });
+});
+
+// ── OPENROUTER_BASE_URL gateway routing (vendored resolver in summarize.ts) ──
+
+describe("runSummaryLlm — OPENROUTER_BASE_URL gateway", () => {
+  const summaryBody = {
+    choices: [{ message: { content: JSON.stringify({ summary: "ok", ratings: [] }) } }],
+  };
+  const openrouterCred = {
+    kind: "openrouter" as const,
+    apiKey: "sk-or-test",
+    modelDefault: "openrouter/google/gemini-3-flash-preview",
+  };
+
+  afterEach(() => {
+    delete process.env.OPENROUTER_BASE_URL;
+  });
+
+  test("defaults to openrouter.ai when the env is unset", async () => {
+    fetchHandler = async () => ({
+      ok: true,
+      status: 200,
+      text: async () => "",
+      json: async () => summaryBody,
+    });
+    const result = await runSummaryLlm(openrouterCred, "sys", "user");
+    expect(result).not.toBeNull();
+    expect(fetchCalls[0]?.url).toBe("https://openrouter.ai/api/v1/chat/completions");
+  });
+
+  test("reroutes through the gateway when OPENROUTER_BASE_URL is set", async () => {
+    process.env.OPENROUTER_BASE_URL = "https://control-plane.example/proxy/v1/";
+    fetchHandler = async () => ({
+      ok: true,
+      status: 200,
+      text: async () => "",
+      json: async () => summaryBody,
+    });
+    const result = await runSummaryLlm(openrouterCred, "sys", "user");
+    expect(result).not.toBeNull();
+    expect(fetchCalls[0]?.url).toBe("https://control-plane.example/proxy/v1/chat/completions");
   });
 });

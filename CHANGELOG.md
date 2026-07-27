@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.121.0] - 2026-07-27
+
+### Added
+- **Sessions can now use concise custom display titles** (#1000) — operators can rename a session inline from its header, search by either the custom title or original task text, and clear the title to restore the task-text fallback across the sidebar, mobile picker, header, and breadcrumbs.
+- **Agent profiles now support custom Lucide icons and colors** (#1001) — the dashboard appearance picker, profile API, and `update-profile` MCP tool preserve explicit custom avatars while allowing `null` to restore the deterministic default.
+- **Claude Opus 5 is available across model registries** (#1004) — direct Claude and Claude Managed Agents surfaces recognize `claude-opus-5`, the `opus` shortname resolves to it, and context/pricing metadata covers the new model.
+
+### Changed
+- **Worker harness pins now track the latest compatible weekly releases** (#1006) — the worker image ships Claude Code 2.1.220, pi 0.82.1, Codex 0.145.0, and OpenCode 1.18.5.
+
+### Fixed
+- **Background integration reload failures no longer escape as unhandled rejections** (#1001) — the fire-and-forget reload path now matches its documented error-swallowing contract, preventing ordering-dependent test and runtime failures after a logged reload error.
+
 ## [1.119.6] - 2026-07-24
 
 ### Changed

@@ -31,6 +31,18 @@ export type ModelTier = "smol" | "regular" | "smart" | "ultra";
 export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh", "max"] as const;
 export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
 
+/** Mirrors `AgentAvatarSchema` (backend `src/types.ts`). Discriminated union so
+ * future avatar types (emoji, image, ...) can be added with no migration —
+ * server validates shape only; the UI owns the icon catalog + fallback. */
+export interface AgentAvatarLucide {
+  type: "lucide";
+  /** Kebab-case lucide icon name, e.g. "rocket". Must exist in AVATAR_ICON_CATALOG to render. */
+  icon: string;
+  /** `#RRGGBB`. Omitted = use the deterministic color derivation. */
+  color?: string;
+}
+export type AgentAvatar = AgentAvatarLucide;
+
 export interface Agent {
   id: string;
   name: string;
@@ -39,6 +51,8 @@ export interface Agent {
   description?: string;
   role?: string;
   capabilities?: string[];
+  /** Custom avatar. Null/missing = fall back to the deterministic hash-derived icon/color. */
+  avatar?: AgentAvatar | null;
   claudeMd?: string;
   soulMd?: string;
   identityMd?: string;
@@ -117,6 +131,7 @@ export interface AgentTask {
   agentId: string | null;
   creatorAgentId?: string;
   task: string;
+  title?: string;
   status: AgentTaskStatus;
   source: AgentTaskSource;
   taskType?: string;

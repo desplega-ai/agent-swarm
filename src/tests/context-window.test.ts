@@ -16,6 +16,7 @@ describe("getContextWindowSize", () => {
   });
 
   test("returns 1M for opus models", () => {
+    expect(getContextWindowSize("claude-opus-5")).toBe(1_000_000);
     expect(getContextWindowSize("claude-opus-4-8")).toBe(1_000_000);
     expect(getContextWindowSize("claude-opus-4-7")).toBe(1_000_000);
     expect(getContextWindowSize("claude-opus-4-6")).toBe(1_000_000);

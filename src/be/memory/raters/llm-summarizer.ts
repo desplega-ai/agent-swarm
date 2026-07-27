@@ -11,6 +11,7 @@
  * No `bun:sqlite` / `src/be/db` imports. Boundary script enforces this.
  */
 import { z } from "zod";
+import { getOpenRouterBaseUrl } from "../../../utils/openrouter-base-url";
 import { type SummaryWithRatings, SummaryWithRatingsSchema } from "./llm";
 
 /**
@@ -27,7 +28,14 @@ export const DEFAULT_MEMORY_RATER_MODEL = "google/gemini-3-flash-preview";
  */
 export const MEMORY_RATER_SCHEMA_NAME = "memory_rater_output";
 
-const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
+/**
+ * Chat-completions URL, resolved per call so `OPENROUTER_BASE_URL` (gateway
+ * routing — see `src/utils/openrouter-base-url.ts`) is honored even when it
+ * is set after module load (worker subprocess env resolution).
+ */
+function openRouterChatCompletionsUrl(): string {
+  return `${getOpenRouterBaseUrl()}/chat/completions`;
+}
 
 /**
  * JSON Schema derived from {@link SummaryWithRatingsSchema}, the source of
@@ -138,7 +146,7 @@ export async function runMemoryRater(opts: RunMemoryRaterOpts): Promise<RunMemor
 
   let res: Response;
   try {
-    res = await fetchFn(OPENROUTER_CHAT_COMPLETIONS_URL, {
+    res = await fetchFn(openRouterChatCompletionsUrl(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

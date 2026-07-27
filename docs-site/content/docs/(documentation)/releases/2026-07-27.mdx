@@ -1,0 +1,54 @@
+---
+title: "Release Notes — Week of July 20-27, 2026"
+description: "A redesigned Connections experience, workspace personalization, and stronger controls for self-hosted deployments."
+---
+
+## Highlights
+
+This week introduces a redesigned Connections experience that makes it straightforward to link agents to the services where work already happens.
+
+### A new Connections experience
+
+The previous script-connections flow has been replaced with an embedded Connections UI backed by a unified OAuth core. Teams can now connect directly to five curated integrations—GitHub, Gmail, Jira, Linear, and Slack—without leaving the product or managing configuration manually.
+
+Embedded OAuth handling lets you authorize an account and immediately use it for tool access or egress secrets. A catalog browser surfaces available integrations with clear visual feedback for connection status. Credential bindings are resolved at runtime for both MCP and scripts execution paths, so once a connection exists you can reference it from prompt steps, workflow nodes, or raw script runs.
+
+The OAuth credential broker now properly handles `authKind: oauth` bindings, fixing an earlier gap where only simple config-key secrets were resolved. This matters when you wire an MCP server or external script to an external API that requires ongoing token refresh; the broker performs refresh sweeps and surfaces a live access token when the script executes.
+
+See [#990](https://github.com/desplega-ai/agent-swarm/pull/990) and [#983](https://github.com/desplega-ai/agent-swarm/pull/983).
+
+### A workspace that is easier to recognize at a glance
+
+Session titles are now customizable. You can set a clear, memorable name for each root task so histories and runs are easier to scan. The title is stored on the root task record and propagates to breadcrumbs, session listings, and the API. If unset, the system falls back to the initial user message or a generic label.
+
+Agent avatars support custom icon selection plus color swatches (including free-form hex input). You can pick from a curated set of lucide icons and apply a deterministic shade, or enter any valid six-digit hex. Default avatars remain available for agents that have not been customized; resetting clears custom choices and reverts to the hash-derived defaults. The picker lives on the agent detail page and updates render immediately across the UI.
+
+These presentation details make multi-agent environments and team workspaces faster to navigate, especially when you are tracking many concurrent sessions or hand off context between people and agents.
+
+See [#1000](https://github.com/desplega-ai/agent-swarm/pull/1000) and [#1001](https://github.com/desplega-ai/agent-swarm/pull/1001).
+
+## Improvements
+
+### Claude Opus 5 in the model registry
+
+Claude Opus 5 models are now registered and selectable alongside existing Claude variants. The model list, context-window accounting, and cost reporting all recognize the new keys so downstream features (session summaries, spend tracking, prompt routing) continue to work without special configuration.
+
+See [#1004](https://github.com/desplega-ai/agent-swarm/pull/1004).
+
+### MCP capability gating for self-hosted deployments
+
+Self-hosters can now gate which MCP tool groups are exposed. Server-capability prompt gating and the full-surface scripts bridge provide deliberate access boundaries: individual tool families can be enabled or disabled at the seed level and the prompt surface reflects those decisions at session start.
+
+Combined with the existing scripts system, this lets operators choose the exact surface area available to agents without broad allow/deny lists or post-hoc filtering. The capability matrix is documented alongside environment variable and MCP reference guides.
+
+See [#996](https://github.com/desplega-ai/agent-swarm/pull/996).
+
+## Bug Fixes
+
+### Workflow watchdogs now honor inline script timeouts
+
+Previously, a workflow step's watchdog could ignore the timeout configured directly on an inline script. The engine now correctly reads and applies that per-step timeout, so long-running inline scripts are terminated as expected rather than running to the global default or to completion.
+
+This is especially relevant when you use inline `swarm-script` or raw source steps that perform external calls or heavy local work; the watchdog respects the field you set on the node.
+
+See [#986](https://github.com/desplega-ai/agent-swarm/pull/986).

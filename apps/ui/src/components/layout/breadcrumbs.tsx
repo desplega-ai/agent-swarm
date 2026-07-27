@@ -15,6 +15,7 @@ import { useTask } from "@/api/hooks/use-tasks";
 import { useUser } from "@/api/hooks/use-users";
 import { useWorkflow } from "@/api/hooks/use-workflows";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
+import { sessionDisplayTitle } from "@/lib/utils";
 
 const routeLabels: Record<string, string> = {
   dashboard: "Dashboard",
@@ -138,7 +139,7 @@ export function Breadcrumbs() {
       : parent === "people"
         ? personMeta?.name
         : parent === "sessions"
-          ? sessionMeta?.root.task
+          ? sessionMeta && sessionDisplayTitle(sessionMeta.root)
           : parent === "agents"
             ? agentMeta?.name
             : parent === "tasks"

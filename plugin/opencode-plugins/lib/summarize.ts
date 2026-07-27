@@ -328,7 +328,14 @@ async function callOpenAICompat(
   let baseUrl: string;
   let modelId: string;
   if (cred.kind === "openrouter") {
-    baseUrl = "https://openrouter.ai/api/v1";
+    // Vendored from `src/utils/openrouter-base-url.ts` (plugin sandbox can't
+    // import from src/): OPENROUTER_BASE_URL routes traffic through an
+    // OpenAI-compatible gateway; unset/blank means openrouter.ai directly.
+    const envBase = process.env.OPENROUTER_BASE_URL;
+    baseUrl =
+      typeof envBase === "string" && envBase.trim().length > 0
+        ? envBase.trim().replace(/\/+$/, "")
+        : "https://openrouter.ai/api/v1";
     // OpenRouter model strings retain the inner provider segment, e.g.
     // "openrouter/google/gemini-3-flash-preview" → "google/gemini-3-flash-preview".
     modelId = cred.modelDefault.replace(/^openrouter\//, "");

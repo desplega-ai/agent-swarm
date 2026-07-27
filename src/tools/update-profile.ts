@@ -6,7 +6,7 @@ import * as z from "zod";
 import { getAgentById, updateAgentName, updateAgentProfile } from "@/be/db";
 import { can } from "@/rbac";
 import { createToolRegistrar } from "@/tools/utils";
-import { type Agent, AgentSchema } from "@/types";
+import { type Agent, AgentAvatarSchema, AgentSchema } from "@/types";
 
 async function validateSetupScriptSyntax(setupScript: string): Promise<string | null> {
   const proc = Bun.spawn(["bash", "-n", "-c", setupScript], {
@@ -121,6 +121,11 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           .describe(
             "Heartbeat checklist content (HEARTBEAT.md). Checked periodically — add standing orders for the lead to review. Synced to /workspace/HEARTBEAT.md.",
           ),
+        avatar: AgentAvatarSchema.nullable()
+          .optional()
+          .describe(
+            "Custom avatar: { type: 'lucide', icon: '<kebab-case-lucide-name>', color?: '#RRGGBB' }. Pass null to reset to the default deterministic icon/color.",
+          ),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -142,6 +147,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         setupScript,
         toolsMd,
         heartbeatMd,
+        avatar,
       },
       requestInfo,
       _meta,
@@ -221,20 +227,21 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         identityMd === undefined &&
         setupScript === undefined &&
         toolsMd === undefined &&
-        heartbeatMd === undefined
+        heartbeatMd === undefined &&
+        avatar === undefined
       ) {
         return {
           content: [
             {
               type: "text",
-              text: "At least one field (name, description, role, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, or heartbeatMd) must be provided.",
+              text: "At least one field (name, description, role, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, heartbeatMd, or avatar) must be provided.",
             },
           ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
             message:
-              "At least one field (name, description, role, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, or heartbeatMd) must be provided.",
+              "At least one field (name, description, role, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, heartbeatMd, or avatar) must be provided.",
           },
         };
       }
@@ -273,7 +280,8 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           }
         }
 
-        // Update profile fields if provided
+        // Update profile fields if provided. `avatar` is spread in only when
+        // present so `null` (reset) stays distinguishable from "not provided".
         agent = updateAgentProfile(
           targetAgentId,
           {
@@ -286,6 +294,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
             setupScript,
             toolsMd,
             heartbeatMd,
+            ...(avatar !== undefined ? { avatar } : {}),
           },
           {
             changeSource: isUpdatingSelf ? "self_edit" : "lead_coaching",
@@ -381,6 +390,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         if (setupScript !== undefined) updatedFields.push("setupScript");
         if (toolsMd !== undefined) updatedFields.push("toolsMd");
         if (heartbeatMd !== undefined) updatedFields.push("heartbeatMd");
+        if (avatar !== undefined) updatedFields.push("avatar");
 
         const targetLabel = isUpdatingSelf ? "own" : `agent ${targetAgentId}`;
         return {
