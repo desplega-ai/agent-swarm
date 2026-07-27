@@ -358,26 +358,69 @@ export async function createPiRuntimeAuth(
 }
 
 /**
- * Materialize the OpenRouter gateway override into `<agentDir>/models.json`
- * so pi-coding-agent's `ModelRuntime` (which loads that file at create time)
- * composes every built-in OpenRouter model with the gateway `baseUrl` — see
- * `src/utils/openrouter-base-url.ts` for the env contract.
+ * Sidecar marker recording the gateway `baseUrl` WE wrote into models.json
+ * (and any user value we displaced). Lets `ensureOpenRouterModelsOverride`
+ * revert precisely when the env returns to default, without ever touching a
+ * hand-authored override it didn't create. Lives next to models.json; NOT
+ * part of pi's config surface.
+ */
+const OPENROUTER_OVERRIDE_MARKER = ".agent-swarm-openrouter-override.json";
+
+interface OpenRouterOverrideMarker {
+  baseUrl: string;
+  /** User-authored baseUrl we displaced, restored on revert. */
+  previous?: string;
+}
+
+async function readJsonFile(path: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const file = Bun.file(path);
+    if (!(await file.exists())) return undefined;
+    const parsed: unknown = JSON.parse(await file.text());
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Materialize (or revert) the OpenRouter gateway override in
+ * `<agentDir>/models.json` so pi-coding-agent's `ModelRuntime` (which loads
+ * that file at create time) composes every built-in OpenRouter model with
+ * the gateway `baseUrl` — see `src/utils/openrouter-base-url.ts` for the
+ * env contract.
  *
- * Merge-preserving: existing provider entries (and any other openrouter
- * config keys) are kept; only `providers.openrouter.baseUrl` is set. A
- * corrupt existing file is overwritten with just the override — for gateway
- * deployments, guaranteed rerouting wins over preserving unparseable config.
- * No-op when `OPENROUTER_BASE_URL` is unset/blank/default, so local pi usage
- * is untouched.
+ * Gateway set (non-default): merge-preserving write — existing provider
+ * entries and other openrouter keys are kept, only
+ * `providers.openrouter.baseUrl` is set; a displaced user value is recorded
+ * in a sidecar marker. A corrupt existing file is overwritten with just the
+ * override — for gateway deployments, guaranteed rerouting wins over
+ * preserving unparseable config.
+ *
+ * Gateway unset/default: reverts a PREVIOUSLY WRITTEN override (marker
+ * present and models.json still carries the marker's value) — restoring the
+ * displaced user baseUrl or deleting the key, dropping now-empty objects,
+ * and removing models.json entirely if the override was all it contained.
+ * The env value in a shared worker isn't per-task in practice, but reverts
+ * make rollback = "unset the env" and keep repo-scoped/self-hosted setups
+ * from inheriting a stale gateway (PR #1010 review). Without a marker the
+ * function never touches models.json, so hand-authored overrides survive.
  */
 export async function ensureOpenRouterModelsOverride(
   agentDir: string,
   env: Record<string, string | undefined> = process.env,
 ): Promise<void> {
   const baseUrl = getOpenRouterBaseUrl(env as NodeJS.ProcessEnv);
-  if (baseUrl === DEFAULT_OPENROUTER_BASE_URL) return;
-
   const modelsPath = join(agentDir, "models.json");
+  const markerPath = join(agentDir, OPENROUTER_OVERRIDE_MARKER);
+
+  if (baseUrl === DEFAULT_OPENROUTER_BASE_URL) {
+    await revertOpenRouterModelsOverride(modelsPath, markerPath);
+    return;
+  }
+
   let existing: Record<string, unknown> = {};
   try {
     const file = Bun.file(modelsPath);
@@ -399,6 +442,17 @@ export async function ensureOpenRouterModelsOverride(
     typeof providers.openrouter === "object" && providers.openrouter !== null
       ? (providers.openrouter as Record<string, unknown>)
       : {};
+
+  // Record what we displace, once — re-runs with the marker already present
+  // keep the ORIGINAL displaced value (the current baseUrl is then ours).
+  const priorMarker = (await readJsonFile(markerPath)) as OpenRouterOverrideMarker | undefined;
+  const currentBaseUrl = typeof openrouter.baseUrl === "string" ? openrouter.baseUrl : undefined;
+  const previous = priorMarker
+    ? priorMarker.previous
+    : currentBaseUrl !== baseUrl
+      ? currentBaseUrl
+      : undefined;
+
   const next = {
     ...existing,
     providers: {
@@ -407,6 +461,66 @@ export async function ensureOpenRouterModelsOverride(
     },
   };
   await Bun.write(modelsPath, `${JSON.stringify(next, null, 2)}\n`);
+  const marker: OpenRouterOverrideMarker = {
+    baseUrl,
+    ...(previous !== undefined ? { previous } : {}),
+  };
+  await Bun.write(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
+}
+
+/**
+ * Undo a marker-recorded gateway override. Only acts when the marker exists
+ * AND models.json's `providers.openrouter.baseUrl` still equals the value
+ * the marker says we wrote — anything else means the user edited the file
+ * since, and we leave it alone (the stale marker is dropped either way).
+ */
+async function revertOpenRouterModelsOverride(
+  modelsPath: string,
+  markerPath: string,
+): Promise<void> {
+  const marker = (await readJsonFile(markerPath)) as OpenRouterOverrideMarker | undefined;
+  if (!marker) return;
+  const removeMarker = () => Bun.file(markerPath).delete();
+
+  const existing = await readJsonFile(modelsPath);
+  if (!existing) {
+    await removeMarker();
+    return;
+  }
+  const providers =
+    typeof existing.providers === "object" && existing.providers !== null
+      ? { ...(existing.providers as Record<string, unknown>) }
+      : undefined;
+  const openrouter =
+    providers && typeof providers.openrouter === "object" && providers.openrouter !== null
+      ? { ...(providers.openrouter as Record<string, unknown>) }
+      : undefined;
+  if (!providers || !openrouter || openrouter.baseUrl !== marker.baseUrl) {
+    await removeMarker();
+    return;
+  }
+
+  if (marker.previous !== undefined) {
+    openrouter.baseUrl = marker.previous;
+  } else {
+    delete openrouter.baseUrl;
+  }
+  if (Object.keys(openrouter).length === 0) {
+    delete providers.openrouter;
+  } else {
+    providers.openrouter = openrouter;
+  }
+  const next: Record<string, unknown> = { ...existing, providers };
+  if (Object.keys(providers).length === 0) {
+    delete next.providers;
+  }
+
+  if (Object.keys(next).length === 0) {
+    await Bun.file(modelsPath).delete();
+  } else {
+    await Bun.write(modelsPath, `${JSON.stringify(next, null, 2)}\n`);
+  }
+  await removeMarker();
 }
 
 /**
@@ -1033,6 +1147,7 @@ export class PiMonoAdapter implements ProviderAdapter {
       agentId: config.agentId,
       taskId: config.taskId,
       isLead: config.role === "lead",
+      env: sessionEnv,
     });
 
     // 5. Create resource loader with system prompt + extension

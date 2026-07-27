@@ -17,6 +17,12 @@ export interface SwarmHooksConfig {
   agentId: string;
   taskId: string;
   isLead: boolean;
+  /**
+   * Per-task resolved env (`ProviderSessionConfig.env`). Forwarded to the
+   * session-summary path so swarm_config overlays (rotated credentials,
+   * `OPENROUTER_BASE_URL`) apply — they never reach `process.env`.
+   */
+  env?: Record<string, string | undefined>;
 }
 
 /** Standard headers for swarm API requests */
@@ -368,6 +374,9 @@ export async function summarizeSessionForPi(
       },
       apiUrl: config.apiUrl,
       apiKey: config.apiKey,
+      // Per-task resolved env — swarm_config overlays (e.g.
+      // OPENROUTER_BASE_URL) never reach process.env.
+      env: config.env,
     });
     // null = no auth resolved or wrapper exhausted retries (already logged inside)
     if (!result) return;

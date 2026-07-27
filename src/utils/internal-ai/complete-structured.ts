@@ -41,6 +41,14 @@ export interface CompleteStructuredOptions<TZod extends z.ZodTypeAny> {
    */
   apiUrl?: string;
   apiKey?: string;
+  /**
+   * Per-task resolved environment (`ProviderSessionConfig.env` /
+   * `fetchResolvedEnv` output). Used for credential lookup AND the
+   * `OPENROUTER_BASE_URL` gateway override — swarm_config-sourced values
+   * never reach `process.env`, so callers with a session env must pass it.
+   * Defaults to `process.env`.
+   */
+  env?: Record<string, string | undefined>;
   /** Default: 3. */
   retries?: number;
   signal?: AbortSignal;
@@ -187,7 +195,7 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
   } else {
     const resolver = opts._resolveCredential ?? resolveCredential;
     cred = await resolver({
-      env: process.env,
+      env: (opts.env ?? process.env) as NodeJS.ProcessEnv,
       apiUrl: opts.apiUrl,
       apiKey: opts.apiKey,
       callerTag: opts.callerTag,
@@ -262,7 +270,9 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
 
   // The builtin catalog hardcodes openrouter.ai; OPENROUTER_BASE_URL reroutes
   // through a gateway (pi-ai's stream path uses `model.baseUrl` verbatim).
-  const openRouterBaseUrl = getOpenRouterBaseUrl();
+  // Resolved from the caller's session env when provided — swarm_config
+  // overlays don't reach `process.env`.
+  const openRouterBaseUrl = getOpenRouterBaseUrl((opts.env ?? process.env) as NodeJS.ProcessEnv);
   if (provider === "openrouter" && openRouterBaseUrl !== DEFAULT_OPENROUTER_BASE_URL) {
     model = { ...model, baseUrl: openRouterBaseUrl };
   }

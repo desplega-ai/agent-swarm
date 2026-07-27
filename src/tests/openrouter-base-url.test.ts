@@ -73,6 +73,86 @@ describe("ensureOpenRouterModelsOverride (pi)", () => {
     expect(written).toEqual({ providers: { openrouter: { baseUrl: GATEWAY } } });
   });
 
+  test("reverts a written override when the env returns to default (file we created is removed)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-or-revert-"));
+    try {
+      await ensureOpenRouterModelsOverride(dir, { OPENROUTER_BASE_URL: GATEWAY });
+      expect(await Bun.file(join(dir, "models.json")).exists()).toBe(true);
+      await ensureOpenRouterModelsOverride(dir, {});
+      // The override was ALL the file contained — both it and the marker go.
+      expect(await Bun.file(join(dir, "models.json")).exists()).toBe(false);
+      expect(await Bun.file(join(dir, ".agent-swarm-openrouter-override.json")).exists()).toBe(
+        false,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("revert restores a displaced user baseUrl and keeps sibling keys", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-or-restore-"));
+    try {
+      await Bun.write(
+        join(dir, "models.json"),
+        JSON.stringify({
+          providers: {
+            openrouter: { baseUrl: "https://user.example/v1", compat: { supportsTools: true } },
+            custom: { baseUrl: "https://custom.example/v1", api: "openai-completions" },
+          },
+        }),
+      );
+      await ensureOpenRouterModelsOverride(dir, { OPENROUTER_BASE_URL: GATEWAY });
+      // Re-run with the gateway still set — displaced value must survive.
+      await ensureOpenRouterModelsOverride(dir, { OPENROUTER_BASE_URL: GATEWAY });
+      await ensureOpenRouterModelsOverride(dir, {});
+      const restored = JSON.parse(await Bun.file(join(dir, "models.json")).text());
+      expect(restored.providers.openrouter).toEqual({
+        baseUrl: "https://user.example/v1",
+        compat: { supportsTools: true },
+      });
+      expect(restored.providers.custom).toEqual({
+        baseUrl: "https://custom.example/v1",
+        api: "openai-completions",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("revert leaves a user-edited baseUrl alone (marker mismatch) and drops the marker", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-or-user-edit-"));
+    try {
+      await ensureOpenRouterModelsOverride(dir, { OPENROUTER_BASE_URL: GATEWAY });
+      // User hand-edits the file after we wrote it.
+      await Bun.write(
+        join(dir, "models.json"),
+        JSON.stringify({ providers: { openrouter: { baseUrl: "https://mine.example/v1" } } }),
+      );
+      await ensureOpenRouterModelsOverride(dir, {});
+      const kept = JSON.parse(await Bun.file(join(dir, "models.json")).text());
+      expect(kept.providers.openrouter.baseUrl).toBe("https://mine.example/v1");
+      expect(await Bun.file(join(dir, ".agent-swarm-openrouter-override.json")).exists()).toBe(
+        false,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("default env never touches a hand-authored models.json (no marker)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-or-hands-off-"));
+    try {
+      const userConfig = {
+        providers: { openrouter: { baseUrl: "https://mine.example/v1" } },
+      };
+      await Bun.write(join(dir, "models.json"), JSON.stringify(userConfig));
+      await ensureOpenRouterModelsOverride(dir, {});
+      expect(JSON.parse(await Bun.file(join(dir, "models.json")).text())).toEqual(userConfig);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("merge-preserves existing providers and openrouter keys", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pi-or-merge-"));
     try {

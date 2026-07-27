@@ -771,12 +771,24 @@ export class OpencodeAdapter implements ProviderAdapter {
       SWARM_AGENT_ID: process.env.SWARM_AGENT_ID,
       SWARM_TASK_ID: process.env.SWARM_TASK_ID,
       SWARM_IS_LEAD: process.env.SWARM_IS_LEAD,
+      OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL,
     };
     process.env.SWARM_API_URL = config.apiUrl;
     process.env.SWARM_API_KEY = config.apiKey;
     process.env.SWARM_AGENT_ID = config.agentId;
     process.env.SWARM_TASK_ID = config.taskId;
     process.env.SWARM_IS_LEAD = config.role === "lead" ? "true" : "false";
+    // Mirror the resolved OpenRouter gateway into the spawn env: the
+    // summarize plugin (and any other plugin OpenRouter fetch) reads its own
+    // process.env inside the opencode subprocess, which inherits OURS — a
+    // per-task swarm_config value in `config.env` would otherwise be
+    // invisible there and the plugin would bypass the gateway.
+    const spawnOpenRouterBaseUrl = getOpenRouterBaseUrl(
+      (config.env ?? process.env) as NodeJS.ProcessEnv,
+    );
+    if (spawnOpenRouterBaseUrl !== DEFAULT_OPENROUTER_BASE_URL) {
+      process.env.OPENROUTER_BASE_URL = spawnOpenRouterBaseUrl;
+    }
     process.env.CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY = CTX_MODE_NUDGE_EVERY;
 
     // Set OPENCODE_CONFIG scoped to the spawn call (save + restore)
