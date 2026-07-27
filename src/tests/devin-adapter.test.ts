@@ -58,6 +58,8 @@ const playbookResponse = {
 
 /** Track last request for assertions. */
 let lastCreateSessionBody: Record<string, unknown> | null = null;
+let lastMessageRequest: { url: string; body: Record<string, unknown> } | null = null;
+let messageErrorResponse: { status: number; body: string } | null = null;
 
 // ---------------------------------------------------------------------------
 // Mock HTTP server
@@ -116,6 +118,12 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
 
     // POST .../messages
     if (method === "POST" && url.includes("/messages")) {
+      lastMessageRequest = { url, body: body ? JSON.parse(body) : {} };
+      if (messageErrorResponse) {
+        res.writeHead(messageErrorResponse.status, { "Content-Type": "application/json" });
+        res.end(messageErrorResponse.body);
+        return;
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
       return;
@@ -214,6 +222,8 @@ beforeEach(() => {
   pollErrorResponse = null;
   pollErrorCount = 0;
   lastCreateSessionBody = null;
+  lastMessageRequest = null;
+  messageErrorResponse = null;
 
   // Ensure env vars are set (individual tests may clear them).
   process.env.DEVIN_API_KEY = API_KEY;
@@ -580,6 +590,35 @@ describe("DevinAdapter.abort", () => {
     if (resultEvent?.type === "result") {
       expect(resultEvent.errorCategory).toBe("cancelled");
     }
+  });
+});
+
+describe("DevinSession.deliverSteering", () => {
+  test("sends through the session-scoped Devin API path and reports queue delivery", async () => {
+    pollResponse.status = "running";
+    pollResponse.status_detail = "working";
+
+    const session = await new DevinAdapter().createSession(testConfig());
+    await expect(session.deliverSteering?.({ mode: "steer", text: "Please stop and revise." })).resolves.toEqual({
+      delivered: true,
+      mode: "queue",
+    });
+    expect(lastMessageRequest).toEqual({
+      url: "/v3/organizations/org-adapter-test/sessions/ses-test-001/messages",
+      body: { message: "Please stop and revise." },
+    });
+    await session.abort();
+  });
+
+  test("returns an undeliverable result when Devin rejects the message", async () => {
+    pollResponse.status = "running";
+    pollResponse.status_detail = "working";
+    messageErrorResponse = { status: 422, body: JSON.stringify({ error: "session unavailable" }) };
+
+    const session = await new DevinAdapter().createSession(testConfig());
+    const result = await session.deliverSteering?.({ mode: "queue", text: "Continue carefully." });
+    expect(result).toEqual({ delivered: false, reason: expect.stringContaining("sendMessage") });
+    await session.abort();
   });
 });
 
