@@ -380,6 +380,7 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.HOME = homeDir;
     delete process.env.CLAUDE_BINARY;
     delete process.env.SWARM_USE_CLAUDE_BRIDGE;
+    delete process.env.CLAUDE_QUEUE_STEERING;
     // Credential check runs before binary resolution; satisfy it.
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-token";
 
@@ -490,6 +491,10 @@ describe("CLAUDE_BINARY env override", () => {
   });
 
   test("argv[1..] after prefix matches between default and legacy bridge command", async () => {
+    // Pin the invocation path: the stream-json/`-p` choice is version-probed
+    // per binary, so without this the assertion would depend on which Claude
+    // CLI happens to be installed on the machine running the test.
+    process.env.CLAUDE_QUEUE_STEERING = "0";
     process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_COMMAND;
     const adapter = new ClaudeAdapter();
     await adapter.createSession(makeConfig());

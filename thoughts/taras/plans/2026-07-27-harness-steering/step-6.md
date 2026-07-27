@@ -2,7 +2,8 @@
 id: step-6
 name: claude stdin stream-json (queue-only)
 depends_on: [step-3]
-status: ready
+status: done
+completed_at: 2026-07-27
 ---
 
 # step-6: claude provider — stdin stream-json rework (queue-only)

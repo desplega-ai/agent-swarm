@@ -90,6 +90,25 @@ export function parseClaudeBinary(raw: string | undefined): string[] {
 
 const MIN_CLAUDE_QUEUE_STEERING_VERSION = [2, 1, 205] as const;
 
+/**
+ * Operator kill-switch for the stream-json invocation path.
+ *
+ * Queued steering on the raw CLI requires `--input-format stream-json`, which
+ * replaces `-p <prompt>` with a stdin message — a change to how *every* claude
+ * task is launched, not just steered ones. `CLAUDE_QUEUE_STEERING=0` forces the
+ * long-standing `-p` invocation back without a code change; `=1` forces the
+ * stream-json path without probing. Unset (the default) probes `--version`.
+ */
+function resolveClaudeQueueSteeringOverride(
+  env: Record<string, string | undefined>,
+): boolean | undefined {
+  const raw = env.CLAUDE_QUEUE_STEERING?.trim().toLowerCase();
+  if (!raw) return undefined;
+  if (["0", "false", "off", "no"].includes(raw)) return false;
+  if (["1", "true", "on", "yes"].includes(raw)) return true;
+  return undefined;
+}
+
 function supportsClaudeQueueSteering(versionOutput: string | undefined): boolean {
   const match =
     versionOutput?.match(/claude(?: code)? version:\s*(\d+)\.(\d+)\.(\d+)/i) ??
@@ -552,7 +571,7 @@ class ClaudeSession implements ProviderSession {
     systemPromptFile: string | null = null,
     private harnessVariant?: string,
     private harnessVariantMeta?: Record<string, unknown>,
-    queueSteeringSupported = false,
+    private readonly queueSteeringSupported = false,
   ) {
     this.taskFilePid = taskFilePid;
     this.contextWindowSize = getContextWindowSize(model);
@@ -602,41 +621,45 @@ class ClaudeSession implements ProviderSession {
           : {}),
         CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
       } as Record<string, string>,
-      stdin: "pipe",
+      // Only pipe stdin on the stream-json path; on the `-p` path the child
+      // has never had a stdin pipe and must not start waiting for one.
+      ...(this.queueSteeringSupported ? { stdin: "pipe" as const } : {}),
       stdout: "pipe",
       stderr: "pipe",
     });
 
-    const stdin = this.proc.stdin;
-    if (stdin && typeof stdin !== "number") {
-      this.stdinWriter = stdin as {
-        write(value: string): unknown;
-        flush?(): unknown;
-        end(): unknown;
-      };
-      void this.writeUserMessage(this.config.prompt).catch((err) => {
+    if (this.queueSteeringSupported) {
+      const stdin = this.proc.stdin;
+      if (stdin && typeof stdin !== "number") {
+        this.stdinWriter = stdin as {
+          write(value: string): unknown;
+          flush?(): unknown;
+          end(): unknown;
+        };
+        void this.writeUserMessage(this.config.prompt).catch((err) => {
+          console.warn(
+            `\x1b[33m[claude]\x1b[0m Failed to write initial prompt to Claude stdin: ${scrubSecrets(String(err))}`,
+          );
+          this.closeStdin();
+          try {
+            this.proc.kill("SIGTERM");
+          } catch {
+            // The subprocess may already have exited after the broken pipe.
+          }
+        });
+      } else {
         console.warn(
-          `\x1b[33m[claude]\x1b[0m Failed to write initial prompt to Claude stdin: ${scrubSecrets(String(err))}`,
+          "\x1b[33m[claude]\x1b[0m Claude stdin was not piped; terminating the session to avoid waiting without a prompt.",
         );
-        this.closeStdin();
         try {
           this.proc.kill("SIGTERM");
         } catch {
-          // The subprocess may already have exited after the broken pipe.
+          // The subprocess may already have exited.
         }
-      });
-    } else {
-      console.warn(
-        "\x1b[33m[claude]\x1b[0m Claude stdin was not piped; terminating the session to avoid waiting without a prompt.",
-      );
-      try {
-        this.proc.kill("SIGTERM");
-      } catch {
-        // The subprocess may already have exited.
       }
     }
 
-    if (queueSteeringSupported && this.stdinWriter) {
+    if (this.queueSteeringSupported && this.stdinWriter) {
       this.deliverSteering = async ({
         mode,
         text,
@@ -684,13 +707,22 @@ class ClaudeSession implements ProviderSession {
       "--verbose",
       "--output-format",
       "stream-json",
-      "--input-format",
-      "stream-json",
       "--dangerously-skip-permissions",
       "--allow-dangerously-skip-permissions",
       "--permission-mode",
       "bypassPermissions",
     ];
+
+    // Queued steering needs `--input-format stream-json`, which is mutually
+    // exclusive with `-p <prompt>` — the prompt then arrives as the first
+    // stdin message instead. Only take that path when the CLI is new enough
+    // to honor it; otherwise keep the long-standing `-p` invocation so an
+    // older worker image behaves exactly as it did before steering existed.
+    if (this.queueSteeringSupported) {
+      cmd.push("--input-format", "stream-json");
+    } else {
+      cmd.push("-p", this.config.prompt);
+    }
 
     if (this.config.additionalArgs?.length) {
       cmd.push(...this.config.additionalArgs);
@@ -1179,6 +1211,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 
     const harnessVariant = useClaudeBridge ? "bridge" : "stock";
     let harnessVariantMeta: Record<string, unknown> | undefined;
+    const queueSteeringOverride = resolveClaudeQueueSteeringOverride(sourceEnv);
     let harnessVersion: string | undefined;
     try {
       const result = Bun.spawnSync([...effectiveClaudeBinaryArgv, "--version"], {
@@ -1198,8 +1231,13 @@ export class ClaudeAdapter implements ProviderAdapter {
       // Harness version detection is best-effort; unknown disables steering.
     }
 
-    const queueSteeringSupported = supportsClaudeQueueSteering(harnessVersion);
-    if (!queueSteeringSupported) {
+    // Bridge/tmux wrappers are excluded: they interpose on the CLI's argv and
+    // stdio, and prompt-over-stdin has only been verified against the stock
+    // binary. A wrapper keeps today's `-p` invocation and simply can't steer.
+    const queueSteeringSupported =
+      queueSteeringOverride ??
+      (!isInteractiveTmuxClaude && supportsClaudeQueueSteering(harnessVersion));
+    if (!queueSteeringSupported && queueSteeringOverride === undefined) {
       console.warn(
         `\x1b[33m[claude]\x1b[0m Queued steering requires Claude Code >= ${MIN_CLAUDE_QUEUE_STEERING_VERSION.join(".")}; detected ${harnessVersion ?? "an unknown version"}. Steering messages will be promoted to follow-up tasks.`,
       );

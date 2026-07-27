@@ -543,7 +543,9 @@ describe("ClaudeManagedAdapter (Phase 3) — session lifecycle", () => {
     );
     await session.waitForCompletion();
 
-    await expect(session.deliverSteering?.({ mode: "queue", text: "Try again later." })).resolves.toEqual({
+    await expect(
+      session.deliverSteering?.({ mode: "queue", text: "Try again later." }),
+    ).resolves.toEqual({
       delivered: false,
       reason: "Error: managed send rejected",
     });

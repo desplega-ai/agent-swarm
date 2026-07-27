@@ -599,7 +599,9 @@ describe("DevinSession.deliverSteering", () => {
     pollResponse.status_detail = "working";
 
     const session = await new DevinAdapter().createSession(testConfig());
-    await expect(session.deliverSteering?.({ mode: "steer", text: "Please stop and revise." })).resolves.toEqual({
+    await expect(
+      session.deliverSteering?.({ mode: "steer", text: "Please stop and revise." }),
+    ).resolves.toEqual({
       delivered: true,
       mode: "queue",
     });
