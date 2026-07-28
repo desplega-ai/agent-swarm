@@ -286,7 +286,10 @@ describe("steering worker transport", () => {
         sourceTaskId: task.id,
       };
 
-      const first = await acceptSteerHandler(ctx, { steeringMessageId: steering.id });
+      const first = await acceptSteerHandler(ctx, {
+        steeringMessageId: steering.id,
+        note: "Switched the summary to Spanish.",
+      });
       const second = await acceptSteerHandler(ctx, { steeringMessageId: steering.id });
 
       expect(first.isError).not.toBe(true);
@@ -294,6 +297,8 @@ describe("steering worker transport", () => {
       expect(getSteeringMessageById(steering.id)).toMatchObject({
         status: "handled",
         handledAt: expect.any(String),
+        // Acceptance note persists; the idempotent second call must not clear it.
+        handledNote: "Switched the summary to Spanish.",
       });
     } finally {
       if (previousBaseUrl === undefined) delete process.env.MCP_BASE_URL;

@@ -105,7 +105,8 @@ export async function acceptSteerHandler(
     };
   }
 
-  const updated = markSteeringHandled(steeringMessageId);
+  const safeNote = note ? scrubSecrets(note) : undefined;
+  const updated = markSteeringHandled(steeringMessageId, safeNote);
   if (!updated) {
     return errorResult(
       `Steering message cannot be acknowledged from status "${steering.status}".`,
@@ -113,7 +114,6 @@ export async function acceptSteerHandler(
     );
   }
 
-  const safeNote = note ? scrubSecrets(note) : undefined;
   const message = safeNote
     ? `Steering message "${steeringMessageId}" acknowledged as handled. Note: ${safeNote}`
     : `Steering message "${steeringMessageId}" acknowledged as handled.`;

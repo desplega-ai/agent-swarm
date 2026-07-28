@@ -3753,6 +3753,7 @@ type TaskSteeringMessageRow = {
   created_at: string;
   delivered_at: string | null;
   handled_at: string | null;
+  handled_note: string | null;
 };
 
 function rowToSteeringMessage(row: TaskSteeringMessageRow): SteeringMessage {
@@ -3771,6 +3772,7 @@ function rowToSteeringMessage(row: TaskSteeringMessageRow): SteeringMessage {
     createdAt: row.created_at,
     deliveredAt: row.delivered_at ?? undefined,
     handledAt: row.handled_at ?? undefined,
+    handledNote: row.handled_note ?? undefined,
   };
 }
 
@@ -3908,16 +3910,17 @@ export function markSteeringDelivered(
   return row ? rowToSteeringMessage(row) : null;
 }
 
-export function markSteeringHandled(id: string): SteeringMessage | null {
+export function markSteeringHandled(id: string, note?: string): SteeringMessage | null {
   const row = getDb()
-    .prepare<TaskSteeringMessageRow, [string]>(
+    .prepare<TaskSteeringMessageRow, [string | null, string]>(
       `UPDATE task_steering_messages
        SET status = 'handled',
-           handled_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+           handled_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+           handled_note = ?
        WHERE id = ? AND status = 'delivered'
        RETURNING *`,
     )
-    .get(id);
+    .get(note ?? null, id);
   return row ? rowToSteeringMessage(row) : null;
 }
 

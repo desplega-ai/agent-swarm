@@ -362,6 +362,8 @@ export const SteeringMessageSchema = z.object({
   createdAt: z.iso.datetime(),
   deliveredAt: z.iso.datetime().optional(),
   handledAt: z.iso.datetime().optional(),
+  /** accept-steer's optional note describing how the steering was incorporated. */
+  handledNote: z.string().optional(),
 });
 export type SteeringMessage = z.infer<typeof SteeringMessageSchema>;
 

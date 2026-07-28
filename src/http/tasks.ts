@@ -60,8 +60,9 @@ import {
   splitLegacyModelAlias,
 } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { json, jsonError, parseBody } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -262,6 +263,8 @@ const markSteeringHandledRoute = route({
   path: "/api/steering-messages/{id}/handled",
   pattern: ["api", "steering-messages", null, "handled"],
   summary: "Mark a steering message handled",
+  description:
+    "Optionally accepts a JSON body `{ note?: string }` — a short acceptance note describing how the steering was incorporated, persisted as `handledNote`.",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   auth: { apiKey: true, agentId: true },
@@ -927,7 +930,19 @@ export async function handleTasks(
       return true;
     }
 
-    const handled = markSteeringHandled(message.id) ?? getSteeringMessageById(message.id);
+    // Optional acceptance note ("how the steering was incorporated"). Read
+    // tolerantly — existing callers post an empty body, which must stay valid.
+    let note: string | undefined;
+    try {
+      const raw = await parseBody<{ note?: unknown }>(req);
+      if (raw && typeof raw.note === "string" && raw.note.trim().length > 0) {
+        note = scrubSecrets(raw.note.slice(0, 500));
+      }
+    } catch {
+      // No/invalid JSON body — the note is optional.
+    }
+
+    const handled = markSteeringHandled(message.id, note) ?? getSteeringMessageById(message.id);
     if (!handled) {
       jsonError(res, "Failed to mark steering message handled", 500);
       return true;

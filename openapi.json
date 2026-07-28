@@ -16142,6 +16142,7 @@
     "/api/steering-messages/{id}/handled": {
       "post": {
         "summary": "Mark a steering message handled",
+        "description": "Optionally accepts a JSON body `{ note?: string }` — a short acceptance note describing how the steering was incorporated, persisted as `handledNote`.",
         "tags": [
           "Tasks"
         ],
