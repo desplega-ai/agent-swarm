@@ -649,6 +649,12 @@ export interface DashboardStats {
     completed: number;
     failed: number;
   };
+  /**
+   * Steering feature flag (≥1.122.1) — served on the authenticated stats
+   * payload, deliberately NOT on the unauthenticated /health endpoint.
+   * Optional for compatibility with older API servers.
+   */
+  steeringEnabled?: boolean;
 }
 
 export type TaskStatus = AgentTaskStatus;

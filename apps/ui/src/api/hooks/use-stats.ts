@@ -39,14 +39,17 @@ export function useApiVersion() {
 }
 
 /**
- * Defaults to enabled so a newer UI remains compatible with older API servers
- * that do not yet include `steeringEnabled` in their health response.
+ * Steering feature flag, read from the authenticated `/api/stats` payload —
+ * deliberately NOT from the unauthenticated `/health` endpoint (server config
+ * must not leak there). Defaults to enabled so a newer UI remains compatible
+ * with older API servers whose stats response lacks `steeringEnabled`; the
+ * version feature-gate still hides steering UI against pre-steering servers.
  */
 export function useSteeringEnabled() {
   return useQuery({
-    queryKey: ["health"],
-    queryFn: () => api.checkHealth(),
-    refetchInterval: 10000,
+    queryKey: ["stats"],
+    queryFn: () => api.fetchStats(),
+    refetchInterval: 30_000,
     retry: 2,
     retryDelay: 1000,
     staleTime: 30_000,

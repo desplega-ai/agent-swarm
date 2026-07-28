@@ -12,7 +12,6 @@ import {
 } from "../be/db";
 import { enqueueAdmissionRow } from "../be/rbac-audit";
 import { getUserGrant } from "../be/rbac-roles";
-import { isSteeringEnabled } from "../be/steering";
 import { initGitHub, resetGitHub } from "../github";
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
@@ -227,11 +226,13 @@ export async function handleCore(
     const version = (await Bun.file("package.json").json()).version;
 
     res.writeHead(200, { "Content-Type": "application/json" });
+    // NOTE: /health is unauthenticated — never expose server configuration
+    // here (feature flags, capabilities, integration state). `steeringEnabled`
+    // lives on the authenticated /api/stats payload instead.
     res.end(
       JSON.stringify({
         status: "ok",
         version,
-        steeringEnabled: isSteeringEnabled(),
       }),
     );
 

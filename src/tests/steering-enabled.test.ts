@@ -21,6 +21,7 @@ import {
 import { requestSteering, SteeringRequestError } from "../be/steering";
 import { createSteeringDispatchState, pollAndDispatchSteering } from "../commands/runner";
 import { handleCore } from "../http/core";
+import { handleStats } from "../http/stats";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { createServer } from "../server";
@@ -127,6 +128,7 @@ beforeAll(async () => {
     if (await handleCore(req, res, agentId, "test-key")) return;
     const pathSegments = getPathSegments(req.url ?? "");
     const queryParams = parseQueryParams(req.url ?? "");
+    if (await handleStats(req, res, pathSegments, queryParams, agentId)) return;
     if (await handleTasks(req, res, pathSegments, queryParams, agentId)) return;
     res.writeHead(404);
     res.end(JSON.stringify({ error: "Not found" }));
@@ -173,11 +175,26 @@ describe("STEERING_ENABLED opt-in", () => {
     });
   });
 
-  test("reports disabled steering from the unauthenticated health endpoint", async () => {
+  test("never leaks the steering flag on the unauthenticated health endpoint", async () => {
+    // /health is public — server configuration must not be discoverable there.
+    const enabled = await api("GET", "/health");
+    expect(enabled.status).toBe(200);
+    expect(enabled.body.steeringEnabled).toBeUndefined();
     await withSteeringDisabled(async () => {
-      const result = await api("GET", "/health");
-      expect(result.status).toBe(200);
-      expect(result.body.steeringEnabled).toBe(false);
+      const disabled = await api("GET", "/health");
+      expect(disabled.status).toBe(200);
+      expect(disabled.body.steeringEnabled).toBeUndefined();
+    });
+  });
+
+  test("reports the steering flag on the authenticated stats endpoint", async () => {
+    const enabled = await api("GET", "/api/stats");
+    expect(enabled.status).toBe(200);
+    expect(enabled.body.steeringEnabled).toBe(true);
+    await withSteeringDisabled(async () => {
+      const disabled = await api("GET", "/api/stats");
+      expect(disabled.status).toBe(200);
+      expect(disabled.body.steeringEnabled).toBe(false);
     });
   });
 

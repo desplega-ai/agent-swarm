@@ -11,6 +11,7 @@ import {
   getTaskStats,
   withFavoriteFlags,
 } from "../be/db";
+import { isSteeringEnabled } from "../be/steering";
 import type { AgentLog } from "../types";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
@@ -150,6 +151,9 @@ export async function handleStats(
         completed: taskStats.completed,
         failed: taskStats.failed,
       },
+      // Authenticated home for the steering feature flag — deliberately NOT on
+      // the unauthenticated /health endpoint (config must not leak).
+      steeringEnabled: isSteeringEnabled(),
     };
 
     json(res, stats);
