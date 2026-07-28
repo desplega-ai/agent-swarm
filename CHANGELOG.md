@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.122.0] - 2026-07-28
+
+### Added
+- **Memory search now enables mature hybrid and graph-linked retrieval by default** (#1002) — reciprocal-rank fusion and one-hop memory-link expansion improve recall out of the box, while `MEMORY_HYBRID_SEARCH=0` and `MEMORY_GRAPH_EXPANSION=0` retain explicit rollback paths.
+- **Agent appearance search now spans hundreds of curated Lucide icons** (#1011) — the dashboard picker supports normalized natural-word search, capped result sets, zero-result feedback, and stable deterministic fallback icons for existing agents.
+- **All OpenRouter consumers now support gateway routing** (#1010) — `OPENROUTER_BASE_URL` consistently routes pi, opencode, Codex/session summarizers, internal AI calls, credential checks, and raw-LLM or validation workflow nodes through an OpenAI-compatible endpoint without changing direct-OpenRouter defaults.
+
 ## [1.121.0] - 2026-07-27
 
 ### Added

@@ -54,6 +54,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `MEMORY_CANDIDATE_MULTIPLIER` | `3` | Candidate set size relative to requested limit |
 | `MEMORY_DEMOTION_FLOOR` | `1.0` | Floor for the Beta-Binomial usefulness multiplier applied during memory reranking (paired with `MEMORY_RATERS`). Default `1.0` disables demotion entirely; lower values (e.g. `0.5`) let poorly-rated memories sink below neutral relevance. |
 | `OPENROUTER_API_KEY` | — | Required for the Stop-hook session summarizer + LLM memory rater (calls go through the Vercel AI SDK against OpenRouter). When unset, both session-summary indexing and the `llm` rater are no-ops |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Optional OpenAI-compatible gateway for every OpenRouter consumer, including harness sessions, credential checks, memory/session summarizers, and raw-LLM or validation workflow nodes. Trailing slashes are removed. Leave unset or blank for direct OpenRouter traffic. |
 | `MEMORY_RATERS` | — (unset/empty → no-op rater only) | Comma-separated list of memory raters to enable (`noop`, `implicit-citation`, `explicit-self`, `llm`). Gates the server-side rating pass fired after task completion (`implicit-citation`) and worker-side gates: the Stop-hook's LLM-rating piggyback (`llm`) and the explicit self-rating tool hint (`explicit-self`). Unknown names are logged and skipped; unset/empty is byte-identical to pre-rater behavior. |
 | `MEMORY_RATER_MODEL` | Per credential kind, e.g. `google/gemini-3-flash-preview` (OpenRouter), `anthropic/claude-haiku-4-5`, `openai/gpt-5.4-mini` | Overrides the resolved model slug for the Stop-hook session-summarizer + LLM memory rater, across whichever credential (OpenRouter/Anthropic/OpenAI/Codex OAuth/Claude CLI) the shared `internal-ai` abstraction resolves. |
 | `MEMORY_RATER_WEIGHTS` | `1.0` per rater | Optional `name:multiplier,...` overrides (e.g. `llm:0.5,implicit-citation:2`) applied to each rater's emitted rating weight before it's persisted. Unlisted raters use `1.0`; the final per-event weight is clamped to `[0, 1]`. |
@@ -118,6 +119,7 @@ Which credentials you need depends on your selected harness provider:
 |----------|----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models via pi-mono |
 | `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key for multi-provider model access |
+| `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | OpenAI-compatible gateway used for OpenRouter model and summarizer traffic |
 | `BEDROCK_AUTH_MODE` | No | inferred from `MODEL_OVERRIDE` | Optional Bedrock mode override. Set `sdk` to force AWS SDK credential probing / live model enumeration; `bearer` is reserved for future support |
 | `AWS_REGION` | In Bedrock SDK mode | — | Required region for Bedrock credential probing and account-accurate model enumeration when `BEDROCK_AUTH_MODE=sdk` or `MODEL_OVERRIDE=amazon-bedrock/*` |
 
@@ -142,6 +144,7 @@ Codex can also authenticate through `~/.codex/auth.json`, including ChatGPT OAut
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key (primary — unlocks 100+ models at [openrouter.ai](https://openrouter.ai)) |
+| `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | OpenAI-compatible gateway used by the OpenRouter provider, model refreshes, and the session summarizer plugin |
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models |
 | `OPENAI_API_KEY` | One of* | — | OpenAI API key for GPT models |
 | `OPENCODE_BINARY` | No | `opencode` | Path to the opencode CLI binary (if not in `$PATH`) |

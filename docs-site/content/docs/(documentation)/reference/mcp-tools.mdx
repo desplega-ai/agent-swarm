@@ -997,6 +997,8 @@ Search accumulated memories with natural language.
 
 When called inside a task, `memory-search` may also return response-side `rateHint` nudges for manual and file-index memories so agents can call `memory_rate(...)` without looking up the signature separately.
 
+Retrieval blends vector and full-text matches, then expands candidates through one hop of resolved memory links before reranking. Both paths are on by default; operators can set `MEMORY_HYBRID_SEARCH=0` or `MEMORY_GRAPH_EXPANSION=0` to restore vector-only or non-graph behavior.
+
 ### memory-get
 
 Retrieve full details of a specific memory.

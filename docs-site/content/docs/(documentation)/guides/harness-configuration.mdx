@@ -189,6 +189,7 @@ At least one credential source is required. The Docker entrypoint validates this
 |----------|----------|---------|-------------|
 | `HARNESS_PROVIDER` | Yes | — | Must be set to `opencode` |
 | `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key (primary — gives access to all OpenRouter models) |
+| `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | Route OpenRouter provider, model-refresh, and session-summary traffic through an OpenAI-compatible gateway |
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models |
 | `OPENAI_API_KEY` | One of* | — | OpenAI API key for GPT models |
 | `OPENCODE_BINARY` | No | `opencode` | Path to the opencode CLI binary (if not in `$PATH`) |
@@ -242,10 +243,13 @@ At least one of these must be available. The Docker entrypoint validates this on
 | `HARNESS_PROVIDER` | Yes | — | Must be set to `pi` |
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models |
 | `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key for multi-provider access |
+| `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | Route OpenRouter model and session-summary traffic through an OpenAI-compatible gateway |
 | `OPENAI_API_KEY` | One of* | — | OpenAI API key for GPT models |
 | `GOOGLE_API_KEY` | When prefixed | — | Google AI API key — required only when `MODEL_OVERRIDE` uses a `google/` prefix |
 
 \* At least one credential source is required (API key or `~/.pi/agent/auth.json`).
+
+`OPENROUTER_BASE_URL` is shared across the swarm's OpenRouter consumers. Set it on API and worker processes when a deployment must route harnesses, credential checks, internal summaries, and raw-LLM or validation workflow nodes through the same gateway. Unset or blank values keep the direct `https://openrouter.ai/api/v1` default.
 
 <Callout type="warn">
 **Do not pass `CLAUDE_CODE_OAUTH_TOKEN`** when using `HARNESS_PROVIDER=pi`. If Claude credentials are present in the environment, the harness will attempt to use them instead of the configured pi-mono provider, causing misconfiguration. Only pass the credentials relevant to your selected provider (`OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`).
