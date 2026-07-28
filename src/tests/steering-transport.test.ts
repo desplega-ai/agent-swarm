@@ -63,7 +63,10 @@ function pendingMessage(overrides: Partial<SteeringMessage> = {}): SteeringMessa
   };
 }
 
+const originalSteeringEnabled = process.env.STEERING_ENABLED;
+
 beforeAll(async () => {
+  process.env.STEERING_ENABLED = "true";
   await removeTestDb();
   initDb(TEST_DB_PATH);
   server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -82,6 +85,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (originalSteeringEnabled === undefined) delete process.env.STEERING_ENABLED;
+  else process.env.STEERING_ENABLED = originalSteeringEnabled;
   await new Promise<void>((resolve) => server.close(() => resolve()));
   closeDb();
   await removeTestDb();
@@ -298,12 +303,13 @@ describe("steering worker transport", () => {
     }
   });
 
-  test("steering prompt follows provider traits and task-pool capability", async () => {
+  test("steering prompt follows provider traits and the core capability", async () => {
     const args = {
       role: "worker",
       agentId: crypto.randomUUID(),
       swarmUrl: "localhost",
-      serverCapabilities: ["task-pool"],
+      // steer-task/accept-steer register under `core`, not `task-pool`.
+      serverCapabilities: ["core"],
     };
     const capable = await getBasePrompt({
       ...args,

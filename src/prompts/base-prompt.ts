@@ -194,7 +194,9 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     isSteeringEnabled() &&
     steerModes.length > 0 &&
     !scriptsOnlyMode &&
-    serverHasCapability("task-pool", true)
+    // steer-task/accept-steer register under the core capability (steering
+    // works on directly-assigned tasks, not just the pool).
+    serverHasCapability("core", true)
   ) {
     const steeringResult = await resolveTemplateAsync("system.agent.steering", {});
     prompt += steeringResult.text;

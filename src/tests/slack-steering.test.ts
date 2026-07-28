@@ -46,7 +46,10 @@ function createRunningSlackTask(
   return started!;
 }
 
+const previousSteeringEnabled = process.env.STEERING_ENABLED;
+
 beforeAll(() => {
+  process.env.STEERING_ENABLED = "true";
   initDb(TEST_DB_PATH);
   leadId = createAgent({
     name: "slack-steering-lead",
@@ -58,6 +61,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  restoreEnv("STEERING_ENABLED", previousSteeringEnabled);
   restoreEnv("SLACK_THREAD_STEERING", previousSteering);
   restoreEnv("SLACK_THREAD_STEERING_MODE", previousSteeringMode);
   restoreEnv("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION", previousRequireMention);

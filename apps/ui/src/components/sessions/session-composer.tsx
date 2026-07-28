@@ -34,7 +34,7 @@ export interface SessionComposerProps {
    */
   latestLeafTask: AgentTask | null;
   /**
-   * Steering is only offered when the API server supports it (≥1.122.0).
+   * Steering is only offered when the API server supports it (≥1.122.1).
    * False → the composer behaves exactly as it did before.
    */
   steeringSupported?: boolean;

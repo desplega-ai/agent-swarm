@@ -554,9 +554,10 @@ SLACK_ALLOWED_USER_IDS=U12345678,U87654321           # Comma-separated user IDs 
 # 0/false/off/no keeps `-p`; 1/true/on/yes forces stream-json input.
 # CLAUDE_QUEUE_STEERING=off
 
-# Global steering kill switch. `true`/`1` blocks new steering and hides MCP/UI
-# surfaces. History reads, in-flight worker callbacks, and terminal promotion remain enabled.
-# STEERING_DISABLE=true
+# Task steering is disabled by default. Set `true`/`1` (API + worker containers)
+# to enable steering MCP/UI surfaces and worker delivery. History reads, in-flight
+# worker callbacks, and terminal promotion work regardless.
+# STEERING_ENABLED=true
 ```
 
 ### User Filtering

@@ -407,7 +407,7 @@ class ApiClient {
   }
 
   /**
-   * Steering (≥1.122.0). `mode` defaults to `"queue"` server-side; the UI always
+   * Steering (≥1.122.1). `mode` defaults to `"queue"` server-side; the UI always
    * sends it explicitly (decision 14). We deliberately do NOT send
    * `onUnsupported: "fail"` — the UI already refuses to offer a mode the target
    * harness can't honor (decision 16), so a degrade here would be a server-side

@@ -65,13 +65,21 @@ function userToolHandler(server: McpServer) {
   return tool.handler;
 }
 
+const originalSteeringEnabled = process.env.STEERING_ENABLED;
+
 beforeAll(async () => {
+  process.env.STEERING_ENABLED = "true";
   await removeDbFiles();
   initDb(TEST_DB_PATH);
 });
 
 afterAll(async () => {
   closeDb();
+  if (originalSteeringEnabled === undefined) {
+    delete process.env.STEERING_ENABLED;
+  } else {
+    process.env.STEERING_ENABLED = originalSteeringEnabled;
+  }
   if (originalRbacEnabled === undefined) {
     delete process.env.RBAC_ENABLED;
   } else {

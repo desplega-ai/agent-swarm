@@ -503,9 +503,9 @@ export default function TaskDetailPage() {
   const { data: users } = useUsers();
   const { data: costs, isLoading: costsLoading } = useSessionCosts({ taskId: id });
   const { data: contextData, isLoading: contextLoading } = useTaskContext(id!);
-  // Steering (≥1.122.0) — soft-degrade against older API servers, which 404
+  // Steering (≥1.122.1) — soft-degrade against older API servers, which 404
   // both `/steer` and `/steering-messages`.
-  const steerGate = useFeatureGate("1.122.0");
+  const steerGate = useFeatureGate("1.122.1");
   const { data: steeringEnabled = true } = useSteeringEnabled();
   const { data: steeringMessages } = useTaskSteeringMessages(id!, {
     enabled: steerGate.supported && steeringEnabled,

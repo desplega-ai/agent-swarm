@@ -24,7 +24,10 @@ const TEST_DB_PATH = `./test-steering-promotion-${process.pid}.sqlite`;
 describe("steering promotion on terminal tasks", () => {
   let agentId: string;
 
+  const originalSteeringEnabled = process.env.STEERING_ENABLED;
+
   beforeAll(async () => {
+    process.env.STEERING_ENABLED = "true";
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(`${TEST_DB_PATH}${suffix}`);
@@ -35,6 +38,8 @@ describe("steering promotion on terminal tasks", () => {
   });
 
   afterAll(async () => {
+    if (originalSteeringEnabled === undefined) delete process.env.STEERING_ENABLED;
+    else process.env.STEERING_ENABLED = originalSteeringEnabled;
     closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {

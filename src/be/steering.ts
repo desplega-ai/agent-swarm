@@ -162,7 +162,10 @@ export function markSteeringUndeliverable(
 /** Single server-side write path for HTTP, MCP, script, and Slack steering. */
 export function requestSteering(args: RequestSteeringArgs): SteerResult {
   if (!isSteeringEnabled()) {
-    throw new SteeringRequestError("Steering is disabled on this server (STEERING_DISABLE)", 403);
+    throw new SteeringRequestError(
+      "Steering is disabled on this server (set STEERING_ENABLED=true to enable)",
+      403,
+    );
   }
 
   const task = getTaskById(args.taskId);

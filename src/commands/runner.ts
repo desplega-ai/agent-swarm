@@ -5344,7 +5344,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
     // Check for cancelled tasks and signal their subprocesses. Deliberately
     // NOT gated on steeringDispatchState — cancellation abort must keep
-    // working when STEERING_DISABLE turns steering dispatch off.
+    // working when steering dispatch is off (STEERING_ENABLED unset).
     if (state.activeTasks.size > 0) {
       for (const [taskId, task] of state.activeTasks) {
         if (cancelledSignaled.has(taskId)) continue; // Already sent SIGTERM

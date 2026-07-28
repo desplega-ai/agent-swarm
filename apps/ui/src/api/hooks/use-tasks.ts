@@ -77,7 +77,7 @@ export function useTaskSessionLogs(taskId: string) {
 }
 
 /**
- * Steering lifecycle readout (≥1.122.0). Polls on the same 5s cadence as
+ * Steering lifecycle readout (≥1.122.1). Polls on the same 5s cadence as
  * `useTaskSessionLogs` — steering status moves `pending → delivered → handled`
  * on the worker, and there is no websocket/SSE channel for it by design.
  */
@@ -386,7 +386,7 @@ export interface SteerTaskInput {
 }
 
 /**
- * Steering (≥1.122.0). Modelled on `usePauseTask`, minus the optimistic status
+ * Steering (≥1.122.1). Modelled on `usePauseTask`, minus the optimistic status
  * patch: steering never changes the task's status, so there is nothing to
  * transition. The snapshot/rollback pair is kept so a failed steer can't leave
  * a half-invalidated cache behind.

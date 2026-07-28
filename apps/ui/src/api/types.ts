@@ -185,13 +185,13 @@ export interface AgentTask {
   /** Pointer-based artifacts attached to the task, when included by the API response. */
   attachments?: TaskAttachment[];
   /**
-   * Steering (≥1.122.0), derived server-side: true when the assigned agent is
+   * Steering (≥1.122.1), derived server-side: true when the assigned agent is
    * the Lead. Only present on task *read* responses (`GET /api/tasks/:id`,
    * `GET /api/sessions/:rootTaskId`) — absent on list rows and optimistic rows.
    */
   isLeadTask?: boolean;
   /**
-   * Steering (≥1.122.0), derived server-side from `PROVIDER_STEER_CAPABILITIES`:
+   * Steering (≥1.122.1), derived server-side from `PROVIDER_STEER_CAPABILITIES`:
    * the modes the target harness can actually honor. Empty array = the harness
    * has no live-injection path at all (codex), so any steer becomes a
    * follow-up task. Same presence caveat as `isLeadTask`.
@@ -207,7 +207,7 @@ export type DevinProviderMeta = {
 };
 
 // ============================================================================
-// Task steering (≥1.122.0) — mirrors the `Steering*` block in `src/types.ts`.
+// Task steering (≥1.122.1) — mirrors the `Steering*` block in `src/types.ts`.
 // ============================================================================
 
 /** `"queue"` lands at the next turn boundary; `"steer"` interrupts the turn. */

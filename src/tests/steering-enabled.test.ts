@@ -28,6 +28,7 @@ import { createUserServer } from "../server-user";
 import { requestSlackThreadSteering } from "../slack/steering";
 import { bufferThreadMessage, instantFlush } from "../slack/thread-buffer";
 import type { ProviderName } from "../types";
+import { isSteeringEnabled } from "../utils/steering-enabled";
 
 const TEST_DB_PATH = `/tmp/agent-swarm-steering-disable-${process.pid}.sqlite`;
 const originalDatabasePath = process.env.DATABASE_PATH;
@@ -45,13 +46,17 @@ function restoreEnv(name: string, value: string | undefined): void {
   else process.env[name] = value;
 }
 
+/**
+ * Steering is opt-in (disabled unless STEERING_ENABLED=true|1), so "disabled"
+ * is simply the default: unset the flag for the duration of the callback.
+ */
 async function withSteeringDisabled<T>(run: () => Promise<T> | T): Promise<T> {
-  const previous = process.env.STEERING_DISABLE;
-  process.env.STEERING_DISABLE = "true";
+  const previous = process.env.STEERING_ENABLED;
+  delete process.env.STEERING_ENABLED;
   try {
     return await run();
   } finally {
-    restoreEnv("STEERING_DISABLE", previous);
+    restoreEnv("STEERING_ENABLED", previous);
   }
 }
 
@@ -107,7 +112,12 @@ async function api(
   return { status: response.status, body: text ? JSON.parse(text) : {} };
 }
 
+const originalSteeringEnabled = process.env.STEERING_ENABLED;
+
 beforeAll(async () => {
+  // The "enabled" halves of these tests opt in explicitly (steering is off by
+  // default); withSteeringDisabled() drops the flag to exercise the default.
+  process.env.STEERING_ENABLED = "true";
   await removeTestDb();
   process.env.DATABASE_PATH = TEST_DB_PATH;
   initDb(TEST_DB_PATH);
@@ -128,13 +138,22 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  restoreEnv("STEERING_ENABLED", originalSteeringEnabled);
   await new Promise<void>((resolve) => server.close(() => resolve()));
   closeDb();
   restoreEnv("DATABASE_PATH", originalDatabasePath);
   await removeTestDb();
 });
 
-describe("STEERING_DISABLE", () => {
+describe("STEERING_ENABLED opt-in", () => {
+  test("steering is disabled by default (flag unset) and on falsy values", () => {
+    expect(isSteeringEnabled({})).toBe(false);
+    expect(isSteeringEnabled({ STEERING_ENABLED: "false" })).toBe(false);
+    expect(isSteeringEnabled({ STEERING_ENABLED: "0" })).toBe(false);
+    expect(isSteeringEnabled({ STEERING_ENABLED: "true" })).toBe(true);
+    expect(isSteeringEnabled({ STEERING_ENABLED: "1" })).toBe(true);
+  });
+
   test("rejects new requests with 403 before looking up or creating rows", async () => {
     await withSteeringDisabled(() => {
       const { task } = createRunningTask("disabled request");
@@ -147,7 +166,7 @@ describe("STEERING_DISABLE", () => {
       }
       expect(thrown).toBeInstanceOf(SteeringRequestError);
       expect(thrown).toMatchObject({
-        message: "Steering is disabled on this server (STEERING_DISABLE)",
+        message: "Steering is disabled on this server (set STEERING_ENABLED=true to enable)",
         statusCode: 403,
       });
       expect(getSteeringMessagesForTask(task.id)).toEqual([]);

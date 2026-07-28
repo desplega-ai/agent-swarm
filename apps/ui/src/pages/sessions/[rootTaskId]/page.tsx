@@ -39,9 +39,9 @@ export default function SessionDetailPage() {
   const { rootTaskId } = useParams<{ rootTaskId: string }>();
   const gate = useFeatureGate("1.76.0");
   const renameGate = useFeatureGate("1.120.0");
-  // Steering (≥1.122.0) — older servers 404 `/api/tasks/:id/steer`, so the
+  // Steering (≥1.122.1) — older servers 404 `/api/tasks/:id/steer`, so the
   // composer falls back to its pre-steering chained-task behaviour.
-  const steerGate = useFeatureGate("1.122.0");
+  const steerGate = useFeatureGate("1.122.1");
   const { data: steeringEnabled = true } = useSteeringEnabled();
   const { data: detail, isLoading: detailLoading } = useSession(rootTaskId);
   const { data: users } = useUsers();
