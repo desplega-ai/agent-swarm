@@ -17,7 +17,10 @@ export const acceptSteerInputSchema = z.object({
 });
 
 export const acceptSteerOutputSchema = z.object({
-  yourAgentId: z.string().uuid().optional(),
+  // Plain string, NOT .uuid(): agents may join with custom IDs (AGENT_ID env /
+  // join-swarm agentId), and a UUID constraint here makes the acknowledgement
+  // response fail output validation after the write already applied.
+  yourAgentId: z.string().optional(),
   success: z.boolean(),
   message: z.string(),
   steeringMessage: SteeringMessageSchema.optional(),
