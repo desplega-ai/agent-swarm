@@ -6,12 +6,20 @@ type: application
 # StatefulSet semantics assume 1.25+.
 kubeVersion: ">=1.25.0-0"
 # Chart version — kept in sync with package.json by `bun run sync-chart-version`.
+<<<<<<< HEAD
 version: 1.122.1
+=======
+version: 1.122.0
+>>>>>>> origin/main
 # Application version — default image tag the chart deploys. Kept in sync with
 # package.json by `bun run sync-chart-version` so release tags and default image
 # tags stay aligned. Users can still override at install time with
 # --set image.tag=... / --set workerImage.tag=...
+<<<<<<< HEAD
 appVersion: "1.122.1"
+=======
+appVersion: "1.122.0"
+>>>>>>> origin/main
 home: https://github.com/desplega-ai/agent-swarm
 sources:
   - https://github.com/desplega-ai/agent-swarm

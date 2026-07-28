@@ -669,6 +669,26 @@ describe("validateProviderCredentials — error scrubbing", () => {
     expect(capturedUrl).toContain("openrouter.ai");
   });
 
+  test("devin hits v3/self (not the deprecated v1 endpoint) and passes on 2xx", async () => {
+    process.env.DEVIN_API_KEY = "cog_fake-devin-key-1234";
+    let capturedUrl = "";
+    globalThis.fetch = (async (url) => {
+      capturedUrl = String(url);
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    const result = await validateProviderCredentials("devin");
+    expect(result.ok).toBe(true);
+    expect(capturedUrl).toContain("/v3/self");
+    expect(capturedUrl).not.toContain("/v1/sessions");
+  });
+
+  test("devin returns ok:false when DEVIN_API_KEY is not set", async () => {
+    delete process.env.DEVIN_API_KEY;
+    const result = await validateProviderCredentials("devin");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("DEVIN_API_KEY");
+  });
+
   test("scrubs api key from error message on 401 response", async () => {
     const fakeKey = "sk-ant-fakekey-DO-NOT-LEAK-1234567890abcdef";
     process.env.ANTHROPIC_API_KEY = fakeKey;

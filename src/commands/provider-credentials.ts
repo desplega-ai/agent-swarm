@@ -260,7 +260,7 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  * | `opencode`       | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` (pi-style) | matching provider's `/v1/models` |
  * | `pi`             | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY`           | matching provider's `/v1/models` |
  * | `pi` (bedrock)   | `MODEL_OVERRIDE=amazon-bedrock/*` → AWS SDK default credential chain    | presence-only (real check is the worker-side Bedrock enumeration) |
- * | `devin`          | `DEVIN_API_KEY` (+ `DEVIN_API_BASE_URL` override)                       | `${baseUrl}/v1/sessions?limit=1` |
+ * | `devin`          | `DEVIN_API_KEY` (+ `DEVIN_API_BASE_URL` override)                       | `${baseUrl}/v3/self`            |
  *
  * Returns `{ok: true, latency_ms}` on 2xx, `{ok: false, error, latency_ms}`
  * otherwise. Errors are scrubbed via `scrubSecrets` before being returned.
@@ -351,7 +351,7 @@ export async function validateProviderCredentials(provider: string): Promise<Liv
           };
         }
         const baseUrl = env.DEVIN_API_BASE_URL ?? "https://api.devin.ai";
-        const r = await timedFetch(`${baseUrl.replace(/\/+$/, "")}/v1/sessions?limit=1`, {
+        const r = await timedFetch(`${baseUrl.replace(/\/+$/, "")}/v3/self`, {
           method: "GET",
           headers: {
             Authorization: `Bearer ${apiKey}`,
