@@ -9,6 +9,7 @@ import {
   type SteerResult,
 } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { isSteeringEnabled as readSteeringEnabled } from "../utils/steering-enabled";
 import {
   createSteeringMessage,
   createTaskExtended,
@@ -29,6 +30,11 @@ export class SteeringRequestError extends Error {
     super(message);
     this.name = "SteeringRequestError";
   }
+}
+
+/** Server-side entry point for the global steering kill switch. */
+export function isSteeringEnabled(): boolean {
+  return readSteeringEnabled();
 }
 
 export interface RequestSteeringArgs {
@@ -155,6 +161,10 @@ export function markSteeringUndeliverable(
 
 /** Single server-side write path for HTTP, MCP, script, and Slack steering. */
 export function requestSteering(args: RequestSteeringArgs): SteerResult {
+  if (!isSteeringEnabled()) {
+    throw new SteeringRequestError("Steering is disabled on this server (STEERING_DISABLE)", 403);
+  }
+
   const task = getTaskById(args.taskId);
   if (!task) {
     throw new SteeringRequestError("Task not found", 404);

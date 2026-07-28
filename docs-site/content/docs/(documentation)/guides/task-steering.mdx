@@ -25,6 +25,10 @@ Not every harness can interrupt. Task responses include `supportedSteerModes`, a
 
 Claude Code queue delivery additionally depends on a supported stock CLI invocation. See [Harness Providers: Claude queue-steering gate](/docs/guides/harness-providers#claude-queue-steering-gate).
 
+## Disable steering globally
+
+Set `STEERING_DISABLE=true` (or `1`) to block new steering requests across HTTP, MCP, scripts, and Slack. The dashboard hides its steering controls and the server does not register `steer-task` or `accept-steer`. Existing message history stays readable, and delivery callbacks plus terminal-status promotion remain enabled so messages already in flight can finish safely.
+
 ## Degradation and `onUnsupported`
 
 The server uses a durable fallback ladder:

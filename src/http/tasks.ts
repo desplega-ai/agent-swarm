@@ -821,6 +821,7 @@ export async function handleTasks(
   }
 
   if (getTaskSteeringMessagesRoute.match(req.method, pathSegments)) {
+    // Keep history readable after a kill-switch flip so past steering remains auditable.
     const parsed = await getTaskSteeringMessagesRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!getTaskById(parsed.params.id)) {
@@ -832,6 +833,7 @@ export async function handleTasks(
   }
 
   if (getPendingSteeringMessagesRoute.match(req.method, pathSegments)) {
+    // Keep read-only worker history available while disabled; only new requests are blocked.
     if (!myAgentId) {
       jsonError(res, "Missing X-Agent-ID header", 400);
       return true;
@@ -856,6 +858,7 @@ export async function handleTasks(
   }
 
   if (markSteeringDeliveredRoute.match(req.method, pathSegments)) {
+    // Do not gate drain callbacks: messages in flight must still reach a terminal state.
     if (!myAgentId) {
       jsonError(res, "Missing X-Agent-ID header", 400);
       return true;
@@ -893,6 +896,7 @@ export async function handleTasks(
   }
 
   if (markSteeringHandledRoute.match(req.method, pathSegments)) {
+    // Do not gate drain callbacks: messages in flight must still reach a terminal state.
     if (!myAgentId) {
       jsonError(res, "Missing X-Agent-ID header", 400);
       return true;
@@ -929,6 +933,7 @@ export async function handleTasks(
   }
 
   if (markSteeringUndeliverableRoute.match(req.method, pathSegments)) {
+    // Do not gate drain callbacks: messages in flight must still reach a terminal state.
     if (!myAgentId) {
       jsonError(res, "Missing X-Agent-ID header", 400);
       return true;

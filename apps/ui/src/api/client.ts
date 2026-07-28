@@ -479,7 +479,7 @@ class ApiClient {
     return res.json();
   }
 
-  async checkHealth(): Promise<{ status: string; version: string }> {
+  async checkHealth(): Promise<{ status: string; version: string; steeringEnabled?: boolean }> {
     const url = `${this.getBaseUrl()}/health`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Health check failed: ${res.status}`);

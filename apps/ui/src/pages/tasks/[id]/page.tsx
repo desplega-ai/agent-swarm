@@ -35,6 +35,7 @@ import "streamdown/styles.css";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { useSteeringEnabled } from "@/api/hooks/use-stats";
 import {
   useCancelTask,
   usePauseTask,
@@ -505,8 +506,9 @@ export default function TaskDetailPage() {
   // Steering (≥1.122.0) — soft-degrade against older API servers, which 404
   // both `/steer` and `/steering-messages`.
   const steerGate = useFeatureGate("1.122.0");
+  const { data: steeringEnabled = true } = useSteeringEnabled();
   const { data: steeringMessages } = useTaskSteeringMessages(id!, {
-    enabled: steerGate.supported,
+    enabled: steerGate.supported && steeringEnabled,
   });
   const cancelTask = useCancelTask();
   const pauseTask = usePauseTask();
@@ -569,7 +571,7 @@ export default function TaskDetailPage() {
   // Steering composer is gated on the *same* condition as Pause — a task only
   // has a live session handle while it is `in_progress`. Everything else falls
   // back to the existing follow-up-task paths.
-  const canSteer = steerGate.supported && task.status === "in_progress";
+  const canSteer = steerGate.supported && steeringEnabled && task.status === "in_progress";
 
   const isFailed = task.status === "failed";
   const isCompleted = task.status === "completed";
@@ -889,9 +891,10 @@ export default function TaskDetailPage() {
   // STEERING — lifecycle list (its own section, not part of the session-log IR)
   // plus the composer. Both are rendered in the desktop centre column and in
   // the mobile "Session Logs" tab, so the two breakpoints stay in step.
-  const steeringSection = steerGate.supported ? (
-    <SteeringMessagesSection messages={steeringMessages ?? []} />
-  ) : null;
+  const steeringSection =
+    steerGate.supported && steeringEnabled ? (
+      <SteeringMessagesSection messages={steeringMessages ?? []} />
+    ) : null;
 
   const steerComposer = canSteer ? (
     <SteerComposer

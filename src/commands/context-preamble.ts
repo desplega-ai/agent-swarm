@@ -13,6 +13,7 @@
 
 import type { TaskAttachment } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { isSteeringEnabled } from "../utils/steering-enabled";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 
 export const CONTEXT_PREAMBLE_MAX_TOKENS = Number(
@@ -368,9 +369,12 @@ export async function buildResumeContextPreamble(
   // Fetch session logs from EVERY chain member so a re-superseded resume
   // still surfaces tool-call history from earlier attempts. Merge, sort by
   // createdAt ASC, then keep the most recent N.
+  const steeringEnabled = isSteeringEnabled();
   const [logsBatches, steeringBatches] = await Promise.all([
     Promise.all(chain.map((c) => fetchSessionLogsForResume(apiUrl, apiKey, c.id))),
-    Promise.all(chain.map((c) => fetchSteeringMessagesForResume(apiUrl, apiKey, c.id))),
+    steeringEnabled
+      ? Promise.all(chain.map((c) => fetchSteeringMessagesForResume(apiUrl, apiKey, c.id)))
+      : Promise.resolve([]),
   ]);
   const merged = logsBatches.flat();
   merged.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -439,10 +443,12 @@ export async function buildResumeContextPreamble(
 
   // 10% — steering messages that could not be delivered before the parent
   // stopped. Oldest entries fall away first, matching session-log truncation.
-  const steeringLines = steeringMessages.map((message) => {
-    const ts = message.createdAt.slice(11, 19);
-    return `[${ts}] ${scrubSecrets(message.body)}`;
-  });
+  const steeringLines = steeringEnabled
+    ? steeringMessages.map((message) => {
+        const ts = message.createdAt.slice(11, 19);
+        return `[${ts}] ${scrubSecrets(message.body)}`;
+      })
+    : [];
   let steeringSection = steeringLines.join("\n");
   while (steeringSection.length > steeringBudget && steeringLines.length > 0) {
     steeringLines.shift();
@@ -472,7 +478,7 @@ export async function buildResumeContextPreamble(
     sections.push("### Artifacts In Flight", "", artSection, "");
   }
 
-  if (steeringSection) {
+  if (steeringEnabled && steeringSection) {
     sections.push("### Undelivered Steering Messages", "", steeringSection, "");
   }
 

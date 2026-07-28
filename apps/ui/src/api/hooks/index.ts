@@ -158,7 +158,7 @@ export {
   useUninstallSkill,
   useUpdateSkill,
 } from "./use-skills";
-export { useApiVersion, useHealth, useLogs, useStats } from "./use-stats";
+export { useApiVersion, useHealth, useLogs, useStats, useSteeringEnabled } from "./use-stats";
 export { useStatus, useTestConnection } from "./use-status";
 export type { UseTaskTemplatesOptions } from "./use-task-templates";
 export { useTaskTemplates } from "./use-task-templates";

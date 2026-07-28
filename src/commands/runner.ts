@@ -59,6 +59,7 @@ import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
+import { isSteeringEnabled } from "../utils/steering-enabled.ts";
 import { interpolate } from "../utils/template.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
 import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
@@ -492,6 +493,8 @@ export async function pollAndDispatchSteering(
   state: SteeringDispatchState,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
+  if (!isSteeringEnabled()) return;
+
   const headers = {
     Authorization: `Bearer ${config.apiKey}`,
     "X-Agent-ID": config.agentId,
@@ -4423,7 +4426,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
   // Track tasks already signaled for cancellation to avoid repeated SIGTERM
   const cancelledSignaled = new Set<string>();
-  const steeringDispatchState = createSteeringDispatchState();
+  const steeringDispatchState = isSteeringEnabled() ? createSteeringDispatchState() : null;
 
   // Migration 055 — cache the harness_provider value used when we last
   // built a `cred_status` snapshot. Re-runs the post-task check only when
@@ -5311,7 +5314,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     }
 
     // Check for cancelled tasks and signal their subprocesses
-    if (state.activeTasks.size > 0) {
+    if (steeringDispatchState && state.activeTasks.size > 0) {
       for (const [taskId, task] of state.activeTasks) {
         if (cancelledSignaled.has(taskId)) continue; // Already sent SIGTERM
         try {
@@ -5343,10 +5346,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     }
 
     // Deliver pending steering to live provider sessions and report the actual outcome.
-    if (state.activeTasks.size > 0) {
+    if (steeringDispatchState && state.activeTasks.size > 0) {
+      const dispatchState = steeringDispatchState;
       for (const [taskId, task] of state.activeTasks) {
         try {
-          await pollAndDispatchSteering(apiConfig, taskId, task.session, steeringDispatchState);
+          await pollAndDispatchSteering(apiConfig, taskId, task.session, dispatchState);
         } catch (error) {
           console.warn(
             `[${role}] Steering dispatch failed for task ${taskId.slice(0, 8)} (non-fatal): ${scrubSecrets(

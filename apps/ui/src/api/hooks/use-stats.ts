@@ -38,6 +38,22 @@ export function useApiVersion() {
   });
 }
 
+/**
+ * Defaults to enabled so a newer UI remains compatible with older API servers
+ * that do not yet include `steeringEnabled` in their health response.
+ */
+export function useSteeringEnabled() {
+  return useQuery({
+    queryKey: ["health"],
+    queryFn: () => api.checkHealth(),
+    refetchInterval: 10000,
+    retry: 2,
+    retryDelay: 1000,
+    staleTime: 30_000,
+    select: (data) => data.steeringEnabled ?? true,
+  });
+}
+
 export function useLogs(limit = 50, agentId?: string) {
   return useQuery({
     queryKey: ["logs", limit, agentId],

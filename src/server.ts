@@ -4,6 +4,7 @@ import { initDb } from "./be/db";
 import { startPricingRefreshLoop } from "./be/pricing-refresh";
 import { ensureRbacSeedsSynced } from "./be/rbac-roles";
 import { seedPricingFromModelsDev } from "./be/seed-pricing";
+import { isSteeringEnabled } from "./be/steering";
 import { registerGithubTaskReactions } from "./github/task-reactions";
 import { loadGlobalConfigsIntoEnv } from "./http/core";
 import { isRbacEnabled } from "./rbac";
@@ -341,9 +342,11 @@ export function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolea
 
   // Task pool capability - task pool operations (create unassigned, claim, release, accept, reject)
   if (hasCapability("task-pool")) {
-    registerAcceptSteerTool(server);
+    if (isSteeringEnabled()) {
+      registerAcceptSteerTool(server);
+      registerSteerTaskTool(server);
+    }
     registerTaskActionTool(server);
-    registerSteerTaskTool(server);
   }
 
   // Config capability - swarm config management and credential bindings

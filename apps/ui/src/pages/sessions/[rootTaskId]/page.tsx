@@ -14,6 +14,7 @@ import { useParams } from "react-router-dom";
 import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useSession, useUpdateSessionTitle } from "@/api/hooks/use-sessions";
+import { useSteeringEnabled } from "@/api/hooks/use-stats";
 import { useUsers } from "@/api/hooks/use-users";
 import { UpgradeRequired } from "@/components/feature-gate/upgrade-required";
 import { SessionComposer } from "@/components/sessions/session-composer";
@@ -41,6 +42,7 @@ export default function SessionDetailPage() {
   // Steering (≥1.122.0) — older servers 404 `/api/tasks/:id/steer`, so the
   // composer falls back to its pre-steering chained-task behaviour.
   const steerGate = useFeatureGate("1.122.0");
+  const { data: steeringEnabled = true } = useSteeringEnabled();
   const { data: detail, isLoading: detailLoading } = useSession(rootTaskId);
   const { data: users } = useUsers();
   const { data: costs } = useSessionCosts({ taskId: rootTaskId, enabled: !!rootTaskId });
@@ -258,7 +260,7 @@ export default function SessionDetailPage() {
       <SessionComposer
         rootTaskId={rootTaskId}
         latestLeafTask={latestLeafTask}
-        steeringSupported={steerGate.supported}
+        steeringSupported={steerGate.supported && steeringEnabled}
       />
     </SessionsShell>
   );

@@ -49,6 +49,8 @@ The `docker-entrypoint.sh` swarm_config-fetch step explicitly **skips** `HARNESS
 
 The server-side `PROVIDER_STEER_CAPABILITIES` map in `src/types.ts` must deep-equal each adapter's `traits.steerModes ?? []`. `src/tests/provider-steering-capabilities.test.ts` iterates the canonical `ProviderNameSchema` list through `createProviderAdapter()` and names the offending provider on drift. Adding a provider requires updating the schema, factory, adapter traits, and capability map together.
 
+`STEERING_DISABLE=true|1` is a global operational kill switch: it prevents new steering requests, removes steering MCP/UI surfaces, and skips worker delivery polling. Existing read-only message history, in-flight worker delivery callbacks, and terminal-status promotion remain available so pre-existing rows can be inspected and drain to a terminal state.
+
 ### Claude queue-steering gate
 
 Claude's queued steering needs `--input-format stream-json`. That input mode is mutually exclusive with the long-standing `-p <prompt>` invocation, so enabling it changes startup for every Claude task, including tasks that are never steered.

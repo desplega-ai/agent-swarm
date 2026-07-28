@@ -1,6 +1,7 @@
 import { getLatestActiveTaskInThread, getLatestLeadTaskInThread } from "../be/db";
 import { requestSteering } from "../be/steering";
 import type { AgentTask, SteerResult } from "../types";
+import { isSteeringEnabled } from "../utils/steering-enabled";
 
 export interface SlackThreadSteeringRequest {
   channelId: string;
@@ -33,6 +34,8 @@ function configuredSteeringTarget(channelId: string, threadTs: string): AgentTas
 export function requestSlackThreadSteering(
   args: SlackThreadSteeringRequest,
 ): SlackThreadSteeringResult | null {
+  if (!isSteeringEnabled()) return null;
+
   const task = configuredSteeringTarget(args.channelId, args.threadTs);
   if (!task || task.status !== "in_progress") return null;
 

@@ -12,6 +12,7 @@ import {
 } from "../be/db";
 import { enqueueAdmissionRow } from "../be/rbac-audit";
 import { getUserGrant } from "../be/rbac-roles";
+import { isSteeringEnabled } from "../be/steering";
 import { initGitHub, resetGitHub } from "../github";
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
@@ -230,6 +231,7 @@ export async function handleCore(
       JSON.stringify({
         status: "ok",
         version,
+        steeringEnabled: isSteeringEnabled(),
       }),
     );
 

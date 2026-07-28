@@ -9,6 +9,7 @@
 
 import type { ProviderTraits } from "../providers/types";
 import type { ProviderName } from "../types";
+import { isSteeringEnabled } from "../utils/steering-enabled";
 import { resolveTemplateAsync } from "./resolver";
 
 // Side-effect import: register all system + session templates
@@ -190,6 +191,7 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
 
   if (
     hasMcp &&
+    isSteeringEnabled() &&
     steerModes.length > 0 &&
     !scriptsOnlyMode &&
     serverHasCapability("task-pool", true)
