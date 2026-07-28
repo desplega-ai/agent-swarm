@@ -234,6 +234,12 @@ export interface SteeringMessage {
   createdByAgentId?: string;
   /** Set when the message became a follow-up task instead of being delivered. */
   promotedTaskId?: string;
+  /**
+   * Optional short note the agent leaves when it acknowledges the message,
+   * describing how the steering was incorporated. Only meaningful alongside
+   * `status: "handled"`; surfaced in the HANDLED chip's tooltip.
+   */
+  handledNote?: string;
   createdAt: string;
   deliveredAt?: string;
   handledAt?: string;

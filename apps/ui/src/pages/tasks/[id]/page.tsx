@@ -62,8 +62,8 @@ import { SessionId } from "@/components/shared/session-id";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
+import { CollapsibleComposerDock } from "@/components/steering/collapsible-composer-dock";
 import { SteerComposer } from "@/components/steering/steer-composer";
-import { SteeringMessagesSection } from "@/components/steering/steering-messages-section";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -83,6 +83,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatCost } from "@/lib/cost-format";
 import { formatDurationMs } from "@/lib/format-duration-ms";
@@ -510,6 +511,12 @@ export default function TaskDetailPage() {
   const { data: steeringMessages } = useTaskSteeringMessages(id!, {
     enabled: steerGate.supported && steeringEnabled,
   });
+  // Composer dock is collapsible on this page only (the sessions surface is a
+  // chat — its composer always stays put). Default expanded.
+  const [composerCollapsed, setComposerCollapsed] = useLocalToggle(
+    "tasks:steer-composer-collapsed",
+    false,
+  );
   const cancelTask = useCancelTask();
   const pauseTask = usePauseTask();
   const resumeTask = useResumeTask();
@@ -872,11 +879,26 @@ export default function TaskDetailPage() {
     </div>
   );
 
-  const sessionLogsContent = hasSessionLogs ? (
+  // STEERING — no longer its own box above the logs. Delivered/handled rows
+  // interleave into the SESSION LOGS stream at `deliveredAt`, promoted/
+  // cancelled at `createdAt`, and still-pending ones pin to the tail box above
+  // the "Agent is working…" footer. `undefined` when gated off, which makes
+  // <SessionLogViewer> behave exactly as it did pre-steering.
+  const steeringForViewer =
+    steerGate.supported && steeringEnabled ? (steeringMessages ?? []) : undefined;
+  const hasSteering = (steeringForViewer?.length ?? 0) > 0;
+
+  // Render the viewer whenever there's anything to show — steering-only is a
+  // real state right after the first message is queued but before the harness
+  // has written any session log lines.
+  const showLogViewer = hasSessionLogs || hasSteering;
+
+  const sessionLogsContent = showLogViewer ? (
     <SessionLogViewer
-      logs={sessionLogs}
+      logs={sessionLogs ?? []}
       compactionSnapshots={contextData?.snapshots}
       isRunning={taskIsRunning(task.status)}
+      steeringMessages={steeringForViewer}
       className="flex-1 min-h-0"
     />
   ) : (
@@ -888,21 +910,23 @@ export default function TaskDetailPage() {
     </div>
   );
 
-  // STEERING — lifecycle list (its own section, not part of the session-log IR)
-  // plus the composer. Both are rendered in the desktop centre column and in
-  // the mobile "Session Logs" tab, so the two breakpoints stay in step.
-  const steeringSection =
-    steerGate.supported && steeringEnabled ? (
-      <SteeringMessagesSection messages={steeringMessages ?? []} />
-    ) : null;
-
   const steerComposer = canSteer ? (
-    <SteerComposer
-      taskId={task.id}
-      supportedSteerModes={task.supportedSteerModes}
-      providerLabel={task.provider}
-      className="px-0 pt-0 pb-0"
-    />
+    <CollapsibleComposerDock
+      collapsed={composerCollapsed}
+      onCollapsedChange={setComposerCollapsed}
+      collapsedLabel={
+        task.supportedSteerModes && task.supportedSteerModes.length === 0
+          ? "Add a follow-up for this task"
+          : "Send a message to the running task"
+      }
+    >
+      <SteerComposer
+        taskId={task.id}
+        supportedSteerModes={task.supportedSteerModes}
+        providerLabel={task.provider}
+        className="px-0 pt-0 pb-0"
+      />
+    </CollapsibleComposerDock>
   ) : null;
 
   // HERO — status badge + tags / priority / source / provider / model badges +
@@ -1098,7 +1122,6 @@ export default function TaskDetailPage() {
             {outcomeContent}
           </TabsContent>
           <TabsContent value="logs" className="flex flex-col flex-1 min-h-0 px-1 py-3 gap-3">
-            {steeringSection}
             {sessionLogsContent}
             {steerComposer}
           </TabsContent>
@@ -1162,23 +1185,7 @@ export default function TaskDetailPage() {
 
             <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
 
-            {steeringSection}
-
-            {hasSessionLogs ? (
-              <SessionLogViewer
-                logs={sessionLogs}
-                compactionSnapshots={contextData?.snapshots}
-                isRunning={taskIsRunning(task.status)}
-                className="flex-1 min-h-0"
-              />
-            ) : (
-              <div className="flex-1 flex items-center justify-center min-h-0">
-                <div className="text-center text-muted-foreground">
-                  <Terminal className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                  <p className="text-xs">No session data available</p>
-                </div>
-              </div>
-            )}
+            {sessionLogsContent}
 
             {steerComposer}
           </div>

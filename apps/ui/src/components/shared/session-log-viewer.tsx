@@ -27,7 +27,12 @@ import {
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 
-import type { ContextSnapshot, SessionLog } from "@/api/types";
+import type { ContextSnapshot, SessionLog, SteeringMessage } from "@/api/types";
+import { QueuedSteeringBox } from "@/components/steering/queued-steering-box";
+import {
+  SteeringLine,
+  steeringMessageTimestamp,
+} from "@/components/steering/steering-message-chips";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { JsonTree } from "@/components/workflows/json-tree";
@@ -58,6 +63,14 @@ interface ToolEntry {
 
 type StreamRow =
   | { type: "compaction"; id: string; snapshot: ContextSnapshot }
+  | {
+      type: "steering";
+      id: string;
+      time: string;
+      iso: string;
+      message: SteeringMessage;
+      isNew: boolean;
+    }
   | {
       type: "agent";
       id: string;
@@ -499,6 +512,12 @@ function buildStream(
   snapshots: ContextSnapshot[],
   newIds: Set<string>,
   isRunning?: boolean,
+  /**
+   * Steering messages to interleave. `pending` rows are filtered out by the
+   * caller — they live in the pinned tail box instead, since nothing has
+   * entered the session yet to timestamp them against.
+   */
+  steering: SteeringMessage[] = [],
 ): StreamRow[] {
   // Index every tool_result by the id of the call it answers (+ its timestamp).
   const resultById = new Map<string, { content: string; isError: boolean; at: number }>();
@@ -517,11 +536,18 @@ function buildStream(
 
   type TL =
     | { kind: "msg"; m: ParsedMessage; t: number }
-    | { kind: "snap"; s: ContextSnapshot; t: number };
+    | { kind: "snap"; s: ContextSnapshot; t: number }
+    | { kind: "steer"; sm: SteeringMessage; iso: string; t: number };
   const tl: TL[] = messages.map((m) => ({ kind: "msg", m, t: new Date(m.timestamp).getTime() }));
   for (const s of snapshots) {
     if (s.eventType === "compaction")
       tl.push({ kind: "snap", s, t: new Date(s.createdAt).getTime() });
+  }
+  for (const sm of steering) {
+    const iso = steeringMessageTimestamp(sm);
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) continue;
+    tl.push({ kind: "steer", sm, iso, t });
   }
   tl.sort((a, b) => a.t - b.t);
 
@@ -539,6 +565,22 @@ function buildStream(
     if (item.kind === "snap") {
       closeGroup();
       rows.push({ type: "compaction", id: `compact-${item.s.id}`, snapshot: item.s });
+      continue;
+    }
+
+    if (item.kind === "steer") {
+      // A user message landing mid-run always terminates the open tool group —
+      // it's a turn boundary in the reader's mental model, not another step.
+      closeGroup();
+      const id = `steer-${item.sm.id}`;
+      rows.push({
+        type: "steering",
+        id,
+        time: fmtClock(item.iso),
+        iso: item.iso,
+        message: item.sm,
+        isNew: newIds.has(id),
+      });
       continue;
     }
 
@@ -683,6 +725,8 @@ function rowSearchText(row: StreamRow): string {
       return JSON.stringify(row.block.data);
     case "toolgroup":
       return row.tools.map((t) => `${t.title} ${t.detail} ${t.preview} ${t.body}`).join(" ");
+    case "steering":
+      return `steering ${row.message.mode} ${row.message.status} ${row.message.body}`;
     case "compaction":
       return "compaction";
   }
@@ -701,6 +745,8 @@ function outlineLabel(row: StreamRow): string {
       return `Thinking · ${truncate(row.text.replace(/\s+/g, " ").trim(), 60)}`;
     case "meta":
       return metaOutlineLabel(row.block);
+    case "steering":
+      return `Steering · ${truncate(row.message.body.replace(/\s+/g, " ").trim(), 56)}`;
     case "compaction":
       return "Compaction";
   }
@@ -750,6 +796,7 @@ type TickTone = "agent" | "tool" | "user" | "muted";
 function rowTone(row: StreamRow): TickTone {
   if (row.type === "toolgroup") return "tool";
   if (row.type === "agent") return row.role === "user" ? "user" : "agent";
+  if (row.type === "steering") return "user";
   if (row.type === "thinking") return "agent";
   return "muted";
 }
@@ -1855,6 +1902,14 @@ interface SessionLogViewerProps {
    * claiming the session is complete.
    */
   isRunning?: boolean;
+  /**
+   * Steering messages for this task (≥1.122.1). Delivered / handled rows
+   * interleave into the stream at `deliveredAt`; promoted / cancelled at
+   * `createdAt`; still-`pending` ones pin to the tail box above the footer.
+   * Omit entirely when the feature is gated off — the viewer then behaves
+   * exactly as before.
+   */
+  steeringMessages?: SteeringMessage[];
 }
 
 export function SessionLogViewer({
@@ -1862,9 +1917,20 @@ export function SessionLogViewer({
   compactionSnapshots,
   className,
   isRunning,
+  steeringMessages,
 }: SessionLogViewerProps) {
   const safeLogs = logs ?? [];
   const messages = useMemo(() => parseSessionLogs(safeLogs), [safeLogs]);
+
+  // Partition on status: `pending` has no session-entry timestamp yet, so it
+  // can't be placed honestly in the stream and goes to the tail box instead.
+  const { streamSteering, pendingSteering } = useMemo(() => {
+    const all = steeringMessages ?? [];
+    return {
+      streamSteering: all.filter((m) => m.status !== "pending"),
+      pendingSteering: all.filter((m) => m.status === "pending"),
+    };
+  }, [steeringMessages]);
 
   // Entrance animation only on genuinely-new rows. Kept pure: the render path
   // only READS seen ids; the ref is updated post-commit in an effect (so it's
@@ -1875,16 +1941,23 @@ export function SessionLogViewer({
     if (isFirst.current) return new Set<string>();
     const fresh = new Set<string>();
     for (const m of messages) if (!seenIds.current.has(m.id)) fresh.add(m.id);
+    // Steering rows share the id space with parsed messages (`steer-<id>`) so
+    // a message that just got delivered animates in like any other new row.
+    for (const s of streamSteering) {
+      const id = `steer-${s.id}`;
+      if (!seenIds.current.has(id)) fresh.add(id);
+    }
     return fresh;
-  }, [messages]);
+  }, [messages, streamSteering]);
   useEffect(() => {
     for (const m of messages) seenIds.current.add(m.id);
+    for (const s of streamSteering) seenIds.current.add(`steer-${s.id}`);
     isFirst.current = false;
-  }, [messages]);
+  }, [messages, streamSteering]);
 
   const rows = useMemo(
-    () => buildStream(messages, compactionSnapshots ?? [], newIds, isRunning),
-    [messages, compactionSnapshots, newIds, isRunning],
+    () => buildStream(messages, compactionSnapshots ?? [], newIds, isRunning, streamSteering),
+    [messages, compactionSnapshots, newIds, isRunning, streamSteering],
   );
 
   const { searchParams, setParam } = useUrlSearchState();
@@ -1972,6 +2045,8 @@ export function SessionLogViewer({
           return 52;
         case "meta":
           return 44;
+        case "steering":
+          return 34;
         case "toolgroup":
           return 52;
         case "compaction":
@@ -2179,6 +2254,31 @@ export function SessionLogViewer({
           </RowShell>
         );
       }
+      if (row.type === "steering") {
+        return (
+          <RowShell
+            time={row.time}
+            iso={row.iso}
+            flash={flash}
+            isNew={row.isNew}
+            highlight={row.isNew && atBottomRef.current}
+            streamDelayMs={streamDelayMs}
+          >
+            {/* One line, same rhythm as the SYSTEM/meta rows: accent marker
+                carries the "user injected this" signal, the chip carries the
+                lifecycle, RowShell's gutter already owns the timestamp. */}
+            <SteeringLine
+              message={row.message}
+              className="text-[12.5px]"
+              marker={
+                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.04em] text-primary">
+                  Steering
+                </span>
+              }
+            />
+          </RowShell>
+        );
+      }
       const open = isGroupOpen(row);
       const dur = formatDur(row.durMs);
       return (
@@ -2333,6 +2433,10 @@ export function SessionLogViewer({
             {pending > 0 ? `${pending} new message${pending === 1 ? "" : "s"}` : null}
           </button>
         </div>
+
+        {/* Queued steering — pinned between the stream and the footer. Rows
+            leave this box on their own as soon as the worker delivers them. */}
+        <QueuedSteeringBox messages={pendingSteering} />
 
         {/* Footer */}
         <RunningFooter count={visibleRows.length} isRunning={isRunning} />

@@ -81,12 +81,18 @@ export function useTaskSessionLogs(taskId: string) {
  * `useTaskSessionLogs` — steering status moves `pending → delivered → handled`
  * on the worker, and there is no websocket/SSE channel for it by design.
  */
-export function useTaskSteeringMessages(taskId: string, opts?: { enabled?: boolean }) {
+export function useTaskSteeringMessages(
+  taskId: string,
+  opts?: { enabled?: boolean; refetchInterval?: number | false },
+) {
   return useQuery({
     queryKey: ["task", taskId, "steering-messages"],
     queryFn: () => api.fetchTaskSteeringMessages(taskId),
     enabled: !!taskId && (opts?.enabled ?? true),
-    refetchInterval: 5000,
+    // Callers rendering many tasks at once (the sessions timeline) pass
+    // `false` for finished tasks — their steering rows are frozen history, so
+    // there is nothing to poll for.
+    refetchInterval: opts?.refetchInterval ?? 5000,
   });
 }
 

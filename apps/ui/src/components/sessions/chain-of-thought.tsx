@@ -14,12 +14,28 @@
  *     by default with a quiet "Activity (N steps)" header that expands on
  *     click — the user gets the ability to keep the breadcrumb without it
  *     dominating the timeline.
+ *
+ * Steering messages (≥1.122.1) interleave into the same feed at their
+ * `createdAt`, rendered as a distinct user-injected block. Polling cost is
+ * deliberately bounded: the steering fetch is enabled only for tasks that are
+ * still active, or terminal tasks the user has explicitly expanded — a long
+ * session's historical rows never fire a request.
  */
 
-import { Check, ChevronDown, ChevronRight, CircleDot, Sparkles } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  CircleDot,
+  MessageSquareShare,
+  Sparkles,
+} from "lucide-react";
 import { useMemo, useState } from "react";
-import { useTask } from "@/api/hooks/use-tasks";
-import type { AgentLog, AgentTaskStatus } from "@/api/types";
+import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { useSteeringEnabled } from "@/api/hooks/use-stats";
+import { useTask, useTaskSteeringMessages } from "@/api/hooks/use-tasks";
+import type { AgentLog, AgentTaskStatus, SteeringMessage } from "@/api/types";
+import { SteeringLine } from "@/components/steering/steering-message-chips";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
 const ACTIVE_STATUSES = new Set<AgentTaskStatus>([
@@ -71,11 +87,9 @@ function summarizeAgentLog(log: AgentLog): string | null {
   }
 }
 
-interface Step {
-  id: string;
-  text: string;
-  createdAt: string;
-}
+type Step =
+  | { kind: "log"; id: string; text: string; createdAt: string }
+  | { kind: "steer"; id: string; message: SteeringMessage; createdAt: string };
 
 export interface ChainOfThoughtProps {
   taskId: string;
@@ -89,18 +103,39 @@ export function ChainOfThought({ taskId, status, className }: ChainOfThoughtProp
   // once the task reaches a terminal state.
   const { data: task } = useTask(taskId, { refetchInterval: isActive ? 4000 : false });
 
+  const [expanded, setExpanded] = useState(false);
+
+  // Same gate as everywhere else. Both hooks are react-query-cached globals
+  // (`/health` version + `/stats`), so calling them per timeline row costs one
+  // shared subscription rather than one request each.
+  const steerGate = useFeatureGate("1.122.1");
+  const { data: steeringEnabled = true } = useSteeringEnabled();
+  const { data: steeringMessages } = useTaskSteeringMessages(taskId, {
+    enabled: steerGate.supported && steeringEnabled && (isActive || expanded),
+    refetchInterval: isActive ? 5000 : false,
+  });
+
   const steps = useMemo<Step[]>(() => {
     const logs = task?.logs ?? [];
     const out: Step[] = [];
     for (const log of logs) {
       const text = summarizeAgentLog(log);
       if (!text) continue;
-      out.push({ id: log.id, text, createdAt: log.createdAt });
+      out.push({ kind: "log", id: log.id, text, createdAt: log.createdAt });
     }
+    for (const message of steeringMessages ?? []) {
+      out.push({
+        kind: "steer",
+        id: `steer-${message.id}`,
+        message,
+        createdAt: message.createdAt,
+      });
+    }
+    // Stable chronological merge. Logs already arrive ordered; the sort only
+    // has to place the steering rows among them.
+    out.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     return out;
-  }, [task?.logs]);
-
-  const [expanded, setExpanded] = useState(false);
+  }, [task?.logs, steeringMessages]);
 
   // Active task with no events yet — show a shimmering placeholder so the row
   // never reads as silent immediately after the user sends.
@@ -137,7 +172,9 @@ export function ChainOfThought({ taskId, status, className }: ChainOfThoughtProp
           Activity · {steps.length}
         </span>
         <span aria-hidden="true">·</span>
-        <span className="truncate italic">{last?.text}</span>
+        <span className="truncate italic">
+          {last?.kind === "steer" ? "Steering message" : last?.text}
+        </span>
       </button>
     );
   }
@@ -163,6 +200,29 @@ export function ChainOfThought({ taskId, status, className }: ChainOfThoughtProp
       <ol className="flex flex-col gap-1 text-xs" aria-label="Agent reasoning">
         {steps.map((step, idx) => {
           const isLast = idx === steps.length - 1;
+          if (step.kind === "steer") {
+            return (
+              <li key={step.id} className="min-w-0">
+                <SteeringLine
+                  message={step.message}
+                  marker={
+                    <MessageSquareShare
+                      className="h-3 w-3 shrink-0 text-primary"
+                      aria-hidden="true"
+                    />
+                  }
+                  trailing={
+                    <span
+                      className="text-[10px] font-mono text-muted-foreground/60 shrink-0"
+                      title={new Date(step.createdAt).toLocaleString()}
+                    >
+                      {formatRelativeTime(step.createdAt)}
+                    </span>
+                  }
+                />
+              </li>
+            );
+          }
           const shimmer = isLast && isActive;
           return (
             <li key={step.id} className="flex items-start gap-2 min-w-0 break-words">
