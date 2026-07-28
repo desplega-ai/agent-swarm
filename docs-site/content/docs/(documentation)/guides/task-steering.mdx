@@ -49,6 +49,8 @@ requested steer
 
 Choose `fail` when true interrupt semantics are required. For example, an instruction to stop a destructive operation should not silently wait until the operation finishes.
 
+Tasks that haven't started yet (`unassigned`, `offered`, `pending`) also accept steering when the provider supports live delivery: the message queues as `pending` and the worker delivers it once the session is live. A `steer` request on a not-yet-started task degrades to `queue` — there is no turn to interrupt yet. If the task reaches a terminal state without ever starting, pending messages are promoted to follow-up tasks as usual.
+
 ## Send steering
 
 ### Dashboard

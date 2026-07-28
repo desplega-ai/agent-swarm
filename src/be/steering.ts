@@ -196,12 +196,24 @@ export function requestSteering(args: RequestSteeringArgs): SteerResult {
   }
 
   const body = scrubSecrets(args.message);
+  // A task whose session hasn't started yet can still accept queued steering:
+  // the row stays `pending` and the worker delivers it once the session is
+  // live (the dispatch poll covers every active task). Interrupting a session
+  // that doesn't exist is meaningless, so a `steer` request on a pre-start
+  // task degrades to queue (degrade, not fail — the harness does support the
+  // mode; it just isn't applicable yet).
+  const preStart =
+    activeTask.status === "unassigned" ||
+    activeTask.status === "offered" ||
+    activeTask.status === "pending";
   // Degrade off the capability map, not off a hardcoded provider name — any
   // provider that can't honor the requested mode downgrades to queue, and the
   // caller is told via `degradedFrom`. (Providers with no live steering at all
   // fall through to the promotion branch below.)
   const degradedFrom =
-    requestedMode === "steer" && supportedModes.length > 0 && !supportedModes.includes("steer")
+    requestedMode === "steer" &&
+    supportedModes.length > 0 &&
+    (!supportedModes.includes("steer") || preStart)
       ? requestedMode
       : undefined;
   const effectiveMode: SteerMode = degradedFrom ? "queue" : requestedMode;
@@ -216,7 +228,9 @@ export function requestSteering(args: RequestSteeringArgs): SteerResult {
     createdByAgentId: args.createdByAgentId,
   });
 
-  if (provider === "codex" || activeTask.status !== "in_progress") {
+  const canReachLiveSession =
+    supportedModes.length > 0 && (activeTask.status === "in_progress" || preStart);
+  if (!canReachLiveSession) {
     const promotedTask = promoteSteeringToTask(activeTask, steeringMessage);
     markSteeringPromoted(steeringMessage.id, promotedTask.id);
     return {

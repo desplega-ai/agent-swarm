@@ -308,6 +308,66 @@ describe("task steering core", () => {
     expect(getTaskById(task.id)?.status).toBe("in_progress");
   });
 
+  test("pending tasks queue steering for delivery once the session starts", () => {
+    const task = createTaskExtended("pending queue target", {
+      agentId: agentIds.get("pi"),
+      source: "api",
+    });
+    expect(task.status).toBe("pending");
+
+    const result = requestSteering({
+      taskId: task.id,
+      message: "context before the session exists",
+      source: "api",
+      createdByKind: "system",
+    });
+
+    // Not promoted — the row waits as `pending` and the worker delivers it
+    // after claiming the task and starting the session.
+    expect(result).toMatchObject({ outcome: "queued", effectiveMode: "queue" });
+    expect(getSteeringMessageById(result.steeringMessageId)?.status).toBe("pending");
+    expect(getTaskById(task.id)?.status).toBe("pending");
+  });
+
+  test("steer mode on a pending task degrades to queue (nothing to interrupt)", () => {
+    const task = createTaskExtended("pending steer target", {
+      agentId: agentIds.get("pi"),
+      source: "api",
+    });
+
+    const result = requestSteering({
+      taskId: task.id,
+      message: "interrupt before start",
+      mode: "steer",
+      source: "api",
+      createdByKind: "system",
+    });
+
+    expect(result).toMatchObject({
+      outcome: "queued",
+      effectiveMode: "queue",
+      degradedFrom: "steer",
+    });
+    expect(getSteeringMessageById(result.steeringMessageId)?.status).toBe("pending");
+  });
+
+  test("pending codex tasks still promote (no live steering at any point)", () => {
+    const task = createTaskExtended("pending codex target", {
+      agentId: agentIds.get("codex"),
+      source: "api",
+    });
+
+    const result = requestSteering({
+      taskId: task.id,
+      message: "codex pre-start message",
+      source: "api",
+      createdByKind: "system",
+    });
+
+    expect(result.outcome).toBe("promoted");
+    expect(result.promotedTaskId).toBeDefined();
+  });
+
   test("latest lead task lookup excludes newer worker-assigned Slack tasks", () => {
     const channelId = "C-STEERING";
     const threadTs = "1234.5678";
