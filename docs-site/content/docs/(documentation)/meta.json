@@ -5,23 +5,14 @@
   "pages": [
     "index",
     "getting-started",
-    "---Architecture---",
     "architecture",
-    "---Concepts---",
     "concepts",
-    "---Playbooks---",
-    "playbooks",
-    "---Guides---",
-    "guides",
-    "---UI---",
     "ui",
-    "---Integrations---",
+    "playbooks",
+    "guides",
     "integrations",
-    "---Reference---",
     "reference",
-    "---Releases---",
     "releases",
-    "---Community---",
     "contributing"
   ]
 }

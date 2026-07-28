@@ -1,0 +1,36 @@
+---
+title: "Overview"
+description: "The Agent Swarm dashboard — what it is, the hosted instance at app.agent-swarm.dev, and how to self-host it"
+---
+
+The Agent Swarm **dashboard** is the web UI for operating a swarm: watch agents, tasks, and inter-agent chat in real time, review approvals, manage workflows, scripts, schedules, skills, and memory, and administer settings — secrets, API keys, integrations, and [swarm configuration](/docs/ui/configuration).
+
+## Hosted dashboard
+
+We host the latest build at **[app.agent-swarm.dev](https://app.agent-swarm.dev)**.
+
+It is a **browser-storage-only** client: the connection details you enter (API URL + API key) are kept in your browser's local storage and requests go straight from your browser to your swarm's API. Nothing is proxied or persisted on our side, and the same hosted dashboard can connect to **any** swarm — a local dev server, your self-hosted deployment, or a cloud swarm. You can save multiple connections and switch between them from the sidebar.
+
+<Callout type="info" title="Connecting">
+  Enter your API URL and key in the in-app connection panel, or open the dashboard with `?apiUrl=...&apiKey=...` query parameters to pre-fill a connection (the `onboard` wizard prints exactly such a URL). Your swarm's API must be reachable from your browser.
+</Callout>
+
+## Self-hosting
+
+The dashboard is a static single-page app (Vite + React) in [`apps/ui/`](https://github.com/desplega-ai/agent-swarm/tree/main/apps/ui) — there is no server component, so it can be served from any static host:
+
+```bash
+cd apps/ui
+bun install
+bun run build   # outputs apps/ui/dist/
+```
+
+Deploy the `dist/` directory to your static host of choice (Vercel, Netlify, nginx, S3 + CDN, ...).
+
+For local development:
+
+```bash
+cd apps/ui && bun install && bun run dev
+```
+
+This serves the dashboard at `http://localhost:5274` and proxies `/api/*` to a local API server on `http://localhost:3013`.
