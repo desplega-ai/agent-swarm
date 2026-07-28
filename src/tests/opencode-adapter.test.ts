@@ -229,7 +229,7 @@ describe("OpencodeSession.deliverSteering", () => {
     );
   });
 
-  test("steer mode aborts the in-flight turn, re-prompts, and keeps the session alive", async () => {
+  test("a steer request never aborts and reports queue honestly", async () => {
     const calls: Array<{ method: "abort" | "promptAsync"; args: unknown }> = [];
     await inspectSteeringBeforeIdle(
       {
@@ -243,11 +243,14 @@ describe("OpencodeSession.deliverSteering", () => {
         },
       },
       async (session, serverCloseCalls) => {
+        // opencode advertises `["queue"]` only: E2E showed the re-prompt fails
+        // once the session has been aborted, losing the message to the
+        // undeliverable path. A steer request that reaches the adapter anyway
+        // is served as a queue and reported as such.
         await expect(
           session.deliverSteering?.({ mode: "steer", text: "Stop and revise." }),
-        ).resolves.toEqual({ delivered: true, mode: "steer" });
+        ).resolves.toEqual({ delivered: true, mode: "queue" });
         expect(calls).toEqual([
-          { method: "abort", args: { path: { id: "sess-steering-123" } } },
           {
             method: "promptAsync",
             args: {

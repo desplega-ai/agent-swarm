@@ -392,7 +392,11 @@ export const PROVIDER_STEER_CAPABILITIES: Record<ProviderName, SteerMode[]> = {
   // guarantee the in-flight turn is interrupted, so we advertise queue only
   // rather than promise semantics we can't honor (step-7 finding).
   devin: ["queue"],
-  opencode: ["steer", "queue"],
+  // Interrupt is abort + re-prompt, and E2E showed the re-prompt fails after
+  // the abort — the message came back undeliverable and was promoted to a
+  // follow-up task. Queue (plain promptAsync) works and is verified. Advertise
+  // only what we can honor; revisit if the abort+prompt path is fixed.
+  opencode: ["queue"],
   claude: ["queue"],
   codex: [],
 };

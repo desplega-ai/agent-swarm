@@ -636,14 +636,17 @@ export class OpencodeSession implements ProviderSession {
 
   async deliverSteering({ mode, text }: SteerDelivery): Promise<SteerDeliveryResult> {
     try {
-      if (mode === "steer") {
-        await this.client.session.abort({ path: { id: this._sessionId } });
-      }
+      // Always queue. `steer` used to abort first and re-prompt, but E2E showed
+      // the re-prompt fails once the session has been aborted, so the message
+      // was lost to the undeliverable path. `steerModes` advertises queue only,
+      // so a "steer" request has already been degraded upstream — this branch
+      // exists for a caller that reaches us anyway, and reports queue honestly.
+      void mode;
       await this.client.session.promptAsync({
         path: { id: this._sessionId },
         body: { parts: [{ type: "text", text }] },
       });
-      return { delivered: true, mode };
+      return { delivered: true, mode: "queue" };
     } catch (err) {
       return { delivered: false, reason: String(err) };
     }
@@ -656,7 +659,7 @@ export class OpencodeAdapter implements ProviderAdapter {
   readonly traits: ProviderTraits = {
     hasMcp: true,
     hasLocalEnvironment: true,
-    steerModes: ["steer", "queue"],
+    steerModes: ["queue"],
   };
 
   validateCredentials(env: Record<string, string | undefined> = {}): string {
