@@ -486,6 +486,30 @@ export function createSteeringDispatchState(): SteeringDispatchState {
   };
 }
 
+/**
+ * Wrap a steering body in the registered delivery envelope so the injected
+ * message carries its own ID. `accept-steer` takes that ID, and it is the only
+ * route to `handled` — without the envelope the agent obeys the message but
+ * can never acknowledge it, and the row sits at `delivered` forever.
+ *
+ * Falls back to the bare body if template resolution fails: delivering an
+ * un-acknowledgeable message beats not delivering one at all.
+ */
+export async function renderSteeringDelivery(
+  steeringMessageId: string,
+  body: string,
+): Promise<string> {
+  try {
+    const result = await resolveTemplateAsync("system.agent.steering.delivery", {
+      steeringMessageId,
+      body,
+    });
+    return result.skipped || !result.text.trim() ? body : result.text;
+  } catch {
+    return body;
+  }
+}
+
 export async function pollAndDispatchSteering(
   config: ApiConfig,
   taskId: string,
@@ -515,7 +539,12 @@ export async function pollAndDispatchSteering(
     if (!outcome) {
       try {
         outcome = session.deliverSteering
-          ? await session.deliverSteering({ mode: message.mode, text: message.body })
+          ? await session.deliverSteering({
+              mode: message.mode,
+              // Wrap the body so it carries its own ID — the agent needs it to
+              // call `accept-steer`, which is the only path to `handled`.
+              text: await renderSteeringDelivery(message.id, message.body),
+            })
           : {
               delivered: false,
               reason: "Provider session does not support live steering",

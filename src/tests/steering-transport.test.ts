@@ -114,7 +114,14 @@ describe("steering worker transport", () => {
     await pollAndDispatchSteering(config, pending.taskId, providerSession, state, fetchImpl);
     await pollAndDispatchSteering(config, pending.taskId, providerSession, state, fetchImpl);
 
-    expect(deliveries).toEqual([{ mode: "steer", text: "change course" }]);
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]?.mode).toBe("steer");
+    // The body is wrapped in the delivery envelope, which MUST carry the
+    // steering message ID — `accept-steer` needs it, and it is the only route
+    // to `handled`. Without it the agent obeys but can never acknowledge.
+    expect(deliveries[0]?.text).toContain("change course");
+    expect(deliveries[0]?.text).toContain(pending.id);
+    expect(deliveries[0]?.text).toContain("accept-steer");
     expect(state.dispatchedIds.has(pending.id)).toBe(true);
     expect(reports).toHaveLength(2);
     expect(reports[0]).toEqual({

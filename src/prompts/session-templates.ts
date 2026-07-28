@@ -202,9 +202,28 @@ registerTemplate({
   defaultBody: `
 #### Live Task Steering
 
-You may receive steering messages while this task is running. Incorporate each message into your current work. After you have acted on a steering message, call \`accept-steer\` with its steering message ID. Do not acknowledge a message before acting on it.
+You may receive steering messages while this task is running. Each one arrives wrapped in a \`[steering <id>]\` marker that carries its steering message ID. Incorporate the message into your current work, then call \`accept-steer\` with that ID. Do not acknowledge a message before acting on it.
 `,
   variables: [],
+  category: "system",
+});
+
+/**
+ * Envelope wrapped around a steering message as it is injected into the live
+ * session. It exists to carry the steering message ID — without it the agent
+ * has no ID to pass to `accept-steer`, so messages are delivered and obeyed
+ * but can never reach `handled`.
+ */
+registerTemplate({
+  eventType: "system.agent.steering.delivery",
+  header: "",
+  defaultBody: `[steering {{steeringMessageId}}] {{body}}
+
+(Once you have acted on this, call \`accept-steer\` with steeringMessageId "{{steeringMessageId}}".)`,
+  variables: [
+    { name: "steeringMessageId", description: "ID of the steering message being delivered" },
+    { name: "body", description: "The steering message text as the sender wrote it" },
+  ],
   category: "system",
 });
 
