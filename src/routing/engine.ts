@@ -16,6 +16,13 @@ import {
   RoutingResultSchema,
 } from "./types";
 
+/**
+ * Server-side aggregate budget for a `prompt.compose` run. Must stay BELOW the
+ * worker's `PROMPT_COMPOSE_REQUEST_TIMEOUT_MS` (src/commands/runner.ts) so the
+ * server always answers before the client gives up — keep the two in sync.
+ */
+export const PROMPT_COMPOSE_TOTAL_BUDGET_MS = 15_000;
+
 export type RoutingScriptRunner = (input: {
   scriptName: string;
   args: unknown;
@@ -154,7 +161,23 @@ export function createRoutingEngine(
       });
     }
 
+    // Aggregate wall-clock budget for prompt composition. Each handler gets its
+    // own `timeoutMs`, but N handlers run sequentially, so without this the
+    // total is unbounded — and the worker's prompt-compose request has a fixed
+    // client deadline (PROMPT_COMPOSE_REQUEST_TIMEOUT_MS in runner.ts). Once
+    // the server exceeds it the worker has already fallen back to the task's
+    // persisted directives, and every further handler burns a subprocess to
+    // produce guidance nobody will ever see.
+    const composeDeadline =
+      edge === "prompt.compose" ? Date.now() + PROMPT_COMPOSE_TOTAL_BUDGET_MS : null;
+
     for (const handler of ordered) {
+      if (composeDeadline !== null && Date.now() >= composeDeadline) {
+        console.warn(
+          `[routing] prompt.compose budget (${PROMPT_COMPOSE_TOTAL_BUDGET_MS}ms) exhausted — skipping remaining handler(s)`,
+        );
+        break;
+      }
       const startedAt = Date.now();
       let parsedResult: RoutingResult | undefined;
       let error: string | undefined;

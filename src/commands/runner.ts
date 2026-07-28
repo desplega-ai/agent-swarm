@@ -1828,6 +1828,15 @@ interface LogBuffer {
 const LOG_BUFFER_SIZE = 50; // Flush after this many lines
 const LOG_FLUSH_INTERVAL_MS = 5000; // Flush every 5 seconds
 
+/**
+ * Client deadline for the `prompt.compose` request. Must stay ABOVE the
+ * server's `PROMPT_COMPOSE_TOTAL_BUDGET_MS` (src/routing/engine.ts) so the
+ * server's own aggregate cap is what ends the run — keep the two in sync.
+ * Worker-side code can't import from the API server, hence the duplicated
+ * literal rather than a shared constant.
+ */
+const PROMPT_COMPOSE_REQUEST_TIMEOUT_MS = 20_000;
+
 /** Push buffered logs to the API */
 async function flushLogBuffer(
   buffer: LogBuffer,
@@ -5450,7 +5459,12 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
                 },
                 // A hung server must not stall prompt composition — fall back
                 // to the directives already carried on the task trigger.
-                signal: AbortSignal.timeout(5_000),
+                //
+                // Deliberately ABOVE the server's PROMPT_COMPOSE_TOTAL_BUDGET_MS
+                // (src/routing/engine.ts). A flat 5s aborted before even one
+                // default-timeout handler could finish, so composed guidance
+                // was computed and traced, then silently discarded.
+                signal: AbortSignal.timeout(PROMPT_COMPOSE_REQUEST_TIMEOUT_MS),
               },
             );
             if (response.ok) {

@@ -211,7 +211,9 @@ export const SDK_READ_ONLY_METHODS: ReadonlySet<string> = new Set<string>([
   "agent_info",
   "metrics_get",
   "user_resolve",
-  "db_query", // executeReadOnlyQuery — writes are rejected server-side
+  // NOTE: `db_query` is deliberately absent. It is read-only in the SQL sense,
+  // but its own description warns results may include secrets (oauth_tokens,
+  // configs) — same exfiltration shape as config_get with egress open.
   // NOTE: config_get / config_list are deliberately NOT here. They accept
   // `includeSecrets: true` and the config routes return unmasked values to an
   // authenticated agent; since the sandbox keeps open network egress, a
@@ -220,8 +222,10 @@ export const SDK_READ_ONLY_METHODS: ReadonlySet<string> = new Set<string>([
   "slack_read",
   "slack_listChannels",
   "slack_downloadFile",
-  // messaging
-  "message_read",
+  // NOTE: `message_read` is deliberately absent. The underlying read-messages
+  // tool defaults `markAsRead: true` and calls updateReadState +
+  // releaseMentionProcessing, so merely probing a handler would consume the
+  // owning agent's unread messages.
   // context
   "context_history",
   "context_diff",

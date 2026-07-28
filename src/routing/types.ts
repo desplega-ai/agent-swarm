@@ -99,7 +99,10 @@ export const RoutingResultSchema = z
     unassign: z.boolean().optional(),
     block: z
       .object({
-        reason: z.string().min(1),
+        // Bounded for the same reason as promptDirectives: a SOFT block is
+        // stored as a routing suggestion and later interpolated into the
+        // protected routing-guidance section of the system prompt.
+        reason: z.string().min(1).max(MAX_ROUTING_NOTE_CHARS),
       })
       .strict()
       .optional(),

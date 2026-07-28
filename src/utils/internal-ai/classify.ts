@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { z } from "zod";
 import { resolveTemplateAsync } from "../../prompts/resolver";
+import { scrubSecrets } from "../secret-scrubber";
 import "./../../prompts/internal-ai-templates";
 import { completeStructured } from "./complete-structured";
 
@@ -34,7 +35,10 @@ export async function classify(
   const systemPrompt = await resolveTemplateAsync("system.internal_ai.classify", {});
   const userPrompt = await resolveTemplateAsync("task.internal_ai.classify", {
     labels: JSON.stringify(labels),
-    input: typeof input === "string" ? input : JSON.stringify(input),
+    // Scrub before this text leaves for an EXTERNAL LLM provider. Callers pass
+    // task descriptions straight through (the seeded continuity-pin handler
+    // does), and those can carry pasted credentials.
+    input: scrubSecrets(typeof input === "string" ? input : JSON.stringify(input)),
   });
   if (systemPrompt.skipped || userPrompt.skipped) return null;
 

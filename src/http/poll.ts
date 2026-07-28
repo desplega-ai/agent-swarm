@@ -230,7 +230,11 @@ export async function handlePoll(
           const candidate = getTaskById(candidateId);
           if (!candidate) continue;
           const routing = await runClaimRouting(candidate, myAgentId);
-          if (routing.kind !== "pending-decision") evaluations++;
+          // Budget on handlers actually EXECUTED, not candidates examined. A
+          // candidate that short-circuits (`pending-decision`) or matches no
+          // handler spawns no subprocess, so charging it would shrink how far
+          // down the pool the scan reaches for no cost saved.
+          evaluations += routing.ranHandlers;
           if (routing.kind === "proceed") {
             // The transaction claims at most one task — stop evaluating (and
             // spawning handler subprocesses for) further candidates.
