@@ -27,8 +27,13 @@ async function removeDbFiles(path: string): Promise<void> {
 
 describe("script SDK allowlist", () => {
   let registeredTools: Record<string, unknown>;
+  const originalSteeringEnabled = process.env.STEERING_ENABLED;
 
   beforeAll(async () => {
+    // The SDK covers the full tool universe regardless of the runtime
+    // steering opt-in (mirrors scripts/bundle-script-types.ts) — steer-task
+    // must register for the drift check to span every allowlisted tool.
+    process.env.STEERING_ENABLED = "true";
     await removeDbFiles(TEST_DB_PATH);
     initDb(TEST_DB_PATH);
     // The scripts SDK bridge always builds a full-surface server (capability
@@ -40,6 +45,8 @@ describe("script SDK allowlist", () => {
   });
 
   afterAll(async () => {
+    if (originalSteeringEnabled === undefined) delete process.env.STEERING_ENABLED;
+    else process.env.STEERING_ENABLED = originalSteeringEnabled;
     closeDb();
     await removeDbFiles(TEST_DB_PATH);
   });
