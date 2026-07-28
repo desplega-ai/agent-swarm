@@ -55,6 +55,7 @@ import {
   ProviderNameSchema,
   ReasoningEffortSchema,
   ResumeReasonSchema,
+  SteeringSourceSchema,
   SteerModeSchema,
   splitLegacyModelAlias,
 } from "../types";
@@ -189,6 +190,10 @@ const steerTaskRoute = route({
     message: z.string().min(1),
     mode: SteerModeSchema.default("queue"),
     onUnsupported: OnUnsupportedSchema,
+    // Which surface the message came from. Defaults to "api" for raw callers;
+    // the UI, Slack and the script SDK identify themselves so the activity
+    // feed can say where a steer originated.
+    source: SteeringSourceSchema.optional(),
     requestedByUserId: z.string().optional(),
   }),
   rbac: { permission: "task.steer.own" },
@@ -799,7 +804,7 @@ export async function handleTasks(
         message: parsed.body.message,
         mode: parsed.body.mode,
         onUnsupported: parsed.body.onUnsupported,
-        source: "api",
+        source: parsed.body.source ?? "api",
         createdByKind:
           auth?.kind === "user" || requestedByUserId
             ? "user"

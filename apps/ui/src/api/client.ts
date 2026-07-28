@@ -421,7 +421,9 @@ class ApiClient {
     const res = await fetch(url, {
       method: "POST",
       headers: this.getHeaders(),
-      body: JSON.stringify(input),
+      // Identify the surface so the steering row is attributed to the dashboard
+      // rather than defaulting to a generic "api" caller.
+      body: JSON.stringify({ ...input, source: "ui" }),
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to steer task" }));
