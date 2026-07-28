@@ -96,7 +96,7 @@ export const registerRegisterServiceTool = (server: McpServer) => {
         metadata: z.record(z.string(), z.unknown()).optional().describe("Additional metadata."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         service: ServiceSchema.optional(),

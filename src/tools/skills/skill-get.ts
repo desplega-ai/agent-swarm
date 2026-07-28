@@ -16,7 +16,7 @@ export const registerSkillGetTool = (server: McpServer) => {
         name: z.string().optional().describe("Skill name (resolved with precedence)"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         skill: z.any().optional(),

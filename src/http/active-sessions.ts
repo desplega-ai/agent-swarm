@@ -23,7 +23,7 @@ const listActiveSessions = route({
   summary: "List active sessions",
   tags: ["Active Sessions"],
   query: z.object({
-    agentId: z.string().uuid().optional(),
+    agentId: z.string().optional(),
   }),
   responses: {
     200: { description: "Active session list" },

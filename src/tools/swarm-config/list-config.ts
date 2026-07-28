@@ -19,7 +19,7 @@ export const registerListConfigTool = (server: McpServer) => {
         scope: SwarmConfigScopeSchema.optional().describe(
           "Filter by scope: 'global', 'agent', or 'repo'.",
         ),
-        scopeId: z.string().uuid().optional().describe("Filter by agent ID or repo ID."),
+        scopeId: z.string().optional().describe("Filter by agent ID or repo ID."),
         key: z.string().optional().describe("Filter by specific key."),
         includeSecrets: z
           .boolean()
@@ -27,7 +27,7 @@ export const registerListConfigTool = (server: McpServer) => {
           .describe("If true, include actual secret values (default: false)."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         configs: z.array(SwarmConfigSchema),

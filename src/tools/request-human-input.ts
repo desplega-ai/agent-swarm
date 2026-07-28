@@ -51,7 +51,7 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
           .describe("Timeout in seconds (auto-rejects on timeout)"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         requestId: z.string().uuid().optional(),

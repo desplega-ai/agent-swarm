@@ -46,7 +46,7 @@ export const registerReadMessagesTool = (server: McpServer) => {
           .describe("Update your read position after fetching (default: true)."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         channelName: z.string().optional(),

@@ -84,11 +84,7 @@ export const createScheduleInputSchema = z.object({
     .default(50)
     .optional()
     .describe("Task priority 0-100 (default: 50)"),
-  targetAgentId: z
-    .string()
-    .uuid()
-    .optional()
-    .describe("Agent to assign tasks to (omit for task pool)"),
+  targetAgentId: z.string().optional().describe("Agent to assign tasks to (omit for task pool)"),
   timezone: z.string().default("UTC").optional().describe("Timezone for cron schedules"),
   enabled: z
     .boolean()
@@ -118,7 +114,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         "Create a new scheduled task. For recurring: provide cronExpression or intervalMs. For one-time: provide delayMs or runAt with scheduleType 'one_time'.",
       inputSchema: createScheduleInputSchema,
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         schedule: z

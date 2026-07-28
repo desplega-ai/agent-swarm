@@ -33,7 +33,6 @@ export const registerRegisterKapsoNumberTool = (server: McpServer) => {
           .describe("Kapso/Meta phone-number ID to provision (KAPSO_PHONE_NUMBER_ID)."),
         agentId: z
           .string()
-          .uuid()
           .optional()
           .describe(
             "Agent to route inbound messages to as a `kapso-inbound` task. Defaults to the lead agent when omitted.",
@@ -48,7 +47,7 @@ export const registerRegisterKapsoNumberTool = (server: McpServer) => {
         name: z.string().optional().describe("Human-friendly display name for the number."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         webhookUrl: z.string().optional(),
@@ -174,7 +173,7 @@ export const registerUnregisterKapsoNumberTool = (server: McpServer) => {
           .describe("Kapso/Meta phone-number ID whose mapping should be removed."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
       }),

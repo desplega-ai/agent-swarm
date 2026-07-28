@@ -18,7 +18,6 @@ export const registerGetConfigTool = (server: McpServer) => {
       inputSchema: z.object({
         agentId: z
           .string()
-          .uuid()
           .optional()
           .describe("Agent ID for scope resolution. Omit for global-only configs."),
         repoId: z
@@ -36,7 +35,7 @@ export const registerGetConfigTool = (server: McpServer) => {
           .describe("If true, include actual secret values (default: false, secrets are masked)."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         configs: z.array(SwarmConfigSchema),

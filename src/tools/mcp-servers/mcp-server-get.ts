@@ -16,7 +16,7 @@ export const registerMcpServerGetTool = (server: McpServer) => {
         name: z.string().optional().describe("MCP server name (resolved with scope cascade)"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         server: z.any().optional(),

@@ -23,7 +23,7 @@ export const registerGetSwarmTool = (server: McpServer) => {
           ),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         agents: z.array(AgentSchema),
       }),
     },

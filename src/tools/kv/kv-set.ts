@@ -39,7 +39,7 @@ export const registerKvSetTool = (server: McpServer) => {
         ),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         namespace: z.string().optional(),

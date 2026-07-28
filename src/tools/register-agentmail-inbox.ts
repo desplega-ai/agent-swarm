@@ -31,7 +31,7 @@ export const registerRegisterAgentmailInboxTool = (server: McpServer) => {
           .describe("Optional email address for this inbox (for reference only)."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         mappings: z

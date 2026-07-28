@@ -25,7 +25,7 @@ export const registerSkillListTool = (server: McpServer) => {
           .describe("Include full content (default false)"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         skills: z.array(z.any()),

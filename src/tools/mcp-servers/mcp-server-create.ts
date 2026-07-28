@@ -44,7 +44,7 @@ export const registerMcpServerCreateTool = (server: McpServer) => {
           ),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         server: z.any().optional(),

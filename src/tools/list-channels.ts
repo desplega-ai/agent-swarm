@@ -14,7 +14,7 @@ export const registerListChannelsTool = (server: McpServer) => {
 
       inputSchema: z.object({}),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         channels: z.array(ChannelSchema),
       }),

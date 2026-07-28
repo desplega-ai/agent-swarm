@@ -16,7 +16,7 @@ export const registerDeletePromptTemplateTool = (server: McpServer) => {
         id: z.string().describe("The prompt template ID to delete."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
       }),

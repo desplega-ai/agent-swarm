@@ -16,7 +16,7 @@ export const registerSkillUninstallTool = (server: McpServer) => {
         agentId: z.string().optional().describe("Target agent (default: calling agent)"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
       }),

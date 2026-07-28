@@ -28,7 +28,7 @@ export const registerSkillUpdateTool = (server: McpServer) => {
           ),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         skill: z.any().optional(),

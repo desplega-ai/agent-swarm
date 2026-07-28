@@ -16,7 +16,7 @@ export const registerSkillGetFileTool = (server: McpServer) => {
         path: z.string().describe("Relative path, e.g. references/animations.md"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         file: z.any().optional(),

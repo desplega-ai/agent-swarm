@@ -16,12 +16,12 @@ export const registerPostMessageTool = (server: McpServer) => {
         content: z.string().min(1).max(4000).describe("Message content."),
         replyTo: z.uuid().optional().describe("Message ID to reply to (for threading)."),
         mentions: z
-          .array(z.uuid())
+          .array(z.string())
           .optional()
           .describe("Agent IDs to @mention (they'll see it in unread)."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         posted: ChannelMessageSchema.optional(),

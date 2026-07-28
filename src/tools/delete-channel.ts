@@ -20,7 +20,7 @@ export const registerDeleteChannelTool = (server: McpServer) => {
         name: z.string().optional().describe("Channel name (alternative to channelId)."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
       }),

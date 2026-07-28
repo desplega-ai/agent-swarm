@@ -48,7 +48,7 @@ const credentialBindingToolBindingSchema = CredentialBindingSchema.and(
 );
 
 const credentialBindingsOutputSchema = z.object({
-  yourAgentId: z.string().uuid().optional(),
+  yourAgentId: z.string().optional(),
   success: z.boolean(),
   message: z.string(),
   provider: z.string().optional(),

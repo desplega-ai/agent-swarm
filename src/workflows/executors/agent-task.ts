@@ -15,7 +15,9 @@ import { BaseExecutor } from "./base";
 
 const AgentTaskConfigSchema = z.object({
   template: z.string(),
-  agentId: z.string().uuid().optional(),
+  // Plain string, NOT .uuid(): agents may join with custom IDs (AGENT_ID env /
+  // join-swarm agentId), so a UUID filter would reject legitimate agents.
+  agentId: z.string().optional(),
   tags: z.array(z.string()).optional(),
   priority: z.number().int().min(0).max(100).optional(),
   offerMode: z.boolean().optional(),

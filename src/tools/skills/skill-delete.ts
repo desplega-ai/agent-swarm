@@ -18,7 +18,7 @@ export const registerSkillDeleteTool = (server: McpServer) => {
         skillId: z.string().describe("ID of the skill to delete"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
       }),

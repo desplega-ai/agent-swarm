@@ -17,7 +17,7 @@ export const registerMyAgentInfoTool = (server: McpServer) => {
         success: z.boolean(),
         message: z.string(),
         agentId: z.string().optional(),
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         yourAgentInfo: AgentSchema.optional(),
       }),
     },

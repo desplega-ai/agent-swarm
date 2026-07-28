@@ -41,7 +41,7 @@ export const registerSetPromptTemplateTool = (server: McpServer) => {
           .describe("Reason for the change (recorded in history)."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         template: PromptTemplateSchema.optional(),

@@ -18,7 +18,7 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
         memoryId: z.uuid().describe("The ID of the memory to delete."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
       }),

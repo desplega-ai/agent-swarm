@@ -28,7 +28,7 @@ export const registerSkillInstallRemoteTool = (server: McpServer) => {
           .describe("If true, registers for npx install (metadata only)"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         skill: z.any().optional(),

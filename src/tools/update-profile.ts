@@ -61,7 +61,6 @@ export const registerUpdateProfileTool = (server: McpServer) => {
       inputSchema: z.object({
         agentId: z
           .string()
-          .uuid()
           .optional()
           .describe(
             "Target agent ID to update. If omitted, updates the calling agent. Only lead agents can update other agents' profiles.",
@@ -128,7 +127,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           ),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         agent: AgentSchema.optional(),

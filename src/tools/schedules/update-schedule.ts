@@ -58,7 +58,7 @@ export const updateScheduleInputSchema = z.object({
   taskType: z.string().max(50).optional().describe("New task type"),
   tags: z.array(z.string()).optional().describe("New tags"),
   priority: z.number().int().min(0).max(100).optional().describe("New priority"),
-  targetAgentId: z.string().uuid().nullable().optional().describe("New target agent ID"),
+  targetAgentId: z.string().nullable().optional().describe("New target agent ID"),
   timezone: z.string().optional().describe("New timezone"),
   enabled: z.boolean().optional().describe("Enable or disable the schedule"),
   model: z
@@ -82,7 +82,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
       description: "Update an existing scheduled task. Any registered agent can update schedules.",
       inputSchema: updateScheduleInputSchema,
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         schedule: z

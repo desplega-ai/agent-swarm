@@ -17,7 +17,6 @@ export const registerContextHistoryTool = (server: McpServer) => {
       inputSchema: z.object({
         agentId: z
           .string()
-          .uuid()
           .optional()
           .describe("Agent ID to query. Default: your own agent. Lead can query any agent."),
         field: z
@@ -33,7 +32,7 @@ export const registerContextHistoryTool = (server: McpServer) => {
           .describe("Max versions to return (default: 10)."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         versions: z
@@ -43,7 +42,7 @@ export const registerContextHistoryTool = (server: McpServer) => {
               field: z.string(),
               version: z.number(),
               changeSource: z.string(),
-              changedByAgentId: z.string().uuid().nullable(),
+              changedByAgentId: z.string().nullable(),
               changeReason: z.string().nullable(),
               contentLength: z.number(),
               createdAt: z.string(),

@@ -24,7 +24,6 @@ export const registerSetConfigTool = (server: McpServer) => {
         scope: SwarmConfigScopeSchema.describe("Config scope: 'global', 'agent', or 'repo'."),
         scopeId: z
           .string()
-          .uuid()
           .optional()
           .describe(
             "Agent ID or repo ID. Required for 'agent' and 'repo' scopes, omit for 'global'.",
@@ -49,7 +48,7 @@ export const registerSetConfigTool = (server: McpServer) => {
           .describe("Optional human-readable description of this config entry."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         config: SwarmConfigSchema.optional(),

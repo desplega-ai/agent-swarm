@@ -29,7 +29,7 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
           .describe("Force re-fetch even if hash matches"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         updated: z.number(),

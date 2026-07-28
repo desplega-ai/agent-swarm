@@ -25,7 +25,7 @@ export const registerListPromptTemplatesTool = (server: McpServer) => {
         isDefault: z.boolean().optional().describe("Filter by default status."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         templates: z.array(PromptTemplateSchema),

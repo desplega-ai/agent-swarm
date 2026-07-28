@@ -55,7 +55,7 @@ export const registerContextDiffTool = (server: McpServer) => {
           .describe('The "older" version ID to compare against. Default: previous version.'),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         field: z.string().optional(),

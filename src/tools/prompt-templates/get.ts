@@ -18,7 +18,7 @@ export const registerGetPromptTemplateTool = (server: McpServer) => {
         id: z.string().describe("The prompt template ID."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         template: PromptTemplateSchema.optional(),

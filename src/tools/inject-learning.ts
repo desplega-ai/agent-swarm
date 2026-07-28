@@ -21,7 +21,7 @@ export const registerInjectLearningTool = (server: McpServer) => {
       description:
         "Allows the lead agent to push learnings into a worker's memory. The learning will be stored as a searchable memory entry that the worker can recall in future sessions.",
       inputSchema: z.object({
-        agentId: z.uuid().describe("Target worker agent ID"),
+        agentId: z.string().describe("Target worker agent ID"),
         learning: z.string().min(1).describe("The learning content to inject"),
         category: LearningCategoryEnum.describe(
           "Category of the learning: mistake-pattern, best-practice, codebase-knowledge, or preference",

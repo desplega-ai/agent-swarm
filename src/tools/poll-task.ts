@@ -30,7 +30,7 @@ export const registerPollTaskTool = (server: McpServer) => {
 
       inputSchema: z.object({}),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         task: AgentTaskSchema.optional(),

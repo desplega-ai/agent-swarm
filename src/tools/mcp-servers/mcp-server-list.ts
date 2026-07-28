@@ -21,7 +21,7 @@ export const registerMcpServerListTool = (server: McpServer) => {
           .describe("Only show servers installed for the calling agent"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         servers: z.array(z.any()),

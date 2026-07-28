@@ -14,7 +14,7 @@ export const registerListServicesTool = (server: McpServer) => {
       annotations: { readOnlyHint: true },
 
       inputSchema: z.object({
-        agentId: z.uuid().optional().describe("Filter by specific agent ID."),
+        agentId: z.string().optional().describe("Filter by specific agent ID."),
         name: z.string().optional().describe("Filter by service name (partial match)."),
         status: ServiceStatusSchema.optional().describe("Filter by health status."),
         includeOwn: z
@@ -24,7 +24,7 @@ export const registerListServicesTool = (server: McpServer) => {
           .describe("Include services registered by calling agent (default: true)."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         services: z.array(

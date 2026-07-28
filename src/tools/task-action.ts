@@ -101,7 +101,7 @@ export const taskActionInputSchema = z.object({
 });
 
 export const taskActionOutputSchema = z.object({
-  yourAgentId: z.string().uuid().optional(),
+  yourAgentId: z.string().optional(),
   success: z.boolean(),
   message: z.string(),
   task: AgentTaskSchema.optional(),

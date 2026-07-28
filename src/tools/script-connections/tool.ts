@@ -93,7 +93,7 @@ const scriptConnectionsInputSchema = z.object({
 });
 
 const scriptConnectionsOutputSchema = z.object({
-  yourAgentId: z.string().uuid().optional(),
+  yourAgentId: z.string().optional(),
   success: z.boolean(),
   message: z.string(),
   connections: z.array(z.unknown()),

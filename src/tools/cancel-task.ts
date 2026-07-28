@@ -20,7 +20,7 @@ export const cancelTaskInputSchema = z.object({
 });
 
 export const cancelTaskOutputSchema = z.object({
-  yourAgentId: z.string().uuid().optional(),
+  yourAgentId: z.string().optional(),
   success: z.boolean(),
   message: z.string(),
   task: AgentTaskSchema.optional(),

@@ -9,7 +9,7 @@ const SESSION_WINDOW_HINT =
   'Outside the 24h WhatsApp session window — free-form text is rejected. Use a pre-approved template message (see the `kapso-whatsapp` skill, "Send a template").';
 
 const outputSchema = z.object({
-  yourAgentId: z.string().uuid().optional(),
+  yourAgentId: z.string().optional(),
   success: z.boolean(),
   message: z.string(),
   messageId: z.string().optional(),

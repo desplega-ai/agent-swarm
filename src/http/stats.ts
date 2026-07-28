@@ -27,7 +27,7 @@ const listLogs = route({
   tags: ["Stats"],
   query: z.object({
     limit: z.coerce.number().int().min(1).optional(),
-    agentId: z.string().uuid().optional(),
+    agentId: z.string().optional(),
   }),
   responses: {
     200: { description: "Agent logs" },

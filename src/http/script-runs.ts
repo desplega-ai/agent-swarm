@@ -76,7 +76,7 @@ const agentTaskBodySchema = z.object({
   stepKey: z.string().min(1),
   template: z.string().optional(),
   task: z.string().optional(),
-  agentId: z.string().uuid().optional(),
+  agentId: z.string().optional(),
   tags: z.array(z.string()).optional(),
   priority: z.number().int().min(0).max(100).optional(),
   offerMode: z.boolean().optional(),

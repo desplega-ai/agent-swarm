@@ -20,7 +20,7 @@ export const registerUnregisterServiceTool = (server: McpServer) => {
           .describe("Service name to unregister (alternative to serviceId)."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
       }),

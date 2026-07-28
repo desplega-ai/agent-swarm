@@ -43,8 +43,7 @@
         "parameters": [
           {
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": "string"
             },
             "required": false,
             "name": "agentId",
@@ -5003,8 +5002,7 @@
                 "type": "object",
                 "properties": {
                   "agentId": {
-                    "type": "string",
-                    "format": "uuid"
+                    "type": "string"
                   },
                   "content": {
                     "type": "string",
@@ -5285,7 +5283,6 @@
                   },
                   "agentId": {
                     "type": "string",
-                    "format": "uuid",
                     "description": "Filter to a single agent. Omit for all."
                   },
                   "scope": {
@@ -9709,8 +9706,7 @@
                     "type": "integer"
                   },
                   "targetAgentId": {
-                    "type": "string",
-                    "format": "uuid"
+                    "type": "string"
                   },
                   "enabled": {
                     "type": "boolean"
@@ -10070,8 +10066,7 @@
                     "type": [
                       "string",
                       "null"
-                    ],
-                    "format": "uuid"
+                    ]
                   },
                   "enabled": {
                     "type": "boolean"
@@ -10223,8 +10218,7 @@
                     "type": [
                       "string",
                       "null"
-                    ],
-                    "format": "uuid"
+                    ]
                   },
                   "enabled": {
                     "type": "boolean"
@@ -12552,8 +12546,7 @@
                     "type": "string"
                   },
                   "agentId": {
-                    "type": "string",
-                    "format": "uuid"
+                    "type": "string"
                   },
                   "tags": {
                     "type": "array",
@@ -14987,8 +14980,7 @@
           },
           {
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": "string"
             },
             "required": false,
             "name": "agentId",

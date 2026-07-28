@@ -25,7 +25,7 @@ export const registerSkillCreateTool = (server: McpServer) => {
           .describe("Scope: agent (personal) or swarm (shared). Default: agent"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         skill: z.any().optional(),

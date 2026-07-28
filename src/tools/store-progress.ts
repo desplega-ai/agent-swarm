@@ -29,6 +29,22 @@ import { validateJsonSchema } from "@/workflows/json-schema-validator";
 // echoed the schema example, producing noise rows keyed `mcp-<taskId>-<ts>`
 // that double-counted alongside the harness's authoritative entry.
 
+export const storeProgressOutputSchema = z.object({
+  success: z.boolean(),
+  message: z.string(),
+  task: AgentTaskSchema.optional(),
+  // Plain string, NOT .uuid(): agents may join with custom IDs (AGENT_ID env /
+  // join-swarm agentId), and a UUID constraint here makes the response fail MCP
+  // output validation after the handler already ran.
+  yourAgentId: z.string().optional(),
+  wasNoOp: z
+    .boolean()
+    .optional()
+    .describe(
+      "True when the call was a no-op because the task was already in a terminal state (completed/failed/cancelled). First-call-wins.",
+    ),
+});
+
 export const registerStoreProgressTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "store-progress",
@@ -68,18 +84,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // runner). If a payload still includes the field, Zod's
         // `unknownKeys` default drops it silently.
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
-        task: AgentTaskSchema.optional(),
-        yourAgentId: z.string().optional(),
-        wasNoOp: z
-          .boolean()
-          .optional()
-          .describe(
-            "True when the call was a no-op because the task was already in a terminal state (completed/failed/cancelled). First-call-wins.",
-          ),
-      }),
+      outputSchema: storeProgressOutputSchema,
     },
     async (
       { taskId, progress, status, output, failureReason, attachments, persistMemory },

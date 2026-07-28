@@ -15,7 +15,7 @@ export const registerSkillSearchTool = (server: McpServer) => {
         limit: z.number().int().min(1).max(100).default(20).optional(),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         skills: z.array(z.any()),

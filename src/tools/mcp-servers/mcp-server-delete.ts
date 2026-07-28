@@ -15,7 +15,7 @@ export const registerMcpServerDeleteTool = (server: McpServer) => {
         id: z.string().describe("ID of the MCP server to delete"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
       }),

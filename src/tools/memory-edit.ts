@@ -46,7 +46,7 @@ export const registerMemoryEditTool = (server: McpServer) => {
         expectedVersion: z.number().int().min(1).optional(),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         memory: AgentMemorySchema.optional(),

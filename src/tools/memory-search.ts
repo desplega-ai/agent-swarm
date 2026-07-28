@@ -16,6 +16,32 @@ function rateHintFor(memoryId: string): string {
   return `memory_rate(id="${memoryId}", useful=true|false)`;
 }
 
+export const memorySearchOutputSchema = z.object({
+  // Plain string, NOT .uuid(): agents may join with custom IDs (AGENT_ID env /
+  // join-swarm agentId), and a UUID constraint here makes the response fail MCP
+  // output validation after the handler already ran.
+  yourAgentId: z.string().optional(),
+  success: z.boolean(),
+  message: z.string(),
+  results: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        name: z.string(),
+        summary: z.string().nullable(),
+        source: AgentMemorySourceSchema,
+        scope: AgentMemoryScopeSchema,
+        similarity: z.number().optional(),
+        retrievalSource: z.enum(["vec", "fts", "hybrid", "fallback", "graph"]).optional(),
+        tags: z.array(z.string()).optional(),
+        createdAt: z.string(),
+        rateHint: z.string().optional(),
+      }),
+    )
+    .optional(),
+  _ratingNudge: z.string().optional(),
+});
+
 export const registerMemorySearchTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "memory-search",
@@ -42,28 +68,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
         limit: z.number().int().min(1).max(50).default(10).describe("Max results to return."),
         source: AgentMemorySourceSchema.optional().describe("Filter by memory source type."),
       }),
-      outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        results: z
-          .array(
-            z.object({
-              id: z.string().uuid(),
-              name: z.string(),
-              summary: z.string().nullable(),
-              source: AgentMemorySourceSchema,
-              scope: AgentMemoryScopeSchema,
-              similarity: z.number().optional(),
-              retrievalSource: z.enum(["vec", "fts", "hybrid", "fallback", "graph"]).optional(),
-              tags: z.array(z.string()).optional(),
-              createdAt: z.string(),
-              rateHint: z.string().optional(),
-            }),
-          )
-          .optional(),
-        _ratingNudge: z.string().optional(),
-      }),
+      outputSchema: memorySearchOutputSchema,
     },
     async ({ query, intent, scope, limit, source }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {

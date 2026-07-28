@@ -31,7 +31,7 @@ export const registerMcpServerUpdateTool = (server: McpServer) => {
         isEnabled: z.boolean().optional().describe("Toggle enabled/disabled"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         server: z.any().optional(),

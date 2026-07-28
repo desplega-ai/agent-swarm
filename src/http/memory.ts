@@ -33,7 +33,7 @@ const indexMemory = route({
   summary: "Ingest content into memory system (async embedding)",
   tags: ["Memory"],
   body: z.object({
-    agentId: z.string().uuid().optional(),
+    agentId: z.string().optional(),
     content: z.string().min(1),
     name: z.string().min(1),
     scope: AgentMemoryScopeSchema,
@@ -137,7 +137,7 @@ const listMemory = route({
       .describe(
         "Natural-language query. If present, runs semantic search; otherwise lists by recency.",
       ),
-    agentId: z.string().uuid().optional().describe("Filter to a single agent. Omit for all."),
+    agentId: z.string().optional().describe("Filter to a single agent. Omit for all."),
     scope: z.enum(["agent", "swarm", "all"]).default("all"),
     source: AgentMemorySourceSchema.optional(),
     sourcePath: z

@@ -15,7 +15,7 @@ export const registerSkillPublishTool = (server: McpServer) => {
         skillId: z.string().describe("ID of the personal skill to publish"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         taskId: z.string().optional(),

@@ -24,7 +24,7 @@ export const registerPreviewPromptTemplateTool = (server: McpServer) => {
           .describe("Variables to interpolate into the template."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         rendered: z.string(),

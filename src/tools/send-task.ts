@@ -31,8 +31,10 @@ import {
 
 export const sendTaskInputSchema = z
   .object({
+    // Plain string, NOT .uuid(): agents may join with custom IDs (AGENT_ID env /
+    // join-swarm agentId), so a UUID filter would reject legitimate agents.
     agentId: z
-      .uuid()
+      .string()
       .optional()
       .describe("The agent to assign/offer task to. Omit to create unassigned task for pool."),
     task: z.string().min(1).describe("The task description to send."),
@@ -141,7 +143,7 @@ export const sendTaskInputSchema = z
   });
 
 export const sendTaskOutputSchema = z.object({
-  yourAgentId: z.string().uuid().optional(),
+  yourAgentId: z.string().optional(),
   success: z.boolean(),
   message: z.string(),
   task: AgentTaskSchema.optional(),

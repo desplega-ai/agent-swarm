@@ -19,7 +19,7 @@ export const registerSkillInstallTool = (server: McpServer) => {
           .describe("Target agent (default: calling agent). Lead can install for others."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         agentSkill: z.any().optional(),

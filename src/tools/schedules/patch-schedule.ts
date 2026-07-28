@@ -58,7 +58,7 @@ export const patchScheduleInputSchema = z.object({
   taskType: z.string().max(50).optional().describe("New task type"),
   tags: z.array(z.string()).optional().describe("New tags"),
   priority: z.number().int().min(0).max(100).optional().describe("New priority"),
-  targetAgentId: z.string().uuid().nullable().optional().describe("New target agent ID"),
+  targetAgentId: z.string().nullable().optional().describe("New target agent ID"),
   timezone: z.string().optional().describe("New timezone"),
   enabled: z.boolean().optional().describe("Enable or disable the schedule"),
   model: z
@@ -83,7 +83,7 @@ export const registerPatchScheduleTool = (server: McpServer) => {
         "Patch an existing scheduled task by shallow-merging provided fields over the current row. Any registered agent can patch schedules.",
       inputSchema: patchScheduleInputSchema,
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         schedule: z

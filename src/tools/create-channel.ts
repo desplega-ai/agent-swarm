@@ -15,10 +15,10 @@ export const registerCreateChannelTool = (server: McpServer) => {
         name: z.string().min(1).max(100).describe("Channel name (must be unique)."),
         description: z.string().max(500).optional().describe("Channel description."),
         type: ChannelTypeSchema.optional().describe("Channel type: 'public' (default) or 'dm'."),
-        participants: z.array(z.uuid()).optional().describe("Agent IDs for DM channels."),
+        participants: z.array(z.string()).optional().describe("Agent IDs for DM channels."),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().uuid().optional(),
+        yourAgentId: z.string().optional(),
         success: z.boolean(),
         message: z.string(),
         channel: ChannelSchema.optional(),
