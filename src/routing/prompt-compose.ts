@@ -1,4 +1,5 @@
 import type { AgentTask, RoutingDirectives } from "../types";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { buildRoutingCtx } from "./ctx";
 import { hasHandlersForVia, runPromptCompose } from "./engine";
 import { MAX_PROMPT_DIRECTIVES } from "./types";
@@ -29,8 +30,14 @@ export async function composeTaskRoutingDirectives(
   // text past base-prompt's budget (which is computed after this) and stops the
   // task starting at all. Dedupe first — repeat composes otherwise accumulate
   // the same lines — then apply the aggregate cap.
+  // Freshly composed directives have not been through any persistence egress
+  // (they go straight to the worker and into the system prompt), so scrub them
+  // here. The durable ones were already scrubbed when they were written.
   const directives = [
-    ...new Set([...(task.routingDirectives?.directives ?? []), ...decision.promptDirectives]),
+    ...new Set([
+      ...(task.routingDirectives?.directives ?? []),
+      ...decision.promptDirectives.map(scrubSecrets),
+    ]),
   ].slice(0, MAX_COMPOSED_PROMPT_DIRECTIVES);
   if (directives.length === 0 && !task.routingDirectives) return undefined;
 

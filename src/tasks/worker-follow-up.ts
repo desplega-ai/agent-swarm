@@ -219,6 +219,12 @@ export async function createWorkerTaskFollowUp(args: {
   ) {
     decision.final = undefined;
   }
+  // `unassign` is contract-limited to creation/delegation/resume. Honouring it
+  // here would clear the Lead assignment in `baseOptions` and drop a Lead-only
+  // completion REVIEW into the worker pool, where any worker could pick it up.
+  if (decision.final?.unassign) {
+    decision.final = { ...decision.final, unassign: undefined };
+  }
 
   return createTaskExtended(
     followUpDescription,

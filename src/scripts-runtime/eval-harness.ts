@@ -1,6 +1,7 @@
 import { buildCtx } from "./ctx";
 import { patchFetchWithEgressSubstitution } from "./egress-secrets";
 import type { SwarmConfigPayload } from "./executors/types";
+import { patchFetchForReadOnly } from "./readonly-egress";
 import { SwarmConfig } from "./swarm-config";
 
 function requiredEnv(name: string): string {
@@ -87,6 +88,12 @@ try {
   const payload = JSON.parse(stdin) as SwarmConfigPayload;
   if (payload.egressSecrets?.length || payload.failedBindings?.length) {
     patchFetchWithEgressSubstitution(payload.egressSecrets ?? [], payload.failedBindings ?? []);
+  }
+  // Outermost fetch layer for read-only runs: a dry-run handler keeps a working
+  // global fetch otherwise, so stripping its credentials still leaves it able
+  // to POST to an external endpoint (or carry a credential in its own source).
+  if (payload.system.readOnly === true) {
+    patchFetchForReadOnly(payload.system.mcpBaseUrl.value);
   }
   const swarmConfig = new SwarmConfig(payload);
   const rawArgs = JSON.parse(await Bun.file(requiredEnv("SWARM_SCRIPT_ARGS_FILE")).text());

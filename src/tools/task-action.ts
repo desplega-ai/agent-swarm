@@ -40,6 +40,7 @@ import {
   ReasoningEffortSchema,
   splitLegacyModelAlias,
 } from "@/types";
+import { scrubSecrets } from "@/utils/secret-scrubber";
 
 export const TaskActionSchema = z.enum([
   "create",
@@ -298,7 +299,7 @@ export async function taskActionHandler(
       return taskActionCallResult(
         {
           success: false,
-          message: `Task blocked by routing: ${created.blocked.reason}. Created Lead reroute-decision task "${created.task.id}".`,
+          message: `Task blocked by routing: ${scrubSecrets(created.blocked.reason)}. Created Lead reroute-decision task "${created.task.id}".`,
           task: created.task,
         },
         agentId,
@@ -307,7 +308,12 @@ export async function taskActionHandler(
     return taskActionCallResult(
       {
         success: true,
-        message: `Created unassigned task "${created.task.id}".`,
+        // A routing handler may have hard-assigned this, in which case the
+        // task is `pending` on that agent — reporting "unassigned"
+        // unconditionally told callers the opposite of what happened.
+        message: created.task.agentId
+          ? `Created task "${created.task.id}" assigned to agent "${created.task.agentId}".`
+          : `Created unassigned task "${created.task.id}".`,
         task: created.task,
       },
       agentId,
@@ -347,7 +353,7 @@ export async function taskActionHandler(
         return taskActionCallResult(
           {
             success: false,
-            message: `Task "${taskId}" claim blocked by routing: ${routing.reason}.${decisionNote}`,
+            message: `Task "${taskId}" claim blocked by routing: ${scrubSecrets(routing.reason)}.${decisionNote}`,
           },
           agentId,
         );

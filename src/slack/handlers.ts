@@ -20,6 +20,7 @@ import type { SlackFile } from "./files";
 import { extractTaskFromMessage, hasOtherUserMention, routeMessage } from "./router";
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { extractSlackMessageText } from "./message-text";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
 import { registerTreeMessage } from "./watcher";
@@ -638,7 +639,7 @@ export function registerMessageHandler(app: App): void {
       // their request is waiting when it does not exist.
       if (offlineBlocked) {
         await say({
-          text: `:satellite: _Routing blocked this request: ${offlineBlocked.reason}. Handed to the Lead as decision task \`${offlineTask.id.slice(0, 8)}\`._`,
+          text: `:satellite: _Routing blocked this request: ${scrubSecrets(offlineBlocked.reason)}. Handed to the Lead as decision task \`${offlineTask.id.slice(0, 8)}\`._`,
           thread_ts: threadTs,
         });
         return;
@@ -720,7 +721,7 @@ export function registerMessageHandler(app: App): void {
           if (blocked) {
             results.failed.push({
               agentName: agent.name,
-              reason: `routing blocked: ${blocked.reason} (Lead decision task ${task.id.slice(0, 8)})`,
+              reason: `routing blocked: ${scrubSecrets(blocked.reason)} (Lead decision task ${task.id.slice(0, 8)})`,
             });
             continue;
           }
@@ -741,7 +742,7 @@ export function registerMessageHandler(app: App): void {
         if (blocked) {
           results.failed.push({
             agentName: agent.name,
-            reason: `routing blocked: ${blocked.reason} (Lead decision task ${task.id.slice(0, 8)})`,
+            reason: `routing blocked: ${scrubSecrets(blocked.reason)} (Lead decision task ${task.id.slice(0, 8)})`,
           });
           continue;
         }

@@ -189,7 +189,15 @@ export function createRoutingEngine(
           // SDK bridge calls with registered-agent checks (e.g. classify)
           // resolve to a real agent instead of 404ing and failing open.
           agentId: handler.createdByAgentId ?? getLeadAgent()?.id ?? "routing",
-          timeoutMs: handler.timeoutMs ?? 5000,
+          // Clamped to what's LEFT of the aggregate budget, not just checked
+          // before starting: a handler begun just under the deadline would
+          // otherwise run its full configured timeout (up to 300s) — past both
+          // the server budget and the worker's request deadline, so its
+          // guidance is discarded anyway and the subprocess is pure waste.
+          timeoutMs:
+            composeDeadline === null
+              ? (handler.timeoutMs ?? 5000)
+              : Math.max(1, Math.min(handler.timeoutMs ?? 5000, composeDeadline - Date.now())),
           // Suppressing bus events is not enough to make a dry run
           // side-effect-free: the handler still executes with real
           // credentials, so it could create tasks, mutate config, or message

@@ -771,14 +771,33 @@ async function autoAssignPoolTasks(findings: HeartbeatFindings): Promise<void> {
     for (const task of batch) {
       if (assignedCount >= MAX_AUTO_ASSIGN_PER_SWEEP) break;
 
-      const worker = idleWorkers.find(
+      const candidate = idleWorkers.find(
         (w) => reservedForWorker(w.id) < (w.maxTasks ?? 1) && isAgentEligibleForTask(w, task),
       );
-      if (!worker) continue; // No eligible worker with capacity this sweep — leave queued.
+      if (!candidate) continue; // No eligible worker with capacity this sweep — leave queued.
 
+      let worker = candidate;
       if (routeClaims) {
-        const routing = await runClaimRouting(task, worker.id);
-        if (routing.kind !== "proceed") continue;
+        const routing = await runClaimRouting(task, candidate.id);
+        if (routing.kind === "redirected") {
+          // Honour the redirect instead of dropping it. `idleWorkers.find()`
+          // picks the same candidate every sweep, so discarding the redirect
+          // meant re-evaluating and re-rejecting it forever while the target
+          // never received the task. The target must still be idle, eligible
+          // and under capacity — otherwise leave the task queued rather than
+          // forcing an assignment the pool rules would refuse.
+          const target = idleWorkers.find((w) => w.id === routing.agentId);
+          if (
+            !target ||
+            reservedForWorker(target.id) >= (target.maxTasks ?? 1) ||
+            !isAgentEligibleForTask(target, task)
+          ) {
+            continue;
+          }
+          worker = target;
+        } else if (routing.kind !== "proceed") {
+          continue;
+        }
         // The hook yielded, so the worker may have claimed work itself in the
         // gap. `reservedByWorker` still holds the pre-hook count, and
         // `assignUnassignedTaskPending` only rechecks the TASK (status +
