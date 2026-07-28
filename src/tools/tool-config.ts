@@ -22,11 +22,6 @@ export const CORE_TOOLS = new Set([
   "task-action", // claim/release/accept/reject
   "send-task", // delegate subtasks
   "get-tasks", // list/filter tasks
-  // Acknowledging a steering message is mandatory (it is the only path to
-  // `handled`) and arrives unprompted mid-task. Behind Tool Search the agent
-  // has to discover it *after* being interrupted; observed E2E behavior is
-  // that it searches, finds the name, and then never calls it.
-  "accept-steer", // acknowledge a steering message delivered mid-run
 
   // Communication (used every session)
   "read-messages", // internal swarm chat
@@ -193,7 +188,8 @@ export const DEFERRED_TOOLS = new Set([
   // External command routes (1)
   "swarm_x",
 
-  // Other (5)
+  // Other (6)
+  "accept-steer",
   "cancel-task",
   "steer-task",
   "inject-learning",
