@@ -26,6 +26,15 @@ export type RoutingVia = z.infer<typeof RoutingViaSchema>;
 export const MAX_PROMPT_DIRECTIVE_CHARS = 2_000;
 export const MAX_PROMPT_DIRECTIVES = 20;
 export const MAX_ROUTING_NOTE_CHARS = 2_000;
+/**
+ * Agent ids are UUIDs (36 chars) but the routing contract accepts whatever id
+ * shape the DB holds, so this is a generous identifier bound — NOT a prompt
+ * budget. It exists because a soft `assignTo` is persisted as a suggestion
+ * and later rendered into the protected routing-guidance prompt section, so
+ * without it the one uncapped RoutingResult string field could smuggle
+ * unbounded text past the directive/note caps.
+ */
+export const MAX_ROUTING_ASSIGN_TARGET_CHARS = 200;
 
 // Id fields are plain strings, not z.uuid(): agents/tasks created through
 // tests and some ingresses carry non-UUID ids, and the routing contract must
@@ -83,7 +92,7 @@ export type RoutingCtx = z.infer<typeof RoutingCtxSchema>;
 
 export const RoutingResultSchema = z
   .object({
-    assignTo: z.string().min(1).optional(),
+    assignTo: z.string().min(1).max(MAX_ROUTING_ASSIGN_TARGET_CHARS).optional(),
     /**
      * Drop any inherited/proposed pin and send the task to the unassigned pool.
      *

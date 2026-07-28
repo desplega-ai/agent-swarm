@@ -22,10 +22,13 @@ export const registerPatchSubscriptionTool = (server: McpServer) => {
         name: z.string().min(1).describe("Subscription name to patch"),
         description: z.string().optional(),
         eventPattern: z.string().min(1).optional(),
+        // Object form ONLY — same event-loop-safety restriction as
+        // create-subscription (string filters run unpreemptible JS in the API
+        // process).
         filter: z
-          .union([z.record(z.string(), z.unknown()), z.string(), z.null()])
+          .union([z.record(z.string(), z.unknown()), z.null()])
           .optional()
-          .describe("New payload filter; pass null to clear"),
+          .describe("New payload filter (object of dot-path → expected value); pass null to clear"),
         scriptArgs: z
           .union([z.record(z.string(), z.unknown()), z.null()])
           .optional()

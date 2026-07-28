@@ -23,12 +23,19 @@ export const createSubscriptionInputSchema = z.object({
       "Glob over dot-separated event names: '*' matches one segment, '**' (last segment only) " +
         "matches the rest. Examples: 'task.completed', 'task.*', 'github.**'.",
     ),
+  // Object form ONLY — deliberately narrower than the wait-node filter
+  // language. String filters compile to JS evaluated synchronously on the API
+  // event loop, where the 50ms cap cannot preempt a CPU-bound loop; any
+  // authenticated agent may create subscriptions, so one hostile filter would
+  // hang the whole API process. Wait-nodes keep string filters as an accepted
+  // risk for workflow authors; subscriptions do not.
   filter: z
-    .union([z.record(z.string(), z.unknown()), z.string()])
+    .record(z.string(), z.unknown())
     .optional()
     .describe(
-      "Optional payload filter (wait-node filter language): object of dot-path → expected value " +
-        "for deep-equal matching, or a string expression over the event payload.",
+      "Optional payload filter: object of dot-path → expected value for deep-equal matching " +
+        '(e.g. { "task.status": "failed" }). String expression filters are not supported ' +
+        "for subscriptions.",
     ),
   targetType: SubscriptionTargetTypeSchema.describe(
     "What to run when the event fires: 'script' (global catalog script, receives the event as " +

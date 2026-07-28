@@ -186,6 +186,19 @@ export async function processPendingDeliveries(limit = CLAIM_BATCH_SIZE): Promis
       });
       continue;
     }
+    // String filters compile to JS that runs synchronously on THIS event
+    // loop, where the wait-filter 50ms cap cannot preempt a CPU-bound body —
+    // one hostile `while(true)` filter would hang the whole API process. The
+    // create/patch tools only accept object filters; refuse to evaluate any
+    // string that reaches storage some other way rather than trusting the cap.
+    if (typeof sub.filter === "string") {
+      finishDelivery(delivery.id, {
+        status: "failed",
+        error: "string filters are not supported for subscriptions (object form only)",
+        retry: false,
+      });
+      continue;
+    }
     // Filters are evaluated HERE, not at capture time: they race a 50ms
     // timeout and so are async, and awaiting anything before the journal write
     // would reopen the crash window that loses events entirely. A rejected

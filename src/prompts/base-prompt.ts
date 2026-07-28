@@ -193,7 +193,10 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
         suggestionLines.push(
           (
             await resolveTemplateAsync("system.task.routing_suggestion.assign", {
-              agent: s.assignTo,
+              // Same defensive clamp as directives/reasons: `assignTo` is an
+              // identifier (schema-capped upstream), but this render point
+              // must not trust persisted handler output.
+              agent: clampPromptText(s.assignTo),
             })
           ).text,
         );
