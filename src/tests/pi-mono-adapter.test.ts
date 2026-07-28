@@ -710,6 +710,27 @@ describe("PiMonoSession.deliverSteering", () => {
     });
     await session.waitForCompletion();
   });
+
+  test("returns an undeliverable result after the session has completed", async () => {
+    // followUp() on a finished AgentSession enqueues into a dead agent loop
+    // without throwing — the liveness gate must fail closed so the server
+    // promotes the message to a follow-up task instead.
+    const followUpCalls: string[] = [];
+    const session = new PiMonoSession(
+      makeMockAgentSession({ followUpCalls }),
+      makeSessionConfig(join(tmpLogDir, "steering-dead-session.log")),
+      false,
+    );
+    await session.waitForCompletion();
+
+    await expect(
+      session.deliverSteering({ mode: "queue", text: "Too late for this run." }),
+    ).resolves.toEqual({
+      delivered: false,
+      reason: "pi session already completed",
+    });
+    expect(followUpCalls).toEqual([]);
+  });
 });
 
 function findError(events: ProviderEvent[]): Extract<ProviderEvent, { type: "error" }> | undefined {
