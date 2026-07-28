@@ -29,7 +29,7 @@ import {
   User,
   Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import "streamdown/styles.css";
 import { useAgents } from "@/api/hooks/use-agents";
@@ -517,6 +517,12 @@ export default function TaskDetailPage() {
     "tasks:steer-composer-collapsed",
     false,
   );
+  // Draft is owned by the page, not the composer. Two reasons: the mobile and
+  // desktop layouts each mount their own <SteerComposer>, and the composer
+  // itself unmounts whenever the task leaves a steerable status. Holding the
+  // text here means crossing the `lg` breakpoint — or a status flip that
+  // hides and later restores the dock — doesn't eat what the user typed.
+  const [steerDraft, setSteerDraft] = useState("");
   const cancelTask = useCancelTask();
   const pauseTask = usePauseTask();
   const resumeTask = useResumeTask();
@@ -575,10 +581,13 @@ export default function TaskDetailPage() {
   const canPause = task.status === "in_progress";
   const canResume = task.status === "paused";
 
-  // Steering composer is gated on the *same* condition as Pause — a task only
-  // has a live session handle while it is `in_progress`. Everything else falls
-  // back to the existing follow-up-task paths.
-  const canSteer = steerGate.supported && steeringEnabled && task.status === "in_progress";
+  // Steering reaches a running task directly, and a `pending` one by queueing:
+  // the server holds the message and delivers it when the session starts.
+  // Everything else falls back to the existing follow-up-task paths.
+  const canSteer =
+    steerGate.supported &&
+    steeringEnabled &&
+    (task.status === "in_progress" || task.status === "pending");
 
   const isFailed = task.status === "failed";
   const isCompleted = task.status === "completed";
@@ -917,13 +926,18 @@ export default function TaskDetailPage() {
       collapsedLabel={
         task.supportedSteerModes && task.supportedSteerModes.length === 0
           ? "Add a follow-up for this task"
-          : "Send a message to the running task"
+          : task.status === "pending"
+            ? "Send a message to the queued task"
+            : "Send a message to the running task"
       }
     >
       <SteerComposer
         taskId={task.id}
         supportedSteerModes={task.supportedSteerModes}
         providerLabel={task.provider}
+        taskStatus={task.status}
+        value={steerDraft}
+        onValueChange={setSteerDraft}
         className="px-0 pt-0 pb-0"
       />
     </CollapsibleComposerDock>
