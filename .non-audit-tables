@@ -27,6 +27,7 @@ seed_state
 session_costs
 session_logs
 task_context_snapshots
+task_steering_messages # attribution via created_by_kind/created_by_user_id/created_by_agent_id (121)
 tracker_agent_mapping
 tracker_sync
 user_identity_events

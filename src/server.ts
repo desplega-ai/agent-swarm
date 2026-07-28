@@ -338,14 +338,18 @@ export function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolea
     // Debug tools (self-guard with lead check)
     registerDbQueryTool(server);
     registerGetOauthAccessTokenTool(server);
-  }
 
-  // Task pool capability - task pool operations (create unassigned, claim, release, accept, reject)
-  if (hasCapability("task-pool")) {
+    // Steering acknowledgement must ship with core: steering delivery works on
+    // directly-assigned tasks (no task-pool capability required), and without
+    // accept-steer every delivered message would be stuck at `delivered`.
     if (isSteeringEnabled()) {
       registerAcceptSteerTool(server);
       registerSteerTaskTool(server);
     }
+  }
+
+  // Task pool capability - task pool operations (create unassigned, claim, release, accept, reject)
+  if (hasCapability("task-pool")) {
     registerTaskActionTool(server);
   }
 

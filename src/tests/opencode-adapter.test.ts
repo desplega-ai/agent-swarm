@@ -288,6 +288,32 @@ describe("OpencodeSession.deliverSteering", () => {
       },
     );
   });
+
+  test("returns an undeliverable result after the session has completed", async () => {
+    // Once `finish()` runs, the local server is closed and further events are
+    // ignored — a promptAsync would start a turn nobody observes while
+    // reporting a false `delivered`, suppressing follow-up promotion.
+    const promptAsyncCalls: unknown[] = [];
+    await inspectSteeringBeforeIdle(
+      {
+        abort: async () => ({}),
+        promptAsync: async (args) => {
+          promptAsyncCalls.push(args);
+          return {};
+        },
+      },
+      async (session) => {
+        await session.abort();
+        await expect(
+          session.deliverSteering?.({ mode: "queue", text: "Too late for this run." }),
+        ).resolves.toEqual({
+          delivered: false,
+          reason: "opencode session already completed",
+        });
+        expect(promptAsyncCalls).toEqual([]);
+      },
+    );
+  });
 });
 
 describe("OpencodeSession — SSE→ProviderEvent mapping", () => {

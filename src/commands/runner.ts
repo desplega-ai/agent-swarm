@@ -5342,8 +5342,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       detectVcsForTask(apiUrl, apiKey, taskId, task.workingDir);
     }
 
-    // Check for cancelled tasks and signal their subprocesses
-    if (steeringDispatchState && state.activeTasks.size > 0) {
+    // Check for cancelled tasks and signal their subprocesses. Deliberately
+    // NOT gated on steeringDispatchState — cancellation abort must keep
+    // working when STEERING_DISABLE turns steering dispatch off.
+    if (state.activeTasks.size > 0) {
       for (const [taskId, task] of state.activeTasks) {
         if (cancelledSignaled.has(taskId)) continue; // Already sent SIGTERM
         try {

@@ -635,6 +635,13 @@ export class OpencodeSession implements ProviderSession {
   }
 
   async deliverSteering({ mode, text }: SteerDelivery): Promise<SteerDeliveryResult> {
+    if (this.completed || this.aborted) {
+      // `finish()` has closed the local server and `handleOpencodeEvent()`
+      // ignores further events — a promptAsync now would start a turn nobody
+      // observes while falsely reporting `delivered`. Fail closed so the
+      // server promotes the message to a follow-up task (same as pi).
+      return { delivered: false, reason: "opencode session already completed" };
+    }
     try {
       // Always queue. `steer` used to abort first and re-prompt, but E2E showed
       // the re-prompt fails once the session has been aborted, so the message

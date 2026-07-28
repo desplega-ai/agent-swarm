@@ -178,6 +178,22 @@ describe("STEERING_DISABLE", () => {
     expect(userTools["steer-task"]).toBeDefined();
   });
 
+  test("registers steering tools with core capability alone (no task-pool)", () => {
+    // Steering delivery works on directly-assigned tasks, so the acknowledge
+    // path must not depend on the optional task-pool capability — otherwise
+    // delivered messages could never reach `handled` on core-only deployments.
+    const previous = process.env.CAPABILITIES;
+    process.env.CAPABILITIES = "core";
+    try {
+      const serverTools = registeredTools(createServer());
+      expect(serverTools["accept-steer"]).toBeDefined();
+      expect(serverTools["steer-task"]).toBeDefined();
+      expect(serverTools["task-action"]).toBeUndefined();
+    } finally {
+      restoreEnv("CAPABILITIES", previous);
+    }
+  });
+
   test("keeps history reads and all worker drain callbacks available", async () => {
     const { agent, task } = createRunningTask("disabled drain callbacks");
     const delivered = createSteeringMessage({

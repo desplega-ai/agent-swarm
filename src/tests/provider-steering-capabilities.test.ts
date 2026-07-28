@@ -1,6 +1,29 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createProviderAdapter } from "../providers";
 import { PROVIDER_STEER_CAPABILITIES, ProviderNameSchema } from "../types";
+
+// The claude-managed adapter ctor requires these env vars; stub them so the
+// trait comparison runs in CI (same pattern as claude-managed-adapter.test.ts).
+const MANAGED_ENV_KEYS = [
+  "ANTHROPIC_API_KEY",
+  "MANAGED_AGENT_ID",
+  "MANAGED_ENVIRONMENT_ID",
+] as const;
+const savedManagedEnv: Record<string, string | undefined> = {};
+
+beforeAll(() => {
+  for (const key of MANAGED_ENV_KEYS) {
+    savedManagedEnv[key] = process.env[key];
+    if (!process.env[key]) process.env[key] = `test-${key.toLowerCase()}`;
+  }
+});
+
+afterAll(() => {
+  for (const key of MANAGED_ENV_KEYS) {
+    if (savedManagedEnv[key] === undefined) delete process.env[key];
+    else process.env[key] = savedManagedEnv[key];
+  }
+});
 
 describe("provider steering capability synchronization", () => {
   for (const provider of ProviderNameSchema.options) {
