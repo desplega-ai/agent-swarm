@@ -3,6 +3,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { getDb } from "./db";
 
 export type RoutingHandlerStats = {
+  handlerId: string;
   handlerName: string;
   hits: number;
   decisive: number;
@@ -130,7 +131,14 @@ export function aggregateHandlerStats({
   const cutoff = windowHours === undefined ? null : `-${windowHours} hours`;
   return getDb()
     .prepare(
-      `SELECT handlerName,
+      // Grouped by handlerId, not handlerName: renaming a handler must not
+      // orphan its history, and a reused name must not inherit another
+      // handler's stats. handlerName rides along as a display label — it is a
+      // bare column next to the query's single MAX() aggregate, which SQLite
+      // documents as taking its value from the MAX row, i.e. the most recent
+      // name recorded for that handlerId.
+      `SELECT handlerId,
+              handlerName,
               SUM(matched) AS hits,
               SUM(decisive) AS decisive,
               SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) AS errors,
@@ -146,7 +154,7 @@ export function aggregateHandlerStats({
           -- after ' ', so a mixed table would let traces far outside the
           -- window through on the cutoff's calendar date.
           AND (? IS NULL OR datetime(createdAt) >= datetime('now', ?))
-        GROUP BY handlerName
+        GROUP BY handlerId
         ORDER BY handlerName`,
     )
     .all(cutoff, cutoff)

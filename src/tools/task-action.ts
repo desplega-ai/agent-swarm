@@ -296,11 +296,14 @@ export async function taskActionHandler(
         : undefined,
     });
     if (created.blocked) {
+      const decisionNote = created.blocked.decisionTask
+        ? ` Created Lead reroute-decision task "${created.blocked.decisionTask.id}".`
+        : " No Lead is available to review the block — nothing was created.";
       return taskActionCallResult(
         {
           success: false,
-          message: `Task blocked by routing: ${scrubSecrets(created.blocked.reason)}. Created Lead reroute-decision task "${created.task.id}".`,
-          task: created.task,
+          message: `Task blocked by routing: ${scrubSecrets(created.blocked.reason)}.${decisionNote}`,
+          task: created.blocked.decisionTask,
         },
         agentId,
       );

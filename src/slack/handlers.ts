@@ -621,25 +621,25 @@ export function registerMessageHandler(app: App): void {
       }
 
       const lead = getLeadAgent();
-      const { task: offlineTask, blocked: offlineBlocked } = await createSlackTaskRouted(
-        fullTaskDescription,
-        {
-          agentId: lead?.id,
-          source: "slack",
-          slackChannelId: msg.channel,
-          slackThreadTs: threadTs,
-          slackUserId: msg.user,
-          requestedByUserId,
-          contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
-        },
-      );
+      const offlineResult = await createSlackTaskRouted(fullTaskDescription, {
+        agentId: lead?.id,
+        source: "slack",
+        slackChannelId: msg.channel,
+        slackThreadTs: threadTs,
+        slackUserId: msg.user,
+        requestedByUserId,
+        contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
+      });
 
-      // On a routing block the requested work was NOT created — `task` is the
-      // Lead reroute-decision. Reporting "queued" here would tell the user
-      // their request is waiting when it does not exist.
-      if (offlineBlocked) {
+      // On a routing block the requested work was NOT created — reporting
+      // "queued" here would tell the user their request is waiting when it
+      // does not exist. With no Lead there is no decision task either.
+      if (offlineResult.blocked) {
+        const handedTo = offlineResult.blocked.decisionTask
+          ? `Handed to the Lead as decision task \`${offlineResult.blocked.decisionTask.id.slice(0, 8)}\`.`
+          : "No Lead is available to review it — nothing was created.";
         await say({
-          text: `:satellite: _Routing blocked this request: ${scrubSecrets(offlineBlocked.reason)}. Handed to the Lead as decision task \`${offlineTask.id.slice(0, 8)}\`._`,
+          text: `:satellite: _Routing blocked this request: ${scrubSecrets(offlineResult.blocked.reason)}. ${handedTo}_`,
           thread_ts: threadTs,
         });
         return;
@@ -708,7 +708,7 @@ export function registerMessageHandler(app: App): void {
       try {
         const latestTask = getMostRecentTaskInThread(msg.channel, threadTs);
         if (agent.isLead) {
-          const { task, blocked } = await createSlackTaskRouted(fullTaskDescription, {
+          const created = await createSlackTaskRouted(fullTaskDescription, {
             agentId: agent.id,
             source: "slack",
             slackChannelId: msg.channel,
@@ -718,19 +718,19 @@ export function registerMessageHandler(app: App): void {
             requestedByUserId,
             contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
           });
-          if (blocked) {
+          if (created.blocked) {
             results.failed.push({
               agentName: agent.name,
-              reason: `routing blocked: ${scrubSecrets(blocked.reason)} (Lead decision task ${task.id.slice(0, 8)})`,
+              reason: `routing blocked: ${scrubSecrets(created.blocked.reason)}${created.blocked.decisionTask ? ` (Lead decision task ${created.blocked.decisionTask.id.slice(0, 8)})` : " (no Lead available to review)"}`,
             });
             continue;
           }
-          results.assigned.push({ agentName: agent.name, taskId: task.id });
+          results.assigned.push({ agentName: agent.name, taskId: created.task.id });
           continue;
         }
 
         // Workers receive tasks as before
-        const { task, blocked } = await createSlackTaskRouted(fullTaskDescription, {
+        const created = await createSlackTaskRouted(fullTaskDescription, {
           agentId: agent.id,
           source: "slack",
           slackChannelId: msg.channel,
@@ -739,13 +739,14 @@ export function registerMessageHandler(app: App): void {
           requestedByUserId,
           contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
         });
-        if (blocked) {
+        if (created.blocked) {
           results.failed.push({
             agentName: agent.name,
-            reason: `routing blocked: ${scrubSecrets(blocked.reason)} (Lead decision task ${task.id.slice(0, 8)})`,
+            reason: `routing blocked: ${scrubSecrets(created.blocked.reason)}${created.blocked.decisionTask ? ` (Lead decision task ${created.blocked.decisionTask.id.slice(0, 8)})` : " (no Lead available to review)"}`,
           });
           continue;
         }
+        const task = created.task;
 
         // Check if agent has an in-progress task in this thread (queued follow-up)
         const agentTasks = getTasksByAgentId(agent.id);

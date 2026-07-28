@@ -135,7 +135,7 @@ export function createRoutingEngine(
 ) {
   return async function runBeforeAssignWithRunner(
     ctx: RoutingCtx,
-    opts: { dryRun?: boolean } = {},
+    opts: { dryRun?: boolean; maxHandlers?: number } = {},
   ): Promise<RoutingDecision> {
     const routingRunId = crypto.randomUUID();
     const decision: RoutingDecision = {
@@ -171,6 +171,7 @@ export function createRoutingEngine(
     const composeDeadline =
       edge === "prompt.compose" ? Date.now() + PROMPT_COMPOSE_TOTAL_BUDGET_MS : null;
 
+    let executed = 0;
     for (const handler of ordered) {
       if (composeDeadline !== null && Date.now() >= composeDeadline) {
         console.warn(
@@ -178,6 +179,20 @@ export function createRoutingEngine(
         );
         break;
       }
+      // Subprocess budget for callers that evaluate many candidates in one
+      // pass (claim routing). Enforced INSIDE the run, not just between
+      // candidates: one candidate matching many non-decisive handlers must
+      // not run all of them after the caller's budget is spent.
+      if (opts.maxHandlers !== undefined && executed >= opts.maxHandlers) {
+        console.warn(
+          `[routing] handler budget (${opts.maxHandlers}) exhausted — skipping remaining handler(s)`,
+        );
+        // A skipped handler may have been a guard, so the decision is marked
+        // incomplete and claim callers must not treat it as "proceed".
+        decision.truncated = true;
+        break;
+      }
+      executed += 1;
       const startedAt = Date.now();
       let parsedResult: RoutingResult | undefined;
       let error: string | undefined;

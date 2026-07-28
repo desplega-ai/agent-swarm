@@ -167,4 +167,10 @@ export interface RoutingDecision {
   notes: string[];
   routingRunId: string;
   trace: RoutingDecisionTrace[];
+  /**
+   * Set when the caller's `maxHandlers` budget expired before every matched
+   * handler ran. A truncated run may have skipped a guard, so callers must
+   * not treat it as a completed evaluation.
+   */
+  truncated?: boolean;
 }

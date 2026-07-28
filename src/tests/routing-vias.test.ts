@@ -353,20 +353,24 @@ describe("routing creation and delegation vias", () => {
       matcher: { via: "creation", taskType: "blocked-create" },
     });
 
-    const { task, blocked } = await createTaskRouted("original blocked creation", {
+    const result = await createTaskRouted("original blocked creation", {
       agentId: workerAId,
       taskType: "blocked-create",
     });
 
-    expect(blocked).toEqual({ reason: "creation policy denied" });
-    expect(task).toMatchObject({
+    // The requested work task is NOT created; the decision task rides on
+    // `blocked` so callers cannot mistake it for the requested work.
+    expect(result.task).toBeUndefined();
+    expect(result.blocked?.reason).toBe("creation policy denied");
+    const decisionTask = result.blocked?.decisionTask;
+    expect(decisionTask).toMatchObject({
       agentId: leadId,
       taskType: "reroute-decision",
       status: "pending",
     });
-    expect(task.tags).toContain("routing-blocked");
-    expect(task.task).toContain("creation policy denied");
-    expect(task.task).toContain("original blocked creation");
+    expect(decisionTask?.tags).toContain("routing-blocked");
+    expect(decisionTask?.task).toContain("creation policy denied");
+    expect(decisionTask?.task).toContain("original blocked creation");
   });
 
   test("delegation block creates a Lead decision and returns the reason to the caller", async () => {

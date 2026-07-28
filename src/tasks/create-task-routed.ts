@@ -5,19 +5,20 @@ import { buildRoutingCtx } from "../routing/ctx";
 import { runBeforeAssign } from "../routing/engine";
 import { validateRoutingAssignTarget } from "../routing/target";
 import type { AgentTask } from "../types";
-import { createRoutingBlockDecisionTask } from "./worker-follow-up";
+import { tryCreateRoutingBlockDecisionTask } from "./worker-follow-up";
 
 export { applyRoutingDecisionToOptions, type RoutedCreateTaskOptions };
 
 /**
  * Discriminated creation outcome: callers must not report a routing block as a
- * normal create. On `blocked`, `task` is the Lead reroute-decision task, NOT
- * the requested work task (which was intentionally not created).
+ * normal create. On `blocked`, the requested work task was intentionally NOT
+ * created; `blocked.decisionTask` is the Lead reroute-decision task, absent
+ * when no Lead exists to adjudicate (a structured outcome, not an exception —
+ * this surfaces through Slack ingestion and MCP tool responses).
  */
-export type CreateTaskRoutedResult = {
-  task: AgentTask;
-  blocked?: { reason: string };
-};
+export type CreateTaskRoutedResult =
+  | { task: AgentTask; blocked?: undefined }
+  | { task?: undefined; blocked: { reason: string; decisionTask?: AgentTask } };
 
 /**
  * Hook-enabled task creation pilot. Slack ingestion, send-task, and task-action
@@ -52,13 +53,14 @@ export async function createTaskRouted(
 
   if (decision.final?.block) {
     const reason = decision.final.block.reason;
-    const decisionTask = createRoutingBlockDecisionTask({
+    const decisionTask = tryCreateRoutingBlockDecisionTask({
       description: settled.description,
       reason,
       options: finalOptions,
     });
+    if (!decisionTask) return { blocked: { reason } };
     backfillTraceTaskId(decision.routingRunId, decisionTask.id);
-    return { task: decisionTask, blocked: { reason } };
+    return { blocked: { reason, decisionTask } };
   }
 
   const task = createTaskExtended(settled.description, finalOptions);

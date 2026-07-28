@@ -89,6 +89,7 @@ declare module "swarm-sdk" {
     stats?: RoutingHandlerStats;
   };
   export type RoutingHandlerStats = {
+    handlerId: string;
     handlerName: string;
     hits: number;
     decisive: number;

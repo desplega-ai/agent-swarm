@@ -23,7 +23,7 @@ import { runBeforeAssign } from "@/routing/engine";
 import { validateRoutingAssignTarget } from "@/routing/target";
 import { applyRoutingDecisionToOptions } from "@/tasks/create-task-routed";
 import { checkSlackRoutingCoherence } from "@/tasks/slack-routing";
-import { createRoutingBlockDecisionTask } from "@/tasks/worker-follow-up";
+import { tryCreateRoutingBlockDecisionTask } from "@/tasks/worker-follow-up";
 import { findDuplicateTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
@@ -36,6 +36,7 @@ import {
   ReasoningEffortSchema,
   splitLegacyModelAlias,
 } from "@/types";
+import { scrubSecrets } from "@/utils/secret-scrubber";
 import { workflowEventBus } from "@/workflows/event-bus";
 
 export const sendTaskInputSchema = z
@@ -482,21 +483,26 @@ export async function sendTaskHandler(
   // Deferred routing block: every dedup guard above has passed, so this really
   // is new work that routing refused — now it is worth a Lead decision.
   if (routingDecision.final?.block) {
-    const reason = routingDecision.final.block.reason;
-    const rerouteTask = createRoutingBlockDecisionTask({
+    // The block reason is raw handler-script output; this message is a
+    // transport egress (MCP text + structured response), so scrub it here —
+    // the decision-task description is scrubbed separately on creation.
+    const reason = scrubSecrets(routingDecision.final.block.reason);
+    const rerouteTask = tryCreateRoutingBlockDecisionTask({
       description: effective.description,
       reason,
       options: routedOptions,
     });
-    backfillTraceTaskId(routingDecision.routingRunId, rerouteTask.id);
-    const message = `Delegation blocked by routing: ${reason}. Created Lead reroute-decision task "${rerouteTask.id}".`;
+    if (rerouteTask) backfillTraceTaskId(routingDecision.routingRunId, rerouteTask.id);
+    const message = rerouteTask
+      ? `Delegation blocked by routing: ${reason}. Created Lead reroute-decision task "${rerouteTask.id}".`
+      : `Delegation blocked by routing: ${reason}. No Lead is available to review the block — nothing was created.`;
     return {
       content: [{ type: "text", text: message }],
       structuredContent: {
         yourAgentId: creatorAgentId,
         success: false,
         message,
-        task: rerouteTask,
+        task: rerouteTask ?? undefined,
       },
     };
   }

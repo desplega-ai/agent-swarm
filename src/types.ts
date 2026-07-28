@@ -2701,6 +2701,7 @@ export const EdgeHandlerSchema = z.object({
 export type EdgeHandler = z.infer<typeof EdgeHandlerSchema>;
 
 export const RoutingHandlerStatsSchema = z.object({
+  handlerId: z.string(),
   handlerName: z.string(),
   hits: z.number().int().nonnegative(),
   decisive: z.number().int().nonnegative(),

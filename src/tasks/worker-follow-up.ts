@@ -538,6 +538,21 @@ export function createRoutingBlockDecisionTask(args: {
   });
 }
 
+/**
+ * Non-throwing variant for creation-time blocks (Slack ingestion, MCP tools):
+ * with no Lead there is nobody to hand the decision to, and those ingresses
+ * must report a structured "blocked, nothing created" outcome rather than let
+ * the lead-not-found exception escape through their transport.
+ */
+export function tryCreateRoutingBlockDecisionTask(args: {
+  description: string;
+  reason: string;
+  options?: CreateTaskOptions;
+}): AgentTask | null {
+  if (!getLeadAgent()) return null;
+  return createRoutingBlockDecisionTask(args);
+}
+
 export type CreateRoutingBlockDecisionResult =
   | { kind: "created"; task: AgentTask }
   | { kind: "skipped"; reason: "lead_not_found" | "duplicate_exists" };

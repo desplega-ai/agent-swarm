@@ -96,4 +96,68 @@ describe("read-only network egress (routing dry-run)", () => {
       /blocked in read-only mode/,
     );
   });
+
+  test("blocks same-origin writes and side-effectful reads, allows the read-only surface", async () => {
+    const seen: string[] = [];
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      seen.push(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    patchFetchForReadOnly("http://localhost:3013");
+
+    // The origin check alone is not enough: a handler carrying its own auth
+    // headers could write same-origin. Non-allowlisted method/path pairs must
+    // be rejected.
+    await expect(
+      globalThis.fetch("http://localhost:3013/api/tasks/abc/cancel", { method: "POST" }),
+    ).rejects.toThrow(/blocked in read-only mode/);
+    await expect(
+      globalThis.fetch("http://localhost:3013/api/kv/some-key", {
+        method: "PUT",
+        body: JSON.stringify({ value: 1 }),
+      }),
+    ).rejects.toThrow(/blocked in read-only mode/);
+    // GET is not assumed safe: /api/poll claims a task, /api/config* returns
+    // unmasked secrets.
+    await expect(globalThis.fetch("http://localhost:3013/api/poll")).rejects.toThrow(
+      /blocked in read-only mode/,
+    );
+    await expect(
+      globalThis.fetch("http://localhost:3013/api/config/resolved?includeSecrets=true"),
+    ).rejects.toThrow(/blocked in read-only mode/);
+
+    // What the read-only SDK surface actually emits stays reachable.
+    await globalThis.fetch("http://localhost:3013/api/tasks?status=unassigned");
+    await globalThis.fetch("http://localhost:3013/api/internal-ai/classify", {
+      method: "POST",
+      body: JSON.stringify({ input: "x", labels: ["a", "b"] }),
+    });
+    expect(seen).toEqual([
+      "http://localhost:3013/api/tasks?status=unassigned",
+      "http://localhost:3013/api/internal-ai/classify",
+    ]);
+  });
+
+  test("gates the generic MCP bridge on the read-only tool set", async () => {
+    globalThis.fetch = (async () => new Response("{}", { status: 200 })) as typeof fetch;
+    patchFetchForReadOnly("http://localhost:3013");
+
+    const bridge = (body: string) =>
+      globalThis.fetch("http://localhost:3013/api/mcp-bridge", { method: "POST", body });
+
+    // The bridge executes arbitrary MCP tools by name, so the path alone
+    // proves nothing — write tools and malformed bodies are rejected.
+    await expect(bridge(JSON.stringify({ tool: "trigger-workflow", args: {} }))).rejects.toThrow(
+      /blocked in read-only mode/,
+    );
+    await expect(bridge(JSON.stringify({ tool: "set-config", args: {} }))).rejects.toThrow(
+      /blocked in read-only mode/,
+    );
+    await expect(bridge("not json")).rejects.toThrow(/blocked in read-only mode/);
+    await expect(bridge(JSON.stringify({}))).rejects.toThrow(/blocked in read-only mode/);
+
+    // Read-only bridge tools pass through.
+    const ok = await bridge(JSON.stringify({ tool: "get-script-run", args: {} }));
+    expect(ok.status).toBe(200);
+  });
 });

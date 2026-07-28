@@ -93,6 +93,7 @@ export type RoutingHandler = {
   stats?: RoutingHandlerStats;
 };
 export type RoutingHandlerStats = {
+  handlerId: string;
   handlerName: string;
   hits: number;
   decisive: number;

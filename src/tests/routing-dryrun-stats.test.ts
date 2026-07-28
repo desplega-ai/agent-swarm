@@ -172,7 +172,7 @@ describe("routing dry-run and handler stats", () => {
   });
 
   test("aggregates handler stats, excluding dry-run traces, and enriches handler list", async () => {
-    createEdgeHandler({
+    const statsHandler = createEdgeHandler({
       name: "stats-handler",
       edge: "task.before_assign",
       scriptName: "stats-script",
@@ -183,7 +183,7 @@ describe("routing dry-run and handler stats", () => {
       routingRunId: crypto.randomUUID(),
       edge: "task.before_assign" as const,
       via: "creation" as const,
-      handlerId: "stats-handler-id",
+      handlerId: statsHandler.id,
       handlerName: "stats-handler",
       flavor: "route" as const,
       mode: "soft" as const,
@@ -208,6 +208,7 @@ describe("routing dry-run and handler stats", () => {
     });
 
     expect(aggregateHandlerStats()).toContainEqual({
+      handlerId: statsHandler.id,
       handlerName: "stats-handler",
       hits: 2,
       decisive: 1,
@@ -227,6 +228,50 @@ describe("routing dry-run and handler stats", () => {
       handlers: [
         { name: "stats-handler", stats: { hits: 2, decisive: 1, errors: 1, deviations: 1 } },
       ],
+    });
+
+    // Stats are keyed by handlerId, not name: a rename keeps the history (and
+    // reports under the newest name), while an unrelated handler reusing the
+    // retired name aggregates separately instead of inheriting it.
+    const renamed = insertRoutingTrace({
+      ...base,
+      routingRunId: crypto.randomUUID(),
+      handlerName: "stats-handler-renamed",
+      decisive: false,
+      dryRun: false,
+      durationMs: 60,
+    });
+    getDb()
+      .prepare("UPDATE routing_trace SET createdAt = datetime('now', '+1 hour') WHERE id = ?")
+      .run(renamed.id);
+    insertRoutingTrace({
+      ...base,
+      routingRunId: crypto.randomUUID(),
+      handlerId: "imposter-handler-id",
+      decisive: true,
+      dryRun: false,
+      durationMs: 10,
+    });
+    const aggregated = aggregateHandlerStats();
+    expect(aggregated).toContainEqual({
+      handlerId: statsHandler.id,
+      handlerName: "stats-handler-renamed",
+      hits: 3,
+      decisive: 1,
+      errors: 1,
+      deviations: 1,
+      avgDurationMs: 40,
+      lastHitAt: expect.any(String),
+    });
+    expect(aggregated).toContainEqual({
+      handlerId: "imposter-handler-id",
+      handlerName: "stats-handler",
+      hits: 1,
+      decisive: 1,
+      errors: 0,
+      deviations: 0,
+      avgDurationMs: 10,
+      lastHitAt: expect.any(String),
     });
   });
 

@@ -1951,6 +1951,7 @@ export interface RoutingHandlerMatcher {
 }
 
 export interface RoutingHandlerStats {
+  handlerId: string;
   handlerName: string;
   /** Non-dry-run trace rows where the handler matched. */
   hits: number;

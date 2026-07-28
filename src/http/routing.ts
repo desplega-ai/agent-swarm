@@ -384,13 +384,16 @@ export async function handleRouting(
   if (listHandlersRoute.match(req.method, pathSegments)) {
     const parsed = await listHandlersRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    // Keyed by id, not name: stats must survive a rename and must not be
+    // inherited by an unrelated handler reusing a retired name.
     const statsByHandler = new Map(
-      aggregateHandlerStats().map((stats) => [stats.handlerName, stats]),
+      aggregateHandlerStats().map((stats) => [stats.handlerId, stats]),
     );
     json(res, {
       handlers: listEdgeHandlers().map((handler) => ({
         ...handler,
-        stats: statsByHandler.get(handler.name) ?? {
+        stats: statsByHandler.get(handler.id) ?? {
+          handlerId: handler.id,
           handlerName: handler.name,
           hits: 0,
           decisive: 0,

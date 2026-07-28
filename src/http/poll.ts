@@ -229,7 +229,12 @@ export async function handlePoll(
           if (evaluations >= CLAIM_ROUTING_MAX_EVALUATIONS) break;
           const candidate = getTaskById(candidateId);
           if (!candidate) continue;
-          const routing = await runClaimRouting(candidate, myAgentId);
+          const routing = await runClaimRouting(candidate, myAgentId, {
+            // Pass the REMAINING budget into the run: without it, one
+            // candidate matching more handlers than the budget allows would
+            // execute all of them before the between-candidates check fires.
+            maxHandlers: CLAIM_ROUTING_MAX_EVALUATIONS - evaluations,
+          });
           // Budget on handlers actually EXECUTED, not candidates examined. A
           // candidate that short-circuits (`pending-decision`) or matches no
           // handler spawns no subprocess, so charging it would shrink how far

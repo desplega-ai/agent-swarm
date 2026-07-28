@@ -43,6 +43,15 @@ export default async function defaultContinuityPin(
       args.candidates.find((candidate) => candidate.id === parent.agentId)?.name ??
       parent.agentRole ??
       parent.agentId;
+    // The quoted description feeds a prompt directive that
+    // RoutingResultSchema caps at MAX_PROMPT_DIRECTIVE_CHARS (2000). An
+    // untruncated long task description would push the directive over the
+    // cap, fail the parse of the WHOLE result, and silently drop the
+    // unassign — breaking this policy exactly on long tasks.
+    const intent =
+      args.task.description.length > 300
+        ? `${args.task.description.slice(0, 300)}…`
+        : args.task.description;
     // `unassign` — not advice alone. Callers default the child's agentId to
     // the parent worker BEFORE routing runs, so returning only directives
     // would leave the follow-up pinned to that worker and merely show it a
@@ -50,7 +59,7 @@ export default async function defaultContinuityPin(
     return {
       unassign: true,
       promptDirectives: [
-        `Routing: the follow-up's intent (${args.task.description}) differs from what ${parentAgent} was doing — sent to the pool for a fresh assignment instead of continuing the session.`,
+        `Routing: the follow-up's intent (${intent}) differs from what ${parentAgent} was doing — sent to the pool for a fresh assignment instead of continuing the session.`,
       ],
       note: "continuity pin broken: intent mismatch",
     };
