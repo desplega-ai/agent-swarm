@@ -43,6 +43,18 @@ const REPO_CLAUDE_MD_MAX_CHARS = 12_000;
 const truncationNotice = (file: string) =>
   `\n\n[...truncated, see /workspace/${file} for full content]\n`;
 
+/**
+ * Defensive caps for handler-authored routing text at the prompt-assembly
+ * point. Mirrors MAX_PROMPT_DIRECTIVES / MAX_PROMPT_DIRECTIVE_CHARS in
+ * src/routing/types.ts — duplicated rather than imported to keep this
+ * worker-side module free of a routing/be dependency.
+ */
+const MAX_RENDERED_ROUTING_DIRECTIVES = 20;
+const MAX_ROUTING_TEXT_CHARS = 2_000;
+
+const clampPromptText = (text: string): string =>
+  text.length <= MAX_ROUTING_TEXT_CHARS ? text : `${text.slice(0, MAX_ROUTING_TEXT_CHARS)}…`;
+
 export function areSlackPromptToolsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const slackDisable = env.SLACK_DISABLE;
   if (slackDisable === "true" || slackDisable === "1") return false;
@@ -156,8 +168,15 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   }
 
   if (args.routingDirectives) {
+    // Defence in depth. The engine bounds what a handler may return and
+    // prompt-compose bounds the composed set, but neither covers every path
+    // that reaches here: the worker falls back to trigger-carried directives
+    // when the compose request times out, and a malformed or legacy row can
+    // carry anything. This is the last point before the text becomes protected
+    // system-prompt content, so re-apply the caps rather than trust upstream.
     const directives = args.routingDirectives.directives
-      .map((directive) => `- ${directive}`)
+      .slice(0, MAX_RENDERED_ROUTING_DIRECTIVES)
+      .map((directive) => `- ${clampPromptText(directive)}`)
       .join("\n");
     // Render EVERY suggestion variant, not just `assignTo`. Soft handlers also
     // emit `unassign` and `block` suggestions, and considering only `assignTo`
@@ -166,8 +185,10 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     //
     // Each variant is a registered template (prompt text never gets
     // concatenated inline here) so operators can reword or disable it.
+    // Same defensive cap as the directives above — suggestions accumulate
+    // across routing runs, and each entry costs a template resolution.
     const suggestionLines: string[] = [];
-    for (const s of args.routingDirectives.suggestions) {
+    for (const s of args.routingDirectives.suggestions.slice(0, MAX_RENDERED_ROUTING_DIRECTIVES)) {
       if (s.assignTo) {
         suggestionLines.push(
           (
@@ -184,7 +205,7 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
         suggestionLines.push(
           (
             await resolveTemplateAsync("system.task.routing_suggestion.block", {
-              reason: s.block.reason,
+              reason: clampPromptText(s.block.reason),
             })
           ).text,
         );
