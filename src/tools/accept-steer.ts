@@ -1,11 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
+import { getSteeringMessageById, getTaskById, markSteeringHandled } from "@/be/db";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar } from "@/tools/utils";
-import { AgentTaskSchema, type SteeringMessage, SteeringMessageSchema } from "@/types";
-import { getApiKey } from "@/utils/api-key";
-import { getMcpBaseUrl } from "@/utils/constants";
+import { type SteeringMessage, SteeringMessageSchema } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 
 export const acceptSteerInputSchema = z.object({
@@ -39,16 +38,16 @@ function errorResult(message: string, agentId?: string): CallToolResult {
   };
 }
 
-async function responseError(response: Response, fallback: string): Promise<string> {
-  try {
-    const body = (await response.json()) as { error?: unknown };
-    if (typeof body.error === "string" && body.error) return body.error;
-  } catch {
-    // The fallback includes the status without echoing an untrusted response body.
-  }
-  return fallback;
-}
-
+/**
+ * MCP tools run inside the API server, which owns the DB (see CLAUDE.md's
+ * architecture invariants) — so this reads and writes directly rather than
+ * looping back over HTTP. The earlier HTTP round-trip resolved its own server
+ * through `MCP_BASE_URL`, which points at the *public* origin in most
+ * deployments; acknowledgement then hit the wrong swarm and 404'd.
+ *
+ * Authorization derives the task from the steering message itself, so the
+ * caller does not need to supply (or match) `X-Source-Task-Id`.
+ */
 export async function acceptSteerHandler(
   ctx: ToolCtx,
   { steeringMessageId, note }: AcceptSteerArgs,
@@ -56,72 +55,43 @@ export async function acceptSteerHandler(
   if (ctx.kind !== "owner" || !ctx.agentId) {
     return errorResult('Agent ID not found. Set the "X-Agent-ID" header.');
   }
-  if (!ctx.sourceTaskId) {
-    return errorResult('Source task ID not found. Set the "X-Source-Task-Id" header.', ctx.agentId);
+
+  const steering = getSteeringMessageById(steeringMessageId);
+  if (!steering) {
+    return errorResult(`Steering message "${steeringMessageId}" not found.`, ctx.agentId);
   }
 
-  const apiUrl = getMcpBaseUrl();
-  const apiKey = getApiKey();
-  const headers = {
-    Authorization: `Bearer ${apiKey}`,
-    "X-Agent-ID": ctx.agentId,
-  };
-
-  try {
-    const taskResponse = await fetch(
-      `${apiUrl}/api/tasks/${encodeURIComponent(ctx.sourceTaskId)}`,
-      { headers },
+  const task = getTaskById(steering.taskId);
+  if (!task) {
+    return errorResult(
+      `Task "${steering.taskId}" for this steering message no longer exists.`,
+      ctx.agentId,
     );
-    if (!taskResponse.ok) {
-      const error = await responseError(
-        taskResponse,
-        `Task lookup failed (HTTP ${taskResponse.status}).`,
-      );
-      return errorResult(error, ctx.agentId);
-    }
+  }
 
-    const parsedTask = AgentTaskSchema.safeParse(await taskResponse.json());
-    if (!parsedTask.success) {
-      return errorResult("Task lookup returned an invalid response.", ctx.agentId);
-    }
-    const ownershipError = assertOwnsTask(ctx, parsedTask.data, "task.read.own");
-    if (ownershipError) return ownershipError;
-
-    const response = await fetch(
-      `${apiUrl}/api/steering-messages/${encodeURIComponent(steeringMessageId)}/handled`,
-      {
-        method: "POST",
-        headers,
-      },
+  // Assignment is the real authorization for acknowledgement: only the agent
+  // actually running the task may say it acted on the message. `assertOwnsTask`
+  // alone is not enough — it routes through RBAC, which grants-all under the
+  // default legacy policy, so this check must be explicit.
+  if (task.agentId !== ctx.agentId) {
+    return errorResult(
+      `Forbidden: steering message "${steeringMessageId}" belongs to a task assigned to another agent.`,
+      ctx.agentId,
     );
-    if (!response.ok) {
-      const error = await responseError(
-        response,
-        `Steering acknowledgement failed (HTTP ${response.status}).`,
-      );
-      return errorResult(error, ctx.agentId);
-    }
+  }
 
-    const parsed = z.object({ message: SteeringMessageSchema }).safeParse(await response.json());
-    if (!parsed.success) {
-      return errorResult("Steering acknowledgement returned an invalid response.", ctx.agentId);
-    }
-    if (parsed.data.message.status !== "handled") {
-      return errorResult(
-        `Steering message cannot be acknowledged from status "${parsed.data.message.status}".`,
-        ctx.agentId,
-      );
-    }
+  const ownershipError = assertOwnsTask(ctx, task, "task.read.own");
+  if (ownershipError) return ownershipError;
 
-    const safeNote = note ? scrubSecrets(note) : undefined;
-    const message = safeNote
-      ? `Steering message "${steeringMessageId}" acknowledged as handled. Note: ${safeNote}`
-      : `Steering message "${steeringMessageId}" acknowledged as handled.`;
+  // Idempotent: re-acknowledging an already-handled message is a success, so a
+  // retrying agent doesn't get an error it will try to "fix".
+  if (steering.status === "handled") {
+    const message = `Steering message "${steeringMessageId}" was already acknowledged.`;
     const structuredContent = {
       yourAgentId: ctx.agentId,
       success: true,
       message,
-      steeringMessage: parsed.data.message satisfies SteeringMessage,
+      steeringMessage: steering satisfies SteeringMessage,
     };
     return {
       content: [
@@ -130,9 +100,33 @@ export async function acceptSteerHandler(
       ],
       structuredContent,
     };
-  } catch (error) {
-    return errorResult(`Steering acknowledgement failed: ${(error as Error).message}`, ctx.agentId);
   }
+
+  const updated = markSteeringHandled(steeringMessageId);
+  if (!updated) {
+    return errorResult(
+      `Steering message cannot be acknowledged from status "${steering.status}".`,
+      ctx.agentId,
+    );
+  }
+
+  const safeNote = note ? scrubSecrets(note) : undefined;
+  const message = safeNote
+    ? `Steering message "${steeringMessageId}" acknowledged as handled. Note: ${safeNote}`
+    : `Steering message "${steeringMessageId}" acknowledged as handled.`;
+  const structuredContent = {
+    yourAgentId: ctx.agentId,
+    success: true,
+    message,
+    steeringMessage: updated satisfies SteeringMessage,
+  };
+  return {
+    content: [
+      { type: "text", text: message },
+      { type: "text", text: JSON.stringify(structuredContent) },
+    ],
+    structuredContent,
+  };
 }
 
 export const registerAcceptSteerTool = (server: McpServer) => {
@@ -141,7 +135,7 @@ export const registerAcceptSteerTool = (server: McpServer) => {
     {
       title: "Accept Steering",
       description:
-        "Acknowledge a live steering message after you have incorporated it into your current task.",
+        "Acknowledge a live steering message after you have incorporated it into your current task. Pass the ID from the `[steering <id>]` marker on the message.",
       annotations: { destructiveHint: false },
       inputSchema: acceptSteerInputSchema,
       outputSchema: acceptSteerOutputSchema,
