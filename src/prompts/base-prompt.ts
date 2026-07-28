@@ -163,20 +163,33 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     // emit `unassign` and `block` suggestions, and considering only `assignTo`
     // left the agent with an empty "Routing guidance" section whenever a soft
     // guard or a pool recommendation was the only thing a handler produced.
-    const suggestionLines = args.routingDirectives.suggestions
-      .map((s) => {
-        if (s.assignTo) {
-          return `Routing suggested assigning this to ${s.assignTo} — if you delegate elsewhere, note why.`;
-        }
-        if (s.unassign) {
-          return "Routing suggested this is a different kind of work from its parent — consider assigning it fresh from the pool rather than continuing in the same session.";
-        }
-        if (s.block) {
-          return `Routing raised a concern: ${s.block.reason} — address it or note why you are proceeding.`;
-        }
-        return null;
-      })
-      .filter((line): line is string => line !== null);
+    //
+    // Each variant is a registered template (prompt text never gets
+    // concatenated inline here) so operators can reword or disable it.
+    const suggestionLines: string[] = [];
+    for (const s of args.routingDirectives.suggestions) {
+      if (s.assignTo) {
+        suggestionLines.push(
+          (
+            await resolveTemplateAsync("system.task.routing_suggestion.assign", {
+              agent: s.assignTo,
+            })
+          ).text,
+        );
+      } else if (s.unassign) {
+        suggestionLines.push(
+          (await resolveTemplateAsync("system.task.routing_suggestion.unassign", {})).text,
+        );
+      } else if (s.block) {
+        suggestionLines.push(
+          (
+            await resolveTemplateAsync("system.task.routing_suggestion.block", {
+              reason: s.block.reason,
+            })
+          ).text,
+        );
+      }
+    }
     const suggestion = suggestionLines.length > 0 ? `\n\n${suggestionLines.join("\n")}` : "";
     const routingDirectivesResult = await resolveTemplateAsync("system.task.routing_directives", {
       directives,

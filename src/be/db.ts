@@ -4327,7 +4327,9 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.requestedByUserId ?? null,
       options?.contextKey ?? null,
       options?.routingAffinity ? JSON.stringify(options.routingAffinity) : null,
-      options?.routingDirectives ? JSON.stringify(options.routingDirectives) : null,
+      // Handler-script output — scrub at the persistence egress. It is later
+      // transported into task responses and rendered into agent prompts.
+      options?.routingDirectives ? scrubSecrets(JSON.stringify(options.routingDirectives)) : null,
       pkg.version,
       now,
       now,
@@ -4380,7 +4382,9 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
 export function updateTaskRoutingDirectives(taskId: string, payload: RoutingDirectives): void {
   getDb()
     .prepare("UPDATE agent_tasks SET routingDirectives = ?, lastUpdatedAt = ? WHERE id = ?")
-    .run(JSON.stringify(payload), new Date().toISOString(), taskId);
+    // Handler-script output — scrub at this persistence egress too, matching
+    // the createTaskExtended insert path.
+    .run(scrubSecrets(JSON.stringify(payload)), new Date().toISOString(), taskId);
 }
 
 export function claimTask(taskId: string, agentId: string): AgentTask | null {

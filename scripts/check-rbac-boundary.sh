@@ -51,7 +51,7 @@ ALLOWED_PATTERNS=(
   'src/tools/send-task.ts|if \(agent\.isLead\) \{'
   'src/http/poll.ts|if \(agent\??\.isLead\) \{'
   # routing claim pre-pass mirrors branch-5's worker-only pool condition (trigger routing, not authz)
-  'src/http/poll.ts|if \(agent && !agent\.isLead && hasCapacity\(myAgentId\)\) \{'
+  'src/http/poll.ts|if \(agent && !agent\.isLead && .*hasCapacity\(myAgentId\)\) \{'
   # routing.lead_deviated attribution: decides whether to EMIT a metric after
   # the task is already created — never whether the delegation is permitted
   'src/tools/send-task.ts|const callerIsLead = creatorAgentId'

@@ -27,6 +27,7 @@ import {
   EdgeHandlerMatcherSchema,
   EdgeHandlerModeSchema,
 } from "../types";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -343,7 +344,11 @@ export async function handleRouting(
     const decision = await (edge === "prompt.compose" ? runPromptCompose : runBeforeAssign)(ctx, {
       dryRun: true,
     });
-    json(res, decision);
+    // The decision embeds raw handler-script output (`trace[].result`, notes,
+    // directives). The persisted trace is scrubbed at its DB egress, but a dry
+    // run returns straight to the caller and never touches that path — so
+    // scrub the whole response here.
+    json(res, JSON.parse(scrubSecrets(JSON.stringify(decision))));
     return true;
   }
 

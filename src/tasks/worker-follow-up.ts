@@ -18,6 +18,7 @@ import { buildRoutingCtx } from "../routing/ctx";
 import { hasHandlersForVia, runBeforeAssign } from "../routing/engine";
 import { validateRoutingAssignTarget } from "../routing/target";
 import type { Agent, AgentTask, ResumeReason, TaskAttachment } from "../types";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
 import "../tools/templates";
@@ -514,7 +515,9 @@ export function createRoutingBlockDecisionTask(args: {
     throw new Error("Cannot create routing block decision task: lead agent not found");
   }
   const decision = resolveTemplate("task.routing.blocked.decision", {
-    reason: args.reason,
+    // The block reason is raw handler-script output and this text becomes a
+    // Lead task description — scrub before it lands in the task queue.
+    reason: scrubSecrets(args.reason),
     task_desc: args.description.slice(0, 500),
     proposed_agent: args.options?.agentId ?? "(unassigned)",
   });

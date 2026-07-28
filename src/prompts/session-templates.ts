@@ -867,3 +867,32 @@ registerTemplate({
   ],
   category: "task_lifecycle",
 });
+
+// One template per soft-suggestion variant. A soft handler can emit an
+// `assignTo`, an `unassign`, or a `block` suggestion, and each renders one line
+// into the `{{suggestion}}` slot above. Registered rather than inlined in the
+// prompt assembler so operators can reword or disable any variant.
+
+registerTemplate({
+  eventType: "system.task.routing_suggestion.assign",
+  header: "",
+  defaultBody: `Routing suggested assigning this to {{agent}} — if you delegate elsewhere, note why.`,
+  variables: [{ name: "agent", description: "Suggested agent id" }],
+  category: "task_lifecycle",
+});
+
+registerTemplate({
+  eventType: "system.task.routing_suggestion.unassign",
+  header: "",
+  defaultBody: `Routing suggested this is a different kind of work from its parent — consider assigning it fresh from the pool rather than continuing in the same session.`,
+  variables: [],
+  category: "task_lifecycle",
+});
+
+registerTemplate({
+  eventType: "system.task.routing_suggestion.block",
+  header: "",
+  defaultBody: `Routing raised a concern: {{reason}} — address it or note why you are proceeding.`,
+  variables: [{ name: "reason", description: "Soft guard block reason" }],
+  category: "task_lifecycle",
+});

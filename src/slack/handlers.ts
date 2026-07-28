@@ -620,15 +620,29 @@ export function registerMessageHandler(app: App): void {
       }
 
       const lead = getLeadAgent();
-      await createSlackTaskRouted(fullTaskDescription, {
-        agentId: lead?.id,
-        source: "slack",
-        slackChannelId: msg.channel,
-        slackThreadTs: threadTs,
-        slackUserId: msg.user,
-        requestedByUserId,
-        contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
-      });
+      const { task: offlineTask, blocked: offlineBlocked } = await createSlackTaskRouted(
+        fullTaskDescription,
+        {
+          agentId: lead?.id,
+          source: "slack",
+          slackChannelId: msg.channel,
+          slackThreadTs: threadTs,
+          slackUserId: msg.user,
+          requestedByUserId,
+          contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
+        },
+      );
+
+      // On a routing block the requested work was NOT created — `task` is the
+      // Lead reroute-decision. Reporting "queued" here would tell the user
+      // their request is waiting when it does not exist.
+      if (offlineBlocked) {
+        await say({
+          text: `:satellite: _Routing blocked this request: ${offlineBlocked.reason}. Handed to the Lead as decision task \`${offlineTask.id.slice(0, 8)}\`._`,
+          thread_ts: threadTs,
+        });
+        return;
+      }
 
       await say({
         text: ":satellite: _No agents are online right now. Your request has been queued and will be processed when agents come back up._",

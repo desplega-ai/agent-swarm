@@ -55,7 +55,11 @@ export class InProcessEventBus implements WorkflowEventBus {
   }
 
   offAny(handler: (event: string, data: unknown) => void): void {
-    this.anyHandlers = this.anyHandlers.filter((h) => h !== handler);
+    // Remove ONE registration, mirroring EventEmitter.off — filtering dropped
+    // every copy, so a handler intentionally registered twice lost both taps
+    // on a single off call.
+    const index = this.anyHandlers.indexOf(handler);
+    if (index !== -1) this.anyHandlers.splice(index, 1);
   }
 }
 

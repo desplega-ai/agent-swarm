@@ -130,8 +130,13 @@ export function handlerMatchesEdgeKey(handler: RoutingHandler, key: LifecycleEdg
 }
 
 /**
- * Handlers registered on `key`, in the engine's execution order
- * (`ORDER BY priority, name` — ascending priority, then name).
+ * Handlers registered on `key`, in the engine's execution order.
+ *
+ * Mirrors `orderedHandlers` in `src/routing/engine.ts`: EVERY guard runs before
+ * every route, and only then does ascending priority, then name, apply.
+ * Sorting on priority alone showed the reverse of the real sequence whenever a
+ * lower-priority-number route shared an edge with a guard — which made the
+ * panel actively misleading for diagnostics.
  */
 export function handlersForEdgeKey(
   handlers: RoutingHandler[],
@@ -139,7 +144,12 @@ export function handlersForEdgeKey(
 ): RoutingHandler[] {
   return handlers
     .filter((handler) => handlerMatchesEdgeKey(handler, key))
-    .sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name));
+    .sort(
+      (a, b) =>
+        (a.flavor === "guard" ? 0 : 1) - (b.flavor === "guard" ? 0 : 1) ||
+        a.priority - b.priority ||
+        a.name.localeCompare(b.name),
+    );
 }
 
 interface LifecycleNodeDef {

@@ -203,7 +203,20 @@ export async function handlePoll(
     if (hasHandlersForVia("task.before_assign", "claim")) {
       routedClaimCandidateIds = new Set();
       const agent = getAgentById(myAgentId);
-      if (agent && !agent.isLead && hasCapacity(myAgentId)) {
+      // Only do the pool pre-pass when the poll will actually TAKE the pool
+      // path. The transaction resolves offered → pending → pool, and neither
+      // offered nor pending work consumes `hasCapacity`, so a worker sitting on
+      // assigned work would otherwise spawn handler subprocesses for unrelated
+      // pool tasks on every poll — writing traces/events/directives and
+      // delaying its own trigger by several handler timeouts.
+      //
+      // Deliberately leaves the set EMPTY rather than undefined when skipping:
+      // if a higher-priority trigger evaporates between here and the
+      // transaction, the pool path finds no approved candidate and the worker
+      // simply polls again, instead of claiming a task whose guards never ran.
+      const hasHigherPriorityWork =
+        getOfferedTasksForAgent(myAgentId).length > 0 || getPendingTaskForAgent(myAgentId) !== null;
+      if (agent && !agent.isLead && !hasHigherPriorityWork && hasCapacity(myAgentId)) {
         // Scan deeper than the evaluation budget. Stopping at the first N rows
         // starved the pool: if routing rejected all N, every later poll
         // re-fetched the same ordered N, so lower-priority work this worker was
