@@ -23,8 +23,16 @@ import { deepInterpolate } from "./template";
 import { runStepValidation, type ValidationRunResult } from "./validation";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const MAX_ITERATIONS = Number(process.env.WORKFLOW_MAX_ITERATIONS) || 100;
-const MAX_STEPS_PER_RUN = Number(process.env.WORKFLOW_MAX_STEPS_PER_RUN) || 500;
+// Read dynamically, NOT captured at module load: `src/http/index.ts` imports
+// this module before `loadGlobalConfigsIntoEnv()` hydrates `swarm_config` into
+// `process.env`, so a module-level const would permanently ignore DB-saved
+// limits. Functions let a config reload take effect without a restart.
+function maxIterations(): number {
+  return Number(process.env.WORKFLOW_MAX_ITERATIONS) || 100;
+}
+function maxStepsPerRun(): number {
+  return Number(process.env.WORKFLOW_MAX_STEPS_PER_RUN) || 500;
+}
 
 export interface WorkflowExecutionOptions {
   requestedByUserId?: string;
@@ -199,10 +207,10 @@ export async function walkGraph(
   // unbounded resources. Checked here so it covers initial walks AND async
   // resumes (resumeFromTaskCompletion, handleTaskFailure, retry-poller).
   const allSteps = getWorkflowRunStepsByRunId(runId);
-  if (allSteps.length >= MAX_STEPS_PER_RUN) {
+  if (allSteps.length >= maxStepsPerRun()) {
     updateWorkflowRun(runId, {
       status: "failed",
-      error: `Circuit breaker: run exceeded ${MAX_STEPS_PER_RUN} total steps (WORKFLOW_MAX_STEPS_PER_RUN)`,
+      error: `Circuit breaker: run exceeded ${maxStepsPerRun()} total steps (WORKFLOW_MAX_STEPS_PER_RUN)`,
       finishedAt: new Date().toISOString(),
     });
     return;
@@ -247,10 +255,10 @@ export async function walkGraph(
 
   while (pendingNodes.length > 0) {
     nodeExecutionCount += pendingNodes.length;
-    if (nodeExecutionCount > MAX_ITERATIONS) {
+    if (nodeExecutionCount > maxIterations()) {
       updateWorkflowRun(runId, {
         status: "failed",
-        error: `Max node executions (${MAX_ITERATIONS}) exceeded — possible infinite loop`,
+        error: `Max node executions (${maxIterations()}) exceeded — possible infinite loop`,
         finishedAt: new Date().toISOString(),
       });
       return;

@@ -76,17 +76,32 @@ const SKIP_AUTO_RESUME_TYPES = new Set([
 // Configuration (env var overrides)
 // ============================================================================
 
-/** Default heartbeat interval: 90 seconds */
-const DEFAULT_INTERVAL_MS = Number(process.env.HEARTBEAT_INTERVAL_MS) || 90_000;
+/**
+ * Default heartbeat interval: 90 seconds.
+ *
+ * Every value in this block is read DYNAMICALLY (a getter, not a module-load
+ * const). Module-level capture happened before `loadGlobalConfigsIntoEnv()`
+ * hydrated `swarm_config` into `process.env`, so DB-saved thresholds were
+ * silently ignored — even across a restart. Keep these as functions.
+ */
+function defaultIntervalMs(): number {
+  return Number(process.env.HEARTBEAT_INTERVAL_MS) || 90_000;
+}
 
 /** Stall threshold: tasks with fresh worker heartbeat but no task update for this many minutes */
-const STALL_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALL_THRESHOLD_MIN) || 30;
+function stallThresholdMinutes(): number {
+  return Number(process.env.HEARTBEAT_STALL_THRESHOLD_MIN) || 30;
+}
 
 /** Stall threshold: tasks with no active session (worker clearly dead) */
-const STALL_THRESHOLD_NO_SESSION_MIN = Number(process.env.HEARTBEAT_STALL_NO_SESSION_MIN) || 5;
+function stallThresholdNoSessionMin(): number {
+  return Number(process.env.HEARTBEAT_STALL_NO_SESSION_MIN) || 5;
+}
 
 /** Stall threshold: tasks with stale worker heartbeat */
-const STALL_THRESHOLD_STALE_HEARTBEAT_MIN = Number(process.env.HEARTBEAT_STALL_STALE_HB_MIN) || 15;
+function stallThresholdStaleHeartbeatMin(): number {
+  return Number(process.env.HEARTBEAT_STALL_STALE_HB_MIN) || 15;
+}
 
 /** Grace window for a fresh pending steering message before normal stall remediation resumes. */
 export const STEERING_STALL_GRACE_MIN = Number(process.env.HEARTBEAT_STEERING_GRACE_MIN) || 5;
@@ -95,7 +110,9 @@ export const STEERING_STALL_GRACE_MIN = Number(process.env.HEARTBEAT_STEERING_GR
 const STALE_CLEANUP_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALE_CLEANUP_MIN) || 30;
 
 /** Max pool tasks to auto-assign per sweep */
-const MAX_AUTO_ASSIGN_PER_SWEEP = Number(process.env.HEARTBEAT_MAX_AUTO_ASSIGN) || 5;
+function maxAutoAssignPerSweep(): number {
+  return Number(process.env.HEARTBEAT_MAX_AUTO_ASSIGN) || 5;
+}
 
 /**
  * Page size for `autoAssignPoolTasks`' paginated pool scan and the hard cap on
@@ -110,7 +127,9 @@ const POOL_SCAN_BATCH_SIZE = Number(process.env.HEARTBEAT_POOL_SCAN_BATCH_SIZE) 
 const POOL_SCAN_CAP = Number(process.env.HEARTBEAT_POOL_SCAN_CAP) || 500;
 
 /** Max crash-recovery resume generations before failing for lead triage */
-export const MAX_RESUME_GENERATIONS = Number(process.env.HEARTBEAT_MAX_RESUME_GENERATIONS) || 3;
+export function maxResumeGenerations(): number {
+  return Number(process.env.HEARTBEAT_MAX_RESUME_GENERATIONS) || 3;
+}
 
 export const RESUME_BUDGET_EXHAUSTED_REASON = "resume_budget_exhausted";
 
@@ -288,7 +307,7 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
  */
 function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
   // Use the shortest threshold to catch all potentially stalled tasks
-  const candidates = getStalledInProgressTasks(STALL_THRESHOLD_NO_SESSION_MIN);
+  const candidates = getStalledInProgressTasks(stallThresholdNoSessionMin());
 
   for (const task of candidates) {
     if (!task.agentId) continue; // Unassigned tasks can't be stalled
@@ -314,7 +333,7 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
 
     if (!session) {
       // Case A: No active session — worker is dead
-      if (taskAgeMs >= STALL_THRESHOLD_NO_SESSION_MIN * 60 * 1000) {
+      if (taskAgeMs >= stallThresholdNoSessionMin() * 60 * 1000) {
         remediateCrashedWorkerTask(findings, task, {
           supersedeReason:
             "Auto-superseded by heartbeat: worker session not found (no active session for task)",
@@ -325,11 +344,11 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
       }
     } else {
       const isStaleHeartbeat =
-        sessionHeartbeatAgeMs! >= STALL_THRESHOLD_STALE_HEARTBEAT_MIN * 60 * 1000;
+        sessionHeartbeatAgeMs! >= stallThresholdStaleHeartbeatMin() * 60 * 1000;
 
       if (isStaleHeartbeat) {
         // Case B: Session exists but heartbeat is stale — worker likely crashed
-        if (taskAgeMs >= STALL_THRESHOLD_STALE_HEARTBEAT_MIN * 60 * 1000) {
+        if (taskAgeMs >= stallThresholdStaleHeartbeatMin() * 60 * 1000) {
           remediateCrashedWorkerTask(findings, task, {
             supersedeReason:
               "Auto-superseded by heartbeat: worker session heartbeat is stale (likely crashed)",
@@ -341,7 +360,7 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
         }
       } else {
         // Case C: Session exists and heartbeat is fresh — ambiguous
-        if (taskAgeMs >= STALL_THRESHOLD_MINUTES * 60 * 1000) {
+        if (taskAgeMs >= stallThresholdMinutes() * 60 * 1000) {
           findings.stalledTasks.push(task);
         }
       }
@@ -424,7 +443,7 @@ function remediateCrashedWorkerTask(
   }
 
   const nextResumeGeneration = getNextResumeGeneration(task);
-  if (nextResumeGeneration > MAX_RESUME_GENERATIONS) {
+  if (nextResumeGeneration > maxResumeGenerations()) {
     const failed = failTask(task.id, RESUME_BUDGET_EXHAUSTED_REASON);
     if (failed) {
       findings.autoFailedTasks.push({
@@ -757,12 +776,12 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
     let assignedCount = 0;
     let offset = 0;
 
-    while (assignedCount < MAX_AUTO_ASSIGN_PER_SWEEP && offset < POOL_SCAN_CAP) {
+    while (assignedCount < maxAutoAssignPerSweep() && offset < POOL_SCAN_CAP) {
       const batch = getUnassignedPoolTasks(POOL_SCAN_BATCH_SIZE, offset);
       if (batch.length === 0) break;
 
       for (const task of batch) {
-        if (assignedCount >= MAX_AUTO_ASSIGN_PER_SWEEP) break;
+        if (assignedCount >= maxAutoAssignPerSweep()) break;
 
         const worker = idleWorkers.find(
           (w) => reservedForWorker(w.id) < (w.maxTasks ?? 1) && isAgentEligibleForTask(w, task),
@@ -819,7 +838,7 @@ function escalateUnreclaimedResumes(findings: HeartbeatFindings): void {
     // Lead re-delegation (send-task does not enforce the generation tag, so a
     // flapping task could loop forever). Terminalize and stop. Atomic, so we
     // never kill a resume the agent just reclaimed in the gap.
-    if (getResumeGeneration(resume) >= MAX_RESUME_GENERATIONS) {
+    if (getResumeGeneration(resume) >= maxResumeGenerations()) {
       const failed = failPendingResumeIfUnclaimed(
         resume.id,
         "failed",
@@ -863,7 +882,7 @@ function escalateUnreclaimedResumes(findings: HeartbeatFindings): void {
           original,
           staleResume: resume,
           reason: "crash_recovery",
-          maxGenerations: MAX_RESUME_GENERATIONS,
+          maxGenerations: maxResumeGenerations(),
         });
         if (decision.kind !== "created") {
           throw new Error(`reroute-decision not created: ${decision.reason}`);
@@ -1014,7 +1033,7 @@ export function isEffectivelyEmpty(content: string): boolean {
  */
 export function gatherSystemStatus(options?: { isBootTriage?: boolean }): string {
   const stats = getTaskStats();
-  const stalledTasks = getStalledInProgressTasks(STALL_THRESHOLD_MINUTES);
+  const stalledTasks = getStalledInProgressTasks(stallThresholdMinutes());
   const agents = getAllAgents();
   const idleWorkers = getIdleWorkersWithCapacity();
   const poolTasks = getUnassignedPoolTasks(10);
@@ -1312,7 +1331,7 @@ function logFindings(findings: HeartbeatFindings): void {
  * Start the heartbeat polling loop.
  * @param intervalMs Polling interval in milliseconds (default: 90000)
  */
-export function startHeartbeat(intervalMs = DEFAULT_INTERVAL_MS): void {
+export function startHeartbeat(intervalMs = defaultIntervalMs()): void {
   if (heartbeatInterval) {
     console.log("[Heartbeat] Already running");
     return;

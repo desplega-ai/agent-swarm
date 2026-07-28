@@ -383,9 +383,10 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "LINEAR_ALLOWED_STATES",
         label: "Linear pickup states",
         description:
-          "Comma-separated Linear issue states eligible for swarm pickup. Leave unset to allow every state.",
+          "Comma-separated Linear workflow state types eligible for swarm pickup. Leave unset for the default `unstarted,started,completed,canceled` — which excludes `triage` and `backlog`.",
         kind: "string",
-        placeholder: "e.g. Todo,In Progress",
+        defaultValue: "unstarted,started,completed,canceled",
+        placeholder: "unstarted,started,completed,canceled",
         docsUrl: `${DOCS}integrations/linear`,
       },
       {
@@ -426,8 +427,8 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         label: "Audit retention (days)",
         description: "How long RBAC audit log entries are kept before being pruned.",
         kind: "number",
-        defaultValue: "90",
-        placeholder: "90",
+        defaultValue: "30",
+        placeholder: "30",
       },
       {
         key: "MCP_OAUTH_ALLOW_PRIVATE_HOSTS",
@@ -483,9 +484,10 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "SCRIPT_RUN_CONCURRENCY_CAP",
         label: "Script run concurrency cap",
         description:
-          "Maximum number of script runs executing at once. Leave unset for no explicit cap.",
+          "Maximum number of script runs executing at once. Leave unset for the default cap of 10.",
         kind: "number",
-        placeholder: "e.g. 10",
+        defaultValue: "10",
+        placeholder: "10",
       },
     ],
   },

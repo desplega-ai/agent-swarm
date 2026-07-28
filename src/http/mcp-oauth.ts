@@ -24,6 +24,7 @@ import {
   revokeMcpToken,
 } from "../oauth/mcp-wrapper";
 import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -31,7 +32,7 @@ import { json, jsonError } from "./utils";
 
 function ssrfOptions() {
   return {
-    allowPrivateHosts: process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS === "true",
+    allowPrivateHosts: isEnvFlagEnabled("MCP_OAUTH_ALLOW_PRIVATE_HOSTS", false),
     allowInsecure: process.env.NODE_ENV !== "production",
   };
 }

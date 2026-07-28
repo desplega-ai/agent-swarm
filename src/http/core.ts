@@ -33,21 +33,78 @@ import { agentWithCapacity, getPathSegments, jsonError, parseQueryParams } from 
  * environment-only, even if legacy rows still exist in the DB.
  * Returns the list of keys that were set/updated.
  */
+/**
+ * Keys this loader has injected into `process.env`, mapped to the value
+ * `process.env` held immediately BEFORE the first injection (`undefined` when
+ * the key was absent entirely).
+ *
+ * Why: injection used to be one-way. Deleting a global row removed it from the
+ * DB but left the previously-injected value live in `process.env`, so every
+ * consumer kept reading the stale setting until the process restarted — a
+ * "reset to default" in the dashboard silently did nothing. On each (re)load we
+ * now restore any previously-injected key that no longer has a global DB row.
+ *
+ * The `has()` guard when recording means the map always holds the *original*
+ * pre-injection value, not the value a previous reload injected.
+ */
+const injectedEnvOriginals = new Map<string, { original: string | undefined; injected: string }>();
+
 export function loadGlobalConfigsIntoEnv(override = false): string[] {
   const globalConfigs = getInjectableGlobalConfigs();
   const updated: string[] = [];
+  const liveKeys = new Set<string>();
+
   for (const config of globalConfigs) {
+    liveKeys.add(config.key);
     if (override || !process.env[config.key]) {
+      const previous = injectedEnvOriginals.get(config.key);
+      injectedEnvOriginals.set(config.key, {
+        // Keep the FIRST original — on a second reload `process.env` already
+        // holds a value we injected, which is not what we want to restore to.
+        original: previous ? previous.original : process.env[config.key],
+        injected: config.value,
+      });
       process.env[config.key] = config.value;
       updated.push(config.key);
     }
   }
+
+  // Un-inject: a key we previously injected that no longer has a global row
+  // reverts to whatever it was before we touched it (deployment env value, or
+  // absent). Then forget it, so a later re-create records a fresh original.
+  //
+  // Guard: only revert when `process.env` still holds the exact value we
+  // injected. If anything else deliberately set the key after us, that write
+  // wins — we must not clobber it.
+  for (const [key, tracked] of [...injectedEnvOriginals]) {
+    if (liveKeys.has(key)) continue;
+    if (process.env[key] !== tracked.injected) {
+      injectedEnvOriginals.delete(key);
+      continue;
+    }
+    if (tracked.original === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = tracked.original;
+    }
+    injectedEnvOriginals.delete(key);
+    updated.push(key);
+  }
+
   // The scrubber caches process.env-derived secret values; invalidate so the
-  // next scrub picks up any new/rotated secrets we just injected.
+  // next scrub picks up any new/rotated/removed secrets we just applied.
   if (updated.length > 0) {
     refreshSecretScrubberCache();
   }
   return updated;
+}
+
+/**
+ * Test-only: forget the injection bookkeeping so a suite can start from a
+ * clean slate without leaking un-injection across tests.
+ */
+export function __resetInjectedEnvTracking(): void {
+  injectedEnvOriginals.clear();
 }
 
 export type ReloadConfigResult = {

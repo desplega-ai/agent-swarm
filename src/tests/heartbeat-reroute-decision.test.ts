@@ -31,7 +31,7 @@ import { createTrackerSync, getTrackerSync } from "../be/db-queries/tracker";
 import {
   codeLevelTriage,
   HEARTBEAT_RESUME_PIN_GRACE_MIN,
-  MAX_RESUME_GENERATIONS,
+  maxResumeGenerations,
   RESUME_BUDGET_EXHAUSTED_REASON,
 } from "../heartbeat/heartbeat";
 import {
@@ -179,7 +179,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
       original,
       staleResume: r1,
       reason: "crash_recovery",
-      maxGenerations: MAX_RESUME_GENERATIONS,
+      maxGenerations: maxResumeGenerations(),
     });
 
     expect(result.kind).toBe("created");
@@ -201,7 +201,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     expect(decision.task).toContain('taskType: "resume"');
     // Generation derived from the FAILED PIN (R1 = gen 1) → next = 2 (of max).
     expect(decision.task).toContain(`${RESUME_GENERATION_TAG_PREFIX}2`);
-    expect(decision.task).toContain(`2 of ${MAX_RESUME_GENERATIONS}`);
+    expect(decision.task).toContain(`2 of ${maxResumeGenerations()}`);
     // No unresolved template variables leaked into the body.
     expect(decision.task).not.toContain("{{");
 
@@ -222,7 +222,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
       original,
       staleResume: r1,
       reason: "crash_recovery",
-      maxGenerations: MAX_RESUME_GENERATIONS,
+      maxGenerations: maxResumeGenerations(),
     });
     expect(first.kind).toBe("created");
 
@@ -230,7 +230,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
       original,
       staleResume: r1,
       reason: "crash_recovery",
-      maxGenerations: MAX_RESUME_GENERATIONS,
+      maxGenerations: maxResumeGenerations(),
     });
     expect(second.kind).toBe("skipped");
     if (second.kind === "skipped") expect(second.reason).toBe("duplicate_exists");
@@ -246,7 +246,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
       original,
       staleResume: r1,
       reason: "crash_recovery",
-      maxGenerations: MAX_RESUME_GENERATIONS,
+      maxGenerations: maxResumeGenerations(),
     });
     expect(result.kind).toBe("skipped");
     if (result.kind === "skipped") expect(result.reason).toBe("lead_not_found");
@@ -340,7 +340,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
       tags: [
         "auto-resume",
         "reason:crash_recovery",
-        `${RESUME_GENERATION_TAG_PREFIX}${MAX_RESUME_GENERATIONS}`,
+        `${RESUME_GENERATION_TAG_PREFIX}${maxResumeGenerations()}`,
         CRASH_RECOVERY_PIN_TAG,
       ],
     });
@@ -507,7 +507,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
       tags: [
         "auto-resume",
         "reason:crash_recovery",
-        `${RESUME_GENERATION_TAG_PREFIX}${MAX_RESUME_GENERATIONS - 1}`,
+        `${RESUME_GENERATION_TAG_PREFIX}${maxResumeGenerations() - 1}`,
         CRASH_RECOVERY_PIN_TAG,
       ],
     });
@@ -520,7 +520,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     const decision = getChildTasks(original.id).find((c) => c.taskType === "reroute-decision");
     expect(decision).toBeDefined();
     // generation_next derives from the failed pin (MAX-1) → MAX.
-    expect(decision!.task).toContain(`${RESUME_GENERATION_TAG_PREFIX}${MAX_RESUME_GENERATIONS}`);
+    expect(decision!.task).toContain(`${RESUME_GENERATION_TAG_PREFIX}${maxResumeGenerations()}`);
   });
 
   // --------------------------------------------------------------------------
@@ -559,7 +559,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
       original: getTaskById(original.id)!,
       staleResume: r1,
       reason: "crash_recovery",
-      maxGenerations: MAX_RESUME_GENERATIONS,
+      maxGenerations: maxResumeGenerations(),
     });
     expect(result.kind).toBe("created");
     if (result.kind !== "created") throw new Error("expected created");

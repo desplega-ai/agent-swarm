@@ -1,3 +1,5 @@
+import { isEnvFlagEnabled } from "../utils/env-flag";
+
 /**
  * GitLab Authentication & Webhook Verification
  *
@@ -11,7 +13,7 @@ let apiToken: string | null = null;
 let gitlabUrl: string = "https://gitlab.com";
 
 export function isGitLabEnabled(): boolean {
-  return !!process.env.GITLAB_WEBHOOK_SECRET && process.env.GITLAB_DISABLE !== "true";
+  return !!process.env.GITLAB_WEBHOOK_SECRET && !isEnvFlagEnabled("GITLAB_DISABLE", false);
 }
 
 export function initGitLab(): void {

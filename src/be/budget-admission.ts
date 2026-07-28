@@ -8,6 +8,7 @@
 // /api/poll pool, MCP `task-action` `accept`) translate refusals into the
 // `budget_refused` trigger envelope.
 
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { getBudget, getDailySpendForAgent, getDailySpendForUser, getDailySpendGlobal } from "./db";
 
 export interface BudgetAdmissionAllowed {
@@ -73,7 +74,7 @@ export function canClaim(
   nowUtc: Date,
   requestedByUserId?: string,
 ): BudgetAdmissionResult {
-  if (process.env.BUDGET_ADMISSION_DISABLED === "true") {
+  if (isEnvFlagEnabled("BUDGET_ADMISSION_DISABLED", false)) {
     if (!killSwitchWarned) {
       killSwitchWarned = true;
       console.warn(

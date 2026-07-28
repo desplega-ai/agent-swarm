@@ -12,6 +12,7 @@ import {
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { resolveTemplate } from "../prompts/resolver";
 import type { Agent, AgentTask, ResumeReason, TaskAttachment } from "../types";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
 import "../tools/templates";
@@ -34,8 +35,14 @@ export const WORKER_LIVENESS_WINDOW_SECONDS = Number(
  * `fresh` window like every other reason, so at the ~5-min detection mark it
  * falls back to the unassigned pool. A reversible kill-switch for this
  * production crash-path change (no code revert needed if the pin misbehaves).
+ *
+ * A function (read dynamically), not a module-load-time const, so a
+ * `swarm_config` reload actually applies it — and so it can be toggled
+ * mid-test. Accepts `0`/`false` to disable, matching every other swarm flag.
  */
-export const HEARTBEAT_PIN_CRASH_RESUME = process.env.HEARTBEAT_PIN_CRASH_RESUME !== "0";
+export function isCrashResumePinEnabled(): boolean {
+  return isEnvFlagEnabled("HEARTBEAT_PIN_CRASH_RESUME", true);
+}
 
 /**
  * Rollback switch for pinning `graceful_shutdown` resumes to their original
@@ -293,7 +300,7 @@ export function createResumeFollowUp(args: {
         Date.now() - lastActivity < WORKER_LIVENESS_WINDOW_SECONDS * 1000;
       const activeCount = getActiveTaskCount(candidate.id);
       const hasCap = activeCount < (candidate.maxTasks ?? 1);
-      const isCrashRecovery = args.reason === "crash_recovery" && HEARTBEAT_PIN_CRASH_RESUME;
+      const isCrashRecovery = args.reason === "crash_recovery" && isCrashResumePinEnabled();
       const isGracefulShutdown = args.reason === "graceful_shutdown";
       const isGracefulPin = isGracefulShutdown && isGracefulResumePinEnabled();
       const isFreshPinnedReason = !isGracefulShutdown && fresh;

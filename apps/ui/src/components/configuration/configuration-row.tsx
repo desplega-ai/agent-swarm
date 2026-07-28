@@ -80,9 +80,37 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
 
   const isDirty = draft !== (savedValue ?? "");
 
+  // A key present in the server's `process.env` with no DB row: the API only
+  // exposes presence, never the env value, so rendering a control seeded from
+  // the catalog default would misreport the live setting. Show a read-only
+  // marker until the operator explicitly opts into overriding it.
+  const [isOverriding, setIsOverriding] = useState(false);
+  const envOnly = inEnv && config === undefined;
+  const showEnvOnly = envOnly && !isOverriding;
+
+  // Once a DB row exists (or disappears again) drop back to the default view.
+  useEffect(() => {
+    if (config !== undefined) setIsOverriding(false);
+  }, [config]);
+
   function handleSave(value: string) {
     save(value, { description: entry.description });
   }
+
+  function cancelOverride() {
+    setDraft(savedValue ?? "");
+    setIsOverriding(false);
+  }
+
+  const cancelOverrideButton = envOnly ? (
+    <button
+      type="button"
+      onClick={cancelOverride}
+      className="text-xs text-muted-foreground underline hover:text-foreground shrink-0"
+    >
+      Cancel
+    </button>
+  ) : null;
 
   const resetButton = config ? (
     <Tooltip>
@@ -107,7 +135,7 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
     <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
       <div className="min-w-0 space-y-1 sm:flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <Label htmlFor={inputId} className="text-sm font-medium">
+          <Label htmlFor={showEnvOnly ? undefined : inputId} className="text-sm font-medium">
             {entry.label}
           </Label>
           <code className="font-mono text-[10px] text-muted-foreground select-text">
@@ -159,7 +187,26 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
       </div>
 
       <div className="flex items-center gap-2 shrink-0 sm:w-80 sm:justify-end">
-        {entry.kind === "boolean" && (
+        {showEnvOnly && (
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-xs text-muted-foreground cursor-help">
+                  Set via environment
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                This key is set in the API server's environment. The dashboard can see that it is
+                set, but not its value. Override to save a value here — it takes over on reload.
+              </TooltipContent>
+            </Tooltip>
+            <Button type="button" size="sm" variant="outline" onClick={() => setIsOverriding(true)}>
+              Override
+            </Button>
+          </>
+        )}
+
+        {!showEnvOnly && entry.kind === "boolean" && (
           <>
             <Switch
               id={inputId}
@@ -167,11 +214,12 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
               disabled={isPending}
               onCheckedChange={(checked) => handleSave(checked ? "true" : "false")}
             />
+            {cancelOverrideButton}
             {resetButton}
           </>
         )}
 
-        {entry.kind === "enum" && (
+        {!showEnvOnly && entry.kind === "enum" && (
           <>
             <Select
               value={savedValue ?? entry.defaultValue ?? UNSET_SENTINEL}
@@ -198,11 +246,12 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
                 ))}
               </SelectContent>
             </Select>
+            {cancelOverrideButton}
             {resetButton}
           </>
         )}
 
-        {(entry.kind === "string" || entry.kind === "number") && (
+        {!showEnvOnly && (entry.kind === "string" || entry.kind === "number") && (
           <>
             <Input
               id={inputId}
@@ -222,6 +271,7 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
             >
               Save
             </Button>
+            {cancelOverrideButton}
             {resetButton}
           </>
         )}

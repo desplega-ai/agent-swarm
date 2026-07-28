@@ -37,6 +37,7 @@ import { startSlackApp, stopSlackApp } from "../slack";
 import { initTelemetry, telemetry } from "../telemetry";
 import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl } from "../utils/constants";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
@@ -629,8 +630,11 @@ httpServer
       });
     }
 
-    // Start heartbeat triage (unless disabled)
-    if (process.env.HEARTBEAT_DISABLE !== "true") {
+    // Start heartbeat triage (unless disabled). Read post-hydration (this block
+    // runs after `loadGlobalConfigsIntoEnv`), so a DB-saved value applies on
+    // restart — which is what the Configuration page's "Restart required"
+    // badge promises for HEARTBEAT_DISABLE / HEARTBEAT_INTERVAL_MS.
+    if (!isEnvFlagEnabled("HEARTBEAT_DISABLE", false)) {
       const { startHeartbeat } = await import("../heartbeat");
       const heartbeatMs = Number(process.env.HEARTBEAT_INTERVAL_MS) || 90000;
       startHeartbeat(heartbeatMs);

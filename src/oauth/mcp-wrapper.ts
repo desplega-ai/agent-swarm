@@ -1,4 +1,5 @@
 import * as oauth from "oauth4webapi";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 
 /**
  * MCP OAuth 2.1 wrapper.
@@ -113,7 +114,7 @@ export function publicEndpointSsrfOptions(): SsrfGuardOptions {
 
 function defaultSsrfOptions(): SsrfGuardOptions {
   return {
-    allowPrivateHosts: process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS === "true",
+    allowPrivateHosts: isEnvFlagEnabled("MCP_OAUTH_ALLOW_PRIVATE_HOSTS", false),
     allowInsecure: process.env.NODE_ENV !== "production",
   };
 }

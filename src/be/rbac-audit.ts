@@ -17,6 +17,7 @@
  * (default 30).
  */
 import type { AdmissionDecision, RbacCheck, RbacDecision } from "../rbac";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { getDb } from "./db";
 
 type AuditRow = {
@@ -42,7 +43,7 @@ let auditGcTimer: ReturnType<typeof setInterval> | null = null;
 let thresholdFlushScheduled = false;
 
 function isAuditDisabled(): boolean {
-  return process.env.RBAC_AUDIT_DISABLED === "true";
+  return isEnvFlagEnabled("RBAC_AUDIT_DISABLED", false);
 }
 
 function principalIdOf(principal: RbacCheck["principal"]): string | null {

@@ -18,6 +18,7 @@ import type { SlackFile } from "./files";
 import { extractTaskFromMessage, hasOtherUserMention, routeMessage } from "./router";
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { extractSlackMessageText } from "./message-text";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
@@ -484,9 +485,11 @@ export function registerMessageHandler(app: App): void {
       isAssistantThread && !botMentioned && !hasOtherUserMention(effectiveText, botUserId);
 
     // ADDITIVE_SLACK: Check for !now command in threads
-    const additiveSlack = process.env.ADDITIVE_SLACK === "true";
-    const requireMentionForThreadFollowup =
-      process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION === "true";
+    const additiveSlack = isEnvFlagEnabled("ADDITIVE_SLACK", false);
+    const requireMentionForThreadFollowup = isEnvFlagEnabled(
+      "SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION",
+      false,
+    );
     if (additiveSlack && msg.thread_ts) {
       const stripped = effectiveText.replace(/<@[A-Z0-9]+>/g, "").trim();
       if (stripped.startsWith("!now")) {

@@ -9,8 +9,9 @@ import { hasOtherUserMention } from "./router";
 import { bufferThreadMessage } from "./thread-buffer";
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 
-const additiveSlack = process.env.ADDITIVE_SLACK === "true";
+const isAdditiveSlack = () => isEnvFlagEnabled("ADDITIVE_SLACK", false);
 
 // Cache the bot's own Slack user ID so we can suppress messages that @-mention
 // a different agent (e.g. Devin) rather than our bot.
@@ -120,7 +121,7 @@ export function createAssistant(): Assistant {
 
         if (workingAgent && workingAgent.status !== "offline") {
           // Follow-up message → route to the same agent
-          if (additiveSlack) {
+          if (isAdditiveSlack()) {
             bufferThreadMessage(channelId, threadTs, messageText, userId, message.ts);
             await safeSetStatus("Queuing follow-up...");
             return;

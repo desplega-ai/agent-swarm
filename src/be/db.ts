@@ -123,6 +123,7 @@ import {
   RoutingAffinitySchema,
 } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -1075,7 +1076,7 @@ export function updateAgentStatusFromCapacity(agentId: string): void {
  * src/tasks/worker-follow-up.ts for the same pattern).
  */
 export function isPoolAffinityEnforcementEnabled(): boolean {
-  return process.env.POOL_AFFINITY_ENFORCEMENT !== "0";
+  return isEnvFlagEnabled("POOL_AFFINITY_ENFORCEMENT", true);
 }
 
 /**

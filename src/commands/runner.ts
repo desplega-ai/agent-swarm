@@ -775,6 +775,24 @@ async function ensureAgentFsCredentials(
  *
  * For values that affect runner-loop behavior (like MAX_CONCURRENT_TASKS),
  * prefer mutating `RunnerState` directly — no round-trip through process.env.
+ *
+ * The second block below is the set surfaced on the dashboard's Configuration
+ * page (apps/ui/src/lib/configuration-catalog.ts) that worker code reads via a
+ * bare `process.env.X`. Without them here, a dashboard save reached the server
+ * but never the worker, so the page advertised settings that silently did
+ * nothing worker-side. Each is a plain scalar with no paired in-process state,
+ * which is what makes it safe to hot-swap:
+ *
+ * - STEERING_ENABLED — read per-poll by `isSteeringEnabled()` and by the
+ *   system-prompt builder; flipping it mid-run just gates a feature.
+ * - ANONYMIZED_TELEMETRY — read per-event by `telemetry.isEnabled()`.
+ * - MEMORY_RATERS — read per hook/prompt invocation.
+ * - TEMPLATE_REGISTRY_URL — read per registry fetch.
+ * - SLACK_DISABLE — read by the prompt builder to gate the Slack tool section.
+ * - SWARM_ORG_NAME — read per telemetry event for org identity.
+ *
+ * NOTE: SCRIPTS_ONLY_MCP and HARNESS_PROVIDER stay excluded on purpose — they
+ * have paired adapter/prompt state and their own reconcile path above.
  */
 const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "MODEL_OVERRIDE",
@@ -782,6 +800,13 @@ const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "AGENT_FS_SHARED_ORG_ID",
   "SWARM_USE_CLAUDE_BRIDGE",
   "BEDROCK_AUTH_MODE",
+  // Configuration-page keys read worker-side.
+  "STEERING_ENABLED",
+  "ANONYMIZED_TELEMETRY",
+  "MEMORY_RATERS",
+  "TEMPLATE_REGISTRY_URL",
+  "SLACK_DISABLE",
+  "SWARM_ORG_NAME",
 ]);
 
 /**

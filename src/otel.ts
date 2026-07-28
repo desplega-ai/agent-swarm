@@ -19,7 +19,20 @@ export type SwarmSpan = {
 import type { SessionCostMetric } from "./otel-impl";
 export type { SessionCostMetric };
 
-const enabled = Boolean(process.env.OTEL_EXPORTER_OTLP_ENDPOINT);
+/**
+ * Whether OTLP export is configured.
+ *
+ * Read DYNAMICALLY, not captured at module load: `src/http/index.ts` and
+ * `src/commands/runner.ts` both import this module at the top of their graph,
+ * which runs before `loadGlobalConfigsIntoEnv()` hydrates `swarm_config` into
+ * `process.env`. A module-level const meant a DB-saved
+ * `OTEL_EXPORTER_OTLP_ENDPOINT` could never enable tracing — not even after a
+ * restart. `initOtel()` is invoked post-hydration, so a dynamic read makes the
+ * setting genuinely effective on restart (and on reload, before init).
+ */
+function otelConfigured(): boolean {
+  return Boolean(process.env.OTEL_EXPORTER_OTLP_ENDPOINT);
+}
 
 const NOOP_SPAN: SwarmSpan = {
   setAttribute: () => NOOP_SPAN,
@@ -50,16 +63,16 @@ let realShutdown: (() => Promise<void>) | undefined;
 let realRecordSessionCost: ((m: SessionCostMetric) => void) | undefined;
 
 export function isOtelEnabled(): boolean {
-  return enabled;
+  return otelConfigured();
 }
 
 export function isPollTracingEnabled(): boolean {
-  const v = (process.env.OTEL_TRACE_POLL ?? "").toLowerCase();
+  const v = (process.env.OTEL_TRACE_POLL ?? "").trim().toLowerCase();
   return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
 export async function initOtel(serviceRole = process.env.AGENT_ROLE || "api"): Promise<void> {
-  if (!enabled || initialized) return;
+  if (!otelConfigured() || initialized) return;
   initialized = true;
 
   try {
@@ -83,21 +96,21 @@ export async function withSpan<T>(
   fn: (span: SwarmSpan) => Promise<T> | T,
   attributes?: Attributes,
 ): Promise<T> {
-  if (!enabled || !realWithSpan) {
+  if (!otelConfigured() || !realWithSpan) {
     return fn(NOOP_SPAN);
   }
   return realWithSpan(name, fn, attributes);
 }
 
 export function startSpan(name: string, attributes?: Attributes): SwarmSpan {
-  if (!enabled || !realStartSpan) {
+  if (!otelConfigured() || !realStartSpan) {
     return NOOP_SPAN;
   }
   return realStartSpan(name, attributes);
 }
 
 export function withSpanContext<T>(span: SwarmSpan, fn: () => T): T {
-  if (!enabled || !realWithSpanContext) {
+  if (!otelConfigured() || !realWithSpanContext) {
     return fn();
   }
   return realWithSpanContext(span, fn);
@@ -107,14 +120,14 @@ export async function withRemoteContext<T>(
   carrier: Record<string, unknown>,
   fn: () => Promise<T> | T,
 ): Promise<T> {
-  if (!enabled || !realWithRemoteContext) {
+  if (!otelConfigured() || !realWithRemoteContext) {
     return fn();
   }
   return realWithRemoteContext(carrier, fn);
 }
 
 export function injectTraceContext(headers: Record<string, string>): Record<string, string> {
-  if (!enabled || !realInjectTraceContext) {
+  if (!otelConfigured() || !realInjectTraceContext) {
     return headers;
   }
   return realInjectTraceContext(headers);
@@ -126,7 +139,7 @@ export async function shutdownOtel(): Promise<void> {
 }
 
 export function recordSessionCost(m: SessionCostMetric): void {
-  if (!enabled || !realRecordSessionCost) return;
+  if (!otelConfigured() || !realRecordSessionCost) return;
   realRecordSessionCost(m);
 }
 

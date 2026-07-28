@@ -1,5 +1,6 @@
 import type { App } from "@slack/bolt";
 import { getAllAgents, getAllTasks } from "../be/db";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 
 export function registerCommandHandler(app: App): void {
   app.command("/agent-swarm-status", async ({ ack, respond }) => {
@@ -61,7 +62,7 @@ export function registerCommandHandler(app: App): void {
     await ack();
     console.log("[Slack] /agent-swarm-help command invoked");
 
-    const additiveSlack = process.env.ADDITIVE_SLACK === "true";
+    const additiveSlack = isEnvFlagEnabled("ADDITIVE_SLACK", false);
 
     const sections = [
       `*How to assign tasks:*

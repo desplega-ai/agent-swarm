@@ -180,9 +180,24 @@ escalateStarvedPoolTasks():
 
 ## Quick reference — env knobs
 
+All of these are read **dynamically** — `heartbeat.ts` exposes them as getter
+functions (`stallThresholdMinutes()`, `maxAutoAssignPerSweep()`,
+`maxResumeGenerations()`, …) rather than module-level `const`s. Module-level
+capture ran before `loadGlobalConfigsIntoEnv()` hydrated `swarm_config` into
+`process.env`, so a value saved from the dashboard's Configuration page was
+ignored even across a restart. Because the sweep re-reads them, a config reload
+now applies immediately to every threshold below **except** the two that size
+the `setInterval` itself (`HEARTBEAT_INTERVAL_MS`, and `HEARTBEAT_DISABLE`
+which decides whether the interval is created at all) — those are read once in
+`src/http/index.ts` after hydration, so they need a restart.
+
+Rollback switches accept `0`/`false` interchangeably (both parse through
+`parseEnvFlag` in `src/utils/env-flag.ts`); `HEARTBEAT_PIN_CRASH_RESUME` and
+`POOL_AFFINITY_ENFORCEMENT` previously honoured only `0`.
+
 | Const | Default | Env |
 |---|---|---|
-| Heartbeat cadence | 90s | `HEARTBEAT_INTERVAL_MS` |
+| Heartbeat cadence (restart required) | 90s | `HEARTBEAT_INTERVAL_MS` |
 | No-session stall (Case A) | 5 min | `HEARTBEAT_STALL_NO_SESSION_MIN` |
 | Stale-heartbeat stall (Case B) | 15 min | `HEARTBEAT_STALL_STALE_HB_MIN` |
 | Lead-escalation stall (Case C) | 30 min | `HEARTBEAT_STALL_THRESHOLD_MIN` |

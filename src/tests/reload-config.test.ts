@@ -5,6 +5,7 @@ import { initAgentMail, resetAgentMail } from "../agentmail";
 import { closeDb, deleteSwarmConfig, getDb, initDb, upsertSwarmConfig } from "../be/db";
 import { initGitHub, resetGitHub } from "../github";
 import {
+  __resetInjectedEnvTracking,
   _autoReloadStatsForTests,
   _resetAutoReloadForTests,
   flushPendingIntegrationsReload,
@@ -235,6 +236,79 @@ describe("reload-config", () => {
     const res = await fetch(`${baseUrl}/nonexistent`, { method: "POST" });
     expect(res.status).toBe(404);
   });
+
+  // Regression: injection used to be one-way. Deleting a global row left the
+  // previously-injected value live in process.env until the process restarted,
+  // so "reset to default" in the dashboard silently did nothing.
+  test("deleting a global row un-injects it from process.env on reload", () => {
+    const testKey = `__TEST_UNINJECT_${Date.now()}`;
+    envKeysToClean.push(testKey);
+    __resetInjectedEnvTracking();
+    delete process.env[testKey];
+
+    const config = upsertSwarmConfig({
+      scope: "global",
+      key: testKey,
+      value: "from-db",
+      isSecret: false,
+    });
+    loadGlobalConfigsIntoEnv(true);
+    expect(process.env[testKey]).toBe("from-db");
+
+    deleteSwarmConfig(config.id);
+    const updated = loadGlobalConfigsIntoEnv(true);
+
+    // Key was absent before injection → it must be absent again, and the
+    // un-injection must be reported so the UI can show what changed.
+    expect(process.env[testKey]).toBeUndefined();
+    expect(updated).toContain(testKey);
+  });
+
+  test("un-injection restores the pre-existing deployment env value", () => {
+    const testKey = `__TEST_UNINJECT_RESTORE_${Date.now()}`;
+    envKeysToClean.push(testKey);
+    __resetInjectedEnvTracking();
+    process.env[testKey] = "from-deploy-env";
+
+    const config = upsertSwarmConfig({
+      scope: "global",
+      key: testKey,
+      value: "from-db",
+      isSecret: false,
+    });
+    // override=true mirrors the reload path, where the DB wins over env.
+    loadGlobalConfigsIntoEnv(true);
+    expect(process.env[testKey]).toBe("from-db");
+
+    deleteSwarmConfig(config.id);
+    loadGlobalConfigsIntoEnv(true);
+
+    expect(process.env[testKey]).toBe("from-deploy-env");
+  });
+
+  test("repeated reloads keep the original pre-injection value, not the injected one", () => {
+    const testKey = `__TEST_UNINJECT_STABLE_${Date.now()}`;
+    envKeysToClean.push(testKey);
+    __resetInjectedEnvTracking();
+    process.env[testKey] = "original";
+
+    const config = upsertSwarmConfig({
+      scope: "global",
+      key: testKey,
+      value: "v1",
+      isSecret: false,
+    });
+    loadGlobalConfigsIntoEnv(true);
+    upsertSwarmConfig({ scope: "global", key: testKey, value: "v2", isSecret: false });
+    loadGlobalConfigsIntoEnv(true);
+    expect(process.env[testKey]).toBe("v2");
+
+    deleteSwarmConfig(config.id);
+    loadGlobalConfigsIntoEnv(true);
+
+    // Must fall back to "original", NOT to the intermediate injected "v1".
+    expect(process.env[testKey]).toBe("original");
+  });
 });
 
 describe("auto-reload debouncer", () => {
@@ -341,9 +415,10 @@ describe("auto-reload debouncer", () => {
     delete process.env[testKey];
   });
 
-  test("delete + reload removes value from active env (well, doesn't re-inject it)", async () => {
+  test("delete + reload un-injects the value from the active env", async () => {
     const testKey = `__TEST_DELETE_${Date.now()}`;
     delete process.env[testKey];
+    __resetInjectedEnvTracking();
 
     const config = upsertSwarmConfig({ scope: "global", key: testKey, value: "to-be-deleted" });
     scheduleIntegrationsReload(20);
@@ -355,11 +430,11 @@ describe("auto-reload debouncer", () => {
     scheduleIntegrationsReload(20);
     await flushPendingIntegrationsReload();
 
-    // Caveat: process.env keeps the previously-injected value. Reload only
-    // overwrites keys that still exist in DB. This test pins that behavior so
-    // anyone changing the loader has to make a deliberate decision about
-    // whether to also unset removed keys.
-    expect(process.env[testKey]).toBe("to-be-deleted");
+    // The loader tracks what it injected and reverts it when the row goes away.
+    // This assertion previously pinned the opposite (stale value survives until
+    // restart); that was the bug — "reset to default" in the dashboard did
+    // nothing for every live consumer.
+    expect(process.env[testKey]).toBeUndefined();
     delete process.env[testKey];
   });
 });

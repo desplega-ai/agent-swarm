@@ -8,6 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import pkg from "../package.json";
+import { isEnvFlagEnabled } from "./utils/env-flag";
 
 const TELEMETRY_ENDPOINT = "https://proxy.desplega.sh/v1/events";
 const PRODUCT = "agent-swarm";
@@ -19,7 +20,7 @@ let cachedIsCloud = false;
 let cachedIsE2b = false;
 
 function isEnabled(): boolean {
-  return process.env.ANONYMIZED_TELEMETRY !== "false";
+  return isEnvFlagEnabled("ANONYMIZED_TELEMETRY", true);
 }
 
 /**

@@ -1,3 +1,4 @@
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import type { PermissionVerb } from "./permissions";
 
 export type AdmissionGrant = {
@@ -14,7 +15,7 @@ export type AdmissionDecision =
   | { allow: false; reason: string; verb?: PermissionVerb };
 
 export function isRbacEnabled(): boolean {
-  return process.env.RBAC_ENABLED === "true";
+  return isEnvFlagEnabled("RBAC_ENABLED", false);
 }
 
 export function decideAdmission(input: {
