@@ -210,6 +210,7 @@ Hub: [runbooks/testing.md](./runbooks/testing.md) — routes to LOCAL_TESTING.md
 Hard rules:
 - Plan-mode verification steps MUST copy real commands from LOCAL_TESTING.md; don't paraphrase.
 - Frontend PRs (`apps/ui/`, `apps/templates-ui/`) MUST include a `qa-use` session with screenshots — enforced by merge gate.
+- E2E/test agents MUST use valid UUID agent IDs (e.g. `AGENT_ID=$(uuidgen)`), never slugs like `e2e-lead` — several MCP tool *output* schemas pin `yourAgentId`/`task.agentId` to UUID, so slug-ID agents get `MCP error -32602: Output validation error` on `get-tasks`/`get-task-details`/`store-progress`/`memory-search` **after the write already landed** (retrying double-writes).
 
 </important>
 
