@@ -88,9 +88,30 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
   const envOnly = inEnv && config === undefined;
   const showEnvOnly = envOnly && !isOverriding;
 
+  // While overriding an env-only boolean/enum, the control edits a local draft
+  // committed by an explicit Save — persisting on change would make the
+  // initially displayed value (often exactly what the operator wants, e.g.
+  // default "false" to override RBAC_ENABLED=true) impossible to save.
+  const isDraftOverride = envOnly && isOverriding;
+  const [choiceDraft, setChoiceDraft] = useState<string | null>(null);
+
+  function beginOverride() {
+    setChoiceDraft(
+      entry.kind === "boolean"
+        ? isTruthyConfigValue(entry.defaultValue)
+          ? "true"
+          : "false"
+        : (entry.defaultValue ?? null),
+    );
+    setIsOverriding(true);
+  }
+
   // Once a DB row exists (or disappears again) drop back to the default view.
   useEffect(() => {
-    if (config !== undefined) setIsOverriding(false);
+    if (config !== undefined) {
+      setIsOverriding(false);
+      setChoiceDraft(null);
+    }
   }, [config]);
 
   function handleSave(value: string) {
@@ -99,6 +120,7 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
 
   function cancelOverride() {
     setDraft(savedValue ?? "");
+    setChoiceDraft(null);
     setIsOverriding(false);
   }
 
@@ -200,7 +222,7 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
                 set, but not its value. Override to save a value here — it takes over on reload.
               </TooltipContent>
             </Tooltip>
-            <Button type="button" size="sm" variant="outline" onClick={() => setIsOverriding(true)}>
+            <Button type="button" size="sm" variant="outline" onClick={beginOverride}>
               Override
             </Button>
           </>
@@ -210,10 +232,32 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
           <>
             <Switch
               id={inputId}
-              checked={isTruthyConfigValue(savedValue ?? entry.defaultValue)}
+              checked={
+                isDraftOverride
+                  ? choiceDraft === "true"
+                  : isTruthyConfigValue(savedValue ?? entry.defaultValue)
+              }
               disabled={isPending}
-              onCheckedChange={(checked) => handleSave(checked ? "true" : "false")}
+              onCheckedChange={(checked) => {
+                const next = checked ? "true" : "false";
+                if (isDraftOverride) {
+                  setChoiceDraft(next);
+                } else {
+                  handleSave(next);
+                }
+              }}
             />
+            {isDraftOverride && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={isPending}
+                onClick={() => handleSave(choiceDraft === "true" ? "true" : "false")}
+              >
+                Save
+              </Button>
+            )}
             {cancelOverrideButton}
             {resetButton}
           </>
@@ -222,9 +266,17 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
         {!showEnvOnly && entry.kind === "enum" && (
           <>
             <Select
-              value={savedValue ?? entry.defaultValue ?? UNSET_SENTINEL}
+              value={
+                isDraftOverride
+                  ? (choiceDraft ?? UNSET_SENTINEL)
+                  : (savedValue ?? entry.defaultValue ?? UNSET_SENTINEL)
+              }
               disabled={isPending}
               onValueChange={(next) => {
+                if (isDraftOverride) {
+                  setChoiceDraft(next === UNSET_SENTINEL ? null : next);
+                  return;
+                }
                 if (next === UNSET_SENTINEL) {
                   reset();
                   return;
@@ -246,6 +298,17 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
                 ))}
               </SelectContent>
             </Select>
+            {isDraftOverride && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={isPending || choiceDraft === null}
+                onClick={() => choiceDraft !== null && handleSave(choiceDraft)}
+              >
+                Save
+              </Button>
+            )}
             {cancelOverrideButton}
             {resetButton}
           </>

@@ -589,10 +589,12 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       {
         key: "TEMPLATE_REGISTRY_URL",
         label: "Template registry URL",
-        description: "Endpoint the dashboard queries for shareable task and workflow templates.",
+        description:
+          "Endpoint for shareable task and workflow templates. Workers fetch their template once at startup and cache it, so running workers keep the old registry until restarted.",
         kind: "string",
         defaultValue: "https://templates.agent-swarm.dev",
         placeholder: "https://templates.agent-swarm.dev",
+        restartRequired: true,
       },
     ],
   },

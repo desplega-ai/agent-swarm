@@ -17,30 +17,30 @@ export const TTL_DEFAULTS: Record<AgentMemorySource, number | null> = {
 
 // Per-source recency decay half-life (in days).
 // manual = Infinity (no decay — curated knowledge stays relevant forever).
-// A global MEMORY_RECENCY_HALF_LIFE_DAYS override forces ALL sources to the same value.
-const GLOBAL_HALF_LIFE_OVERRIDE = process.env.MEMORY_RECENCY_HALF_LIFE_DAYS;
-const GLOBAL_HALF_LIFE =
-  GLOBAL_HALF_LIFE_OVERRIDE != null && GLOBAL_HALF_LIFE_OVERRIDE !== ""
-    ? Number(GLOBAL_HALF_LIFE_OVERRIDE)
-    : null;
+// A global MEMORY_RECENCY_HALF_LIFE_DAYS override forces ALL sources to the
+// same value.
+//
+// Read DYNAMICALLY, not captured at module load: memory modules are imported
+// by `src/http/index.ts` before `loadGlobalConfigsIntoEnv()` hydrates
+// swarm_config into `process.env`, so a module-level capture would leave a
+// dashboard-saved override permanently inert (even across restarts). Same
+// reasoning for `minSimilarity()` / `accessBoostMaxMultiplier()` below.
+const DEFAULT_RECENCY_DECAY_HALF_LIFE: Record<AgentMemorySource, number> = {
+  manual: Number.POSITIVE_INFINITY,
+  file_index: 180,
+  task_completion: 14,
+  session_summary: 7,
+};
 
-export const RECENCY_DECAY_HALF_LIFE: Record<AgentMemorySource, number> =
-  GLOBAL_HALF_LIFE != null && Number.isFinite(GLOBAL_HALF_LIFE)
-    ? {
-        manual: GLOBAL_HALF_LIFE,
-        file_index: GLOBAL_HALF_LIFE,
-        task_completion: GLOBAL_HALF_LIFE,
-        session_summary: GLOBAL_HALF_LIFE,
-      }
-    : {
-        manual: Number.POSITIVE_INFINITY,
-        file_index: 180,
-        task_completion: 14,
-        session_summary: 7,
-      };
-
-// Legacy export — callers that don't have a source fall back to task_completion's value.
-export const RECENCY_DECAY_HALF_LIFE_DAYS = RECENCY_DECAY_HALF_LIFE.task_completion;
+// Callers that don't have a source fall back to task_completion's value.
+export function recencyDecayHalfLifeDays(source: AgentMemorySource = "task_completion"): number {
+  const raw = process.env.MEMORY_RECENCY_HALF_LIFE_DAYS;
+  if (raw != null && raw !== "") {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return DEFAULT_RECENCY_DECAY_HALF_LIFE[source];
+}
 
 // Source-quality multiplier for reranking.
 // Curated manual memories rank higher; ephemeral session summaries rank lower.
@@ -52,10 +52,14 @@ export const SOURCE_QUALITY_MULTIPLIER: Record<AgentMemorySource, number> = {
 };
 
 // Minimum raw cosine similarity to keep a candidate. Below this, the result is noise.
-export const MIN_SIMILARITY = numEnv("MEMORY_MIN_SIMILARITY", 0.1);
+export function minSimilarity(): number {
+  return numEnv("MEMORY_MIN_SIMILARITY", 0.1);
+}
 
 // Reranking parameters
-export const ACCESS_BOOST_MAX_MULTIPLIER = numEnv("MEMORY_ACCESS_BOOST_MAX", 1.5);
+export function accessBoostMaxMultiplier(): number {
+  return numEnv("MEMORY_ACCESS_BOOST_MAX", 1.5);
+}
 export const ACCESS_BOOST_RECENCY_WINDOW_HOURS = numEnv("MEMORY_ACCESS_RECENCY_HOURS", 48);
 export const CANDIDATE_SET_MULTIPLIER = numEnv("MEMORY_CANDIDATE_MULTIPLIER", 3);
 

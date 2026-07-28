@@ -5,7 +5,7 @@ import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
 import {
   EMBEDDING_DIMENSIONS,
   isHybridSearchEnabled,
-  MIN_SIMILARITY,
+  minSimilarity,
   PROTECTED_SOURCES,
   TTL_DEFAULTS,
 } from "../constants";
@@ -728,7 +728,7 @@ export class SqliteMemoryStore implements MemoryStore {
     const candidates: MemoryCandidate[] = [];
     for (const row of rows) {
       const similarity = 1 - row.distance;
-      if (similarity < MIN_SIMILARITY) continue;
+      if (similarity < minSimilarity()) continue;
       candidates.push({ ...rowToCandidate(row, similarity), retrievalSource: "vec" });
     }
 
@@ -775,7 +775,7 @@ export class SqliteMemoryStore implements MemoryStore {
       const emb = deserializeEmbedding(row.embedding);
       if (emb.length !== queryEmbedding.length) continue;
       const similarity = cosineSimilarity(queryEmbedding, emb);
-      if (similarity < MIN_SIMILARITY) continue;
+      if (similarity < minSimilarity()) continue;
       candidates.push({ ...rowToCandidate(row, similarity), retrievalSource: "fallback" });
     }
 

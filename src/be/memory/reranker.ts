@@ -1,9 +1,8 @@
 import type { AgentMemorySource } from "@/types";
 import {
-  ACCESS_BOOST_MAX_MULTIPLIER,
   ACCESS_BOOST_RECENCY_WINDOW_HOURS,
-  RECENCY_DECAY_HALF_LIFE,
-  RECENCY_DECAY_HALF_LIFE_DAYS,
+  accessBoostMaxMultiplier,
+  recencyDecayHalfLifeDays,
   SOURCE_QUALITY_MULTIPLIER,
 } from "./constants";
 import type { MemoryCandidate, RerankOptions } from "./types";
@@ -17,7 +16,7 @@ const MS_PER_HOUR = 1000 * 60 * 60;
  * file_index = 180d, task_completion = 14d, session_summary = 7d.
  */
 export function recencyDecay(createdAt: string, now: Date, source?: AgentMemorySource): number {
-  const halfLife = source ? RECENCY_DECAY_HALF_LIFE[source] : RECENCY_DECAY_HALF_LIFE_DAYS;
+  const halfLife = recencyDecayHalfLifeDays(source);
   if (!Number.isFinite(halfLife)) return 1.0;
   const ageDays = (now.getTime() - new Date(createdAt).getTime()) / MS_PER_DAY;
   if (ageDays <= 0) return 1.0;
@@ -33,7 +32,7 @@ export function accessBoost(accessedAt: string, accessCount: number, now: Date):
 
   const hoursSinceAccess = (now.getTime() - new Date(accessedAt).getTime()) / MS_PER_HOUR;
   const recencyFactor = hoursSinceAccess <= ACCESS_BOOST_RECENCY_WINDOW_HOURS ? 1.0 : 0.5;
-  const boost = 1 + Math.min(accessCount / 10, ACCESS_BOOST_MAX_MULTIPLIER - 1) * recencyFactor;
+  const boost = 1 + Math.min(accessCount / 10, accessBoostMaxMultiplier() - 1) * recencyFactor;
   return boost;
 }
 

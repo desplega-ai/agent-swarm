@@ -69,6 +69,15 @@ export function useSwarmConfig(key: string): UseSwarmConfigResult {
   const invalidate = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["configs"] });
     queryClient.invalidateQueries({ queryKey: ["config", "env-presence"] });
+    // The server applies global upserts/deletes to `process.env` via a ~250ms
+    // debounced reload, so the immediate refetch above usually still observes
+    // the OLD env presence. Re-check after the debounce has fired so source
+    // chips ("db (pending reload)", "Set via environment") converge without a
+    // manual refresh.
+    setTimeout(() => {
+      queryClient.invalidateQueries({ queryKey: ["configs"] });
+      queryClient.invalidateQueries({ queryKey: ["config", "env-presence"] });
+    }, 1500);
   }, [queryClient]);
 
   const save = useCallback(
