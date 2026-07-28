@@ -25,6 +25,10 @@ async function main() {
   // The SDK is derived from the full MCP registry regardless of deployment
   // CAPABILITIES — the scripts bridge is always full-surface, so the .d.ts
   // must be too (and generation must not depend on the local env's flags).
+  // Same for feature flags: steering is opt-in at runtime (STEERING_ENABLED),
+  // but the generated SDK covers the full tool universe — a disabled server
+  // rejects task_steer at call time with a clear 403.
+  process.env.STEERING_ENABLED = "true";
   const server = createServer({ fullSurface: true });
   const tools = (server as unknown as { _registeredTools: RegisteredTools })._registeredTools;
   const missing = SDK_ALLOWLIST.map((name) => mcpToolNameForSdkMethod(name)).filter(
