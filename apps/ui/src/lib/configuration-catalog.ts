@@ -284,10 +284,9 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "CAPABILITIES",
         label: "Capability surface",
         description:
-          'Comma-separated list of MCP capability groups exposed to workers. Use "all" for the full surface.',
+          "Comma-separated list of MCP capability groups exposed to workers (core, tasks, scripts, memory, workflows, …). Leave unset for the standard default surface; there is no wildcard value.",
         kind: "string",
-        defaultValue: "all",
-        placeholder: "all",
+        placeholder: "core,tasks,scripts,memory,workflows",
       },
     ],
   },
@@ -505,6 +504,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Collector endpoint traces and metrics are exported to. Leave unset to disable OTLP export.",
         kind: "string",
         placeholder: "http://localhost:4318",
+        restartRequired: true,
         docsUrl: `${DOCS}guides/observability-opentelemetry`,
       },
       {
@@ -515,6 +515,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "string",
         defaultValue: "agent-swarm",
         placeholder: "agent-swarm",
+        restartRequired: true,
         docsUrl: `${DOCS}guides/observability-opentelemetry`,
       },
       {

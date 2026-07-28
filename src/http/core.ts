@@ -13,6 +13,7 @@ import {
 import { enqueueAdmissionRow } from "../be/rbac-audit";
 import { getUserGrant } from "../be/rbac-roles";
 import { initGitHub, resetGitHub } from "../github";
+import { initGitLab, isGitLabEnabled, resetGitLab } from "../gitlab";
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
 import { decideAdmission, isRbacEnabled } from "../rbac";
@@ -136,6 +137,13 @@ export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfig
 
   resetGitHub();
   if (initGitHub()) integrations.push("github");
+
+  // GitLab caches its webhook secret at init; without a reset here, flipping
+  // GITLAB_DISABLE off from the dashboard would report enabled while every
+  // webhook verification kept failing against the stale null secret.
+  resetGitLab();
+  initGitLab();
+  if (isGitLabEnabled()) integrations.push("gitlab");
 
   resetLinear();
   if (initLinear()) integrations.push("linear");

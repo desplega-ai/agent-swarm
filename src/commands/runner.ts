@@ -4252,6 +4252,15 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     bootCooldownMs = resolveCodexCreditsExhaustedCooldownMs(
       bootEnv.env.CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
     );
+    // Apply live-safe resolved keys (STEERING_ENABLED, ANONYMIZED_TELEMETRY,
+    // TEMPLATE_REGISTRY_URL, ...) BEFORE the telemetry/template initialization
+    // below. Otherwise a dashboard-saved value only lands at the first
+    // poll-loop reconciliation — after the startup telemetry event and the
+    // one-time template fetch have already read the deployment env.
+    const bootApplied = applyResolvedEnvToProcessEnv(bootEnv.env);
+    if (bootApplied.length > 0) {
+      console.log(`[runner] Applied resolved swarm config at boot: ${bootApplied.join(", ")}`);
+    }
   } catch (err) {
     console.warn(
       `[runner] fetchResolvedEnv failed at boot, falling back to env for provider and the default cooldown: ${err}`,

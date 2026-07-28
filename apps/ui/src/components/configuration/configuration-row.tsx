@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useSwarmConfig } from "@/hooks/use-swarm-config";
+import { isTruthyConfigValue, useSwarmConfig } from "@/hooks/use-swarm-config";
 import type { ConfigCatalogEntry } from "@/lib/configuration-catalog";
 import { cn } from "@/lib/utils";
 
@@ -210,7 +210,7 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
           <>
             <Switch
               id={inputId}
-              checked={(savedValue ?? entry.defaultValue) === "true"}
+              checked={isTruthyConfigValue(savedValue ?? entry.defaultValue)}
               disabled={isPending}
               onCheckedChange={(checked) => handleSave(checked ? "true" : "false")}
             />

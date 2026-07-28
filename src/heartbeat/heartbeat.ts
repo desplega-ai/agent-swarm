@@ -111,7 +111,13 @@ const STALE_CLEANUP_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALE_CLEAN
 
 /** Max pool tasks to auto-assign per sweep */
 function maxAutoAssignPerSweep(): number {
-  return Number(process.env.HEARTBEAT_MAX_AUTO_ASSIGN) || 5;
+  const raw = process.env.HEARTBEAT_MAX_AUTO_ASSIGN?.trim();
+  if (!raw) return 5;
+  const n = Number(raw);
+  // 0 is a valid operator choice ("assign nothing this sweep") and the config
+  // validator accepts it — the usual `Number(...) || 5` idiom would silently
+  // turn it back into the default.
+  return Number.isInteger(n) && n >= 0 ? n : 5;
 }
 
 /**
