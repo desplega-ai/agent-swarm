@@ -28,7 +28,7 @@ import {
 } from "../be/db-queries/tracker";
 import {
   codeLevelTriage,
-  MAX_RESUME_GENERATIONS,
+  maxResumeGenerations,
   RESUME_BUDGET_EXHAUSTED_REASON,
   setBeforeHeartbeatSupersedeForTests,
 } from "../heartbeat/heartbeat";
@@ -115,7 +115,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
       tags: [
         "auto-resume",
         "reason:crash_recovery",
-        `${RESUME_GENERATION_TAG_PREFIX}${MAX_RESUME_GENERATIONS}`,
+        `${RESUME_GENERATION_TAG_PREFIX}${maxResumeGenerations()}`,
       ],
     });
     startTask(parent.id);
