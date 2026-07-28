@@ -570,20 +570,19 @@ export async function handleTasks(
     // Prefer trusted server-side identity: an authenticated request user, or
     // the caller's own ownership-gated task context (`X-Source-Task-Id` /
     // ambient current task) — same as every other audited write site. This
-    // is the upstream #939 anti-spoofing behavior and stays the default.
+    // is the upstream #939 anti-spoofing behavior.
     //
-    // Fork-specific opt-in: in a single-tenant deployment where every caller
-    // shares ONE operator key (so `auth.kind` is never "user" and there's no
-    // way to bind a caller to a user), TRUST_BODY_REQUESTED_BY_USER_ID=true
-    // re-enables a body-supplied `requestedByUserId` as a last resort, after
-    // validating it names a real user. This is safe ONLY because every
-    // holder of that shared key is already trusted org-wide — it must stay
-    // off (default) anywhere callers of the shared/global key are not all
-    // equally trusted, since it lets any such caller attribute a task to any
-    // user. Must NOT be upstreamed as a default-on behavior.
+    // TRUST_BODY_REQUESTED_BY_USER_ID (default ON) accepts a body-supplied
+    // `requestedByUserId` as a last resort — only when the caller could not be
+    // bound to a user (shared operator key), and only after validating it
+    // names a real user. Typical single-tenant deployments share ONE operator
+    // key, so without this the UI and API callers can never attribute tasks.
+    // Set TRUST_BODY_REQUESTED_BY_USER_ID=false anywhere holders of the
+    // shared/global key are NOT all equally trusted — with it on, any such
+    // caller can attribute a task to any user.
     const trustedUserId = resolveHttpAuditUserId(req, myAgentId);
     let requestedByUserId = trustedUserId ?? undefined;
-    const trustBodyRequestedByUserId = process.env.TRUST_BODY_REQUESTED_BY_USER_ID === "true";
+    const trustBodyRequestedByUserId = process.env.TRUST_BODY_REQUESTED_BY_USER_ID !== "false";
     if (trustBodyRequestedByUserId && !requestedByUserId && parsed.body.requestedByUserId) {
       const candidate = findUserById(parsed.body.requestedByUserId);
       if (candidate) requestedByUserId = candidate.id;
@@ -788,7 +787,7 @@ export async function handleTasks(
     const trustedUserId = resolveHttpAuditUserId(req, myAgentId);
     let requestedByUserId = trustedUserId ?? undefined;
     if (
-      process.env.TRUST_BODY_REQUESTED_BY_USER_ID === "true" &&
+      process.env.TRUST_BODY_REQUESTED_BY_USER_ID !== "false" &&
       !requestedByUserId &&
       parsed.body.requestedByUserId
     ) {
