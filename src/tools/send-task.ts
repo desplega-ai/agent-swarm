@@ -383,25 +383,12 @@ export async function sendTaskHandler(
   // `assignTo ?? effectiveAgentId` would silently ignore.
   effectiveAgentId = routedOptions.agentId ?? undefined;
 
-  if (routingDecision.final?.block) {
-    const reason = routingDecision.final.block.reason;
-    const rerouteTask = createRoutingBlockDecisionTask({
-      description: effective.description,
-      reason,
-      options: routedOptions,
-    });
-    backfillTraceTaskId(routingDecision.routingRunId, rerouteTask.id);
-    const message = `Delegation blocked by routing: ${reason}. Created Lead reroute-decision task "${rerouteTask.id}".`;
-    return {
-      content: [{ type: "text", text: message }],
-      structuredContent: {
-        yourAgentId: creatorAgentId,
-        success: false,
-        message,
-        task: rerouteTask,
-      },
-    };
-  }
+  // NOTE: a routing block does NOT return here. The dedup guards below
+  // (tracker contextKey, duplicate task, follow-up re-delegation) are meant to
+  // make a repeated delegation a no-op — materializing the Lead
+  // reroute-decision before them turned each repeat into a NEW control task,
+  // defeating exactly that. The block is materialized after they have had
+  // their say; see the deferred branch below.
 
   const existingTrackerWork = findExistingLinearTrackerContextWork(effectiveParentTask?.contextKey);
   if (existingTrackerWork) {
@@ -490,6 +477,28 @@ export async function sendTaskHandler(
         // completion, so re-delegation is legitimate.
       }
     }
+  }
+
+  // Deferred routing block: every dedup guard above has passed, so this really
+  // is new work that routing refused — now it is worth a Lead decision.
+  if (routingDecision.final?.block) {
+    const reason = routingDecision.final.block.reason;
+    const rerouteTask = createRoutingBlockDecisionTask({
+      description: effective.description,
+      reason,
+      options: routedOptions,
+    });
+    backfillTraceTaskId(routingDecision.routingRunId, rerouteTask.id);
+    const message = `Delegation blocked by routing: ${reason}. Created Lead reroute-decision task "${rerouteTask.id}".`;
+    return {
+      content: [{ type: "text", text: message }],
+      structuredContent: {
+        yourAgentId: creatorAgentId,
+        success: false,
+        message,
+        task: rerouteTask,
+      },
+    };
   }
 
   // The engine already ran (via=delegation) above and creation is synchronous

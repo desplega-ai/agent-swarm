@@ -212,9 +212,10 @@ export const SDK_READ_ONLY_METHODS: ReadonlySet<string> = new Set<string>([
   "metrics_get",
   "user_resolve",
   "db_query", // executeReadOnlyQuery — writes are rejected server-side
-  // config
-  "config_get",
-  "config_list",
+  // NOTE: config_get / config_list are deliberately NOT here. They accept
+  // `includeSecrets: true` and the config routes return unmasked values to an
+  // authenticated agent; since the sandbox keeps open network egress, a
+  // dry-run handler could read an arbitrary secret and post it elsewhere.
   // slack (read paths only — no post/reply/update/delete)
   "slack_read",
   "slack_listChannels",

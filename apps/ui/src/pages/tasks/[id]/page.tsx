@@ -287,6 +287,13 @@ function routingResultSummary(row: RoutingTraceRow): string {
     if (row.mode === "soft" && !row.decisive) return "SOFT suggest →";
     return `assign → ${row.assignedAgentName ?? result.assignTo}`;
   }
+  // `unassign` is decisive for soft handlers too, so without its own branch a
+  // pin release fell through to the generic summary and the Routing tab gave
+  // the wrong explanation for why the task ended up unassigned.
+  if (result.unassign) {
+    if (row.mode === "soft" && !row.decisive) return "SOFT suggest → pool";
+    return "unassign → pool";
+  }
   const parts: string[] = [];
   if (result.mutate) parts.push("mutate");
   const directives = result.promptDirectives?.length ?? 0;

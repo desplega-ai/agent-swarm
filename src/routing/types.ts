@@ -18,6 +18,15 @@ export const RoutingViaSchema = z.enum([
 ]);
 export type RoutingVia = z.infer<typeof RoutingViaSchema>;
 
+/**
+ * Caps on handler-authored prompt text. Sized so even a fully saturated
+ * directive set (20 × 2000 ≈ 40 KB) stays well inside base-prompt's
+ * BOOTSTRAP_TOTAL_MAX_CHARS (120 KB) alongside the rest of the prompt.
+ */
+export const MAX_PROMPT_DIRECTIVE_CHARS = 2_000;
+export const MAX_PROMPT_DIRECTIVES = 20;
+export const MAX_ROUTING_NOTE_CHARS = 2_000;
+
 // Id fields are plain strings, not z.uuid(): agents/tasks created through
 // tests and some ingresses carry non-UUID ids, and the routing contract must
 // accept whatever the DB actually holds.
@@ -103,8 +112,19 @@ export const RoutingResultSchema = z
       })
       .strict()
       .optional(),
-    promptDirectives: z.array(z.string()).optional(),
-    note: z.string().optional(),
+    /**
+     * Bounded on purpose. `base-prompt.ts` renders these verbatim into the
+     * system prompt BEFORE the 120k budget is computed, so an unbounded
+     * directive from a misconfigured handler becomes protected prompt text —
+     * a multi-megabyte prompt that blows provider context limits (and
+     * MAX_ARG_STRLEN) and stops every matching task from starting. Rejecting
+     * at the schema fails the handler open instead, which is recoverable.
+     */
+    promptDirectives: z
+      .array(z.string().max(MAX_PROMPT_DIRECTIVE_CHARS))
+      .max(MAX_PROMPT_DIRECTIVES)
+      .optional(),
+    note: z.string().max(MAX_ROUTING_NOTE_CHARS).optional(),
   })
   .strict()
   .refine((result) => !(result.unassign && result.assignTo), {

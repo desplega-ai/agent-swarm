@@ -139,7 +139,12 @@ export function aggregateHandlerStats({
               MAX(createdAt) AS lastHitAt
          FROM routing_trace
         WHERE dryRun = 0
-          AND (? IS NULL OR createdAt >= datetime('now', ?))
+          -- datetime() on BOTH sides: createdAt is ISO ("...T...") while
+          -- datetime('now', ?) returns a space-separated value, and SQLite
+          -- compares these as TEXT — 'T' sorts after ' ', so on the cutoff's
+          -- calendar date a trace far older than the window still compared
+          -- greater and leaked into the results.
+          AND (? IS NULL OR datetime(createdAt) >= datetime('now', ?))
         GROUP BY handlerName
         ORDER BY handlerName`,
     )
