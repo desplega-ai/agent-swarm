@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useSwarmConfig } from "@/hooks/use-swarm-config";
+import { useSwarmConfigTable } from "@/hooks/use-swarm-config";
 import { ConfigDetailDialog } from "./config-detail-dialog";
 import { ConfigEntryDialog } from "./config-entry-dialog";
 
@@ -52,7 +52,7 @@ export function SwarmConfigSection() {
     onRowClicked,
     filteredConfigs,
     agentOptions,
-  } = useSwarmConfig();
+  } = useSwarmConfigTable();
 
   const columnDefs = useMemo<ColDef<SwarmConfig>[]>(
     () => [

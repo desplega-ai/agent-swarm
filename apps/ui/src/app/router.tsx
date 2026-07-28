@@ -22,6 +22,7 @@ const UsageContent = lazy(() =>
 const BudgetsPage = lazy(() => import("@/pages/budgets/page"));
 const ConnectionsPage = lazy(() => import("@/pages/settings/connections-page"));
 const SecretsPage = lazy(() => import("@/pages/settings/secrets-page"));
+const ConfigurationPage = lazy(() => import("@/pages/settings/configuration-page"));
 const IntegrationsPage = lazy(() => import("@/pages/integrations/page"));
 const IntegrationDetailPage = lazy(() => import("@/pages/integrations/[id]/page"));
 const ReposPage = lazy(() => import("@/pages/repos/page"));
@@ -137,6 +138,7 @@ export const router = createBrowserRouter([
           { path: "api-keys", element: <ApiKeysPage /> },
           { path: "integrations", element: <IntegrationsPage /> },
           { path: "integrations/:id", element: <IntegrationDetailPage /> },
+          { path: "configuration", element: <ConfigurationPage /> },
           { path: "repos", element: <ReposPage /> },
           { path: "debug", element: <DebugPage /> },
         ],

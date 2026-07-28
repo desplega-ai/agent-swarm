@@ -1,0 +1,231 @@
+import { ExternalLink, RotateCcw } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useSwarmConfig } from "@/hooks/use-swarm-config";
+import type { ConfigCatalogEntry } from "@/lib/configuration-catalog";
+import { cn } from "@/lib/utils";
+
+// Radix `SelectItem` rejects an empty string value, so "fall back to the
+// default" needs its own sentinel. It never reaches the API — picking it
+// deletes the DB row instead.
+const UNSET_SENTINEL = "__unset__";
+
+interface SourceChip {
+  label: string;
+  className: string;
+  title: string;
+}
+
+/**
+ * Mirrors the per-field source chips on the integrations detail page
+ * (`components/integrations/field-renderer.tsx`) so both surfaces read the
+ * same way.
+ */
+function deriveSourceChip(inDb: boolean, inEnv: boolean): SourceChip | null {
+  if (inDb) {
+    return inEnv
+      ? {
+          label: "db+env",
+          className: "bg-status-success/10 text-status-success border-status-success/30",
+          title: "Saved here and loaded into process.env. Live on the server.",
+        }
+      : {
+          label: "db (pending reload)",
+          className: "bg-status-active/10 text-status-active border-status-active/30",
+          title:
+            "Saved here but not yet in process.env — reload or restart the API server to apply.",
+        };
+  }
+  return inEnv
+    ? {
+        label: "env",
+        className: "bg-status-info/10 text-status-info border-status-info/30",
+        title:
+          "Set via deployment env (.env / docker) only. No saved value — saving here creates one that takes over on reload.",
+      }
+    : null;
+}
+
+export interface ConfigurationRowProps {
+  entry: ConfigCatalogEntry;
+  /** Whether the key is currently present in the API server's `process.env`. */
+  inEnv: boolean;
+}
+
+export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
+  const { config, value: savedValue, save, reset, isSaving } = useSwarmConfig(entry.key);
+  const inputId = `config-${entry.key}`;
+  const isPending = isSaving;
+  const sourceChip = deriveSourceChip(config !== undefined, inEnv);
+
+  // Text/number rows are draft-edited and committed with an explicit Save.
+  // Re-sync whenever the server value changes underneath us (save, reset,
+  // reload, or another tab).
+  const [draft, setDraft] = useState(savedValue ?? "");
+  useEffect(() => {
+    setDraft(savedValue ?? "");
+  }, [savedValue]);
+
+  const isDirty = draft !== (savedValue ?? "");
+
+  function handleSave(value: string) {
+    save(value, { description: entry.description });
+  }
+
+  const resetButton = config ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8 shrink-0"
+          onClick={reset}
+          disabled={isPending}
+          aria-label={`Reset ${entry.key} to its default`}
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Reset to default (removes the saved value)</TooltipContent>
+    </Tooltip>
+  ) : null;
+
+  return (
+    <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+      <div className="min-w-0 space-y-1 sm:flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Label htmlFor={inputId} className="text-sm font-medium">
+            {entry.label}
+          </Label>
+          <code className="font-mono text-[10px] text-muted-foreground select-text">
+            {entry.key}
+          </code>
+          {entry.restartRequired && (
+            <Badge
+              variant="outline"
+              size="tag"
+              className="border-status-warning/30 text-status-warning-strong"
+            >
+              Restart required
+            </Badge>
+          )}
+          {sourceChip && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className={cn(
+                    "text-[9px] uppercase tracking-wide px-1.5 py-0 h-5 inline-flex items-center rounded-md border font-medium leading-none cursor-help",
+                    sourceChip.className,
+                  )}
+                >
+                  {sourceChip.label}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">{sourceChip.title}</TooltipContent>
+            </Tooltip>
+          )}
+          {entry.docsUrl && (
+            <a
+              href={entry.docsUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-muted-foreground hover:text-foreground"
+              aria-label={`Documentation for ${entry.key}`}
+              title="Open documentation"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">{entry.description}</p>
+        {entry.defaultValue && (
+          <p className="text-[11px] text-muted-foreground">
+            Default: <code className="font-mono">{entry.defaultValue}</code>
+          </p>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 shrink-0 sm:w-80 sm:justify-end">
+        {entry.kind === "boolean" && (
+          <>
+            <Switch
+              id={inputId}
+              checked={(savedValue ?? entry.defaultValue) === "true"}
+              disabled={isPending}
+              onCheckedChange={(checked) => handleSave(checked ? "true" : "false")}
+            />
+            {resetButton}
+          </>
+        )}
+
+        {entry.kind === "enum" && (
+          <>
+            <Select
+              value={savedValue ?? entry.defaultValue ?? UNSET_SENTINEL}
+              disabled={isPending}
+              onValueChange={(next) => {
+                if (next === UNSET_SENTINEL) {
+                  reset();
+                  return;
+                }
+                handleSave(next);
+              }}
+            >
+              <SelectTrigger id={inputId} className="w-full sm:w-56">
+                <SelectValue placeholder="Not set" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={UNSET_SENTINEL}>
+                  {entry.defaultValue ? `Default (${entry.defaultValue})` : "Not set"}
+                </SelectItem>
+                {(entry.options ?? []).map((opt) => (
+                  <SelectItem key={opt} value={opt}>
+                    {opt}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {resetButton}
+          </>
+        )}
+
+        {(entry.kind === "string" || entry.kind === "number") && (
+          <>
+            <Input
+              id={inputId}
+              type={entry.kind === "number" ? "number" : "text"}
+              value={draft}
+              placeholder={entry.placeholder ?? entry.defaultValue}
+              disabled={isPending}
+              onChange={(e) => setDraft(e.target.value)}
+              className="w-full sm:w-56 font-mono text-xs"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!isDirty || isPending}
+              onClick={() => handleSave(draft)}
+            >
+              Save
+            </Button>
+            {resetButton}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

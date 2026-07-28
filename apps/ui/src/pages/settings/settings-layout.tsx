@@ -8,6 +8,7 @@ import {
   PanelLeftOpen,
   Plug,
   Settings as SettingsIcon,
+  SlidersHorizontal,
 } from "lucide-react";
 import { useCallback, useEffect } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -34,6 +35,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   { title: "Secrets", path: "/settings/secrets", icon: KeyRound },
   { title: "API Keys", path: "/settings/api-keys", icon: Key },
   { title: "Integrations", path: "/settings/integrations", icon: Plug },
+  { title: "Configuration", path: "/settings/configuration", icon: SlidersHorizontal },
   { title: "Repos", path: "/settings/repos", icon: SettingsIcon },
   { title: "Debug", path: "/settings/debug", icon: Bug },
 ];

@@ -37,6 +37,7 @@ const routeLabels: Record<string, string> = {
   memory: "Memory",
   settings: "Settings",
   config: "Config",
+  configuration: "Configuration",
   connections: "Connections",
   "oauth-apps": "OAuth Apps",
   secrets: "Secrets",

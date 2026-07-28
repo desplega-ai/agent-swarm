@@ -1,0 +1,62 @@
+---
+title: "Configuration"
+description: "Manage operator-facing swarm settings from the dashboard — feature flags, thresholds, and defaults grouped by subsystem"
+---
+
+The **Configuration** page (Settings → Configuration, at `/settings/configuration` in the dashboard) surfaces the environment variables that shape how your swarm behaves — steering, memory retrieval, heartbeat and crash recovery, harness selection, integration toggles, security, workflow limits, and branding — as editable settings, so you can tune a running deployment without shelling into the host to edit `.env` files.
+
+![The Configuration settings page](/ui/configuration-page.png)
+
+## How values resolve
+
+Every setting on this page corresponds to an environment variable the API server reads. Saving a value from the dashboard stores it as a **global swarm config** entry (the same `swarm_config` store used by the `get-config` / `set-config` MCP tools), and the server applies it via an automatic config reload shortly after the save.
+
+Precedence rules:
+
+- **At boot**, real environment variables win: a variable set in the server's environment takes precedence over a stored value until the next reload.
+- **After a save or reload**, stored values win: the server re-injects global config over the process environment.
+- Settings marked with a **Restart required** badge are only read at server startup — saving them stores the value, but it takes effect on the next restart.
+
+Each row shows a source chip when the underlying environment variable is set on the server, so you can tell whether the effective value comes from the environment, the stored config, or both.
+
+## Groups
+
+| Group | Examples |
+| --- | --- |
+| Steering | `STEERING_ENABLED`, `SLACK_THREAD_STEERING`, `SLACK_THREAD_STEERING_MODE` |
+| Memory | `MEMORY_HYBRID_SEARCH`, `MEMORY_GRAPH_EXPANSION`, `MEMORY_RATERS`, `EMBEDDING_MODEL` |
+| Heartbeat & crash recovery | `HEARTBEAT_INTERVAL_MS`, `HEARTBEAT_STALL_THRESHOLD_MIN`, `HEARTBEAT_PIN_CRASH_RESUME` |
+| Harness & tools | `SCRIPTS_ONLY_MCP`, `CAPABILITIES` |
+| Integrations | `SLACK_DISABLE`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL` |
+| Security & access | `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS` |
+| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS` |
+| Telemetry & observability | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `ANONYMIZED_TELEMETRY` |
+| Branding & URLs | `SWARM_ORG_NAME`, `SWARM_BRAND_COLOR`, `DASHBOARD_URL` |
+
+Harness **provider and model selection are deliberately absent** from this page — they are configured per agent. A global value would silently become the default for every agent in the swarm, so those knobs live on each agent's own configuration instead.
+
+Settings with deeper behavior link out to the relevant guide (for example the [task steering](/docs/guides/task-steering) and [harness providers](/docs/guides/harness-providers) guides) directly from the row.
+
+![Editing a configuration group](/ui/configuration-group.png)
+
+## Editing
+
+Controls match the value type:
+
+- **Toggles** (feature flags) persist immediately when switched.
+- **Selects** (enumerated values such as `HARNESS_PROVIDER`) persist on change.
+- **Text and number inputs** show a Save button once the value differs from what is stored.
+
+Every row shows its default, and rows with a stored value offer a **Reset** action that deletes the stored entry and returns the setting to its default (or to the environment value, if one is set). The **Reload config** button in the header forces an immediate config reload — useful after changing environment variables outside the dashboard.
+
+<Callout type="info" title="Credentials live elsewhere">
+  This page intentionally excludes secrets. Integration credentials (Slack tokens, GitHub app keys, OAuth secrets) are managed on the [Integrations](/docs/guides/slack-integration) pages, and swarm-wide secret values on the Secrets page — see the [secrets encryption guide](/docs/guides/secrets-encryption).
+</Callout>
+
+## Access control
+
+Reading configuration requires dashboard access (API key). Writes go through the config API's RBAC gate (`config.write.any`): operator and user tokens can save, and agent principals are restricted to lead agents.
+
+## Adding a new setting
+
+If you are contributing a new operator-facing environment variable to Agent Swarm, register it in the configuration catalog at `apps/ui/src/lib/configuration-catalog.ts` (group, value kind, default, description, and docs link) so it appears on this page. Reserved bootstrap keys (`API_KEY`, `SECRETS_ENCRYPTION_KEY`) and credentials must never be added to the catalog.
