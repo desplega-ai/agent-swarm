@@ -36,6 +36,11 @@ Every event also includes:
 - The environment (`production` by default; override with `DESPLEGA_TELEMETRY_ENV`)
 - A schema version number
 - `is_cloud` — boolean flag indicating whether the event originated from a cloud-hosted swarm or a self-hosted install. Lets the backend partition cloud vs self-hosted traffic without joining to another dimension.
+- `has_embedding_key` — boolean, whether an embedding-capable key (`EMBEDDING_API_KEY` or `OPENAI_API_KEY`) is configured, i.e. whether semantic memory search is likely enabled.
+- `has_slack_channel` / `has_email_channel` / `has_notification_channel` — booleans indicating whether an outbound notification channel (Slack, AgentMail email, or either) is configured. Presence only — never a token, channel ID, or address.
+- `install_method` — enum: `onboard_interactive`, `onboard_noninteractive`, `e2b`, or `manual`. Which entry point produced this install.
+- `install_preset` (metadata, optional) — the onboard wizard preset used (`dev`, `content`, `research`, `solo`, or `custom`), when the install went through the wizard. Allow-listed against the wizard's known preset IDs — any other value (including free text accidentally placed in `INSTALL_PRESET`) is omitted rather than forwarded.
+- `install_created_at` (metadata, optional) — ISO timestamp of when this install's identity was first minted, persisted once alongside the installation ID. Lets analysis reconstruct the time from install to first real task without depending on server-restart timing.
 
 ## How it's anonymized
 
@@ -53,6 +58,8 @@ On first startup, the telemetry module checks `swarm_config` for a `telemetry_in
 3. If config access fails (e.g. worker without DB access), an ephemeral ID (`ephemeral_` prefix) is generated for that session only.
 
 Workers access the installation ID via HTTP (respecting the DB boundary invariant), while the API server reads it directly from the database.
+
+A `telemetry_installed_at` timestamp is minted alongside the installation ID the same way (and backfilled once, on first upgrade, for installs that predate this field) — it anchors "when this install came into being" independent of server restarts.
 
 ## How to opt out
 

@@ -2,9 +2,15 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import pkg from "../../package.json";
 import {
   _getInstallationIdForTests,
+  _getInstalledAtForTests,
+  _hasEmailChannel,
+  _hasEmbeddingKey,
+  _hasSlackChannel,
   _isE2bSandbox,
   _resetTelemetryStateForTests,
   _resolveCloudMode,
+  _resolveInstallMethod,
+  _resolveInstallPreset,
   initTelemetry,
   track,
 } from "../telemetry";
@@ -50,7 +56,7 @@ describe("initTelemetry", () => {
     expect(writes).toEqual([]);
   });
 
-  test("with generateIfMissing + missing config → mints install_<hex> and persists", async () => {
+  test("with generateIfMissing + missing config → mints install_<hex> and persists (id + installed_at)", async () => {
     const writes: Array<{ key: string; value: string }> = [];
     await initTelemetry(
       "api-server",
@@ -63,7 +69,12 @@ describe("initTelemetry", () => {
     const id = _getInstallationIdForTests();
     expect(id).not.toBeNull();
     expect(id).toMatch(/^install_[0-9a-f]{16}$/);
-    expect(writes).toEqual([{ key: "telemetry_installation_id", value: id as string }]);
+    const installedAt = _getInstalledAtForTests();
+    expect(installedAt).not.toBeNull();
+    expect(writes).toEqual([
+      { key: "telemetry_installation_id", value: id as string },
+      { key: "telemetry_installed_at", value: installedAt as string },
+    ]);
   });
 
   test("with generateIfMissing + getConfig throws → mints ephemeral_<hex>, no persist", async () => {
@@ -82,6 +93,93 @@ describe("initTelemetry", () => {
     expect(id).not.toBeNull();
     expect(id).toMatch(/^ephemeral_[0-9a-f]{16}$/);
     expect(writes).toEqual([]);
+    // Config access is failing — nowhere durable to persist an anchor, so
+    // leave it null rather than faking a fresh mint.
+    expect(_getInstalledAtForTests()).toBeNull();
+  });
+
+  describe("telemetry_installed_at persistence failure-safety", () => {
+    test("fresh install: telemetry_installed_at write fails → installationId still persists+resolves, installedAt stays null", async () => {
+      const writes: Array<{ key: string; value: string }> = [];
+      await initTelemetry(
+        "api-server",
+        async () => undefined,
+        async (key, value) => {
+          if (key === "telemetry_installed_at") {
+            throw new Error("config write failed");
+          }
+          writes.push({ key, value });
+        },
+        { generateIfMissing: true },
+      );
+      const id = _getInstallationIdForTests();
+      // Must be the real minted+persisted ID, not an ephemeral fallback — the
+      // installed_at failure must not unwind and discard the installationId
+      // write that already succeeded.
+      expect(id).toMatch(/^install_[0-9a-f]{16}$/);
+      expect(writes).toEqual([{ key: "telemetry_installation_id", value: id as string }]);
+      // No fabricated/unpersisted anchor emitted this session.
+      expect(_getInstalledAtForTests()).toBeNull();
+    });
+
+    test("backfill: telemetry_installed_at write fails → existing installationId is preserved, installedAt stays null", async () => {
+      const existing = "install_backfillfailure";
+      const writes: Array<{ key: string; value: string }> = [];
+      await initTelemetry(
+        "api-server",
+        async (key) => (key === "telemetry_installation_id" ? existing : undefined),
+        async (key, value) => {
+          if (key === "telemetry_installed_at") {
+            throw new Error("config write failed");
+          }
+          writes.push({ key, value });
+        },
+        { generateIfMissing: true },
+      );
+      // The pre-existing installation ID must survive the unrelated
+      // installed_at write failure — not get discarded for an ephemeral one.
+      expect(_getInstallationIdForTests()).toBe(existing);
+      expect(writes).toEqual([]);
+      expect(_getInstalledAtForTests()).toBeNull();
+    });
+
+    test("backfill: telemetry_installed_at write succeeds → mints and persists exactly once", async () => {
+      const existing = "install_backfillsuccess";
+      const writes: Array<{ key: string; value: string }> = [];
+      await initTelemetry(
+        "api-server",
+        async (key) => (key === "telemetry_installation_id" ? existing : undefined),
+        async (key, value) => {
+          writes.push({ key, value });
+        },
+        { generateIfMissing: true },
+      );
+      expect(_getInstallationIdForTests()).toBe(existing);
+      const installedAt = _getInstalledAtForTests();
+      expect(installedAt).not.toBeNull();
+      expect(writes).toEqual([{ key: "telemetry_installed_at", value: installedAt as string }]);
+    });
+
+    test("already-exists: both installation_id and installed_at present → no writes, reuses existing anchor", async () => {
+      const existing = "install_alreadyexists";
+      const existingInstalledAt = "2026-01-01T00:00:00.000Z";
+      const writes: Array<{ key: string; value: string }> = [];
+      await initTelemetry(
+        "api-server",
+        async (key) => {
+          if (key === "telemetry_installation_id") return existing;
+          if (key === "telemetry_installed_at") return existingInstalledAt;
+          return undefined;
+        },
+        async (key, value) => {
+          writes.push({ key, value });
+        },
+        { generateIfMissing: true },
+      );
+      expect(_getInstallationIdForTests()).toBe(existing);
+      expect(_getInstalledAtForTests()).toBe(existingInstalledAt);
+      expect(writes).toEqual([]);
+    });
   });
 
   describe("track() org identity in metadata", () => {
@@ -598,6 +696,285 @@ describe("initTelemetry", () => {
 
       const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
       expect(metadata.environment).toBe("test");
+    });
+  });
+
+  describe("_resolveInstallMethod", () => {
+    test("known values pass through unchanged", () => {
+      expect(_resolveInstallMethod("onboard_interactive", false)).toBe("onboard_interactive");
+      expect(_resolveInstallMethod("onboard_noninteractive", false)).toBe("onboard_noninteractive");
+    });
+
+    test("known value still wins even inside an E2B sandbox", () => {
+      expect(_resolveInstallMethod("onboard_interactive", true)).toBe("onboard_interactive");
+    });
+
+    test("missing/unrecognized value + E2B sandbox → e2b", () => {
+      expect(_resolveInstallMethod(undefined, true)).toBe("e2b");
+      expect(_resolveInstallMethod(null, true)).toBe("e2b");
+      expect(_resolveInstallMethod("garbage", true)).toBe("e2b");
+    });
+
+    test("missing/unrecognized value + no E2B → manual", () => {
+      expect(_resolveInstallMethod(undefined, false)).toBe("manual");
+      expect(_resolveInstallMethod("", false)).toBe("manual");
+      expect(_resolveInstallMethod("  ", false)).toBe("manual");
+      expect(_resolveInstallMethod("some-typo", false)).toBe("manual");
+    });
+  });
+
+  describe("_resolveInstallPreset", () => {
+    test("known wizard preset IDs pass through unchanged", () => {
+      expect(_resolveInstallPreset("dev")).toBe("dev");
+      expect(_resolveInstallPreset("content")).toBe("content");
+      expect(_resolveInstallPreset("research")).toBe("research");
+      expect(_resolveInstallPreset("solo")).toBe("solo");
+      expect(_resolveInstallPreset("custom")).toBe("custom");
+    });
+
+    test("unrecognized value is omitted (not forwarded, not mapped to a sentinel)", () => {
+      // Anything an operator could accidentally put in INSTALL_PRESET
+      // (an email, a customer name, a typo) must never reach telemetry.
+      expect(_resolveInstallPreset("taras@desplega.ai")).toBeUndefined();
+      expect(_resolveInstallPreset("acme-corp")).toBeUndefined();
+      expect(_resolveInstallPreset("Dev")).toBeUndefined(); // case-sensitive
+      expect(_resolveInstallPreset("unknown")).toBeUndefined();
+    });
+
+    test("missing/blank value is omitted", () => {
+      expect(_resolveInstallPreset(undefined)).toBeUndefined();
+      expect(_resolveInstallPreset(null)).toBeUndefined();
+      expect(_resolveInstallPreset("")).toBeUndefined();
+      expect(_resolveInstallPreset("   ")).toBeUndefined();
+    });
+  });
+
+  describe("_hasEmbeddingKey", () => {
+    test("true when EMBEDDING_API_KEY is set", () => {
+      expect(_hasEmbeddingKey({ EMBEDDING_API_KEY: "sk-embed" })).toBe(true);
+    });
+
+    test("true when OPENAI_API_KEY is set", () => {
+      expect(_hasEmbeddingKey({ OPENAI_API_KEY: "sk-openai" })).toBe(true);
+    });
+
+    test("false when neither is set (onboard wizard only writes ANTHROPIC_API_KEY)", () => {
+      expect(_hasEmbeddingKey({ ANTHROPIC_API_KEY: "sk-ant" })).toBe(false);
+      expect(_hasEmbeddingKey({})).toBe(false);
+    });
+  });
+
+  describe("_hasSlackChannel / _hasEmailChannel", () => {
+    test("Slack requires both tokens", () => {
+      expect(_hasSlackChannel({ SLACK_BOT_TOKEN: "xoxb-1" })).toBe(false);
+      expect(_hasSlackChannel({ SLACK_APP_TOKEN: "xapp-1" })).toBe(false);
+      expect(_hasSlackChannel({ SLACK_BOT_TOKEN: "xoxb-1", SLACK_APP_TOKEN: "xapp-1" })).toBe(true);
+    });
+
+    test("Slack respects SLACK_DISABLE even with both tokens present", () => {
+      expect(
+        _hasSlackChannel({
+          SLACK_BOT_TOKEN: "xoxb-1",
+          SLACK_APP_TOKEN: "xapp-1",
+          SLACK_DISABLE: "true",
+        }),
+      ).toBe(false);
+    });
+
+    test("Email requires AGENTMAIL_WEBHOOK_SECRET", () => {
+      expect(_hasEmailChannel({})).toBe(false);
+      expect(_hasEmailChannel({ AGENTMAIL_WEBHOOK_SECRET: "whsec_1" })).toBe(true);
+    });
+
+    test("Email respects AGENTMAIL_DISABLE even with secret present", () => {
+      expect(
+        _hasEmailChannel({ AGENTMAIL_WEBHOOK_SECRET: "whsec_1", AGENTMAIL_DISABLE: "1" }),
+      ).toBe(false);
+    });
+  });
+
+  describe("track() ships activation-funnel properties/metadata", () => {
+    const originalFetch = globalThis.fetch;
+    let captured: Record<string, unknown> | null = null;
+
+    // The dev/CI shell may itself have OPENAI_API_KEY / EMBEDDING_API_KEY set
+    // (e.g. for other tooling) — clear before AND after each test so that
+    // ambient env never leaks into the "absent" assertions below.
+    const clearEnv = () => {
+      delete process.env.EMBEDDING_API_KEY;
+      delete process.env.OPENAI_API_KEY;
+      delete process.env.SLACK_BOT_TOKEN;
+      delete process.env.SLACK_APP_TOKEN;
+      delete process.env.AGENTMAIL_WEBHOOK_SECRET;
+      delete process.env.INSTALL_METHOD;
+      delete process.env.INSTALL_PRESET;
+    };
+
+    beforeEach(() => {
+      captured = null;
+      clearEnv();
+      globalThis.fetch = (async (_url: string, init?: { body?: string }) => {
+        captured = init?.body ? JSON.parse(init.body) : null;
+        return new Response(null, { status: 204 });
+      }) as typeof fetch;
+    });
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+      clearEnv();
+    });
+
+    test("defaults: no embedding key, no channels, install_method=manual, no install_preset", async () => {
+      await initTelemetry(
+        "api-server",
+        async () => undefined,
+        async () => {},
+        { generateIfMissing: true },
+      );
+
+      track({ event: "server.started", properties: {} });
+      await new Promise((r) => setTimeout(r, 0));
+
+      const properties = (captured as { properties: Record<string, unknown> }).properties;
+      const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
+      expect(properties.has_embedding_key).toBe(false);
+      expect(properties.has_slack_channel).toBe(false);
+      expect(properties.has_email_channel).toBe(false);
+      expect(properties.has_notification_channel).toBe(false);
+      expect(properties.install_method).toBe("manual");
+      expect(metadata.install_preset).toBeUndefined();
+      // Freshly minted install → install_created_at is set.
+      expect(typeof metadata.install_created_at).toBe("string");
+    });
+
+    test("wizard install: INSTALL_METHOD + INSTALL_PRESET flow through to properties/metadata", async () => {
+      process.env.INSTALL_METHOD = "onboard_noninteractive";
+      process.env.INSTALL_PRESET = "solo";
+      await initTelemetry(
+        "api-server",
+        async () => undefined,
+        async () => {},
+        { generateIfMissing: true },
+      );
+
+      track({ event: "server.started", properties: {} });
+      await new Promise((r) => setTimeout(r, 0));
+
+      const properties = (captured as { properties: Record<string, unknown> }).properties;
+      const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
+      expect(properties.install_method).toBe("onboard_noninteractive");
+      expect(metadata.install_preset).toBe("solo");
+    });
+
+    test("unrecognized INSTALL_PRESET is omitted from metadata, not forwarded as free text", async () => {
+      process.env.INSTALL_PRESET = "someone@example.com";
+      await initTelemetry(
+        "api-server",
+        async () => undefined,
+        async () => {},
+        { generateIfMissing: true },
+      );
+
+      track({ event: "server.started", properties: {} });
+      await new Promise((r) => setTimeout(r, 0));
+
+      const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
+      expect(metadata.install_preset).toBeUndefined();
+    });
+
+    test("channels + embedding key all present", async () => {
+      process.env.EMBEDDING_API_KEY = "sk-embed";
+      process.env.SLACK_BOT_TOKEN = "xoxb-1";
+      process.env.SLACK_APP_TOKEN = "xapp-1";
+      process.env.AGENTMAIL_WEBHOOK_SECRET = "whsec_1";
+      await initTelemetry(
+        "api-server",
+        async () => undefined,
+        async () => {},
+        { generateIfMissing: true },
+      );
+
+      track({ event: "server.started", properties: {} });
+      await new Promise((r) => setTimeout(r, 0));
+
+      const properties = (captured as { properties: Record<string, unknown> }).properties;
+      expect(properties.has_embedding_key).toBe(true);
+      expect(properties.has_slack_channel).toBe(true);
+      expect(properties.has_email_channel).toBe(true);
+      expect(properties.has_notification_channel).toBe(true);
+    });
+
+    test("caller properties cannot override the cohort fields (spread last, like is_cloud/is_e2b)", async () => {
+      await initTelemetry(
+        "api-server",
+        async () => undefined,
+        async () => {},
+        { generateIfMissing: true },
+      );
+
+      track({
+        event: "test.event",
+        properties: { has_slack_channel: true, install_method: "spoofed" },
+      });
+      await new Promise((r) => setTimeout(r, 0));
+
+      const properties = (captured as { properties: Record<string, unknown> }).properties;
+      expect(properties.has_slack_channel).toBe(false);
+      expect(properties.install_method).toBe("manual");
+    });
+
+    test("caller metadata CAN override install_preset — same (accepted) permissiveness as organization_id today", async () => {
+      process.env.INSTALL_PRESET = "solo";
+      await initTelemetry(
+        "api-server",
+        async () => undefined,
+        async () => {},
+        { generateIfMissing: true },
+      );
+
+      track({ event: "test.event", metadata: { install_preset: "spoofed" } });
+      await new Promise((r) => setTimeout(r, 0));
+
+      const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
+      expect(metadata.install_preset).toBe("spoofed");
+    });
+  });
+
+  describe("ANONYMIZED_TELEMETRY=false opt-out covers the new fields too", () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalled = false;
+
+    beforeEach(() => {
+      fetchCalled = false;
+      globalThis.fetch = (async () => {
+        fetchCalled = true;
+        return new Response(null, { status: 204 });
+      }) as typeof fetch;
+    });
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+      process.env.ANONYMIZED_TELEMETRY = "true";
+    });
+
+    test("disabled → initTelemetry never mints/persists, track() never fetches", async () => {
+      process.env.ANONYMIZED_TELEMETRY = "false";
+      const writes: Array<{ key: string; value: string }> = [];
+      await initTelemetry(
+        "api-server",
+        async () => undefined,
+        async (key, value) => {
+          writes.push({ key, value });
+        },
+        { generateIfMissing: true },
+      );
+      expect(_getInstallationIdForTests()).toBeNull();
+      expect(_getInstalledAtForTests()).toBeNull();
+      expect(writes).toEqual([]);
+
+      track({ event: "server.started", properties: {} });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(fetchCalled).toBe(false);
     });
   });
 });
