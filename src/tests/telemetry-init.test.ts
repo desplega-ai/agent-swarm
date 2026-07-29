@@ -10,6 +10,7 @@ import {
   _resetTelemetryStateForTests,
   _resolveCloudMode,
   _resolveInstallMethod,
+  _resolveInstallPreset,
   initTelemetry,
   track,
 } from "../telemetry";
@@ -95,6 +96,90 @@ describe("initTelemetry", () => {
     // Config access is failing — nowhere durable to persist an anchor, so
     // leave it null rather than faking a fresh mint.
     expect(_getInstalledAtForTests()).toBeNull();
+  });
+
+  describe("telemetry_installed_at persistence failure-safety", () => {
+    test("fresh install: telemetry_installed_at write fails → installationId still persists+resolves, installedAt stays null", async () => {
+      const writes: Array<{ key: string; value: string }> = [];
+      await initTelemetry(
+        "api-server",
+        async () => undefined,
+        async (key, value) => {
+          if (key === "telemetry_installed_at") {
+            throw new Error("config write failed");
+          }
+          writes.push({ key, value });
+        },
+        { generateIfMissing: true },
+      );
+      const id = _getInstallationIdForTests();
+      // Must be the real minted+persisted ID, not an ephemeral fallback — the
+      // installed_at failure must not unwind and discard the installationId
+      // write that already succeeded.
+      expect(id).toMatch(/^install_[0-9a-f]{16}$/);
+      expect(writes).toEqual([{ key: "telemetry_installation_id", value: id as string }]);
+      // No fabricated/unpersisted anchor emitted this session.
+      expect(_getInstalledAtForTests()).toBeNull();
+    });
+
+    test("backfill: telemetry_installed_at write fails → existing installationId is preserved, installedAt stays null", async () => {
+      const existing = "install_backfillfailure";
+      const writes: Array<{ key: string; value: string }> = [];
+      await initTelemetry(
+        "api-server",
+        async (key) => (key === "telemetry_installation_id" ? existing : undefined),
+        async (key, value) => {
+          if (key === "telemetry_installed_at") {
+            throw new Error("config write failed");
+          }
+          writes.push({ key, value });
+        },
+        { generateIfMissing: true },
+      );
+      // The pre-existing installation ID must survive the unrelated
+      // installed_at write failure — not get discarded for an ephemeral one.
+      expect(_getInstallationIdForTests()).toBe(existing);
+      expect(writes).toEqual([]);
+      expect(_getInstalledAtForTests()).toBeNull();
+    });
+
+    test("backfill: telemetry_installed_at write succeeds → mints and persists exactly once", async () => {
+      const existing = "install_backfillsuccess";
+      const writes: Array<{ key: string; value: string }> = [];
+      await initTelemetry(
+        "api-server",
+        async (key) => (key === "telemetry_installation_id" ? existing : undefined),
+        async (key, value) => {
+          writes.push({ key, value });
+        },
+        { generateIfMissing: true },
+      );
+      expect(_getInstallationIdForTests()).toBe(existing);
+      const installedAt = _getInstalledAtForTests();
+      expect(installedAt).not.toBeNull();
+      expect(writes).toEqual([{ key: "telemetry_installed_at", value: installedAt as string }]);
+    });
+
+    test("already-exists: both installation_id and installed_at present → no writes, reuses existing anchor", async () => {
+      const existing = "install_alreadyexists";
+      const existingInstalledAt = "2026-01-01T00:00:00.000Z";
+      const writes: Array<{ key: string; value: string }> = [];
+      await initTelemetry(
+        "api-server",
+        async (key) => {
+          if (key === "telemetry_installation_id") return existing;
+          if (key === "telemetry_installed_at") return existingInstalledAt;
+          return undefined;
+        },
+        async (key, value) => {
+          writes.push({ key, value });
+        },
+        { generateIfMissing: true },
+      );
+      expect(_getInstallationIdForTests()).toBe(existing);
+      expect(_getInstalledAtForTests()).toBe(existingInstalledAt);
+      expect(writes).toEqual([]);
+    });
   });
 
   describe("track() org identity in metadata", () => {
@@ -638,6 +723,32 @@ describe("initTelemetry", () => {
     });
   });
 
+  describe("_resolveInstallPreset", () => {
+    test("known wizard preset IDs pass through unchanged", () => {
+      expect(_resolveInstallPreset("dev")).toBe("dev");
+      expect(_resolveInstallPreset("content")).toBe("content");
+      expect(_resolveInstallPreset("research")).toBe("research");
+      expect(_resolveInstallPreset("solo")).toBe("solo");
+      expect(_resolveInstallPreset("custom")).toBe("custom");
+    });
+
+    test("unrecognized value is omitted (not forwarded, not mapped to a sentinel)", () => {
+      // Anything an operator could accidentally put in INSTALL_PRESET
+      // (an email, a customer name, a typo) must never reach telemetry.
+      expect(_resolveInstallPreset("taras@desplega.ai")).toBeUndefined();
+      expect(_resolveInstallPreset("acme-corp")).toBeUndefined();
+      expect(_resolveInstallPreset("Dev")).toBeUndefined(); // case-sensitive
+      expect(_resolveInstallPreset("unknown")).toBeUndefined();
+    });
+
+    test("missing/blank value is omitted", () => {
+      expect(_resolveInstallPreset(undefined)).toBeUndefined();
+      expect(_resolveInstallPreset(null)).toBeUndefined();
+      expect(_resolveInstallPreset("")).toBeUndefined();
+      expect(_resolveInstallPreset("   ")).toBeUndefined();
+    });
+  });
+
   describe("_hasEmbeddingKey", () => {
     test("true when EMBEDDING_API_KEY is set", () => {
       expect(_hasEmbeddingKey({ EMBEDDING_API_KEY: "sk-embed" })).toBe(true);
@@ -753,6 +864,22 @@ describe("initTelemetry", () => {
       const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
       expect(properties.install_method).toBe("onboard_noninteractive");
       expect(metadata.install_preset).toBe("solo");
+    });
+
+    test("unrecognized INSTALL_PRESET is omitted from metadata, not forwarded as free text", async () => {
+      process.env.INSTALL_PRESET = "someone@example.com";
+      await initTelemetry(
+        "api-server",
+        async () => undefined,
+        async () => {},
+        { generateIfMissing: true },
+      );
+
+      track({ event: "server.started", properties: {} });
+      await new Promise((r) => setTimeout(r, 0));
+
+      const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
+      expect(metadata.install_preset).toBeUndefined();
     });
 
     test("channels + embedding key all present", async () => {

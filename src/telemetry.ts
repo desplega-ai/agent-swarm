@@ -109,6 +109,32 @@ export function _resolveInstallMethod(raw: string | undefined | null, isE2b: boo
 }
 
 /**
+ * Preset IDs defined in `src/commands/onboard/presets.ts` (`PRESETS`).
+ * Duplicated as a literal set here — rather than imported — to preserve this
+ * file's zero-dependency contract (see file header); bump this list in the
+ * same PR that adds/removes/renames a preset.
+ */
+const KNOWN_INSTALL_PRESETS = new Set(["dev", "content", "research", "solo", "custom"]);
+
+/**
+ * Validate `INSTALL_PRESET` against the wizard's known preset IDs.
+ *
+ * Unlike `_resolveInstallMethod`, an unrecognized value is omitted entirely
+ * rather than mapped to a fallback sentinel: `INSTALL_PRESET` is free-form
+ * operator-set environment text, so forwarding an unrecognized value (an
+ * email address, a customer name, anything placed in that env var by
+ * mistake) would violate telemetry's enum-only / no-PII contract. Returning
+ * `undefined` here means the `install_preset` metadata key is omitted from
+ * the event entirely (see the spread-guard in `track()`).
+ *
+ * Exported for tests; not part of the public API.
+ */
+export function _resolveInstallPreset(raw: string | undefined | null): string | undefined {
+  const normalized = raw?.trim();
+  return normalized && KNOWN_INSTALL_PRESETS.has(normalized) ? normalized : undefined;
+}
+
+/**
  * Whether semantic memory is likely enabled — i.e. an embedding-capable key
  * is present. The onboard wizard's `generateEnv()` currently only writes
  * Anthropic credentials (`src/commands/onboard/env-generator.ts`), so this
@@ -183,7 +209,7 @@ export async function initTelemetry(
   cachedHasSlackChannel = _hasSlackChannel();
   cachedHasEmailChannel = _hasEmailChannel();
   cachedInstallMethod = _resolveInstallMethod(process.env.INSTALL_METHOD, cachedIsE2b);
-  cachedInstallPreset = process.env.INSTALL_PRESET?.trim() || undefined;
+  cachedInstallPreset = _resolveInstallPreset(process.env.INSTALL_PRESET);
   console.log(
     `telemetry: cloud=${cachedIsCloud} e2b=${cachedIsE2b} install_method=${cachedInstallMethod}`,
   );
@@ -201,14 +227,13 @@ export async function initTelemetry(
       if (existingInstalledAt) {
         installedAt = existingInstalledAt;
       } else if (generateIfMissing) {
-        installedAt = new Date().toISOString();
-        await setConfig("telemetry_installed_at", installedAt);
+        await tryPersistInstalledAt(setConfig);
       }
     } else if (generateIfMissing) {
-      installationId = `install_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-      installedAt = new Date().toISOString();
-      await setConfig("telemetry_installation_id", installationId);
-      await setConfig("telemetry_installed_at", installedAt);
+      const candidateId = `install_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+      await setConfig("telemetry_installation_id", candidateId);
+      installationId = candidateId;
+      await tryPersistInstalledAt(setConfig);
     }
     // else: leave installationId = null; track() will no-op
   } catch {
@@ -220,6 +245,32 @@ export async function initTelemetry(
       // to write it. Leave installedAt null rather than a fake fresh mint.
     }
     // else: leave installationId = null; track() will no-op
+  }
+}
+
+/**
+ * Mint + persist the `telemetry_installed_at` anchor, but only commit it to
+ * module state (and therefore only emit it on this session's events) once
+ * the write actually lands.
+ *
+ * The anchor's entire value is being a stable, one-time identity for "when
+ * did this install first appear" — a failed write here must not fabricate
+ * that stability. If `setConfig` throws, this process emits no anchor at
+ * all (rather than an unpersisted one that the next boot won't see and will
+ * mint a *different* replacement for), and — critically — the failure is
+ * swallowed locally so it can't unwind into the caller's `catch`, which
+ * would otherwise discard an already-resolved `installationId` that has
+ * nothing to do with this write.
+ */
+async function tryPersistInstalledAt(
+  setConfig: (key: string, value: string) => Promise<void> | void,
+): Promise<void> {
+  const candidate = new Date().toISOString();
+  try {
+    await setConfig("telemetry_installed_at", candidate);
+    installedAt = candidate;
+  } catch {
+    // Leave installedAt null for this session.
   }
 }
 
