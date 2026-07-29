@@ -126,6 +126,9 @@ Part 2 — prompting (same PR; applies to ALL harnesses — script_rubric includ
 11. **Codex bot P1 (round 2)**: the authoring contract's "nothing else" ctx list was wrong for durable workflow scripts — `launch-script-run` builds a different ctx (`ctx.run`, `ctx.step.rawLlm/agentTask/swarmScript`, `ctx.swarm`, `ctx.stdlib`, `ctx.logger`; NO `ctx.api`/`ctx.mcp`/`ctx.swarm.config` — see `src/script-workflows/workflow-ctx.ts`). Template now scopes the list to inline/named scripts and documents the durable ctx separately.
 12. **Codex bot P1 (round 2)**: `get-script-run` rendered only a journal COUNT into details — text-only harnesses couldn't see step outcomes. Now renders up to 20 entries (stepKey, stepType, status, error or 400-char result preview) with an overflow marker.
 
+13. **Codex bot P2 (round 3)**: MCP.md rendered imported enum schema constants (`SteerModeSchema`, `OnUnsupportedSchema`, task `status`, `modelTier`, `effort`) as `unknown` — the generator now resolves `z.enum` constants (values + declaration-level defaults, comments stripped) from the tool file or `src/types.ts`. Note: main's MCP.md rows for these were maintained by the docs-daily-update job, not the generator — the generator is now self-sufficient for enums.
+14. `origin/main` (`adaa69e8`, telemetry funnel PR) merged into the branch cleanly; all 6 bot review threads replied-to and resolved.
+
 **Known follow-ups discovered during implementation (not blocking):**
 
 - Scheduling guidance ("Pick the Right targetType") lives INSIDE `system.agent.context_mode`, so pi leads (who now correctly drop context_mode) lose it — split scheduling out of context_mode (incident-relevant: the welcome session misused schedules).
