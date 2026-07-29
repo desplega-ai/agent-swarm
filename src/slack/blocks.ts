@@ -394,15 +394,28 @@ const MAX_OUTPUT_LENGTH = 120;
 /**
  * Truncate output to the first sentence or MAX_OUTPUT_LENGTH, whichever is shorter.
  */
-function truncateOutput(text: string): string {
+function truncateOutput(text: string): { text: string; truncated: boolean } {
   // Find first sentence boundary (. followed by space or end)
   const sentenceEnd = text.search(/\.\s/);
-  const firstSentence = sentenceEnd !== -1 ? text.slice(0, sentenceEnd + 1) : text;
-  if (firstSentence.length <= MAX_OUTPUT_LENGTH) return firstSentence;
-  const boundary = text.lastIndexOf(" ", MAX_OUTPUT_LENGTH);
-  const cut = boundary >= MAX_OUTPUT_LENGTH / 2 ? boundary : MAX_OUTPUT_LENGTH;
+  const sentenceCut = sentenceEnd !== -1 ? sentenceEnd + 1 : text.length;
+  if (sentenceCut === text.length && text.length <= MAX_OUTPUT_LENGTH) {
+    return { text, truncated: false };
+  }
+
+  let cut = Math.min(sentenceCut, MAX_OUTPUT_LENGTH);
+  if (cut === MAX_OUTPUT_LENGTH) {
+    const boundary = text.lastIndexOf(" ", MAX_OUTPUT_LENGTH);
+    cut = boundary >= MAX_OUTPUT_LENGTH / 2 ? boundary : MAX_OUTPUT_LENGTH;
+  }
   const omitted = text.length - cut;
-  return `${text.slice(0, cut).trimEnd()}… (${omitted} more chars; full output in thread)`;
+  return {
+    text: `${text.slice(0, cut).trimEnd()}… (${omitted} more chars; open task for full output)`,
+    truncated: true,
+  };
+}
+
+export function isTreeOutputTruncated(text: string): boolean {
+  return truncateOutput(text).truncated;
 }
 
 /**
@@ -433,7 +446,7 @@ function renderChildDetail(node: TreeNode, indent: string): string[] {
   }
 
   if (node.status === "completed" && !node.slackReplySent && node.output) {
-    lines.push(`${indent}${truncateOutput(markdownToSlack(node.output))}`);
+    lines.push(`${indent}${truncateOutput(markdownToSlack(node.output)).text}`);
   }
 
   return lines;
@@ -457,7 +470,7 @@ function renderTree(root: TreeNode): string {
       lines.push(`    Error: ${root.failureReason}`);
     }
     if (root.status === "completed" && !root.slackReplySent && root.output) {
-      lines.push(`    ${truncateOutput(markdownToSlack(root.output))}`);
+      lines.push(`    ${truncateOutput(markdownToSlack(root.output)).text}`);
     }
     return lines.join("\n");
   }

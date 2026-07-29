@@ -1,6 +1,6 @@
 import type { WebClient } from "@slack/web-api";
-import { getAgentById, getTaskAttachments } from "../be/db";
-import type { Agent, AgentTask, TaskAttachment } from "../types";
+import { getAgentById, getTaskAttachments, markTaskSlackReplySent } from "../be/db";
+import type { Agent, AgentTask } from "../types";
 import { getSlackApp } from "./app";
 import {
   buildCancelledBlocks,
@@ -11,6 +11,7 @@ import {
   formatAttachmentsBlockForSlack,
   formatDuration,
   getTaskLink,
+  isTreeOutputTruncated,
   markdownToSlack,
   splitSlackSectionText,
 } from "./blocks";
@@ -33,16 +34,9 @@ function classifySlackUpdateError(error: unknown): SlackUpdateResult {
 }
 
 const isDev = process.env.ENV === "development";
-const MIN_INLINE_OUTPUT_LENGTH = 20;
-export const MAX_INLINE_OUTPUT_MESSAGE_LENGTH = 4000;
-const INLINE_OUTPUT_FALLBACKS = new Set([
-  "done",
-  "completed",
-  "complete",
-  "task completed",
-  "process completed successfully",
-  "process completed successfully (no output captured)",
-]);
+// Ten 2,900-char sections keep each message's fallback text below Slack's
+// 40,000-char message cap while allowing arbitrarily long output in batches.
+const MAX_INLINE_OUTPUT_BLOCKS_PER_MESSAGE = 10;
 
 /**
  * Get the display name for an agent, with (dev) prefix if in development mode.
@@ -51,45 +45,23 @@ function getAgentDisplayName(agent: Agent): string {
   return isDev ? `(dev) ${agent.name}` : agent.name;
 }
 
-export function shouldPostInlineCompletionOutput(
-  task: AgentTask,
-  attachments: readonly TaskAttachment[],
-): boolean {
+export function shouldPostInlineCompletionOutput(task: AgentTask): boolean {
   if (task.status !== "completed") return false;
   if (!task.slackChannelId || !task.slackThreadTs) return false;
   if (task.slackReplySent) return false;
 
   const output = task.output?.trim();
-  if (!output || output.length < MIN_INLINE_OUTPUT_LENGTH) return false;
-  if (INLINE_OUTPUT_FALLBACKS.has(output.toLowerCase())) return false;
-
-  return !attachments.some((attachment) => attachment.isPrimary);
+  return !!output && isTreeOutputTruncated(markdownToSlack(output));
 }
 
-export function formatInlineCompletionOutputText(opts: {
+export function formatInlineCompletionOutputChunks(opts: {
   agentName: string;
   taskId: string;
   output: string;
-}): string {
+}): string[] {
   const header = `✅ *${opts.agentName}* completed with output (${getTaskLink(opts.taskId)}):\n\n`;
-  const tail = `\n\n…(full output in task ${getTaskLink(opts.taskId)})`;
   const slackOutput = markdownToSlack(opts.output.trim());
-  const maxBodyLength = MAX_INLINE_OUTPUT_MESSAGE_LENGTH - header.length;
-
-  if (slackOutput.length <= maxBodyLength) {
-    return header + slackOutput;
-  }
-
-  const maxTruncatedBodyLength = Math.max(0, maxBodyLength - tail.length);
-  let cut = slackOutput.lastIndexOf("\n", maxTruncatedBodyLength);
-  if (cut < maxTruncatedBodyLength / 2) {
-    cut = slackOutput.lastIndexOf(" ", maxTruncatedBodyLength);
-  }
-  if (cut < maxTruncatedBodyLength / 2) {
-    cut = maxTruncatedBodyLength;
-  }
-
-  return header + slackOutput.slice(0, cut).trimEnd() + tail;
+  return splitSlackSectionText(header + slackOutput);
 }
 
 export async function sendInlineTaskOutput(task: AgentTask): Promise<boolean> {
@@ -104,24 +76,28 @@ export async function sendInlineTaskOutput(task: AgentTask): Promise<boolean> {
     return false;
   }
 
-  const text = formatInlineCompletionOutputText({
+  const chunks = formatInlineCompletionOutputChunks({
     agentName: agent.name,
     taskId: task.id,
     output: task.output,
   });
 
   try {
-    await sendWithPersona(app.client, {
-      channel: task.slackChannelId,
-      thread_ts: task.slackThreadTs,
-      text,
-      username: getAgentDisplayName(agent),
-      icon_emoji: getAgentEmoji(agent),
-      blocks: splitSlackSectionText(text).map((chunk) => ({
-        type: "section",
-        text: { type: "mrkdwn", text: chunk },
-      })),
-    });
+    for (let i = 0; i < chunks.length; i += MAX_INLINE_OUTPUT_BLOCKS_PER_MESSAGE) {
+      const batch = chunks.slice(i, i + MAX_INLINE_OUTPUT_BLOCKS_PER_MESSAGE);
+      await sendWithPersona(app.client, {
+        channel: task.slackChannelId,
+        thread_ts: task.slackThreadTs,
+        text: batch.join("\n\n"),
+        username: getAgentDisplayName(agent),
+        icon_emoji: getAgentEmoji(agent),
+        blocks: batch.map((chunk) => ({
+          type: "section",
+          text: { type: "mrkdwn", text: chunk },
+        })),
+      });
+    }
+    markTaskSlackReplySent(task.id);
     return true;
   } catch (error) {
     console.error(`[Slack] Failed to send inline output for task ${task.id}:`, error);

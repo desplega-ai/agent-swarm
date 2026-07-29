@@ -301,6 +301,24 @@ export async function processTreeMessages(): Promise<void> {
     // Check if tree is fully terminal — do one final render then clean up
     const fullyTerminal = isTreeFullyTerminal(nodes);
 
+    // Deliver any output that the compact tree would truncate before the tree
+    // is finalized and removed from tracking. Previously cleanup marked these
+    // tasks notified first, so the completion loop below never posted them.
+    let outputDeliverySucceeded = true;
+    for (const node of nodes.flatMap((root) => [root, ...root.children])) {
+      const task = getTaskById(node.taskId);
+      if (!task || !shouldPostInlineCompletionOutput(task)) continue;
+
+      const sent = await sendInlineTaskOutput(task);
+      if (sent) {
+        node.slackReplySent = true;
+        notifiedCompletions.set(task.id, now);
+        console.log(`[Slack] Sent full output for tree-tracked completion ${task.id.slice(0, 8)}`);
+      } else {
+        outputDeliverySucceeded = false;
+      }
+    }
+
     // Build blocks
     let blocks: unknown[];
     try {
@@ -315,7 +333,7 @@ export async function processTreeMessages(): Promise<void> {
     const lastSerialized = lastRenderedTree.get(messageTs);
     if (serialized === lastSerialized) {
       // No changes — skip update
-      if (fullyTerminal) {
+      if (fullyTerminal && outputDeliverySucceeded) {
         // Even though nothing changed visually, clean up if terminal
         cleanupCompletedTree(messageTs, tree, nodes);
       }
@@ -380,7 +398,7 @@ export async function processTreeMessages(): Promise<void> {
     }
 
     // Clean up fully terminal trees after final render
-    if (fullyTerminal && success) {
+    if (fullyTerminal && success && outputDeliverySucceeded) {
       cleanupCompletedTree(messageTs, tree, nodes);
     }
   }
@@ -711,11 +729,10 @@ export function startTaskWatcher(intervalMs = 3000): void {
         if (lastSent && now - lastSent < MIN_SEND_INTERVAL) continue;
 
         // Tasks tracked in a tree are still rendered by processTreeMessages().
-        // For prose-only completions, add one inline output reply so the user
+        // For truncated completions, add one inline output reply so the user
         // sees the actual answer instead of only the compact tree preview.
         if (taskToTree.has(task.id)) {
-          const attachments = task.status === "completed" ? getTaskAttachments(task.id) : [];
-          if (!shouldPostInlineCompletionOutput(task, attachments)) {
+          if (!shouldPostInlineCompletionOutput(task)) {
             notifiedCompletions.set(task.id, now);
             continue;
           }
