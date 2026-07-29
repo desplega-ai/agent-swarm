@@ -29,6 +29,7 @@ import "./integrations";
 import "./kv";
 import "./memory";
 import "./metrics";
+import "./models-catalog";
 import "./oauth-locks";
 import "./oauth-callback";
 import "./oauth-generic";

@@ -17,6 +17,20 @@ rate by hand should also update this file.
 - **Pinned local entries**: safe by construction. The runtime refresh only adds
   pricing rows; it does not rewrite or delete the committed snapshot.
 
+## Live UI catalog: GET /api/models-catalog
+
+- **Runtime module**: `src/be/models-catalog.ts`; route in
+  `src/http/models-catalog.ts`.
+- Every successful models.dev fetch in the runtime refresh above also updates
+  an in-memory slim catalog (openrouter / anthropic / openai / amazon-bedrock
+  only, picker-relevant fields only). The UI model picker
+  (`apps/ui/src/lib/agent-runtime-models.ts` via `useModelsCatalog()`) prefers
+  this over its build-time snapshot, so new models appear without a deploy.
+- Pinned limited-availability entries (`PINNED_MODELSDEV_ENTRIES`) are
+  re-merged from the vendored snapshot when models.dev doesn't list them yet.
+- Until the first successful fetch (or when models.dev is unreachable) the
+  endpoint serves the vendored snapshot with `source: "snapshot"`.
+
 ## Fallback/UI catalog: vendored models.dev snapshot
 
 - **Fallback path**: `src/be/modelsdev-cache.json`
@@ -26,7 +40,8 @@ rate by hand should also update this file.
   `seedPricingFromModelsDev()`,
   called from `src/server.ts` after `initDb`.
 - **Role**: cold-start fallback seed for pricing when models.dev is unavailable,
-  plus the UI model-picker source for names, labels, and context windows.
+  plus the fallback for the UI model picker while `GET /api/models-catalog`
+  hasn't resolved (names, labels, and context windows).
 - **Projection rules** (see the same module for code-level detail):
   - Anthropic models → rows under `provider='claude'` AND `provider='claude-managed'`.
     Shortnames (`opus`, `sonnet`, `haiku`) ALSO get rows keyed by the current

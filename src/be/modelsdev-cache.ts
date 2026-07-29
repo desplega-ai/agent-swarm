@@ -8,12 +8,23 @@ export interface ModelsDevCostBlock {
   cache_write?: number;
 }
 
+export interface ModelsDevReasoningOption {
+  type?: string;
+  values?: string[];
+}
+
 export interface ModelsDevModel {
   id?: string;
+  name?: string;
   cost?: ModelsDevCostBlock;
+  limit?: { context?: number };
+  reasoning?: boolean;
+  reasoning_options?: ModelsDevReasoningOption[];
 }
 
 export interface ModelsDevProvider {
+  id?: string;
+  name?: string;
   models?: Record<string, ModelsDevModel>;
 }
 
@@ -28,7 +39,9 @@ export const MODELSDEV_CACHE_PATH = path.join("src", "be", "modelsdev-cache.json
  * This file is now fallback-only for pricing freshness: boot seeding uses it
  * when the DB is empty or models.dev is unavailable, while
  * `src/be/pricing-refresh.ts` owns live price updates. The UI model picker
- * still imports the same snapshot for names, labels, and context windows.
+ * fetches the live catalog from `GET /api/models-catalog`
+ * (`src/be/models-catalog.ts`) and only falls back to its bundled copy of
+ * this snapshot when that request hasn't resolved.
  */
 export function loadModelsDevCache(): ModelsDevCache | null {
   const explicitPath = process.env.MODELSDEV_CACHE_PATH;

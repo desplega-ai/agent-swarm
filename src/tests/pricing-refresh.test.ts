@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, getActivePricingRow, getDb, getLogsByEventType, initDb } from "../be/db";
+import { getModelsCatalog, resetModelsCatalogForTests } from "../be/models-catalog";
 import type { ModelsDevCache } from "../be/modelsdev-cache";
 import { refreshPricingFromModelsDev } from "../be/pricing-refresh";
 
@@ -49,6 +50,7 @@ afterEach(() => {
   const db = getDb();
   db.prepare("DELETE FROM pricing").run();
   db.prepare("DELETE FROM agent_log WHERE eventType LIKE 'pricing.refresh%'").run();
+  resetModelsCatalogForTests();
 });
 
 describe("models.dev runtime pricing refresh", () => {
@@ -90,6 +92,29 @@ describe("models.dev runtime pricing refresh", () => {
       )
       .all();
     expect(rows.map((row) => row.effective_from)).toEqual([0, 1_000]);
+  });
+
+  test("updates the live model catalog on a successful refresh, keeping it on 304", async () => {
+    expect(getModelsCatalog().source).toBe("snapshot");
+
+    await refreshPricingFromModelsDev({
+      now: 5_000,
+      fetchImpl: async () => responseFor(openAiCache(2, 8), '"etag-catalog"'),
+    });
+
+    const afterRefresh = getModelsCatalog();
+    expect(afterRefresh.source).toBe("live");
+    expect(afterRefresh.updatedAt).toBe(5_000);
+    expect(afterRefresh.providers.openai?.models["gpt-refresh-test"]).toBeDefined();
+
+    await refreshPricingFromModelsDev({
+      now: 6_000,
+      fetchImpl: async () => new Response(null, { status: 304 }),
+    });
+
+    const after304 = getModelsCatalog();
+    expect(after304.source).toBe("live");
+    expect(after304.updatedAt).toBe(5_000);
   });
 
   test("sends If-None-Match and short-circuits on HTTP 304", async () => {

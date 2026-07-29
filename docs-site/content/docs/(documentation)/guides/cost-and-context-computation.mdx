@@ -42,7 +42,7 @@ The `pricing` table starts with a boot seed from the vendored models.dev snapsho
 
 After boot, the API server runs an in-process models.dev refresher once immediately and then every 12 hours. It fetches `https://models.dev/api.json` with `If-None-Match`, projects the response through the same `buildModelsDevSeedRows()` logic, inserts a new effective row only for new models or changed prices, and prunes history to the latest two rows per `(provider, model, token_class)`.
 
-The UI path `ui/src/lib/modelsdev-cache.json` is still a symlink to the backend snapshot. The model picker keeps using that committed file for names, labels, and context windows until a separate runtime catalog endpoint exists.
+The same refresh also feeds the runtime model catalog at `GET /api/models-catalog` (`src/be/models-catalog.ts`) — a slim projection of the picker-reachable providers. The UI model picker prefers that live catalog, so newly released models appear without redeploying; the committed snapshot (still symlinked at `ui/src/lib/modelsdev-cache.json`) remains the build-time fallback for names, labels, and context windows while the request is in flight or the server predates the endpoint.
 
 - **Projection rules** live in `src/be/seed-pricing.ts`:
   - Anthropic models → rows under both `provider='claude'` AND `provider='claude-managed'`. Shortnames (`opus`/`sonnet`/`haiku`) also land under the current default full id.

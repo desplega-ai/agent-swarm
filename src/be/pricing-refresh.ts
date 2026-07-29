@@ -6,6 +6,7 @@ import {
   type InsertPricingRowInput,
   insertPricingRow,
 } from "./db";
+import { updateLiveModelsCatalog } from "./models-catalog";
 import type { ModelsDevCache } from "./modelsdev-cache";
 import { buildModelsDevSeedRows, type PricingSeedRow } from "./seed-pricing";
 
@@ -148,6 +149,7 @@ export async function refreshPricingFromModelsDev(
 
   const cache = (await response.json()) as ModelsDevCache;
   const etag = response.headers.get("etag");
+  updateLiveModelsCatalog(cache, now);
   const rows = buildModelsDevSeedRows(cache);
   const { inserted, unchanged } = insertChangedPricingRows(rows, now);
   const pruned = prunePricingHistory(2);

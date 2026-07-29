@@ -1,3 +1,4 @@
+import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { getConfig } from "@/lib/config";
 import type {
   AgentAvatar,
@@ -182,6 +183,12 @@ async function throwTriggerSchemaErrorIfMatch(res: Response, genericLabel: strin
   throw new Error(`${genericLabel}: ${res.status}`);
 }
 
+export interface ModelsCatalogResponse {
+  source: "live" | "snapshot";
+  updatedAt: number | null;
+  providers: LiveModelsCatalog;
+}
+
 class ApiClient {
   private getHeaders(): HeadersInit {
     const config = getConfig();
@@ -200,6 +207,13 @@ class ApiClient {
       return "";
     }
     return config.apiUrl;
+  }
+
+  async fetchModelsCatalog(): Promise<ModelsCatalogResponse> {
+    const url = `${this.getBaseUrl()}/api/models-catalog`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch models catalog: ${res.status}`);
+    return res.json();
   }
 
   async fetchAgents(includeTasks = true): Promise<AgentsResponse> {

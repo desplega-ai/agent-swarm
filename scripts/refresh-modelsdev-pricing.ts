@@ -13,6 +13,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { PINNED_MODELSDEV_ENTRIES } from "../src/be/models-catalog";
 
 const CACHE_PATH = path.join(process.cwd(), "src", "be", "modelsdev-cache.json");
 const REASONING_SNAPSHOT_PATH = path.join(
@@ -23,12 +24,9 @@ const REASONING_SNAPSHOT_PATH = path.join(
 );
 const MODELSDEV_URL = "https://models.dev/api.json";
 // Limited-availability models that are intentionally vendored even when models.dev
-// does not list them yet. Add future manual pins as "provider/model-id".
-const PINNED_ENTRIES = [
-  "anthropic/claude-mythos-5",
-  "anthropic/claude-sonnet-5",
-  "amazon-bedrock/anthropic.claude-sonnet-5",
-] as const;
+// does not list them yet. Shared with the live catalog (`src/be/models-catalog.ts`)
+// so both surfaces pin the same set. Add future manual pins as "provider/model-id".
+const PINNED_ENTRIES = PINNED_MODELSDEV_ENTRIES;
 
 // Providers actually reachable by the four local harnesses' model pickers
 // (mirrors `SNAPSHOT_ORDER` + `BEDROCK_SNAPSHOT_ID` in

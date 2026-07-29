@@ -54,7 +54,7 @@ export interface ModelGroup {
   disabledReason?: string;
 }
 
-type SnapshotProviderId = "openrouter" | "anthropic" | "openai" | "amazon-bedrock";
+export type SnapshotProviderId = "openrouter" | "anthropic" | "openai" | "amazon-bedrock";
 
 interface CachedReasoningOption {
   type: string;
@@ -72,9 +72,18 @@ interface CachedModel {
 
 interface CachedProvider {
   id: string;
-  name: string;
+  name?: string;
   models: Record<string, CachedModel>;
 }
+
+/**
+ * Live catalog fetched from `GET /api/models-catalog` (see
+ * `src/be/models-catalog.ts`) — same shape and field names as the bundled
+ * snapshot, so live and static data flow through identical code. When a
+ * provider is present here it is preferred over the build-time snapshot;
+ * when the fetch hasn't resolved the snapshot keeps the picker non-blank.
+ */
+export type LiveModelsCatalog = Partial<Record<SnapshotProviderId, CachedProvider>>;
 
 const CACHE = modelsCache as Record<SnapshotProviderId, CachedProvider | undefined>;
 
@@ -321,7 +330,11 @@ export function modelGroupsForHarness(
   configs: SwarmConfig[] | undefined,
   envPresence: Record<string, boolean> | undefined,
   liveBedrockStatus?: LiveBedrockStatus | null,
+  liveCatalog?: LiveModelsCatalog | null,
 ): ModelGroup[] {
+  const providerCache = (providerId: SnapshotProviderId): CachedProvider | undefined =>
+    liveCatalog?.[providerId] ?? CACHE[providerId];
+
   if (harness === "claude" || harness === "codex") {
     const models = DIRECT_MODELS[harness];
     const requiredKey = models[0]?.requiredKey ?? "";
@@ -338,7 +351,7 @@ export function modelGroupsForHarness(
 
   const snapshotGroups = SNAPSHOT_ORDER.map((providerId) => {
     const meta = SNAPSHOT_META[providerId];
-    const cache = CACHE[providerId];
+    const cache = providerCache(providerId);
     const models: ModelOption[] = Object.values(cache?.models ?? {})
       .map((m) => ({
         id: `${providerId}/${m.id}`,
@@ -362,7 +375,7 @@ export function modelGroupsForHarness(
   // For the pi harness, also expose Amazon Bedrock models.
   if (harness === "pi") {
     const bedrockMeta = SNAPSHOT_META[BEDROCK_SNAPSHOT_ID];
-    const bedrockCache = CACHE[BEDROCK_SNAPSHOT_ID];
+    const bedrockCache = providerCache(BEDROCK_SNAPSHOT_ID);
 
     let bedrockModels: ModelOption[];
     let bedrockEnabled: boolean;

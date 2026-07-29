@@ -6,6 +6,7 @@ import { useUpdateAgentRuntime } from "@/api/hooks/use-agents";
 import { useResolvedConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
+import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import { type Agent, REASONING_EFFORT_LEVELS, type ReasoningEffortLevel } from "@/api/types";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { ProviderIcon } from "@/components/shared/provider-icon";
@@ -113,9 +114,18 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         : null,
     [agent.credStatus?.bedrock],
   );
+  const catalogQuery = useModelsCatalog();
+  const liveCatalog = catalogQuery.data?.providers ?? null;
   const groups = useMemo(
-    () => modelGroupsForHarness(harness, configs, envPresenceQuery.data, liveBedrockStatus),
-    [harness, configs, envPresenceQuery.data, liveBedrockStatus],
+    () =>
+      modelGroupsForHarness(
+        harness,
+        configs,
+        envPresenceQuery.data,
+        liveBedrockStatus,
+        liveCatalog,
+      ),
+    [harness, configs, envPresenceQuery.data, liveBedrockStatus, liveCatalog],
   );
   const modelOption = findModelOption(model, groups);
   const latestModel = agent.credStatus?.latestModel ?? null;
@@ -127,11 +137,12 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       configs,
       envPresenceQuery.data,
       liveBedrockStatus,
+      liveCatalog,
     );
     setHarness(initialHarness);
     setModel(nextModel || pickDefaultModelForHarness(initialHarness, nextGroups));
     setEffort(configuredEffort(configs));
-  }, [configs, initialHarness, envPresenceQuery.data, liveBedrockStatus]);
+  }, [configs, initialHarness, envPresenceQuery.data, liveBedrockStatus, liveCatalog]);
 
   // Clears `effort` whenever it ends up unsupported by the (possibly new)
   // selected model, rather than silently coercing it to a supported value.
@@ -154,6 +165,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       configs,
       envPresenceQuery.data,
       liveBedrockStatus,
+      liveCatalog,
     );
     setHarness(nextHarness);
     const nextModel = findModelOption(model, nextGroups)
@@ -301,7 +313,9 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
           {modelOption.contextWindow
             ? ` · ${formatContext(modelOption.contextWindow)} context`
             : ""}
-          . Prices from <code>models.dev</code> snapshot — verify against provider billing.
+          . Prices from <code>models.dev</code>{" "}
+          {catalogQuery.data?.source === "live" ? "live catalog" : "snapshot"} — verify against
+          provider billing.
         </p>
       ) : null}
     </div>

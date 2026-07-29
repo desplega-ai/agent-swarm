@@ -6574,6 +6574,129 @@
         }
       }
     },
+    "/api/models-catalog": {
+      "get": {
+        "summary": "Get the live model catalog for the picker-reachable providers",
+        "description": "Slim projection of the models.dev payload (openrouter / anthropic / openai / amazon-bedrock only), refreshed server-side at boot and every 12h by the pricing-refresh loop. `source` is 'snapshot' with `updatedAt: null` until the first successful fetch (or when models.dev is unreachable), in which case the vendored snapshot is served instead.",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Model catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "live",
+                        "snapshot"
+                      ]
+                    },
+                    "updatedAt": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "providers": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "models": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "cost": {
+                                  "type": "object",
+                                  "properties": {
+                                    "input": {
+                                      "type": "number"
+                                    },
+                                    "output": {
+                                      "type": "number"
+                                    }
+                                  }
+                                },
+                                "limit": {
+                                  "type": "object",
+                                  "properties": {
+                                    "context": {
+                                      "type": "number"
+                                    }
+                                  }
+                                },
+                                "reasoning": {
+                                  "type": "boolean"
+                                },
+                                "reasoning_options": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string"
+                                      },
+                                      "values": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "type"
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": [
+                                "id"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "models"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "updatedAt",
+                    "providers"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/oauth/refresh-locks/{key}": {
       "post": {
         "summary": "Acquire a cross-process OAuth refresh lock",

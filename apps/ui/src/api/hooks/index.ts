@@ -106,6 +106,7 @@ export {
   useUpdateMetric,
 } from "./use-metric-definitions";
 export { useMetrics } from "./use-metrics";
+export { useModelsCatalog } from "./use-models-catalog";
 export type { PromptTemplateFilters } from "./use-prompt-templates";
 export {
   useCheckoutTemplate,
