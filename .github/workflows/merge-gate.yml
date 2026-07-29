@@ -318,7 +318,16 @@ jobs:
         # apps/evals/Dockerfile is the standalone evals-service image (Dokploy); it installs
         # from the ROOT workspace lockfile, so workspace changes can break it silently
         # unless it is built here too.
-        dockerfile: [Dockerfile, Dockerfile.worker, apps/evals/Dockerfile]
+        # The worker builds only the worker-slim target here (fast PR gate — it still
+        # exercises the shared worker-base layers and the leaf block); the full target
+        # is built and published on merge by docker-and-deploy.yml.
+        include:
+          - dockerfile: Dockerfile
+            target: ""
+          - dockerfile: Dockerfile.worker
+            target: worker-slim
+          - dockerfile: apps/evals/Dockerfile
+            target: ""
 
     steps:
       - name: Checkout repository
@@ -332,6 +341,7 @@ jobs:
         with:
           context: .
           file: ./${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           push: false
           tags: test-image:latest
 

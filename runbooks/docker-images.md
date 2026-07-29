@@ -2,19 +2,52 @@
 
 Rules and traps when editing `Dockerfile` (API) or `Dockerfile.worker` — especially anything that installs deps or writes to `/home/worker`.
 
-## TL;DR — current baseline
+## TL;DR — current baseline (2026-07-29)
 
-| Image | Uncompressed | Compressed (ghcr) | Built from |
-|---|---:|---:|---|
-| `agent-swarm-worker` | ~5.8 GB | ~2.3 GB | `Dockerfile.worker` |
-| `agent-swarm` (API) | ~450 MB | ~180 MB | `Dockerfile` |
+| Image | Uncompressed | Built from |
+|---|---:|---|
+| `agent-swarm-worker` (full, `:latest`) | ~4.2 GB | `Dockerfile.worker` target `worker-full` (default) |
+| `agent-swarm-worker` (`:slim`) | ~1.9 GB | `Dockerfile.worker` target `worker-slim` |
+| `agent-swarm` (API) | ~380 MB | `Dockerfile` |
 
-The worker is intrinsically heavy because it ships **four harnesses** (claude / pi / codex / opencode) + Playwright + a full dev toolchain. Don't chase further cuts without measuring with `docker history <img> --format "{{.Size}}\t{{.CreatedBy}}" | sort -h -r | head -10` first.
+Compressed ghcr pull size ≈ 35–45 % of uncompressed. The full worker is intrinsically heavy because it ships **four harnesses** (claude / pi / codex / opencode) + Playwright + a full dev toolchain. Don't chase further cuts without measuring with `docker history <img> --format "{{.Size}}\t{{.CreatedBy}}" | sort -h -r | head -10` first. Known irreducible chunk: `libllvm17t64` (~115 MB) is a hard `Depends:` of `postgresql-16` on Ubuntu 24.04 (NOT a recommends), and `libllvm20`+mesa (~180 MB) is a hard dep chain of `libgbm1`, which Chromium needs — both exist only in the full image.
+
+## Stage map (`Dockerfile.worker`)
+
+```
+prek, builder            pinned prek binary + compiled agent-swarm binary
+worker-base              minimal apt set + bun + ALL four harness CLIs +
+                         context-mode CLI + npx-skills installs + base
+                         /opt/global-deps (pm2, wts, agent-fs) + settings/ENVs
+├─ worker-slim (target)  worker-base + leaf block. CI + E2E image.
+└─ worker-full-base      + dev toolchain, glab, Playwright libs + chromium,
+                         postgres/redis servers, /opt/global-deps-full
+                         (qa-use, sentry-cli, localtunnel, claude-bridge),
+                         context-mode claude+codex PLUGINS, qa-use skill
+   └─ worker-full        worker-full-base + leaf block. Default; MUST stay the
+      (target, LAST)     last stage so untargeted builds produce it.
+```
+
+Placement rules:
+
+- **Code-dependent COPYs (the "leaf block") live ONLY in the two leaf stages**, duplicated verbatim and marked `KEEP IN SYNC`. Putting them in `worker-base` would invalidate every heavy `worker-full-base` layer on each `src/` edit.
+- New heavy tool? Decide slim-vs-full deliberately: `worker-base` if the entrypoint or a harness needs it to boot, `worker-full-base` otherwise. If a tool is full-only and the entrypoint references it, guard the entrypoint with `command -v` (see the glab / postgres / redis guards in `docker-entrypoint.sh`).
+- Full-only npm globals go in `/opt/global-deps-full` (separate staging dir) — never extend the base `/opt/global-deps` from `worker-full-base`, that rewrites its node_modules into a duplicate layer.
+
+## Skills: `npx skills`, not plugin marketplaces
+
+Skills are installed by pinned `npx skills add <owner/repo>@<tag> --skill <name> -g -a claude-code -y` runs (worker-base; qa-use skill in worker-full-base), then mirrored into the pi/codex/opencode/.agents trees by the leaf block. The ONLY remaining marketplace plugins are context-mode for Claude + Codex (they ship the ctx_* hooks, which a skills-only installer can't provide).
+
+- Pin every source to a tag/SHA — unpinned `npx skills add` resolves the default branch at build time.
+- Don't `|| true`-guard the skills RUN; keep the `test -e .../SKILL.md` asserts (upstream bug: global installs occasionally skip the `~/.claude/skills` link — vercel-labs/skills#851).
+- Adding a plugin via `claude plugin install` again? It runs `bun install` under the hood — `rm -rf /home/worker/.bun/install/cache` in the SAME RUN (this was once an 880 MB layer), and expect the plugin cache to hold a full repo clone (the old agent-fs plugin was 778 MB for one skill — prefer `npx skills`).
 
 ## Build + measure
 
 ```bash
-bun run docker:build:worker                                       # builds agent-swarm-worker:latest
+bun run docker:build:worker                                       # full -> agent-swarm-worker:latest
+bun run docker:build:worker:slim                                  # slim -> agent-swarm-worker:slim
+bun run docker:build:api                                          # API  -> agent-swarm-api:latest
 docker images --format "{{.Repository}}:{{.Tag}} {{.Size}}" | grep agent-swarm
 docker history agent-swarm-worker:latest --format "{{.Size}}\t{{.CreatedBy}}" \
   | awk -F'\t' '{ if ($1 ~ /[0-9]/ && $1 !~ /^0B/) print }' \
@@ -130,10 +163,10 @@ Compressed pull size ≈ 35–45 % of uncompressed on-disk size.
 
 ## When to bump the image
 
-`Dockerfile.worker` rebuilds happen via `bun run docker:build:worker` locally, and on every push to `main` via `.github/workflows/docker-and-deploy.yml`. After local changes:
+`Dockerfile.worker` rebuilds happen via `bun run docker:build:worker` locally, and on every push to `main` via `.github/workflows/docker-and-deploy.yml` (which publishes `worker-full` as `:latest`/`:{VERSION}`/`:sha-*` AND `worker-slim` as `:slim`/`:{VERSION}-slim`/`:sha-*-slim`). PRs build only the `worker-slim` target in the merge gate. After local changes:
 
 ```bash
 bun run docker:build:worker && bun run pm2-restart
 ```
 
-See [ci.md](./ci.md) for the full Docker CI flow.
+See [ci.md](./ci.md) for the full Docker CI flow, and the docs-site "Published Artifacts" page for the consumer-facing inventory.

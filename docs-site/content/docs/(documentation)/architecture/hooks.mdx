@@ -39,7 +39,6 @@ Fires before every tool call. This hook provides safety guardrails:
 - **Cancellation check** — If the task has been cancelled, the hook blocks the tool call and notifies the agent
 - **Loop detection** — Detects when the same tool is called with identical arguments repeatedly (a sign the agent is stuck), including nested MCP argument payloads; low-cardinality Codex file-change ping-pong patterns use a higher threshold before blocking
 - **Polling limits** — Prevents excessive polling of external services
-- **Shared disk write prevention** — On Archil-mounted environments, warns agents before they attempt to write to another agent's directory under `/workspace/shared/`. Each agent can only write to its own subdirectory (`/workspace/shared/{category}/{agentId}/`)
 
 ### PostToolUse
 
@@ -49,7 +48,6 @@ Fires after every tool call. This is the most active hook:
 - **Activity tracking** — Updates the agent's `lastActivityAt` timestamp (fire-and-forget) for stall detection
 - **Identity sync** — If an identity file (SOUL.md, IDENTITY.md, TOOLS.md, CLAUDE.md) was edited, syncs the changes to the database with `changeSource: "self_edit"` tracking to distinguish agent edits from session-end syncs. The session-start runner now records baseline hashes for those files; the Stop/session-end sync path skips unchanged files so lead-side `update-profile` edits made during the session are not overwritten by stale local copies. Files shorter than 100 characters are rejected to prevent accidental profile corruption
 - **Memory indexing** — If a file was written to a memory directory, automatically generates an embedding and indexes it
-- **Shared disk write failure detection** — On Archil-mounted environments, detects "Read-only file system" errors from Write, Edit, or Bash tools and warns the agent about the per-agent directory convention
 
 ### UserPromptSubmit
 

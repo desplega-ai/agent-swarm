@@ -1,8 +1,8 @@
 # Agent Swarm MCP Server Dockerfile
 # Multi-stage build: compiles to standalone binary for minimal image size
 
-# Stage 1: Build the binary
-FROM oven/bun:latest AS builder
+# Stage 1: Build the binary (pinned — keep in sync with Dockerfile.worker's builder)
+FROM oven/bun:1.3.11 AS builder
 
 WORKDIR /build
 
@@ -84,9 +84,9 @@ COPY --from=builder /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
 
-# Copy compiled binary from builder
-COPY --from=builder /build/agent-swarm-api /usr/local/bin/agent-swarm-api
-RUN chmod +x /usr/local/bin/agent-swarm-api
+# Copy compiled binary from builder.
+# --chmod avoids a separate `RUN chmod` layer that would duplicate the binary.
+COPY --from=builder --chmod=755 /build/agent-swarm-api /usr/local/bin/agent-swarm-api
 
 # Copy package.json for version info
 COPY package.json ./
@@ -123,12 +123,8 @@ COPY --from=builder /build/typescript-lib/ /app/typescript-lib/
 # ship node_modules, so the TypeScript compiler resolves it from here instead.
 COPY --from=builder /build/script-types/ /app/script-types/
 
-# Install archil CLI for FUSE/R2-backed disk mounts
-RUN curl https://s3.amazonaws.com/archil-client/install | sh
-
 # Create data directory for SQLite (WAL mode needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
-# Create Archil mount point directories
-RUN mkdir -p /app/data /mnt/data /workspace/shared
+RUN mkdir -p /app/data /workspace/shared
 
 ENV PORT=3013
 ENV DATABASE_PATH=/app/data/agent-swarm-db.sqlite
@@ -147,7 +143,6 @@ EXPOSE 3013
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- http://localhost:3013/health || exit 1
 
-COPY api-entrypoint.sh /api-entrypoint.sh
-RUN chmod +x /api-entrypoint.sh
+COPY --chmod=755 api-entrypoint.sh /api-entrypoint.sh
 
 ENTRYPOINT ["/api-entrypoint.sh"]

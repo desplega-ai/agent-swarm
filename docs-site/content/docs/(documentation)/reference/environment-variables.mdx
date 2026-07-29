@@ -411,17 +411,6 @@ Identity envs that brand the swarm and gate cloud-only UX. All are read on every
 
 The no-config default is `local-fs`; set `AGENT_FS_API_URL` globally to keep shared agent-fs behavior. The API boot seeder registers a service identity with agent-fs on first boot, stores `API_AGENT_FS_API_KEY` as an encrypted global swarm config secret, creates the shared org/drive, and persists `AGENT_FS_DEFAULT_*`. Each runner then asks the API to create its own encrypted agent-scoped `AGENT_FS_API_KEY`. The two `AGENT_FS_DEFAULT_*` keys let the server fill in attachment IDs server-side so the renderer can emit full live-host URLs — per-row IDs always win, and missing config + missing row IDs still falls back to the `agent-fs:<path>` form.
 
-## Archil Disk Mounts
-
-Environment variables for optional [Archil](https://www.archil.com/) FUSE disk mounts, giving worker containers persistent shared and per-agent personal disks. Skipped entirely when `ARCHIL_MOUNT_TOKEN` is unset (local dev / non-Archil environments).
-
-| Variable | Description |
-|----------|-------------|
-| `ARCHIL_MOUNT_TOKEN` | Auth token for the Archil CLI. Gates the entire feature — unset disables disk mounting |
-| `ARCHIL_REGION` | Archil region for the mount (e.g. `aws-eu-west-1`) |
-| `ARCHIL_SHARED_DISK_NAME` | Shared disk identifier, mounted at `/workspace/shared` |
-| `ARCHIL_PERSONAL_DISK_NAME` | Per-agent personal disk identifier, mounted at `/workspace/personal` |
-
 ## Pages
 
 Environment variables for the hosted Pages feature (DB-backed, agent-authored web pages). See [MCP Tools Reference](/docs/reference/mcp-tools#pages-tools) for the Pages tools.

@@ -1,14 +1,29 @@
 # Agent Swarm Worker Dockerfile
-# Runs Claude in headless loop mode as a worker agent
-# Multi-stage build: compiles to standalone binary with full dev environment
+# Runs a harness (claude / pi / codex / opencode) in headless loop mode as a
+# worker agent.
+#
+# Stage graph (see runbooks/docker-images.md):
+#   prek, builder                — pinned tool + compiled agent-swarm binary
+#   worker-base                  — minimal system + ALL four harness CLIs
+#   worker-slim  (target)        — worker-base + repo artifacts. For CI + E2E.
+#   worker-full-base             — worker-base + dev toolchain, Playwright,
+#                                  postgres/redis, glab, context-mode plugins
+#   worker-full  (target, LAST)  — worker-full-base + repo artifacts. Default
+#                                  build; published as :latest.
+#
+# The repo-artifact block (binary, plugin/ trees, entrypoint) is duplicated in
+# the two leaf stages ON PURPOSE: putting it in worker-base would invalidate
+# every heavy worker-full-base layer on each code change. Keep the two blocks
+# in sync (marked "leaf block" below).
 
 ARG PREK_VERSION=0.4.5
+ARG SKILLS_CLI_VERSION=1.5.20
 
 # Official prek docs recommend copying the pinned binary from its distroless
 # image into Debian-based images.
 FROM ghcr.io/j178/prek:v${PREK_VERSION} AS prek
 
-# Stage 1: Build the binary
+# ─── Stage: builder ──────────────────────────────────────────────────────────
 FROM oven/bun:1.3.11 AS builder
 WORKDIR /build
 # Root package.json declares Bun workspaces (apps/{ui,templates-ui,evals}); their manifests +
@@ -26,8 +41,8 @@ COPY templates/ ./templates/
 COPY tsconfig.json ./
 RUN bun build ./src/cli.tsx --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm
 
-# Stage 2: Full development environment
-FROM ubuntu:24.04
+# ─── Stage: worker-base — minimal system + all harness CLIs ──────────────────
+FROM ubuntu:24.04 AS worker-base
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -35,12 +50,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Use pipefail so pipe failures are caught
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Install all system packages in a single layer
+# Minimal system packages: enough to boot the entrypoint, auth with GitHub,
+# clone repos, and run any of the four harnesses. Dev toolchain, postgres,
+# Playwright, glab etc. are worker-full-base additions.
 # Step 1: bootstrap curl/gnupg so we can add external apt repos
-# Step 2: add NodeSource + GitHub CLI repos, then install everything
-# NOTE: intentionally NOT using --no-install-recommends here — this is a full
-# dev environment where agents build arbitrary projects; recommended packages
-# (setuptools, wheel, less, dev headers, etc.) prevent subtle breakage.
+# Step 2: add NodeSource + GitHub CLI repos, then install the slim set
 RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -48,43 +62,25 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
        | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && apt-get update && apt-get install -y \
+    && apt-get update && apt-get install -y --no-install-recommends \
     wget lsb-release \
     git git-lfs \
-    vim nano \
-    build-essential make cmake gcc g++ \
+    nano \
     python3 python3-pip python3-venv \
-    jq tree htop unzip zip tar gzip sqlite3 fuse3 libfuse2 gosu tini \
+    jq unzip zip tar gzip sqlite3 gosu tini \
     openssh-client \
     postgresql-client \
-    postgresql-16 \
-    postgresql-16-pgvector \
-    postgresql-contrib-16 \
     nodejs \
     gh \
-    tmux \
     && rm -rf /var/lib/apt/lists/*
 
-# Redis server for tasks that need a local queue/cache backend (always bundled).
-# Runtime start is controlled by SWARM_DEP_REDIS_ENABLED (default: false).
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends redis-server redis-tools \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install GitLab CLI (glab) for GitLab integration
-ARG GLAB_VERSION=1.89.0
-ARG TARGETARCH
-RUN curl -fsSL "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/${GLAB_VERSION}/glab_${GLAB_VERSION}_linux_${TARGETARCH}.deb" -o /tmp/glab.deb \
-    && dpkg -i /tmp/glab.deb \
-    && rm /tmp/glab.deb
-
-# Install Bun (for running JS/TS projects)
-RUN curl -fsSL https://bun.sh/install | bash
-ENV BUN_INSTALL="/root/.bun"
-ENV PATH="$BUN_INSTALL/bin:$PATH"
+# Install Bun once, system-wide at /usr/local/bin (shared by root and worker —
+# runbook rule 4: never install a toolchain twice). Runtime `bun i -g` for the
+# worker user still lands in ~/.bun via the BUN_INSTALL ENV set below.
+RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
 
 # Create non-root user for runtime execution.
-# NOTE: Container entrypoint runs as root for FUSE mount compatibility.
+# NOTE: Container entrypoint runs as root (setup, chown, privileged mounts).
 # Final exec drops to worker via gosu (Claude rejects --dangerously-skip-permissions as root).
 # Worker user retained for file ownership and Claude process execution.
 RUN useradd -m -s /bin/bash worker
@@ -104,8 +100,8 @@ RUN mkdir -p /home/worker/.corepack
 # /home/worker/.local root-owned and break worker-side mkdir into .local/share.
 RUN mkdir -p /home/worker/.local/bin /home/worker/.local/share /home/worker/.local/state
 
-# Install Bun for worker user (need to set HOME explicitly in RUN)
-RUN HOME=/home/worker BUN_INSTALL=/home/worker/.bun curl -fsSL https://bun.sh/install | bash
+# Bun binary is system-wide (/usr/local/bin); ~/.bun/bin stays on PATH for
+# runtime worker-scoped global installs.
 ENV PATH="/home/worker/.bun/bin:$PATH"
 
 # Install Claude CLI (pinned version — bump ARG to update)
@@ -168,12 +164,6 @@ RUN mkdir -p /home/worker/.codex && \
       > /home/worker/.codex/config.toml && \
     chown -R worker:worker /home/worker/.codex
 
-# Install the context-mode Codex plugin (provides the ctx_* hooks for the Codex
-# harness). The [features] block above enables hooks + plugin-provided hooks.
-# Guarded with || true so a marketplace/registry hiccup can't fail the build.
-RUN codex plugin marketplace add mksglu/context-mode || true \
-    && codex plugin add context-mode@context-mode || true
-
 # Install opencode CLI + SDK (alternative harness, selected via HARNESS_PROVIDER=opencode)
 # CLI version must match SDK version — the SDK spawns `opencode serve` and parses
 # its stdout for the listening URL (see node_modules/@opencode-ai/sdk/dist/server.js).
@@ -193,9 +183,9 @@ USER worker
 # Install context-mode CLI globally (context-window compression tools for all
 # harnesses). The global install puts `context-mode` on PATH (for Claude/Codex
 # stdio MCP) AND makes the package importable (for the OpenCode in-process
-# plugin). The Claude/Codex plugin installs provide the hooks; this provides
-# the CLI binary + package importability. Disable per-worker via
-# CONTEXT_MODE_DISABLED=true (read by the adapters at runtime).
+# plugin). The Claude/Codex plugin installs (worker-full-base) provide the
+# hooks; this provides the CLI binary + package importability. Disable
+# per-worker via CONTEXT_MODE_DISABLED=true (read by the adapters at runtime).
 ARG CONTEXT_MODE_VERSION=1.0.151
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
@@ -206,29 +196,29 @@ USER worker
 # Install prek for opt-in worker repo hook setup.
 COPY --from=prek /prek /usr/local/bin/prek
 
-# Install Claude marketplace plugins (build-time cache)
-RUN mkdir -p /home/worker/.claude \
-    # Main desplega toolbox plugin
-    && claude plugin marketplace add desplega-ai/ai-toolbox@cc-desplega-2.0.0 || true \
-    && claude plugin install desplega@desplega-ai-toolbox --scope user || true \
-    # Worktree management
-    && claude plugin install wts@desplega-ai-toolbox --scope user || true \
-    # desplega.ai qa-use CLI
-    && claude plugin marketplace add desplega-ai/qa-use || true \
-    && claude plugin install qa-use@desplega.ai --scope user || true \
-    # context-mode to improve context-window usage. NOTE: this plugin (which
-    # provides the ctx_* HOOKS) tracks the marketplace HEAD and is NOT version-
-    # pinned. A build-time `git checkout v${CONTEXT_MODE_VERSION}` in the
-    # marketplace clone does not work (git rejects it with "dubious ownership"
-    # and the clone is shallow without tags), so we don't attempt it. The ctx_*
-    # TOOLS are served by the globally-installed CLI (npm i -g
-    # context-mode@${CONTEXT_MODE_VERSION} above), which IS pinned; only the
-    # hook bundle floats — acceptable since the hooks are backward-compatible.
-    && claude plugin marketplace add mksglu/claude-context-mode || true \
-    && claude plugin install context-mode@context-mode --scope user || true \
-    # agent-fs goodies
-    && claude plugin marketplace add desplega-ai/agent-fs || true \
-    && claude plugin install agent-fs@agent-fs --scope user || true
+# Install skills with `npx skills` (vercel-labs skills-only installer), pinned
+# to tags for reproducible builds. Replaces the previous desplega/wts/qa-use/
+# agent-fs marketplace plugins (~950 MB of full repo clones + bun cache) —
+# the only plugin surface the swarm used was their skills; the CLIs themselves
+# are installed via /opt/global-deps. Deliberately NOT `|| true`-guarded:
+# pinned refs are deterministic, so a fetch failure should fail the build.
+# Gotcha (vercel-labs/skills#851): global claude-code installs occasionally
+# land only in ~/.agents/skills — the `test -e` asserts catch that, and the
+# mirror step in the leaf stages dereferences symlinks when fanning out to
+# other harnesses. The qa-use skill is installed in worker-full-base only
+# (its CLI isn't present in slim).
+ARG SKILLS_CLI_VERSION
+RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v0.10.0 --skill agent-fs -g -a claude-code -y \
+    && npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/ai-toolbox@cc-desplega-2.0.0 \
+       --skill ask-user --skill brainstorming --skill implementing --skill improve-agents-md \
+       --skill learning --skill phase-running --skill planning --skill qa --skill questioning \
+       --skill researching --skill reviewing --skill script-builder --skill step-running \
+       --skill tdd-planning --skill v-implementing --skill v-planning --skill verifying \
+       --skill wts-expert \
+       -g -a claude-code -y \
+    && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
+    && test -e /home/worker/.claude/skills/wts-expert/SKILL.md \
+    && rm -rf /home/worker/.npm
 
 # Configure wts for agent mode (no tmux, no auto-Claude)
 RUN mkdir -p /home/worker/.wts \
@@ -254,10 +244,13 @@ RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
   } \
 }' > /home/worker/.claude/settings.json
 
-# Install global npm tools (pinned versions for cache stability).
+# Base global npm tools (pinned versions for cache stability): the set the
+# entrypoint and core agent workflows depend on. Full-image extras (qa-use,
+# sentry-cli, localtunnel, claude-bridge) live in a SEPARATE staging dir in
+# worker-full-base so this layer is never rewritten.
 #
-# We use a staging-dir `npm install` + symlink pattern instead of `npm install -g`
-# so we can apply an `overrides` workaround for a broken upstream transitive:
+# Staging-dir `npm install` + symlink pattern (instead of `npm install -g`) so
+# we can apply `overrides` for broken/bloated upstream transitives:
 #   @desplega.ai/agent-fs -> chonkie -> @huggingface/hub@2.11.1
 #     -> @huggingface/xetchunk-wasm@0.0.4
 # xetchunk-wasm@0.0.4 was published with `gearhash-jit: workspace:*` and
@@ -266,6 +259,13 @@ RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
 # `@huggingface/hub` to 2.11.0 (the last version before xetchunk-wasm became
 # a dep) sidesteps it. Drop this workaround once HF republishes a clean
 # xetchunk-wasm and chonkie / agent-fs pull it in.
+#
+# onnxruntime-* / node-llama-cpp (~360 MB) back agent-fs's LOCAL embedding
+# path only — the swarm always talks to a shared agent-fs API (server-side
+# indexing), and agent-fs imports them lazily (`await import(...)`), so the
+# stubs only surface if someone forces local embeddings inside a worker.
+# @duckdb/node-api is intentionally NOT stubbed: `agent-fs` SQL-over-files
+# runs client-side and the skill actively advertises it.
 USER root
 RUN mkdir -p /opt/global-deps && cat > /opt/global-deps/package.json <<'EOF'
 {
@@ -273,11 +273,7 @@ RUN mkdir -p /opt/global-deps && cat > /opt/global-deps/package.json <<'EOF'
   "private": true,
   "dependencies": {
     "pm2": "6.0.14",
-    "@sentry/cli": "3.3.4",
     "@desplega.ai/wts": "0.2.3",
-    "@desplega.ai/localtunnel": "2.2.0",
-    "@desplega.ai/qa-use": "2.19.0",
-    "@desplega.ai/claude-bridge": "0.2.2",
     "@desplega.ai/agent-fs": "0.10.0"
   },
   "overrides": {
@@ -289,10 +285,151 @@ RUN mkdir -p /opt/global-deps && cat > /opt/global-deps/package.json <<'EOF'
     "web-tree-sitter": "npm:empty-npm-package@1.0.0",
     "cohere-ai": "npm:empty-npm-package@1.0.0",
     "voyageai": "npm:empty-npm-package@1.0.0",
-    "ollama": "npm:empty-npm-package@1.0.0"
+    "ollama": "npm:empty-npm-package@1.0.0",
+    "onnxruntime-node": "npm:empty-npm-package@1.0.0",
+    "onnxruntime-web": "npm:empty-npm-package@1.0.0",
+    "node-llama-cpp": "npm:empty-npm-package@1.0.0"
   }
 }
 EOF
+
+# CRITICAL: `ENV HOME=/home/worker` is still active under `USER root`, so
+# without the inline override npm would dump ~/.npm into /home/worker as
+# root-owned files (see runbook rule 2). Caches cleaned in the SAME RUN.
+RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
+    sh -c 'cd /opt/global-deps && npm install --no-audit --no-fund \
+      && for bin in /opt/global-deps/node_modules/.bin/*; do \
+           ln -sf "$bin" "/usr/local/bin/$(basename "$bin")"; \
+         done' \
+    && rm -rf /tmp/npm-cache /root/.npm /root/.cache
+
+# Runtime environment shared by all leaf stages
+ENV AGENT_ROLE=worker
+ENV HARNESS_PROVIDER=claude
+ENV WORKER_YOLO=false
+ENV MCP_BASE_URL=http://host.docker.internal:3013
+ENV WORKER_LOG_DIR=/logs
+ENV LEAD_LOG_DIR=/logs
+ENV WORKER_SYSTEM_PROMPT=""
+ENV WORKER_SYSTEM_PROMPT_FILE=""
+ENV LEAD_SYSTEM_PROMPT=""
+ENV LEAD_SYSTEM_PROMPT_FILE=""
+ENV STARTUP_SCRIPT_STRICT=false
+ENV TEMPLATE_REGISTRY_URL=https://templates.agent-swarm.dev
+ENV PM2_HOME=/workspace/.pm2
+ENV PATH="/home/worker/.local/bin:/home/worker/.bun/bin:$PATH"
+ENV OPENCODE_SWARM_PLUGIN_PATH=/home/worker/.config/opencode/plugins/agent-swarm.ts
+
+VOLUME ["/logs"]
+
+# Expose service port for PM2 processes
+EXPOSE 3000
+
+ENTRYPOINT ["/docker-entrypoint.sh"]
+
+# ─── Stage: worker-slim — CI/E2E image (all harnesses, no extras) ────────────
+FROM worker-base AS worker-slim
+
+# ==== leaf block — KEEP IN SYNC with the identical block in worker-full ====
+# Repo artifacts change on every code change; they live only in leaf stages so
+# the heavy shared layers above never get invalidated by a src/ edit.
+
+# Copy binary from builder.
+# --chmod avoids a separate `RUN chmod` layer that would duplicate the binary.
+COPY --from=builder --chmod=755 /build/agent-swarm /usr/local/bin/agent-swarm
+
+# Optional helpers (postgres/redis only exist in the full image; the
+# entrypoint guards on the binaries before invoking these)
+COPY --chmod=755 scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
+COPY --chmod=755 scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
+COPY --chmod=755 scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
+
+# Copy commands / agents / skills
+COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
+COPY --chown=worker:worker plugin/agents/* /home/worker/.claude/agents/
+COPY --chown=worker:worker plugin/skills/ /home/worker/.claude/skills/
+
+# Copy pi-mono skills (used when HARNESS_PROVIDER=pi)
+COPY --chown=worker:worker plugin/pi-skills/ /home/worker/.pi/agent/skills/
+
+# Copy codex skills (used when HARNESS_PROVIDER=codex)
+# Structure: plugin/commands/<name>.md -> ~/.codex/skills/<name>/SKILL.md
+COPY --chown=worker:worker plugin/commands/ /tmp/codex-skills-src/
+RUN mkdir -p /home/worker/.codex/skills && \
+    for f in /tmp/codex-skills-src/*.md; do \
+      [ -e "$f" ] || continue; \
+      name=$(basename "$f" .md); \
+      mkdir -p "/home/worker/.codex/skills/$name"; \
+      cp "$f" "/home/worker/.codex/skills/$name/SKILL.md"; \
+    done && \
+    rm -rf /tmp/codex-skills-src && \
+    chown -R worker:worker /home/worker/.codex/skills
+
+# Mirror Claude-installed skills into every local harness skill tree (repo
+# skills + `npx skills` installs). -L dereferences symlinks (npx skills may
+# symlink into ~/.agents/skills).
+# NOTE: chown ONLY the skill trees written here. A `chown -R` over the parent
+# dotdirs (.opencode is 171 MB, .codex 90 MB) rewrites them into this layer
+# (runbook rule 1) — previously a 270 MB layer for 88 KB of skills.
+RUN mkdir -p /home/worker/.pi/agent/skills /home/worker/.codex/skills /home/worker/.opencode/skills /home/worker/.agents/skills && \
+    cp -aL /home/worker/.claude/skills/. /home/worker/.pi/agent/skills/ || true && \
+    cp -aL /home/worker/.claude/skills/. /home/worker/.codex/skills/ || true && \
+    cp -aL /home/worker/.claude/skills/. /home/worker/.opencode/skills/ || true && \
+    cp -aL /home/worker/.claude/skills/. /home/worker/.agents/skills/ || true && \
+    chown -R worker:worker /home/worker/.pi/agent/skills /home/worker/.codex/skills \
+      /home/worker/.opencode/skills /home/worker/.agents
+
+# Copy opencode plugin (used when HARNESS_PROVIDER=opencode).
+# OPENCODE_SWARM_PLUGIN_PATH (ENV in worker-base) tells OpencodeAdapter exactly
+# where to find the plugin. The plugin entrypoint imports adjacent vendored
+# helpers (`./opencode-auth`, `./summarize`) — opencode's plugin loader runs
+# the TS files inside its own bundled Bun runtime, which only exposes
+# `@opencode-ai/{plugin,sdk}`, so the helpers are vendored next to it. Tests
+# live in a sibling `tests/` subdirectory and are intentionally NOT copied
+# (opencode auto-discovers `.ts` files here and would load them as plugins).
+RUN mkdir -p /home/worker/.config/opencode/plugins/lib && \
+    chown -R worker:worker /home/worker/.config
+COPY --chown=worker:worker plugin/opencode-plugins/agent-swarm.ts /home/worker/.config/opencode/plugins/agent-swarm.ts
+COPY --chown=worker:worker plugin/opencode-plugins/lib/ /home/worker/.config/opencode/plugins/lib/
+
+# Workspace directories (bind-mounted or volume-backed at runtime) + entrypoint
+RUN mkdir -p /workspace/personal /workspace/shared /logs && \
+    chown worker:worker /workspace /logs
+COPY --chown=worker:worker --chmod=755 docker-entrypoint.sh /docker-entrypoint.sh
+
+USER root
+WORKDIR /workspace
+# ==== end leaf block ====
+
+# ─── Stage: worker-full-base — dev toolchain + Playwright + services ─────────
+FROM worker-base AS worker-full-base
+
+USER root
+
+# Full dev-environment extras. NOTE: intentionally NOT using
+# --no-install-recommends — agents build arbitrary projects; recommended
+# packages (setuptools, wheel, less, dev headers, etc.) prevent subtle
+# breakage. python3-{dev,setuptools,wheel} are explicit because worker-base
+# installs python with --no-install-recommends.
+# Postgres + redis servers back the SWARM_DEP_POSTGRES_ENABLED /
+# SWARM_DEP_REDIS_ENABLED opt-in features (started by the entrypoint).
+RUN apt-get update && apt-get install -y \
+    vim tree htop tmux \
+    build-essential make cmake gcc g++ \
+    python3-dev python3-setuptools python3-wheel \
+    fuse3 libfuse2 \
+    postgresql-16 \
+    postgresql-16-pgvector \
+    postgresql-contrib-16 \
+    redis-server redis-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install GitLab CLI (glab) for GitLab integration
+ARG GLAB_VERSION=1.89.0
+ARG TARGETARCH
+RUN curl -fsSL "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/${GLAB_VERSION}/glab_${GLAB_VERSION}_linux_${TARGETARCH}.deb" -o /tmp/glab.deb \
+    && dpkg -i /tmp/glab.deb \
+    && rm /tmp/glab.deb
 
 # Playwright browsers live in a system path so they're shared across users at
 # runtime AND so the install doesn't pollute /home/worker (which would force a
@@ -327,21 +464,52 @@ RUN apt-get update \
       libxrandr2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install global deps + Playwright chromium. CRITICAL: `ENV HOME=/home/worker`
-# (line 70) is still active under `USER root`, so without the inline override
-# below npm/Playwright would dump ~/.npm (~830 MB) and ~/.cache/ms-playwright
-# (~930 MB) into /home/worker as root-owned files — which previously required
-# a `chown -R worker:worker /home/worker` step that re-wrote the entire HOME
-# as a 5+ GB duplicate layer. By keeping HOME=/root and the npm cache in
-# /tmp, then cleaning them in the same RUN, the chown becomes unnecessary.
+# Full-image global npm tools, staged in a SEPARATE dir from worker-base's
+# /opt/global-deps so its layer is never rewritten. Same overrides rationale
+# as worker-base (see that heredoc's comment).
+RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <<'EOF'
+{
+  "name": "global-deps-full",
+  "private": true,
+  "dependencies": {
+    "@sentry/cli": "3.3.4",
+    "@desplega.ai/localtunnel": "2.2.0",
+    "@desplega.ai/qa-use": "2.19.0",
+    "@desplega.ai/claude-bridge": "0.2.2"
+  },
+  "overrides": {
+    "@huggingface/hub": "2.11.0",
+    "chromadb": "npm:empty-npm-package@1.0.0",
+    "chromadb-default-embed": "npm:empty-npm-package@1.0.0",
+    "@xenova/transformers": "npm:empty-npm-package@1.0.0",
+    "tree-sitter-wasms": "npm:empty-npm-package@1.0.0",
+    "web-tree-sitter": "npm:empty-npm-package@1.0.0",
+    "cohere-ai": "npm:empty-npm-package@1.0.0",
+    "voyageai": "npm:empty-npm-package@1.0.0",
+    "ollama": "npm:empty-npm-package@1.0.0",
+    "onnxruntime-node": "npm:empty-npm-package@1.0.0",
+    "onnxruntime-web": "npm:empty-npm-package@1.0.0",
+    "node-llama-cpp": "npm:empty-npm-package@1.0.0"
+  }
+}
+EOF
+
+# Install full global deps + Playwright chromium. CRITICAL: `ENV
+# HOME=/home/worker` is still active under `USER root`, so without the inline
+# override below npm/Playwright would dump ~/.npm (~830 MB) and
+# ~/.cache/ms-playwright (~930 MB) into /home/worker as root-owned files —
+# which previously required a `chown -R worker:worker /home/worker` step that
+# re-wrote the entire HOME as a 5+ GB duplicate layer. By keeping HOME=/root
+# and the npm cache in /tmp, then cleaning them in the same RUN, the chown
+# becomes unnecessary.
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     sh -c 'mkdir -p /opt/playwright \
-      && cd /opt/global-deps && npm install --no-audit --no-fund \
-      && for bin in /opt/global-deps/node_modules/.bin/*; do \
+      && cd /opt/global-deps-full && npm install --no-audit --no-fund \
+      && for bin in /opt/global-deps-full/node_modules/.bin/*; do \
            ln -sf "$bin" "/usr/local/bin/$(basename "$bin")"; \
          done \
       && qa-use install-deps' \
-    && cd /opt/global-deps \
+    && cd /opt/global-deps-full \
     && chromium_path="$(node -e 'const { chromium } = require("playwright"); process.stdout.write(chromium.executablePath())')" \
     && ldd "$chromium_path" | tee /tmp/chromium-ldd.txt \
     && ! grep -F "not found" /tmp/chromium-ldd.txt \
@@ -349,26 +517,52 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache \
     && chmod -R a+rX /opt/playwright
 
-# Install archil CLI for FUSE/R2-backed disk mounts
-RUN curl https://s3.amazonaws.com/archil-client/install | sh
+# Install the context-mode plugins for Claude + Codex (build-time cache).
+# These are the ONLY marketplace plugins — they ship the ctx_* HOOKS, which a
+# skills-only installer cannot replace. NOTE: the Claude plugin tracks the
+# marketplace HEAD and is NOT version-pinned. A build-time `git checkout
+# v${CONTEXT_MODE_VERSION}` in the marketplace clone does not work (git
+# rejects it with "dubious ownership" and the clone is shallow without tags),
+# so we don't attempt it. The ctx_* TOOLS are served by the globally-installed
+# CLI (npm i -g context-mode in worker-base), which IS pinned; only the hook
+# bundle floats — acceptable since the hooks are backward-compatible.
+# Guarded with || true so a marketplace/registry hiccup can't fail the build.
+# CRITICAL: clean ~/.bun/install/cache in the SAME RUN — plugin installs run
+# `bun install` under the hood and previously left an 880 MB cache in a layer.
+USER worker
+RUN claude plugin marketplace add mksglu/claude-context-mode || true \
+    && claude plugin install context-mode@context-mode --scope user || true \
+    && codex plugin marketplace add mksglu/context-mode || true \
+    && codex plugin add context-mode@context-mode || true \
+    && rm -rf /home/worker/.bun/install/cache
 
-# Copy binary from builder (changes on every code change — keep late)
-COPY --from=builder /build/agent-swarm /usr/local/bin/agent-swarm
-RUN chmod +x /usr/local/bin/agent-swarm
+# qa-use skill (full image only — the qa-use CLI isn't present in slim).
+# Picked up by the leaf-stage mirror into the other harness skill trees.
+ARG SKILLS_CLI_VERSION
+RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/qa-use@v2.19.0 --skill qa-use -g -a claude-code -y \
+    && test -e /home/worker/.claude/skills/qa-use/SKILL.md \
+    && rm -rf /home/worker/.npm
 
-# Optional helper to start a local PostgreSQL 16 cluster (not invoked automatically)
-COPY scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
-RUN chmod +x /usr/local/bin/init-local-postgres.sh
+USER root
 
-# Optional helper to start local Redis (not invoked automatically)
-COPY scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
-RUN chmod +x /usr/local/bin/init-local-redis.sh
+# ─── Stage: worker-full — default/published image (must stay LAST) ───────────
+FROM worker-full-base AS worker-full
 
-# Best-effort repo hook installer used after opt-in worker repo clones.
-COPY scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
-RUN chmod +x /usr/local/bin/install-repo-hooks.sh
+# ==== leaf block — KEEP IN SYNC with the identical block in worker-slim ====
+# Repo artifacts change on every code change; they live only in leaf stages so
+# the heavy shared layers above never get invalidated by a src/ edit.
 
-# Copy commands (changes on code change — keep late)
+# Copy binary from builder.
+# --chmod avoids a separate `RUN chmod` layer that would duplicate the binary.
+COPY --from=builder --chmod=755 /build/agent-swarm /usr/local/bin/agent-swarm
+
+# Optional helpers (postgres/redis only exist in the full image; the
+# entrypoint guards on the binaries before invoking these)
+COPY --chmod=755 scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
+COPY --chmod=755 scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
+COPY --chmod=755 scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
+
+# Copy commands / agents / skills
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
 COPY --chown=worker:worker plugin/agents/* /home/worker/.claude/agents/
 COPY --chown=worker:worker plugin/skills/ /home/worker/.claude/skills/
@@ -389,69 +583,38 @@ RUN mkdir -p /home/worker/.codex/skills && \
     rm -rf /tmp/codex-skills-src && \
     chown -R worker:worker /home/worker/.codex/skills
 
-# Mirror Claude-installed skills into every local harness skill tree. This
-# includes marketplace/plugin skills installed under ~/.claude/skills during the
-# build, not just the repository's plugin/commands conversion above.
+# Mirror Claude-installed skills into every local harness skill tree (repo
+# skills + `npx skills` installs). -L dereferences symlinks (npx skills may
+# symlink into ~/.agents/skills).
+# NOTE: chown ONLY the skill trees written here. A `chown -R` over the parent
+# dotdirs (.opencode is 171 MB, .codex 90 MB) rewrites them into this layer
+# (runbook rule 1) — previously a 270 MB layer for 88 KB of skills.
 RUN mkdir -p /home/worker/.pi/agent/skills /home/worker/.codex/skills /home/worker/.opencode/skills /home/worker/.agents/skills && \
-    cp -a /home/worker/.claude/skills/. /home/worker/.pi/agent/skills/ || true && \
-    cp -a /home/worker/.claude/skills/. /home/worker/.codex/skills/ || true && \
-    cp -a /home/worker/.claude/skills/. /home/worker/.opencode/skills/ || true && \
-    cp -a /home/worker/.claude/skills/. /home/worker/.agents/skills/ || true && \
-    chown -R worker:worker /home/worker/.pi /home/worker/.codex /home/worker/.opencode /home/worker/.agents
+    cp -aL /home/worker/.claude/skills/. /home/worker/.pi/agent/skills/ || true && \
+    cp -aL /home/worker/.claude/skills/. /home/worker/.codex/skills/ || true && \
+    cp -aL /home/worker/.claude/skills/. /home/worker/.opencode/skills/ || true && \
+    cp -aL /home/worker/.claude/skills/. /home/worker/.agents/skills/ || true && \
+    chown -R worker:worker /home/worker/.pi/agent/skills /home/worker/.codex/skills \
+      /home/worker/.opencode/skills /home/worker/.agents
 
 # Copy opencode plugin (used when HARNESS_PROVIDER=opencode).
-# OPENCODE_SWARM_PLUGIN_PATH tells OpencodeAdapter exactly where to find the
-# plugin — the bundled binary's `import.meta.dir` is /usr/local/bin which
-# doesn't help, and relying on opencode's auto-discovery is implicit (it
-# silently breaks if discovery rules change or OPENCODE_CONFIG suppresses it).
-#
-# Phase 2 (session-summarization fix): the plugin entrypoint imports adjacent
-# vendored helpers (`./opencode-auth`, `./summarize`). opencode's plugin
-# loader runs the TS files inside its own bundled Bun runtime, which only
-# exposes `@opencode-ai/{plugin,sdk}` — so the helpers are vendored, NOT
-# imported from `@desplega.ai/agent-swarm`. COPY them next to the entrypoint
-# so the relative imports resolve. Tests live in a sibling `tests/`
-# subdirectory and are intentionally NOT copied (opencode auto-discovers
-# `.ts` files in this directory and would try to load them as plugins).
+# OPENCODE_SWARM_PLUGIN_PATH (ENV in worker-base) tells OpencodeAdapter exactly
+# where to find the plugin. The plugin entrypoint imports adjacent vendored
+# helpers (`./opencode-auth`, `./summarize`) — opencode's plugin loader runs
+# the TS files inside its own bundled Bun runtime, which only exposes
+# `@opencode-ai/{plugin,sdk}`, so the helpers are vendored next to it. Tests
+# live in a sibling `tests/` subdirectory and are intentionally NOT copied
+# (opencode auto-discovers `.ts` files here and would load them as plugins).
 RUN mkdir -p /home/worker/.config/opencode/plugins/lib && \
     chown -R worker:worker /home/worker/.config
 COPY --chown=worker:worker plugin/opencode-plugins/agent-swarm.ts /home/worker/.config/opencode/plugins/agent-swarm.ts
 COPY --chown=worker:worker plugin/opencode-plugins/lib/ /home/worker/.config/opencode/plugins/lib/
-ENV OPENCODE_SWARM_PLUGIN_PATH=/home/worker/.config/opencode/plugins/agent-swarm.ts
 
-# Create directories and copy entrypoint
-RUN mkdir -p /workspace /logs && chown worker:worker /workspace /logs
-COPY --chown=worker:worker docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+# Workspace directories (bind-mounted or volume-backed at runtime) + entrypoint
+RUN mkdir -p /workspace/personal /workspace/shared /logs && \
+    chown worker:worker /workspace /logs
+COPY --chown=worker:worker --chmod=755 docker-entrypoint.sh /docker-entrypoint.sh
 
 USER root
 WORKDIR /workspace
-
-# Create mount-point directories (must be empty for Archil FUSE mounts)
-RUN mkdir -p /workspace/personal /workspace/shared
-
-# NOTE: Do NOT use VOLUME for /workspace/shared or /workspace/personal.
-# Fly.io's init sets up volume mount points that prevent FUSE from mounting
-# on top of them (EINVAL). Archil FUSE mounts replace Docker volumes here.
-VOLUME ["/logs"]
-
-# Expose service port for PM2 processes
-EXPOSE 3000
-
-# Environment
-ENV AGENT_ROLE=worker
-ENV HARNESS_PROVIDER=claude
-ENV WORKER_YOLO=false
-ENV MCP_BASE_URL=http://host.docker.internal:3013
-ENV WORKER_LOG_DIR=/logs
-ENV LEAD_LOG_DIR=/logs
-ENV WORKER_SYSTEM_PROMPT=""
-ENV WORKER_SYSTEM_PROMPT_FILE=""
-ENV LEAD_SYSTEM_PROMPT=""
-ENV LEAD_SYSTEM_PROMPT_FILE=""
-ENV STARTUP_SCRIPT_STRICT=false
-ENV TEMPLATE_REGISTRY_URL=https://templates.agent-swarm.dev
-ENV PM2_HOME=/workspace/.pm2
-ENV PATH="/home/worker/.local/bin:/home/worker/.bun/bin:$PATH"
-
-ENTRYPOINT ["/docker-entrypoint.sh"]
+# ==== end leaf block ====

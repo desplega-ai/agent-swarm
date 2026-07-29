@@ -127,6 +127,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
+      # E2E services run the slim target (all harnesses, no playwright/postgres/etc.)
+      target: worker-slim
     stop_grace_period: 60s
 
     depends_on:
@@ -167,6 +169,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
+      # E2E services run the slim target (all harnesses, no playwright/postgres/etc.)
+      target: worker-slim
     depends_on:
       api:
         condition: service_healthy
@@ -216,6 +220,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
+      # E2E services run the slim target (all harnesses, no playwright/postgres/etc.)
+      target: worker-slim
     depends_on:
       api:
         condition: service_healthy

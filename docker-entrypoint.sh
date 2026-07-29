@@ -236,52 +236,16 @@ fi
 
 # ---- Git safe.directory backstop ----
 # Avoid "dubious ownership" when /workspace dirs are owned by a different uid
-# (Archil/FUSE mounts, root-owned auto-clone, host-mounted volumes, etc.).
+# (root-owned auto-clone, host-mounted volumes, etc.).
 # --system writes to /etc/gitconfig and applies to ALL users, so the worker
 # user inherits this after the gosu drop below.
 git config --system --add safe.directory '*' 2>/dev/null || true
 
-# ---- Archil disk mounts ----
-# Skipped when ARCHIL_MOUNT_TOKEN is not set (local dev / environments without Archil)
-if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
-    echo ""
-    echo "=== Archil Mount ==="
-
-    # Ensure /dev/fuse exists (needed in some VM environments like Fly.io Firecracker)
-    if [ ! -e /dev/fuse ]; then
-        mknod /dev/fuse c 10 229
-        chmod 666 /dev/fuse
-    fi
-
-    if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
-        echo "Mounting shared disk ($ARCHIL_SHARED_DISK_NAME) at /workspace/shared..."
-        archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
-    fi
-
-    # NOTE: Top-level shared directory pre-creation (thoughts/, memory/, etc.)
-    # lives in api-entrypoint.sh, not here. The API boots first and creates
-    # them so workers' mkdir auto-grants delegation at the subdir level.
-
-    if [ -n "$ARCHIL_PERSONAL_DISK_NAME" ]; then
-        echo "Mounting personal disk ($ARCHIL_PERSONAL_DISK_NAME) at /workspace/personal..."
-        # --force reclaims stale delegations from previous machine incarnations.
-        # Personal disks are always single-client, so force is safe.
-        # archil mount requires root — entrypoint runs as root (USER root in Dockerfile).
-        archil mount --force "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
-        # Brief pause for FUSE daemon to finish --force re-negotiation
-        sleep 1
-    fi
-    echo "===================="
-fi
-# ---- End Archil mount ----
-
-# Create personal workspace subdirectories (after FUSE mount, since Archil
-# requires empty mount points — these dirs can't exist at build time).
-# Personal disk is exclusive (rw), so this always succeeds.
+# Create personal workspace subdirectories.
 # NOTE: Shared disk subdirectories are created per-agent below (see
 # "Setting up per-agent directories" block), NOT here.
 mkdir -p /workspace/personal/memory 2>/dev/null || true
-# chown individual dirs (not -R) to avoid EPERM on .archil system files
+# chown individual dirs (not -R) to avoid EPERM on mount-managed system files
 chown worker:worker /workspace/personal 2>/dev/null || true
 chown worker:worker /workspace/personal/memory 2>/dev/null || true
 
@@ -355,12 +319,6 @@ echo "=========================="
 # Cleanup function for graceful shutdown
 cleanup() {
     echo ""
-    # Unmount Archil disks (flushes pending data to backing store)
-    if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
-        echo "Unmounting Archil disks..."
-        archil unmount /workspace/shared 2>/dev/null || true
-        archil unmount /workspace/personal 2>/dev/null || true
-    fi
     echo "Shutting down PM2 processes..."
     pm2 kill 2>/dev/null || true
 }
@@ -510,7 +468,9 @@ echo "=============================="
 # Configure GitLab authentication if token is provided
 echo ""
 echo "=== GitLab Authentication ==="
-if [ -n "$GITLAB_TOKEN" ]; then
+if [ -n "$GITLAB_TOKEN" ] && ! command -v glab > /dev/null 2>&1; then
+    echo "WARNING: GITLAB_TOKEN set but glab is not installed (slim image?) - GitLab integration disabled"
+elif [ -n "$GITLAB_TOKEN" ]; then
     echo "Configuring GitLab authentication..."
 
     # Configure glab CLI with the token
@@ -720,46 +680,14 @@ fi
 if [ -n "$AGENT_ID" ]; then
     AGENT_SHARED="/workspace/shared"
 
-    # Safety net: if top-level dirs don't exist yet (API still booting),
-    # retry a few times with backoff
-    if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
-        for attempt in 1 2 3; do
-            if [ -d "$AGENT_SHARED/thoughts" ]; then
-                break
-            fi
-            echo "Waiting for shared directory structure (attempt $attempt/3)..."
-            sleep 3
-        done
-    fi
-
     echo "Setting up per-agent directories for $AGENT_ID..."
-
-    # The shared disk is already mounted via `archil mount --shared`.
-    # Read access to ALL directories (including other agents') is automatic.
-    # Here we claim WRITE ownership of this agent's own subdirectories only.
-    #
-    # IMPORTANT: Top-level dirs (thoughts/, memory/, downloads/, misc/) are
-    # pre-created by the API machine at boot. This ensures our mkdir below
-    # auto-grants delegation at the SUBDIR level (e.g., thoughts/$AGENT_ID),
-    # not the parent level (thoughts/). See Appendix A in the plan for details.
 
     for category in "thoughts" "memory" "downloads" "misc"; do
         AGENT_DIR="$AGENT_SHARED/$category/$AGENT_ID"
 
-        # Create our subdir (auto-grants delegation on $AGENT_ID level)
-        # Entrypoint runs as root, so no sudo needed for mkdir.
+        # Create our subdir. Entrypoint runs as root, so no sudo needed.
         mkdir -p "$AGENT_DIR" 2>/dev/null || true
 
-        # Checkout for persistent ownership (survives reboots where dir already exists)
-        # Use -f (force) to reclaim stale delegations from destroyed/redeployed machines.
-        # Each agent is the sole writer for its own subdirectory, so force is safe.
-        # Use `yes` piped in to auto-confirm the force-checkout prompt (no --yes flag).
-        # No sudo — entrypoint runs as root; sudo can swallow stdin pipes.
-        if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
-            yes | archil checkout -f "$AGENT_DIR" 2>/dev/null || true
-        fi
-
-        # chown AFTER checkout — need Archil delegation before FUSE allows chown
         chown worker:worker "$AGENT_DIR" 2>/dev/null || true
     done
 
@@ -842,13 +770,23 @@ echo ""
 chown -R worker:worker /home/worker/.local 2>/dev/null || true
 
 # Optional: initialize a local PostgreSQL 16 cluster before dropping privileges.
+# command -v guard: postgres/redis servers only ship in the full image — on the
+# slim image these flags log a warning instead of killing the boot (set -e).
 if [ "${SWARM_DEP_POSTGRES_ENABLED:-false}" = "true" ]; then
-  /usr/local/bin/init-local-postgres.sh
+  if [ -x /usr/lib/postgresql/16/bin/initdb ]; then
+    /usr/local/bin/init-local-postgres.sh
+  else
+    echo "WARNING: SWARM_DEP_POSTGRES_ENABLED=true but PostgreSQL is not installed (slim image?) - skipping"
+  fi
 fi
 
 # Optional: start a local Redis server before dropping privileges.
 if [ "${SWARM_DEP_REDIS_ENABLED:-false}" = "true" ]; then
-  /usr/local/bin/init-local-redis.sh
+  if command -v redis-server > /dev/null 2>&1; then
+    /usr/local/bin/init-local-redis.sh
+  else
+    echo "WARNING: SWARM_DEP_REDIS_ENABLED=true but Redis is not installed (slim image?) - skipping"
+  fi
 fi
 
 WORKER_BOOTSTRAP="/tmp/agent-swarm-worker-entrypoint.sh"

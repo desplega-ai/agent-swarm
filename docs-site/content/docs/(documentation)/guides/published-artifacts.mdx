@@ -1,0 +1,74 @@
+---
+title: Published Artifacts
+description: Everything an Agent Swarm release publishes — Docker images and tags (full vs slim), E2B templates, the npm package, and the Helm chart
+---
+
+Every merge to `main` (and every version bump) publishes a set of artifacts. This page is the canonical inventory: what exists, how it's tagged, and which one to use.
+
+## Docker images
+
+All images are multi-arch (`linux/amd64` + `linux/arm64`) and published to GitHub Container Registry.
+
+| Image | Built from | Contents |
+|---|---|---|
+| `ghcr.io/desplega-ai/agent-swarm` | `Dockerfile` | API server — compiled binary, migrations, script runtimes. Small by design (~400 MB). |
+| `ghcr.io/desplega-ai/agent-swarm-worker` | `Dockerfile.worker` (target `worker-full`) | Full worker — all four harnesses plus the complete dev environment (see below). |
+| `ghcr.io/desplega-ai/agent-swarm-worker:slim` | `Dockerfile.worker` (target `worker-slim`) | Slim worker for CI and E2E — all four harnesses, none of the heavy extras. |
+
+### Tag scheme
+
+| Tag | When pushed | Mutability |
+|---|---|---|
+| `latest` / `slim` | Every push to `main` | Mutable — tracks main |
+| `{VERSION}` / `{VERSION}-slim` (e.g. `1.123.0`, `1.123.0-slim`) | Only when `package.json` version changes | Immutable — use for reproducible deploys |
+| `sha-{GIT_SHA}` / `sha-{GIT_SHA}-slim` | Every push to `main` | Immutable — exact commit |
+
+### Full vs slim worker
+
+Both variants ship all four harness CLIs (Claude Code, Codex, pi, opencode), the compiled `agent-swarm` binary, Node.js, Bun, Python, git, `gh`, `pm2`, the `agent-fs` and `wts` CLIs, and the full skill trees for every harness.
+
+The **full** image (default, `latest`) additionally includes:
+
+- Build toolchain: `build-essential`, `cmake`, `gcc`/`g++`, Python dev headers
+- Playwright Chromium + `qa-use` (browser automation/E2E testing)
+- PostgreSQL 16 server + pgvector and Redis server (opt-in local services via `SWARM_DEP_POSTGRES_ENABLED` / `SWARM_DEP_REDIS_ENABLED`)
+- GitLab CLI (`glab`), `sentry-cli`, `localtunnel`, `claude-bridge`
+- context-mode plugins for Claude and Codex (the `ctx_*` hooks)
+- Convenience tools: `vim`, `tmux`, `htop`, `tree`
+
+The **slim** image drops all of the above. On the slim image, `SWARM_DEP_POSTGRES_ENABLED` / `SWARM_DEP_REDIS_ENABLED` and `GITLAB_TOKEN` log a warning at boot instead of activating.
+
+**Use slim when** you're running CI pipelines, cross-provider E2E tests, or local `docker compose` development (docker-compose.local.yml already targets it). **Use full when** agents need to compile arbitrary projects, run browser automation, or use the bundled postgres/redis services — i.e. production swarms.
+
+To build locally:
+
+```bash
+bun run docker:build:worker        # full  -> agent-swarm-worker:latest
+bun run docker:build:worker:slim   # slim  -> agent-swarm-worker:slim
+bun run docker:build:api           # API   -> agent-swarm-api:latest
+```
+
+## E2B sandbox templates
+
+Published on every **version bump** (not every merge), built from the immutable `:{VERSION}` image tags (E2B caches by image reference string, so mutable tags would go stale):
+
+| Template | Source image |
+|---|---|
+| `agent-swarm-api-{version-slug}` (e.g. `agent-swarm-api-1-123-0`) | `agent-swarm:{VERSION}` |
+| `agent-swarm-api-latest` | `agent-swarm:{VERSION}` |
+| `agent-swarm-worker-{version-slug}` | `agent-swarm-worker:{VERSION}` |
+| `agent-swarm-worker-latest` | `agent-swarm-worker:{VERSION}` |
+
+Templates are public. See the [E2B provider guide](/docs/guides/e2b-provider-smoke-tests) for usage.
+
+## npm package
+
+[`@desplega.ai/agent-swarm`](https://www.npmjs.com/package/@desplega.ai/agent-swarm) — the CLI (worker/lead runner, hooks, `e2b` commands). Published on version bump.
+
+## Helm chart
+
+`charts/agent-swarm` — chart `version`/`appVersion` are kept in sync with `package.json` by `bun run sync-chart-version` (CI-enforced). See the [Deployment Guide](/docs/guides/deployment) for Kubernetes usage.
+
+## Where publishing happens
+
+`.github/workflows/docker-and-deploy.yml` on pushes to `main`: builds and pushes all three image variants per-arch, merges multi-arch manifests, deploys the production compose, notifies Swarm Cloud of new digests, and — on version bumps — publishes E2B templates, the npm package, the git tag, and the GitHub release. PRs only build the API image, the **slim** worker target, and the evals image as a merge-gate check (`.github/workflows/merge-gate.yml`).

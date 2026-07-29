@@ -51,7 +51,9 @@ New MCP tools: when adding a tool, register it in `SDK_TOOL_NAME_MAP` (`src/scri
 | `bun run tsc:check` | Type check |
 | `bun test` | Run unit tests (`bun test src/tests/<file>.test.ts` for one) |
 | `bun run pm2-{start,stop,restart,logs,status}` | All services (API 3013, UI 5274, lead 3201, worker 3202) |
-| `bun run docker:build:worker` | Build Docker worker image |
+| `bun run docker:build:worker` | Build Docker worker image (full) |
+| `bun run docker:build:worker:slim` | Build slim worker image (`--target worker-slim`, for CI/E2E) |
+| `bun run docker:build:api` | Build API server image |
 | `bun run docs:openapi` | Regenerate `openapi.json` |
 | `bun run docs:business-use` | Regenerate `BUSINESS_USE.md` (requires BU backend) |
 | `bun run build:pi-skills` | Regenerate `plugin/pi-skills/` from `plugin/commands/*.md` |
@@ -176,9 +178,11 @@ See [BUSINESS_USE.md](./BUSINESS_USE.md) for flow diagrams. Flows: `task` (runId
 Rules + traps before you change anything: [runbooks/docker-images.md](./runbooks/docker-images.md).
 
 Top rules — internalize these before editing:
+- **`Dockerfile.worker` is multi-target**: `worker-base` → `worker-slim` (CI/E2E, published as `:slim`) and `worker-full-base` → `worker-full` (default `:latest`, MUST stay the last stage). Repo-artifact COPYs live in a duplicated "leaf block" in both leaf stages — keep the two blocks identical. New heavy tools go in `worker-full-base` unless boot-critical; guard full-only tools in `docker-entrypoint.sh` with `command -v`. The PR merge gate builds only `worker-slim` — build `worker-full` locally when you touch full-only stages.
+- **Skills install via pinned `npx skills`, not plugin marketplaces** (the context-mode claude/codex plugins are the only marketplace exception — they ship hooks). Pin sources to tags; keep the `test -e .../SKILL.md` asserts.
 - **Never `chown -R /home/worker` in its own layer** — it duplicates the full HOME (multi-GB layer). Either don't pollute HOME under `USER root`, or chown in the same RUN as the install.
 - **`ENV HOME=/home/worker` survives `USER root`** — `npm install` / `playwright install` / curl-pipe-bash under root will dump caches into `/home/worker/.{npm,cache}`. Override `HOME=/root` and redirect caches (`NPM_CONFIG_CACHE=/tmp/...`, `PLAYWRIGHT_BROWSERS_PATH=/opt/playwright`) inline, then clean in the same RUN.
-- **`npm overrides` only apply at the install root** — monorepo root overrides do NOT travel with packages published to npm. To stub a transitive bloater (e.g. chromadb, onnxruntime variants) for a globally-installed dep, put the override in `/opt/global-deps/package.json` inside the Dockerfile, not in the source repo.
+- **`npm overrides` only apply at the install root** — monorepo root overrides do NOT travel with packages published to npm. To stub a transitive bloater (e.g. chromadb, onnxruntime variants) for a globally-installed dep, put the override in `/opt/global-deps/package.json` (base) or `/opt/global-deps-full/package.json` (full extras) inside the Dockerfile, not in the source repo.
 - Always measure: `docker history <img> --format "{{.Size}}\t{{.CreatedBy}}" | sort -h -r | head -10`.
 
 </important>

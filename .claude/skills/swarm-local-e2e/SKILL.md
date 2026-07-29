@@ -64,10 +64,10 @@ bun run start:http &
 ## Step 3: Build Docker Image
 
 ```bash
-bun run docker:build:worker
+bun run docker:build:worker:slim
 ```
 
-This builds `agent-swarm-worker:latest` from the current code. **Rebuild after every code change.**
+This builds `agent-swarm-worker:slim` from the current code — the slim target is faster and sufficient for E2E (all four harnesses included). Use `bun run docker:build:worker` + `agent-swarm-worker:latest` instead only when the test needs playwright/qa-use, local postgres/redis, or glab. **Rebuild after every code change.**
 
 ## Step 4: Start Lead Container
 
@@ -80,7 +80,7 @@ docker run --rm -d \
   -e AGENT_ROLE=lead \
   -e MAX_CONCURRENT_TASKS=1 \
   -p 3201:3000 \
-  agent-swarm-worker:latest
+  agent-swarm-worker:slim
 ```
 
 Wait ~15s, then verify:
@@ -99,7 +99,7 @@ docker run --rm -d \
   --env-file .env.docker \
   -e MAX_CONCURRENT_TASKS=1 \
   -p 3203:3000 \
-  agent-swarm-worker:latest
+  agent-swarm-worker:slim
 ```
 
 Wait ~15s, then verify:

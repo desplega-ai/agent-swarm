@@ -59,15 +59,17 @@ If you only need to verify the API boots and workers register — no tasks, no U
 rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm
 bun run start:http &
 
-# 2. Build worker image
-bun run docker:build:worker
+# 2. Build worker image (slim is faster and sufficient for smoke tests;
+#    use `bun run docker:build:worker` + :latest when the test needs
+#    playwright/qa-use, postgres/redis, or glab)
+bun run docker:build:worker:slim
 
 # 3. Start lead + worker (use branch-specific names to avoid worktree collisions)
 SUFFIX=$(git branch --show-current | tr '/' '-')
 docker run --rm -d --name e2e-lead-$SUFFIX --env-file .env.docker-lead \
-  -e AGENT_ROLE=lead -e MAX_CONCURRENT_TASKS=1 -p 3201:3000 agent-swarm-worker:latest
+  -e AGENT_ROLE=lead -e MAX_CONCURRENT_TASKS=1 -p 3201:3000 agent-swarm-worker:slim
 docker run --rm -d --name e2e-worker-$SUFFIX --env-file .env.docker \
-  -e MAX_CONCURRENT_TASKS=1 -p 3203:3000 agent-swarm-worker:latest
+  -e MAX_CONCURRENT_TASKS=1 -p 3203:3000 agent-swarm-worker:slim
 
 # 4. Verify registration (wait ~15s first)
 curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/agents \

@@ -171,16 +171,23 @@ Run individual Claude workers in containers.
 
 ```bash
 docker pull ghcr.io/desplega-ai/agent-swarm-worker:latest
+
+# Slim variant for CI/E2E (all four harnesses, no playwright/postgres/redis/glab
+# or dev toolchain — see docs-site "Published Artifacts" for the full matrix)
+docker pull ghcr.io/desplega-ai/agent-swarm-worker:slim
 ```
 
 ### Build Locally
 
 ```bash
-# Build the worker image
+# Build the worker image (full)
 docker build -f Dockerfile.worker -t agent-swarm-worker .
 
 # Or using npm script
 bun run docker:build:worker
+
+# Slim variant (CI/E2E)
+bun run docker:build:worker:slim
 
 # Override the pinned Claude Code version (default: 2.1.220)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
@@ -258,18 +265,19 @@ chmod 666 ./work/.mcp.json
 
 ### Architecture
 
-The Docker worker image uses a multi-stage build:
+The Docker worker image uses a multi-stage build with two publishable targets:
 
 1. **Builder stage**: Compiles `src/cli.tsx` into a standalone binary
-2. **Runtime stage**: Ubuntu 24.04 with full development environment
+2. **`worker-slim` target** (`:slim` tag): Ubuntu 24.04 with all four harness CLIs and the core agent tooling — for CI and E2E
+3. **`worker-full` target** (default, `:latest` tag): adds the full development environment below (build toolchain, Playwright/qa-use, postgres/redis servers, glab)
 
-**Pre-installed tools:**
+**Pre-installed tools** (full image; `:slim` drops build tools, `glab`, `vim`, `fuse3`, Playwright, and the postgres/redis servers):
 
 - **Languages**: Python 3, Node.js 22, Bun
 - **Build tools**: gcc, g++, make, cmake
 - **Process manager**: PM2 (for background services)
 - **CLI tools**: GitHub CLI (`gh`), GitLab CLI (`glab`), sqlite3
-- **Agent tools**: `wts` (git worktree manager), `archil` (FUSE/R2-backed storage)
+- **Agent tools**: `wts` (git worktree manager)
 - **Utilities**: git, git-lfs, vim, nano, jq, curl, wget, ssh, fuse3
 - **Runtime user**: Agent processes run as the non-root `worker` user without
   passwordless sudo. Bake additional system packages into the worker image or

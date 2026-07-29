@@ -2,6 +2,7 @@
   "title": "Guides",
   "pages": [
     "deployment",
+    "published-artifacts",
     "asset-namespaces",
     "agent-fs-co-deployment",
     "self-hosted-sso",

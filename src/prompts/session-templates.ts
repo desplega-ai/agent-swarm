@@ -336,9 +336,8 @@ registerTemplate({
 You have access to agent-fs — a persistent, searchable filesystem shared across the swarm.
 Use the \`agent-fs\` CLI for all thoughts, research, plans, and shared documents.
 
-The \`agent-fs\` skill (from the agent-fs Claude Code plugin) provides a full CLI reference —
-it auto-injects on relevant Bash tool calls. You can also run \`agent-fs docs\` for
-interactive CLI documentation.
+The \`agent-fs\` skill (installed in your skills directory) provides a full CLI
+reference. You can also run \`agent-fs docs\` for interactive CLI documentation.
 
 ### Writing to your personal drive (default)
 \`\`\`bash

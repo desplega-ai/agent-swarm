@@ -10,7 +10,7 @@ Three workflows live in `.github/workflows/`:
 |---|---|---|
 | `merge-gate.yml` | PR → `main` | **The gate.** All jobs below must pass for merge. |
 | `ci.yml` | Push → `main` | Lint + tsc + test (subset of merge-gate). |
-| `docker-and-deploy.yml` | Push → `main` | Build images, publish release E2B templates, deploy, and publish npm/GitHub releases (only when `package.json` `version` changed). Not part of PR gate — see [release.md](./release.md). |
+| `docker-and-deploy.yml` | Push → `main` | Build images (API + worker-full + worker-slim, each amd64+arm64 with multi-arch manifest merges; slim publishes as `:slim` / `:{VERSION}-slim` / `:sha-*-slim`), publish release E2B templates, deploy, and publish npm/GitHub releases (only when `package.json` `version` changed). Not part of PR gate — see [release.md](./release.md). |
 
 Both PR-blocking workflows path-ignore `docs-site/**`. PRs that touch only those don't run code jobs (but Vercel deploys docs-site separately).
 
@@ -28,7 +28,7 @@ CI detects what changed and runs the matching jobs:
 | **Script SDK Types Freshness** | `bun run check:script-types` (regenerates `src/scripts-runtime/types/*.d.ts`, must produce zero diff) | Edited `src/be/scripts/typecheck.ts` (the source of truth) without `bun run build:script-types`, or edited the generated `.d.ts` files directly (never do that) |
 | **OpenAPI Spec Freshness** | `bun run docs:openapi` (must produce zero diff in `openapi.json` AND `docs-site/content/docs/api-reference/`) | Edited an HTTP route or bumped `package.json` `version` without regenerating |
 | **Raw matchRoute check** | `! grep -rn 'matchRoute(' src/http/ --include='*.ts' \| grep -v 'route-def.ts' \| grep -v 'utils.ts'` | Used `matchRoute` directly instead of the `route()` factory |
-| **Docker Build (Dockerfile + Dockerfile.worker + apps/evals/Dockerfile)** | `docker build -f Dockerfile . && docker build -f Dockerfile.worker . && docker build -f apps/evals/Dockerfile .` | Broken multi-stage build, missing file in the worker context, evals image drifting from the root workspace lockfile |
+| **Docker Build (Dockerfile + Dockerfile.worker slim target + apps/evals/Dockerfile)** | `docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worker-slim . && docker build -f apps/evals/Dockerfile .` | Broken multi-stage build, missing file in the worker context, evals image drifting from the root workspace lockfile. NOTE: the PR gate builds only the worker's `worker-slim` target (fast); `worker-full` is only built on merge by `docker-and-deploy.yml` — if you touched full-only stages (`worker-full-base` / `worker-full`), build the full target locally before merging |
 
 ### When `apps/ui/` changed (or root `bun.lock` / `package.json` / `bunfig.toml`)
 
@@ -62,7 +62,9 @@ bun run check:script-types || echo "script SDK types drift — run 'bun run buil
 
 # Docker (if you touched any Dockerfile, apps/evals/, .dockerignore, bunfig.toml,
 # root/member package.json, bun.lock, or anything the Dockerfiles COPY)
-docker build -f Dockerfile . && docker build -f Dockerfile.worker . && docker build -f apps/evals/Dockerfile .
+# PR gate builds the worker's slim target; build the full target too if you
+# touched worker-full-base / worker-full stages.
+docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worker-slim . && docker build -f apps/evals/Dockerfile .
 
 # ui (if you touched apps/ui/ — or root bun.lock/package.json/bunfig.toml, since ui deps resolve from the root lock)
 ( cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b )
