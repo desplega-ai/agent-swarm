@@ -464,7 +464,7 @@ export default async function (args: z.infer<typeof argsSchema>, ctx) {
 }
 \`\`\`
 
-**What \`ctx\` actually holds (nothing else):**
+**What \`ctx\` actually holds for inline/named scripts (\`script-run\` / \`script-upsert\`) — nothing else:**
 - \`ctx.swarm.*\` — the swarm SDK: \`task_get\`, \`task_send\`, \`task_storeProgress\`, \`task_action\`, \`task_list\`, \`message_post\`, \`message_read\`, \`slack_reply\`, \`memory_search\`, \`kv_get\`/\`kv_set\`/\`kv_del\`/\`kv_incr\`/\`kv_list\`, \`swarm_get\`, \`agent_info\`, and more. Responses are usually wrapped — prefer \`res?.data ?? res\`.
 - \`ctx.swarm.config\` — \`apiKey\`, \`agentId\`, \`mcpBaseUrl\`, plus \`ctx.swarm.config.get("KEY")\` for user values. All are \`Redacted\` wrappers: they stringify to \`<redacted>\`, and you must never unwrap them into a return value, log line, or request body you build by hand.
 - \`ctx.api.<slug>\` / \`ctx.mcp.<slug>\` — typed clients for connections the lead registered (\`ctx.api.<slug>.<operationId>(...)\`, \`ctx.api.<slug>.graphql(query, vars)\`, \`ctx.mcp.<slug>.<toolName>(args)\`). They exist ONLY for registered connections — introspect with \`Object.keys(ctx.api ?? {})\` / \`Object.keys(ctx.mcp ?? {})\` before assuming one is there.
@@ -472,6 +472,8 @@ export default async function (args: z.infer<typeof argsSchema>, ctx) {
 - \`ctx.logger\` — \`log\` / \`warn\` / \`error\`.
 
 There is NO ambient task context: \`taskId\` must arrive through \`args\`. \`agentId\` IS propagated automatically (\`X-Agent-ID\` header).
+
+**Durable workflow scripts (\`launch-script-run\`) get a DIFFERENT \`ctx\`:** \`ctx.run\` (\`id\`/\`agentId\`/\`args\`), \`ctx.step.rawLlm(label, config)\` / \`ctx.step.agentTask(label, config)\` / \`ctx.step.swarmScript(label, config)\` (durable, journaled steps), plus \`ctx.swarm.*\`, \`ctx.stdlib\`, \`ctx.logger\` as above. Durable runs have NO \`ctx.api\`/\`ctx.mcp\` connection clients and no \`ctx.swarm.config\` — call connections from an inner script via \`ctx.step.swarmScript\` instead.
 
 **\`argsSchema\` convention:** export a Zod schema named \`argsSchema\` from every named script. \`script-upsert\` converts it to JSON Schema, so callers, schedules, and workflows can see the script's input contract. Without it the script's args are undocumented.
 

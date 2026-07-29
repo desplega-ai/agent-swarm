@@ -123,6 +123,9 @@ Part 2 — prompting (same PR; applies to ALL harnesses — script_rubric includ
 9. **Codex bot P2 (docs)**: `generate-mcp-docs.ts` is a source-text parser — the sweep's `// Plain string, NOT .uuid()` comments corrupted its field splitting and silently dropped rows (send-task `agentId`, task-action rows). Generator now strips whole-line comments before splitting; MCP.md regenerated. NOTE: main's MCP.md had drifted (docs-daily-update enriches rows beyond generator output, e.g. steer-task mode enum); regen is faithful-to-source, the daily job re-enriches.
 10. **CI**: `scripts/check-rbac-boundary.sh` (not in the local mirror list!) flagged get-swarm's cosmetic `", lead"` render — allowlisted. All PR #1023 checks green as of `2da020fd`.
 
+11. **Codex bot P1 (round 2)**: the authoring contract's "nothing else" ctx list was wrong for durable workflow scripts — `launch-script-run` builds a different ctx (`ctx.run`, `ctx.step.rawLlm/agentTask/swarmScript`, `ctx.swarm`, `ctx.stdlib`, `ctx.logger`; NO `ctx.api`/`ctx.mcp`/`ctx.swarm.config` — see `src/script-workflows/workflow-ctx.ts`). Template now scopes the list to inline/named scripts and documents the durable ctx separately.
+12. **Codex bot P1 (round 2)**: `get-script-run` rendered only a journal COUNT into details — text-only harnesses couldn't see step outcomes. Now renders up to 20 entries (stepKey, stepType, status, error or 400-char result preview) with an overflow marker.
+
 **Known follow-ups discovered during implementation (not blocking):**
 
 - Scheduling guidance ("Pick the Right targetType") lives INSIDE `system.agent.context_mode`, so pi leads (who now correctly drop context_mode) lose it — split scheduling out of context_mode (incident-relevant: the welcome session misused schedules).

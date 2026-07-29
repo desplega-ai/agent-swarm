@@ -13,6 +13,18 @@ export const GET_SCRIPT_RUN_DESCRIPTION =
 export const LIST_SCRIPT_RUNS_DESCRIPTION =
   "List durable script workflow runs, optionally filtered by status or agent ID.";
 
+const JOURNAL_RENDER_LIMIT = 20;
+const JOURNAL_VALUE_CAP = 400;
+
+function journalValuePreview(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const serialized = typeof value === "string" ? value : JSON.stringify(value);
+  if (!serialized) return undefined;
+  return serialized.length > JOURNAL_VALUE_CAP
+    ? `${serialized.slice(0, JOURNAL_VALUE_CAP)}…`
+    : serialized;
+}
+
 function renderRunDetail(data: unknown): string | undefined {
   if (typeof data !== "object" || data === null) return undefined;
   const run = (data as { run?: Record<string, unknown> }).run;
@@ -23,8 +35,27 @@ function renderRunDetail(data: unknown): string | undefined {
   if (run.output !== undefined && run.output !== null) {
     lines.push(`output: ${JSON.stringify(run.output)}`);
   }
+  // Journal entries must reach the text channel — most harnesses never show
+  // the model structuredContent, and a bare count hides step outcomes.
   const journal = (data as { journal?: unknown[] }).journal;
-  if (Array.isArray(journal)) lines.push(`journal entries: ${journal.length}`);
+  if (Array.isArray(journal) && journal.length > 0) {
+    lines.push(`journal (${journal.length} entr${journal.length === 1 ? "y" : "ies"}):`);
+    for (const raw of journal.slice(0, JOURNAL_RENDER_LIMIT)) {
+      const entry = (raw ?? {}) as Record<string, unknown>;
+      const key = String(entry.stepKey ?? entry.label ?? entry.id ?? "?");
+      const kind = typeof entry.stepType === "string" ? ` [${entry.stepType}]` : "";
+      const status = typeof entry.status === "string" ? ` ${entry.status}` : "";
+      const error =
+        typeof entry.error === "string" && entry.error ? ` — error: ${entry.error}` : "";
+      const output = error ? undefined : journalValuePreview(entry.output ?? entry.result);
+      lines.push(`- ${key}${kind}:${status}${error}${output ? ` — ${output}` : ""}`);
+    }
+    if (journal.length > JOURNAL_RENDER_LIMIT) {
+      lines.push(
+        `… +${journal.length - JOURNAL_RENDER_LIMIT} more entries (see structuredContent.data.journal)`,
+      );
+    }
+  }
   return lines.length > 0 ? lines.join("\n") : undefined;
 }
 
