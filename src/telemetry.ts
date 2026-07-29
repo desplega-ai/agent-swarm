@@ -15,9 +15,15 @@ const PRODUCT = "agent-swarm";
 const TIMEOUT_MS = 5_000;
 
 let installationId: string | null = null;
+let installedAt: string | null = null;
 let source = "unknown";
 let cachedIsCloud = false;
 let cachedIsE2b = false;
+let cachedHasEmbedding = false;
+let cachedHasSlackChannel = false;
+let cachedHasEmailChannel = false;
+let cachedInstallMethod = "manual";
+let cachedInstallPreset: string | undefined;
 
 function isEnabled(): boolean {
   return isEnvFlagEnabled("ANONYMIZED_TELEMETRY", true);
@@ -80,6 +86,66 @@ export function _resolveCloudMode(mcpBaseUrl: string | undefined | null): {
   return { isCloud: isCloudHostname(hostname) };
 }
 
+const KNOWN_INSTALL_METHODS = new Set(["onboard_interactive", "onboard_noninteractive"]);
+
+/**
+ * Resolve the "which entry point produced this install" cohort.
+ *
+ * `raw` comes from `INSTALL_METHOD`, written into `.env` by the onboard
+ * wizard's `generateEnv()` (`onboard_interactive` / `onboard_noninteractive`
+ * per `--yes`/`-y`). Installs that never ran the wizard — hand-written
+ * docker-compose, a bare `bun run start:http` clone — never set this var, so
+ * an unrecognized/missing value falls back to `"e2b"` (detected independently
+ * via `E2B_SANDBOX_ID`, since the `e2b start-stack` CLI path doesn't go
+ * through `generateEnv()`) or `"manual"`.
+ *
+ * Exported for tests; not part of the public API.
+ */
+export function _resolveInstallMethod(raw: string | undefined | null, isE2b: boolean): string {
+  const normalized = raw?.trim();
+  if (normalized && KNOWN_INSTALL_METHODS.has(normalized)) return normalized;
+  if (isE2b) return "e2b";
+  return "manual";
+}
+
+/**
+ * Whether semantic memory is likely enabled — i.e. an embedding-capable key
+ * is present. The onboard wizard's `generateEnv()` currently only writes
+ * Anthropic credentials (`src/commands/onboard/env-generator.ts`), so this
+ * lets us measure how many installs are silently running with memory search
+ * degraded/off. Boolean only — never the key value.
+ *
+ * Exported for tests; not part of the public API.
+ */
+export function _hasEmbeddingKey(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !!(env.EMBEDDING_API_KEY || env.OPENAI_API_KEY);
+}
+
+/**
+ * Mirrors `initSlackApp()`'s enablement check (`src/slack/app.ts`) without
+ * importing the Slack module — this file is intentionally dependency-free
+ * (see file header) so both the api-server and workers can import it cheaply.
+ * If Slack's disable/credential logic changes, update this in the same PR.
+ *
+ * Exported for tests; not part of the public API.
+ */
+export function _hasSlackChannel(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (
+    !!(env.SLACK_BOT_TOKEN && env.SLACK_APP_TOKEN) && !isEnvFlagEnabled("SLACK_DISABLE", false, env)
+  );
+}
+
+/**
+ * Mirrors `isAgentMailEnabled()` (`src/agentmail/app.ts`) without importing
+ * the AgentMail module — see `_hasSlackChannel` for why. AgentMail is the
+ * swarm's only outbound email channel today.
+ *
+ * Exported for tests; not part of the public API.
+ */
+export function _hasEmailChannel(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !!env.AGENTMAIL_WEBHOOK_SECRET && !isEnvFlagEnabled("AGENTMAIL_DISABLE", false, env);
+}
+
 interface InitTelemetryOptions {
   /**
    * Whether to mint and persist a new install ID when the config read returns
@@ -113,15 +179,36 @@ export async function initTelemetry(
   const resolved = _resolveCloudMode(process.env.MCP_BASE_URL);
   cachedIsCloud = resolved.isCloud;
   cachedIsE2b = _isE2bSandbox();
-  console.log(`telemetry: cloud=${cachedIsCloud} e2b=${cachedIsE2b}`);
+  cachedHasEmbedding = _hasEmbeddingKey();
+  cachedHasSlackChannel = _hasSlackChannel();
+  cachedHasEmailChannel = _hasEmailChannel();
+  cachedInstallMethod = _resolveInstallMethod(process.env.INSTALL_METHOD, cachedIsE2b);
+  cachedInstallPreset = process.env.INSTALL_PRESET?.trim() || undefined;
+  console.log(
+    `telemetry: cloud=${cachedIsCloud} e2b=${cachedIsE2b} install_method=${cachedInstallMethod}`,
+  );
 
   try {
     const existing = await getConfig("telemetry_installation_id");
     if (existing) {
       installationId = existing;
+      // Backfill for installs that minted an ID before `telemetry_installed_at`
+      // existed. This reflects the upgrade date, not the true original install
+      // date, but it's the earliest timestamp we can attribute with certainty
+      // — only api-server (generateIfMissing) backfills, same authority rule
+      // as the installation ID itself.
+      const existingInstalledAt = await getConfig("telemetry_installed_at");
+      if (existingInstalledAt) {
+        installedAt = existingInstalledAt;
+      } else if (generateIfMissing) {
+        installedAt = new Date().toISOString();
+        await setConfig("telemetry_installed_at", installedAt);
+      }
     } else if (generateIfMissing) {
       installationId = `install_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+      installedAt = new Date().toISOString();
       await setConfig("telemetry_installation_id", installationId);
+      await setConfig("telemetry_installed_at", installedAt);
     }
     // else: leave installationId = null; track() will no-op
   } catch {
@@ -129,6 +216,8 @@ export async function initTelemetry(
     if (generateIfMissing) {
       // Generate ephemeral ID so telemetry still works this session.
       installationId = `ephemeral_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+      // Not persisted — config access is failing, so there's nowhere durable
+      // to write it. Leave installedAt null rather than a fake fresh mint.
     }
     // else: leave installationId = null; track() will no-op
   }
@@ -208,6 +297,15 @@ export function track(options: TrackOptions): void {
         is_cloud: cachedIsCloud || isCloudDeployment(),
         is_e2b: cachedIsE2b,
         swarmVersion: pkg.version,
+        // Instrumentation-gap closure (2026-07-29): activation-funnel signals.
+        // All boolean/enum, resolved once at init from process.env — never a
+        // secret, URL, channel ID, address, or other identifier. Spread LAST
+        // (same rule as is_cloud/is_e2b above) so callers can't spoof them.
+        has_embedding_key: cachedHasEmbedding,
+        has_slack_channel: cachedHasSlackChannel,
+        has_email_channel: cachedHasEmailChannel,
+        has_notification_channel: cachedHasSlackChannel || cachedHasEmailChannel,
+        install_method: cachedInstallMethod,
       },
       metadata: {
         transport: "https",
@@ -215,6 +313,9 @@ export function track(options: TrackOptions): void {
         environment: getTelemetryEnvironment(),
         is_cloud: isCloudDeployment(),
         ...getOrgIdentity(),
+        // Optional — only present when known, same pattern as organization_*.
+        ...(cachedInstallPreset ? { install_preset: cachedInstallPreset } : {}),
+        ...(installedAt ? { install_created_at: installedAt } : {}),
         ...options.metadata,
       },
     };
@@ -235,14 +336,25 @@ export function track(options: TrackOptions): void {
  */
 export function _resetTelemetryStateForTests(): void {
   installationId = null;
+  installedAt = null;
   source = "unknown";
   cachedIsCloud = false;
   cachedIsE2b = false;
+  cachedHasEmbedding = false;
+  cachedHasSlackChannel = false;
+  cachedHasEmailChannel = false;
+  cachedInstallMethod = "manual";
+  cachedInstallPreset = undefined;
 }
 
 /** Test-only: read the resolved install ID. */
 export function _getInstallationIdForTests(): string | null {
   return installationId;
+}
+
+/** Test-only: read the resolved install-created-at anchor. */
+export function _getInstalledAtForTests(): string | null {
+  return installedAt;
 }
 
 export const telemetry = {

@@ -16,6 +16,18 @@ export function generateEnv(state: OnboardState): string {
   lines.push(`MCP_BASE_URL=http://localhost:${port}`);
   lines.push("APP_URL=https://app.agent-swarm.dev");
 
+  // Install path — read by src/telemetry.ts at boot to attribute the
+  // "which entry point produced this install" cohort. Boolean/enum only,
+  // never an identifier. Installs that never ran the wizard (hand-written
+  // docker-compose, manual `bun run start:http`) simply won't have this
+  // var set, and telemetry falls back to "manual".
+  lines.push(
+    `INSTALL_METHOD=${state.nonInteractive ? "onboard_noninteractive" : "onboard_interactive"}`,
+  );
+  if (state.presetId) {
+    lines.push(`INSTALL_PRESET=${state.presetId}`);
+  }
+
   // ── Authentication ──
   lines.push("");
   lines.push("# === Authentication ===");

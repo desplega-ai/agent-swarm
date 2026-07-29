@@ -466,6 +466,8 @@ When a session is spawned, the runner splits the credential value by commas and 
 |----------|---------|-------------|
 | `ANONYMIZED_TELEMETRY` | `true` (enabled) | Set to `false` to disable anonymized telemetry. See [Telemetry](/docs/reference/telemetry) for details |
 | `DESPLEGA_TELEMETRY_ENV` | `production` | Explicit telemetry environment tag. Set to `development` or `test` for intentional non-production telemetry. |
+| `INSTALL_METHOD` | unset | Written automatically by the onboard wizard (`onboard_interactive` / `onboard_noninteractive`); not meant to be hand-set. Unset installs are attributed as `manual` (or `e2b` inside an E2B sandbox). |
+| `INSTALL_PRESET` | unset | Written automatically by the onboard wizard with the chosen preset (e.g. `solo`), when applicable. |
 
 ## OpenTelemetry
 
