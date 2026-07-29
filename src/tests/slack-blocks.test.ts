@@ -952,7 +952,8 @@ describe("buildTreeBlocks", () => {
     expect(text).toContain("*Not broken*");
     expect(text).not.toContain("###");
     expect(text).not.toContain("**Not broken**");
-    expect(text).toContain("more chars; full output in thread");
+    expect(text).toContain("more chars; open task for full output");
+    expect(text).not.toContain("full output in thread");
   });
 
   test("completed root with slackReplySent suppresses output", () => {

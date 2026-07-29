@@ -609,6 +609,48 @@ describe("processTreeMessages", () => {
     expect(_getTreeLastUpdateTime().has(messageTs)).toBe(false);
   });
 
+  test("posts truncated terminal output in full before cleaning up the tree", async () => {
+    const agent = createAgent({ name: "FullOutputAgent", isLead: true, status: "idle" });
+    const task = createTaskExtended("terminal full output test", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "C_FULL_OUTPUT",
+      slackThreadTs: "4141414141.000001",
+      slackUserId: "U_FULL_OUTPUT",
+    });
+    const finalMarker = "FINAL-OUTPUT-MARKER";
+    const output = `### Findings\n\n${"Detailed result line. ".repeat(350)}${finalMarker}`;
+
+    startTask(task.id);
+    completeTask(task.id, output);
+
+    const messageTs = "4141414141.000002";
+    registerTreeMessage(task.id, "C_FULL_OUTPUT", "4141414141.000001", messageTs);
+    _getTreeLastUpdateTime().delete(messageTs);
+    _getLastRenderedTree().delete(messageTs);
+    mockChatPostMessage.mockClear();
+    mockChatUpdate.mockClear();
+
+    await processTreeMessages();
+
+    expect(mockChatPostMessage).toHaveBeenCalledTimes(1);
+    const reply = mockChatPostMessage.mock.calls[0]![0] as any;
+    expect(reply.thread_ts).toBe("4141414141.000001");
+    expect(reply.blocks.length).toBeGreaterThan(1);
+    expect(
+      reply.blocks.every((block: { text: { text: string } }) => block.text.text.length <= 2900),
+    ).toBe(true);
+    expect(
+      reply.blocks.map((block: { text: { text: string } }) => block.text.text).join(""),
+    ).toContain(finalMarker);
+    expect(getTaskById(task.id)!.slackReplySent).toBe(true);
+
+    const treeUpdate = mockChatUpdate.mock.calls[0]![0] as any;
+    expect(JSON.stringify(treeUpdate.blocks)).not.toContain("open task for full output");
+    expect(JSON.stringify(treeUpdate.blocks)).not.toContain(finalMarker);
+    expect(_getTreeMessages().has(messageTs)).toBe(false);
+  });
+
   test("cleans up tree with root + children when all terminal", async () => {
     const lead = createAgent({ name: "TermLead", isLead: true, status: "idle" });
     const worker = createAgent({ name: "TermWorker", isLead: false, status: "idle" });
