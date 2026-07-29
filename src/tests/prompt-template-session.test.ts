@@ -113,7 +113,7 @@ describe("Session templates — registration", () => {
     }
   });
 
-  test("total of 29 session/system templates registered", () => {
+  test("total of 30 session/system templates registered", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
     // 26 = the original 19 + `system.session.worker.pi` + `system.agent.seed_scripts`
@@ -121,7 +121,9 @@ describe("Session templates — registration", () => {
     // + `system.agent.scripts_only_mode.slack` + `system.agent.messaging`
     // + `system.agent.steering`.
     // 29 = 27 + `system.agent.script_authoring_contract` + `system.session.lead.pi`.
-    expect(sessionSystem.length).toBe(29);
+    // 30 = 29 + `system.agent.scheduling` (split out of context_mode so the
+    // pi composites keep the scheduling rules without the ctx_* tool block).
+    expect(sessionSystem.length).toBe(30);
   });
 });
 

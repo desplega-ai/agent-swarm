@@ -708,6 +708,8 @@ describe("getBasePrompt — context-mode provider gating", () => {
     expect(result).not.toContain("batch_execute");
     expect(result).toContain("Agent Scripts");
     expect(result).toContain("Pre-built Seed Scripts");
+    // Scheduling rules live outside the ctx_* advertisement — pi keeps them.
+    expect(result).toContain("Scheduling — Pick the Right targetType");
   });
 
   test("pi LEAD also skips the context-mode block (lead.pi composite)", async () => {
@@ -727,6 +729,8 @@ describe("getBasePrompt — context-mode provider gating", () => {
     expect(result).toContain("Agent Scripts");
     expect(result).toContain(AUTHORING_CONTRACT_MARKER);
     expect(result).toContain("Pre-built Seed Scripts");
+    // Scheduling rules live outside the ctx_* advertisement — pi keeps them.
+    expect(result).toContain("Scheduling — Pick the Right targetType");
   });
 
   test("claude LEAD keeps the context-mode block", async () => {

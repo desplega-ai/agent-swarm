@@ -583,6 +583,18 @@ You have access to the \`context-mode\` MCP tools (\`batch_execute\`, \`execute\
 
 {{@template[system.agent.script_rubric]}}
 
+{{@template[system.agent.scheduling]}}
+`,
+  variables: [],
+  category: "system",
+});
+
+// Standalone so the pi composites (which drop `system.agent.context_mode` and
+// its ctx_* tool advertisement) can still include the scheduling rules.
+registerTemplate({
+  eventType: "system.agent.scheduling",
+  header: "",
+  defaultBody: `
 ### Scheduling — Pick the Right targetType
 
 When creating a schedule, match \`targetType\` to the work being fired:
@@ -855,8 +867,9 @@ registerTemplate({
 // Pi-specific worker composite. Identical to `system.session.worker` except it
 // omits only the `system.agent.context_mode` MCP-tool block — pi has no
 // context-mode MCP wiring yet, so advertising the `ctx_*` tools would point at
-// phantom tools. It still includes the shared script rubric and seed-script
-// guidance so pi sessions get the same bulk-work decision policy (DES-514).
+// phantom tools. It still includes the shared script rubric, scheduling rules,
+// and seed-script guidance so pi sessions get the same bulk-work decision
+// policy (DES-514).
 registerTemplate({
   eventType: "system.session.worker.pi",
   header: "",
@@ -867,6 +880,7 @@ registerTemplate({
 {{@template[system.agent.filesystem]}}
 {{@template[system.agent.self_awareness]}}
 {{@template[system.agent.script_rubric]}}
+{{@template[system.agent.scheduling]}}
 {{@template[system.agent.seed_scripts]}}
 
 {{@template[system.agent.system]}}
@@ -883,7 +897,8 @@ registerTemplate({
 // omits only the `system.agent.context_mode` MCP-tool block — pi has no
 // context-mode MCP wiring, so a pi lead would otherwise be told about `ctx_*`
 // tools that don't exist. It still includes the shared script rubric (which
-// carries the script authoring contract) and seed-script guidance.
+// carries the script authoring contract), scheduling rules, and seed-script
+// guidance.
 registerTemplate({
   eventType: "system.session.lead.pi",
   header: "",
@@ -894,6 +909,7 @@ registerTemplate({
 {{@template[system.agent.filesystem]}}
 {{@template[system.agent.self_awareness]}}
 {{@template[system.agent.script_rubric]}}
+{{@template[system.agent.scheduling]}}
 {{@template[system.agent.seed_scripts]}}
 
 {{@template[system.agent.system]}}
