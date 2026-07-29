@@ -134,6 +134,12 @@ export async function proxyScriptsApi(args: {
    * journal holds the step errors).
    */
   failureDetails?: (data: unknown) => string | undefined;
+  /**
+   * Skip the generic details cap. Only for payloads that are authoritative in
+   * full (e.g. script-query-types' type blobs, which exceed the cap and have
+   * no pagination) — everything else stays capped.
+   */
+  uncappedDetails?: boolean;
 }): Promise<SwarmToolResult> {
   if (!args.requestInfo.agentId) return toolErr(SCRIPT_TRANSPORT_ERROR);
 
@@ -171,8 +177,9 @@ export async function proxyScriptsApi(args: {
     });
   }
 
+  const successDetails = args.successDetails?.(data);
   return toolOk(args.successMessage(data), {
-    details: capDetails(args.successDetails?.(data)),
+    details: args.uncappedDetails ? successDetails : capDetails(successDetails),
     data: toolData,
   });
 }

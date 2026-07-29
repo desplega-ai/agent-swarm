@@ -150,7 +150,15 @@ export const swarmToolOutputSchema = <S extends z.ZodRawShape>(dataShape?: S) =>
   z.looseObject({ ...swarmToolEnvelopeShape, ...(dataShape ?? ({} as S)) });
 
 export const SCRIPT_AUTHORING_NUDGE =
-  "Scripts must `export default async function (args, ctx)` — args FIRST, ctx second; run script-query-types (no name) for the full ctx/SDK type surface.";
+  "Scripts must `export default async function (args, ctx)` — args FIRST, ctx second; run script-query-types (no name) for the full ctx/SDK type surface, and see the `swarm-scripts` skill for authoring patterns.";
+
+// Only steer on failures plausibly caused by the script itself (typecheck or
+// runtime) — on lookup/transport/authorization errors the authoring advice
+// distracts from the reported problem.
+const scriptAuthoringNudge = (r: SwarmToolResult): string | undefined =>
+  !r.ok && /Typecheck failed:|Script run .*failed/.test(r.message)
+    ? SCRIPT_AUTHORING_NUDGE
+    : undefined;
 
 /**
  * Central conditional nudges, keyed by tool name. Applied by the finalize
@@ -158,10 +166,10 @@ export const SCRIPT_AUTHORING_NUDGE =
  * single sentence; derive only from already-scrubbed result fields.
  */
 export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefined> = {
-  "script-run": (r) => (r.ok ? undefined : SCRIPT_AUTHORING_NUDGE),
-  "script-upsert": (r) => (r.ok ? undefined : SCRIPT_AUTHORING_NUDGE),
-  "launch-script-run": (r) => (r.ok ? undefined : SCRIPT_AUTHORING_NUDGE),
-  "get-script-run": (r) => (r.ok ? undefined : SCRIPT_AUTHORING_NUDGE),
+  "script-run": scriptAuthoringNudge,
+  "script-upsert": scriptAuthoringNudge,
+  "launch-script-run": scriptAuthoringNudge,
+  "get-script-run": scriptAuthoringNudge,
   "script-search": (r) => {
     if (!r.ok) return undefined;
     // proxyScriptsApi wraps the parsed HTTP body as data = { status, data },

@@ -60,6 +60,7 @@ export const registerScriptQueryTypesTool = (server: McpServer) => {
           requestInfo,
           successMessage: () => "Swarm script SDK + stdlib type definitions fetched.",
           successDetails: renderTypeBlobs,
+          uncappedDetails: true,
         });
       }
       const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
@@ -69,6 +70,7 @@ export const registerScriptQueryTypesTool = (server: McpServer) => {
         requestInfo,
         successMessage: () => `Type definitions for script \`${name}\` fetched.`,
         successDetails: renderTypeBlobs,
+        uncappedDetails: true,
       });
     },
   );

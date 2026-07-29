@@ -128,6 +128,22 @@ describe("finalizeSwarmToolResult", () => {
     expect((result.structuredContent as { nudge?: string }).nudge).toBe(SCRIPT_AUTHORING_NUDGE);
   });
 
+  test("NUDGES map: lookup/transport failures get no authoring nudge", () => {
+    // A missing run ID / transport error is not an authoring problem — the
+    // (args, ctx) steer would distract from the reported error.
+    const notFound = finalizeSwarmToolResult("get-script-run", {
+      ok: false,
+      message: "Scripts API request failed with 404",
+    });
+    expect((notFound.structuredContent as { nudge?: string }).nudge).toBeUndefined();
+
+    const typecheck = finalizeSwarmToolResult("script-upsert", {
+      ok: false,
+      message: "Typecheck failed: TS2345 …",
+    });
+    expect((typecheck.structuredContent as { nudge?: string }).nudge).toBe(SCRIPT_AUTHORING_NUDGE);
+  });
+
   test("NUDGES map: empty script-search points at seeded examples; non-empty does not", () => {
     // Real proxyScriptsApi shape: data = { status, data: <parsed HTTP body> }.
     const empty = finalizeSwarmToolResult("script-search", {
