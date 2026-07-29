@@ -287,8 +287,12 @@ function jsonSchemaToTypeBox(schema: Record<string, unknown>): TSchema {
   return Type.Unsafe(schema);
 }
 
-/** Convert MCP tools to pi-mono ToolDefinition objects */
-function mcpToolsToDefinitions(
+/**
+ * Convert MCP tools to pi-mono ToolDefinition objects.
+ * Exported for the isError-propagation conformance test — pi-agent-core
+ * derives a tool result's error flag solely from execute() throwing.
+ */
+export function mcpToolsToDefinitions(
   mcpClient: McpHttpClient,
   tools: Array<{ name: string; description?: string; inputSchema: Record<string, unknown> }>,
 ): ToolDefinition[] {
