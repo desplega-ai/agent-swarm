@@ -1,9 +1,31 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getKv } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
-import { KvEntrySchema, KvKeySchema, KvNamespaceSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "@/types";
 import { resolveNamespace } from "./resolve-namespace";
+
+// Loose, format-pin-free mirror of KvEntrySchema for MCP output validation.
+const kvEntryOutputSchema = z.looseObject({
+  namespace: z.string().optional(),
+  key: z.string().optional(),
+  value: z.unknown().optional(),
+  valueType: KvValueTypeSchema.optional(),
+  expiresAt: z.number().int().nullable().optional(),
+  createdAt: z.number().int().optional(),
+  updatedAt: z.number().int().optional(),
+});
+
+function renderKvEntry(entry: {
+  value: unknown;
+  valueType: string;
+  expiresAt: number | null;
+}): string {
+  const valueText =
+    typeof entry.value === "string" ? entry.value : JSON.stringify(entry.value, null, 2);
+  const expiry = entry.expiresAt ? ` (expires ${new Date(entry.expiresAt).toISOString()})` : "";
+  return `value (${entry.valueType}): ${valueText}${expiry}`;
+}
 
 export const registerKvGetTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -20,45 +42,32 @@ export const registerKvGetTool = (server: McpServer) => {
           "Optional explicit namespace. Defaults to the caller's contextKey.",
         ),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
         namespace: z.string().optional(),
-        entry: KvEntrySchema.nullable().optional(),
+        entry: kvEntryOutputSchema.nullable().optional(),
       }),
     },
     async ({ key, namespace }, requestInfo) => {
       const resolved = resolveNamespace(namespace, requestInfo);
       if ("error" in resolved) {
-        return {
-          content: [{ type: "text", text: resolved.error }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: resolved.error,
-          },
-        };
+        return toolErr(resolved.error, { data: { yourAgentId: requestInfo.agentId } });
       }
 
       const entry = getKv(resolved.namespace, key);
-      return {
-        content: [
-          {
-            type: "text",
-            text: entry
-              ? `Found "${key}" in "${resolved.namespace}".`
-              : `No entry for "${key}" in "${resolved.namespace}".`,
+      return toolOk(
+        entry
+          ? `Found "${key}" in "${resolved.namespace}".`
+          : `No entry for "${key}" in "${resolved.namespace}".`,
+        {
+          details: entry ? renderKvEntry(entry) : undefined,
+          data: {
+            yourAgentId: requestInfo.agentId,
+            namespace: resolved.namespace,
+            entry: entry ?? null,
           },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          success: true,
-          message: entry ? "ok" : "not found",
-          namespace: resolved.namespace,
-          entry: entry ?? null,
         },
-      };
+      );
     },
   );
 };

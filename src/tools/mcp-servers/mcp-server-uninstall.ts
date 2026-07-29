@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, uninstallMcpServer } from "@/be/db";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerMcpServerUninstallTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -16,18 +16,13 @@ export const registerMcpServerUninstallTool = (server: McpServer) => {
         mcpServerId: z.string().describe("ID of the MCP server to uninstall"),
         agentId: z.string().optional().describe("Target agent (default: calling agent)"),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
       }),
     },
     async (args, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       const targetAgentId = args.agentId ?? requestInfo.agentId;
@@ -45,38 +40,17 @@ export const registerMcpServerUninstallTool = (server: McpServer) => {
           source: "mcp",
         });
         if (!decision.allow) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Only leads can uninstall MCP servers for other agents.",
-              },
-            ],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Permission denied.",
-            },
-          };
+          return toolErr("Only leads can uninstall MCP servers for other agents.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
       }
 
       const removed = uninstallMcpServer(targetAgentId, args.mcpServerId);
-      return {
-        content: [
-          {
-            type: "text",
-            text: removed ? "MCP server uninstalled." : "MCP server was not installed.",
-          },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          success: removed,
-          message: removed
-            ? "MCP server uninstalled."
-            : "MCP server was not installed for this agent.",
-        },
-      };
+      const data = { yourAgentId: requestInfo.agentId };
+      return removed
+        ? toolOk("MCP server uninstalled.", { data })
+        : toolErr("MCP server was not installed for this agent.", { data });
     },
   );
 };

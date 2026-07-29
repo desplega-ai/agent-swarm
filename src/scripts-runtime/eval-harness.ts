@@ -17,7 +17,16 @@ type StructuredError = {
   userFrames: StackFrame[];
   userScriptLine?: number;
   userScriptColumn?: number;
+  ctxSignatureHint?: string;
 };
+
+// Matches runtime errors that look like a swapped/misused (args, ctx) signature,
+// e.g. destructuring `ctx.api`/`ctx.kv`/`ctx.fetchJson`/`ctx.log` off `undefined`/`null`
+// because the script read them off `args` instead.
+const CTX_UNDEFINED_ACCESS_RE = /cannot read propert(?:y|ies)(?: .*)? of (?:undefined|null)/i;
+const CTX_MEMBER_RE = /\b(api|kv|fetchJson|log)\b/i;
+const CTX_SIGNATURE_HINT =
+  "Hint: swarm scripts export default async function (args, ctx) — args comes first, ctx second.";
 
 function buildStructuredError(err: unknown, userModulePath: string): StructuredError {
   const errObj = err instanceof Error ? err : new Error(String(err));
@@ -48,6 +57,11 @@ function buildStructuredError(err: unknown, userModulePath: string): StructuredE
     }
   }
 
+  const ctxSignatureHint =
+    CTX_UNDEFINED_ACCESS_RE.test(message) && CTX_MEMBER_RE.test(message)
+      ? CTX_SIGNATURE_HINT
+      : undefined;
+
   return {
     name,
     message,
@@ -55,6 +69,7 @@ function buildStructuredError(err: unknown, userModulePath: string): StructuredE
     userFrames,
     userScriptLine: userFrames[0]?.line,
     userScriptColumn: userFrames[0]?.column,
+    ...(ctxSignatureHint ? { ctxSignatureHint } : {}),
   };
 }
 
@@ -103,7 +118,9 @@ try {
 
   const mod = await import(userModulePath);
   if (typeof mod.default !== "function") {
-    throw new Error("Swarm script must export a default function");
+    throw new Error(
+      "Swarm script must export a default function. Script must export default async function (args, ctx) — args FIRST, ctx second.",
+    );
   }
 
   let validatedArgs = parsedArgs;

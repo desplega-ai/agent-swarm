@@ -1,5 +1,4 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
 import {
   getLogsByTaskIdChronological,
@@ -8,28 +7,162 @@ import {
   getUserById,
 } from "@/be/db";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
-import { createToolRegistrar } from "@/tools/utils";
-import { AgentLogSchema, AgentTaskSchema, TaskAttachmentSchema } from "@/types";
+import {
+  createToolRegistrar,
+  type SwarmToolResult,
+  swarmToolOutputSchema,
+  toolErr,
+  toolOk,
+} from "@/tools/utils";
+import { AgentTaskStatusSchema } from "@/types";
 
 export const getTaskDetailsInputSchema = z.object({
   taskId: z.uuid().describe("The ID of the task to get details for."),
 });
 
-export const getTaskDetailsOutputSchema = z.object({
+// Loosened, output-only mirror of FollowUpConfigSchema / RoutingAffinitySchema
+// (both plain z.object) and AgentTaskSchema / AgentLogSchema / TaskAttachmentSchema
+// (which pin id/timestamp fields to z.uuid()/z.iso.datetime()). Output schemas
+// must be all-optional z.looseObject with plain z.string() for those fields —
+// a UUID/datetime constraint here fails MCP output validation after the write
+// already applied (the -32602-after-write trap for slug-ID agents). The
+// strict schemas in src/types.ts stay untouched: they're shared with runtime
+// parsing (AgentTaskSchema.parse) elsewhere and covered by their own tests.
+const looseFollowUpConfigSchema = z.looseObject({
+  disabled: z.boolean().optional(),
+  onCompleted: z.string().optional(),
+  onFailed: z.string().optional(),
+});
+
+const looseRoutingAffinitySchema = z.looseObject({
+  sourceAgentId: z.string().optional(),
+  role: z.string().optional(),
+  harnessProvider: z.string().optional(),
+  capabilities: z.array(z.string()).optional(),
+});
+
+export const looseAgentTaskOutputSchema = z.looseObject({
+  id: z.string().optional(),
+  key: z.string().optional(),
+  agentId: z.string().nullable().optional(),
+  creatorAgentId: z.string().optional(),
+  task: z.string().optional(),
+  title: z.string().optional(),
+  status: AgentTaskStatusSchema.optional(),
+  source: z.string().optional(),
+  taskType: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  priority: z.number().optional(),
+  dependsOn: z.array(z.string()).optional(),
+  offeredTo: z.string().optional(),
+  offeredAt: z.string().optional(),
+  acceptedAt: z.string().optional(),
+  rejectionReason: z.string().optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+  finishedAt: z.string().optional(),
+  notifiedAt: z.string().optional(),
+  failureReason: z.string().optional(),
+  output: z.string().optional(),
+  progress: z.string().optional(),
+  slackChannelId: z.string().optional(),
+  slackThreadTs: z.string().optional(),
+  slackUserId: z.string().optional(),
+  slackReplySent: z.boolean().optional(),
+  slackProgressMessageTs: z.string().optional(),
+  slackTreeRootMessageTs: z.string().optional(),
+  vcsProvider: z.string().optional(),
+  vcsRepo: z.string().optional(),
+  vcsEventType: z.string().optional(),
+  vcsNumber: z.number().optional(),
+  vcsCommentId: z.number().optional(),
+  vcsAuthor: z.string().optional(),
+  vcsUrl: z.string().optional(),
+  vcsInstallationId: z.number().optional(),
+  vcsNodeId: z.string().optional(),
+  agentmailInboxId: z.string().optional(),
+  agentmailMessageId: z.string().optional(),
+  agentmailThreadId: z.string().optional(),
+  mentionMessageId: z.string().optional(),
+  mentionChannelId: z.string().optional(),
+  dir: z.string().optional(),
+  parentTaskId: z.string().optional(),
+  claudeSessionId: z.string().optional(),
+  model: z.string().optional(),
+  modelTier: z.string().optional(),
+  effort: z.string().optional(),
+  scheduleId: z.string().optional(),
+  workflowRunId: z.string().nullable().optional(),
+  workflowRunStepId: z.string().nullable().optional(),
+  contextKey: z.string().optional(),
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
+  followUpConfig: looseFollowUpConfigSchema.optional(),
+  wasPaused: z.boolean().optional(),
+  compactionCount: z.number().optional(),
+  peakContextPercent: z.number().optional(),
+  peakContextTokens: z.number().optional(),
+  contextWindowSize: z.number().optional(),
+  credentialKeySuffix: z.string().optional(),
+  credentialKeyType: z.string().optional(),
+  requestedByUserId: z.string().optional(),
+  swarmVersion: z.string().optional(),
+  provider: z.string().optional(),
+  providerMeta: z.record(z.string(), z.unknown()).optional(),
+  harnessVariant: z.string().optional(),
+  harnessVariantMeta: z.record(z.string(), z.unknown()).optional(),
+  totalCostUsd: z.number().optional(),
+  routingAffinity: looseRoutingAffinitySchema.optional(),
+});
+
+const looseAgentLogSchema = z.looseObject({
+  id: z.string().optional(),
+  eventType: z.string().optional(),
+  agentId: z.string().optional(),
+  taskId: z.string().optional(),
+  oldValue: z.string().optional(),
+  newValue: z.string().optional(),
+  metadata: z.string().optional(),
+  createdAt: z.string().optional(),
+});
+
+const looseTaskAttachmentSchema = z.looseObject({
+  id: z.string().optional(),
+  taskId: z.string().optional(),
+  agentId: z.string().nullable().optional(),
+  name: z.string().optional(),
+  kind: z.string().optional(),
+  url: z.string().optional(),
+  path: z.string().optional(),
+  pageId: z.string().optional(),
+  providerId: z.string().optional(),
+  providerKey: z.string().optional(),
+  capabilities: z.record(z.string(), z.unknown()).optional(),
+  orgId: z.string().optional(),
+  driveId: z.string().optional(),
+  mimeType: z.string().optional(),
+  sizeBytes: z.number().optional(),
+  sha256: z.string().optional(),
+  intent: z.string().optional(),
+  description: z.string().optional(),
+  isPrimary: z.boolean().optional(),
+  createdAt: z.string().optional(),
+  createdBy: z.string().optional(),
+  updatedBy: z.string().optional(),
+});
+
+export const getTaskDetailsOutputSchema = swarmToolOutputSchema({
   // Plain string, NOT .uuid(): agents may join with custom IDs (AGENT_ID env /
   // join-swarm agentId), and a UUID constraint here makes the response fail MCP
   // output validation after the handler already ran.
   yourAgentId: z.string().optional(),
-  success: z.boolean(),
-  message: z.string(),
-  task: AgentTaskSchema.optional(),
+  task: looseAgentTaskOutputSchema.optional(),
   requestedBy: z
-    .object({ name: z.string(), email: z.string().optional() })
+    .looseObject({ name: z.string().optional(), email: z.string().optional() })
     .optional()
     .describe("Resolved user who requested this task"),
-  logs: z.array(AgentLogSchema).optional(),
+  logs: z.array(looseAgentLogSchema).optional(),
   attachments: z
-    .array(TaskAttachmentSchema)
+    .array(looseTaskAttachmentSchema)
     .optional()
     .describe(
       "Pointer-based artifacts attached to this task via store-progress, ordered by created_at.",
@@ -41,19 +174,12 @@ type GetTaskDetailsArgs = z.infer<typeof getTaskDetailsInputSchema>;
 export async function getTaskDetailsHandler(
   ctx: ToolCtx,
   { taskId }: GetTaskDetailsArgs,
-): Promise<CallToolResult> {
+): Promise<SwarmToolResult> {
   const task = getTaskById(taskId);
   const agentId = ctx.kind === "owner" ? ctx.agentId : undefined;
 
   if (!task) {
-    return {
-      content: [{ type: "text", text: `Task with ID "${taskId}" not found.` }],
-      structuredContent: {
-        yourAgentId: agentId,
-        success: false,
-        message: `Task with ID "${taskId}" not found.`,
-      },
-    };
+    return toolErr(`Task with ID "${taskId}" not found.`, { data: { yourAgentId: agentId } });
   }
 
   const ownershipError = assertOwnsTask(ctx, task, "task.read.own");
@@ -68,26 +194,18 @@ export async function getTaskDetailsHandler(
     ? { name: requestedByUser.name, email: requestedByUser.email }
     : undefined;
 
-  const structuredContent = {
+  const data = {
     yourAgentId: agentId,
-    success: true,
-    message: `Task "${taskId}" details retrieved.`,
     task,
     requestedBy,
     logs,
     attachments,
   };
 
-  return {
-    content: [
-      { type: "text", text: `Task "${taskId}" details retrieved.` },
-      {
-        type: "text",
-        text: JSON.stringify(structuredContent),
-      },
-    ],
-    structuredContent,
-  };
+  return toolOk(`Task "${taskId}" (${task.status}) details retrieved.`, {
+    details: JSON.stringify(data),
+    data,
+  });
 }
 
 export const registerGetTaskDetailsTool = (server: McpServer) => {

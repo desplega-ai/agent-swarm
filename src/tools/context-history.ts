@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getContextVersionHistory } from "@/be/db";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import type { VersionableField } from "@/types";
 
 export const registerContextHistoryTool = (server: McpServer) => {
@@ -31,21 +31,19 @@ export const registerContextHistoryTool = (server: McpServer) => {
           .optional()
           .describe("Max versions to return (default: 10)."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
         versions: z
           .array(
-            z.object({
-              id: z.string().uuid(),
-              field: z.string(),
-              version: z.number(),
-              changeSource: z.string(),
-              changedByAgentId: z.string().nullable(),
-              changeReason: z.string().nullable(),
-              contentLength: z.number(),
-              createdAt: z.string(),
+            z.looseObject({
+              id: z.string().optional(),
+              field: z.string().optional(),
+              version: z.number().optional(),
+              changeSource: z.string().optional(),
+              changedByAgentId: z.string().nullable().optional(),
+              changeReason: z.string().nullable().optional(),
+              contentLength: z.number().optional(),
+              createdAt: z.string().optional(),
             }),
           )
           .optional(),
@@ -53,13 +51,7 @@ export const registerContextHistoryTool = (server: McpServer) => {
     },
     async ({ agentId, field, limit }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       const targetAgentId = agentId ?? requestInfo.agentId;
@@ -67,14 +59,7 @@ export const registerContextHistoryTool = (server: McpServer) => {
       // Verify target agent exists
       const targetAgent = getAgentById(targetAgentId);
       if (!targetAgent) {
-        return {
-          content: [{ type: "text", text: "Agent not found." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Agent not found.",
-          },
-        };
+        return toolErr("Agent not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
       // Access control: agents can see their own history, lead can see any
@@ -91,19 +76,10 @@ export const registerContextHistoryTool = (server: McpServer) => {
           source: "mcp",
         });
         if (!decision.allow) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Permission denied. Only the lead can view other agents' context history.",
-              },
-            ],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Permission denied. Only the lead can view other agents' context history.",
-            },
-          };
+          return toolErr(
+            "Permission denied. Only the lead can view other agents' context history.",
+            { data: { yourAgentId: requestInfo.agentId } },
+          );
         }
       }
 
@@ -124,7 +100,7 @@ export const registerContextHistoryTool = (server: McpServer) => {
         createdAt: v.createdAt,
       }));
 
-      const text =
+      const details =
         versions.length === 0
           ? `No context versions found for agent ${targetAgentId}${field ? ` field ${field}` : ""}.`
           : versionSummaries
@@ -134,15 +110,10 @@ export const registerContextHistoryTool = (server: McpServer) => {
               )
               .join("\n");
 
-      return {
-        content: [{ type: "text", text }],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          success: true,
-          message: `Found ${versions.length} version(s).`,
-          versions: versionSummaries,
-        },
-      };
+      return toolOk(`Found ${versions.length} version(s).`, {
+        details,
+        data: { yourAgentId: requestInfo.agentId, versions: versionSummaries },
+      });
     },
   );
 };

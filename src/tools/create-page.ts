@@ -23,7 +23,7 @@ import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { createPage, getPage, getPageBySlug, getPageVersions, updatePage } from "@/be/db";
 import { snapshotPage } from "@/pages/version";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AssetKeySchema, PageAuthModeSchema, PageContentTypeSchema } from "@/types";
 import { getAppUrl, getPublicMcpBaseUrl } from "@/utils/constants";
 
@@ -108,31 +108,19 @@ export const registerCreatePageTool = (server: McpServer) => {
             "Declared credential needs for JSON pages (renderer ignores for v1 — reserved for follow-up).",
           ),
       }),
-      outputSchema: z.object({
-        yourAgentId: z.string(),
-        id: z.string(),
+      outputSchema: swarmToolOutputSchema({
+        yourAgentId: z.string().optional(),
+        id: z.string().optional(),
         key: AssetKeySchema.optional(),
-        version: z.number(),
-        app_url: z.string(),
-        api_url: z.string(),
+        version: z.number().optional(),
+        app_url: z.string().optional(),
+        api_url: z.string().optional(),
       }),
     },
     async (input, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         const msg = "Agent ID required. Set the X-Agent-ID header on the MCP request.";
-        return {
-          content: [{ type: "text", text: msg }],
-          structuredContent: {
-            yourAgentId: "",
-            id: "",
-            version: 0,
-            app_url: "",
-            api_url: "",
-            success: false,
-            message: msg,
-          },
-          isError: true,
-        };
+        return toolErr(msg);
       }
 
       const slug = input.slug ?? slugify(input.title);
@@ -162,19 +150,9 @@ export const registerCreatePageTool = (server: McpServer) => {
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: msg }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            id: existing?.id ?? "",
-            version: 0,
-            app_url: "",
-            api_url: "",
-            success: false,
-            message: msg,
-          },
-          isError: true,
-        };
+        return toolErr(msg, {
+          data: { yourAgentId: requestInfo.agentId, id: existing?.id ?? "" },
+        });
       }
 
       let id: string;
@@ -197,19 +175,9 @@ export const registerCreatePageTool = (server: McpServer) => {
         });
         if (!updated) {
           const msg = `Failed to update existing page ${existing.id}.`;
-          return {
-            content: [{ type: "text", text: msg }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              id: existing.id,
-              version: 0,
-              app_url: "",
-              api_url: "",
-              success: false,
-              message: msg,
-            },
-            isError: true,
-          };
+          return toolErr(msg, {
+            data: { yourAgentId: requestInfo.agentId, id: existing.id },
+          });
         }
         id = updated.id;
       } else {
@@ -230,19 +198,7 @@ export const registerCreatePageTool = (server: McpServer) => {
         } catch (err) {
           const detail = err instanceof Error ? err.message : String(err);
           const msg = `Failed to create page: ${detail}`;
-          return {
-            content: [{ type: "text", text: msg }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              id: "",
-              version: 0,
-              app_url: "",
-              api_url: "",
-              success: false,
-              message: msg,
-            },
-            isError: true,
-          };
+          return toolErr(msg, { data: { yourAgentId: requestInfo.agentId, id: "" } });
         }
       }
 
@@ -251,33 +207,16 @@ export const registerCreatePageTool = (server: McpServer) => {
       const fresh = getPage(id);
       if (!fresh) {
         const msg = `Page ${id} disappeared between write and read.`;
-        return {
-          content: [{ type: "text", text: msg }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            id,
-            version: 0,
-            app_url: "",
-            api_url: "",
-            success: false,
-            message: msg,
-          },
-          isError: true,
-        };
+        return toolErr(msg, { data: { yourAgentId: requestInfo.agentId, id } });
       }
 
       const apiUrl = `${getApiBaseUrl()}/p/${id}`;
       const appUrl = `${getAppBaseUrl()}/pages/${id}`;
       const version = pageEditCounter(id);
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Page "${input.title}" saved (slug=${finalSlug}, version=${version}).\n  API: ${apiUrl}\n  App: ${appUrl}`,
-          },
-        ],
-        structuredContent: {
+      return toolOk(`Page "${input.title}" saved (slug=${finalSlug}, version=${version}).`, {
+        details: `API: ${apiUrl}\n  App: ${appUrl}`,
+        data: {
           yourAgentId: requestInfo.agentId,
           id,
           key: fresh.key,
@@ -285,7 +224,7 @@ export const registerCreatePageTool = (server: McpServer) => {
           app_url: appUrl,
           api_url: apiUrl,
         },
-      };
+      });
     },
   );
 };

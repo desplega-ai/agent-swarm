@@ -14,6 +14,14 @@ import "../prompts/session-templates";
 
 const TEST_DB_PATH = "./test-prompt-session.sqlite";
 
+/** Heading of `system.agent.script_authoring_contract` — used for dedupe checks */
+const AUTHORING_CONTRACT_MARKER = "### Script Authoring Contract";
+
+/** How many times the authoring contract appears in a rendered prompt */
+function countAuthoringContract(text: string): number {
+  return text.split(AUTHORING_CONTRACT_MARKER).length - 1;
+}
+
 /**
  * Re-register session templates if they've been cleared by other tests.
  */
@@ -60,7 +68,7 @@ describe("Session templates — registration", () => {
     await ensureTemplatesRegistered();
   });
 
-  test("all 17 system templates are registered", () => {
+  test("all 18 system templates are registered", () => {
     const systemTemplates = [
       "system.agent.role",
       "system.agent.register",
@@ -72,6 +80,7 @@ describe("Session templates — registration", () => {
       "system.agent.filesystem",
       "system.agent.agent_fs",
       "system.agent.self_awareness",
+      "system.agent.script_authoring_contract",
       "system.agent.script_rubric",
       "system.agent.context_mode",
       "system.agent.seed_scripts",
@@ -89,8 +98,13 @@ describe("Session templates — registration", () => {
     }
   });
 
-  test("2 session composite templates are registered", () => {
-    const sessionTemplates = ["system.session.lead", "system.session.worker"];
+  test("session composite templates are registered", () => {
+    const sessionTemplates = [
+      "system.session.lead",
+      "system.session.worker",
+      "system.session.worker.pi",
+      "system.session.lead.pi",
+    ];
 
     for (const eventType of sessionTemplates) {
       const def = getTemplateDefinition(eventType);
@@ -99,14 +113,17 @@ describe("Session templates — registration", () => {
     }
   });
 
-  test("total of 27 session/system templates registered", () => {
+  test("total of 30 session/system templates registered", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
     // 26 = the original 19 + `system.session.worker.pi` + `system.agent.seed_scripts`
     // + `system.agent.script_rubric` + `system.agent.scripts_only_mode`
     // + `system.agent.scripts_only_mode.slack` + `system.agent.messaging`
     // + `system.agent.steering`.
-    expect(sessionSystem.length).toBe(27);
+    // 29 = 27 + `system.agent.script_authoring_contract` + `system.session.lead.pi`.
+    // 30 = 29 + `system.agent.scheduling` (split out of context_mode so the
+    // pi composites keep the scheduling rules without the ctx_* tool block).
+    expect(sessionSystem.length).toBe(30);
   });
 });
 
@@ -197,6 +214,31 @@ describe("Session templates — individual resolution", () => {
     expect(result.text).toContain("context-mode");
     expect(result.text).toContain("batch_execute");
     expect(result.text).toContain("Agent Scripts");
+  });
+
+  test("system.agent.script_authoring_contract states the call convention and secret rules", () => {
+    const result = resolveTemplate("system.agent.script_authoring_contract", {});
+    expect(result.skipped).toBe(false);
+    expect(result.text).toContain("`args` FIRST, `ctx` SECOND");
+    expect(result.text).toContain("export default async function (args");
+    expect(result.text).toContain("export const argsSchema");
+    expect(result.text).toContain("ctx.swarm.config");
+    expect(result.text).toContain("ctx.api.<slug>");
+    expect(result.text).toContain("ctx.stdlib");
+    expect(result.text).toContain("ctx.logger");
+    expect(result.text).toContain("[REDACTED:<CONFIG_KEY>]");
+    expect(result.text).toContain("includeSecrets: true");
+    expect(result.text).toContain("taskTemplate");
+  });
+
+  test("system.agent.script_rubric leads with the authoring contract", () => {
+    const result = resolveTemplate("system.agent.script_rubric", {});
+    expect(result.unresolved.length).toBe(0);
+    expect(countAuthoringContract(result.text)).toBe(1);
+    // Contract renders before the rubric body
+    expect(result.text.indexOf(AUTHORING_CONTRACT_MARKER)).toBeLessThan(
+      result.text.indexOf("### Agent Scripts"),
+    );
   });
 
   test("system.agent.script_rubric contains script decision guardrails", () => {
@@ -325,6 +367,42 @@ describe("Session templates — composite resolution", () => {
     expect(result.text).not.toContain("localtunnel");
   });
 
+  test("authoring contract renders exactly once in every script-carrying composite", () => {
+    const composites: [string, string][] = [
+      ["system.session.lead", "lead"],
+      ["system.session.worker", "worker"],
+      ["system.session.worker.pi", "worker"],
+      ["system.session.lead.pi", "lead"],
+    ];
+
+    for (const [eventType, role] of composites) {
+      const result = resolveTemplate(eventType, { role, agentId: "dedupe-test" });
+      expect(result.unresolved.length).toBe(0);
+      expect(countAuthoringContract(result.text)).toBe(1);
+    }
+  });
+
+  test("system.session.lead.pi omits the context-mode block but keeps lead + script guidance", () => {
+    const result = resolveTemplate("system.session.lead.pi", {
+      role: "lead",
+      agentId: "pi-lead-001",
+    });
+    expect(result.skipped).toBe(false);
+    expect(result.unresolved.length).toBe(0);
+
+    // No context_mode block — none of its ctx_* tool advertising
+    expect(result.text).not.toContain("Context Window Management");
+    expect(result.text).not.toContain("batch_execute");
+    expect(result.text).not.toContain("execute_file");
+    expect(result.text).not.toContain("context-mode` MCP tools");
+
+    // Still a lead, still gets the script guidance
+    expect(result.text).toContain("CRITICAL: You are a coordinator");
+    expect(result.text).toContain("Agent Scripts");
+    expect(result.text).toContain(AUTHORING_CONTRACT_MARKER);
+    expect(result.text).toContain("Pre-built Seed Scripts");
+  });
+
   test("lead and worker composites differ only in lead vs worker section", () => {
     const leadResult = resolveTemplate("system.session.lead", {
       role: "lead",
@@ -403,6 +481,58 @@ describe("Session templates — getBasePrompt integration", () => {
 
     // Should NOT have worker content
     expect(result).not.toContain("task-action");
+  });
+
+  test("authoring contract renders exactly once in the scripts-only prompt", async () => {
+    const { getBasePrompt } = await import("../prompts/base-prompt");
+    for (const role of ["worker", "lead"] as const) {
+      const result = await getBasePrompt({
+        role,
+        agentId: "scripts-only-dedupe",
+        swarmUrl: "swarm.test.com",
+        scriptsOnly: true,
+      });
+
+      expect(result).toContain("Code-Mode: script tools ONLY");
+      expect(countAuthoringContract(result)).toBe(1);
+    }
+  });
+
+  test("getBasePrompt renders the authoring contract once per provider/role combo", async () => {
+    const { getBasePrompt } = await import("../prompts/base-prompt");
+    const combos = [
+      { role: "worker", provider: undefined },
+      { role: "lead", provider: undefined },
+      { role: "worker", provider: "pi" as const },
+      { role: "lead", provider: "pi" as const },
+    ];
+
+    for (const combo of combos) {
+      const result = await getBasePrompt({
+        role: combo.role,
+        agentId: "contract-once",
+        swarmUrl: "swarm.test.com",
+        provider: combo.provider,
+      });
+      expect(countAuthoringContract(result)).toBe(1);
+    }
+  });
+
+  test("getBasePrompt uses the pi lead composite (no context-mode) for lead + pi", async () => {
+    const { getBasePrompt } = await import("../prompts/base-prompt");
+    const result = await getBasePrompt({
+      role: "lead",
+      agentId: "integration-test-pi-lead",
+      swarmUrl: "swarm.test.com",
+      provider: "pi",
+    });
+
+    expect(result).toContain("CRITICAL: You are a coordinator");
+    expect(result).toContain("Agent Scripts");
+    expect(result).toContain("Pre-built Seed Scripts");
+    expect(result).not.toContain("Context Window Management");
+    expect(result).not.toContain("batch_execute");
+    expect(result).not.toContain("execute_file");
   });
 
   test("getBasePrompt includes script guidance for pi worker without context-mode tool list", async () => {

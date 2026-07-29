@@ -433,10 +433,65 @@ Use this to debug issues and propose improvements to your own infrastructure.
   category: "system",
 });
 
+/**
+ * Script authoring contract — the call convention every script must follow.
+ *
+ * Included at the top of `system.agent.script_rubric` so it reaches every
+ * composite that carries the rubric (lead, worker, worker.pi, lead.pi) without
+ * a per-composite edit. The scripts-only composite path renders after one of
+ * those composites, so it must NOT restate the signature (duplicate guidance).
+ *
+ * Facts here are derived from `src/scripts-runtime/ctx.ts` (+ the generated
+ * `types/swarm-sdk.d.ts`); do not add ctx members that don't exist.
+ */
+registerTemplate({
+  eventType: "system.agent.script_authoring_contract",
+  header: "",
+  defaultBody: `
+### Script Authoring Contract (read BEFORE writing any script)
+
+**Entry point — \`args\` FIRST, \`ctx\` SECOND.** A one-parameter \`function (ctx)\` still typechecks, but at runtime that parameter receives \`args\`, so every \`ctx.*\` access throws. This is the single most common cause of failed script runs.
+
+\`\`\`ts
+import * as z from "zod";
+
+export const argsSchema = z.object({ taskId: z.string(), limit: z.number().optional() });
+
+export default async function (args: z.infer<typeof argsSchema>, ctx) {
+  const res = await ctx.swarm.task_get({ taskId: args.taskId });
+  const task = res?.data ?? res;
+  return { title: task?.title };
+}
+\`\`\`
+
+**What \`ctx\` actually holds for inline/named scripts (\`script-run\` / \`script-upsert\`) — nothing else:**
+- \`ctx.swarm.*\` — the swarm SDK: \`task_get\`, \`task_send\`, \`task_storeProgress\`, \`task_action\`, \`task_list\`, \`message_post\`, \`message_read\`, \`slack_reply\`, \`memory_search\`, \`kv_get\`/\`kv_set\`/\`kv_del\`/\`kv_incr\`/\`kv_list\`, \`swarm_get\`, \`agent_info\`, and more. Responses are usually wrapped — prefer \`res?.data ?? res\`.
+- \`ctx.swarm.config\` — \`apiKey\`, \`agentId\`, \`mcpBaseUrl\`, plus \`ctx.swarm.config.get("KEY")\` for user values. All are \`Redacted\` wrappers: they stringify to \`<redacted>\`, and you must never unwrap them into a return value, log line, or request body you build by hand.
+- \`ctx.api.<slug>\` / \`ctx.mcp.<slug>\` — typed clients for connections the lead registered (\`ctx.api.<slug>.<operationId>(...)\`, \`ctx.api.<slug>.graphql(query, vars)\`, \`ctx.mcp.<slug>.<toolName>(args)\`). They exist ONLY for registered connections — introspect with \`Object.keys(ctx.api ?? {})\` / \`Object.keys(ctx.mcp ?? {})\` before assuming one is there.
+- \`ctx.stdlib\` — \`fetch\`, \`fetchJson\` (retries + 30s timeout), \`grep\`, \`glob\`, \`table\`, \`Redacted\`.
+- \`ctx.logger\` — \`log\` / \`warn\` / \`error\`.
+
+There is NO ambient task context: \`taskId\` must arrive through \`args\`. \`agentId\` IS propagated automatically (\`X-Agent-ID\` header).
+
+**Durable workflow scripts (\`launch-script-run\`) get a DIFFERENT \`ctx\`:** \`ctx.run\` (\`id\`/\`agentId\`/\`args\`), \`ctx.step.rawLlm(label, config)\` / \`ctx.step.agentTask(label, config)\` / \`ctx.step.swarmScript(label, config)\` (durable, journaled steps), plus \`ctx.swarm.*\`, \`ctx.stdlib\`, \`ctx.logger\` as above. Durable runs have NO \`ctx.api\`/\`ctx.mcp\` connection clients and no \`ctx.swarm.config\` — call connections from an inner script via \`ctx.step.swarmScript\` instead.
+
+**\`argsSchema\` convention:** export a Zod schema named \`argsSchema\` from every named script. \`script-upsert\` converts it to JSON Schema, so callers, schedules, and workflows can see the script's input contract. Without it the script's args are undocumented.
+
+**Secrets — never paste a raw value:**
+- Prefer a registered connection (\`ctx.api.<slug>\` / \`ctx.mcp.<slug>\`): its credentials are attached server-side and never enter the script.
+- Otherwise put the placeholder \`[REDACTED:<CONFIG_KEY>]\` in the header or query value (e.g. \`Authorization: Bearer [REDACTED:GITHUB_TOKEN]\`). The runtime substitutes the real value at egress, and only for that credential binding's allowed hosts.
+- NEVER bake a raw secret — or the output of \`get-config\` with \`includeSecrets: true\` — into script source, script args, a schedule's \`taskTemplate\`, or a task description. Those are stored as plaintext and replayed on every run. Use a connection or a credential binding instead.
+`,
+  variables: [],
+  category: "system",
+});
+
 registerTemplate({
   eventType: "system.agent.script_rubric",
   header: "",
   defaultBody: `
+{{@template[system.agent.script_authoring_contract]}}
+
 ### Agent Scripts — for bulk, repetitive, or data-heavy work
 
 Use **scripts** (\`script-upsert\` + \`script-run\`) when a task involves repetitive SDK calls, large data processing, or deterministic multi-step pipelines. Scripts run out-of-process and return only their final result.
@@ -478,13 +533,7 @@ registerTemplate({
 
 This swarm runs in **scripts-only mode**. The ONLY swarm MCP tools available are the script tools: \`script-search\`, \`script-run\`, \`script-upsert\`, \`script-delete\`, \`script-query-types\`, \`launch-script-run\`, \`get-script-run\`, \`list-script-runs\` (your harness may expose them under a prefix, e.g. \`mcp__agent-swarm__script-run\` — use the exact registered tool id). They are already loaded. Named tools like \`store-progress\`, \`send-task\`, \`post-message\`, \`memory-search\` do NOT exist here — do not search for them.
 
-**Script entry signature (memorize — args FIRST, ctx SECOND):**
-
-\`\`\`ts
-export default async function (args: any, ctx: any) { /* ... */ }
-\`\`\`
-
-The full SDK is \`ctx.swarm.*\` — task lifecycle (\`task_get\`, \`task_send\`, \`task_storeProgress\`, \`task_action\`, \`task_list\`), messaging (\`message_post\`, \`message_read\`), Slack (\`slack_reply\`, \`slack_post\`, \`slack_read\`), memory, kv, swarm info (\`swarm_get\`, \`agent_info\`), and more. Responses are usually wrapped — prefer \`res?.data ?? res\`.
+The script authoring contract above (entry signature, \`ctx\` shape, secret handling) applies here unchanged. The full SDK is \`ctx.swarm.*\` — task lifecycle (\`task_get\`, \`task_send\`, \`task_storeProgress\`, \`task_action\`, \`task_list\`), messaging (\`message_post\`, \`message_read\`), Slack (\`slack_reply\`, \`slack_post\`, \`slack_read\`), memory, kv, swarm info (\`swarm_get\`, \`agent_info\`), and more. Responses are usually wrapped — prefer \`res?.data ?? res\`.
 
 **Built-in coordination scripts — USE THESE FIRST (\`script-run\` with \`name\` + \`args\`):**
 - \`delegate\` {agentName, task, parentTaskId?} → subtask for an agent by name; returns {taskId}
@@ -534,6 +583,18 @@ You have access to the \`context-mode\` MCP tools (\`batch_execute\`, \`execute\
 
 {{@template[system.agent.script_rubric]}}
 
+{{@template[system.agent.scheduling]}}
+`,
+  variables: [],
+  category: "system",
+});
+
+// Standalone so the pi composites (which drop `system.agent.context_mode` and
+// its ctx_* tool advertisement) can still include the scheduling rules.
+registerTemplate({
+  eventType: "system.agent.scheduling",
+  header: "",
+  defaultBody: `
 ### Scheduling — Pick the Right targetType
 
 When creating a schedule, match \`targetType\` to the work being fired:
@@ -806,8 +867,9 @@ registerTemplate({
 // Pi-specific worker composite. Identical to `system.session.worker` except it
 // omits only the `system.agent.context_mode` MCP-tool block — pi has no
 // context-mode MCP wiring yet, so advertising the `ctx_*` tools would point at
-// phantom tools. It still includes the shared script rubric and seed-script
-// guidance so pi sessions get the same bulk-work decision policy (DES-514).
+// phantom tools. It still includes the shared script rubric, scheduling rules,
+// and seed-script guidance so pi sessions get the same bulk-work decision
+// policy (DES-514).
 registerTemplate({
   eventType: "system.session.worker.pi",
   header: "",
@@ -818,6 +880,36 @@ registerTemplate({
 {{@template[system.agent.filesystem]}}
 {{@template[system.agent.self_awareness]}}
 {{@template[system.agent.script_rubric]}}
+{{@template[system.agent.scheduling]}}
+{{@template[system.agent.seed_scripts]}}
+
+{{@template[system.agent.system]}}
+{{@template[system.agent.share_urls]}}
+{{@template[system.agent.code_quality]}}`,
+  variables: [
+    { name: "role", description: "The agent's role" },
+    { name: "agentId", description: "The agent's unique identifier" },
+  ],
+  category: "session",
+});
+
+// Pi-specific lead composite. Identical to `system.session.lead` except it
+// omits only the `system.agent.context_mode` MCP-tool block — pi has no
+// context-mode MCP wiring, so a pi lead would otherwise be told about `ctx_*`
+// tools that don't exist. It still includes the shared script rubric (which
+// carries the script authoring contract), scheduling rules, and seed-script
+// guidance.
+registerTemplate({
+  eventType: "system.session.lead.pi",
+  header: "",
+  defaultBody: `{{@template[system.agent.role]}}
+
+{{@template[system.agent.register]}}
+{{@template[system.agent.lead]}}
+{{@template[system.agent.filesystem]}}
+{{@template[system.agent.self_awareness]}}
+{{@template[system.agent.script_rubric]}}
+{{@template[system.agent.scheduling]}}
 {{@template[system.agent.seed_scripts]}}
 
 {{@template[system.agent.system]}}

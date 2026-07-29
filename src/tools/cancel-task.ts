@@ -1,5 +1,4 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
 import {
   cancelTask,
@@ -10,41 +9,45 @@ import {
 } from "@/be/db";
 import { can } from "@/rbac";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
-import { createToolRegistrar } from "@/tools/utils";
+import {
+  createToolRegistrar,
+  type SwarmToolResult,
+  swarmToolOutputSchema,
+  toolErr,
+  toolOk,
+} from "@/tools/utils";
 import type { AgentTask } from "@/types";
-import { AgentTaskSchema } from "@/types";
+import { looseAgentTaskOutputSchema } from "./get-task-details";
 
 export const cancelTaskInputSchema = z.object({
   taskId: z.uuid().describe("The ID of the task to cancel."),
   reason: z.string().optional().describe("Reason for cancellation."),
 });
 
-export const cancelTaskOutputSchema = z.object({
+export const cancelTaskOutputSchema = swarmToolOutputSchema({
   yourAgentId: z.string().optional(),
-  success: z.boolean(),
-  message: z.string(),
-  task: AgentTaskSchema.optional(),
+  task: looseAgentTaskOutputSchema.optional(),
 });
 
 type CancelTaskArgs = z.infer<typeof cancelTaskInputSchema>;
 
+type CancelTaskTxnResult = {
+  success: boolean;
+  message: string;
+  task?: AgentTask;
+};
+
 export async function cancelTaskHandler(
   ctx: ToolCtx,
   { taskId, reason }: CancelTaskArgs,
-): Promise<CallToolResult> {
+): Promise<SwarmToolResult> {
   if (ctx.kind === "owner" && !ctx.agentId) {
-    return {
-      content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-      structuredContent: {
-        success: false,
-        message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-      },
-    };
+    return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
   }
 
   const agentId = ctx.kind === "owner" ? ctx.agentId : undefined;
 
-  const txn = getDb().transaction(() => {
+  const txn = getDb().transaction((): CancelTaskTxnResult | SwarmToolResult => {
     if (ctx.kind === "owner") {
       const ownerAgentId = ctx.agentId;
       if (!ownerAgentId) {
@@ -142,31 +145,18 @@ export async function cancelTaskHandler(
     };
   });
 
-  const result = txn() as
-    | {
-        success: boolean;
-        message: string;
-        task?: AgentTask;
-      }
-    | CallToolResult;
+  const result = txn();
 
-  if ("content" in result) return result;
+  // assertOwnsTask already returns a fully-formed SwarmToolResult — pass it through.
+  if ("ok" in result) return result;
 
-  const structuredContent = {
-    yourAgentId: agentId,
-    ...result,
-  };
-
-  return {
-    content: [
-      { type: "text", text: result.message },
-      {
-        type: "text",
-        text: JSON.stringify(structuredContent),
-      },
-    ],
-    structuredContent,
-  };
+  const data = { yourAgentId: agentId, task: result.task };
+  // Text channel must carry the cancelled task too — most harnesses never show
+  // the model structuredContent.
+  const details = result.task ? JSON.stringify(result.task, null, 2) : undefined;
+  return result.success
+    ? toolOk(result.message, { data, details })
+    : toolErr(result.message, { data, details });
 }
 
 export const registerCancelTaskTool = (server: McpServer) => {

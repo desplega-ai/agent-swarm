@@ -1,7 +1,24 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentMcpServers, listMcpServers } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+
+function renderServerLines(servers: unknown[]): string | undefined {
+  if (servers.length === 0) return undefined;
+  return servers
+    .map((entry) => {
+      const s = entry as {
+        name?: unknown;
+        transport?: unknown;
+        isEnabled?: unknown;
+        status?: unknown;
+      };
+      const enabled = s.isEnabled === false ? "disabled" : "enabled";
+      const status = typeof s.status === "string" && s.status ? `, status=${s.status}` : "";
+      return `- ${String(s.name ?? "?")} (${String(s.transport ?? "?")}, ${enabled}${status})`;
+    })
+    .join("\n");
+}
 
 export const registerMcpServerListTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -20,12 +37,10 @@ export const registerMcpServerListTool = (server: McpServer) => {
           .optional()
           .describe("Only show servers installed for the calling agent"),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        servers: z.array(z.any()),
-        total: z.number(),
+        servers: z.array(z.looseObject({})).optional(),
+        total: z.number().optional(),
       }),
     },
     async (args, requestInfo, _meta) => {
@@ -39,28 +54,15 @@ export const registerMcpServerListTool = (server: McpServer) => {
                 search: args.search,
               });
 
-        return {
-          content: [{ type: "text", text: `Found ${servers.length} MCP server(s).` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Found ${servers.length} MCP server(s).`,
-            servers,
-            total: servers.length,
-          },
-        };
+        return toolOk(`Found ${servers.length} MCP server(s).`, {
+          details: renderServerLines(servers),
+          data: { yourAgentId: requestInfo.agentId, servers, total: servers.length },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed: ${message}`,
-            servers: [],
-            total: 0,
-          },
-        };
+        return toolErr(`Failed: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId, servers: [], total: 0 },
+        });
       }
     },
   );

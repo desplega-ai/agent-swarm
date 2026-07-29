@@ -44,12 +44,22 @@ type RegisteredTool = {
   handler: (args: unknown, extra: unknown) => Promise<unknown>;
 };
 
+// New SwarmToolResult wire contract (src/tools/utils.ts finalizeSwarmToolResult):
+// content[0].text = message [+ details] [+ nudge]; structuredContent = the
+// script-tool `data` (here always `{ status, data }` per scriptToolOutputSchema)
+// spread with the envelope keys `success`/`message`/`details?`/`nudge?`;
+// isError = !ok. There is no top-level `error` field anymore — the honest
+// error text lives in `message` (and often `details`).
 type StructuredResult<T> = {
+  content: Array<{ type: string; text: string }>;
+  isError?: boolean;
   structuredContent: {
     success: boolean;
-    status: number;
+    message: string;
+    details?: string;
+    nudge?: string;
+    status?: number;
     data?: T;
-    error?: string;
   };
 };
 
@@ -205,13 +215,17 @@ describe("script_ MCP HTTP proxy tools", () => {
       { name: "times-seven", source, description: "Multiply", intent: "MCP E2E" },
       meta(workerId),
     )) as StructuredResult<{ name: string; version: number }>;
+    expect(upsert.isError).toBeFalsy();
     expect(upsert.structuredContent.success).toBe(true);
     expect(upsert.structuredContent.data?.name).toBe("times-seven");
+    expect(upsert.structuredContent.message).toContain("saved");
+    expect(upsert.content[0]?.text).toContain("saved");
 
     const search = (await tools.search.handler(
       { query: "seven", limit: 5 },
       meta(workerId),
     )) as StructuredResult<{ results: Array<{ name: string }> }>;
+    expect(search.isError).toBeFalsy();
     expect(search.structuredContent.success).toBe(true);
     expect(search.structuredContent.data?.results.map((item) => item.name)).toContain(
       "times-seven",
@@ -221,13 +235,18 @@ describe("script_ MCP HTTP proxy tools", () => {
       { name: "times-seven", args: { value: 6 }, intent: "MCP run" },
       meta(workerId),
     )) as StructuredResult<{ result: { result: number } }>;
+    expect(run.isError).toBeFalsy();
     expect(run.structuredContent.success).toBe(true);
     expect(run.structuredContent.data?.result).toEqual({ result: 42 });
+    // truncated is `{ stdout, stderr }` — both false here, so the text must not
+    // claim truncation (a bare truthy check on the object did exactly that).
+    expect(run.content[0]?.text).not.toContain("output truncated");
 
     const del = (await tools.del.handler(
       { name: "times-seven", scope: "agent" },
       meta(workerId),
     )) as StructuredResult<{ deleted: boolean }>;
+    expect(del.isError).toBeFalsy();
     expect(del.structuredContent.success).toBe(true);
     expect(del.structuredContent.data?.deleted).toBe(true);
   });
@@ -240,6 +259,7 @@ describe("script_ MCP HTTP proxy tools", () => {
       { source, args: { value: 21 }, intent: "inline persist e2e" },
       meta(workerId),
     )) as StructuredResult<{ result: { doubled: number } }>;
+    expect(run.isError).toBeFalsy();
     expect(run.structuredContent.success).toBe(true);
     expect(run.structuredContent.data?.result).toEqual({ doubled: 42 });
 
@@ -271,7 +291,16 @@ describe("script_ MCP HTTP proxy tools", () => {
       { source, intent: "inline failure e2e" },
       meta(workerId),
     )) as StructuredResult<unknown>;
-    expect(run.structuredContent.success).toBe(true);
+    // INVERTED: the old test asserted structuredContent.success === true for a
+    // script that threw at runtime — that was the dishonest-ok bug the
+    // describeScriptFailure() honest-failure-detection in script-common.ts
+    // exists to kill (runbooks/mcp-tool-results.md §1). A run whose body
+    // carries a runtimeError/exitCode!=0 is now reported as a real tool
+    // failure: isError:true, "Script run failed: ..." message, success:false.
+    expect(run.isError).toBe(true);
+    expect(run.structuredContent.success).toBe(false);
+    expect(run.structuredContent.message).toContain("Script run failed:");
+    expect(run.content[0]?.text).toContain("Script run failed:");
 
     const listed = (await tools.listScriptRuns.handler(
       { limit: 10, offset: 0 },
@@ -287,11 +316,19 @@ describe("script_ MCP HTTP proxy tools", () => {
 
   test("stdio-style missing agent identity short-circuits clearly", async () => {
     const tools = buildToolServer();
-    const result = (await tools.search.handler({ query: "anything" }, meta())) as StructuredResult<{
-      error: string;
-    }>;
+    const result = (await tools.search.handler(
+      { query: "anything" },
+      meta(),
+    )) as StructuredResult<unknown>;
+    // SCRIPT_TRANSPORT_ERROR is still the message on missing identity, but it
+    // now flows through the SwarmToolResult envelope: isError:true,
+    // structuredContent.success:false, and the real text on BOTH channels
+    // (content[0].text and structuredContent.message) instead of a bespoke
+    // top-level `error` field.
+    expect(result.isError).toBe(true);
     expect(result.structuredContent.success).toBe(false);
-    expect(result.structuredContent.error).toContain("HTTP MCP transport");
+    expect(result.structuredContent.message).toContain("HTTP MCP transport");
+    expect(result.content[0]?.text).toContain("HTTP MCP transport");
   });
 
   test("launches, lists, and inspects durable script workflow runs", async () => {
@@ -302,6 +339,7 @@ describe("script_ MCP HTTP proxy tools", () => {
       { source, args: { input: true }, scriptName: "mcp-script-workflow" },
       meta(workerId),
     )) as StructuredResult<{ id: string; status: string; url: string }>;
+    expect(launched.isError).toBeFalsy();
     expect(launched.structuredContent.success).toBe(true);
     expect(launched.structuredContent.status).toBe(201);
     expect(launched.structuredContent.data?.status).toBe("running");
@@ -324,6 +362,60 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(detail.structuredContent.data?.run.id).toBe(runId);
     expect(detail.structuredContent.data?.run.status).toBe("running");
     expect(detail.structuredContent.data?.journal).toEqual([]);
+  });
+
+  test("failed durable run renders journal entries in the error text", async () => {
+    const tools = buildToolServer();
+    const source = `export default async function main() { return { ok: true }; }`;
+
+    const launched = (await tools.launchScriptRun.handler(
+      { source, scriptName: "mcp-failed-workflow" },
+      meta(workerId),
+    )) as StructuredResult<{ id: string }>;
+    const runId = launched.structuredContent.data?.id;
+    expect(runId).toBeTruthy();
+
+    const internalHeaders = {
+      authorization: `Bearer ${API_KEY}`,
+      "x-agent-id": workerId,
+      "content-type": "application/json",
+    };
+    const step = await dispatchScriptsApi(
+      `http://scripts-mcp-e2e.test/api/internal/script-runs/${runId}/steps`,
+      {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({
+          stepKey: "flaky-step",
+          stepType: "swarm-script",
+          status: "failed",
+          error: "step exploded",
+        }),
+      },
+    );
+    expect(step.status).toBe(201);
+    const failed = await dispatchScriptsApi(
+      `http://scripts-mcp-e2e.test/api/internal/script-runs/${runId}/status`,
+      {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({ status: "failed", error: "workflow failed at flaky-step" }),
+      },
+    );
+    expect(failed.status).toBe(204);
+
+    const detail = (await tools.getScriptRun.handler(
+      { id: runId },
+      meta(workerId),
+    )) as StructuredResult<unknown>;
+    expect(detail.isError).toBe(true);
+    expect(detail.structuredContent.success).toBe(false);
+    expect(detail.structuredContent.message).toContain("workflow failed at flaky-step");
+    // Step errors live in the journal — it must reach the text channel on
+    // failure too, not only via successDetails on the happy path.
+    expect(detail.content[0]?.text).toContain("journal (1 entry)");
+    expect(detail.content[0]?.text).toContain("flaky-step");
+    expect(detail.content[0]?.text).toContain("step exploded");
   });
 
   test("typed SDK fixture passes upsert typecheck and wrong arg type fails", async () => {
@@ -363,7 +455,15 @@ describe("script_ MCP HTTP proxy tools", () => {
       },
       meta(workerId),
     )) as StructuredResult<{ diagnostics: string[] }>;
+    // INVERTED: the old test asserted the bare `typecheck_failed` literal on a
+    // top-level `error` field. describeScriptFailure() (src/tools/script-common.ts)
+    // now folds the real diagnostic into the message instead of the opaque
+    // code, per runbooks/mcp-tool-results.md's conversion rule ("message
+    // summarizes ... details carries the payload the model actually needs").
+    expect(bad.isError).toBe(true);
     expect(bad.structuredContent.success).toBe(false);
-    expect(bad.structuredContent.error).toBe("typecheck_failed");
+    expect(bad.structuredContent.message).toContain("Typecheck failed:");
+    expect(bad.structuredContent.details).toBeTruthy();
+    expect(bad.content[0]?.text).toContain("Typecheck failed:");
   });
 });

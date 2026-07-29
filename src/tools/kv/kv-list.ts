@@ -1,11 +1,34 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { countKv, listKv } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
-import { KvEntrySchema, KvNamespaceSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { KvNamespaceSchema, KvValueTypeSchema } from "@/types";
 import { resolveNamespace } from "./resolve-namespace";
 
 const MAX_KV_LIST_LIMIT = 1000;
+
+// Loose, format-pin-free mirror of KvEntrySchema for MCP output validation.
+const kvEntryOutputSchema = z.looseObject({
+  namespace: z.string().optional(),
+  key: z.string().optional(),
+  value: z.unknown().optional(),
+  valueType: KvValueTypeSchema.optional(),
+  expiresAt: z.number().int().nullable().optional(),
+  createdAt: z.number().int().optional(),
+  updatedAt: z.number().int().optional(),
+});
+
+function renderKvEntries(
+  entries: Array<{ key: string; value: unknown; valueType: string }>,
+): string | undefined {
+  if (entries.length === 0) return undefined;
+  return entries
+    .map((entry) => {
+      const valueText = typeof entry.value === "string" ? entry.value : JSON.stringify(entry.value);
+      return `- ${entry.key} (${entry.valueType}): ${valueText}`;
+    })
+    .join("\n");
+}
 
 export const registerKvListTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -28,26 +51,17 @@ export const registerKvListTool = (server: McpServer) => {
         offset: z.number().int().nonnegative().optional(),
         namespace: KvNamespaceSchema.optional(),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
         namespace: z.string().optional(),
-        entries: z.array(KvEntrySchema).optional(),
+        entries: z.array(kvEntryOutputSchema).optional(),
         total: z.number().optional(),
       }),
     },
     async ({ prefix, limit, offset, namespace }, requestInfo) => {
       const resolved = resolveNamespace(namespace, requestInfo);
       if ("error" in resolved) {
-        return {
-          content: [{ type: "text", text: resolved.error }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: resolved.error,
-          },
-        };
+        return toolErr(resolved.error, { data: { yourAgentId: requestInfo.agentId } });
       }
       const effectiveLimit = Math.min(limit ?? 100, MAX_KV_LIST_LIMIT);
       const effectivePrefix = prefix && prefix.length > 0 ? prefix : undefined;
@@ -57,25 +71,20 @@ export const registerKvListTool = (server: McpServer) => {
         offset: offset ?? 0,
       });
       const total = countKv(resolved.namespace, { prefix: effectivePrefix });
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              entries.length === 0
-                ? `No entries in "${resolved.namespace}".`
-                : `Found ${entries.length} of ${total} entries in "${resolved.namespace}".`,
+      return toolOk(
+        entries.length === 0
+          ? `No entries in "${resolved.namespace}".`
+          : `Found ${entries.length} of ${total} entries in "${resolved.namespace}".`,
+        {
+          details: renderKvEntries(entries),
+          data: {
+            yourAgentId: requestInfo.agentId,
+            namespace: resolved.namespace,
+            entries,
+            total,
           },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          success: true,
-          message: "ok",
-          namespace: resolved.namespace,
-          entries,
-          total,
         },
-      };
+      );
     },
   );
 };

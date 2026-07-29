@@ -438,6 +438,15 @@ declare module "swarm-sdk" {
     logger: ScriptLogger;
   }
 
+  /**
+   * A swarm script's default export. `args` comes FIRST, `ctx` second — never swap them.
+   *
+   * @example
+   * export default async function (args: { name: string }, ctx: ScriptContext) {
+   *   await ctx.logger.log(`hello ${args.name}`);
+   *   return { ok: true };
+   * }
+   */
   // biome-ignore lint/suspicious/noExplicitAny: scripts may narrow their args type at the entrypoint.
   export type ScriptMain = (args: any, ctx: ScriptContext) => unknown | Promise<unknown>;
 }

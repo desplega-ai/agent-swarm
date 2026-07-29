@@ -1,8 +1,18 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getChannelById, getChannelByName, postMessage, updateReadState } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
-import { ChannelMessageSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+
+const PostedMessageSchema = z.looseObject({
+  id: z.string().optional(),
+  channelId: z.string().optional(),
+  agentId: z.string().nullable().optional(),
+  agentName: z.string().optional(),
+  content: z.string().optional(),
+  replyToId: z.string().optional(),
+  mentions: z.array(z.string()).optional(),
+  createdAt: z.string().optional(),
+});
 
 export const registerPostMessageTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -20,22 +30,14 @@ export const registerPostMessageTool = (server: McpServer) => {
           .optional()
           .describe("Agent IDs to @mention (they'll see it in unread)."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        posted: ChannelMessageSchema.optional(),
+        posted: PostedMessageSchema.optional(),
       }),
     },
     async ({ channel, content, replyTo, mentions }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       // Find channel by name or ID
@@ -45,14 +47,9 @@ export const registerPostMessageTool = (server: McpServer) => {
       }
 
       if (!targetChannel) {
-        return {
-          content: [{ type: "text", text: `Channel "${channel}" not found.` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Channel "${channel}" not found.`,
-          },
-        };
+        return toolErr(`Channel "${channel}" not found.`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       try {
@@ -64,25 +61,14 @@ export const registerPostMessageTool = (server: McpServer) => {
         // Auto-mark channel as read after posting (so you don't see your own message as unread)
         updateReadState(requestInfo.agentId, targetChannel.id);
 
-        return {
-          content: [{ type: "text", text: `Posted message to #${targetChannel.name}.` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Posted message to #${targetChannel.name}.`,
-            posted,
-          },
-        };
+        return toolOk(`Posted message to #${targetChannel.name}.`, {
+          data: { yourAgentId: requestInfo.agentId, posted },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to post message: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to post message: ${message}`,
-          },
-        };
+        return toolErr(`Failed to post message: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

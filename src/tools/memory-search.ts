@@ -6,7 +6,7 @@ import { CANDIDATE_SET_MULTIPLIER } from "@/be/memory/constants";
 import { expandCandidatesWithGraph } from "@/be/memory/graph-expansion";
 import { recordRetrievals } from "@/be/memory/raters/retrieval";
 import { rerank } from "@/be/memory/reranker";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import type { AgentMemorySource } from "@/types";
 import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "@/types";
 
@@ -16,30 +16,51 @@ function rateHintFor(memoryId: string): string {
   return `memory_rate(id="${memoryId}", useful=true|false)`;
 }
 
-export const memorySearchOutputSchema = z.object({
+type MemorySearchResult = {
+  id: string;
+  name: string;
+  summary: string | null;
+  source: string;
+  scope: string;
+  similarity?: number;
+  retrievalSource?: string;
+  tags?: string[];
+  createdAt: string;
+  rateHint?: string;
+};
+
+function renderResults(results: MemorySearchResult[]): string | undefined {
+  if (results.length === 0) return undefined;
+  return results
+    .map((r) => {
+      const score = typeof r.similarity === "number" ? ` score=${r.similarity.toFixed(3)}` : "";
+      const summary = r.summary ? ` — ${r.summary}` : "";
+      return `- ${r.id} [${r.source}/${r.scope}]${score}${summary}`;
+    })
+    .join("\n");
+}
+
+export const memorySearchOutputSchema = swarmToolOutputSchema({
   // Plain string, NOT .uuid(): agents may join with custom IDs (AGENT_ID env /
   // join-swarm agentId), and a UUID constraint here makes the response fail MCP
   // output validation after the handler already ran.
   yourAgentId: z.string().optional(),
-  success: z.boolean(),
-  message: z.string(),
   results: z
     .array(
-      z.object({
-        id: z.string().uuid(),
-        name: z.string(),
-        summary: z.string().nullable(),
-        source: AgentMemorySourceSchema,
-        scope: AgentMemoryScopeSchema,
+      z.looseObject({
+        id: z.string().optional(),
+        name: z.string().optional(),
+        summary: z.string().nullable().optional(),
+        source: AgentMemorySourceSchema.optional(),
+        scope: AgentMemoryScopeSchema.optional(),
         similarity: z.number().optional(),
         retrievalSource: z.enum(["vec", "fts", "hybrid", "fallback", "graph"]).optional(),
         tags: z.array(z.string()).optional(),
-        createdAt: z.string(),
+        createdAt: z.string().optional(),
         rateHint: z.string().optional(),
       }),
     )
     .optional(),
-  _ratingNudge: z.string().optional(),
 });
 
 export const registerMemorySearchTool = (server: McpServer) => {
@@ -72,14 +93,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
     },
     async ({ query, intent, scope, limit, source }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID required for memory search." }],
-          structuredContent: {
-            yourAgentId: undefined,
-            success: false,
-            message: "Agent ID required. Are you registered in the swarm?",
-          },
-        };
+        return toolErr("Agent ID required. Are you registered in the swarm?");
       }
 
       const agent = getAgentById(requestInfo.agentId);
@@ -146,25 +160,12 @@ export const registerMemorySearchTool = (server: McpServer) => {
             : {}),
         }));
 
-        const nudgeCount = mapped.filter((r) => r.rateHint).length;
-        const _ratingNudge =
-          nudgeCount > 0 ? "Rate memories that help or mislead you with memory_rate." : undefined;
-
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Found ${mapped.length} memories matching "${query}".`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Found ${mapped.length} memories matching "${query}".`,
-            results: mapped,
-            _ratingNudge,
-          },
-        };
+        // The conditional rating steer lives in the central NUDGES map
+        // (src/tools/utils.ts), keyed off rateHint presence in the results.
+        return toolOk(`Found ${mapped.length} memories matching "${query}".`, {
+          details: renderResults(mapped),
+          data: { yourAgentId: requestInfo.agentId, results: mapped },
+        });
       }
 
       // Fallback: list recent memories (no OPENAI_API_KEY and no FTS hit)
@@ -185,20 +186,13 @@ export const registerMemorySearchTool = (server: McpServer) => {
         createdAt: r.createdAt,
       }));
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Embedding unavailable. Showing ${mapped.length} most recent memories.`,
-          },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          success: true,
-          message: `Embedding unavailable (no OPENAI_API_KEY). Showing ${mapped.length} most recent memories.`,
-          results: mapped,
+      return toolOk(
+        `Embedding unavailable (no OPENAI_API_KEY). Showing ${mapped.length} most recent memories.`,
+        {
+          details: renderResults(mapped),
+          data: { yourAgentId: requestInfo.agentId, results: mapped },
         },
-      };
+      );
     },
   );
 };

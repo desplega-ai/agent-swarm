@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getSkillById, listSkills, updateSkill } from "@/be/db";
 import { parseSkillContent } from "@/be/skill-parser";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 function contentHash(content: string): string {
   const hash = new Bun.CryptoHasher("sha256").update(content).digest("hex");
@@ -28,13 +28,11 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
           .optional()
           .describe("Force re-fetch even if hash matches"),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        updated: z.number(),
-        checked: z.number(),
-        errors: z.array(z.string()),
+        updated: z.number().optional(),
+        checked: z.number().optional(),
+        errors: z.array(z.string()).optional(),
       }),
     },
     async (args, requestInfo, _meta) => {
@@ -93,35 +91,25 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
           }
         }
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Synced remote skills: ${updated} updated, ${skills.length} checked, ${errors.length} errors.`,
-            },
-          ],
-          structuredContent: {
+        return toolOk(`${updated} updated, ${skills.length} checked.`, {
+          details: `Synced remote skills: ${updated} updated, ${skills.length} checked, ${errors.length} errors.`,
+          data: {
             yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `${updated} updated, ${skills.length} checked.`,
             updated,
             checked: skills.length,
             errors,
           },
-        };
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed: ${message}` }],
-          structuredContent: {
+        return toolErr(`Failed: ${message}`, {
+          data: {
             yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed: ${message}`,
             updated: 0,
             checked: 0,
             errors: [message],
           },
-        };
+        });
       }
     },
   );

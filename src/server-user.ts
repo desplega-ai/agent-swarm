@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
 import pkg from "../package.json";
 import { enqueueAdmissionRow } from "./be/rbac-audit";
@@ -33,7 +33,7 @@ import {
   taskActionOutputSchema,
 } from "./tools/task-action";
 import { userCtx } from "./tools/task-tool-ctx";
-import { createToolRegistrar } from "./tools/utils";
+import { createToolRegistrar, type SwarmToolResult, toolErr } from "./tools/utils";
 import { ModelTierSchema, type User } from "./types";
 import { isSteeringEnabled } from "./utils/steering-enabled";
 
@@ -66,7 +66,7 @@ async function maybeDenyUserToolAdmission(
   user: User,
   toolName: string,
   config: UserToolAdmissionConfig,
-): Promise<CallToolResult | undefined> {
+): Promise<SwarmToolResult | undefined> {
   if (!isRbacEnabled()) return undefined;
 
   const grant = getUserGrant(user.id);
@@ -86,10 +86,7 @@ async function maybeDenyUserToolAdmission(
 
   if (decision.allow) return undefined;
 
-  return {
-    isError: true,
-    content: [{ type: "text", text: `Forbidden: ${decision.reason}` }],
-  };
+  return toolErr(`Forbidden: ${decision.reason}`);
 }
 
 export function createUserServer(user: User): McpServer {

@@ -1,8 +1,22 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getPromptTemplates } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
-import { PromptTemplateSchema, PromptTemplateScopeSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { PromptTemplateScopeSchema } from "@/types";
+
+const promptTemplateOutputShape = z.looseObject({
+  id: z.string().optional(),
+  eventType: z.string().optional(),
+  scope: z.string().optional(),
+  scopeId: z.string().nullable().optional(),
+  state: z.string().optional(),
+  body: z.string().optional(),
+  isDefault: z.boolean().optional(),
+  version: z.number().optional(),
+  createdBy: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
 
 export const registerListPromptTemplatesTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -24,25 +38,17 @@ export const registerListPromptTemplatesTool = (server: McpServer) => {
         scopeId: z.string().optional().describe("Filter by scope ID (agent ID or repo ID)."),
         isDefault: z.boolean().optional().describe("Filter by default status."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        templates: z.array(PromptTemplateSchema),
-        count: z.number(),
+        templates: z.array(promptTemplateOutputShape).optional(),
+        count: z.number().optional(),
       }),
     },
     async ({ eventType, scope, scopeId, isDefault }, requestInfo) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-            templates: [],
-            count: 0,
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.', {
+          data: { templates: [], count: 0 },
+        });
       }
 
       try {
@@ -59,36 +65,15 @@ export const registerListPromptTemplatesTool = (server: McpServer) => {
                 )
                 .join("\n");
 
-        return {
-          content: [
-            {
-              type: "text",
-              text:
-                count === 0
-                  ? "No prompt templates found."
-                  : `Found ${count} prompt template(s):\n\n${summary}`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: count === 0 ? "No prompt templates found." : `Found ${count} template(s).`,
-            templates,
-            count,
-          },
-        };
+        return toolOk(count === 0 ? "No prompt templates found." : `Found ${count} template(s).`, {
+          details: count === 0 ? undefined : summary,
+          data: { yourAgentId: requestInfo.agentId, templates, count },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to list prompt templates: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to list prompt templates: ${message}`,
-            templates: [],
-            count: 0,
-          },
-        };
+        return toolErr(`Failed to list prompt templates: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId, templates: [], count: 0 },
+        });
       }
     },
   );

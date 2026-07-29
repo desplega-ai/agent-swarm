@@ -3,7 +3,7 @@ import * as z from "zod";
 import { createSkill, getAgentById } from "@/be/db";
 import { parseSkillContent } from "@/be/skill-parser";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerSkillInstallRemoteTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -27,19 +27,14 @@ export const registerSkillInstallRemoteTool = (server: McpServer) => {
           .optional()
           .describe("If true, registers for npx install (metadata only)"),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        skill: z.any().optional(),
+        skill: z.looseObject({}).optional(),
       }),
     },
     async (args, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       // Only leads can install global/swarm remote skills
@@ -55,14 +50,9 @@ export const registerSkillInstallRemoteTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) {
-        return {
-          content: [{ type: "text", text: "Only lead agents can install remote skills." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Only lead agents can install remote skills.",
-          },
-        };
+        return toolErr("Only lead agents can install remote skills.", {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       try {
@@ -77,19 +67,10 @@ export const registerSkillInstallRemoteTool = (server: McpServer) => {
           // Fetch SKILL.md content
           const response = await fetch(rawUrl);
           if (!response.ok) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Failed to fetch SKILL.md from ${rawUrl}: ${response.status}`,
-                },
-              ],
-              structuredContent: {
-                yourAgentId: requestInfo.agentId,
-                success: false,
-                message: `Failed to fetch: HTTP ${response.status}`,
-              },
-            };
+            return toolErr(`Failed to fetch: HTTP ${response.status}`, {
+              details: `Failed to fetch SKILL.md from ${rawUrl}: ${response.status}`,
+              data: { yourAgentId: requestInfo.agentId },
+            });
           }
           content = await response.text();
           sourceHash = new Bun.CryptoHasher("sha256").update(content).digest("hex");
@@ -133,30 +114,13 @@ export const registerSkillInstallRemoteTool = (server: McpServer) => {
           userInvocable: parsedMeta.userInvocable,
         });
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Installed remote skill "${skill.name}" from ${args.sourceRepo}`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Installed remote skill "${skill.name}".`,
-            skill,
-          },
-        };
+        return toolOk(`Installed remote skill "${skill.name}".`, {
+          details: `Installed remote skill "${skill.name}" from ${args.sourceRepo}`,
+          data: { yourAgentId: requestInfo.agentId, skill },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed: ${message}`,
-          },
-        };
+        return toolErr(`Failed: ${message}`, { data: { yourAgentId: requestInfo.agentId } });
       }
     },
   );

@@ -1,7 +1,39 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getWorkflowRun, getWorkflowRunStepsByRunId } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+
+const STEP_VALUE_CAP = 400;
+
+function stepValuePreview(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const serialized = typeof value === "string" ? value : JSON.stringify(value);
+  if (!serialized) return undefined;
+  return serialized.length > STEP_VALUE_CAP
+    ? `${serialized.slice(0, STEP_VALUE_CAP)}…`
+    : serialized;
+}
+
+function renderSteps(steps: ReturnType<typeof getWorkflowRunStepsByRunId>): string | undefined {
+  if (steps.length === 0) return undefined;
+  return steps
+    .map((step) => {
+      const nodeId = (step as { nodeId?: unknown }).nodeId ?? "?";
+      const status = (step as { status?: unknown }).status ?? "?";
+      const error = (step as { error?: unknown }).error;
+      const errorSuffix = typeof error === "string" && error ? ` — error: ${error}` : "";
+      // Step results must reach the text channel — details suppresses the
+      // JSON fallback, and text-only harnesses never see structured data.
+      const output = errorSuffix
+        ? undefined
+        : stepValuePreview((step as { output?: unknown }).output);
+      const outputSuffix = output ? ` — output: ${output}` : "";
+      const diagnostics = stepValuePreview((step as { diagnostics?: unknown }).diagnostics);
+      const diagnosticsSuffix = diagnostics ? ` — diagnostics: ${diagnostics}` : "";
+      return `- ${String(nodeId)}: ${String(status)}${errorSuffix}${outputSuffix}${diagnosticsSuffix}`;
+    })
+    .join("\n");
+}
 
 export const registerGetWorkflowRunTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -13,46 +45,24 @@ export const registerGetWorkflowRunTool = (server: McpServer) => {
       inputSchema: z.object({
         id: z.string().uuid().describe("Workflow run ID"),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
         run: z.unknown().optional(),
-        steps: z.array(z.unknown()),
+        steps: z.array(z.unknown()).optional(),
       }),
     },
     async ({ id }) => {
       try {
         const run = getWorkflowRun(id);
         if (!run) {
-          return {
-            content: [{ type: "text" as const, text: `Workflow run not found: ${id}` }],
-            structuredContent: {
-              success: false,
-              message: `Workflow run not found: ${id}`,
-              steps: [],
-            },
-          };
+          return toolErr(`Workflow run not found: ${id}`, { data: { steps: [] } });
         }
         const steps = getWorkflowRunStepsByRunId(id);
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Run ${id} — status: ${run.status}, steps: ${steps.length}.`,
-            },
-          ],
-          structuredContent: {
-            success: true,
-            message: `Run ${id} status: ${run.status}.`,
-            run,
-            steps,
-          },
-        };
+        return toolOk(`Run ${id} status: ${run.status}.`, {
+          details: renderSteps(steps),
+          data: { run, steps },
+        });
       } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Failed: ${err}` }],
-          structuredContent: { success: false, message: String(err), steps: [] },
-        };
+        return toolErr(String(err), { data: { steps: [] } });
       }
     },
   );

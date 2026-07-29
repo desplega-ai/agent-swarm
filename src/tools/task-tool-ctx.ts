@@ -1,7 +1,6 @@
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { can, type PermissionVerb } from "@/rbac";
 import type { AgentTask, User } from "@/types";
-import type { RequestInfo } from "./utils";
+import { type RequestInfo, type SwarmToolResult, toolErr } from "./utils";
 
 export type ToolCtx =
   | { kind: "owner"; agentId?: string; sourceTaskId?: string; sessionId?: string }
@@ -29,7 +28,7 @@ export function assertOwnsTask(
   ctx: ToolCtx,
   task: AgentTask,
   verb: PermissionVerb = "task.read.own",
-): CallToolResult | null {
+): SwarmToolResult | null {
   // RBAC chokepoint — a future admin/role tier widens visibility here, in this one function.
   const decision = can({
     principal:
@@ -46,14 +45,7 @@ export function assertOwnsTask(
     return null;
   }
 
-  const message = `Forbidden: this task is not yours (task ${task.id}).`;
-  return {
-    isError: true,
-    content: [{ type: "text", text: message }],
-    structuredContent: {
-      success: false,
-      code: "forbidden",
-      message,
-    },
-  };
+  return toolErr(`Forbidden: this task is not yours (task ${task.id}).`, {
+    data: { code: "forbidden" },
+  });
 }

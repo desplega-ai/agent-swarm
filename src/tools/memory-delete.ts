@@ -3,7 +3,7 @@ import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getMemoryStore } from "@/be/memory";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerMemoryDeleteTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -17,36 +17,22 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
       inputSchema: z.object({
         memoryId: z.uuid().describe("The ID of the memory to delete."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
       }),
     },
     async ({ memoryId }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID required to delete memories." }],
-          structuredContent: {
-            yourAgentId: undefined,
-            success: false,
-            message: "Agent ID required. Are you registered in the swarm?",
-          },
-        };
+        return toolErr("Agent ID required. Are you registered in the swarm?");
       }
 
       const store = getMemoryStore();
       const memory = store.peek(memoryId);
 
       if (!memory) {
-        return {
-          content: [{ type: "text", text: `Memory "${memoryId}" not found.` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Memory "${memoryId}" not found.`,
-          },
-        };
+        return toolErr(`Memory "${memoryId}" not found.`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       // Permission check: own memories or lead can delete swarm-scoped
@@ -62,36 +48,20 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) {
-        return {
-          content: [{ type: "text", text: "You don't have permission to delete this memory." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message:
-              "Permission denied. You can only delete your own memories, or swarm memories if you are the lead.",
-          },
-        };
+        return toolErr(
+          "Permission denied. You can only delete your own memories, or swarm memories if you are the lead.",
+          { data: { yourAgentId: requestInfo.agentId } },
+        );
       }
 
       const deleted = store.delete(memoryId);
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: deleted
-              ? `Memory "${memoryId}" deleted.`
-              : `Failed to delete memory "${memoryId}".`,
-          },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          success: deleted,
-          message: deleted
-            ? `Memory "${memoryId}" deleted.`
-            : `Failed to delete memory "${memoryId}".`,
-        },
-      };
+      const message = deleted
+        ? `Memory "${memoryId}" deleted.`
+        : `Failed to delete memory "${memoryId}".`;
+      return deleted
+        ? toolOk(message, { data: { yourAgentId: requestInfo.agentId } })
+        : toolErr(message, { data: { yourAgentId: requestInfo.agentId } });
     },
   );
 };

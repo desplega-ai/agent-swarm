@@ -56,6 +56,7 @@ type Structured = {
 type ToolResult = {
   content: Array<{ type: string; text: string }>;
   structuredContent: Structured;
+  isError: boolean;
 };
 
 let server: McpServer;
@@ -131,6 +132,7 @@ describe("skill tool gates (characterization)", () => {
       scope: "swarm",
     });
 
+    expect(result.isError).toBe(true);
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toBe(
       "Only lead agents can create swarm-scope skills directly.",
@@ -144,6 +146,7 @@ describe("skill tool gates (characterization)", () => {
       scope: "swarm",
     });
 
+    expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.message).toContain("Created and installed skill");
   });
@@ -164,9 +167,14 @@ describe("skill tool gates (characterization)", () => {
       agentId: OTHER_WORKER_ID,
     });
 
+    // New contract: toolErr's message IS the real denial text (no generic
+    // "Permission denied." wrapper) — see runbooks/mcp-tool-results.md §1.
+    expect(result.isError).toBe(true);
     expect(result.structuredContent.success).toBe(false);
-    expect(result.structuredContent.message).toBe("Permission denied.");
-    expect(result.content[0]?.text).toBe("Only leads can install skills for other agents.");
+    expect(result.structuredContent.message).toBe(
+      "Only leads can install skills for other agents.",
+    );
+    expect(result.content[0]?.text).toStartWith("Only leads can install skills for other agents.");
   });
 
   test("lead can install a skill for another agent", async () => {
@@ -184,6 +192,7 @@ describe("skill tool gates (characterization)", () => {
       agentId: WORKER_ID,
     });
 
+    expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.message).toContain("Installed skill");
   });
@@ -194,8 +203,10 @@ describe("skill tool gates (characterization)", () => {
       sourceRepo: "acme/skills",
     });
 
+    expect(result.isError).toBe(true);
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toBe("Only lead agents can install remote skills.");
+    expect(result.content[0]?.text).toStartWith("Only lead agents can install remote skills.");
   });
 
   test("lead can install a remote skill (isComplex path, no network fetch)", async () => {
@@ -204,6 +215,7 @@ describe("skill tool gates (characterization)", () => {
       isComplex: true,
     });
 
+    expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.message).toContain("Installed remote skill");
   });
@@ -215,9 +227,16 @@ describe("skill tool gates (characterization)", () => {
       agentId: OTHER_WORKER_ID,
     });
 
+    // New contract: toolErr's message IS the real denial text (no generic
+    // "Permission denied." wrapper) — see runbooks/mcp-tool-results.md §1.
+    expect(result.isError).toBe(true);
     expect(result.structuredContent.success).toBe(false);
-    expect(result.structuredContent.message).toBe("Permission denied.");
-    expect(result.content[0]?.text).toBe("Only leads can uninstall skills for other agents.");
+    expect(result.structuredContent.message).toBe(
+      "Only leads can uninstall skills for other agents.",
+    );
+    expect(result.content[0]?.text).toStartWith(
+      "Only leads can uninstall skills for other agents.",
+    );
   });
 
   test("lead can uninstall a skill for another agent", async () => {
@@ -236,6 +255,7 @@ describe("skill tool gates (characterization)", () => {
       agentId: OTHER_WORKER_ID,
     });
 
+    expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.message).toBe("Skill uninstalled.");
   });
@@ -253,9 +273,16 @@ describe("skill tool gates (characterization)", () => {
 
     const result = await callTool("skill-delete", WORKER_ID, { skillId: skill.id });
 
+    // New contract: toolErr's message IS the real denial text (no generic
+    // "Permission denied." wrapper) — see runbooks/mcp-tool-results.md §1.
+    expect(result.isError).toBe(true);
     expect(result.structuredContent.success).toBe(false);
-    expect(result.structuredContent.message).toBe("Permission denied.");
-    expect(result.content[0]?.text).toBe("Only the owning agent or lead can delete this skill.");
+    expect(result.structuredContent.message).toBe(
+      "Only the owning agent or lead can delete this skill.",
+    );
+    expect(result.content[0]?.text).toStartWith(
+      "Only the owning agent or lead can delete this skill.",
+    );
     // DB not mutated
     expect(getSkillById(skill.id)).not.toBeNull();
   });
@@ -272,6 +299,7 @@ describe("skill tool gates (characterization)", () => {
 
     const result = await callTool("skill-delete", WORKER_ID, { skillId: skill.id });
 
+    expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
     expect(getSkillById(skill.id)).toBeNull();
   });
@@ -288,6 +316,7 @@ describe("skill tool gates (characterization)", () => {
 
     const result = await callTool("skill-delete", LEAD_ID, { skillId: skill.id });
 
+    expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
     expect(getSkillById(skill.id)).toBeNull();
   });
@@ -303,8 +332,12 @@ describe("mcp-server tool gates (characterization)", () => {
       scope: "swarm",
     });
 
+    expect(result.isError).toBe(true);
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toBe(
+      "Only lead agents can create swarm-scope MCP servers.",
+    );
+    expect(result.content[0]?.text).toStartWith(
       "Only lead agents can create swarm-scope MCP servers.",
     );
   });
@@ -317,8 +350,12 @@ describe("mcp-server tool gates (characterization)", () => {
       scope: "global",
     });
 
+    expect(result.isError).toBe(true);
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toBe(
+      "Only lead agents can create global-scope MCP servers.",
+    );
+    expect(result.content[0]?.text).toStartWith(
       "Only lead agents can create global-scope MCP servers.",
     );
   });
@@ -331,6 +368,7 @@ describe("mcp-server tool gates (characterization)", () => {
       scope: "swarm",
     });
 
+    expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.message).toContain("Created and installed MCP server");
   });
@@ -342,9 +380,16 @@ describe("mcp-server tool gates (characterization)", () => {
       agentId: OTHER_WORKER_ID,
     });
 
+    // New contract: toolErr's message IS the real denial text (no generic
+    // "Permission denied." wrapper) — see runbooks/mcp-tool-results.md §1.
+    expect(result.isError).toBe(true);
     expect(result.structuredContent.success).toBe(false);
-    expect(result.structuredContent.message).toBe("Permission denied.");
-    expect(result.content[0]?.text).toBe("Only leads can install MCP servers for other agents.");
+    expect(result.structuredContent.message).toBe(
+      "Only leads can install MCP servers for other agents.",
+    );
+    expect(result.content[0]?.text).toStartWith(
+      "Only leads can install MCP servers for other agents.",
+    );
   });
 
   test("lead can install an MCP server for another agent", async () => {
@@ -361,6 +406,7 @@ describe("mcp-server tool gates (characterization)", () => {
       agentId: WORKER_ID,
     });
 
+    expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.message).toContain("Installed MCP server");
   });
@@ -372,9 +418,16 @@ describe("mcp-server tool gates (characterization)", () => {
       agentId: OTHER_WORKER_ID,
     });
 
+    // New contract: toolErr's message IS the real denial text (no generic
+    // "Permission denied." wrapper) — see runbooks/mcp-tool-results.md §1.
+    expect(result.isError).toBe(true);
     expect(result.structuredContent.success).toBe(false);
-    expect(result.structuredContent.message).toBe("Permission denied.");
-    expect(result.content[0]?.text).toBe("Only leads can uninstall MCP servers for other agents.");
+    expect(result.structuredContent.message).toBe(
+      "Only leads can uninstall MCP servers for other agents.",
+    );
+    expect(result.content[0]?.text).toStartWith(
+      "Only leads can uninstall MCP servers for other agents.",
+    );
   });
 
   test("lead can uninstall an MCP server for another agent", async () => {
@@ -392,6 +445,7 @@ describe("mcp-server tool gates (characterization)", () => {
       agentId: OTHER_WORKER_ID,
     });
 
+    expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.message).toBe("MCP server uninstalled.");
   });
@@ -408,9 +462,14 @@ describe("mcp-server tool gates (characterization)", () => {
 
     const result = await callTool("mcp-server-delete", WORKER_ID, { id: mcpServer.id });
 
+    // New contract: toolErr's message IS the real denial text (no generic
+    // "Permission denied." wrapper) — see runbooks/mcp-tool-results.md §1.
+    expect(result.isError).toBe(true);
     expect(result.structuredContent.success).toBe(false);
-    expect(result.structuredContent.message).toBe("Permission denied.");
-    expect(result.content[0]?.text).toBe(
+    expect(result.structuredContent.message).toBe(
+      "Only the owning agent or lead can delete this MCP server.",
+    );
+    expect(result.content[0]?.text).toStartWith(
       "Only the owning agent or lead can delete this MCP server.",
     );
     // DB not mutated
@@ -428,6 +487,7 @@ describe("mcp-server tool gates (characterization)", () => {
 
     const result = await callTool("mcp-server-delete", LEAD_ID, { id: mcpServer.id });
 
+    expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
     expect(getMcpServerById(mcpServer.id)).toBeNull();
   });
@@ -447,9 +507,14 @@ describe("mcp-server tool gates (characterization)", () => {
       name: "hacked-name",
     });
 
+    // New contract: toolErr's message IS the real denial text (no generic
+    // "Permission denied." wrapper) — see runbooks/mcp-tool-results.md §1.
+    expect(result.isError).toBe(true);
     expect(result.structuredContent.success).toBe(false);
-    expect(result.structuredContent.message).toBe("Permission denied.");
-    expect(result.content[0]?.text).toBe(
+    expect(result.structuredContent.message).toBe(
+      "Only the owning agent or lead can update this MCP server.",
+    );
+    expect(result.content[0]?.text).toStartWith(
       "Only the owning agent or lead can update this MCP server.",
     );
     // DB not mutated
@@ -470,6 +535,7 @@ describe("mcp-server tool gates (characterization)", () => {
       description: "updated by owner",
     });
 
+    expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
   });
 
@@ -487,6 +553,7 @@ describe("mcp-server tool gates (characterization)", () => {
       description: "updated by lead",
     });
 
+    expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getMcpServerById, getMcpServerByName } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerMcpServerGetTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -15,23 +15,14 @@ export const registerMcpServerGetTool = (server: McpServer) => {
         id: z.string().optional().describe("MCP server ID"),
         name: z.string().optional().describe("MCP server name (resolved with scope cascade)"),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        server: z.any().optional(),
+        server: z.looseObject({}).optional(),
       }),
     },
     async (args, requestInfo, _meta) => {
       if (!args.id && !args.name) {
-        return {
-          content: [{ type: "text", text: "Provide id or name." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Provide id or name.",
-          },
-        };
+        return toolErr("Provide id or name.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
       let mcpServer = null;
@@ -51,30 +42,13 @@ export const registerMcpServerGetTool = (server: McpServer) => {
       }
 
       if (!mcpServer) {
-        return {
-          content: [{ type: "text", text: "MCP server not found." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "MCP server not found.",
-          },
-        };
+        return toolErr("MCP server not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: `MCP server "${mcpServer.name}" (${mcpServer.id}): ${mcpServer.transport} transport, scope=${mcpServer.scope}`,
-          },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          success: true,
-          message: `Found MCP server "${mcpServer.name}".`,
-          server: mcpServer,
-        },
-      };
+      return toolOk(`Found MCP server "${mcpServer.name}".`, {
+        details: `MCP server "${mcpServer.name}" (${mcpServer.id}): ${mcpServer.transport} transport, scope=${mcpServer.scope}`,
+        data: { yourAgentId: requestInfo.agentId, server: mcpServer },
+      });
     },
   );
 };

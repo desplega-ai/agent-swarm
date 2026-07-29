@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { deleteMcpServer, getAgentById, getMcpServerById } from "@/be/db";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerMcpServerDeleteTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -14,30 +14,18 @@ export const registerMcpServerDeleteTool = (server: McpServer) => {
       inputSchema: z.object({
         id: z.string().describe("ID of the MCP server to delete"),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
       }),
     },
     async (args, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       const existing = getMcpServerById(args.id);
       if (!existing) {
-        return {
-          content: [{ type: "text", text: "MCP server not found." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "MCP server not found.",
-          },
-        };
+        return toolErr("MCP server not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
       const agent = getAgentById(requestInfo.agentId);
@@ -52,35 +40,17 @@ export const registerMcpServerDeleteTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) {
-        return {
-          content: [
-            { type: "text", text: "Only the owning agent or lead can delete this MCP server." },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Permission denied.",
-          },
-        };
+        return toolErr("Only the owning agent or lead can delete this MCP server.", {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       const result = deleteMcpServer(args.id);
       const message = result.deleted
         ? `Deleted MCP server "${existing.name}" and ${result.deletedScriptConnectionCount} script connection(s).`
         : "Delete failed.";
-      return {
-        content: [
-          {
-            type: "text",
-            text: message,
-          },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          success: result.deleted,
-          message,
-        },
-      };
+      const data = { yourAgentId: requestInfo.agentId };
+      return result.deleted ? toolOk(message, { data }) : toolErr(message, { data });
     },
   );
 };

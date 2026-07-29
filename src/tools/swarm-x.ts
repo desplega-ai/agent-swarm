@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { COMPOSIO_HTTP_METHODS, composioArgsFromParts, executeComposioRequest } from "@/x/composio";
-import { createToolRegistrar } from "./utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "./utils";
 
 const primitiveQueryValueSchema = z.union([z.string(), z.number(), z.boolean()]);
 
@@ -46,16 +46,15 @@ export const registerSwarmXTool = (server: McpServer) => {
           .default(false)
           .describe("Return raw text instead of JSON-pretty output text."),
       }),
-      outputSchema: z.object({
-        target: z.literal("composio"),
-        ok: z.boolean(),
-        status: z.number(),
-        statusText: z.string(),
-        method: z.string(),
-        url: z.string(),
-        response: z.unknown(),
-        responseText: z.string(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
+        target: z.literal("composio").optional(),
+        ok: z.boolean().optional(),
+        status: z.number().optional(),
+        statusText: z.string().optional(),
+        method: z.string().optional(),
+        url: z.string().optional(),
+        response: z.unknown().optional(),
+        responseText: z.string().optional(),
       }),
     },
     async (input) => {
@@ -75,9 +74,8 @@ export const registerSwarmXTool = (server: McpServer) => {
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text", text: `swarm_x composio: ${message}` }],
-          structuredContent: {
+        return toolErr(`swarm_x composio: ${message}`, {
+          data: {
             target: "composio",
             ok: false,
             status: 0,
@@ -86,15 +84,14 @@ export const registerSwarmXTool = (server: McpServer) => {
             url: "",
             response: null,
             responseText: "",
-            message,
           },
-          isError: true,
-        };
+        });
       }
 
-      const message =
-        result.error || result.formattedBody || `HTTP ${result.status} ${result.statusText}`.trim();
-      const structuredContent = {
+      const summary =
+        `Composio ${result.method} ${result.url} → HTTP ${result.status} ${result.statusText}`.trim();
+      const details = result.error || result.formattedBody || undefined;
+      const data = {
         target: "composio" as const,
         ok: result.ok,
         status: result.status,
@@ -103,14 +100,11 @@ export const registerSwarmXTool = (server: McpServer) => {
         url: result.url,
         response: result.body,
         responseText: result.text,
-        message,
       };
 
-      return {
-        content: [{ type: "text", text: message }],
-        structuredContent,
-        isError: !result.ok,
-      };
+      return result.ok
+        ? toolOk(summary, { details, data })
+        : toolErr(result.error || summary, { details, data });
     },
   );
 };

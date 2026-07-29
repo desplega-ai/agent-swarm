@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { createMcpServer, getAgentById, installMcpServer } from "@/be/db";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerMcpServerCreateTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -43,43 +43,28 @@ export const registerMcpServerCreateTool = (server: McpServer) => {
             'JSON object string of extra OAuth authorize-request params, e.g. {"access_type":"offline","prompt":"consent"}',
           ),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        server: z.any().optional(),
+        server: z.looseObject({}).optional(),
       }),
     },
     async (args, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       try {
         // Validate transport-specific fields
         if (args.transport === "stdio" && !args.command) {
-          return {
-            content: [{ type: "text", text: "stdio transport requires a command." }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "stdio transport requires a command.",
-            },
-          };
+          return toolErr("stdio transport requires a command.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         if ((args.transport === "http" || args.transport === "sse") && !args.url) {
-          return {
-            content: [{ type: "text", text: `${args.transport} transport requires a url.` }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: `${args.transport} transport requires a url.`,
-            },
-          };
+          return toolErr(`${args.transport} transport requires a url.`, {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         // Swarm/global scope requires lead
@@ -97,19 +82,9 @@ export const registerMcpServerCreateTool = (server: McpServer) => {
             source: "mcp",
           });
           if (!decision.allow) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Only lead agents can create ${scope}-scope MCP servers.`,
-                },
-              ],
-              structuredContent: {
-                yourAgentId: requestInfo.agentId,
-                success: false,
-                message: `Only lead agents can create ${scope}-scope MCP servers.`,
-              },
-            };
+            return toolErr(`Only lead agents can create ${scope}-scope MCP servers.`, {
+              data: { yourAgentId: requestInfo.agentId },
+            });
           }
         }
 
@@ -131,25 +106,14 @@ export const registerMcpServerCreateTool = (server: McpServer) => {
         // Auto-install for the creating agent
         installMcpServer(requestInfo.agentId, created.id);
 
-        return {
-          content: [{ type: "text", text: `Created MCP server "${created.name}" (${created.id})` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Created and installed MCP server "${created.name}".`,
-            server: created,
-          },
-        };
+        return toolOk(`Created and installed MCP server "${created.name}" (${created.id}).`, {
+          data: { yourAgentId: requestInfo.agentId, server: created },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to create MCP server: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed: ${message}`,
-          },
-        };
+        return toolErr(`Failed to create MCP server: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

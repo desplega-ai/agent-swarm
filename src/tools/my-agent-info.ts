@@ -1,8 +1,36 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
-import { AgentSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { AgentStatusSchema, ProviderNameSchema } from "@/types";
+
+// Loose mirror of AgentSchema for tool output: every field optional, no
+// datetime/uuid format pins, nested blobs collapsed to permissive objects.
+const agentOutputShape = z.looseObject({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  isLead: z.boolean().optional(),
+  status: AgentStatusSchema.optional(),
+  description: z.string().optional(),
+  role: z.string().optional(),
+  capabilities: z.array(z.string()).optional(),
+  claudeMd: z.string().optional(),
+  soulMd: z.string().optional(),
+  identityMd: z.string().optional(),
+  setupScript: z.string().optional(),
+  toolsMd: z.string().optional(),
+  heartbeatMd: z.string().optional(),
+  maxTasks: z.number().optional(),
+  emptyPollCount: z.number().optional(),
+  lastActivityAt: z.string().optional(),
+  provider: ProviderNameSchema.optional(),
+  harnessProvider: ProviderNameSchema.nullable().optional(),
+  credentialMissing: z.array(z.string()).nullable().optional(),
+  credStatus: z.looseObject({}).nullable().optional(),
+  avatar: z.looseObject({}).nullable().optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+});
 
 export const registerMyAgentInfoTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -13,29 +41,18 @@ export const registerMyAgentInfoTool = (server: McpServer) => {
       annotations: { readOnlyHint: true },
 
       inputSchema: z.object({}),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
         agentId: z.string().optional(),
         yourAgentId: z.string().optional(),
-        yourAgentInfo: AgentSchema.optional(),
+        yourAgentInfo: agentOutputShape.optional(),
       }),
     },
     async (_input, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: 'Agent ID not found. The MCP client should define the "X-Agent-ID" header.',
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: 'Agent ID not found. The MCP client should define the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr(
+          'Agent ID not found. The MCP client should define the "X-Agent-ID" header.',
+          { data: { yourAgentId: requestInfo.agentId } },
+        );
       }
 
       const maybeAgent = getAgentById(requestInfo.agentId);
@@ -47,20 +64,9 @@ export const registerMyAgentInfoTool = (server: McpServer) => {
         registeredMessage = ` You are registered as agent "${maybeAgent.name}".`;
       }
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Your agent ID is: ${requestInfo.agentId}.${registeredMessage}`,
-          },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          yourAgentInfo: maybeAgent,
-          success: true,
-          message: `Your agent ID is: ${requestInfo.agentId}.${registeredMessage}`,
-        },
-      };
+      return toolOk(`Your agent ID is: ${requestInfo.agentId}.${registeredMessage}`, {
+        data: { yourAgentId: requestInfo.agentId, yourAgentInfo: maybeAgent },
+      });
     },
   );
 };

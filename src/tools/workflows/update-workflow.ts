@@ -3,7 +3,7 @@ import { z } from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getWorkflow, updateWorkflow } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import {
   AssetKeySchema,
   CooldownConfigSchema,
@@ -74,9 +74,7 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
               "Other JSON-Schema keywords are silently ignored.",
           ),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
         workflow: z.unknown().optional(),
         versionCreated: z.number().optional(),
       }),
@@ -102,28 +100,14 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
         // Check workflow exists
         const existing = getWorkflow(id);
         if (!existing) {
-          return {
-            content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],
-            structuredContent: { success: false, message: `Workflow not found: ${id}` },
-          };
+          return toolErr(`Workflow not found: ${id}`);
         }
 
         // Validate new definition if provided
         if (definition) {
           const validation = validateDefinition(definition);
           if (!validation.valid) {
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: `Invalid definition: ${validation.errors.join("; ")}`,
-                },
-              ],
-              structuredContent: {
-                success: false,
-                message: `Invalid definition: ${validation.errors.join("; ")}`,
-              },
-            };
+            return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
           }
         }
 
@@ -148,30 +132,14 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
           updatedBy,
         });
         if (!workflow) {
-          return {
-            content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],
-            structuredContent: { success: false, message: `Workflow not found: ${id}` },
-          };
+          return toolErr(`Workflow not found: ${id}`);
         }
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Updated workflow "${workflow.name}" (${id}). Version ${version.version} snapshot created.`,
-            },
-          ],
-          structuredContent: {
-            success: true,
-            message: `Updated workflow "${workflow.name}".`,
-            workflow,
-            versionCreated: version.version,
-          },
-        };
+        return toolOk(`Updated workflow "${workflow.name}".`, {
+          details: `Updated workflow "${workflow.name}" (${id}). Version ${version.version} snapshot created.`,
+          data: { workflow, versionCreated: version.version },
+        });
       } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Failed: ${err}` }],
-          structuredContent: { success: false, message: String(err) },
-        };
+        return toolErr(String(err));
       }
     },
   );

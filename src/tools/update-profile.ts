@@ -5,8 +5,36 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, updateAgentName, updateAgentProfile } from "@/be/db";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
-import { type Agent, AgentAvatarSchema, AgentSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { type Agent, AgentAvatarSchema, AgentStatusSchema, ProviderNameSchema } from "@/types";
+
+// Loose mirror of AgentSchema for tool output: every field optional, no
+// datetime/uuid format pins, nested blobs collapsed to permissive objects.
+const agentOutputShape = z.looseObject({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  isLead: z.boolean().optional(),
+  status: AgentStatusSchema.optional(),
+  description: z.string().optional(),
+  role: z.string().optional(),
+  capabilities: z.array(z.string()).optional(),
+  claudeMd: z.string().optional(),
+  soulMd: z.string().optional(),
+  identityMd: z.string().optional(),
+  setupScript: z.string().optional(),
+  toolsMd: z.string().optional(),
+  heartbeatMd: z.string().optional(),
+  maxTasks: z.number().optional(),
+  emptyPollCount: z.number().optional(),
+  lastActivityAt: z.string().optional(),
+  provider: ProviderNameSchema.optional(),
+  harnessProvider: ProviderNameSchema.nullable().optional(),
+  credentialMissing: z.array(z.string()).nullable().optional(),
+  credStatus: z.looseObject({}).nullable().optional(),
+  avatar: z.looseObject({}).nullable().optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+});
 
 async function validateSetupScriptSyntax(setupScript: string): Promise<string | null> {
   const proc = Bun.spawn(["bash", "-n", "-c", setupScript], {
@@ -126,11 +154,9 @@ export const registerUpdateProfileTool = (server: McpServer) => {
             "Custom avatar: { type: 'lucide', icon: '<kebab-case-lucide-name>', color?: '#RRGGBB' }. Pass null to reset to the default deterministic icon/color.",
           ),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        agent: AgentSchema.optional(),
+        agent: agentOutputShape.optional(),
       }),
     },
     async (
@@ -152,13 +178,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
       _meta,
     ) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       // Determine target agent: if agentId is provided, check lead permissions
@@ -169,14 +189,9 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         // Only lead agents can update other agents' profiles
         const callingAgent = getAgentById(requestInfo.agentId);
         if (!callingAgent) {
-          return {
-            content: [{ type: "text", text: "Calling agent not found." }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Calling agent not found.",
-            },
-          };
+          return toolErr("Calling agent not found.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
         const decision = can({
           principal: { kind: "agent", agentId: callingAgent.id, isLead: callingAgent.isLead },
@@ -185,33 +200,18 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           source: "mcp",
         });
         if (!decision.allow) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Only lead agents can update other agents' profiles. Provide no agentId to update your own profile.",
-              },
-            ],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message:
-                "Only lead agents can update other agents' profiles. Provide no agentId to update your own profile.",
-            },
-          };
+          return toolErr(
+            "Only lead agents can update other agents' profiles. Provide no agentId to update your own profile.",
+            { data: { yourAgentId: requestInfo.agentId } },
+          );
         }
 
         // Validate target agent exists before proceeding
         const targetAgent = getAgentById(targetAgentId);
         if (!targetAgent) {
-          return {
-            content: [{ type: "text", text: `Target agent ${targetAgentId} not found.` }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: `Target agent ${targetAgentId} not found.`,
-            },
-          };
+          return toolErr(`Target agent ${targetAgentId} not found.`, {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
       }
 
@@ -229,20 +229,10 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         heartbeatMd === undefined &&
         avatar === undefined
       ) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "At least one field (name, description, role, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, heartbeatMd, or avatar) must be provided.",
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message:
-              "At least one field (name, description, role, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, heartbeatMd, or avatar) must be provided.",
-          },
-        };
+        return toolErr(
+          "At least one field (name, description, role, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, heartbeatMd, or avatar) must be provided.",
+          { data: { yourAgentId: requestInfo.agentId } },
+        );
       }
 
       try {
@@ -253,14 +243,9 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         if (setupScript !== undefined) {
           const syntaxError = await validateSetupScriptSyntax(setupScript);
           if (syntaxError) {
-            return {
-              content: [{ type: "text", text: `Invalid setupScript: ${syntaxError}` }],
-              structuredContent: {
-                yourAgentId: requestInfo.agentId,
-                success: false,
-                message: `Invalid setupScript: ${syntaxError}`,
-              },
-            };
+            return toolErr(`Invalid setupScript: ${syntaxError}`, {
+              data: { yourAgentId: requestInfo.agentId },
+            });
           }
         }
 
@@ -268,14 +253,9 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         if (name !== undefined) {
           agent = updateAgentName(targetAgentId, name);
           if (!agent) {
-            return {
-              content: [{ type: "text", text: "Target agent not found." }],
-              structuredContent: {
-                yourAgentId: requestInfo.agentId,
-                success: false,
-                message: "Target agent not found.",
-              },
-            };
+            return toolErr("Target agent not found.", {
+              data: { yourAgentId: requestInfo.agentId },
+            });
           }
         }
 
@@ -368,14 +348,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         }
 
         if (!agent) {
-          return {
-            content: [{ type: "text", text: "Agent not found." }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Agent not found.",
-            },
-          };
+          return toolErr("Agent not found.", { data: { yourAgentId: requestInfo.agentId } });
         }
 
         const updatedFields: string[] = [];
@@ -392,27 +365,14 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         if (avatar !== undefined) updatedFields.push("avatar");
 
         const targetLabel = isUpdatingSelf ? "own" : `agent ${targetAgentId}`;
-        return {
-          content: [
-            { type: "text", text: `Updated ${targetLabel} profile: ${updatedFields.join(", ")}.` },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Updated ${targetLabel} profile: ${updatedFields.join(", ")}.`,
-            agent,
-          },
-        };
+        return toolOk(`Updated ${targetLabel} profile: ${updatedFields.join(", ")}.`, {
+          data: { yourAgentId: requestInfo.agentId, agent },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to update profile: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to update profile: ${message}`,
-          },
-        };
+        return toolErr(`Failed to update profile: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

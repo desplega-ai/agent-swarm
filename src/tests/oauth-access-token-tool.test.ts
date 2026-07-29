@@ -89,14 +89,84 @@ describe("resolveOAuthAccessToken", () => {
       { provider: "custom-provider", minValiditySeconds: 300 },
       {},
     )) as {
-      structuredContent: { success: boolean; provider?: string; accessToken?: string };
+      content: Array<{ type: string; text: string }>;
+      structuredContent: {
+        success: boolean;
+        message: string;
+        details?: string;
+        provider?: string;
+        accessToken?: string;
+        expiresAt?: string;
+        tokenType?: string;
+      };
+      isError?: boolean;
     };
 
+    // New SwarmToolResult contract (src/tools/utils.ts): ok:true -> isError:false,
+    // structuredContent.success:true, and data (token fields) spread at the top
+    // level alongside the envelope keys.
+    // Captured before toMatchObject runs (bun's `expect.any()` matcher mutates
+    // the received object in place for diff reporting).
+    const expiresAt = result.structuredContent.expiresAt;
+    expect(result.isError).toBe(false);
     expect(result.structuredContent).toMatchObject({
       success: true,
       provider: "custom-provider",
       accessToken: "mcp-tool-access-token-plain-value",
+      expiresAt: expect.any(String),
+      tokenType: "Bearer",
     });
+    // message summarizes the outcome (provider + expiry) — required, non-empty.
+    expect(result.structuredContent.message).toMatch(
+      /custom-provider OAuth access token resolved; expires at/,
+    );
+    // details carries the actual token payload (allowSecretEgress: true means
+    // the central scrubber does not redact it, since the tool's whole purpose
+    // is handing over the plaintext token).
+    expect(result.structuredContent.details).toBe("mcp-tool-access-token-plain-value");
+
+    // content[0].text is composed as message + "\n\n" + details, so both
+    // channels (text for pi/opencode/claude-managed, structuredContent for
+    // Codex) carry the same information per the "both channels self-sufficient"
+    // rule in runbooks/mcp-tool-results.md.
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].type).toBe("text");
+    expect(result.content[0].text).toBe(
+      `custom-provider OAuth access token resolved; expires at ${expiresAt}.\n\nmcp-tool-access-token-plain-value`,
+    );
+  });
+
+  test("registered MCP tool reports a real error via isError + structuredContent.success:false on failure", async () => {
+    // No tokens stored for "custom-provider" in this test — resolveOAuthAccessToken
+    // throws "custom-provider OAuth tokens are not connected".
+    const server = new McpServer({ name: "oauth-access-token-test-err", version: "1.0.0" });
+    registerGetOauthAccessTokenTool(server);
+    const tool = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          { handler: (args: unknown, extra: unknown) => Promise<unknown> }
+        >;
+      }
+    )._registeredTools["get-oauth-access-token"];
+    if (!tool) throw new Error("get-oauth-access-token tool was not registered");
+
+    const result = (await tool.handler({ provider: "custom-provider" }, {})) as {
+      content: Array<{ type: string; text: string }>;
+      structuredContent: { success: boolean; message: string };
+      isError?: boolean;
+    };
+
+    // New contract: failures are truthful — isError:true, structuredContent.success:false,
+    // and the real error text (not a generic/placeholder string) reaches content[0].text.
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toBe(
+      "Failed to resolve OAuth access token: custom-provider OAuth tokens are not connected",
+    );
+    expect(result.content[0].text).toBe(
+      "Failed to resolve OAuth access token: custom-provider OAuth tokens are not connected",
+    );
   });
 
   test("returns a fresh access token and registers it for scrubber redaction", async () => {

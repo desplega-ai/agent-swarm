@@ -70,7 +70,11 @@ describe("agent-id fields accept non-UUID agent ids", () => {
   });
 
   test("get-tasks output accepts a slug yourAgentId and slug task agent ids", () => {
+    // Envelope keys (success, message) are required by swarmToolEnvelopeShape —
+    // every tool output schema built via swarmToolOutputSchema() demands them.
     const parsed = getTasksOutputSchema.parse({
+      success: true,
+      message: "Found 1 task(s).",
       yourAgentId: SLUG_AGENT_ID,
       tasks: [
         {
@@ -159,7 +163,15 @@ describe("agent-id fields accept non-UUID agent ids", () => {
     expect(parsed.agentId).toBe(SLUG_WORKER_ID);
   });
 
-  test("server-generated ids keep their UUID constraint", () => {
+  // INVERTED (see runbooks/mcp-tool-results.md §5): output schemas never pin a
+  // string field to a format — every tool-declared id field is a plain
+  // z.string(), even for server-generated ids like memory result ids, because
+  // the -32602-after-write trap can hit any strict output field, not just
+  // agent-id ones. The internal AgentTaskSchema (src/types.ts) is a separate,
+  // still-strict DB/runtime-parsing schema — it is never used as a tool
+  // outputSchema (tools mirror it loosely via looseAgentTaskOutputSchema), so
+  // its own `.uuid()` pin on `id` is untouched by this refactor.
+  test("internal AgentTaskSchema keeps its id UUID constraint, but tool output schemas no longer pin any id format", () => {
     expect(() => AgentTaskSchema.parse({ ...slugTask, id: "not-a-uuid" })).toThrow();
     expect(() =>
       memorySearchOutputSchema.parse({
@@ -177,6 +189,6 @@ describe("agent-id fields accept non-UUID agent ids", () => {
           },
         ],
       }),
-    ).toThrow();
+    ).not.toThrow();
   });
 });

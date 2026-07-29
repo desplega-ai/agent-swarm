@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getWorkflow } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { generateEdges } from "@/workflows/definition";
 
 export const registerGetWorkflowTool = (server: McpServer) => {
@@ -15,9 +15,7 @@ export const registerGetWorkflowTool = (server: McpServer) => {
       inputSchema: z.object({
         id: z.string().uuid().describe("Workflow ID"),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
         workflow: z.unknown().optional(),
         edges: z.array(z.unknown()).optional(),
       }),
@@ -26,27 +24,18 @@ export const registerGetWorkflowTool = (server: McpServer) => {
       try {
         const workflow = getWorkflow(id);
         if (!workflow) {
-          return {
-            content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],
-            structuredContent: { success: false, message: `Workflow not found: ${id}` },
-          };
+          return toolErr(`Workflow not found: ${id}`);
         }
         // Auto-generate edges for UI rendering
         const edges = generateEdges(workflow.definition);
-        return {
-          content: [{ type: "text" as const, text: `Workflow "${workflow.name}" (${id}).` }],
-          structuredContent: {
-            success: true,
-            message: `Workflow "${workflow.name}".`,
-            workflow,
-            edges,
-          },
-        };
+        return toolOk(`Workflow "${workflow.name}" (${id}).`, {
+          // The definition must reach the text channel — most harnesses never
+          // show the model structuredContent.
+          details: JSON.stringify(workflow, null, 2),
+          data: { workflow, edges },
+        });
       } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Failed: ${err}` }],
-          structuredContent: { success: false, message: String(err) },
-        };
+        return toolErr(String(err));
       }
     },
   );

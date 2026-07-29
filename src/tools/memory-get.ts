@@ -5,19 +5,44 @@ import { getMemoryStore } from "@/be/memory";
 import { canReadMemory } from "@/be/memory/access";
 import { getLinksForMemory, type MemoryLinksResult } from "@/be/memory/links-store";
 import { recordRetrievals } from "@/be/memory/raters/retrieval";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import type { AgentMemorySource } from "@/types";
-import { AgentMemorySchema } from "@/types";
+import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "@/types";
 
 const NUDGE_ELIGIBLE_SOURCES: ReadonlySet<AgentMemorySource> = new Set(["manual", "file_index"]);
 
-const LinkedMemoryRefSchema = z.object({
+// Loose, format-pin-free mirror of AgentMemorySchema for MCP output validation.
+const agentMemoryOutputSchema = z.looseObject({
+  id: z.string().optional(),
+  agentId: z.string().nullable().optional(),
+  scope: AgentMemoryScopeSchema.optional(),
+  key: z.string().nullable().optional(),
+  name: z.string().optional(),
+  content: z.string().optional(),
+  summary: z.string().nullable().optional(),
+  source: AgentMemorySourceSchema.optional(),
+  sourceTaskId: z.string().nullable().optional(),
+  sourcePath: z.string().nullable().optional(),
+  chunkIndex: z.number().int().optional(),
+  totalChunks: z.number().int().optional(),
+  tags: z.array(z.string()).optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().nullable().optional(),
+  accessedAt: z.string().optional(),
+  expiresAt: z.string().nullable().optional(),
+  accessCount: z.number().int().optional(),
+  embeddingModel: z.string().nullable().optional(),
+  contentHash: z.string().nullable().optional(),
+  version: z.number().int().optional(),
+});
+
+const LinkedMemoryRefSchema = z.looseObject({
   id: z.string(),
   name: z.string(),
   scope: z.string(),
 });
 
-const MemoryLinkSchema = z.object({
+const MemoryLinkSchema = z.looseObject({
   id: z.string(),
   linkType: z.string(),
   targetKind: z.string(),
@@ -36,7 +61,7 @@ const MemoryLinkSchema = z.object({
   ),
 });
 
-const MemoryBacklinkSchema = z.object({
+const MemoryBacklinkSchema = z.looseObject({
   id: z.string(),
   linkType: z.string(),
   strength: z.number(),
@@ -63,11 +88,9 @@ export const registerMemoryGetTool = (server: McpServer) => {
             "Why you are retrieving this memory. Required. E.g. 'need full details of the auth fix pattern'.",
           ),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        memory: AgentMemorySchema.optional(),
+        memory: agentMemoryOutputSchema.optional(),
         links: z
           .array(MemoryLinkSchema)
           .optional()
@@ -84,25 +107,13 @@ export const registerMemoryGetTool = (server: McpServer) => {
       const memoryForAuth = store.peek(memoryId);
 
       if (!memoryForAuth) {
-        return {
-          content: [{ type: "text", text: `Memory "${memoryId}" not found.` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Memory "${memoryId}" not found.`,
-          },
-        };
+        return toolErr(`Memory "${memoryId}" not found.`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       if (!canReadMemory(memoryForAuth, requestInfo.agentId)) {
-        return {
-          content: [{ type: "text", text: "Not authorized" }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Not authorized",
-          },
-        };
+        return toolErr("Not authorized", { data: { yourAgentId: requestInfo.agentId } });
       }
 
       const memory = store.get(memoryId)!;
@@ -146,23 +157,16 @@ export const registerMemoryGetTool = (server: McpServer) => {
           ? `\n\n[${linkBlocks.links.length} outgoing link(s), ${linkBlocks.backlinks.length} backlink(s) — see structured output]`
           : "";
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Memory "${memory.name}" retrieved.\n\n${memory.content}${linksSummary}`,
-          },
-        ],
-        structuredContent: {
+      return toolOk(`Memory "${memory.name}" retrieved.`, {
+        details: `${memory.content}${linksSummary}`,
+        data: {
           yourAgentId: requestInfo.agentId,
-          success: true,
-          message: `Memory "${memory.name}" retrieved.`,
           memory,
           links: linkBlocks.links,
           backlinks: linkBlocks.backlinks,
           rateHint,
         },
-      };
+      });
     },
   );
 };

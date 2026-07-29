@@ -2,8 +2,45 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { resolveIdentity, resolveIdentityByEmail } from "@/be/identity";
 import { findUserById, findUsersByName, getUserIdentities } from "@/be/users";
-import { createToolRegistrar } from "@/tools/utils";
+import {
+  createToolRegistrar,
+  type SwarmToolResult,
+  swarmToolOutputSchema,
+  toolOk,
+} from "@/tools/utils";
 import type { User } from "@/types";
+
+// Loose mirror of UserSchema (+ externalIds) for tool output: every field
+// optional, no datetime format pins.
+const resolveUserOutputShape = z.looseObject({
+  status: z.string().optional(),
+  kind: z.string().optional(),
+  externalId: z.string().optional(),
+  candidates: z
+    .array(
+      z.looseObject({
+        userId: z.string().optional(),
+        name: z.string().optional(),
+        email: z.string().optional(),
+      }),
+    )
+    .optional(),
+  id: z.string().optional(),
+  name: z.string().optional(),
+  email: z.string().optional(),
+  role: z.string().optional(),
+  notes: z.string().optional(),
+  emailAliases: z.array(z.string()).optional(),
+  preferredChannel: z.string().optional(),
+  timezone: z.string().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  dailyBudgetUsd: z.number().nullable().optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+  externalIds: z
+    .array(z.looseObject({ kind: z.string().optional(), externalId: z.string().optional() }))
+    .optional(),
+});
 
 /**
  * `resolve-user` — the framework's provider-agnostic reverse lookup:
@@ -68,25 +105,30 @@ export const resolveUserInputSchema = z
     { message: "Provide either (kind + externalId), email, userId, or name" },
   );
 
-function jsonResult(value: unknown) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
-}
-
-function profileResult(user: User) {
-  return jsonResult({ ...user, externalIds: getUserIdentities(user.id) });
-}
-
-function unknownResult(kind: string, externalId: string) {
-  return jsonResult({ status: "unknown" as const, kind, externalId });
-}
-
-function ambiguousResult(candidates: User[]) {
-  return jsonResult({
-    status: "ambiguous" as const,
-    message:
-      "AMBIGUOUS — do not pick by salience. Multiple users match this name; disambiguate with (kind, externalId), email, or userId.",
-    candidates: candidates.map((u) => ({ userId: u.id, name: u.name, email: u.email })),
+function profileResult(user: User): SwarmToolResult {
+  const externalIds = getUserIdentities(user.id);
+  const payload = { ...user, externalIds };
+  return toolOk(`Resolved user "${user.name}" (${user.id}).`, {
+    details: JSON.stringify(payload, null, 2),
+    data: payload,
   });
+}
+
+function unknownResult(kind: string, externalId: string): SwarmToolResult {
+  return toolOk(`No user found for ${kind}="${externalId}".`, {
+    data: { status: "unknown", kind, externalId },
+  });
+}
+
+function ambiguousResult(candidates: User[]): SwarmToolResult {
+  const candidateList = candidates.map((u) => ({ userId: u.id, name: u.name, email: u.email }));
+  return toolOk(
+    "AMBIGUOUS — do not pick by salience. Multiple users match this name; disambiguate with (kind, externalId), email, or userId.",
+    {
+      details: JSON.stringify(candidateList, null, 2),
+      data: { status: "ambiguous", candidates: candidateList },
+    },
+  );
 }
 
 export const registerResolveUserTool = (server: McpServer) => {
@@ -98,6 +140,7 @@ export const registerResolveUserTool = (server: McpServer) => {
         "Provider-agnostic reverse lookup: (kind, externalId) → user, e.g. {kind: 'slack', externalId: 'U016H7XKZGS'} or {kind: 'github', externalId: 'octocat'} — the same shape for every provider, no per-provider keys. Also accepts email (primary or alias), userId (reverse lookup of all linked identities), or name (exact/prefix search). A miss returns a structured {status: 'unknown', ...} payload, never prose; an ambiguous name search returns {status: 'ambiguous', candidates: [...]}.",
       annotations: { readOnlyHint: true },
       inputSchema: resolveUserInputSchema,
+      outputSchema: swarmToolOutputSchema(resolveUserOutputShape.shape),
     },
     async ({ kind, externalId, email, userId, name }) => {
       if (kind && externalId) {

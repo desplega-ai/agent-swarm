@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getMcpServerById, installMcpServer } from "@/be/db";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerMcpServerInstallTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -19,19 +19,14 @@ export const registerMcpServerInstallTool = (server: McpServer) => {
           .optional()
           .describe("Target agent (default: calling agent). Lead can install for others."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        installation: z.any().optional(),
+        installation: z.looseObject({}).optional(),
       }),
     },
     async (args, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       const targetAgentId = args.agentId ?? requestInfo.agentId;
@@ -50,71 +45,29 @@ export const registerMcpServerInstallTool = (server: McpServer) => {
           source: "mcp",
         });
         if (!decision.allow) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Only leads can install MCP servers for other agents.",
-              },
-            ],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Permission denied.",
-            },
-          };
+          return toolErr("Only leads can install MCP servers for other agents.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
       }
 
       const mcpServer = getMcpServerById(args.mcpServerId);
       if (!mcpServer) {
-        return {
-          content: [{ type: "text", text: "MCP server not found." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "MCP server not found.",
-          },
-        };
+        return toolErr("MCP server not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
       if (!mcpServer.isEnabled) {
-        return {
-          content: [{ type: "text", text: "MCP server is disabled." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "MCP server is disabled.",
-          },
-        };
+        return toolErr("MCP server is disabled.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
       try {
         const installation = installMcpServer(targetAgentId, args.mcpServerId);
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Installed MCP server "${mcpServer.name}" for agent ${targetAgentId}.`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Installed MCP server "${mcpServer.name}".`,
-            installation,
-          },
-        };
+        return toolOk(`Installed MCP server "${mcpServer.name}" for agent ${targetAgentId}.`, {
+          data: { yourAgentId: requestInfo.agentId, installation },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed: ${message}`,
-          },
-        };
+        return toolErr(`Failed: ${message}`, { data: { yourAgentId: requestInfo.agentId } });
       }
     },
   );

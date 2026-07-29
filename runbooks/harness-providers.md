@@ -34,6 +34,12 @@ The `docker-entrypoint.sh` swarm_config-fetch step explicitly **skips** `HARNESS
 
 **Canonical conceptual reference:** [docs-site/.../guides/harness-providers.mdx](../docs-site/content/docs/(documentation)/guides/harness-providers.mdx). That guide is the source of truth for how the `ProviderAdapter` interface, the runner's poll→spawn→events→finish flow, system-prompt composition, entrypoint credential restoration, and OAuth flows fit together. Read it before non-trivial work.
 
+## Tool-result handling (isError propagation)
+
+MCP tools return `isError` on the wire `CallToolResult` (see [runbooks/mcp-tool-results.md](./mcp-tool-results.md) for the full server-side contract). Adapters that wrap the MCP client for an in-process agent library must propagate that flag explicitly rather than assuming a resolved call means success.
+
+**pi**: `mcpToolsToDefinitions` in `src/providers/pi-mono-adapter.ts` calls `mcpClient.callTool(...)` and gets the raw result back. pi-agent-core derives a tool call's error flag from whether the wrapped `execute()` **throws** — not from any field on a resolved return value. The adapter therefore checks `result.isError` and `throw`s (rather than returning) when it's true; without that, a failed script/tool call would resolve normally and pi-agent-core would report it to the model as a success.
+
 ## Live task steering
 
 `ProviderSession.deliverSteering?(delivery: SteerDelivery): Promise<SteerDeliveryResult>` is the optional live-input seam. `ProviderTraits.steerModes` advertises the modes an adapter can provide; an absent field means `[]`.

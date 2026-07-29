@@ -12,6 +12,48 @@ import { Glob } from "bun";
 import path from "node:path";
 
 const TOOLS_DIR = path.join(import.meta.dir, "../src/tools");
+const TYPES_FILE = path.join(import.meta.dir, "../src/types.ts");
+
+// Shared zod enum constants (e.g. `export const SteerModeSchema = z.enum([...])`)
+// imported by tool files from src/types.ts — resolved so their fields render
+// the finite alternatives instead of `unknown`.
+let typesContentCache: string | null = null;
+function typesContent(): string {
+  if (typesContentCache === null) {
+    try {
+      typesContentCache = require("node:fs").readFileSync(TYPES_FILE, "utf8");
+    } catch {
+      typesContentCache = "";
+    }
+  }
+  return typesContentCache;
+}
+
+/** Resolve `const <Name> = z.enum([...])` from the tool file or src/types.ts. */
+function resolveEnumConstant(
+  identifier: string,
+  fullContent: string,
+): { values: string[]; defaultValue?: string } | null {
+  const declRe = new RegExp(
+    `const\\s+${identifier}\\s*=\\s*z\\s*\\.\\s*enum\\(\\[([\\s\\S]*?)\\]\\)([^;\\n]*)`,
+  );
+  for (const source of [fullContent, typesContent()]) {
+    const match = source.match(declRe);
+    if (match?.[1]) {
+      const values = match[1]
+        .replace(/\/\/[^\n]*/g, "")
+        .replace(/["']/g, "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (values.length > 0) {
+        const defaultMatch = match[2]?.match(/\.default\(([^)]+)\)/);
+        return { values, defaultValue: defaultMatch?.[1]?.trim() };
+      }
+    }
+  }
+  return null;
+}
 const SERVER_FILE = path.join(import.meta.dir, "../src/server.ts");
 const OUTPUT_FILE = path.join(import.meta.dir, "../MCP.md");
 
@@ -335,6 +377,12 @@ function parseSchemaFields(content: string, fullContent: string): FieldInfo[] {
   // Remove outer braces and parse fields
   objectContent = objectContent.slice(1, -1);
 
+  // Drop whole-line `//` comments BEFORE the depth-tracking split below —
+  // parens/commas inside a comment would otherwise corrupt the field
+  // boundaries and silently drop parameters from the generated docs. Only
+  // whole lines are stripped, so `//` inside describe() strings (URLs) is safe.
+  objectContent = objectContent.replace(/^\s*\/\/[^\n]*$/gm, "");
+
   // Parse each field by tracking brace/paren depth
   let currentField = "";
   let depth = 0;
@@ -379,10 +427,14 @@ function findSchemaConstantObjectStart(constName: string, source: string): numbe
  * string literal the constant holds.
  */
 function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
+  // Strip line comments preceding the field name — a `// note` above a field
+  // would otherwise make the name regex fail and silently drop the parameter
+  // row from the generated docs.
+  const withoutLeadingComments = fieldStr.replace(/^(\s*\/\/[^\n]*\n)+/, "");
   // Match field name and type chain. Allow whitespace/newlines between `z` and
   // the first `.method(...)` so multi-line zod chains (e.g. `z\n  .string()`)
   // are parsed too.
-  const fieldMatch = fieldStr.match(/^\s*(\w+):\s*([\s\S]+)/);
+  const fieldMatch = withoutLeadingComments.match(/^\s*(\w+):\s*([\s\S]+)/);
   if (!fieldMatch) return null;
 
   const [, name, rawTypeChain] = fieldMatch;
@@ -390,6 +442,7 @@ function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
 
   // Determine type
   let type = "unknown";
+  let constantDefault: string | undefined;
   if (typeChain.startsWith("string")) type = "string";
   else if (typeChain.startsWith("number")) type = "number";
   else if (typeChain.startsWith("boolean")) type = "boolean";
@@ -402,11 +455,24 @@ function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
     const enumMatch = typeChain.match(/enum\(\[([\s\S]*?)\]/);
     if (enumMatch) {
       const values = enumMatch[1]
+        .replace(/\/\/[^\n]*/g, "")
         .replace(/["']/g, "")
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
       type = values.join(" \\| ");
+    }
+  } else {
+    // Identifier reference (e.g. `SteerModeSchema.default("queue")`) — resolve
+    // shared enum constants so the docs keep the finite alternatives (and a
+    // default declared on the constant itself, e.g. OnUnsupportedSchema).
+    const identifierMatch = typeChain.match(/^([A-Za-z_$][\w$]*)/);
+    const resolved = identifierMatch
+      ? resolveEnumConstant(identifierMatch[1]!, fullContent)
+      : null;
+    if (resolved) {
+      type = resolved.values.join(" \\| ");
+      if (resolved.defaultValue) constantDefault = resolved.defaultValue;
     }
   }
 
@@ -421,6 +487,10 @@ function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
     if (defaultMatch) {
       defaultValue = defaultMatch[1].trim();
     }
+  } else if (constantDefault !== undefined) {
+    // Default declared on the shared schema constant, not the field chain.
+    required = false;
+    defaultValue = constantDefault;
   }
 
   // Extract description.

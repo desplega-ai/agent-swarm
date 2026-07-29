@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getSkillById, getSkillByName } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerSkillGetTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -15,23 +15,14 @@ export const registerSkillGetTool = (server: McpServer) => {
         skillId: z.string().optional().describe("Skill ID"),
         name: z.string().optional().describe("Skill name (resolved with precedence)"),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        skill: z.any().optional(),
+        skill: z.looseObject({}).optional(),
       }),
     },
     async (args, requestInfo, _meta) => {
       if (!args.skillId && !args.name) {
-        return {
-          content: [{ type: "text", text: "Provide skillId or name." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Provide skillId or name.",
-          },
-        };
+        return toolErr("Provide skillId or name.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
       let skill = null;
@@ -49,27 +40,13 @@ export const registerSkillGetTool = (server: McpServer) => {
       }
 
       if (!skill) {
-        return {
-          content: [{ type: "text", text: "Skill not found." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Skill not found.",
-          },
-        };
+        return toolErr("Skill not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
-      return {
-        content: [
-          { type: "text", text: `Skill "${skill.name}" (${skill.id}):\n\n${skill.content}` },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          success: true,
-          message: `Found skill "${skill.name}".`,
-          skill,
-        },
-      };
+      return toolOk(`Found skill "${skill.name}".`, {
+        details: `Skill "${skill.name}" (${skill.id}):\n\n${skill.content}`,
+        data: { yourAgentId: requestInfo.agentId, skill },
+      });
     },
   );
 };

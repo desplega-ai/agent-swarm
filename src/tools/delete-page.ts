@@ -2,7 +2,13 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { deletePage, getAgentById, getPage, getPageBySlug } from "@/be/db";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+
+const DeletedPageSchema = z.looseObject({
+  id: z.string().optional(),
+  slug: z.string().optional(),
+  title: z.string().optional(),
+});
 
 export const registerDeletePageTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -22,51 +28,25 @@ export const registerDeletePageTool = (server: McpServer) => {
             "Page slug to delete from the caller's own (agentId, slug) namespace. Alternative to pageId.",
           ),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        deletedPage: z
-          .object({
-            id: z.string(),
-            slug: z.string(),
-            title: z.string(),
-          })
-          .optional(),
+        deletedPage: DeletedPageSchema.optional(),
       }),
     },
     async ({ pageId, slug }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       if (!pageId && !slug) {
-        return {
-          content: [{ type: "text", text: "Either pageId or slug must be provided." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Either pageId or slug must be provided.",
-          },
-        };
+        return toolErr("Either pageId or slug must be provided.", {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       const caller = getAgentById(requestInfo.agentId);
       if (!caller) {
-        return {
-          content: [{ type: "text", text: "Agent not found." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Agent not found.",
-          },
-        };
+        return toolErr("Agent not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
       const page = pageId
@@ -75,14 +55,7 @@ export const registerDeletePageTool = (server: McpServer) => {
           ? getPageBySlug(requestInfo.agentId, slug)
           : null;
       if (!page) {
-        return {
-          content: [{ type: "text", text: "Page not found." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Page not found.",
-          },
-        };
+        return toolErr("Page not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
       const decision = can({
@@ -92,27 +65,17 @@ export const registerDeletePageTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) {
-        return {
-          content: [{ type: "text", text: "Only the lead or page owner can delete pages." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Only the lead or page owner can delete pages.",
-          },
-        };
+        return toolErr("Only the lead or page owner can delete pages.", {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       try {
         const deleted = deletePage(page.id);
         if (!deleted) {
-          return {
-            content: [{ type: "text", text: "Failed to delete page." }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Failed to delete page.",
-            },
-          };
+          return toolErr("Failed to delete page.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         const deletedPage = {
@@ -120,25 +83,14 @@ export const registerDeletePageTool = (server: McpServer) => {
           slug: page.slug,
           title: page.title,
         };
-        return {
-          content: [{ type: "text", text: `Deleted page "${page.title}".` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Deleted page "${page.title}".`,
-            deletedPage,
-          },
-        };
+        return toolOk(`Deleted page "${page.title}".`, {
+          data: { yourAgentId: requestInfo.agentId, deletedPage },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to delete page: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to delete page: ${message}`,
-          },
-        };
+        return toolErr(`Failed to delete page: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

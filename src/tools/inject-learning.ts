@@ -3,7 +3,7 @@ import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 const LearningCategoryEnum = z.enum([
   "mistake-pattern",
@@ -27,21 +27,13 @@ export const registerInjectLearningTool = (server: McpServer) => {
           "Category of the learning: mistake-pattern, best-practice, codebase-knowledge, or preference",
         ),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
         memoryId: z.string().optional(),
       }),
     },
     async ({ agentId: targetAgentId, learning, category }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. The MCP client should define the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. The MCP client should define the "X-Agent-ID" header.');
       }
 
       // Validate caller is the lead agent
@@ -57,25 +49,13 @@ export const registerInjectLearningTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) {
-        return {
-          content: [{ type: "text", text: "Only the lead agent can inject learnings." }],
-          structuredContent: {
-            success: false,
-            message: "Only the lead agent can inject learnings into worker memory.",
-          },
-        };
+        return toolErr("Only the lead agent can inject learnings into worker memory.");
       }
 
       // Validate target agent exists
       const targetAgent = getAgentById(targetAgentId);
       if (!targetAgent) {
-        return {
-          content: [{ type: "text", text: `Agent "${targetAgentId}" not found.` }],
-          structuredContent: {
-            success: false,
-            message: `Agent with ID "${targetAgentId}" not found in the swarm.`,
-          },
-        };
+        return toolErr(`Agent with ID "${targetAgentId}" not found in the swarm.`);
       }
 
       // Create swarm-scoped memory — lead learnings are organizational knowledge visible to all workers
@@ -102,19 +82,9 @@ export const registerInjectLearningTool = (server: McpServer) => {
       }
 
       const targetName = targetAgent.name || targetAgentId.slice(0, 8);
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Learning injected into ${targetName}'s memory (category: ${category}).`,
-          },
-        ],
-        structuredContent: {
-          success: true,
-          message: `Learning injected into ${targetName}'s memory (category: ${category}).`,
-          memoryId: memory.id,
-        },
-      };
+      return toolOk(`Learning injected into ${targetName}'s memory (category: ${category}).`, {
+        data: { memoryId: memory.id },
+      });
     },
   );
 };

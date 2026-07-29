@@ -21,7 +21,12 @@ export const registerScriptUpsertTool = (server: McpServer) => {
       annotations: { openWorldHint: false },
       inputSchema: z.object({
         name: scriptNameSchema.describe("Stable script name within the selected scope."),
-        source: z.string().min(1).describe("TypeScript source with a default export function."),
+        source: z
+          .string()
+          .min(1)
+          .describe(
+            "TypeScript source. Must `export default async function (args, ctx)` — args FIRST, ctx second.",
+          ),
         description: z.string().default("").describe("Human-readable script description."),
         intent: z.string().default("").describe("Why this script exists."),
         scope: scriptScopeSchema.default("agent").describe("Persist under agent or global scope."),
@@ -37,7 +42,17 @@ export const registerScriptUpsertTool = (server: McpServer) => {
         path: "/api/scripts/upsert",
         body: args,
         requestInfo,
-        successMessage: () => "Script upsert completed.",
+        successMessage: (data) => {
+          const body = (data ?? {}) as {
+            name?: unknown;
+            version?: unknown;
+            contentDeduped?: unknown;
+          };
+          const name = typeof body.name === "string" ? body.name : args.name;
+          const version = typeof body.version === "number" ? ` v${body.version}` : "";
+          const deduped = body.contentDeduped ? " (content unchanged — deduped)" : "";
+          return `Script \`${name}\`${version} saved.${deduped}`;
+        },
       }),
   );
 };

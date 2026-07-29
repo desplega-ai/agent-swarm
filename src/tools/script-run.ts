@@ -12,6 +12,38 @@ import {
 export const SCRIPT_RUN_DESCRIPTION =
   "Run a named swarm-shared script (callable across agents and from workflow `swarm-script` nodes), OR inline source (auto-saved as scratch to the catalog). Use for swarm-visible, durable scripts. For local-only throwaway TS, use code-mode `run`.";
 
+function renderRunOutput(data: unknown): string | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
+  const body = data as {
+    result?: unknown;
+    stdout?: string;
+    durationMs?: number;
+    truncated?: { stdout?: boolean; stderr?: boolean };
+    autoSaved?: { slug?: string };
+    kvSaved?: { namespace?: string; key?: string };
+  };
+  const parts: string[] = [];
+  if (body.result !== undefined) {
+    parts.push(
+      `result:\n${typeof body.result === "string" ? body.result : JSON.stringify(body.result, null, 2)}`,
+    );
+  }
+  if (typeof body.stdout === "string" && body.stdout.trim()) {
+    parts.push(`stdout:\n${body.stdout.trim()}`);
+  }
+  const notes: string[] = [];
+  if (typeof body.durationMs === "number") notes.push(`${body.durationMs}ms`);
+  if (body.truncated?.stdout || body.truncated?.stderr) {
+    notes.push("output truncated by the runtime");
+  }
+  if (body.autoSaved?.slug) notes.push(`auto-saved as scratch script \`${body.autoSaved.slug}\``);
+  if (body.kvSaved?.key) {
+    notes.push(`output persisted to kv ${body.kvSaved.namespace}/${body.kvSaved.key}`);
+  }
+  if (notes.length > 0) parts.push(`(${notes.join("; ")})`);
+  return parts.length > 0 ? parts.join("\n\n") : undefined;
+}
+
 export const registerScriptRunTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "script-run",
@@ -21,7 +53,13 @@ export const registerScriptRunTool = (server: McpServer) => {
       annotations: { openWorldHint: true },
       inputSchema: z.object({
         name: scriptNameSchema.optional().describe("Name of a reusable script to run."),
-        source: z.string().min(1).optional().describe("Inline TypeScript source to run."),
+        source: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Inline TypeScript source to run. Must `export default async function (args, ctx)` — args FIRST, ctx second.",
+          ),
         args: z.unknown().optional().describe("JSON-serializable script arguments."),
         intent: z.string().default("").describe("Why this script is being run."),
         scope: scriptScopeSchema.optional().describe("Optional scope for named script resolution."),
@@ -45,6 +83,7 @@ export const registerScriptRunTool = (server: McpServer) => {
         body: args,
         requestInfo,
         successMessage: () => "Script run completed.",
+        successDetails: renderRunOutput,
       }),
   );
 };

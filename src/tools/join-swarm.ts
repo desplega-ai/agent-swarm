@@ -6,8 +6,38 @@ import {
   generateDefaultIdentityMd,
   generateDefaultSoulMd,
 } from "@/prompts/defaults";
-import { createToolRegistrar } from "@/tools/utils";
-import { AgentSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { AgentStatusSchema, ProviderNameSchema } from "@/types";
+
+// Loose mirror of AgentSchema for tool output: every field optional, no
+// datetime/uuid format pins, nested blobs collapsed to permissive objects.
+// (Mirrored locally per runbooks/mcp-tool-results.md — output schemas must be
+// loose and can't reuse the strict, format-pinned domain schema directly.)
+const agentOutputShape = z.looseObject({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  isLead: z.boolean().optional(),
+  status: AgentStatusSchema.optional(),
+  description: z.string().optional(),
+  role: z.string().optional(),
+  capabilities: z.array(z.string()).optional(),
+  claudeMd: z.string().optional(),
+  soulMd: z.string().optional(),
+  identityMd: z.string().optional(),
+  setupScript: z.string().optional(),
+  toolsMd: z.string().optional(),
+  heartbeatMd: z.string().optional(),
+  maxTasks: z.number().optional(),
+  emptyPollCount: z.number().optional(),
+  lastActivityAt: z.string().optional(),
+  provider: ProviderNameSchema.optional(),
+  harnessProvider: ProviderNameSchema.nullable().optional(),
+  credentialMissing: z.array(z.string()).nullable().optional(),
+  credStatus: z.looseObject({}).nullable().optional(),
+  avatar: z.looseObject({}).nullable().optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+});
 
 export const registerJoinSwarmTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -36,30 +66,18 @@ export const registerJoinSwarmTool = (server: McpServer) => {
           .optional()
           .describe("List of capabilities (e.g., ['typescript', 'react', 'testing'])."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        agent: AgentSchema.optional(),
+        agent: agentOutputShape.optional(),
       }),
     },
     async ({ lead, name, requestedId, description, role, capabilities }, requestInfo, _meta) => {
       // Check if agent ID is set
       if (!requestInfo.agentId && !requestedId) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: 'Agent ID not found. The MCP client should define the "X-Agent-ID" header, or provide a requestedId.',
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId ?? requestedId,
-            success: false,
-            message:
-              'Agent ID not found. The MCP client should define the "X-Agent-ID" header, or provide a requestedId.',
-          },
-        };
+        return toolErr(
+          'Agent ID not found. The MCP client should define the "X-Agent-ID" header, or provide a requestedId.',
+          { data: { yourAgentId: requestInfo.agentId ?? requestedId } },
+        );
       }
 
       const agentId = requestInfo.agentId ?? requestedId ?? "";
@@ -127,34 +145,14 @@ export const registerJoinSwarmTool = (server: McpServer) => {
 
         const agent = agentTx();
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Successfully joined swarm as ${agent.isLead ? "Lead" : "Worker"} agent "${agent.name}" (ID: ${agent.id}).`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: agent.id,
-            success: true,
-            message: `Successfully joined swarm as ${agent.isLead ? "Lead" : "Worker"} agent "${agent.name}" (ID: ${agent.id}).`,
-            agent,
-          },
-        };
+        return toolOk(
+          `Successfully joined swarm as ${agent.isLead ? "Lead" : "Worker"} agent "${agent.name}" (ID: ${agent.id}).`,
+          { data: { yourAgentId: agent.id, agent } },
+        );
       } catch (error) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Failed to join swarm: ${(error as Error).message}`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId ?? requestedId,
-            success: false,
-            message: `Failed to join swarm: ${(error as Error).message}`,
-          },
-        };
+        return toolErr(`Failed to join swarm: ${(error as Error).message}`, {
+          data: { yourAgentId: requestInfo.agentId ?? requestedId },
+        });
       }
     },
   );

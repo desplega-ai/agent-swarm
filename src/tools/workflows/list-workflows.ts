@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { listWorkflows } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AssetKeySchema, WorkflowRunStatusSchema } from "@/types";
 
 export const registerListWorkflowsTool = (server: McpServer) => {
@@ -34,10 +34,8 @@ export const registerListWorkflowsTool = (server: McpServer) => {
             "Return the full workflow `definition` + trigger config instead of slim rows. Default false — prefer `get-workflow` to fetch a single workflow in full.",
           ),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
-        workflows: z.array(z.unknown()),
+      outputSchema: swarmToolOutputSchema({
+        workflows: z.array(z.unknown()).optional(),
       }),
     },
     async ({ enabled, key, keyPrefix, consecutiveErrorsMin, lastRunStatus, includeFull }) => {
@@ -46,19 +44,9 @@ export const registerListWorkflowsTool = (server: McpServer) => {
         const workflows = includeFull
           ? listWorkflows(filters)
           : listWorkflows(filters, { slim: true });
-        return {
-          content: [{ type: "text" as const, text: `Found ${workflows.length} workflow(s).` }],
-          structuredContent: {
-            success: true,
-            message: `Found ${workflows.length} workflow(s).`,
-            workflows,
-          },
-        };
+        return toolOk(`Found ${workflows.length} workflow(s).`, { data: { workflows } });
       } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Failed: ${err}` }],
-          structuredContent: { success: false, message: String(err), workflows: [] },
-        };
+        return toolErr(String(err), { data: { workflows: [] } });
       }
     },
   );

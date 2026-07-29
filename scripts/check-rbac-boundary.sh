@@ -24,6 +24,8 @@
 #        src/tools/memory-search.ts
 #   3. NON-AUTHZ sites (Appendix A):
 #        src/tools/slack-reply.ts   — cosmetic icon_emoji pick
+#        src/tools/get-swarm.ts     — cosmetic ", lead" tag in the agent-list
+#                                     details rendering
 #        src/tools/join-swarm.ts    — registration-time lead assignment
 #                                     (increment-4 hardening surface)
 #        src/tools/send-task.ts     — target-shape guard (task TO lead)
@@ -45,6 +47,7 @@ CHECK_PATHS=(
 ALLOWED_PATTERNS=(
   'src/tools/memory-search.ts|const isLead = agent\?\.isLead \?\? false'
   'src/tools/slack-reply.ts|icon_emoji: agent\.isLead'
+  'src/tools/get-swarm.ts|a\.isLead \? ", lead" : ""'
   'src/tools/join-swarm.ts|agents\.find\(\(agent\) => agent\.isLead\)'
   'src/tools/join-swarm.ts|agent\.isLead \? "Lead" : "Worker"'
   'src/tools/send-task.ts|if \(agent\.isLead\) \{'

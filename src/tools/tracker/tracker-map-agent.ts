@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { createTrackerAgentMapping } from "@/be/db-queries/tracker";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerTrackerMapAgentTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -17,10 +17,8 @@ export const registerTrackerMapAgentTool = (server: McpServer) => {
         externalUserId: z.string().describe("The external user ID in the tracker"),
         agentName: z.string().describe("Display name for the agent mapping"),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
-        mapping: z.any().optional(),
+      outputSchema: swarmToolOutputSchema({
+        mapping: z.unknown().optional(),
       }),
     },
     async (args, _requestInfo, _meta) => {
@@ -32,25 +30,13 @@ export const registerTrackerMapAgentTool = (server: McpServer) => {
           agentName: args.agentName,
         });
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Mapped agent ${args.agentName} to ${args.provider} user ${args.externalUserId}`,
-            },
-          ],
-          structuredContent: {
-            success: true,
-            message: `Mapped agent ${args.agentName} to ${args.provider} user ${args.externalUserId}.`,
-            mapping,
-          },
-        };
+        return toolOk(
+          `Mapped agent ${args.agentName} to ${args.provider} user ${args.externalUserId}.`,
+          { data: { mapping } },
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to map agent: ${message}` }],
-          structuredContent: { success: false, message: `Failed: ${message}` },
-        };
+        return toolErr(`Failed to map agent: ${message}`);
       }
     },
   );

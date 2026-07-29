@@ -5,7 +5,7 @@ import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { withAutoJoin } from "@/slack/channel-join";
 import { markdownToSlack } from "@/slack/responses";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerSlackStartThreadTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -20,9 +20,7 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
         channelId: z.string().min(1).describe("The Slack channel ID to post to."),
         message: z.string().min(1).max(4000).describe("The message content to post."),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
         channelId: z.string().optional(),
         ts: z.string().optional(),
         messageTs: z.string().optional(),
@@ -30,18 +28,12 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
     },
     async ({ channelId, message }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       const agent = getAgentById(requestInfo.agentId);
       if (!agent) {
-        return {
-          content: [{ type: "text", text: "Agent not found." }],
-          structuredContent: { success: false, message: "Agent not found." },
-        };
+        return toolErr("Agent not found.");
       }
 
       const decision = can({
@@ -51,21 +43,12 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) {
-        return {
-          content: [{ type: "text", text: "Posting to Slack channels requires lead privileges." }],
-          structuredContent: {
-            success: false,
-            message: "Posting to Slack channels requires lead privileges.",
-          },
-        };
+        return toolErr("Posting to Slack channels requires lead privileges.");
       }
 
       const app = getSlackApp();
       if (!app) {
-        return {
-          content: [{ type: "text", text: "Slack not configured." }],
-          structuredContent: { success: false, message: "Slack not configured." },
-        };
+        return toolErr("Slack not configured.");
       }
 
       try {
@@ -93,42 +76,18 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
         const resolvedChannelId = result.channel ?? channelId;
 
         if (!ts) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Message posted but Slack did not return a ts — cannot thread replies.",
-              },
-            ],
-            structuredContent: {
-              success: false,
-              message: "Message posted but Slack did not return a ts — cannot thread replies.",
-              channelId: resolvedChannelId,
-            },
-          };
+          return toolErr("Message posted but Slack did not return a ts — cannot thread replies.", {
+            data: { channelId: resolvedChannelId },
+          });
         }
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Thread started. channelId=${resolvedChannelId}, ts=${ts}. Pass ts as threadTs on slack-post to reply in-thread.`,
-            },
-          ],
-          structuredContent: {
-            success: true,
-            message: "Thread started successfully.",
-            channelId: resolvedChannelId,
-            ts,
-            messageTs: ts,
-          },
-        };
+        return toolOk("Thread started successfully.", {
+          details: `Thread started. channelId=${resolvedChannelId}, ts=${ts}. Pass ts as threadTs on slack-post to reply in-thread.`,
+          data: { channelId: resolvedChannelId, ts, messageTs: ts },
+        });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: `Failed to start thread: ${errorMsg}` }],
-          structuredContent: { success: false, message: `Failed to start thread: ${errorMsg}` },
-        };
+        return toolErr(`Failed to start thread: ${errorMsg}`);
       }
     },
   );

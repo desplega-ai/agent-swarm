@@ -25,6 +25,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 import { getBasePrompt } from "../prompts/base-prompt";
 import type { ProviderSession } from "../providers/types";
 import { acceptSteerHandler } from "../tools/accept-steer";
+import { finalizeSwarmToolResult } from "../tools/utils";
 import type { SteeringMessage } from "../types";
 
 const TEST_DB_PATH = `/tmp/agent-swarm-steering-transport-${process.pid}.sqlite`;
@@ -267,7 +268,13 @@ describe("steering worker transport", () => {
         source: "api",
       });
       expect(startTask(otherTask.id)?.status).toBe("in_progress");
-      const denied = await acceptSteerHandler(
+      // NEW CONTRACT: acceptSteerHandler returns a SwarmToolResult ({ ok,
+      // message, data }), not a wire-level CallToolResult — isError/content
+      // are synthesized only by finalizeSwarmToolResult at the registrar
+      // boundary (see src/tools/utils.ts). Assert the handler-level envelope
+      // directly, then also run it through the real finalize step once to
+      // pin the actual wire shape a harness receives.
+      const deniedResult = await acceptSteerHandler(
         {
           kind: "owner",
           agentId: otherAgent.id,
@@ -275,9 +282,13 @@ describe("steering worker transport", () => {
         },
         { steeringMessageId: steering.id },
       );
+      expect(deniedResult.ok).toBe(false);
+      expect(deniedResult.message).toContain("assigned to another agent");
+      const denied = finalizeSwarmToolResult("accept-steer", deniedResult);
       expect(denied.isError).toBe(true);
       expect(denied.content[0]?.type).toBe("text");
       expect(denied.content[0]?.text).toContain("assigned to another agent");
+      expect((denied.structuredContent as { success?: boolean })?.success).toBe(false);
       expect(getSteeringMessageById(steering.id)?.status).toBe("delivered");
 
       const ctx = {
@@ -292,8 +303,12 @@ describe("steering worker transport", () => {
       });
       const second = await acceptSteerHandler(ctx, { steeringMessageId: steering.id });
 
-      expect(first.isError).not.toBe(true);
-      expect(second.isError).not.toBe(true);
+      // NEW CONTRACT: assert ok:true on the SwarmToolResult itself (see comment above).
+      expect(first.ok).toBe(true);
+      expect(second.ok).toBe(true);
+      const finalizedSecond = finalizeSwarmToolResult("accept-steer", second);
+      expect(finalizedSecond.isError).not.toBe(true);
+      expect((finalizedSecond.structuredContent as { success?: boolean })?.success).toBe(true);
       expect(getSteeringMessageById(steering.id)).toMatchObject({
         status: "handled",
         handledAt: expect.any(String),

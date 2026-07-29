@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { getExecutorRegistry, retryFailedRun } from "@/workflows";
 
 export const registerRetryWorkflowRunTool = (server: McpServer) => {
@@ -14,26 +14,14 @@ export const registerRetryWorkflowRunTool = (server: McpServer) => {
       inputSchema: z.object({
         runId: z.string().uuid().describe("Workflow run ID to retry"),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
-      }),
+      outputSchema: swarmToolOutputSchema(),
     },
     async ({ runId }) => {
       try {
         await retryFailedRun(runId, getExecutorRegistry());
-        return {
-          content: [{ type: "text" as const, text: `Retrying workflow run ${runId}.` }],
-          structuredContent: {
-            success: true,
-            message: `Retrying workflow run ${runId}.`,
-          },
-        };
+        return toolOk(`Retrying workflow run ${runId}.`);
       } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Failed: ${err}` }],
-          structuredContent: { success: false, message: String(err) },
-        };
+        return toolErr(String(err));
       }
     },
   );

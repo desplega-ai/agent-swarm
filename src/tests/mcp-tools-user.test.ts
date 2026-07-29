@@ -45,6 +45,18 @@ function textOf(result: CallToolResult): string {
   return "";
 }
 
+/**
+ * Structured payload the registrar composes: `{ ...data, success, message,
+ * details?, nudge? }` (see finalizeSwarmToolResult in src/tools/utils.ts).
+ * Tool-specific data keys (status/unknown/ambiguous/candidates/externalIds/id/...)
+ * are spread at the TOP LEVEL alongside the envelope keys — this is where the
+ * machine-readable payload now lives ("never prose" = never ONLY in the text
+ * channel; structuredContent is always populated).
+ */
+function structuredOf(result: CallToolResult): Record<string, unknown> {
+  return (result.structuredContent ?? {}) as Record<string, unknown>;
+}
+
 function eventsFor(userId: string): Array<{ eventType: string; afterJson: string | null }> {
   return getDb()
     .prepare<{ eventType: string; afterJson: string | null }, string>(
@@ -90,6 +102,12 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
     const text = textOf(result);
     expect(text).toContain(user.id);
     expect(text).toContain("Slack User One");
+    expect(result.isError).toBe(false);
+    expect(structuredOf(result)).toMatchObject({
+      success: true,
+      id: user.id,
+      name: "Slack User One",
+    });
   });
 
   test("matches by email → findUserByEmail hit (primary + alias)", async () => {
@@ -101,22 +119,34 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
 
     const byPrimary = await callTool(server, "resolve-user", { email: "primary@example.com" });
     expect(textOf(byPrimary)).toContain(user.id);
+    expect(byPrimary.isError).toBe(false);
+    expect(structuredOf(byPrimary)).toMatchObject({ success: true, id: user.id });
 
     const byAlias = await callTool(server, "resolve-user", { email: "alias@example.com" });
     expect(textOf(byAlias)).toContain(user.id);
+    expect(byAlias.isError).toBe(false);
+    expect(structuredOf(byAlias)).toMatchObject({ success: true, id: user.id });
   });
 
-  test("returns a structured {status: 'unknown', ...} payload when nothing matches — never prose", async () => {
+  test("returns a structured {status: 'unknown', ...} payload when nothing matches — machine-readable via structuredContent, not prose-only", async () => {
     const result = await callTool(server, "resolve-user", {
       kind: "slack",
       externalId: "U_DOES_NOT_EXIST",
     });
-    const parsed = JSON.parse(textOf(result));
-    expect(parsed).toEqual({
+    // A miss is a successful, honest lookup outcome — not a tool failure.
+    expect(result.isError).toBe(false);
+    // NEW CONTRACT (SwarmToolResult): the {status, kind, externalId} payload is
+    // spread at the top level of structuredContent alongside the envelope
+    // (success/message), not embedded as a JSON blob inside content[0].text.
+    expect(structuredOf(result)).toMatchObject({
+      success: true,
       status: "unknown",
       kind: "slack",
       externalId: "U_DOES_NOT_EXIST",
     });
+    // Prose summary still shows up in the text channel for harnesses that
+    // only read content.text.
+    expect(textOf(result)).toContain('No user found for slack="U_DOES_NOT_EXIST"');
   });
 
   // Schema-level validation tests. The MCP SDK runs Zod at the transport
@@ -183,18 +213,21 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
       kind: "github",
       externalId: "extid-gh-handle",
     });
-    const parsed = JSON.parse(textOf(result));
+    const parsed = structuredOf(result);
     expect(parsed.id).toBe(user.id);
     expect(Array.isArray(parsed.externalIds)).toBe(true);
-    const kinds = parsed.externalIds.map((e: { kind: string }) => e.kind).sort();
+    const kinds = (parsed.externalIds as Array<{ kind: string }>).map((e) => e.kind).sort();
     expect(kinds).toEqual(["github", "slack"]);
+    // Both channels must be independently self-sufficient — the same payload
+    // is also present (via `details`) in the text channel.
+    expect(textOf(result)).toContain(user.id);
   });
 
   test("externalIds is empty array when user has no identities", async () => {
     const user = createUser({ name: "No Identities User", email: "noid@example.com" });
 
     const result = await callTool(server, "resolve-user", { email: "noid@example.com" });
-    const parsed = JSON.parse(textOf(result));
+    const parsed = structuredOf(result);
     expect(parsed.id).toBe(user.id);
     expect(parsed.externalIds).toEqual([]);
   });
@@ -204,17 +237,21 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
     linkIdentity(user.id, "linear", "L_UIDLOOKUP", SYSTEM_ACTOR);
 
     const result = await callTool(server, "resolve-user", { userId: user.id });
-    const parsed = JSON.parse(textOf(result));
+    const parsed = structuredOf(result);
     expect(parsed.id).toBe(user.id);
     expect(parsed.name).toBe("User ID Lookup");
     expect(parsed.externalIds).toHaveLength(1);
-    expect(parsed.externalIds[0]).toMatchObject({ kind: "linear", externalId: "L_UIDLOOKUP" });
+    expect((parsed.externalIds as unknown[])[0]).toMatchObject({
+      kind: "linear",
+      externalId: "L_UIDLOOKUP",
+    });
   });
 
   test("userId lookup returns a structured {status: 'unknown', ...} payload for an unknown ID", async () => {
     const result = await callTool(server, "resolve-user", { userId: "nonexistent-user-id-xyz" });
-    const parsed = JSON.parse(textOf(result));
-    expect(parsed).toEqual({
+    expect(result.isError).toBe(false);
+    expect(structuredOf(result)).toMatchObject({
+      success: true,
       status: "unknown",
       kind: "userId",
       externalId: "nonexistent-user-id-xyz",
@@ -225,7 +262,7 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
     const user = createUser({ name: "Zbigniew Solo", email: "zbigniew@example.com" });
 
     const result = await callTool(server, "resolve-user", { name: "Zbigniew Solo" });
-    const parsed = JSON.parse(textOf(result));
+    const parsed = structuredOf(result);
     expect(parsed.id).toBe(user.id);
     expect(parsed.name).toBe("Zbigniew Solo");
   });
@@ -234,7 +271,7 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
     const user = createUser({ name: "Priyanka Unique Prefix", email: "priyanka@example.com" });
 
     const result = await callTool(server, "resolve-user", { name: "Priyanka" });
-    const parsed = JSON.parse(textOf(result));
+    const parsed = structuredOf(result);
     expect(parsed.id).toBe(user.id);
   });
 
@@ -243,17 +280,22 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
     const b = createUser({ name: "Alberto Dubois", email: "alberto.dubois@example.com" });
 
     const result = await callTool(server, "resolve-user", { name: "Alberto" });
-    const parsed = JSON.parse(textOf(result));
+    const parsed = structuredOf(result);
     expect(parsed.status).toBe("ambiguous");
     expect(parsed.message).toMatch(/AMBIGUOUS/);
-    const candidateIds = parsed.candidates.map((c: { userId: string }) => c.userId).sort();
+    const candidateIds = (parsed.candidates as Array<{ userId: string }>)
+      .map((c) => c.userId)
+      .sort();
     expect(candidateIds).toEqual([a.id, b.id].sort());
+    // The "never guess" message must also reach harnesses that only read text.
+    expect(textOf(result)).toMatch(/AMBIGUOUS/);
   });
 
   test("name lookup: zero matches return a structured {status: 'unknown', kind: 'name', ...} payload", async () => {
     const result = await callTool(server, "resolve-user", { name: "Nobody Registered Xyz" });
-    const parsed = JSON.parse(textOf(result));
-    expect(parsed).toEqual({
+    expect(result.isError).toBe(false);
+    expect(structuredOf(result)).toMatchObject({
+      success: true,
       status: "unknown",
       kind: "name",
       externalId: "Nobody Registered Xyz",
@@ -364,7 +406,11 @@ describe("manage-user MCP tool (identities array)", () => {
 
   test("non-lead caller is rejected", async () => {
     const result = await callTool(server, "manage-user", { action: "list" }, WORKER_ID);
+    // NEW CONTRACT: failures set isError=true (derived from ok=false) and
+    // structuredContent.success=false — not just prose in content.text.
+    expect(result.isError).toBe(true);
     expect(textOf(result)).toContain("Only the lead agent");
+    expect(structuredOf(result)).toMatchObject({ success: false });
   });
 
   test("create no longer accepts old top-level slackUserId / linearUserId / githubUsername / gitlabUsername", async () => {

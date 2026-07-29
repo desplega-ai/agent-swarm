@@ -42,6 +42,51 @@ function disableSlackPromptTools() {
   delete process.env.SLACK_APP_TOKEN;
 }
 
+/** Heading of `system.agent.script_authoring_contract` — used for dedupe checks */
+const AUTHORING_CONTRACT_MARKER = "### Script Authoring Contract";
+
+/** How many times the authoring contract appears in a rendered prompt */
+function countAuthoringContract(text: string): number {
+  return text.split(AUTHORING_CONTRACT_MARKER).length - 1;
+}
+
+// ---------------------------------------------------------------------------
+// Script authoring contract — must reach every script-carrying composite, and
+// must never be duplicated (scripts-only mode renders after a composite that
+// already carries the rubric).
+// ---------------------------------------------------------------------------
+describe("getBasePrompt — script authoring contract", () => {
+  const combos: { role: string; provider?: "claude" | "pi"; scriptsOnly?: boolean }[] = [
+    { role: "worker" },
+    { role: "lead" },
+    { role: "worker", provider: "pi" },
+    { role: "lead", provider: "pi" },
+    { role: "worker", scriptsOnly: true },
+    { role: "lead", scriptsOnly: true },
+    { role: "worker", provider: "pi", scriptsOnly: true },
+  ];
+
+  for (const combo of combos) {
+    const label = `${combo.role}/${combo.provider ?? "default"}${
+      combo.scriptsOnly ? "/scripts-only" : ""
+    }`;
+    test(`renders exactly once for ${label}`, async () => {
+      const result = await getBasePrompt({ ...minimalArgs, ...combo });
+      expect(countAuthoringContract(result)).toBe(1);
+      expect(result).toContain("`args` FIRST, `ctx` SECOND");
+      expect(result).toContain("[REDACTED:<CONFIG_KEY>]");
+    });
+  }
+
+  test("remote provider (no MCP) gets no script authoring contract", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      traits: { hasMcp: false, hasLocalEnvironment: false },
+    });
+    expect(countAuthoringContract(result)).toBe(0);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Basic fields
 // ---------------------------------------------------------------------------
@@ -663,6 +708,40 @@ describe("getBasePrompt — context-mode provider gating", () => {
     expect(result).not.toContain("batch_execute");
     expect(result).toContain("Agent Scripts");
     expect(result).toContain("Pre-built Seed Scripts");
+    // Scheduling rules live outside the ctx_* advertisement — pi keeps them.
+    expect(result).toContain("Scheduling — Pick the Right targetType");
+  });
+
+  test("pi LEAD also skips the context-mode block (lead.pi composite)", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "lead",
+      traits: localTraits,
+      provider: "pi",
+    });
+    // Lead content is present
+    expect(result).toContain("CRITICAL: You are a coordinator");
+    // ...but no phantom ctx_* tooling
+    expect(result).not.toContain("Context Window Management");
+    expect(result).not.toContain("batch_execute");
+    expect(result).not.toContain("execute_file");
+    // Script guidance (incl. the authoring contract) survives
+    expect(result).toContain("Agent Scripts");
+    expect(result).toContain(AUTHORING_CONTRACT_MARKER);
+    expect(result).toContain("Pre-built Seed Scripts");
+    // Scheduling rules live outside the ctx_* advertisement — pi keeps them.
+    expect(result).toContain("Scheduling — Pick the Right targetType");
+  });
+
+  test("claude LEAD keeps the context-mode block", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "lead",
+      traits: localTraits,
+      provider: "claude",
+    });
+    expect(result).toContain("Context Window Management");
+    expect(result).toContain("batch_execute");
   });
 
   for (const provider of ["claude", "codex", "opencode"] as const) {

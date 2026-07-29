@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getWorkflow, getWorkflowRun } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { getExecutorRegistry, startWorkflowExecution } from "@/workflows";
 import { TriggerSchemaError } from "@/workflows/engine";
 
@@ -21,9 +21,7 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
           .optional()
           .describe("Optional data to pass as trigger context to the workflow"),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
         runId: z.string().optional(),
         skipped: z.boolean().optional(),
         validationErrors: z.array(z.string()).optional(),
@@ -34,19 +32,10 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
       try {
         const workflow = getWorkflow(id);
         if (!workflow) {
-          return {
-            content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],
-            structuredContent: { success: false, message: `Workflow not found: ${id}` },
-          };
+          return toolErr(`Workflow not found: ${id}`);
         }
         if (!workflow.enabled) {
-          return {
-            content: [{ type: "text" as const, text: `Workflow "${workflow.name}" is disabled.` }],
-            structuredContent: {
-              success: false,
-              message: `Workflow "${workflow.name}" is disabled.`,
-            },
-          };
+          return toolErr(`Workflow "${workflow.name}" is disabled.`);
         }
         const runId = await startWorkflowExecution(
           workflow,
@@ -59,36 +48,16 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
         const skipped = run?.status === "skipped";
 
         if (skipped) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Workflow "${workflow.name}" skipped (cooldown active) — run ID: ${runId}.`,
-              },
-            ],
-            structuredContent: {
-              success: true,
-              message: `Workflow "${workflow.name}" skipped (cooldown).`,
-              runId,
-              skipped: true,
-            },
-          };
+          return toolOk(`Workflow "${workflow.name}" skipped (cooldown).`, {
+            details: `Workflow "${workflow.name}" skipped (cooldown active) — run ID: ${runId}.`,
+            data: { runId, skipped: true },
+          });
         }
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Triggered workflow "${workflow.name}" — run ID: ${runId}.`,
-            },
-          ],
-          structuredContent: {
-            success: true,
-            message: `Triggered workflow "${workflow.name}".`,
-            runId,
-            skipped: false,
-          },
-        };
+        return toolOk(`Triggered workflow "${workflow.name}".`, {
+          details: `Triggered workflow "${workflow.name}" — run ID: ${runId}.`,
+          data: { runId, skipped: false },
+        });
       } catch (err) {
         if (err instanceof TriggerSchemaError) {
           // Re-fetch workflow so we can echo its triggerSchema for self-correction.
@@ -98,23 +67,18 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
           const schemaBlock = workflow?.triggerSchema
             ? `\n\nExpected triggerSchema:\n\`\`\`json\n${JSON.stringify(workflow.triggerSchema, null, 2)}\n\`\`\``
             : "";
-          const text =
-            `Trigger payload did not match the workflow's triggerSchema:\n${bulleted}` +
-            schemaBlock;
-          return {
-            content: [{ type: "text" as const, text }],
-            structuredContent: {
-              success: false,
-              message: `Trigger payload did not match the workflow's triggerSchema (${err.validationErrors.length} error${err.validationErrors.length === 1 ? "" : "s"}).`,
-              validationErrors: err.validationErrors,
-              triggerSchema: workflow?.triggerSchema,
+          return toolErr(
+            `Trigger payload did not match the workflow's triggerSchema (${err.validationErrors.length} error${err.validationErrors.length === 1 ? "" : "s"}).`,
+            {
+              details: `Trigger payload did not match the workflow's triggerSchema:\n${bulleted}${schemaBlock}`,
+              data: {
+                validationErrors: err.validationErrors,
+                triggerSchema: workflow?.triggerSchema,
+              },
             },
-          };
+          );
         }
-        return {
-          content: [{ type: "text" as const, text: `Failed: ${err}` }],
-          structuredContent: { success: false, message: String(err) },
-        };
+        return toolErr(String(err));
       }
     },
   );

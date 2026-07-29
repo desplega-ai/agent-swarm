@@ -1,8 +1,29 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { updateSwarmRepo } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
-import { RepoGuidelinesSchema, RepoHooksSchema, SwarmRepoSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { RepoGuidelinesSchema, RepoHooksSchema } from "@/types";
+
+const swarmRepoOutputShape = z.looseObject({
+  id: z.string().optional(),
+  url: z.string().optional(),
+  name: z.string().optional(),
+  clonePath: z.string().optional(),
+  defaultBranch: z.string().optional(),
+  autoClone: z.boolean().optional(),
+  hooks: z.looseObject({ enabled: z.boolean().optional() }).optional(),
+  guidelines: z
+    .looseObject({
+      prChecks: z.array(z.string()).optional(),
+      mergeChecks: z.array(z.string()).optional(),
+      allowMerge: z.boolean().optional(),
+      review: z.array(z.string()).optional(),
+    })
+    .nullable()
+    .optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+});
 
 export const registerUpdateRepoTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -31,39 +52,21 @@ export const registerUpdateRepoTool = (server: McpServer) => {
             "Repository guidelines: prChecks (commands before PR), mergeChecks (conditions before merge), allowMerge (default false), review (guidance for reviewers). Pass null to clear.",
           ),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
-        repo: SwarmRepoSchema.nullable(),
+      outputSchema: swarmToolOutputSchema({
+        repo: swarmRepoOutputShape.nullable().optional(),
       }),
     },
     async ({ id, ...updates }) => {
       const updated = updateSwarmRepo(id, updates);
 
       if (!updated) {
-        return {
-          content: [{ type: "text" as const, text: `Repo not found: ${id}` }],
-          structuredContent: {
-            success: false,
-            message: `Repo not found: ${id}`,
-            repo: null,
-          },
-        };
+        return toolErr(`Repo not found: ${id}`, { data: { repo: null } });
       }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Updated repo "${updated.name}" — guidelines: ${updated.guidelines ? "configured" : "not set"}`,
-          },
-        ],
-        structuredContent: {
-          success: true,
-          message: `Updated repo "${updated.name}".`,
-          repo: updated,
-        },
-      };
+      return toolOk(`Updated repo "${updated.name}".`, {
+        details: `Updated repo "${updated.name}" — guidelines: ${updated.guidelines ? "configured" : "not set"}`,
+        data: { repo: updated },
+      });
     },
   );
 };

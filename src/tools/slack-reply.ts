@@ -10,7 +10,7 @@ import {
 import { getSlackApp } from "@/slack/app";
 import { withAutoJoin } from "@/slack/channel-join";
 import { markdownToSlack } from "@/slack/responses";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerSlackReplyTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -32,26 +32,18 @@ export const registerSlackReplyTool = (server: McpServer) => {
           .describe("The task ID with Slack context (for task-related threads)."),
         message: z.string().min(1).max(4000).describe("The message to send to the Slack thread."),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
         messageTs: z.string().optional(),
       }),
     },
     async ({ inboxMessageId, taskId, message }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       const agent = getAgentById(requestInfo.agentId);
       if (!agent) {
-        return {
-          content: [{ type: "text", text: "Agent not found." }],
-          structuredContent: { success: false, message: "Agent not found." },
-        };
+        return toolErr("Agent not found.");
       }
 
       let slackChannelId: string | undefined;
@@ -61,16 +53,10 @@ export const registerSlackReplyTool = (server: McpServer) => {
       if (inboxMessageId) {
         const inboxMsg = getInboxMessageById(inboxMessageId);
         if (!inboxMsg) {
-          return {
-            content: [{ type: "text", text: "Inbox message not found." }],
-            structuredContent: { success: false, message: "Inbox message not found." },
-          };
+          return toolErr("Inbox message not found.");
         }
         if (inboxMsg.agentId !== requestInfo.agentId) {
-          return {
-            content: [{ type: "text", text: "This inbox message is not yours." }],
-            structuredContent: { success: false, message: "This inbox message is not yours." },
-          };
+          return toolErr("This inbox message is not yours.");
         }
         slackChannelId = inboxMsg.slackChannelId;
         slackThreadTs = inboxMsg.slackThreadTs;
@@ -80,41 +66,26 @@ export const registerSlackReplyTool = (server: McpServer) => {
       } else if (taskId) {
         const task = getTaskById(taskId);
         if (!task) {
-          return {
-            content: [{ type: "text", text: "Task not found." }],
-            structuredContent: { success: false, message: "Task not found." },
-          };
+          return toolErr("Task not found.");
         }
         // Verify agent has context for this task
         if (task.agentId !== requestInfo.agentId && task.creatorAgentId !== requestInfo.agentId) {
-          return {
-            content: [{ type: "text", text: "You don't have context for this task." }],
-            structuredContent: { success: false, message: "You don't have context for this task." },
-          };
+          return toolErr("You don't have context for this task.");
         }
         slackChannelId = task.slackChannelId;
         slackThreadTs = task.slackThreadTs;
       } else {
-        return {
-          content: [{ type: "text", text: "Must provide inboxMessageId or taskId." }],
-          structuredContent: { success: false, message: "Must provide inboxMessageId or taskId." },
-        };
+        return toolErr("Must provide inboxMessageId or taskId.");
       }
 
       if (!slackChannelId || !slackThreadTs) {
-        return {
-          content: [{ type: "text", text: "No Slack context available." }],
-          structuredContent: { success: false, message: "No Slack context available." },
-        };
+        return toolErr("No Slack context available.");
       }
 
       // Send the reply
       const app = getSlackApp();
       if (!app) {
-        return {
-          content: [{ type: "text", text: "Slack not configured." }],
-          structuredContent: { success: false, message: "Slack not configured." },
-        };
+        return toolErr("Slack not configured.");
       }
 
       try {
@@ -147,20 +118,12 @@ export const registerSlackReplyTool = (server: McpServer) => {
           console.log(`[Slack] Marked slackReplySent=1 for task ${taskId}`);
         }
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Reply sent successfully.${messageTs ? ` Message timestamp: ${messageTs}` : ""}`,
-            },
-          ],
-          structuredContent: { success: true, message: "Reply sent successfully.", messageTs },
-        };
+        return toolOk("Reply sent successfully.", {
+          details: messageTs ? `Message timestamp: ${messageTs}` : undefined,
+          data: { messageTs },
+        });
       } catch (error) {
-        return {
-          content: [{ type: "text", text: `Failed to send reply: ${error}` }],
-          structuredContent: { success: false, message: `Failed to send reply: ${error}` },
-        };
+        return toolErr(`Failed to send reply: ${error}`);
       }
     },
   );

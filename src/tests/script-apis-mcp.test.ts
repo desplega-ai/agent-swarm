@@ -42,8 +42,22 @@ const DOUBLER_SOURCE =
 
 type RegisteredTool = { handler: (args: unknown, extra: unknown) => Promise<unknown> };
 
+// New SwarmToolResult wire shape (see src/tools/utils.ts finalizeSwarmToolResult +
+// runbooks/mcp-tool-results.md): structuredContent = { ...data, success, message,
+// details?, nudge? } and isError = !ok. There is no top-level "error" key anymore —
+// failure text lives in `message` (and optionally `details`). Tool-specific data
+// (script-apis always nests { status, data } via scriptToolOutputSchema) is spread
+// alongside the envelope keys, so `status`/`data` sit next to `success`/`message`.
 type StructuredResult<T> = {
-  structuredContent: { success: boolean; status: number; data?: T; error?: string };
+  content: Array<{ type: string; text: string }>;
+  structuredContent: {
+    success: boolean;
+    message: string;
+    details?: string;
+    nudge?: string;
+    status?: number;
+    data?: T;
+  };
   isError?: boolean;
 };
 
@@ -189,9 +203,19 @@ describe("script-apis MCP tool", () => {
       { action: "create", scriptId, authMode: "bearer", label: "demo" },
       meta(leadId),
     )) as StructuredResult<{ id: string; token: string; authMode: string }>;
+    // isError = !ok, derived centrally by the registrar (src/tools/utils.ts).
+    expect(result.isError).toBeFalsy();
     expect(result.structuredContent.success).toBe(true);
-    expect(result.structuredContent.data?.token).toMatch(/^xsk_/);
+    const token = result.structuredContent.data?.token;
+    expect(token).toMatch(/^xsk_/);
     expect(result.structuredContent.data?.authMode).toBe("bearer");
+    // The reveal is a deliberate `allowSecretEgress` exemption from the central
+    // scrubber (runbooks/mcp-tool-results.md §2) — the plaintext token must
+    // survive into both the text channel and structuredContent.data, and
+    // appear exactly once (not duplicated across message+details).
+    const text = result.content[0]?.text ?? "";
+    expect(text).toContain("shown once — save it now");
+    expect(text.split(token as string).length - 1).toBe(1);
   });
 
   test("non-lead agents cannot mint or reveal bearer tokens", async () => {
@@ -200,9 +224,13 @@ describe("script-apis MCP tool", () => {
       { action: "create", scriptId, authMode: "bearer", label: "demo" },
       meta(workerId),
     )) as StructuredResult<unknown>;
+    expect(createDenied.isError).toBe(true);
     expect(createDenied.structuredContent.success).toBe(false);
     expect(createDenied.structuredContent.status).toBe(403);
-    expect(createDenied.structuredContent.error).toContain("Only lead agents can create");
+    // No top-level "error" key anymore — the failure text lives in `message`
+    // (and is echoed into content[0].text by the registrar).
+    expect(createDenied.structuredContent.message).toContain("Only lead agents can create");
+    expect(createDenied.content[0]?.text).toContain("Only lead agents can create");
 
     const created = (await tools.scriptApis.handler(
       { action: "create", scriptId, authMode: "bearer" },
@@ -214,9 +242,11 @@ describe("script-apis MCP tool", () => {
       { action: "list", scriptId, includeSecrets: true },
       meta(workerId),
     )) as StructuredResult<unknown>;
+    expect(revealDenied.isError).toBe(true);
     expect(revealDenied.structuredContent.success).toBe(false);
     expect(revealDenied.structuredContent.status).toBe(403);
-    expect(revealDenied.structuredContent.error).toContain("Only lead agents can reveal");
+    expect(revealDenied.structuredContent.message).toContain("Only lead agents can reveal");
+    expect(revealDenied.content[0]?.text).toContain("Only lead agents can reveal");
   });
 
   test("list masks bearer tokens by default and reveals with includeSecrets", async () => {
@@ -232,12 +262,16 @@ describe("script-apis MCP tool", () => {
       { action: "list", scriptId },
       meta(workerId),
     )) as StructuredResult<{ apis: Array<{ id: string; token: string | null }> }>;
+    expect(masked.isError).toBeFalsy();
     expect(masked.structuredContent.data?.apis[0]?.token).toBe("********");
+    // Masking must hold in the text channel too, not just structuredContent.
+    expect(masked.content[0]?.text ?? "").not.toContain(realToken as string);
 
     const revealed = (await tools.scriptApis.handler(
       { action: "list", scriptId, includeSecrets: true },
       meta(leadId),
     )) as StructuredResult<{ apis: Array<{ id: string; token: string | null }> }>;
+    expect(revealed.isError).toBeFalsy();
     expect(revealed.structuredContent.data?.apis[0]?.token).toBe(realToken);
   });
 
@@ -248,6 +282,7 @@ describe("script-apis MCP tool", () => {
       { action: "list", scriptId },
       meta(workerId),
     )) as StructuredResult<{ apis: Array<{ token: string | null }> }>;
+    expect(listed.isError).toBeFalsy();
     expect(listed.structuredContent.data?.apis[0]?.token).toBeNull();
   });
 
@@ -264,9 +299,16 @@ describe("script-apis MCP tool", () => {
       { action: "rotate", scriptId, endpointId },
       meta(leadId),
     )) as StructuredResult<{ token: string }>;
+    expect(rotated.isError).toBeFalsy();
     expect(rotated.structuredContent.success).toBe(true);
-    expect(rotated.structuredContent.data?.token).toBeTruthy();
-    expect(rotated.structuredContent.data?.token).not.toBe(oldToken);
+    const newToken = rotated.structuredContent.data?.token;
+    expect(newToken).toBeTruthy();
+    expect(newToken).not.toBe(oldToken);
+    // Same one-time-reveal guarantee as create: plaintext survives the scrub
+    // (allowSecretEgress) and appears exactly once in the text channel.
+    const text = rotated.content[0]?.text ?? "";
+    expect(text).toContain("shown once — save it now");
+    expect(text.split(newToken as string).length - 1).toBe(1);
   });
 
   test("update toggles enabled and relabels", async () => {
@@ -281,6 +323,7 @@ describe("script-apis MCP tool", () => {
       { action: "update", scriptId, endpointId, enabled: false, label: "renamed" },
       meta(leadId),
     )) as StructuredResult<{ enabled: boolean; label: string | null }>;
+    expect(updated.isError).toBeFalsy();
     expect(updated.structuredContent.success).toBe(true);
     expect(updated.structuredContent.data?.enabled).toBe(false);
     expect(updated.structuredContent.data?.label).toBe("renamed");
@@ -298,6 +341,7 @@ describe("script-apis MCP tool", () => {
       { action: "delete", scriptId, endpointId },
       meta(leadId),
     )) as StructuredResult<{ deleted: boolean }>;
+    expect(deleted.isError).toBeFalsy();
     expect(deleted.structuredContent.success).toBe(true);
     expect(deleted.structuredContent.data?.deleted).toBe(true);
 
@@ -315,8 +359,10 @@ describe("script-apis MCP tool", () => {
         { action, scriptId },
         meta(workerId),
       )) as StructuredResult<unknown>;
+      expect(result.isError).toBe(true);
       expect(result.structuredContent.success).toBe(false);
-      expect(result.structuredContent.error).toContain("endpointId is required");
+      expect(result.structuredContent.message).toContain("endpointId is required");
+      expect(result.content[0]?.text).toContain("endpointId is required");
     }
   });
 
@@ -326,7 +372,9 @@ describe("script-apis MCP tool", () => {
       { action: "list", scriptId },
       meta(),
     )) as StructuredResult<unknown>;
+    expect(result.isError).toBe(true);
     expect(result.structuredContent.success).toBe(false);
-    expect(result.structuredContent.error).toContain("HTTP MCP transport");
+    expect(result.structuredContent.message).toContain("HTTP MCP transport");
+    expect(result.content[0]?.text).toContain("HTTP MCP transport");
   });
 });

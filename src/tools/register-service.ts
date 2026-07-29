@@ -2,8 +2,29 @@ import path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, upsertService } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
-import { ServiceSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { ServiceStatusSchema } from "@/types";
+
+// Loose mirror of ServiceSchema for tool output: every field optional, no
+// url/uuid/datetime format pins.
+const serviceOutputShape = z.looseObject({
+  id: z.string().optional(),
+  agentId: z.string().optional(),
+  name: z.string().optional(),
+  port: z.number().optional(),
+  description: z.string().optional(),
+  url: z.string().optional(),
+  healthCheckPath: z.string().optional(),
+  status: ServiceStatusSchema.optional(),
+  script: z.string().optional(),
+  cwd: z.string().optional(),
+  interpreter: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+});
 
 const SWARM_URL = process.env.SWARM_URL ?? "localhost";
 const ALLOWED_SCRIPT_ROOTS = ["/workspace", "/home/worker"];
@@ -95,11 +116,9 @@ export const registerRegisterServiceTool = (server: McpServer) => {
           .describe("Environment variables for the process."),
         metadata: z.record(z.string(), z.unknown()).optional().describe("Additional metadata."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        service: ServiceSchema.optional(),
+        service: serviceOutputShape.optional(),
       }),
     },
     async (
@@ -108,27 +127,16 @@ export const registerRegisterServiceTool = (server: McpServer) => {
       _meta,
     ) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       try {
         // Look up the agent to get its name
         const agent = getAgentById(requestInfo.agentId);
         if (!agent) {
-          return {
-            content: [{ type: "text", text: "Agent not found. Join the swarm first." }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Agent not found. Join the swarm first.",
-            },
-          };
+          return toolErr("Agent not found. Join the swarm first.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         // Service name uses agent ID (stable, URL-safe) for subdomain
@@ -154,31 +162,15 @@ export const registerRegisterServiceTool = (server: McpServer) => {
           metadata,
         });
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Registered service "${serviceName}" at ${url}. Status: ${service.status}. Use update-service-status to mark as healthy.`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Registered service "${serviceName}" at ${url}.`,
-            service,
-          },
-        };
+        return toolOk(
+          `Registered service "${serviceName}" at ${url}. Status: ${service.status}. Use update-service-status to mark as healthy.`,
+          { data: { yourAgentId: requestInfo.agentId, service } },
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          isError: true,
-          content: [{ type: "text", text: `Failed to register service: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to register service: ${message}`,
-          },
-        };
+        return toolErr(`Failed to register service: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

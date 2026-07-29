@@ -2,13 +2,13 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getSlackApp } from "@/slack/app";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
-const SlackChannelSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  type: z.enum(["public", "private", "dm", "mpim"]),
-  isMember: z.boolean(),
+const SlackChannelSchema = z.looseObject({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  type: z.enum(["public", "private", "dm", "mpim"]).optional(),
+  isMember: z.boolean().optional(),
   numMembers: z.number().optional(),
 });
 
@@ -36,34 +36,23 @@ export const registerSlackListChannelsTool = (server: McpServer) => {
           .default(100)
           .describe("Maximum number of channels to retrieve (default: 100, max: 200)."),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
-        channels: z.array(SlackChannelSchema),
+      outputSchema: swarmToolOutputSchema({
+        channels: z.array(SlackChannelSchema).optional(),
       }),
     },
     async ({ types, limit = 100 }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found.", channels: [] },
-        };
+        return toolErr("Agent ID not found.", { data: { channels: [] } });
       }
 
       const agent = getAgentById(requestInfo.agentId);
       if (!agent) {
-        return {
-          content: [{ type: "text", text: "Agent not found." }],
-          structuredContent: { success: false, message: "Agent not found.", channels: [] },
-        };
+        return toolErr("Agent not found.", { data: { channels: [] } });
       }
 
       const app = getSlackApp();
       if (!app) {
-        return {
-          content: [{ type: "text", text: "Slack not configured." }],
-          structuredContent: { success: false, message: "Slack not configured.", channels: [] },
-        };
+        return toolErr("Slack not configured.", { data: { channels: [] } });
       }
 
       try {
@@ -141,29 +130,13 @@ export const registerSlackListChannelsTool = (server: McpServer) => {
           })
           .join("\n");
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Found ${channels.length} channel(s):\n\n${textOutput}`,
-            },
-          ],
-          structuredContent: {
-            success: true,
-            message: `Found ${channels.length} channel(s).`,
-            channels,
-          },
-        };
+        return toolOk(`Found ${channels.length} channel(s).`, {
+          details: textOutput || undefined,
+          data: { channels },
+        });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: `Failed to list Slack channels: ${errorMsg}` }],
-          structuredContent: {
-            success: false,
-            message: `Failed to list Slack channels: ${errorMsg}`,
-            channels: [],
-          },
-        };
+        return toolErr(`Failed to list Slack channels: ${errorMsg}`, { data: { channels: [] } });
       }
     },
   );

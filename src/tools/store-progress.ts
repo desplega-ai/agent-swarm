@@ -18,8 +18,9 @@ import { getRetrievalsForTask } from "@/be/memory/raters/retrieval";
 import { runServerRaters } from "@/be/memory/raters/run-server-raters";
 import { shouldPersistTaskCompletionMemory } from "@/memory/automatic-task-gate";
 import { createWorkerTaskFollowUp } from "@/tasks/worker-follow-up";
-import { createToolRegistrar } from "@/tools/utils";
-import { AgentTaskSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
+import { looseAgentTaskOutputSchema } from "@/tools/get-task-details";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
 import { validateJsonSchema } from "@/workflows/json-schema-validator";
 
 // Phase 11: the `cost` / `costData` field was removed from this tool's input
@@ -29,10 +30,10 @@ import { validateJsonSchema } from "@/workflows/json-schema-validator";
 // echoed the schema example, producing noise rows keyed `mcp-<taskId>-<ts>`
 // that double-counted alongside the harness's authoritative entry.
 
-export const storeProgressOutputSchema = z.object({
-  success: z.boolean(),
-  message: z.string(),
-  task: AgentTaskSchema.optional(),
+export const storeProgressOutputSchema = swarmToolOutputSchema({
+  // Loose, output-only mirror of AgentTaskSchema (see get-task-details.ts) —
+  // no uuid()/datetime() pins so a write doesn't fail output validation.
+  task: looseAgentTaskOutputSchema.optional(),
   // Plain string, NOT .uuid(): agents may join with custom IDs (AGENT_ID env /
   // join-swarm agentId), and a UUID constraint here makes the response fail MCP
   // output validation after the handler already ran.
@@ -92,19 +93,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
       _meta,
     ) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: 'Agent ID not found. The MCP client should define the "X-Agent-ID" header.',
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: 'Agent ID not found. The MCP client should define the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. The MCP client should define the "X-Agent-ID" header.');
       }
 
       const txn = getDb().transaction(() => {
@@ -471,13 +460,9 @@ export const registerStoreProgressTool = (server: McpServer) => {
         }
       }
 
-      return {
-        content: [{ type: "text", text: result.message }],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          ...result,
-        },
-      };
+      const { success, message, ...rest } = result;
+      const data = { yourAgentId: requestInfo.agentId, ...rest };
+      return success ? toolOk(message, { data }) : toolErr(message, { data });
     },
   );
 };

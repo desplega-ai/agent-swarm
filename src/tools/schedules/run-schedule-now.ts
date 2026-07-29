@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getScheduledTaskById, getScheduledTaskByName } from "@/be/db";
 import { runScheduleNow } from "@/scheduler";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerRunScheduleNowTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -16,14 +16,12 @@ export const registerRunScheduleNowTool = (server: McpServer) => {
         scheduleId: z.string().uuid().optional().describe("Schedule ID to run"),
         name: z.string().optional().describe("Schedule name to run (alternative to ID)"),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
         schedule: z
-          .object({
-            id: z.string(),
-            name: z.string(),
+          .looseObject({
+            id: z.string().optional(),
+            name: z.string().optional(),
             nextRunAt: z.string().optional(),
           })
           .optional(),
@@ -31,23 +29,11 @@ export const registerRunScheduleNowTool = (server: McpServer) => {
     },
     async ({ scheduleId, name }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       if (!scheduleId && !name) {
-        return {
-          content: [{ type: "text", text: "Either scheduleId or name must be provided." }],
-          structuredContent: {
-            success: false,
-            message: "Either scheduleId or name must be provided.",
-          },
-        };
+        return toolErr("Either scheduleId or name must be provided.");
       }
 
       // Find the schedule
@@ -58,28 +44,13 @@ export const registerRunScheduleNowTool = (server: McpServer) => {
           : null;
 
       if (!schedule) {
-        return {
-          content: [{ type: "text", text: "Schedule not found." }],
-          structuredContent: {
-            success: false,
-            message: "Schedule not found.",
-          },
-        };
+        return toolErr("Schedule not found.");
       }
 
       if (!schedule.enabled) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Schedule "${schedule.name}" is disabled. Enable it first or use it as a template.`,
-            },
-          ],
-          structuredContent: {
-            success: false,
-            message: `Schedule "${schedule.name}" is disabled.`,
-          },
-        };
+        return toolErr(`Schedule "${schedule.name}" is disabled.`, {
+          details: "Enable it first or use it as a template.",
+        });
       }
 
       try {
@@ -88,17 +59,10 @@ export const registerRunScheduleNowTool = (server: McpServer) => {
         // Re-fetch to get updated lastRunAt
         const updated = getScheduledTaskById(schedule.id);
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Executed schedule "${schedule.name}". Task created. Next regular run: ${updated?.nextRunAt || "not scheduled"}`,
-            },
-          ],
-          structuredContent: {
+        return toolOk(`Executed schedule "${schedule.name}".`, {
+          details: `Task created. Next regular run: ${updated?.nextRunAt || "not scheduled"}`,
+          data: {
             yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Executed schedule "${schedule.name}".`,
             schedule: updated
               ? {
                   id: updated.id,
@@ -107,17 +71,12 @@ export const registerRunScheduleNowTool = (server: McpServer) => {
                 }
               : undefined,
           },
-        };
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to run schedule: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to run schedule: ${message}`,
-          },
-        };
+        return toolErr(`Failed to run schedule: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

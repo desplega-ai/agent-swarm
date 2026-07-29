@@ -141,6 +141,18 @@ After adding a handler FILE: also add the import to `src/http/all-routes.ts`, th
 
 </important>
 
+<important if="you are adding or modifying MCP tools in src/tools/">
+
+Tools return a `SwarmToolResult` (`toolOk(message, extras?)` / `toolErr(message, extras?)` from `src/tools/utils.ts`) — **never** a raw `CallToolResult`. The registrar (`createToolRegistrar`) is the sole place that builds `content`/`structuredContent`/`isError`; a tool that hand-builds those fields bypasses the both-channels-consistency guarantee.
+
+- `message` summarizes the outcome (required, non-empty); `details` carries the payload the model actually needs to act on (diagnostics, stderr, a rendered table) — not just a count.
+- Declare `outputSchema` via `swarmToolOutputSchema(dataShape?)` — loose (`z.looseObject`), every data field optional, no `.uuid()`/`.email()`/format pins on OUTPUT fields (double-validated by our SDK + opencode's client; a strict/pinned schema rejects an honest response after the side effect already landed). Input schemas may stay strict.
+- Conditional one-sentence steers go in the central `NUDGES` map in `src/tools/utils.ts`, not ad-hoc per-tool strings.
+
+Full contract, the per-harness verified matrix, and the validation gate: [runbooks/mcp-tool-results.md](./runbooks/mcp-tool-results.md).
+
+</important>
+
 <important if="you are bumping the version in package.json">
 
 Two artifacts derive from `package.json`'s `version`: `openapi.json` + `docs-site/content/docs/api-reference/**` (embed it) and `charts/agent-swarm/Chart.yaml` (`version`/`appVersion` must match). CI fails the `OpenAPI Spec Freshness Check` and the chart-version sync check on a bump without regenerating them.

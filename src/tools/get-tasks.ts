@@ -1,28 +1,32 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
 import { getAllTasks } from "@/be/db";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
-import { createToolRegistrar } from "@/tools/utils";
+import {
+  createToolRegistrar,
+  type SwarmToolResult,
+  swarmToolOutputSchema,
+  toolOk,
+} from "@/tools/utils";
 import type { AgentTask, AgentTaskSummary } from "@/types";
 import { AgentTaskStatusSchema, AssetKeySchema } from "@/types";
 
-const TaskSummarySchema = z.object({
-  id: z.string(),
-  key: AssetKeySchema,
-  agentId: z.string().nullable(),
+const TaskSummarySchema = z.looseObject({
+  id: z.string().optional(),
+  key: z.string().optional(),
+  agentId: z.string().nullable().optional(),
   // Slim rows (default) carry `taskPreview` (~300 chars); `includeFull` rows
   // carry the full `task` text. Exactly one is present.
   task: z.string().optional(),
   taskPreview: z.string().optional(),
-  status: AgentTaskStatusSchema,
+  status: AgentTaskStatusSchema.optional(),
   taskType: z.string().optional(),
-  tags: z.array(z.string()),
-  priority: z.number(),
-  dependsOn: z.array(z.string()),
+  tags: z.array(z.string()).optional(),
+  priority: z.number().optional(),
+  dependsOn: z.array(z.string()).optional(),
   offeredTo: z.string().optional(),
-  createdAt: z.string(),
-  lastUpdatedAt: z.string(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
   finishedAt: z.string().optional(),
   progress: z.string().optional(),
 });
@@ -65,12 +69,12 @@ export const getTasksInputSchema = z.object({
     .describe("Return the full `task` text instead of a ~300-char `taskPreview`. Default false."),
 });
 
-export const getTasksOutputSchema = z.object({
+export const getTasksOutputSchema = swarmToolOutputSchema({
   // Plain string, NOT .uuid(): agents may join with custom IDs (AGENT_ID env /
   // join-swarm agentId), and a UUID constraint here makes the response fail MCP
   // output validation after the handler already ran.
   yourAgentId: z.string().optional(),
-  tasks: z.array(TaskSummarySchema),
+  tasks: z.array(TaskSummarySchema).optional(),
 });
 
 type GetTasksArgs = z.infer<typeof getTasksInputSchema>;
@@ -93,7 +97,7 @@ export async function getTasksHandler(
     limit,
     includeFull,
   }: GetTasksArgs,
-): Promise<CallToolResult> {
+): Promise<SwarmToolResult> {
   const agentId = ctx.kind === "owner" ? ctx.agentId : undefined;
 
   // Build filters. User context is hard-scoped by requestedByUserId and ignores
@@ -153,24 +157,15 @@ export async function getTasksHandler(
   if (keyPrefix) filters.push(`keyPrefix='${keyPrefix}'`);
 
   const filterMsg = filters.length > 0 ? ` (${filters.join(", ")})` : "";
-  const structuredContent = {
+  const data = {
     yourAgentId: agentId,
     tasks: taskSummaries,
   };
 
-  return {
-    content: [
-      {
-        type: "text",
-        text: `Found ${taskSummaries.length} task(s)${filterMsg}.`,
-      },
-      {
-        type: "text",
-        text: JSON.stringify(structuredContent),
-      },
-    ],
-    structuredContent,
-  };
+  return toolOk(`Found ${taskSummaries.length} task(s)${filterMsg}.`, {
+    details: JSON.stringify(data),
+    data,
+  });
 }
 
 export const registerGetTasksTool = (server: McpServer) => {
