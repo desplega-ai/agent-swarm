@@ -15,6 +15,8 @@ CLI_PATH_FILE="${BOOTSTRAP_ROOT}/cli-path"
 BROWSER_PATH_FILE="${BOOTSTRAP_ROOT}/browser-path"
 WRAPPER_PATH="${LINK_DIR}/agent-browser"
 PLAYWRIGHT_FALLBACK_ROOT="${AGENT_BROWSER_PLAYWRIGHT_ROOT-/opt/playwright}"
+read -r -a SYSTEM_BROWSER_COMMANDS <<< \
+  "${AGENT_BROWSER_SYSTEM_BROWSER_COMMANDS:-google-chrome-stable google-chrome chromium chromium-browser}"
 
 case "$BOOTSTRAP_ROOT" in
   "" | "/")
@@ -104,7 +106,7 @@ resolve_existing_browser() {
     fi
   fi
 
-  for browser_command in google-chrome-stable google-chrome chromium chromium-browser; do
+  for browser_command in "${SYSTEM_BROWSER_COMMANDS[@]}"; do
     candidate="$(command -v "$browser_command" 2>/dev/null || true)"
     if [ -n "$candidate" ] && [ -x "$candidate" ]; then
       printf '%s\n' "$candidate"

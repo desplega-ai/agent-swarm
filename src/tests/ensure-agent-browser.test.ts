@@ -86,6 +86,7 @@ ln -s "$prefix/lib/node_modules/agent-browser/bin/agent-browser" "$prefix/bin/ag
       AGENT_BROWSER_BOOTSTRAP_ROOT: stateDir,
       AGENT_BROWSER_LINK_DIR: linkDir,
       AGENT_BROWSER_PLAYWRIGHT_ROOT: join(root, "missing-system-playwright"),
+      AGENT_BROWSER_SYSTEM_BROWSER_COMMANDS: "__agent_browser_missing__",
       PLAYWRIGHT_BROWSERS_PATH: playwrightRoot,
       MOCK_NPM_COUNT: installCountPath,
       MOCK_NPM_DELAY: options.npmDelay ?? "0",
