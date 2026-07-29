@@ -41,6 +41,10 @@ async function createFixture(options: { browserPresent?: boolean; npmDelay?: str
 set -euo pipefail
 printf 'install\\n' >> "$MOCK_NPM_COUNT"
 sleep "\${MOCK_NPM_DELAY:-0}"
+if [[ " $* " != *" --ignore-scripts "* ]]; then
+  echo "mock npm requires --ignore-scripts" >&2
+  exit 97
+fi
 prefix=""
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "--prefix" ]; then

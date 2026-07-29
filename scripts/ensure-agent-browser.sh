@@ -133,7 +133,7 @@ fi
 if [ -z "$cli_path" ]; then
   rm -rf "$INSTALL_DIR"
   HOME="$BROWSER_HOME" NPM_CONFIG_CACHE="${BOOTSTRAP_ROOT}/npm-cache" \
-    npm install --global --prefix "$INSTALL_DIR" --no-audit --no-fund \
+    npm install --global --prefix "$INSTALL_DIR" --no-audit --no-fund --ignore-scripts \
     "agent-browser@${AGENT_BROWSER_VERSION}"
 
   if [ ! -x "$INSTALL_BIN" ] \
