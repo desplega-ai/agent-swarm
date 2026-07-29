@@ -335,6 +335,12 @@ function parseSchemaFields(content: string, fullContent: string): FieldInfo[] {
   // Remove outer braces and parse fields
   objectContent = objectContent.slice(1, -1);
 
+  // Drop whole-line `//` comments BEFORE the depth-tracking split below —
+  // parens/commas inside a comment would otherwise corrupt the field
+  // boundaries and silently drop parameters from the generated docs. Only
+  // whole lines are stripped, so `//` inside describe() strings (URLs) is safe.
+  objectContent = objectContent.replace(/^\s*\/\/[^\n]*$/gm, "");
+
   // Parse each field by tracking brace/paren depth
   let currentField = "";
   let depth = 0;
@@ -379,10 +385,14 @@ function findSchemaConstantObjectStart(constName: string, source: string): numbe
  * string literal the constant holds.
  */
 function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
+  // Strip line comments preceding the field name — a `// note` above a field
+  // would otherwise make the name regex fail and silently drop the parameter
+  // row from the generated docs.
+  const withoutLeadingComments = fieldStr.replace(/^(\s*\/\/[^\n]*\n)+/, "");
   // Match field name and type chain. Allow whitespace/newlines between `z` and
   // the first `.method(...)` so multi-line zod chains (e.g. `z\n  .string()`)
   // are parsed too.
-  const fieldMatch = fieldStr.match(/^\s*(\w+):\s*([\s\S]+)/);
+  const fieldMatch = withoutLeadingComments.match(/^\s*(\w+):\s*([\s\S]+)/);
   if (!fieldMatch) return null;
 
   const [, name, rawTypeChain] = fieldMatch;

@@ -248,6 +248,7 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
+| `agentId` | `string` | No | - | The agent to assign/offer task to. Omit to create unassigned task for pool. |
 | `task` | `string` | Yes | - | The task description to send. |
 | `key` | `unknown` | No | - | Logical namespace key. Child tasks inherit their parent namespace when provided. |
 | `offerMode` | `boolean` | No | false | If true, offer the task instead of direct assign (agent must accept/reject). |
@@ -414,11 +415,15 @@ Perform task pool operations: create unassigned tasks, claim/release tasks from 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `action` | `unknown` | Yes | - | The action to perform: 'create' creates an unassigned task, 'claim' takes a task from pool, 'release' returns task to pool, 'accept' accepts offered task, 'reject' declines offered task, 'to_backlog' moves task to backlog, 'from_backlog' moves task from backlog to pool. |
+| `task` | `string` | No | - | Task description (required for 'create'). |
 | `key` | `unknown` | No | - | Logical namespace for a created task. Defaults to a shared/task:<id>/ resource key. |
 | `taskType` | `string` | No | - | Task type (e.g., 'bug', 'feature'). |
 | `tags` | `array` | No | - | Tags for filtering (e.g., ['urgent', 'frontend']). |
 | `priority` | `number` | No | - | Priority 0-100, default 50. |
 | `dependsOn` | `array` | No | - | Task IDs this task depends on. |
+| `taskId` | `uuid` | No | - | Task ID (required for claim/release/accept/reject). |
+| `reason` | `string` | No | - | Reason for rejection (optional for 'reject'). |
+| `dir` | `string` | No | - | Working directory (absolute path) for the agent to start in. Only used with 'create' action. |
 | `model` | `string` | No | - | Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action. |
 | `modelTier` | `unknown` | No | - | Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action. |
 | `effort` | `unknown` | No | - | Reasoning effort for the created task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. Only used with 'create' action. |

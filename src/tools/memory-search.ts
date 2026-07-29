@@ -160,13 +160,10 @@ export const registerMemorySearchTool = (server: McpServer) => {
             : {}),
         }));
 
-        const nudgeCount = mapped.filter((r) => r.rateHint).length;
-        const ratingNudge =
-          nudgeCount > 0 ? "Rate memories that help or mislead you with memory_rate." : undefined;
-
+        // The conditional rating steer lives in the central NUDGES map
+        // (src/tools/utils.ts), keyed off rateHint presence in the results.
         return toolOk(`Found ${mapped.length} memories matching "${query}".`, {
           details: renderResults(mapped),
-          nudge: ratingNudge,
           data: { yourAgentId: requestInfo.agentId, results: mapped },
         });
       }

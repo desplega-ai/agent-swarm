@@ -115,6 +115,14 @@ Part 2 — prompting (same PR; applies to ALL harnesses — script_rubric includ
 4. **Review round restored text-channel payloads** the sweep dropped: task-action/send-task/cancel-task render the task JSON as `details` (old code emitted it as a second content block); get-workflow renders the full definition; skill-search echoes the query again.
 5. **`scripts/check-rbac-boundary.sh` allowlist** got a `get-swarm.ts` entry — the sweep added a cosmetic `", lead"` tag in the agent-list details rendering (display, not authz).
 
+**Post-review round (2026-07-29 EOD, after Taras question + Codex bot comments — all addressed):**
+
+6. **Text-channel completeness guarantee added** (Taras: "does content contain 100% of structuredContent?"): it didn't — `data` without `details` was invisible to text-only harnesses. The finalize transform now auto-renders `data` as JSON into `content.text` when `details` is absent (capped ~8KB, curated `details` suppresses it, NOT duplicated into `structuredContent.details`). Runbook §2 + gate tests updated; rbac-charact-skills denial assertions moved from `toBe` to `toStartWith` (denial text still first).
+7. **Codex bot P2 (real bug)**: script-search NUDGES entry read `r.data.results` but the proxy nests the body at `r.data.data.results` — the seeded-examples nudge never fired; fixed + gate test now uses the real proxy shape (it had masked the bug).
+8. **Codex bot P1**: memory-search rating steer moved from inline `nudge:` into the central `NUDGES` map (policy: steers centrally auditable).
+9. **Codex bot P2 (docs)**: `generate-mcp-docs.ts` is a source-text parser — the sweep's `// Plain string, NOT .uuid()` comments corrupted its field splitting and silently dropped rows (send-task `agentId`, task-action rows). Generator now strips whole-line comments before splitting; MCP.md regenerated. NOTE: main's MCP.md had drifted (docs-daily-update enriches rows beyond generator output, e.g. steer-task mode enum); regen is faithful-to-source, the daily job re-enriches.
+10. **CI**: `scripts/check-rbac-boundary.sh` (not in the local mirror list!) flagged get-swarm's cosmetic `", lead"` render — allowlisted. All PR #1023 checks green as of `2da020fd`.
+
 **Known follow-ups discovered during implementation (not blocking):**
 
 - Scheduling guidance ("Pick the Right targetType") lives INSIDE `system.agent.context_mode`, so pi leads (who now correctly drop context_mode) lose it — split scheduling out of context_mode (incident-relevant: the welcome session misused schedules).

@@ -129,19 +129,73 @@ describe("finalizeSwarmToolResult", () => {
   });
 
   test("NUDGES map: empty script-search points at seeded examples; non-empty does not", () => {
+    // Real proxyScriptsApi shape: data = { status, data: <parsed HTTP body> }.
     const empty = finalizeSwarmToolResult("script-search", {
       ok: true,
       message: "Found 0 script(s).",
-      data: { data: {}, results: [] },
+      data: { status: 200, data: { results: [] } },
     });
     expect((empty.structuredContent as { nudge?: string }).nudge).toContain("seeded");
 
     const nonEmpty = finalizeSwarmToolResult("script-search", {
       ok: true,
       message: "Found 1 script(s).",
-      data: { results: [{ name: "x" }] },
+      data: { status: 200, data: { results: [{ name: "x" }] } },
     });
     expect((nonEmpty.structuredContent as { nudge?: string }).nudge).toBeUndefined();
+  });
+
+  test("NUDGES map: memory-search rating steer fires only when a result carries a rateHint", () => {
+    const withHint = finalizeSwarmToolResult("memory-search", {
+      ok: true,
+      message: "Found 2 memories.",
+      data: {
+        results: [{ id: "a" }, { id: "b", rateHint: 'memory_rate(id="b", useful=true|false)' }],
+      },
+    });
+    expect((withHint.structuredContent as { nudge?: string }).nudge).toContain("memory_rate");
+
+    const withoutHint = finalizeSwarmToolResult("memory-search", {
+      ok: true,
+      message: "Found 1 memories.",
+      data: { results: [{ id: "a" }] },
+    });
+    expect((withoutHint.structuredContent as { nudge?: string }).nudge).toBeUndefined();
+  });
+
+  test("data with no details auto-renders into the text channel (completeness guarantee)", () => {
+    const result = finalizeSwarmToolResult("some-tool", {
+      ok: true,
+      message: "Saved.",
+      data: { taskId: "t-1", status: "in_progress" },
+    });
+    const text = (result.content?.[0] as { text: string }).text;
+    expect(text).toContain('"taskId": "t-1"');
+    expect(text).toContain('"status": "in_progress"');
+    // Not duplicated into structuredContent.details — data is already there.
+    expect((result.structuredContent as { details?: string }).details).toBeUndefined();
+
+    // Explicit details suppress the fallback (curated rendering wins).
+    const curated = finalizeSwarmToolResult("some-tool", {
+      ok: true,
+      message: "Saved.",
+      details: "- t-1: in_progress",
+      data: { taskId: "t-1", status: "in_progress" },
+    });
+    const curatedText = (curated.content?.[0] as { text: string }).text;
+    expect(curatedText).toContain("- t-1: in_progress");
+    expect(curatedText).not.toContain('"taskId"');
+  });
+
+  test("auto-rendered data fallback is capped for the tightest harness budget", () => {
+    const result = finalizeSwarmToolResult("some-tool", {
+      ok: true,
+      message: "Big payload.",
+      data: { blob: "x".repeat(50_000) },
+    });
+    const text = (result.content?.[0] as { text: string }).text;
+    expect(text.length).toBeLessThan(10_000);
+    expect(text).toContain("[truncated");
   });
 
   test("an explicit tool-provided nudge wins over the central map", () => {

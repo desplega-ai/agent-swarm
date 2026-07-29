@@ -174,7 +174,7 @@ describe("skill tool gates (characterization)", () => {
     expect(result.structuredContent.message).toBe(
       "Only leads can install skills for other agents.",
     );
-    expect(result.content[0]?.text).toBe("Only leads can install skills for other agents.");
+    expect(result.content[0]?.text).toStartWith("Only leads can install skills for other agents.");
   });
 
   test("lead can install a skill for another agent", async () => {
@@ -206,7 +206,7 @@ describe("skill tool gates (characterization)", () => {
     expect(result.isError).toBe(true);
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toBe("Only lead agents can install remote skills.");
-    expect(result.content[0]?.text).toBe("Only lead agents can install remote skills.");
+    expect(result.content[0]?.text).toStartWith("Only lead agents can install remote skills.");
   });
 
   test("lead can install a remote skill (isComplex path, no network fetch)", async () => {
@@ -234,7 +234,9 @@ describe("skill tool gates (characterization)", () => {
     expect(result.structuredContent.message).toBe(
       "Only leads can uninstall skills for other agents.",
     );
-    expect(result.content[0]?.text).toBe("Only leads can uninstall skills for other agents.");
+    expect(result.content[0]?.text).toStartWith(
+      "Only leads can uninstall skills for other agents.",
+    );
   });
 
   test("lead can uninstall a skill for another agent", async () => {
@@ -278,7 +280,9 @@ describe("skill tool gates (characterization)", () => {
     expect(result.structuredContent.message).toBe(
       "Only the owning agent or lead can delete this skill.",
     );
-    expect(result.content[0]?.text).toBe("Only the owning agent or lead can delete this skill.");
+    expect(result.content[0]?.text).toStartWith(
+      "Only the owning agent or lead can delete this skill.",
+    );
     // DB not mutated
     expect(getSkillById(skill.id)).not.toBeNull();
   });
@@ -333,7 +337,9 @@ describe("mcp-server tool gates (characterization)", () => {
     expect(result.structuredContent.message).toBe(
       "Only lead agents can create swarm-scope MCP servers.",
     );
-    expect(result.content[0]?.text).toBe("Only lead agents can create swarm-scope MCP servers.");
+    expect(result.content[0]?.text).toStartWith(
+      "Only lead agents can create swarm-scope MCP servers.",
+    );
   });
 
   test("worker cannot create a global-scope MCP server", async () => {
@@ -349,7 +355,9 @@ describe("mcp-server tool gates (characterization)", () => {
     expect(result.structuredContent.message).toBe(
       "Only lead agents can create global-scope MCP servers.",
     );
-    expect(result.content[0]?.text).toBe("Only lead agents can create global-scope MCP servers.");
+    expect(result.content[0]?.text).toStartWith(
+      "Only lead agents can create global-scope MCP servers.",
+    );
   });
 
   test("lead can create a swarm-scope MCP server", async () => {
@@ -379,7 +387,9 @@ describe("mcp-server tool gates (characterization)", () => {
     expect(result.structuredContent.message).toBe(
       "Only leads can install MCP servers for other agents.",
     );
-    expect(result.content[0]?.text).toBe("Only leads can install MCP servers for other agents.");
+    expect(result.content[0]?.text).toStartWith(
+      "Only leads can install MCP servers for other agents.",
+    );
   });
 
   test("lead can install an MCP server for another agent", async () => {
@@ -415,7 +425,9 @@ describe("mcp-server tool gates (characterization)", () => {
     expect(result.structuredContent.message).toBe(
       "Only leads can uninstall MCP servers for other agents.",
     );
-    expect(result.content[0]?.text).toBe("Only leads can uninstall MCP servers for other agents.");
+    expect(result.content[0]?.text).toStartWith(
+      "Only leads can uninstall MCP servers for other agents.",
+    );
   });
 
   test("lead can uninstall an MCP server for another agent", async () => {
@@ -457,7 +469,7 @@ describe("mcp-server tool gates (characterization)", () => {
     expect(result.structuredContent.message).toBe(
       "Only the owning agent or lead can delete this MCP server.",
     );
-    expect(result.content[0]?.text).toBe(
+    expect(result.content[0]?.text).toStartWith(
       "Only the owning agent or lead can delete this MCP server.",
     );
     // DB not mutated
@@ -502,7 +514,7 @@ describe("mcp-server tool gates (characterization)", () => {
     expect(result.structuredContent.message).toBe(
       "Only the owning agent or lead can update this MCP server.",
     );
-    expect(result.content[0]?.text).toBe(
+    expect(result.content[0]?.text).toStartWith(
       "Only the owning agent or lead can update this MCP server.",
     );
     // DB not mutated

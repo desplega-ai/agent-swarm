@@ -164,12 +164,31 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
   "get-script-run": (r) => (r.ok ? undefined : SCRIPT_AUTHORING_NUDGE),
   "script-search": (r) => {
     if (!r.ok) return undefined;
-    const results = (r.data as { results?: unknown[] } | undefined)?.results;
+    // proxyScriptsApi wraps the parsed HTTP body as data = { status, data },
+    // so the results array lives one level down.
+    const body = (r.data as { data?: { results?: unknown[] } } | undefined)?.data;
+    const results = body?.results;
     return Array.isArray(results) && results.length === 0
       ? "No scripts matched — the catalog ships seeded example scripts; re-run script-search with an empty query to list them."
       : undefined;
   },
+  "memory-search": (r) => {
+    if (!r.ok) return undefined;
+    const results = (r.data as { results?: Array<{ rateHint?: unknown }> } | undefined)?.results;
+    return Array.isArray(results) && results.some((entry) => Boolean(entry?.rateHint))
+      ? "Rate memories that help or mislead you with memory_rate."
+      : undefined;
+  },
 };
+
+// Cap for the auto-rendered data fallback in the text channel — Codex's
+// ~10KB middle-out truncation is the tightest harness budget.
+const DATA_FALLBACK_CAP = 8_000;
+
+function truncateForText(text: string): string {
+  if (text.length <= DATA_FALLBACK_CAP) return text;
+  return `${text.slice(0, DATA_FALLBACK_CAP)}\n… [truncated ${text.length - DATA_FALLBACK_CAP} chars]`;
+}
 
 type FinalizeContext = { toolName: string };
 type FinalizeMiddleware = (result: SwarmToolResult, ctx: FinalizeContext) => SwarmToolResult;
@@ -208,7 +227,17 @@ export function finalizeSwarmToolResult(toolName: string, result: SwarmToolResul
   }
   for (const middleware of FINALIZE_PIPELINE) r = middleware(r, { toolName });
 
-  const text = [r.message, r.details, r.nudge]
+  // Text-channel completeness guarantee: when a tool sets data but no details,
+  // render the data as JSON into the text channel. Most harnesses only ever
+  // show the model content.text — without this fallback, a data-only payload
+  // would be invisible there. Not copied into structuredContent.details (the
+  // structured channel already carries data verbatim).
+  const dataFallback =
+    !r.details?.trim() && r.data && Object.keys(r.data).length > 0
+      ? truncateForText(JSON.stringify(r.data, null, 2))
+      : undefined;
+
+  const text = [r.message, r.details ?? dataFallback, r.nudge]
     .filter((part): part is string => Boolean(part?.trim()))
     .join("\n\n");
   const structuredContent: Record<string, unknown> = {

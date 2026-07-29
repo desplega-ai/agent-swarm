@@ -35,10 +35,12 @@ Build one with `toolOk(message, extras?)` / `toolErr(message, extras?)` (`src/to
 After the pipeline, the transform composes both channels from the same three fields:
 
 ```ts
-text = [message, details, nudge].filter(Boolean).join("\n\n")
+text = [message, details ?? autoRenderedData, nudge].filter(Boolean).join("\n\n")
 structuredContent = { ...data, success: ok, message, details?, nudge? }
 isError = !ok
 ```
+
+**Text-channel completeness guarantee**: when a tool sets `data` but no `details`, the transform auto-renders the data as pretty-printed JSON into the text channel (capped at ~8KB — Codex's middle-out truncation is the tightest harness budget). A payload can therefore never be visible only to structured-content readers; an explicit `details` (curated rendering) always suppresses the fallback, and the fallback is *not* copied into `structuredContent.details` (the structured channel already carries `data` verbatim).
 
 An empty/blank `message` never reaches a harness silently: the registrar logs a warning and substitutes a loud fallback ("Tool call succeeded (no message provided)." / "Tool call failed (no message provided).") so the text channel is never blank.
 
