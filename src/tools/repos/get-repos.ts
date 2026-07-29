@@ -1,8 +1,28 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getSwarmRepos } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
-import { SwarmRepoSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolOk } from "@/tools/utils";
+
+const swarmRepoOutputShape = z.looseObject({
+  id: z.string().optional(),
+  url: z.string().optional(),
+  name: z.string().optional(),
+  clonePath: z.string().optional(),
+  defaultBranch: z.string().optional(),
+  autoClone: z.boolean().optional(),
+  hooks: z.looseObject({ enabled: z.boolean().optional() }).optional(),
+  guidelines: z
+    .looseObject({
+      prChecks: z.array(z.string()).optional(),
+      mergeChecks: z.array(z.string()).optional(),
+      allowMerge: z.boolean().optional(),
+      review: z.array(z.string()).optional(),
+    })
+    .nullable()
+    .optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+});
 
 export const registerGetReposTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -16,11 +36,9 @@ export const registerGetReposTool = (server: McpServer) => {
       inputSchema: z.object({
         name: z.string().optional().describe("Filter by repo name. If omitted, returns all repos."),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
-        repos: z.array(SwarmRepoSchema),
-        count: z.number(),
+      outputSchema: swarmToolOutputSchema({
+        repos: z.array(swarmRepoOutputShape).optional(),
+        count: z.number().optional(),
       }),
     },
     async ({ name }) => {
@@ -38,20 +56,10 @@ export const registerGetReposTool = (server: McpServer) => {
               )
               .join("\n");
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: count === 0 ? "No repos found." : `Found ${count} repo(s):\n\n${repoList}`,
-          },
-        ],
-        structuredContent: {
-          success: true,
-          message: count === 0 ? "No repos found." : `Found ${count} repo(s).`,
-          repos,
-          count,
-        },
-      };
+      return toolOk(count === 0 ? "No repos found." : `Found ${count} repo(s).`, {
+        details: count === 0 ? undefined : repoList,
+        data: { repos, count },
+      });
     },
   );
 };

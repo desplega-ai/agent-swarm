@@ -6,7 +6,7 @@ import { getSlackApp } from "@/slack/app";
 import { withAutoJoin } from "@/slack/channel-join";
 import { downloadFile } from "@/slack/files";
 import { extractSlackMessageText } from "@/slack/message-text";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 /**
  * Default download directory for auto-downloaded Slack files (inside MCP container).
@@ -14,22 +14,22 @@ import { createToolRegistrar } from "@/tools/utils";
  */
 const AUTO_DOWNLOAD_DIR = "/app/shared/downloads/slack";
 
-const SlackFileSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  mimetype: z.string(),
-  filetype: z.string(),
-  size: z.number(),
-  url_private_download: z.string(),
+const SlackFileSchema = z.looseObject({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  mimetype: z.string().optional(),
+  filetype: z.string().optional(),
+  size: z.number().optional(),
+  url_private_download: z.string().optional(),
   localPath: z.string().optional(),
 });
 
-const SlackMessageSchema = z.object({
+const SlackMessageSchema = z.looseObject({
   user: z.string().optional(),
   username: z.string().optional(),
-  isBot: z.boolean(),
-  text: z.string(),
-  ts: z.string(),
+  isBot: z.boolean().optional(),
+  text: z.string().optional(),
+  ts: z.string().optional(),
   files: z.array(SlackFileSchema).optional(),
 });
 
@@ -65,12 +65,10 @@ export const registerSlackReadTool = (server: McpServer) => {
           .default(true)
           .describe("Include file attachments in the response (default: true)."),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
         channelId: z.string().optional(),
         threadTs: z.string().optional(),
-        messages: z.array(SlackMessageSchema),
+        messages: z.array(SlackMessageSchema).optional(),
       }),
     },
     async (
@@ -79,18 +77,12 @@ export const registerSlackReadTool = (server: McpServer) => {
       _meta,
     ) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found.", messages: [] },
-        };
+        return toolErr("Agent ID not found.", { data: { messages: [] } });
       }
 
       const agent = getAgentById(requestInfo.agentId);
       if (!agent) {
-        return {
-          content: [{ type: "text", text: "Agent not found." }],
-          structuredContent: { success: false, message: "Agent not found.", messages: [] },
-        };
+        return toolErr("Agent not found.", { data: { messages: [] } });
       }
 
       let slackChannelId: string | undefined = channelId;
@@ -100,45 +92,21 @@ export const registerSlackReadTool = (server: McpServer) => {
       if (inboxMessageId) {
         const inboxMsg = getInboxMessageById(inboxMessageId);
         if (!inboxMsg) {
-          return {
-            content: [{ type: "text", text: "Inbox message not found." }],
-            structuredContent: {
-              success: false,
-              message: "Inbox message not found.",
-              messages: [],
-            },
-          };
+          return toolErr("Inbox message not found.", { data: { messages: [] } });
         }
         if (inboxMsg.agentId !== requestInfo.agentId) {
-          return {
-            content: [{ type: "text", text: "This inbox message is not yours." }],
-            structuredContent: {
-              success: false,
-              message: "This inbox message is not yours.",
-              messages: [],
-            },
-          };
+          return toolErr("This inbox message is not yours.", { data: { messages: [] } });
         }
         slackChannelId = inboxMsg.slackChannelId;
         slackThreadTs = inboxMsg.slackThreadTs;
       } else if (taskId) {
         const task = getTaskById(taskId);
         if (!task) {
-          return {
-            content: [{ type: "text", text: "Task not found." }],
-            structuredContent: { success: false, message: "Task not found.", messages: [] },
-          };
+          return toolErr("Task not found.", { data: { messages: [] } });
         }
         // Verify agent has context for this task
         if (task.agentId !== requestInfo.agentId && task.creatorAgentId !== requestInfo.agentId) {
-          return {
-            content: [{ type: "text", text: "You don't have context for this task." }],
-            structuredContent: {
-              success: false,
-              message: "You don't have context for this task.",
-              messages: [],
-            },
-          };
+          return toolErr("You don't have context for this task.", { data: { messages: [] } });
         }
         slackChannelId = task.slackChannelId;
         slackThreadTs = task.slackThreadTs;
@@ -151,45 +119,25 @@ export const registerSlackReadTool = (server: McpServer) => {
           source: "mcp",
         });
         if (!decision.allow) {
-          return {
-            content: [{ type: "text", text: "Direct channel access requires lead privileges." }],
-            structuredContent: {
-              success: false,
-              message: "Direct channel access requires lead privileges.",
-              messages: [],
-            },
-          };
+          return toolErr("Direct channel access requires lead privileges.", {
+            data: { messages: [] },
+          });
         }
         slackChannelId = channelId;
         slackThreadTs = threadTs;
       } else {
-        return {
-          content: [{ type: "text", text: "Must provide inboxMessageId, taskId, or channelId." }],
-          structuredContent: {
-            success: false,
-            message: "Must provide inboxMessageId, taskId, or channelId.",
-            messages: [],
-          },
-        };
+        return toolErr("Must provide inboxMessageId, taskId, or channelId.", {
+          data: { messages: [] },
+        });
       }
 
       if (!slackChannelId) {
-        return {
-          content: [{ type: "text", text: "No Slack channel context available." }],
-          structuredContent: {
-            success: false,
-            message: "No Slack channel context available.",
-            messages: [],
-          },
-        };
+        return toolErr("No Slack channel context available.", { data: { messages: [] } });
       }
 
       const app = getSlackApp();
       if (!app) {
-        return {
-          content: [{ type: "text", text: "Slack not configured." }],
-          structuredContent: { success: false, message: "Slack not configured.", messages: [] },
-        };
+        return toolErr("Slack not configured.", { data: { messages: [] } });
       }
 
       try {
@@ -370,31 +318,13 @@ export const registerSlackReadTool = (server: McpServer) => {
           })
           .join("\n\n");
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Retrieved ${messages.length} message(s) from Slack.\n\n${textOutput}`,
-            },
-          ],
-          structuredContent: {
-            success: true,
-            message: `Retrieved ${messages.length} message(s).`,
-            channelId: slackChannelId,
-            threadTs: slackThreadTs,
-            messages,
-          },
-        };
+        return toolOk(`Retrieved ${messages.length} message(s).`, {
+          details: textOutput || undefined,
+          data: { channelId: slackChannelId, threadTs: slackThreadTs, messages },
+        });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: `Failed to read Slack messages: ${errorMsg}` }],
-          structuredContent: {
-            success: false,
-            message: `Failed to read Slack messages: ${errorMsg}`,
-            messages: [],
-          },
-        };
+        return toolErr(`Failed to read Slack messages: ${errorMsg}`, { data: { messages: [] } });
       }
     },
   );

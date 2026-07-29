@@ -11,7 +11,7 @@ import {
   upsertScriptConnection,
 } from "@/be/script-connections";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { resolveScopedResourceId, scopedResourceScopeIdSchema } from "@/utils/scoped-resource";
 
 const scriptConnectionsInputSchema = z.object({
@@ -92,11 +92,9 @@ const scriptConnectionsInputSchema = z.object({
   enabled: z.boolean().optional().describe("Whether the connection is enabled."),
 });
 
-const scriptConnectionsOutputSchema = z.object({
+const scriptConnectionsOutputSchema = swarmToolOutputSchema({
   yourAgentId: z.string().optional(),
-  success: z.boolean(),
-  message: z.string(),
-  connections: z.array(z.unknown()),
+  connections: z.array(z.unknown()).optional(),
 });
 
 type ScriptConnectionsArgs = z.infer<typeof scriptConnectionsInputSchema>;
@@ -148,14 +146,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
     },
     async (args, requestInfo) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-            connections: [],
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       const agent = getAgentById(requestInfo.agentId);
@@ -170,15 +161,9 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) {
-        return {
-          content: [{ type: "text", text: "Only the lead can manage script connections." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Only the lead can manage script connections.",
-            connections: [],
-          },
-        };
+        return toolErr("Only the lead can manage script connections.", {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       if (args.action === "list") {
@@ -186,101 +171,61 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         const provenanceLines = connections
           .filter((connection) => connection.kind === "openapi" || connection.baseUrl !== null)
           .map(baseUrlProvenanceText);
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Found ${connections.length} script connection(s).${provenanceLines.length ? `\n${provenanceLines.join("\n")}` : ""}`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Found ${connections.length} script connection(s).`,
-            connections,
-          },
-        };
+        return toolOk(`Found ${connections.length} script connection(s).`, {
+          details: provenanceLines.length > 0 ? provenanceLines.join("\n") : undefined,
+          data: { yourAgentId: requestInfo.agentId, connections },
+        });
       }
 
       if (args.action === "disable") {
         if (!args.id) {
-          return {
-            content: [{ type: "text", text: "id is required for disable." }],
-            structuredContent: {
+          return toolErr("id is required for disable.", {
+            data: {
               yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "id is required for disable.",
               connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
             },
-          };
+          });
         }
         setScriptConnectionEnabled(args.id, false);
         const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
-        return {
-          content: [{ type: "text", text: "Script connection disabled." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: "Script connection disabled.",
-            connections,
-          },
-        };
+        return toolOk("Script connection disabled.", {
+          data: { yourAgentId: requestInfo.agentId, connections },
+        });
       }
 
       if (args.action === "refresh") {
         if (!args.id) {
-          return {
-            content: [{ type: "text", text: "id is required for refresh." }],
-            structuredContent: {
+          return toolErr("id is required for refresh.", {
+            data: {
               yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "id is required for refresh.",
               connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
             },
-          };
+          });
         }
         const refreshed = await refreshScriptConnection(args.id, null, requestInfo.agentId);
         const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
         if (!refreshed) {
-          return {
-            content: [{ type: "text", text: "Script connection not found." }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Script connection not found.",
-              connections,
-            },
-          };
+          return toolErr("Script connection not found.", {
+            data: { yourAgentId: requestInfo.agentId, connections },
+          });
         }
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Script connection ${refreshed.slug} refreshed (${baseUrlProvenanceText(refreshed)}).`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: !refreshed.generationError,
-            message: refreshed.generationError
-              ? `Refreshed but generation failed: ${refreshed.generationError}`
-              : `Script connection ${refreshed.slug} refreshed.`,
-            connections,
-          },
+        const extras = {
+          details: baseUrlProvenanceText(refreshed),
+          data: { yourAgentId: requestInfo.agentId, connections },
         };
+        return refreshed.generationError
+          ? toolErr(`Refreshed but generation failed: ${refreshed.generationError}`, extras)
+          : toolOk(`Script connection ${refreshed.slug} refreshed.`, extras);
       }
 
       if (args.action === "upsert-mcp") {
         if (!args.slug || !args.mcpServerId) {
-          return {
-            content: [{ type: "text", text: "slug and mcpServerId are required." }],
-            structuredContent: {
+          return toolErr("slug and mcpServerId are required.", {
+            data: {
               yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "slug and mcpServerId are required.",
               connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
             },
-          };
+          });
         }
 
         const existing = args.id ? getScriptConnectionById(args.id) : null;
@@ -298,30 +243,20 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         });
 
         const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
-        return {
-          content: [{ type: "text", text: `Script MCP connection ${connection.slug} saved.` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: !connection.generationError,
-            message: connection.generationError
-              ? `Saved but generation failed: ${connection.generationError}`
-              : `Script MCP connection ${connection.slug} saved.`,
-            connections,
-          },
-        };
+        const extras = { data: { yourAgentId: requestInfo.agentId, connections } };
+        return connection.generationError
+          ? toolErr(`Saved but generation failed: ${connection.generationError}`, extras)
+          : toolOk(`Script MCP connection ${connection.slug} saved.`, extras);
       }
 
       if (args.action === "upsert-graphql") {
         if (!args.slug || !args.baseUrl || !args.allowedHosts?.length) {
-          return {
-            content: [{ type: "text", text: "slug, baseUrl, and allowedHosts are required." }],
-            structuredContent: {
+          return toolErr("slug, baseUrl, and allowedHosts are required.", {
+            data: {
               yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "slug, baseUrl, and allowedHosts are required.",
               connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
             },
-          };
+          });
         }
 
         const existing = args.id ? getScriptConnectionById(args.id) : null;
@@ -347,51 +282,30 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         });
 
         const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
-        return {
-          content: [{ type: "text", text: `Script GraphQL connection ${connection.slug} saved.` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: !connection.generationError,
-            message: connection.generationError
-              ? `Saved but generation failed: ${connection.generationError}`
-              : `Script GraphQL connection ${connection.slug} saved.`,
-            connections,
-          },
-        };
+        const extras = { data: { yourAgentId: requestInfo.agentId, connections } };
+        return connection.generationError
+          ? toolErr(`Saved but generation failed: ${connection.generationError}`, extras)
+          : toolOk(`Script GraphQL connection ${connection.slug} saved.`, extras);
       }
 
       if (!args.slug || (!args.openapiSpecJson && !args.openapiSpecUrl && !args.specSource)) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "slug and exactly one OpenAPI spec source (openapiSpecJson, openapiSpecUrl, or specSource) are required.",
+        return toolErr(
+          "slug and exactly one OpenAPI spec source (openapiSpecJson, openapiSpecUrl, or specSource) are required.",
+          {
+            data: {
+              yourAgentId: requestInfo.agentId,
+              connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
             },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message:
-              "slug and exactly one OpenAPI spec source (openapiSpecJson, openapiSpecUrl, or specSource) are required.",
-            connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
           },
-        };
+        );
       }
       if ([args.openapiSpecJson, args.openapiSpecUrl, args.specSource].filter(Boolean).length > 1) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Provide exactly one OpenAPI spec source.",
-            },
-          ],
-          structuredContent: {
+        return toolErr("Provide exactly one OpenAPI spec source.", {
+          data: {
             yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Provide exactly one OpenAPI spec source.",
             connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
           },
-        };
+        });
       }
 
       const existing = args.id ? getScriptConnectionById(args.id) : null;
@@ -421,22 +335,13 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
       });
 
       const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Script connection ${connection.slug} saved (${baseUrlProvenanceText(connection)}).`,
-          },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          success: !connection.generationError,
-          message: connection.generationError
-            ? `Saved but generation failed: ${connection.generationError}`
-            : `Script connection ${connection.slug} saved.`,
-          connections,
-        },
+      const extras = {
+        details: baseUrlProvenanceText(connection),
+        data: { yourAgentId: requestInfo.agentId, connections },
       };
+      return connection.generationError
+        ? toolErr(`Saved but generation failed: ${connection.generationError}`, extras)
+        : toolOk(`Script connection ${connection.slug} saved.`, extras);
     },
   );
 };

@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAuthorizationById, getOAuthAppById, getOAuthTokens } from "@/be/db-queries/oauth";
 import { ensureAuthorizationTokenOrThrow, ensureTokenOrThrow } from "@/oauth/ensure-token";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { registerVolatileSecret } from "@/utils/secret-scrubber";
 
 type OAuthProvider = string;
@@ -121,9 +121,7 @@ export const registerGetOauthAccessTokenTool = (server: McpServer) => {
           .default(300)
           .describe("Minimum remaining token lifetime required before returning it."),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
         provider: z.string().optional(),
         accessToken: z.string().optional(),
         expiresAt: z.string().optional(),
@@ -139,28 +137,15 @@ export const registerGetOauthAccessTokenTool = (server: McpServer) => {
           ? await resolveOAuthAccessTokenByAuthorization(authorizationId, minValiditySeconds)
           : await resolveOAuthAccessToken(provider as string, minValiditySeconds);
         const message = `${token.provider} OAuth access token resolved; expires at ${token.expiresAt}.`;
-        return {
-          content: [
-            {
-              type: "text",
-              text: `${message}\n\n${token.accessToken}`,
-            },
-          ],
-          structuredContent: {
-            success: true,
-            message,
-            ...token,
-          },
-        };
+        return toolOk(message, {
+          details: token.accessToken,
+          data: { ...token },
+          // Deliberate reveal: this tool's purpose is handing over the token.
+          allowSecretEgress: true,
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text", text: `Failed to resolve OAuth access token: ${message}` }],
-          structuredContent: {
-            success: false,
-            message,
-          },
-        };
+        return toolErr(`Failed to resolve OAuth access token: ${message}`);
       }
     },
   );

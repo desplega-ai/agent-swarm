@@ -2,16 +2,20 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { sendKapsoText } from "@/integrations/kapso/client";
 import { getKapsoConfig } from "@/integrations/kapso/config";
-import { createToolRegistrar } from "@/tools/utils";
+import {
+  createToolRegistrar,
+  type SwarmToolResult,
+  swarmToolOutputSchema,
+  toolErr,
+  toolOk,
+} from "@/tools/utils";
 
 /** Shared structured-error message for the 24h session-window case. */
 const SESSION_WINDOW_HINT =
   'Outside the 24h WhatsApp session window — free-form text is rejected. Use a pre-approved template message (see the `kapso-whatsapp` skill, "Send a template").';
 
-const outputSchema = z.object({
+const outputSchema = swarmToolOutputSchema({
   yourAgentId: z.string().optional(),
-  success: z.boolean(),
-  message: z.string(),
   messageId: z.string().optional(),
   sessionWindowExpired: z.boolean().optional(),
 });
@@ -79,15 +83,13 @@ async function sendAndFormat(
   params: { phoneNumberId: string; to: string; body: string; previewUrl?: boolean },
   agentId: string | undefined,
   contextMessageId: string | undefined,
-) {
+): Promise<SwarmToolResult> {
   try {
     const config = getKapsoConfig();
     if (!config.apiKey) {
-      const msg = "KAPSO_API_KEY is not configured in swarm config.";
-      return {
-        content: [{ type: "text" as const, text: msg }],
-        structuredContent: { yourAgentId: agentId, success: false, message: msg },
-      };
+      return toolErr("KAPSO_API_KEY is not configured in swarm config.", {
+        data: { yourAgentId: agentId },
+      });
     }
 
     const result = await sendKapsoText({
@@ -102,34 +104,19 @@ async function sendAndFormat(
 
     if (result.ok) {
       const text = `Sent WhatsApp message to ${params.to} (wamid ${result.messageId ?? "unknown"})`;
-      return {
-        content: [{ type: "text" as const, text }],
-        structuredContent: {
-          yourAgentId: agentId,
-          success: true,
-          message: text,
-          messageId: result.messageId,
-        },
-      };
+      return toolOk(text, {
+        data: { yourAgentId: agentId, messageId: result.messageId },
+      });
     }
 
     const text = result.sessionWindowExpired
       ? `${SESSION_WINDOW_HINT} (Kapso: ${result.errorMessage})`
       : `Kapso send failed: ${result.errorMessage}`;
-    return {
-      content: [{ type: "text" as const, text }],
-      structuredContent: {
-        yourAgentId: agentId,
-        success: false,
-        message: text,
-        sessionWindowExpired: result.sessionWindowExpired,
-      },
-    };
+    return toolErr(text, {
+      data: { yourAgentId: agentId, sessionWindowExpired: result.sessionWindowExpired },
+    });
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    return {
-      content: [{ type: "text" as const, text: `Error: ${errorMessage}` }],
-      structuredContent: { yourAgentId: agentId, success: false, message: errorMessage },
-    };
+    return toolErr(errorMessage, { data: { yourAgentId: agentId } });
   }
 }

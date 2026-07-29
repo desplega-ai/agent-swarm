@@ -4,7 +4,7 @@ import { getAgentById, getInboxMessageById, getTaskById } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { MAX_FILE_SIZE, uploadFile } from "@/slack/files";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 /**
  * Base directory for agent file operations.
@@ -152,9 +152,7 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
           .optional()
           .describe("Optional message to post with the file."),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
         fileId: z.string().optional(),
       }),
     },
@@ -164,18 +162,12 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
       _meta,
     ) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       const agent = getAgentById(requestInfo.agentId);
       if (!agent) {
-        return {
-          content: [{ type: "text", text: "Agent not found." }],
-          structuredContent: { success: false, message: "Agent not found." },
-        };
+        return toolErr("Agent not found.");
       }
 
       let slackChannelId: string | undefined;
@@ -185,33 +177,21 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
       if (inboxMessageId) {
         const inboxMsg = getInboxMessageById(inboxMessageId);
         if (!inboxMsg) {
-          return {
-            content: [{ type: "text", text: "Inbox message not found." }],
-            structuredContent: { success: false, message: "Inbox message not found." },
-          };
+          return toolErr("Inbox message not found.");
         }
         if (inboxMsg.agentId !== requestInfo.agentId) {
-          return {
-            content: [{ type: "text", text: "This inbox message is not yours." }],
-            structuredContent: { success: false, message: "This inbox message is not yours." },
-          };
+          return toolErr("This inbox message is not yours.");
         }
         slackChannelId = inboxMsg.slackChannelId;
         slackThreadTs = inboxMsg.slackThreadTs;
       } else if (taskId) {
         const task = getTaskById(taskId);
         if (!task) {
-          return {
-            content: [{ type: "text", text: "Task not found." }],
-            structuredContent: { success: false, message: "Task not found." },
-          };
+          return toolErr("Task not found.");
         }
         // Verify agent has context for this task
         if (task.agentId !== requestInfo.agentId && task.creatorAgentId !== requestInfo.agentId) {
-          return {
-            content: [{ type: "text", text: "You don't have context for this task." }],
-            structuredContent: { success: false, message: "You don't have context for this task." },
-          };
+          return toolErr("You don't have context for this task.");
         }
         slackChannelId = task.slackChannelId;
         slackThreadTs = resolveTaskUploadThreadTs(task);
@@ -224,81 +204,35 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
           source: "mcp",
         });
         if (!decision.allow) {
-          return {
-            content: [{ type: "text", text: "Direct channel access requires lead privileges." }],
-            structuredContent: {
-              success: false,
-              message: "Direct channel access requires lead privileges.",
-            },
-          };
+          return toolErr("Direct channel access requires lead privileges.");
         }
         slackChannelId = channelId;
         slackThreadTs = threadTs;
       } else {
-        return {
-          content: [{ type: "text", text: "Must provide inboxMessageId, taskId, or channelId." }],
-          structuredContent: {
-            success: false,
-            message: "Must provide inboxMessageId, taskId, or channelId.",
-          },
-        };
+        return toolErr("Must provide inboxMessageId, taskId, or channelId.");
       }
 
       if (!slackChannelId) {
-        return {
-          content: [{ type: "text", text: "No Slack channel context available." }],
-          structuredContent: {
-            success: false,
-            message: "No Slack channel context available.",
-          },
-        };
+        return toolErr("No Slack channel context available.");
       }
 
       const app = getSlackApp();
       if (!app) {
-        return {
-          content: [{ type: "text", text: "Slack not configured." }],
-          structuredContent: { success: false, message: "Slack not configured." },
-        };
+        return toolErr("Slack not configured.");
       }
 
       // Validate: must provide either filePath OR content (not both, not neither)
       if (!filePath && !content) {
-        return {
-          content: [{ type: "text", text: "Must provide either filePath or content (base64)." }],
-          structuredContent: {
-            success: false,
-            message: "Must provide either filePath or content (base64).",
-          },
-        };
+        return toolErr("Must provide either filePath or content (base64).");
       }
 
       if (filePath && content) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Cannot provide both filePath and content. Use one or the other.",
-            },
-          ],
-          structuredContent: {
-            success: false,
-            message: "Cannot provide both filePath and content. Use one or the other.",
-          },
-        };
+        return toolErr("Cannot provide both filePath and content. Use one or the other.");
       }
 
       // If using content (base64), filename is required
       if (content && !filename) {
-        return {
-          content: [
-            { type: "text", text: "filename is required when using base64 content upload." },
-          ],
-          structuredContent: {
-            success: false,
-            message: "filename is required when using base64 content upload.",
-          },
-        };
+        return toolErr("filename is required when using base64 content upload.");
       }
 
       let fileToUpload: string | Buffer;
@@ -319,10 +253,7 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
             `Tips:\n` +
             `- Put the file in /workspace/shared/<agent-id>/ (e.g., '/workspace/shared/<agent-id>/my-file.png') and pass that path.\n` +
             `- Or pass the file inline via the \`content\` arg as base64 (with \`filename\`) so no shared-mount round-trip is needed.`;
-          return {
-            content: [{ type: "text", text: errorMsg }],
-            structuredContent: { success: false, message: errorMsg },
-          };
+          return toolErr(errorMsg);
         }
 
         const resolvedPath = pathResult.resolvedPath;
@@ -331,13 +262,7 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
 
         if (fileSize > MAX_FILE_SIZE) {
           const sizeMB = Math.round(fileSize / 1024 / 1024);
-          return {
-            content: [{ type: "text", text: `File too large: ${sizeMB} MB. Maximum is 1 GB.` }],
-            structuredContent: {
-              success: false,
-              message: `File too large: ${sizeMB} MB. Maximum is 1 GB.`,
-            },
-          };
+          return toolErr(`File too large: ${sizeMB} MB. Maximum is 1 GB.`);
         }
 
         fileToUpload = resolvedPath;
@@ -347,21 +272,12 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
         try {
           fileToUpload = Buffer.from(content!, "base64");
         } catch {
-          return {
-            content: [{ type: "text", text: "Invalid base64 content." }],
-            structuredContent: { success: false, message: "Invalid base64 content." },
-          };
+          return toolErr("Invalid base64 content.");
         }
 
         if (fileToUpload.length > MAX_FILE_SIZE) {
           const sizeMB = Math.round(fileToUpload.length / 1024 / 1024);
-          return {
-            content: [{ type: "text", text: `File too large: ${sizeMB} MB. Maximum is 1 GB.` }],
-            structuredContent: {
-              success: false,
-              message: `File too large: ${sizeMB} MB. Maximum is 1 GB.`,
-            },
-          };
+          return toolErr(`File too large: ${sizeMB} MB. Maximum is 1 GB.`);
         }
 
         actualFilename = filename!;
@@ -377,30 +293,14 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
         });
 
         if (!result.success) {
-          return {
-            content: [{ type: "text", text: `Failed to upload file: ${result.error}` }],
-            structuredContent: {
-              success: false,
-              message: `Failed to upload file: ${result.error}`,
-            },
-          };
+          return toolErr(`Failed to upload file: ${result.error}`);
         }
 
         const successMsg = `File uploaded successfully${result.fileId ? ` (ID: ${result.fileId})` : ""}.`;
-        return {
-          content: [{ type: "text", text: successMsg }],
-          structuredContent: {
-            success: true,
-            message: successMsg,
-            fileId: result.fileId,
-          },
-        };
+        return toolOk(successMsg, { data: { fileId: result.fileId } });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: `Failed to upload file: ${errorMsg}` }],
-          structuredContent: { success: false, message: `Failed to upload file: ${errorMsg}` },
-        };
+        return toolErr(`Failed to upload file: ${errorMsg}`);
       }
     },
   );

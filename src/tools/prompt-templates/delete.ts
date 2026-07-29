@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { deletePromptTemplate, getPromptTemplateById } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerDeletePromptTemplateTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -15,71 +15,39 @@ export const registerDeletePromptTemplateTool = (server: McpServer) => {
       inputSchema: z.object({
         id: z.string().describe("The prompt template ID to delete."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
       }),
     },
     async ({ id }, requestInfo) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       try {
         const existing = getPromptTemplateById(id);
         if (!existing) {
-          return {
-            content: [{ type: "text", text: `Prompt template "${id}" not found.` }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: `Prompt template "${id}" not found.`,
-            },
-          };
+          return toolErr(`Prompt template "${id}" not found.`, {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         const deleted = deletePromptTemplate(id);
         if (!deleted) {
-          return {
-            content: [{ type: "text", text: `Failed to delete prompt template "${id}".` }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: `Failed to delete prompt template "${id}".`,
-            },
-          };
+          return toolErr(`Failed to delete prompt template "${id}".`, {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Prompt template "${existing.eventType}" (scope: ${existing.scope}${existing.scopeId ? `, scopeId: ${existing.scopeId}` : ""}) deleted successfully.`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Prompt template "${existing.eventType}" deleted successfully.`,
-          },
-        };
+        return toolOk(`Prompt template "${existing.eventType}" deleted successfully.`, {
+          details: `Prompt template "${existing.eventType}" (scope: ${existing.scope}${existing.scopeId ? `, scopeId: ${existing.scopeId}` : ""}) deleted successfully.`,
+          data: { yourAgentId: requestInfo.agentId },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to delete prompt template: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to delete prompt template: ${message}`,
-          },
-        };
+        return toolErr(`Failed to delete prompt template: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

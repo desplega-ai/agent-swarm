@@ -13,7 +13,7 @@ import {
 import { mergeScheduleTiming, validateRecurringTiming } from "@/be/schedules/validate";
 import { getScript } from "@/be/scripts/db";
 import { calculateNextRun } from "@/scheduler";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import {
   AssetKeySchema,
   ModelTierSchema,
@@ -73,6 +73,34 @@ export const updateScheduleInputSchema = z.object({
     .describe("Portable model tier for tasks created by this schedule. Set to null to clear."),
 });
 
+const scheduleDataShape = {
+  id: z.string().optional(),
+  key: AssetKeySchema.optional(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  cronExpression: z.string().optional(),
+  intervalMs: z.number().optional(),
+  taskTemplate: z.string().optional(),
+  taskType: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  priority: z.number().optional(),
+  targetAgentId: z.string().optional(),
+  enabled: z.boolean().optional(),
+  lastRunAt: z.string().optional(),
+  nextRunAt: z.string().optional(),
+  createdByAgentId: z.string().optional(),
+  timezone: z.string().optional(),
+  model: z.string().optional(),
+  modelTier: ModelTierSchema.optional(),
+  scheduleType: z.string().optional(),
+  targetType: ScheduledTaskTargetTypeSchema.optional(),
+  workflowId: z.string().optional(),
+  scriptName: z.string().optional(),
+  scriptArgs: z.record(z.string(), z.unknown()).optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+};
+
 export const registerUpdateScheduleTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "update-schedule",
@@ -81,39 +109,9 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
       annotations: { idempotentHint: true },
       description: "Update an existing scheduled task. Any registered agent can update schedules.",
       inputSchema: updateScheduleInputSchema,
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        schedule: z
-          .object({
-            id: z.string(),
-            key: AssetKeySchema,
-            name: z.string(),
-            description: z.string().optional(),
-            cronExpression: z.string().optional(),
-            intervalMs: z.number().optional(),
-            taskTemplate: z.string().optional(),
-            taskType: z.string().optional(),
-            tags: z.array(z.string()),
-            priority: z.number(),
-            targetAgentId: z.string().optional(),
-            enabled: z.boolean(),
-            lastRunAt: z.string().optional(),
-            nextRunAt: z.string().optional(),
-            createdByAgentId: z.string().optional(),
-            timezone: z.string(),
-            model: z.string().optional(),
-            modelTier: ModelTierSchema.optional(),
-            scheduleType: z.string(),
-            targetType: ScheduledTaskTargetTypeSchema.optional(),
-            workflowId: z.string().optional(),
-            scriptName: z.string().optional(),
-            scriptArgs: z.record(z.string(), z.unknown()).optional(),
-            createdAt: z.string(),
-            lastUpdatedAt: z.string(),
-          })
-          .optional(),
+        schedule: z.looseObject(scheduleDataShape).optional(),
       }),
     },
     async (
@@ -143,13 +141,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
       _meta,
     ) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       // Find the schedule
@@ -160,40 +152,19 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
           : null;
 
       if (!schedule) {
-        return {
-          content: [{ type: "text", text: "Schedule not found." }],
-          structuredContent: {
-            success: false,
-            message: "Schedule not found.",
-          },
-        };
+        return toolErr("Schedule not found.");
       }
 
       const caller = getAgentById(requestInfo.agentId);
       if (!caller) {
-        return {
-          content: [{ type: "text", text: "Agent not found." }],
-          structuredContent: {
-            success: false,
-            message: "Agent not found.",
-          },
-        };
+        return toolErr("Agent not found.");
       }
 
       // Reject updates on completed one-time schedules
       if (schedule.scheduleType === "one_time" && !schedule.enabled && schedule.lastRunAt) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `One-time schedule "${schedule.name}" has already executed. Create a new one instead.`,
-            },
-          ],
-          structuredContent: {
-            success: false,
-            message: `One-time schedule "${schedule.name}" has already executed. Create a new one instead.`,
-          },
-        };
+        return toolErr(
+          `One-time schedule "${schedule.name}" has already executed. Create a new one instead.`,
+        );
       }
 
       // Validate new cron expression if provided
@@ -204,13 +175,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : "Invalid cron expression";
-          return {
-            content: [{ type: "text", text: `Invalid cron expression: ${message}` }],
-            structuredContent: {
-              success: false,
-              message: `Invalid cron expression: ${message}`,
-            },
-          };
+          return toolErr(`Invalid cron expression: ${message}`);
         }
       }
 
@@ -218,13 +183,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
       if (targetAgentId && targetAgentId !== null) {
         const agent = getAgentById(targetAgentId);
         if (!agent) {
-          return {
-            content: [{ type: "text", text: `Target agent not found: ${targetAgentId}` }],
-            structuredContent: {
-              success: false,
-              message: `Target agent not found: ${targetAgentId}`,
-            },
-          };
+          return toolErr(`Target agent not found: ${targetAgentId}`);
         }
       }
 
@@ -232,13 +191,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
       if (newName && newName !== schedule.name) {
         const existing = getScheduledTaskByName(newName);
         if (existing) {
-          return {
-            content: [{ type: "text", text: `Schedule with name "${newName}" already exists.` }],
-            structuredContent: {
-              success: false,
-              message: `Schedule with name "${newName}" already exists.`,
-            },
-          };
+          return toolErr(`Schedule with name "${newName}" already exists.`);
         }
       }
 
@@ -249,42 +202,22 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
       const mergedScriptName = scriptName !== undefined ? scriptName : schedule.scriptName;
 
       if (mergedTargetType === "agent-task" && !mergedTaskTemplate) {
-        const message = "taskTemplate is required when targetType is 'agent-task'.";
-        return {
-          content: [{ type: "text", text: message }],
-          structuredContent: { success: false, message },
-        };
+        return toolErr("taskTemplate is required when targetType is 'agent-task'.");
       }
       if (mergedTargetType === "workflow") {
         if (!mergedWorkflowId) {
-          const message = "workflowId is required when targetType is 'workflow'.";
-          return {
-            content: [{ type: "text", text: message }],
-            structuredContent: { success: false, message },
-          };
+          return toolErr("workflowId is required when targetType is 'workflow'.");
         }
         if (!getWorkflow(mergedWorkflowId)) {
-          const message = `Workflow not found: ${mergedWorkflowId}`;
-          return {
-            content: [{ type: "text", text: message }],
-            structuredContent: { success: false, message },
-          };
+          return toolErr(`Workflow not found: ${mergedWorkflowId}`);
         }
       }
       if (mergedTargetType === "script") {
         if (!mergedScriptName) {
-          const message = "scriptName is required when targetType is 'script'.";
-          return {
-            content: [{ type: "text", text: message }],
-            structuredContent: { success: false, message },
-          };
+          return toolErr("scriptName is required when targetType is 'script'.");
         }
         if (!getScript({ name: mergedScriptName, scope: "global" })) {
-          const message = `Script not found: ${mergedScriptName}`;
-          return {
-            content: [{ type: "text", text: message }],
-            structuredContent: { success: false, message },
-          };
+          return toolErr(`Script not found: ${mergedScriptName}`);
         }
       }
 
@@ -333,19 +266,9 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
           );
           const timingError = validateRecurringTiming(timing);
           if (timingError) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: "At least one of intervalMs or cronExpression must be set for recurring schedules.",
-                },
-              ],
-              structuredContent: {
-                success: false,
-                message:
-                  "At least one of intervalMs or cronExpression must be set for recurring schedules.",
-              },
-            };
+            return toolErr(
+              "At least one of intervalMs or cronExpression must be set for recurring schedules.",
+            );
           }
 
           const needsNextRunRecalc =
@@ -375,39 +298,20 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         const updated = updateScheduledTask(schedule.id, { ...updateData, updatedBy });
 
         if (!updated) {
-          return {
-            content: [{ type: "text", text: "Failed to update schedule." }],
-            structuredContent: {
-              success: false,
-              message: "Failed to update schedule.",
-            },
-          };
+          return toolErr("Failed to update schedule.");
         }
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Updated schedule "${updated.name}". Next run: ${updated.nextRunAt || "disabled"}`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Updated schedule "${updated.name}".`,
-            schedule: updated,
+        return toolOk(
+          `Updated schedule "${updated.name}". Next run: ${updated.nextRunAt || "disabled"}`,
+          {
+            data: { yourAgentId: requestInfo.agentId, schedule: updated },
           },
-        };
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to update schedule: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to update schedule: ${message}`,
-          },
-        };
+        return toolErr(`Failed to update schedule: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

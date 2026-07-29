@@ -16,7 +16,25 @@ import {
   unlinkIdentity,
 } from "@/be/users";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+
+// Loose mirror of UserSchema for tool output: every field optional, no
+// datetime format pins.
+const userOutputShape = z.looseObject({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  email: z.string().optional(),
+  role: z.string().optional(),
+  notes: z.string().optional(),
+  emailAliases: z.array(z.string()).optional(),
+  preferredChannel: z.string().optional(),
+  timezone: z.string().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  dailyBudgetUsd: z.number().nullable().optional(),
+  status: z.enum(["invited", "active", "suspended"]).optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+});
 
 /**
  * `manage-user` — Q18 break-and-migrate shape:
@@ -84,6 +102,10 @@ export const registerManageUserTool = (server: McpServer) => {
         "Create, update, delete, or list user profiles in the user registry. Identities are managed via an `identities: [{kind, externalId}]` array (declarative — update computes diff). Lead-only.",
       annotations: { readOnlyHint: false },
       inputSchema: InputSchema,
+      outputSchema: swarmToolOutputSchema({
+        users: z.array(userOutputShape).optional(),
+        user: userOutputShape.optional(),
+      }),
     },
     async (input, requestInfo) => {
       const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
@@ -98,11 +120,7 @@ export const registerManageUserTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow || !callerAgent) {
-        return {
-          content: [
-            { type: "text" as const, text: "Only the lead agent can manage user profiles." },
-          ],
-        };
+        return toolErr("Only the lead agent can manage user profiles.");
       }
 
       // Build the operator-actor used for every event emitted in this call.
@@ -114,33 +132,29 @@ export const registerManageUserTool = (server: McpServer) => {
       switch (input.action) {
         case "list": {
           const users = getAllUsers();
-          return {
-            content: [{ type: "text" as const, text: JSON.stringify(users, null, 2) }],
-          };
+          return toolOk(`Found ${users.length} user(s).`, {
+            details: JSON.stringify(users, null, 2),
+            data: { users },
+          });
         }
 
         case "get": {
           if (!input.userId) {
-            return {
-              content: [{ type: "text" as const, text: "userId is required for get action." }],
-            };
+            return toolErr("userId is required for get action.");
           }
           const user = getUserById(input.userId);
           if (!user) {
-            return {
-              content: [{ type: "text" as const, text: `User ${input.userId} not found.` }],
-            };
+            return toolErr(`User ${input.userId} not found.`);
           }
-          return {
-            content: [{ type: "text" as const, text: JSON.stringify(user, null, 2) }],
-          };
+          return toolOk(`Found user "${user.name}" (${user.id}).`, {
+            details: JSON.stringify(user, null, 2),
+            data: { user },
+          });
         }
 
         case "create": {
           if (!input.name) {
-            return {
-              content: [{ type: "text" as const, text: "name is required for create action." }],
-            };
+            return toolErr("name is required for create action.");
           }
           try {
             const user = createUser({
@@ -158,34 +172,24 @@ export const registerManageUserTool = (server: McpServer) => {
             for (const ident of input.identities ?? []) {
               linkIdentity(user.id, ident.kind, ident.externalId, operatorActor);
             }
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: `User created: ${JSON.stringify(user, null, 2)}`,
-                },
-              ],
-            };
+            return toolOk(`User created: "${user.name}" (${user.id}).`, {
+              details: JSON.stringify(user, null, 2),
+              data: { user },
+            });
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
-            return {
-              content: [{ type: "text" as const, text: `Failed to create user: ${message}` }],
-            };
+            return toolErr(`Failed to create user: ${message}`);
           }
         }
 
         case "update": {
           if (!input.userId) {
-            return {
-              content: [{ type: "text" as const, text: "userId is required for update action." }],
-            };
+            return toolErr("userId is required for update action.");
           }
           try {
             const before = getUserById(input.userId);
             if (!before) {
-              return {
-                content: [{ type: "text" as const, text: `User ${input.userId} not found.` }],
-              };
+              return toolErr(`User ${input.userId} not found.`);
             }
 
             const user = updateUser(input.userId, {
@@ -201,9 +205,7 @@ export const registerManageUserTool = (server: McpServer) => {
               metadata: input.metadata,
             });
             if (!user) {
-              return {
-                content: [{ type: "text" as const, text: `User ${input.userId} not found.` }],
-              };
+              return toolErr(`User ${input.userId} not found.`);
             }
 
             // Identity diff — pass the desired set, helper emits the deltas.
@@ -235,43 +237,28 @@ export const registerManageUserTool = (server: McpServer) => {
               }
             }
 
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: `User updated: ${JSON.stringify(user, null, 2)}`,
-                },
-              ],
-            };
+            return toolOk(`User updated: "${user.name}" (${user.id}).`, {
+              details: JSON.stringify(user, null, 2),
+              data: { user },
+            });
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
-            return {
-              content: [{ type: "text" as const, text: `Failed to update user: ${message}` }],
-            };
+            return toolErr(`Failed to update user: ${message}`);
           }
         }
 
         case "delete": {
           if (!input.userId) {
-            return {
-              content: [{ type: "text" as const, text: "userId is required for delete action." }],
-            };
+            return toolErr("userId is required for delete action.");
           }
           const deleted = deleteUser(input.userId);
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: deleted ? `User ${input.userId} deleted.` : `User ${input.userId} not found.`,
-              },
-            ],
-          };
+          return deleted
+            ? toolOk(`User ${input.userId} deleted.`)
+            : toolErr(`User ${input.userId} not found.`);
         }
 
         default:
-          return {
-            content: [{ type: "text" as const, text: `Unknown action: ${input.action}` }],
-          };
+          return toolErr(`Unknown action: ${input.action}`);
       }
     },
   );

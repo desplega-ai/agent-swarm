@@ -3,7 +3,7 @@ import * as z from "zod";
 import { createMetric, getMetric, getMetricBySlug, getMetricVersions, updateMetric } from "@/be/db";
 import { assertSelectOnlyQuery } from "@/http/db-query";
 import { snapshotMetric } from "@/metrics/version";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { MetricDefinitionSchema } from "@/types";
 import { getAppUrl } from "@/utils/constants";
 
@@ -47,30 +47,17 @@ export const registerCreateMetricTool = (server: McpServer) => {
           "Dashboard JSON definition: a list of widgets, each with SELECT/WITH SQL and viz config.",
         ),
       }),
-      outputSchema: z.object({
-        yourAgentId: z.string(),
-        id: z.string(),
-        version: z.number(),
-        app_url: z.string(),
-        success: z.boolean().optional(),
-        message: z.string().optional(),
+      outputSchema: swarmToolOutputSchema({
+        yourAgentId: z.string().optional(),
+        id: z.string().optional(),
+        version: z.number().optional(),
+        app_url: z.string().optional(),
       }),
     },
     async (input, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         const msg = "Agent ID required. Set the X-Agent-ID header on the MCP request.";
-        return {
-          content: [{ type: "text", text: msg }],
-          structuredContent: {
-            yourAgentId: "",
-            id: "",
-            version: 0,
-            app_url: "",
-            success: false,
-            message: msg,
-          },
-          isError: true,
-        };
+        return toolErr(msg);
       }
 
       try {
@@ -79,18 +66,9 @@ export const registerCreateMetricTool = (server: McpServer) => {
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text", text: `Metric query rejected: ${msg}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            id: "",
-            version: 0,
-            app_url: "",
-            success: false,
-            message: msg,
-          },
-          isError: true,
-        };
+        return toolErr(`Metric query rejected: ${msg}`, {
+          data: { yourAgentId: requestInfo.agentId, id: "" },
+        });
       }
 
       const slug = input.slug ?? slugify(input.title);
@@ -110,18 +88,9 @@ export const registerCreateMetricTool = (server: McpServer) => {
         });
         if (!updated) {
           const msg = `Failed to update existing metric ${existing.id}.`;
-          return {
-            content: [{ type: "text", text: msg }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              id: existing.id,
-              version: 0,
-              app_url: "",
-              success: false,
-              message: msg,
-            },
-            isError: true,
-          };
+          return toolErr(msg, {
+            data: { yourAgentId: requestInfo.agentId, id: existing.id },
+          });
         }
         id = updated.id;
       } else {
@@ -137,54 +106,22 @@ export const registerCreateMetricTool = (server: McpServer) => {
         } catch (err) {
           const detail = err instanceof Error ? err.message : String(err);
           const msg = `Failed to create metric: ${detail}`;
-          return {
-            content: [{ type: "text", text: msg }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              id: "",
-              version: 0,
-              app_url: "",
-              success: false,
-              message: msg,
-            },
-            isError: true,
-          };
+          return toolErr(msg, { data: { yourAgentId: requestInfo.agentId, id: "" } });
         }
       }
 
       const fresh = getMetric(id);
       if (!fresh) {
         const msg = `Metric ${id} disappeared between write and read.`;
-        return {
-          content: [{ type: "text", text: msg }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            id,
-            version: 0,
-            app_url: "",
-            success: false,
-            message: msg,
-          },
-          isError: true,
-        };
+        return toolErr(msg, { data: { yourAgentId: requestInfo.agentId, id } });
       }
 
       const version = metricEditCounter(id);
       const appUrl = `${getAppBaseUrl()}/usage/metrics`;
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Metric "${input.title}" saved (slug=${slug}, version=${version}).\n  App: ${appUrl}`,
-          },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          id,
-          version,
-          app_url: appUrl,
-        },
-      };
+      return toolOk(`Metric "${input.title}" saved (slug=${slug}, version=${version}).`, {
+        details: `App: ${appUrl}`,
+        data: { yourAgentId: requestInfo.agentId, id, version, app_url: appUrl },
+      });
     },
   );
 };

@@ -13,7 +13,8 @@ import {
 } from "../be/db";
 import { createUserServer } from "../server-user";
 import { steerTaskHandler } from "../tools/steer-task";
-import { ownerCtx } from "../tools/task-tool-ctx";
+import { ownerCtx, type ToolCtx } from "../tools/task-tool-ctx";
+import { finalizeSwarmToolResult } from "../tools/utils";
 
 const TEST_DB_PATH = `/tmp/agent-swarm-steer-task-tool-${process.pid}.sqlite`;
 const originalRbacEnabled = process.env.RBAC_ENABLED;
@@ -55,6 +56,14 @@ function runningClaudeTask(creatorAgentId?: string, requestedByUserId?: string) 
   });
   expect(startTask(task.id)?.status).toBe("in_progress");
   return task;
+}
+
+// steerTaskHandler returns the bare SwarmToolResult; the registrar's
+// finalizeSwarmToolResult composes the actual wire CallToolResult
+// (content/structuredContent/isError). Route through it here so these
+// direct-handler tests assert the same contract the real MCP surface sends.
+async function callSteer(ctx: ToolCtx, args: Parameters<typeof steerTaskHandler>[1]) {
+  return finalizeSwarmToolResult("steer-task", await steerTaskHandler(ctx, args));
 }
 
 function userToolHandler(server: McpServer) {
@@ -114,11 +123,18 @@ describe("steer-task MCP tool", () => {
     });
     const task = runningClaudeTask(creator.id);
 
-    const leadResult = await steerTaskHandler(ownerCtx({ agentId: lead.id }), {
+    const leadResult = await callSteer(ownerCtx({ agentId: lead.id }), {
       taskId: task.id,
       message: "finish the current turn safely",
     });
-    expect(leadResult.content).toHaveLength(2);
+    // Registrar always emits exactly one text block ([message, details, nudge]
+    // joined) — not the old multi-block content array.
+    expect(leadResult.content).toHaveLength(1);
+    expect(leadResult.isError).toBe(false);
+    // message + details (JSON-rendered data) must both land in the text
+    // channel — the payload keys spread at the TOP LEVEL of structuredContent.
+    expect(leadResult.content[0]?.text).toContain("Queued for delivery.");
+    expect(leadResult.content[0]?.text).toContain('"outcome":"queued"');
     expect(structured(leadResult)).toMatchObject({
       success: true,
       outcome: "queued",
@@ -131,17 +147,19 @@ describe("steer-task MCP tool", () => {
       createdByAgentId: lead.id,
     });
 
-    const denied = await steerTaskHandler(ownerCtx({ agentId: unrelated.id }), {
+    const denied = await callSteer(ownerCtx({ agentId: unrelated.id }), {
       taskId: task.id,
       message: "this must not be delivered",
     });
     expect(denied.isError).toBe(true);
     expect(denied.content[0]?.text).toContain("Only the lead or task creator");
+    expect(structured(denied)).toMatchObject({ success: false });
 
-    const creatorResult = await steerTaskHandler(ownerCtx({ agentId: creator.id }), {
+    const creatorResult = await callSteer(ownerCtx({ agentId: creator.id }), {
       taskId: task.id,
       message: "creator follow-up",
     });
+    expect(creatorResult.isError).toBe(false);
     expect(structured(creatorResult).success).toBe(true);
   });
 
@@ -149,27 +167,38 @@ describe("steer-task MCP tool", () => {
     const lead = createAgent({ name: "Degrade lead", isLead: true, status: "busy", maxTasks: 10 });
     const task = runningClaudeTask();
 
-    const degraded = await steerTaskHandler(ownerCtx({ agentId: lead.id }), {
+    const degraded = await callSteer(ownerCtx({ agentId: lead.id }), {
       taskId: task.id,
       message: "interrupt if possible",
       mode: "steer",
     });
+    // Degraded-with-default is honest ok:true with the degradation surfaced
+    // via degradedFrom, not a buried/dishonest failure.
+    expect(degraded.isError).toBe(false);
     expect(structured(degraded)).toMatchObject({
       success: true,
       outcome: "queued",
       effectiveMode: "queue",
       degradedFrom: "steer",
+      message: "Queued for delivery (requested steer; claude supports queue only).",
     });
-    expect(degraded.content[0]?.text).toBe(
+    // content.text = [message, details, nudge].join("\n\n"); details carries
+    // the JSON-rendered data payload appended after the human summary.
+    expect(degraded.content).toHaveLength(1);
+    expect(degraded.content[0]?.text).toStartWith(
       "Queued for delivery (requested steer; claude supports queue only).",
     );
+    expect(degraded.content[0]?.text).toContain('"degradedFrom":"steer"');
 
-    const failed = await steerTaskHandler(ownerCtx({ agentId: lead.id }), {
+    const failed = await callSteer(ownerCtx({ agentId: lead.id }), {
       taskId: task.id,
       message: "must interrupt now",
       mode: "steer",
       onUnsupported: "fail",
     });
+    // fail-requested is a real toolErr: isError true, honest error text, and
+    // structuredContent.success false — no more "typecheck_failed"-style
+    // dishonest-ok reporting.
     expect(failed.isError).toBe(true);
     expect(structured(failed)).toMatchObject({ success: false });
     expect(failed.content[0]?.text).toContain("does not support steering mode 'steer'");

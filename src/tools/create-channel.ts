@@ -1,8 +1,18 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { createChannel, getChannelByName } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
-import { ChannelSchema, ChannelTypeSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { ChannelTypeSchema } from "@/types";
+
+const ChannelOutputSchema = z.looseObject({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  type: ChannelTypeSchema.optional(),
+  createdBy: z.string().optional(),
+  participants: z.array(z.string()).optional(),
+  createdAt: z.string().optional(),
+});
 
 export const registerCreateChannelTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -17,36 +27,22 @@ export const registerCreateChannelTool = (server: McpServer) => {
         type: ChannelTypeSchema.optional().describe("Channel type: 'public' (default) or 'dm'."),
         participants: z.array(z.string()).optional().describe("Agent IDs for DM channels."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        channel: ChannelSchema.optional(),
+        channel: ChannelOutputSchema.optional(),
       }),
     },
     async ({ name, description, type, participants }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       // Check if channel already exists
       const existing = getChannelByName(name);
       if (existing) {
-        return {
-          content: [{ type: "text", text: `Channel "${name}" already exists.` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Channel "${name}" already exists.`,
-            channel: existing,
-          },
-        };
+        return toolErr(`Channel "${name}" already exists.`, {
+          data: { yourAgentId: requestInfo.agentId, channel: existing },
+        });
       }
 
       try {
@@ -57,25 +53,14 @@ export const registerCreateChannelTool = (server: McpServer) => {
           participants,
         });
 
-        return {
-          content: [{ type: "text", text: `Created channel "${name}".` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Created channel "${name}".`,
-            channel,
-          },
-        };
+        return toolOk(`Created channel "${name}".`, {
+          data: { yourAgentId: requestInfo.agentId, channel },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to create channel: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to create channel: ${message}`,
-          },
-        };
+        return toolErr(`Failed to create channel: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

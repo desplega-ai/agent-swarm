@@ -254,13 +254,30 @@ describe("memory editing", () => {
           intent: "test stale-link pruning",
         },
         meta(),
-      )) as { structuredContent: { success: boolean; message: string; changed?: boolean } };
+      )) as {
+        isError?: boolean;
+        content: Array<{ type: string; text: string }>;
+        structuredContent: {
+          success: boolean;
+          message: string;
+          changed?: boolean;
+          version?: number;
+          memory?: { id?: string };
+        };
+      };
 
-      // Assert on the message first — on failure it carries the tool's error
-      // (a bare success:false told us nothing when this flaked in CI).
-      expect(result.structuredContent.message).toStartWith("Memory edited to version");
+      // New envelope contract (src/tools/utils.ts finalizeSwarmToolResult):
+      // isError = !ok, structuredContent = { ...data, success, message }, and
+      // content[0].text carries the same message. Assert on the message first
+      // — on failure it carries the tool's error (a bare success:false told us
+      // nothing when this flaked in CI).
+      expect(result.isError).toBe(false);
+      expect(result.structuredContent.message).toStartWith(`Memory "${a.id}" edited to version`);
+      expect(result.content[0]?.text).toStartWith(`Memory "${a.id}" edited to version`);
       expect(result.structuredContent.success).toBe(true);
       expect(result.structuredContent.changed).toBe(true);
+      expect(result.structuredContent.version).toBe(2);
+      expect(result.structuredContent.memory?.id).toBe(a.id);
 
       const rows = linkRowsFor(a.id);
       expect(rows).toHaveLength(2);

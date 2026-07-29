@@ -1,12 +1,22 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { upsertPromptTemplate } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
-import {
-  PromptTemplateSchema,
-  PromptTemplateScopeSchema,
-  PromptTemplateStateSchema,
-} from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { PromptTemplateScopeSchema, PromptTemplateStateSchema } from "@/types";
+
+const promptTemplateOutputShape = z.looseObject({
+  id: z.string().optional(),
+  eventType: z.string().optional(),
+  scope: z.string().optional(),
+  scopeId: z.string().nullable().optional(),
+  state: z.string().optional(),
+  body: z.string().optional(),
+  isDefault: z.boolean().optional(),
+  version: z.number().optional(),
+  createdBy: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
 
 export const registerSetPromptTemplateTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -40,40 +50,23 @@ export const registerSetPromptTemplateTool = (server: McpServer) => {
           .optional()
           .describe("Reason for the change (recorded in history)."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        template: PromptTemplateSchema.optional(),
+        template: promptTemplateOutputShape.optional(),
       }),
     },
     async ({ eventType, scope: rawScope, scopeId, state, body, changeReason }, requestInfo) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       const scope = rawScope ?? "global";
 
       if (scope !== "global" && !scopeId) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `scopeId is required for scope '${scope}'. Provide an agent ID or repo ID.`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `scopeId is required for scope '${scope}'.`,
-          },
-        };
+        return toolErr(`scopeId is required for scope '${scope}'.`, {
+          details: `scopeId is required for scope '${scope}'. Provide an agent ID or repo ID.`,
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       try {
@@ -87,30 +80,15 @@ export const registerSetPromptTemplateTool = (server: McpServer) => {
           changeReason,
         });
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Prompt template for "${eventType}" set successfully (scope: ${scope}${scopeId ? `, scopeId: ${scopeId}` : ""}, v${template.version}).`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Template "${eventType}" set successfully at version ${template.version}.`,
-            template,
-          },
-        };
+        return toolOk(`Template "${eventType}" set successfully at version ${template.version}.`, {
+          details: `Prompt template for "${eventType}" set successfully (scope: ${scope}${scopeId ? `, scopeId: ${scopeId}` : ""}, v${template.version}).`,
+          data: { yourAgentId: requestInfo.agentId, template },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to set prompt template: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to set prompt template: ${message}`,
-          },
-        };
+        return toolErr(`Failed to set prompt template: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

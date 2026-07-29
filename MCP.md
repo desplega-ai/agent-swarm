@@ -248,7 +248,6 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `agentId` | `string` | No | - | The agent to assign/offer task to. Omit to create unassigned task for pool. |
 | `task` | `string` | Yes | - | The task description to send. |
 | `key` | `unknown` | No | - | Logical namespace key. Child tasks inherit their parent namespace when provided. |
 | `offerMode` | `boolean` | No | false | If true, offer the task instead of direct assign (agent must accept/reject). |
@@ -378,33 +377,27 @@ Return a valid plaintext OAuth access token for an integrated tracker. The token
 
 ### accept-steer
 
-**Acknowledge a steering message**
+**Accept Steering**
 
-Agent-only acknowledgement used after the assigned worker has incorporated a delivered steering message. It changes the message from `delivered` to `handled`; it does not deliver or re-run the message.
+Acknowledge a live steering message after you have incorporated it into your current task. Pass the ID from the `[steering <id>]` marker on the message.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `steeringMessageId` | `uuid` | Yes | - | Delivered steering message to acknowledge. |
-| `note` | `string` | No | - | Optional note (maximum 500 characters) describing how the instruction was incorporated. Secrets are scrubbed before the note is returned. |
-
-The caller must have an `X-Agent-ID`, own the active source task, and be assigned the task associated with the steering message.
+| `steeringMessageId` | `uuid` | Yes | - | The steering message ID to acknowledge. |
+| `note` | `string` | No | - | Optional short note describing how the steering was incorporated. |
 
 ### steer-task
 
-**Steer a running task**
+**Steer Task**
 
-Send additional instructions to a task that is already running. This tool is registered on both the agent and user MCP surfaces when `STEERING_ENABLED=true`. Agents may steer tasks they created, while the lead may steer any task; user calls are restricted by `task.steer.own`.
+Send a message to a task that is already running. `mode:"steer"` is honored on pi and claude-managed; claude, devin and opencode support queue only; codex always promotes the message to a follow-up task. Pass `onUnsupported:"fail"` to get an error instead of a downgrade.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `taskId` | `uuid` | Yes | - | The running task to steer. |
-| `message` | `string` | Yes | - | Additional instructions to deliver. Empty messages are rejected. |
-| `mode` | `steer \| queue` | No | `queue` | `steer` requests an interrupt; `queue` delivers at the next turn boundary. |
-| `onUnsupported` | `degrade \| fail` | No | `degrade` | Degrade through queue/follow-up when the harness cannot honor the mode, or fail without creating a steering row. |
-
-The structured result includes `success`, `outcome` (`steered`, `queued`, or `promoted`), `effectiveMode`, and the `steeringMessageId`. A degraded result also includes `degradedFrom`; a promoted result includes `promotedTaskId`.
-
-Provider support: pi and Claude Managed support both modes; raw Claude, Devin, and opencode are queue-only; Codex promotes steering to a follow-up task.
+| `taskId` | `uuid` | Yes | - | The ID of the running task to steer. |
+| `message` | `string` | Yes | - | The message to send to the task. |
+| `mode` | `unknown` | No | "queue" | Deliver at a turn boundary or interrupt. |
+| `onUnsupported` | `unknown` | Yes | - | Whether an unsupported mode should degrade or return an error. |
 
 ## Task Pool Tools
 
@@ -588,7 +581,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `name` | `unknown` | No | - | Name of a reusable script to run. |
-| `source` | `string` | No | - | Inline TypeScript source to run. |
+| `source` | `string` | No | - | Inline TypeScript source to run. Must `export default async function (args, ctx)` — args FIRST, ctx second. |
 | `args` | `unknown` | No | - | JSON-serializable script arguments. |
 | `intent` | `string` | No | "" | Why this script is being run. |
 | `scope` | `unknown` | No | - | Optional scope for named script resolution. |
@@ -602,7 +595,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `name` | `unknown` | Yes | - | Stable script name within the selected scope. |
-| `source` | `string` | Yes | - | TypeScript source with a default export function. |
+| `source` | `string` | Yes | - | TypeScript source. Must `export default async function (args, ctx)` — args FIRST, ctx second. |
 | `description` | `string` | No | "" | Human-readable script description. |
 | `intent` | `string` | No | "" | Why this script exists. |
 | `scope` | `unknown` | No | "agent" | Persist under agent or global scope. |
@@ -623,7 +616,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `name` | `unknown` | Yes | - | Script name whose signature should be fetched. |
+| `name` | `unknown` | No | - | Optional script name whose signature should be fetched. Omit to get the swarm-wide sdk/stdlib type surface. |
 | `scope` | `unknown` | No | - | Optional scope for script resolution. |
 
 ### launch-script-run
@@ -632,7 +625,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `source` | `string` | Yes | - | TypeScript script workflow source. |
+| `source` | `string` | Yes | - | TypeScript script workflow source. Must `export default async function (args, ctx)` — args FIRST, ctx second. |
 | `args` | `unknown` | No | - | JSON-serializable workflow arguments. |
 | `idempotencyKey` | `string` | No | - | Optional key that returns the existing run instead of launching a duplicate. |
 | `scriptName` | `unknown` | No | - | Optional human-readable script/workflow name for the run. |
@@ -1967,3 +1960,4 @@ Update the health status of a registered service. Use this after a service becom
 | `serviceId` | `uuid` | No | - | Service ID to update. |
 | `name` | `string` | No | - | Service name to update (alternative to serviceId). |
 | `status` | `unknown` | Yes | - | New status: 'starting', 'healthy', 'unhealthy', or 'stopped'. |
+

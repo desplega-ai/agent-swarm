@@ -1,13 +1,24 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { upsertKv } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
-import { KvEntrySchema, KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "@/types";
 import { kvWriteAuthError } from "./kv-write-auth";
 import { resolveNamespace } from "./resolve-namespace";
 
 // 2 MiB cap — mirrors the HTTP enforcement.
 const MAX_KV_BODY_BYTES = 2 * 1024 * 1024;
+
+// Loose, format-pin-free mirror of KvEntrySchema for MCP output validation.
+const kvEntryOutputSchema = z.looseObject({
+  namespace: z.string().optional(),
+  key: z.string().optional(),
+  value: z.unknown().optional(),
+  valueType: KvValueTypeSchema.optional(),
+  expiresAt: z.number().int().nullable().optional(),
+  createdAt: z.number().int().optional(),
+  updatedAt: z.number().int().optional(),
+});
 
 export const registerKvSetTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -38,38 +49,23 @@ export const registerKvSetTool = (server: McpServer) => {
           "Optional explicit namespace. Defaults to the caller's contextKey.",
         ),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
         namespace: z.string().optional(),
-        entry: KvEntrySchema.optional(),
+        entry: kvEntryOutputSchema.optional(),
       }),
     },
     async ({ key, value, valueType, expiresInSec, namespace }, requestInfo) => {
       const resolved = resolveNamespace(namespace, requestInfo);
       if ("error" in resolved) {
-        return {
-          content: [{ type: "text", text: resolved.error }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: resolved.error,
-          },
-        };
+        return toolErr(resolved.error, { data: { yourAgentId: requestInfo.agentId } });
       }
 
       const authErr = kvWriteAuthError(resolved.namespace, { agentId: requestInfo.agentId });
       if (authErr) {
-        return {
-          content: [{ type: "text", text: authErr }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: authErr,
-            namespace: resolved.namespace,
-          },
-        };
+        return toolErr(authErr, {
+          data: { yourAgentId: requestInfo.agentId, namespace: resolved.namespace },
+        });
       }
 
       const finalValueType = valueType ?? "json";
@@ -80,16 +76,9 @@ export const registerKvSetTool = (server: McpServer) => {
         if (finalValueType === "json") {
           const stringified = JSON.stringify(value);
           if (stringified === undefined) {
-            const msg = "value is not JSON-encodable";
-            return {
-              content: [{ type: "text", text: msg }],
-              structuredContent: {
-                yourAgentId: requestInfo.agentId,
-                success: false,
-                message: msg,
-                namespace: resolved.namespace,
-              },
-            };
+            return toolErr("value is not JSON-encodable", {
+              data: { yourAgentId: requestInfo.agentId, namespace: resolved.namespace },
+            });
           }
           encodedSize = Buffer.byteLength(stringified, "utf8");
         } else if (finalValueType === "integer") {
@@ -111,28 +100,15 @@ export const registerKvSetTool = (server: McpServer) => {
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "encoding error";
-        return {
-          content: [{ type: "text", text: msg }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: msg,
-            namespace: resolved.namespace,
-          },
-        };
+        return toolErr(msg, {
+          data: { yourAgentId: requestInfo.agentId, namespace: resolved.namespace },
+        });
       }
 
       if (encodedSize > MAX_KV_BODY_BYTES) {
-        const msg = `Payload too large (max ${MAX_KV_BODY_BYTES} bytes)`;
-        return {
-          content: [{ type: "text", text: msg }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: msg,
-            namespace: resolved.namespace,
-          },
-        };
+        return toolErr(`Payload too large (max ${MAX_KV_BODY_BYTES} bytes)`, {
+          data: { yourAgentId: requestInfo.agentId, namespace: resolved.namespace },
+        });
       }
 
       const expiresAt = expiresInSec !== undefined ? Date.now() + expiresInSec * 1000 : null;
@@ -145,32 +121,14 @@ export const registerKvSetTool = (server: McpServer) => {
           valueType: finalValueType,
           expiresAt,
         });
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Set "${key}" in "${resolved.namespace}".`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: "ok",
-            namespace: resolved.namespace,
-            entry,
-          },
-        };
+        return toolOk(`Set "${key}" in "${resolved.namespace}".`, {
+          data: { yourAgentId: requestInfo.agentId, namespace: resolved.namespace, entry },
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "upsert failed";
-        return {
-          content: [{ type: "text", text: msg }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: msg,
-            namespace: resolved.namespace,
-          },
-        };
+        return toolErr(msg, {
+          data: { yourAgentId: requestInfo.agentId, namespace: resolved.namespace },
+        });
       }
     },
   );

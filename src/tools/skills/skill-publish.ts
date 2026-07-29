@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { createTaskExtended, getAgentById, getLeadAgent, getSkillById } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerSkillPublishTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -14,67 +14,41 @@ export const registerSkillPublishTool = (server: McpServer) => {
       inputSchema: z.object({
         skillId: z.string().describe("ID of the personal skill to publish"),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
         taskId: z.string().optional(),
       }),
     },
     async (args, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       const skill = getSkillById(args.skillId);
       if (!skill) {
-        return {
-          content: [{ type: "text", text: "Skill not found." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Skill not found.",
-          },
-        };
+        return toolErr("Skill not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
       if (skill.type !== "personal") {
-        return {
-          content: [{ type: "text", text: "Only personal skills can be published." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Only personal skills can be published.",
-          },
-        };
+        return toolErr("Only personal skills can be published.", {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       if (skill.ownerAgentId !== requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "You can only publish your own skills." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "You can only publish your own skills.",
-          },
-        };
+        return toolErr("You can only publish your own skills.", {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       // Find the lead agent
       const leadAgent = getLeadAgent();
 
       if (!leadAgent) {
-        return {
-          content: [{ type: "text", text: "No lead agent found to approve the skill." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "No lead agent available.",
-          },
-        };
+        return toolErr("No lead agent available.", {
+          details: "No lead agent found to approve the skill.",
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       // Create an approval task for the lead
@@ -104,20 +78,10 @@ To reject: close this task with a rejection reason.`;
         priority: 60,
       });
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Skill publish request created. Task ${task.id} sent to lead for approval.`,
-          },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          success: true,
-          message: `Publish request sent to lead. Track via task ${task.id}.`,
-          taskId: task.id,
-        },
-      };
+      return toolOk(`Publish request sent to lead. Track via task ${task.id}.`, {
+        details: `Skill publish request created. Task ${task.id} sent to lead for approval.`,
+        data: { yourAgentId: requestInfo.agentId, taskId: task.id },
+      });
     },
   );
 };

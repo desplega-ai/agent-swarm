@@ -1,8 +1,19 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { listWorkflowRuns } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { WorkflowRunStatusSchema } from "@/types";
+
+function renderRuns(runs: ReturnType<typeof listWorkflowRuns>): string | undefined {
+  if (runs.length === 0) return undefined;
+  return runs
+    .map((run) => {
+      const error = (run as { error?: unknown }).error;
+      const errorSuffix = typeof error === "string" && error ? ` — error: ${error}` : "";
+      return `- ${run.id} [${run.workflowId}]: ${run.status}${errorSuffix}`;
+    })
+    .join("\n");
+}
 
 export const registerListWorkflowRunsTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -17,10 +28,8 @@ export const registerListWorkflowRunsTool = (server: McpServer) => {
           "Filter by run status (running, waiting, completed, failed, skipped)",
         ),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
-        runs: z.array(z.unknown()),
+      outputSchema: swarmToolOutputSchema({
+        runs: z.array(z.unknown()).optional(),
       }),
     },
     async ({ workflowId, status }) => {
@@ -29,19 +38,12 @@ export const registerListWorkflowRunsTool = (server: McpServer) => {
         if (status) {
           runs = runs.filter((r) => r.status === status);
         }
-        return {
-          content: [{ type: "text" as const, text: `Found ${runs.length} run(s).` }],
-          structuredContent: {
-            success: true,
-            message: `Found ${runs.length} run(s).`,
-            runs,
-          },
-        };
+        return toolOk(`Found ${runs.length} run(s).`, {
+          details: renderRuns(runs),
+          data: { runs },
+        });
       } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Failed: ${err}` }],
-          structuredContent: { success: false, message: String(err), runs: [] },
-        };
+        return toolErr(String(err), { data: { runs: [] } });
       }
     },
   );

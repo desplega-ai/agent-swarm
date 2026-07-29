@@ -1,6 +1,6 @@
 ---
 name: swarm-scripts
-description: Use swarm scripts for bulk SDK calls, repetitive fan-out, and context-efficient data processing.
+description: Use swarm scripts for bulk SDK calls, repetitive fan-out, and context-efficient data processing. Scripts must export default async function (args, ctx) — args first, ctx second.
 ---
 
 # Swarm Scripts

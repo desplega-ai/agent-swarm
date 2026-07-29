@@ -2,8 +2,33 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { refreshLinks } from "@/be/memory/link-resolver";
-import { createToolRegistrar } from "@/tools/utils";
-import { AgentMemorySchema, AgentMemoryScopeSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "@/types";
+
+// Loose, format-pin-free mirror of AgentMemorySchema for MCP output validation.
+const agentMemoryOutputSchema = z.looseObject({
+  id: z.string().optional(),
+  agentId: z.string().nullable().optional(),
+  scope: AgentMemoryScopeSchema.optional(),
+  key: z.string().nullable().optional(),
+  name: z.string().optional(),
+  content: z.string().optional(),
+  summary: z.string().nullable().optional(),
+  source: AgentMemorySourceSchema.optional(),
+  sourceTaskId: z.string().nullable().optional(),
+  sourcePath: z.string().nullable().optional(),
+  chunkIndex: z.number().int().optional(),
+  totalChunks: z.number().int().optional(),
+  tags: z.array(z.string()).optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().nullable().optional(),
+  accessedAt: z.string().optional(),
+  expiresAt: z.string().nullable().optional(),
+  accessCount: z.number().int().optional(),
+  embeddingModel: z.string().nullable().optional(),
+  contentHash: z.string().nullable().optional(),
+  version: z.number().int().optional(),
+});
 
 export const registerMemoryEditTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -45,11 +70,9 @@ export const registerMemoryEditTool = (server: McpServer) => {
         intent: z.string().min(1).describe("Why you are editing this memory."),
         expectedVersion: z.number().int().min(1).optional(),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        memory: AgentMemorySchema.optional(),
+        memory: agentMemoryOutputSchema.optional(),
         changed: z.boolean().optional(),
         previousVersion: z.number().int().optional(),
         version: z.number().int().optional(),
@@ -61,25 +84,13 @@ export const registerMemoryEditTool = (server: McpServer) => {
       _meta,
     ) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID required to edit memories." }],
-          structuredContent: {
-            yourAgentId: undefined,
-            success: false,
-            message: "Agent ID required. Are you registered in the swarm?",
-          },
-        };
+        return toolErr("Agent ID required. Are you registered in the swarm?");
       }
 
       if (!memoryId && !(key && scope)) {
-        return {
-          content: [{ type: "text", text: "memoryId or key+scope required." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "memoryId or key+scope required.",
-          },
-        };
+        return toolErr("memoryId or key+scope required.", {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       try {
@@ -113,36 +124,24 @@ export const registerMemoryEditTool = (server: McpServer) => {
           }
         }
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: result.changed
-                ? `Memory "${result.memory.id}" edited to version ${result.version}.`
-                : `Memory "${result.memory.id}" unchanged.`,
+        return toolOk(
+          result.changed
+            ? `Memory "${result.memory.id}" edited to version ${result.version}.`
+            : `Memory "${result.memory.id}" unchanged.`,
+          {
+            data: {
+              yourAgentId: requestInfo.agentId,
+              memory: result.memory,
+              changed: result.changed,
+              previousVersion: result.previousVersion,
+              version: result.version,
             },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: result.changed
-              ? `Memory edited to version ${result.version}.`
-              : "Memory unchanged.",
-            memory: result.memory,
-            changed: result.changed,
-            previousVersion: result.previousVersion,
-            version: result.version,
           },
-        };
+        );
       } catch (err) {
-        return {
-          content: [{ type: "text", text: `Memory edit failed: ${(err as Error).message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Memory edit failed: ${(err as Error).message}`,
-          },
-        };
+        return toolErr(`Memory edit failed: ${(err as Error).message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

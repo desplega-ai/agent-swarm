@@ -3,7 +3,7 @@ import { z } from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getWorkflow, updateWorkflow } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import type { WorkflowPatch } from "@/types";
 import { AssetKeySchema, WorkflowNodePatchSchema } from "@/types";
 import { applyDefinitionPatch, validateDefinition } from "@/workflows/definition";
@@ -66,9 +66,7 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
               "Validator subset: type, required, properties, enum, const, items.",
           ),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
         workflow: z.unknown().optional(),
         versionCreated: z.number().optional(),
         nodesCreated: z.number().optional(),
@@ -80,10 +78,7 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
       try {
         const existing = getWorkflow(id);
         if (!existing) {
-          return {
-            content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],
-            structuredContent: { success: false, message: `Workflow not found: ${id}` },
-          };
+          return toolErr(`Workflow not found: ${id}`);
         }
 
         const patchResult = applyDefinitionPatch(existing.definition, {
@@ -94,19 +89,12 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
         });
         if (patchResult.errors.length > 0) {
           const msg = patchResult.errors.join("; ");
-          return {
-            content: [{ type: "text" as const, text: `Patch errors: ${msg}` }],
-            structuredContent: { success: false, message: msg },
-          };
+          return toolErr(`Patch errors: ${msg}`);
         }
 
         const validation = validateDefinition(patchResult.definition);
         if (!validation.valid) {
-          const msg = `Invalid definition: ${validation.errors.join("; ")}`;
-          return {
-            content: [{ type: "text" as const, text: msg }],
-            structuredContent: { success: false, message: msg },
-          };
+          return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
         }
 
         const version = snapshotWorkflow(id, requestInfo.agentId);
@@ -127,34 +115,21 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
         }
         const workflow = updateWorkflow(id, updateArgs);
         if (!workflow) {
-          return {
-            content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],
-            structuredContent: { success: false, message: `Workflow not found: ${id}` },
-          };
+          return toolErr(`Workflow not found: ${id}`);
         }
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Patched workflow "${workflow.name}" (${id}). Version ${version.version} snapshot created.`,
-            },
-          ],
-          structuredContent: {
-            success: true,
-            message: `Patched workflow "${workflow.name}".`,
+        return toolOk(`Patched workflow "${workflow.name}".`, {
+          details: `Patched workflow "${workflow.name}" (${id}). Version ${version.version} snapshot created.`,
+          data: {
             workflow,
             versionCreated: version.version,
             nodesCreated: create?.length ?? 0,
             nodesUpdated: update?.length ?? 0,
             nodesDeleted: del?.length ?? 0,
           },
-        };
+        });
       } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Failed: ${err}` }],
-          structuredContent: { success: false, message: String(err) },
-        };
+        return toolErr(String(err));
       }
     },
   );

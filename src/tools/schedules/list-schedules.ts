@@ -1,8 +1,35 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getScheduledTasks } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AssetKeySchema } from "@/types";
+
+const scheduleRowShape = {
+  id: z.string().optional(),
+  key: AssetKeySchema.optional(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  cronExpression: z.string().optional(),
+  intervalMs: z.number().optional(),
+  // Slim rows carry `taskTemplatePreview`; `includeFull` rows carry `taskTemplate`.
+  taskTemplate: z.string().optional(),
+  taskTemplatePreview: z.string().optional(),
+  taskType: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  priority: z.number().optional(),
+  targetAgentId: z.string().optional(),
+  enabled: z.boolean().optional(),
+  lastRunAt: z.string().optional(),
+  nextRunAt: z.string().optional(),
+  createdByAgentId: z.string().optional(),
+  timezone: z.string().optional(),
+  consecutiveErrors: z.number().optional(),
+  lastErrorAt: z.string().optional(),
+  lastErrorMessage: z.string().optional(),
+  scheduleType: z.string().optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+};
 
 export const registerListSchedulesTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -46,39 +73,10 @@ export const registerListSchedulesTool = (server: McpServer) => {
             "Return the full `taskTemplate` instead of a short `taskTemplatePreview`. Default false.",
           ),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        schedules: z.array(
-          z.object({
-            id: z.string(),
-            key: AssetKeySchema,
-            name: z.string(),
-            description: z.string().optional(),
-            cronExpression: z.string().optional(),
-            intervalMs: z.number().optional(),
-            // Slim rows carry `taskTemplatePreview`; `includeFull` rows carry `taskTemplate`.
-            taskTemplate: z.string().optional(),
-            taskTemplatePreview: z.string().optional(),
-            taskType: z.string().optional(),
-            tags: z.array(z.string()),
-            priority: z.number(),
-            targetAgentId: z.string().optional(),
-            enabled: z.boolean(),
-            lastRunAt: z.string().optional(),
-            nextRunAt: z.string().optional(),
-            createdByAgentId: z.string().optional(),
-            timezone: z.string(),
-            consecutiveErrors: z.number().optional(),
-            lastErrorAt: z.string().optional(),
-            lastErrorMessage: z.string().optional(),
-            scheduleType: z.string(),
-            createdAt: z.string(),
-            lastUpdatedAt: z.string(),
-          }),
-        ),
-        count: z.number(),
+        schedules: z.array(z.looseObject(scheduleRowShape)).optional(),
+        count: z.number().optional(),
       }),
     },
     async (
@@ -97,15 +95,9 @@ export const registerListSchedulesTool = (server: McpServer) => {
       _meta,
     ) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-            schedules: [],
-            count: 0,
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.', {
+          data: { schedules: [], count: 0 },
+        });
       }
 
       try {
@@ -140,33 +132,15 @@ export const registerListSchedulesTool = (server: McpServer) => {
           })
           .join("\n");
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: count === 0 ? statusSummary : `${statusSummary}\n\n${scheduleList}`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: statusSummary,
-            schedules,
-            count,
-          },
-        };
+        return toolOk(statusSummary, {
+          details: count === 0 ? undefined : scheduleList,
+          data: { yourAgentId: requestInfo.agentId, schedules, count },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to list schedules: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to list schedules: ${message}`,
-            schedules: [],
-            count: 0,
-          },
-        };
+        return toolErr(`Failed to list schedules: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId, schedules: [], count: 0 },
+        });
       }
     },
   );

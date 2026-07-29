@@ -7,7 +7,7 @@ import {
   getAgentMailInboxMapping,
   getAgentMailInboxMappingsByAgent,
 } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerRegisterAgentmailInboxTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -30,18 +30,16 @@ export const registerRegisterAgentmailInboxTool = (server: McpServer) => {
           .optional()
           .describe("Optional email address for this inbox (for reference only)."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
         mappings: z
           .array(
-            z.object({
-              id: z.string(),
-              inboxId: z.string(),
-              agentId: z.string(),
-              inboxEmail: z.string().nullable(),
-              createdAt: z.string(),
+            z.looseObject({
+              id: z.string().optional(),
+              inboxId: z.string().optional(),
+              agentId: z.string().optional(),
+              inboxEmail: z.string().nullable().optional(),
+              createdAt: z.string().optional(),
             }),
           )
           .optional(),
@@ -49,26 +47,13 @@ export const registerRegisterAgentmailInboxTool = (server: McpServer) => {
     },
     async ({ action, inboxId, inboxEmail }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       try {
         const agent = getAgentById(requestInfo.agentId);
         if (!agent) {
-          return {
-            content: [{ type: "text", text: "Agent not found." }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Agent not found.",
-            },
-          };
+          return toolErr("Agent not found.", { data: { yourAgentId: requestInfo.agentId } });
         }
 
         if (action === "list") {
@@ -77,89 +62,48 @@ export const registerRegisterAgentmailInboxTool = (server: McpServer) => {
             mappings.length === 0
               ? "No AgentMail inbox mappings registered."
               : `Found ${mappings.length} mapping(s):\n${mappings.map((m) => `  - ${m.inboxId} (${m.inboxEmail ?? "no email"})`).join("\n")}`;
-          return {
-            content: [{ type: "text", text }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: true,
-              message: text,
-              mappings,
-            },
-          };
+          return toolOk(`Found ${mappings.length} mapping(s).`, {
+            details: text,
+            data: { yourAgentId: requestInfo.agentId, mappings },
+          });
         }
 
         if (!inboxId) {
-          return {
-            content: [{ type: "text", text: "inboxId is required for register/unregister." }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "inboxId is required for register/unregister.",
-            },
-          };
+          return toolErr("inboxId is required for register/unregister.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         if (action === "register") {
           const mapping = createAgentMailInboxMapping(inboxId, requestInfo.agentId, inboxEmail);
           const text = `Registered inbox ${inboxId} → agent ${agent.name} (${requestInfo.agentId})`;
-          return {
-            content: [{ type: "text", text }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: true,
-              message: text,
-              mappings: [mapping],
-            },
-          };
+          return toolOk(text, {
+            data: { yourAgentId: requestInfo.agentId, mappings: [mapping] },
+          });
         }
 
         if (action === "unregister") {
           // Check ownership before allowing unregister
           const existing = getAgentMailInboxMapping(inboxId);
           if (existing && existing.agentId !== requestInfo.agentId) {
-            const text = `Cannot unregister inbox ${inboxId}: owned by another agent`;
-            return {
-              content: [{ type: "text", text }],
-              structuredContent: {
-                yourAgentId: requestInfo.agentId,
-                success: false,
-                message: text,
-              },
-            };
+            return toolErr(`Cannot unregister inbox ${inboxId}: owned by another agent`, {
+              data: { yourAgentId: requestInfo.agentId },
+            });
           }
 
           const deleted = deleteAgentMailInboxMapping(inboxId);
           const text = deleted
             ? `Unregistered inbox ${inboxId}`
             : `No mapping found for inbox ${inboxId}`;
-          return {
-            content: [{ type: "text", text }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: deleted,
-              message: text,
-            },
-          };
+          return deleted
+            ? toolOk(text, { data: { yourAgentId: requestInfo.agentId } })
+            : toolErr(text, { data: { yourAgentId: requestInfo.agentId } });
         }
 
-        return {
-          content: [{ type: "text", text: `Unknown action: ${action}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Unknown action: ${action}`,
-          },
-        };
+        return toolErr(`Unknown action: ${action}`, { data: { yourAgentId: requestInfo.agentId } });
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text", text: `Error: ${errorMessage}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: errorMessage,
-          },
-        };
+        return toolErr(errorMessage, { data: { yourAgentId: requestInfo.agentId } });
       }
     },
   );

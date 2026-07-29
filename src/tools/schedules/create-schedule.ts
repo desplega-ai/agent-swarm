@@ -6,7 +6,7 @@ import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { createScheduledTask, getAgentById, getScheduledTaskByName, getWorkflow } from "@/be/db";
 import { getScript } from "@/be/scripts/db";
 import { calculateNextRun } from "@/scheduler";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import {
   AssetKeySchema,
   ModelTierSchema,
@@ -104,6 +104,34 @@ export const createScheduleInputSchema = z.object({
   ),
 });
 
+const scheduleDataShape = {
+  id: z.string().optional(),
+  key: AssetKeySchema.optional(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  cronExpression: z.string().optional(),
+  intervalMs: z.number().optional(),
+  taskTemplate: z.string().optional(),
+  taskType: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  priority: z.number().optional(),
+  targetAgentId: z.string().optional(),
+  enabled: z.boolean().optional(),
+  lastRunAt: z.string().optional(),
+  nextRunAt: z.string().optional(),
+  createdByAgentId: z.string().optional(),
+  timezone: z.string().optional(),
+  model: z.string().optional(),
+  modelTier: ModelTierSchema.optional(),
+  scheduleType: z.string().optional(),
+  targetType: ScheduledTaskTargetTypeSchema.optional(),
+  workflowId: z.string().optional(),
+  scriptName: z.string().optional(),
+  scriptArgs: z.record(z.string(), z.unknown()).optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+};
+
 export const registerCreateScheduleTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "create-schedule",
@@ -113,39 +141,9 @@ export const registerCreateScheduleTool = (server: McpServer) => {
       description:
         "Create a new scheduled task. For recurring: provide cronExpression or intervalMs. For one-time: provide delayMs or runAt with scheduleType 'one_time'.",
       inputSchema: createScheduleInputSchema,
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        schedule: z
-          .object({
-            id: z.string(),
-            key: AssetKeySchema,
-            name: z.string(),
-            description: z.string().optional(),
-            cronExpression: z.string().optional(),
-            intervalMs: z.number().optional(),
-            taskTemplate: z.string().optional(),
-            taskType: z.string().optional(),
-            tags: z.array(z.string()),
-            priority: z.number(),
-            targetAgentId: z.string().optional(),
-            enabled: z.boolean(),
-            lastRunAt: z.string().optional(),
-            nextRunAt: z.string().optional(),
-            createdByAgentId: z.string().optional(),
-            timezone: z.string(),
-            model: z.string().optional(),
-            modelTier: ModelTierSchema.optional(),
-            scheduleType: z.string(),
-            targetType: ScheduledTaskTargetTypeSchema.optional(),
-            workflowId: z.string().optional(),
-            scriptName: z.string().optional(),
-            scriptArgs: z.record(z.string(), z.unknown()).optional(),
-            createdAt: z.string(),
-            lastUpdatedAt: z.string(),
-          })
-          .optional(),
+        schedule: z.looseObject(scheduleDataShape).optional(),
       }),
     },
     async (
@@ -176,13 +174,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
       _meta,
     ) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       const isOneTime = scheduleType === "one_time";
@@ -190,83 +182,27 @@ export const registerCreateScheduleTool = (server: McpServer) => {
       // Validate params based on schedule type
       if (isOneTime) {
         if (cronExpression || intervalMs) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "One-time schedules cannot use cronExpression or intervalMs. Use delayMs or runAt instead.",
-              },
-            ],
-            structuredContent: {
-              success: false,
-              message:
-                "One-time schedules cannot use cronExpression or intervalMs. Use delayMs or runAt instead.",
-            },
-          };
+          return toolErr(
+            "One-time schedules cannot use cronExpression or intervalMs. Use delayMs or runAt instead.",
+          );
         }
         if (!delayMs && !runAt) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "One-time schedules require either delayMs or runAt.",
-              },
-            ],
-            structuredContent: {
-              success: false,
-              message: "One-time schedules require either delayMs or runAt.",
-            },
-          };
+          return toolErr("One-time schedules require either delayMs or runAt.");
         }
         if (delayMs && runAt) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Provide either delayMs or runAt, not both.",
-              },
-            ],
-            structuredContent: {
-              success: false,
-              message: "Provide either delayMs or runAt, not both.",
-            },
-          };
+          return toolErr("Provide either delayMs or runAt, not both.");
         }
         if (runAt && new Date(runAt).getTime() <= Date.now()) {
-          return {
-            content: [{ type: "text", text: "runAt must be in the future." }],
-            structuredContent: {
-              success: false,
-              message: "runAt must be in the future.",
-            },
-          };
+          return toolErr("runAt must be in the future.");
         }
       } else {
         if (delayMs || runAt) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "delayMs and runAt are only for one-time schedules. Set scheduleType to 'one_time'.",
-              },
-            ],
-            structuredContent: {
-              success: false,
-              message:
-                "delayMs and runAt are only for one-time schedules. Set scheduleType to 'one_time'.",
-            },
-          };
+          return toolErr(
+            "delayMs and runAt are only for one-time schedules. Set scheduleType to 'one_time'.",
+          );
         }
         if (!cronExpression && !intervalMs) {
-          return {
-            content: [
-              { type: "text", text: "Either cronExpression or intervalMs must be provided." },
-            ],
-            structuredContent: {
-              success: false,
-              message: "Either cronExpression or intervalMs must be provided.",
-            },
-          };
+          return toolErr("Either cronExpression or intervalMs must be provided.");
         }
       }
 
@@ -276,81 +212,43 @@ export const registerCreateScheduleTool = (server: McpServer) => {
           CronExpressionParser.parse(cronExpression, { tz: timezone || "UTC" });
         } catch (err) {
           const message = err instanceof Error ? err.message : "Invalid cron expression";
-          return {
-            content: [{ type: "text", text: `Invalid cron expression: ${message}` }],
-            structuredContent: {
-              success: false,
-              message: `Invalid cron expression: ${message}`,
-            },
-          };
+          return toolErr(`Invalid cron expression: ${message}`);
         }
       }
 
       // Check for duplicate name
       const existing = getScheduledTaskByName(name);
       if (existing) {
-        return {
-          content: [{ type: "text", text: `Schedule with name "${name}" already exists.` }],
-          structuredContent: {
-            success: false,
-            message: `Schedule with name "${name}" already exists.`,
-          },
-        };
+        return toolErr(`Schedule with name "${name}" already exists.`);
       }
 
       // Validate targetAgentId if provided
       if (targetAgentId) {
         const agent = getAgentById(targetAgentId);
         if (!agent) {
-          return {
-            content: [{ type: "text", text: `Target agent not found: ${targetAgentId}` }],
-            structuredContent: {
-              success: false,
-              message: `Target agent not found: ${targetAgentId}`,
-            },
-          };
+          return toolErr(`Target agent not found: ${targetAgentId}`);
         }
       }
 
       // Cross-field targetType validation
       const resolvedTargetType = targetType ?? "agent-task";
       if (resolvedTargetType === "agent-task" && !taskTemplate) {
-        const message = "taskTemplate is required when targetType is 'agent-task'.";
-        return {
-          content: [{ type: "text", text: message }],
-          structuredContent: { success: false, message },
-        };
+        return toolErr("taskTemplate is required when targetType is 'agent-task'.");
       }
       if (resolvedTargetType === "workflow") {
         if (!workflowId) {
-          const message = "workflowId is required when targetType is 'workflow'.";
-          return {
-            content: [{ type: "text", text: message }],
-            structuredContent: { success: false, message },
-          };
+          return toolErr("workflowId is required when targetType is 'workflow'.");
         }
         if (!getWorkflow(workflowId)) {
-          const message = `Workflow not found: ${workflowId}`;
-          return {
-            content: [{ type: "text", text: message }],
-            structuredContent: { success: false, message },
-          };
+          return toolErr(`Workflow not found: ${workflowId}`);
         }
       }
       if (resolvedTargetType === "script") {
         if (!scriptName) {
-          const message = "scriptName is required when targetType is 'script'.";
-          return {
-            content: [{ type: "text", text: message }],
-            structuredContent: { success: false, message },
-          };
+          return toolErr("scriptName is required when targetType is 'script'.");
         }
         if (!getScript({ name: scriptName, scope: "global" })) {
-          const message = `Script not found: ${scriptName}`;
-          return {
-            content: [{ type: "text", text: message }],
-            structuredContent: { success: false, message },
-          };
+          return toolErr(`Script not found: ${scriptName}`);
         }
       }
 
@@ -403,30 +301,17 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         const scheduleDesc = isOneTime
           ? `one-time at ${schedule.nextRunAt}`
           : cronExpression || `every ${intervalMs}ms`;
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Created schedule "${name}" (${scheduleDesc}). Next run: ${schedule.nextRunAt || "disabled"}`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Created schedule "${name}".`,
-            schedule,
+        return toolOk(
+          `Created schedule "${name}" (${scheduleDesc}). Next run: ${schedule.nextRunAt || "disabled"}`,
+          {
+            data: { yourAgentId: requestInfo.agentId, schedule },
           },
-        };
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to create schedule: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to create schedule: ${message}`,
-          },
-        };
+        return toolErr(`Failed to create schedule: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

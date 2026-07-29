@@ -1,5 +1,4 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
@@ -29,15 +28,21 @@ import {
   updateTaskClaudeSessionId,
 } from "@/be/db";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
-import { createToolRegistrar } from "@/tools/utils";
 import {
-  AgentTaskSchema,
+  createToolRegistrar,
+  type SwarmToolResult,
+  swarmToolOutputSchema,
+  toolErr,
+  toolOk,
+} from "@/tools/utils";
+import {
   AssetKeySchema,
   BudgetRefusalCauseSchema,
   ModelTierSchema,
   ReasoningEffortSchema,
   splitLegacyModelAlias,
 } from "@/types";
+import { looseAgentTaskOutputSchema } from "./get-task-details";
 
 export const TaskActionSchema = z.enum([
   "create",
@@ -100,11 +105,9 @@ export const taskActionInputSchema = z.object({
     ),
 });
 
-export const taskActionOutputSchema = z.object({
+export const taskActionOutputSchema = swarmToolOutputSchema({
   yourAgentId: z.string().optional(),
-  success: z.boolean(),
-  message: z.string(),
-  task: AgentTaskSchema.optional(),
+  task: looseAgentTaskOutputSchema.optional(),
   // Phase 3: budget-admission refusal fields. Populated only on
   // `accept` action when the per-agent or global daily budget is blown.
   refusalCause: BudgetRefusalCauseSchema.optional(),
@@ -133,43 +136,26 @@ type TaskActionResult = {
   refusalSideEffects?: unknown;
 };
 
-function agentOnlyActionResult(): CallToolResult {
-  const message = "This action is only available to worker agents.";
-  const structuredContent = {
-    success: false,
-    message,
-  };
-
-  return {
-    isError: true,
-    content: [
-      { type: "text", text: message },
-      { type: "text", text: JSON.stringify(structuredContent) },
-    ],
-    structuredContent,
-  };
+function agentOnlyActionResult(): SwarmToolResult {
+  return toolErr("This action is only available to worker agents.");
 }
 
-function taskActionCallResult(result: TaskActionResult, agentId?: string): CallToolResult {
-  const { refusalSideEffects: _omit, ...publicResult } = result;
-  const structuredContent = {
+function taskActionResult(result: TaskActionResult, agentId?: string): SwarmToolResult {
+  const { refusalSideEffects: _omit, success, message, ...rest } = result;
+  const data = {
     yourAgentId: agentId,
-    ...publicResult,
+    ...rest,
   };
-
-  return {
-    content: [
-      { type: "text", text: result.message },
-      { type: "text", text: JSON.stringify(structuredContent) },
-    ],
-    structuredContent,
-  };
+  // Most harnesses only show the model the text channel — render the payload
+  // (task object, refusalCause, ...) there too, not just in structuredContent.
+  const details = Object.keys(rest).length > 0 ? JSON.stringify(rest, null, 2) : undefined;
+  return success ? toolOk(message, { data, details }) : toolErr(message, { data, details });
 }
 
 export async function taskActionHandler(
   ctx: ToolCtx,
   input: TaskActionArgs,
-): Promise<CallToolResult> {
+): Promise<SwarmToolResult> {
   const {
     action,
     task,
@@ -191,7 +177,7 @@ export async function taskActionHandler(
       return agentOnlyActionResult();
     }
 
-    const result = getDb().transaction((): TaskActionResult | CallToolResult => {
+    const result = getDb().transaction((): TaskActionResult | SwarmToolResult => {
       if (!taskId) {
         return { success: false, message: `Task ID is required for '${action}' action.` };
       }
@@ -239,17 +225,11 @@ export async function taskActionHandler(
       };
     })();
 
-    return "content" in result ? result : taskActionCallResult(result);
+    return "ok" in result ? result : taskActionResult(result);
   }
 
   if (!ctx.agentId) {
-    return {
-      content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-      structuredContent: {
-        success: false,
-        message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-      },
-    };
+    return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
   }
 
   const agentId = ctx.agentId;
@@ -266,7 +246,7 @@ export async function taskActionHandler(
           : error instanceof Error
             ? error.message
             : String(error);
-      return taskActionCallResult({ success: false, message }, agentId);
+      return taskActionResult({ success: false, message }, agentId);
     }
   }
 
@@ -597,7 +577,7 @@ export async function taskActionHandler(
     emitBudgetRefusalSideEffects(sideEffects.context, sideEffects.inserted);
   }
 
-  return taskActionCallResult(result, agentId);
+  return taskActionResult(result, agentId);
 }
 
 export const registerTaskActionTool = (server: McpServer) => {

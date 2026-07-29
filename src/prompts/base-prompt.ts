@@ -116,15 +116,16 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   if (!hasMcp) {
     // If no MCP, role cannot be lead
     compositeEventType = "system.session.worker.remote";
+  } else if (args.provider === "pi") {
+    // Pi has no context-mode MCP wiring yet, so it uses composites that omit
+    // the context-mode tool list while still including the shared script
+    // rubric (and its authoring contract) plus seed-script guidance. Checked
+    // before the role branch so pi *leads* aren't told about `ctx_*` tools that
+    // don't exist for them either. All other local providers (claude, codex,
+    // opencode) keep the full context block via the standard composites.
+    compositeEventType = role === "lead" ? "system.session.lead.pi" : "system.session.worker.pi";
   } else if (role === "lead") {
     compositeEventType = "system.session.lead";
-  } else if (args.provider === "pi") {
-    // Pi has no context-mode MCP wiring yet, so it uses a worker composite that
-    // omits the context-mode tool list while still including the shared script
-    // rubric and seed-script guidance. All other local providers (claude,
-    // codex, opencode) keep the full context block via the standard worker
-    // composite.
-    compositeEventType = "system.session.worker.pi";
   } else {
     compositeEventType = "system.session.worker";
   }

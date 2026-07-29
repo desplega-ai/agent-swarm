@@ -5,7 +5,7 @@ import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { withAutoJoin } from "@/slack/channel-join";
 import { markdownToSlack } from "@/slack/responses";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerSlackPostTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -26,26 +26,18 @@ export const registerSlackPostTool = (server: McpServer) => {
             "Optional parent message ts to thread under. Obtain via `slack-start-thread`. When omitted, posts as a new top-level message.",
           ),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
         messageTs: z.string().optional(),
       }),
     },
     async ({ channelId, message, threadTs }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       const agent = getAgentById(requestInfo.agentId);
       if (!agent) {
-        return {
-          content: [{ type: "text", text: "Agent not found." }],
-          structuredContent: { success: false, message: "Agent not found." },
-        };
+        return toolErr("Agent not found.");
       }
 
       // Require lead privileges to post directly to channels
@@ -56,21 +48,12 @@ export const registerSlackPostTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) {
-        return {
-          content: [{ type: "text", text: "Posting to Slack channels requires lead privileges." }],
-          structuredContent: {
-            success: false,
-            message: "Posting to Slack channels requires lead privileges.",
-          },
-        };
+        return toolErr("Posting to Slack channels requires lead privileges.");
       }
 
       const app = getSlackApp();
       if (!app) {
-        return {
-          content: [{ type: "text", text: "Slack not configured." }],
-          structuredContent: { success: false, message: "Slack not configured." },
-        };
+        return toolErr("Slack not configured.");
       }
 
       try {
@@ -97,25 +80,13 @@ export const registerSlackPostTool = (server: McpServer) => {
 
         const messageTs = result.ts;
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Message posted successfully.${messageTs ? ` Message timestamp: ${messageTs}` : ""}`,
-            },
-          ],
-          structuredContent: {
-            success: true,
-            message: "Message posted successfully.",
-            messageTs,
-          },
-        };
+        return toolOk("Message posted successfully.", {
+          details: messageTs ? `Message timestamp: ${messageTs}` : undefined,
+          data: { messageTs },
+        });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: `Failed to post message: ${errorMsg}` }],
-          structuredContent: { success: false, message: `Failed to post message: ${errorMsg}` },
-        };
+        return toolErr(`Failed to post message: ${errorMsg}`);
       }
     },
   );

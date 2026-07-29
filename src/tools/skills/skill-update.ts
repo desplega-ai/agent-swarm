@@ -3,7 +3,7 @@ import * as z from "zod";
 import { getAgentById, getSkillById, updateSkill } from "@/be/db";
 import { parseSkillContent } from "@/be/skill-parser";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 const SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE =
   "This skill is system-managed and cannot be edited from the UI; it is re-seeded on each start. Fork it under a new name to customize.";
@@ -27,43 +27,24 @@ export const registerSkillUpdateTool = (server: McpServer) => {
             "Scope: agent (personal) or swarm (shared). Only leads can promote a skill to swarm scope (used by the skill-approval flow).",
           ),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        skill: z.any().optional(),
+        skill: z.looseObject({}).optional(),
       }),
     },
     async (args, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       if (!args.skillId) {
-        return {
-          content: [{ type: "text", text: "skillId is required." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "skillId is required.",
-          },
-        };
+        return toolErr("skillId is required.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
       try {
         const existing = getSkillById(args.skillId);
         if (!existing) {
-          return {
-            content: [{ type: "text", text: "Skill not found." }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Skill not found.",
-            },
-          };
+          return toolErr("Skill not found.", { data: { yourAgentId: requestInfo.agentId } });
         }
 
         // Only owner or lead can update
@@ -79,27 +60,15 @@ export const registerSkillUpdateTool = (server: McpServer) => {
           source: "mcp",
         });
         if (!updateDecision.allow) {
-          return {
-            content: [
-              { type: "text", text: "Only the owning agent or lead can update this skill." },
-            ],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Permission denied.",
-            },
-          };
+          return toolErr("Only the owning agent or lead can update this skill.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         if (existing.systemDefault && (args.content !== undefined || args.scope !== undefined)) {
-          return {
-            content: [{ type: "text", text: SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE,
-            },
-          };
+          return toolErr(SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE, {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         const updates: Parameters<typeof updateSkill>[1] = {};
@@ -137,54 +106,28 @@ export const registerSkillUpdateTool = (server: McpServer) => {
               source: "mcp",
             }).allow
           ) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: 'Only lead agents can promote a skill to "swarm" scope. Use "skill-publish" to request approval.',
-                },
-              ],
-              structuredContent: {
-                yourAgentId: requestInfo.agentId,
-                success: false,
-                message: "Only lead agents can promote a skill to swarm scope.",
-              },
-            };
+            return toolErr("Only lead agents can promote a skill to swarm scope.", {
+              details: 'Use "skill-publish" to request approval.',
+              data: { yourAgentId: requestInfo.agentId },
+            });
           }
           updates.scope = args.scope;
         }
 
         const skill = updateSkill(args.skillId, updates);
         if (!skill) {
-          return {
-            content: [{ type: "text", text: "Failed to update skill." }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Update failed.",
-            },
-          };
+          return toolErr("Update failed.", {
+            details: "Failed to update skill.",
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
-        return {
-          content: [{ type: "text", text: `Updated skill "${skill.name}" (v${skill.version})` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Updated skill "${skill.name}" to version ${skill.version}.`,
-            skill,
-          },
-        };
+        return toolOk(`Updated skill "${skill.name}" to version ${skill.version}.`, {
+          data: { yourAgentId: requestInfo.agentId, skill },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed: ${message}`,
-          },
-        };
+        return toolErr(`Failed: ${message}`, { data: { yourAgentId: requestInfo.agentId } });
       }
     },
   );

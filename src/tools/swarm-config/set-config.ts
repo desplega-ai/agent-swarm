@@ -8,8 +8,22 @@ import {
 } from "@/be/swarm-config-guard";
 import { scheduleIntegrationsReload } from "@/http/core";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
-import { SwarmConfigSchema, SwarmConfigScopeSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { SwarmConfigScopeSchema } from "@/types";
+
+const configEntryShape = z.looseObject({
+  id: z.string().optional(),
+  scope: SwarmConfigScopeSchema.optional(),
+  scopeId: z.string().nullable().optional(),
+  key: z.string().optional(),
+  value: z.string().optional(),
+  isSecret: z.boolean().optional(),
+  envPath: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+  encrypted: z.boolean().optional(),
+});
 
 export const registerSetConfigTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -47,51 +61,27 @@ export const registerSetConfigTool = (server: McpServer) => {
           .optional()
           .describe("Optional human-readable description of this config entry."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        config: SwarmConfigSchema.optional(),
+        config: configEntryShape.optional(),
       }),
     },
     async ({ scope, scopeId, key, value, isSecret, envPath, description }, requestInfo) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       try {
         if (scope !== "global" && !scopeId) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `scopeId is required for scope '${scope}'. Provide an agent ID or repo ID.`,
-              },
-            ],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: `scopeId is required for scope '${scope}'.`,
-            },
-          };
+          return toolErr(`scopeId is required for scope '${scope}'.`, {
+            details: `scopeId is required for scope '${scope}'. Provide an agent ID or repo ID.`,
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         if (isReservedConfigKey(key)) {
           const message = reservedKeyError(key).message;
-          return {
-            content: [{ type: "text", text: message }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message,
-            },
-          };
+          return toolErr(message, { data: { yourAgentId: requestInfo.agentId } });
         }
 
         // Every swarm-config write is lead-gated (DES-445 follow-up): previously
@@ -110,27 +100,14 @@ export const registerSetConfigTool = (server: McpServer) => {
           source: "mcp",
         });
         if (!decision.allow) {
-          const message = "Writing swarm config requires the lead agent.";
-          return {
-            content: [{ type: "text", text: message }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message,
-            },
-          };
+          return toolErr("Writing swarm config requires the lead agent.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         const validationError = validateConfigValue(key, value);
         if (validationError) {
-          return {
-            content: [{ type: "text", text: validationError }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: validationError,
-            },
-          };
+          return toolErr(validationError, { data: { yourAgentId: requestInfo.agentId } });
         }
 
         const config = upsertSwarmConfig({
@@ -149,30 +126,15 @@ export const registerSetConfigTool = (server: McpServer) => {
 
         const [masked] = maskSecrets([config]);
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Config "${key}" set successfully (scope: ${scope}${scopeId ? `, scopeId: ${scopeId}` : ""}).`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Config "${key}" set successfully.`,
-            config: masked,
-          },
-        };
+        return toolOk(`Config "${key}" set successfully.`, {
+          details: `Config "${key}" set successfully (scope: ${scope}${scopeId ? `, scopeId: ${scopeId}` : ""}).`,
+          data: { yourAgentId: requestInfo.agentId, config: masked },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to set config: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to set config: ${message}`,
-          },
-        };
+        return toolErr(`Failed to set config: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

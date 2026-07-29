@@ -4,7 +4,7 @@ import { getAgentById } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { parseSlackTs } from "@/slack/message-text";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerSlackDeleteTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -24,25 +24,16 @@ export const registerSlackDeleteTool = (server: McpServer) => {
             "Timestamp of the message to delete. Accepts the dotted form (1783411554.596189), the 'p' deep-link form (p1783411554596189), or a full Slack permalink URL.",
           ),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
-      }),
+      outputSchema: swarmToolOutputSchema(),
     },
     async ({ channelId, messageTs }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       const agent = getAgentById(requestInfo.agentId);
       if (!agent) {
-        return {
-          content: [{ type: "text", text: "Agent not found." }],
-          structuredContent: { success: false, message: "Agent not found." },
-        };
+        return toolErr("Agent not found.");
       }
 
       const decision = can({
@@ -52,31 +43,19 @@ export const registerSlackDeleteTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) {
-        return {
-          content: [{ type: "text", text: "Deleting Slack messages requires lead privileges." }],
-          structuredContent: {
-            success: false,
-            message: "Deleting Slack messages requires lead privileges.",
-          },
-        };
+        return toolErr("Deleting Slack messages requires lead privileges.");
       }
 
       const app = getSlackApp();
       if (!app) {
-        return {
-          content: [{ type: "text", text: "Slack not configured." }],
-          structuredContent: { success: false, message: "Slack not configured." },
-        };
+        return toolErr("Slack not configured.");
       }
 
       try {
         const ts = parseSlackTs(messageTs);
         await app.client.chat.delete({ channel: channelId, ts });
 
-        return {
-          content: [{ type: "text", text: "Message deleted successfully." }],
-          structuredContent: { success: true, message: "Message deleted successfully." },
-        };
+        return toolOk("Message deleted successfully.");
       } catch (error) {
         const errorCode = (error as { data?: { error?: string } } | undefined)?.data?.error;
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -99,10 +78,7 @@ export const registerSlackDeleteTool = (server: McpServer) => {
             message = `Failed to delete message: ${errorMsg}`;
         }
 
-        return {
-          content: [{ type: "text", text: message }],
-          structuredContent: { success: false, message },
-        };
+        return toolErr(message);
       }
     },
   );

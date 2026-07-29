@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getOAuthApp, getOAuthTokens } from "@/be/db-queries/oauth";
 import { ensureToken } from "@/oauth/ensure-token";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolOk } from "@/tools/utils";
 
 export const registerTrackerStatusTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -13,17 +13,18 @@ export const registerTrackerStatusTool = (server: McpServer) => {
         "Show all connected trackers and their OAuth status (token expiry, workspace info). Proactively refreshes near-expiry tokens before reporting, so the returned `tokenExpiresAt` reflects the row that subsequent API calls (and direct DB reads) will see.",
       annotations: { readOnlyHint: true },
 
-      outputSchema: z.object({
-        success: z.boolean(),
-        trackers: z.array(
-          z.object({
-            provider: z.string(),
-            connected: z.boolean(),
-            tokenExpiresAt: z.string().nullable(),
-            scopes: z.string().nullable(),
-            redirectUri: z.string().nullable(),
-          }),
-        ),
+      outputSchema: swarmToolOutputSchema({
+        trackers: z
+          .array(
+            z.looseObject({
+              provider: z.string().optional(),
+              connected: z.boolean().optional(),
+              tokenExpiresAt: z.string().nullable().optional(),
+              scopes: z.string().nullable().optional(),
+              redirectUri: z.string().nullable().optional(),
+            }),
+          )
+          .optional(),
       }),
     },
     async (_requestInfo, _meta) => {
@@ -50,13 +51,20 @@ export const registerTrackerStatusTool = (server: McpServer) => {
         .map((t) => `${t.provider}: ${t.connected ? "connected" : "not connected"}`)
         .join(", ");
 
-      return {
-        content: [{ type: "text", text: `Tracker status: ${summary}` }],
-        structuredContent: {
-          success: true,
-          trackers,
-        },
-      };
+      const details = trackers
+        .map((t) => {
+          const bits = [
+            `provider: ${t.provider}`,
+            `connected: ${t.connected}`,
+            `tokenExpiresAt: ${t.tokenExpiresAt ?? "n/a"}`,
+            `scopes: ${t.scopes ?? "n/a"}`,
+            `redirectUri: ${t.redirectUri ?? "n/a"}`,
+          ];
+          return `- ${bits.join(", ")}`;
+        })
+        .join("\n");
+
+      return toolOk(`Tracker status: ${summary}`, { details, data: { trackers } });
     },
   );
 };

@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { deleteWorkflow } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerDeleteWorkflowTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -13,29 +13,17 @@ export const registerDeleteWorkflowTool = (server: McpServer) => {
       inputSchema: z.object({
         id: z.string().uuid().describe("Workflow ID to delete"),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
-      }),
+      outputSchema: swarmToolOutputSchema(),
     },
     async ({ id }) => {
       try {
         const deleted = deleteWorkflow(id);
         if (!deleted) {
-          return {
-            content: [{ type: "text" as const, text: `Workflow not found: ${id}` }],
-            structuredContent: { success: false, message: `Workflow not found: ${id}` },
-          };
+          return toolErr(`Workflow not found: ${id}`);
         }
-        return {
-          content: [{ type: "text" as const, text: `Deleted workflow ${id}.` }],
-          structuredContent: { success: true, message: `Deleted workflow ${id}.` },
-        };
+        return toolOk(`Deleted workflow ${id}.`);
       } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Failed: ${err}` }],
-          structuredContent: { success: false, message: String(err) },
-        };
+        return toolErr(String(err));
       }
     },
   );

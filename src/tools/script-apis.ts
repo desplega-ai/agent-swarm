@@ -1,10 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { can, type PermissionVerb } from "@/rbac";
-import type { RequestInfo } from "@/tools/utils";
-import { createToolRegistrar } from "@/tools/utils";
+import type { RequestInfo, SwarmToolResult } from "@/tools/utils";
+import { createToolRegistrar, toolErr, toolOk } from "@/tools/utils";
 import type { ScriptApiRecord, ScriptApiWithSecret } from "@/types";
 import { registerVolatileSecret } from "@/utils/secret-scrubber";
 import { proxyScriptsApi, SCRIPT_TRANSPORT_ERROR, scriptToolOutputSchema } from "./script-common";
@@ -44,20 +43,23 @@ function maskToken(endpoint: RawEndpoint): RawEndpoint {
   return { ...rest, token: endpoint.authMode === "bearer" ? "********" : null };
 }
 
-function errorResult(message: string, status = 400): CallToolResult {
-  return {
-    isError: true,
-    content: [{ type: "text", text: message }],
-    structuredContent: { success: false, status, error: message },
-  };
+function renderEndpointsList(endpoints: RawEndpoint[]): string | undefined {
+  if (endpoints.length === 0) return undefined;
+  return endpoints
+    .map((endpoint) => {
+      const label = endpoint.label ? ` "${endpoint.label}"` : "";
+      const token = endpoint.token ? `, token=${endpoint.token}` : "";
+      return `- ${endpoint.id}${label}: authMode=${endpoint.authMode}, enabled=${endpoint.enabled}${token}`;
+    })
+    .join("\n");
 }
 
 function requireScriptApiPermission(
   requestInfo: RequestInfo,
   verb: PermissionVerb,
   message: string,
-): CallToolResult | null {
-  if (!requestInfo.agentId) return errorResult(SCRIPT_TRANSPORT_ERROR);
+): SwarmToolResult | null {
+  if (!requestInfo.agentId) return toolErr(SCRIPT_TRANSPORT_ERROR);
 
   const agent = getAgentById(requestInfo.agentId);
   const decision = can({
@@ -70,7 +72,7 @@ function requireScriptApiPermission(
     resource: { kind: "none" },
     source: "mcp",
   });
-  return decision.allow ? null : errorResult(message, 403);
+  return decision.allow ? null : toolErr(message, { data: { status: 403 } });
 }
 
 export const registerScriptApisTool = (server: McpServer) => {
@@ -92,8 +94,8 @@ export const registerScriptApisTool = (server: McpServer) => {
           requestInfo,
           successMessage: () => "",
         });
-        if (result.isError) return result;
-        const raw = (result.structuredContent as { data?: { apis?: RawEndpoint[] } })?.data;
+        if (!result.ok) return result;
+        const raw = (result.data as { data?: { apis?: RawEndpoint[] } } | undefined)?.data;
         let endpoints = (raw?.apis ?? []).map(maskToken);
 
         if (args.includeSecrets) {
@@ -113,8 +115,8 @@ export const registerScriptApisTool = (server: McpServer) => {
                 requestInfo,
                 successMessage: () => "",
               });
-              if (secretResult.isError) return endpoint;
-              const token = (secretResult.structuredContent as { data?: { token?: string | null } })
+              if (!secretResult.ok) return endpoint;
+              const token = (secretResult.data as { data?: { token?: string | null } } | undefined)
                 ?.data?.token;
               if (token) registerVolatileSecret(token, `script-api:${endpoint.id}`);
               return { ...endpoint, token: token ?? null };
@@ -122,10 +124,12 @@ export const registerScriptApisTool = (server: McpServer) => {
           );
         }
 
-        return {
-          content: [{ type: "text", text: `Found ${endpoints.length} endpoint(s).` }],
-          structuredContent: { success: true, status: 200, data: { apis: endpoints } },
-        };
+        return toolOk(`Found ${endpoints.length} endpoint(s).`, {
+          details: renderEndpointsList(endpoints),
+          data: { status: 200, data: { apis: endpoints } },
+          // Deliberate reveal path — includeSecrets returns real bearer tokens.
+          allowSecretEgress: args.includeSecrets === true,
+        });
       }
 
       if (args.action === "create") {
@@ -146,16 +150,23 @@ export const registerScriptApisTool = (server: McpServer) => {
           },
           requestInfo,
           successMessage: (data) => `Endpoint ${(data as ScriptApiWithSecret).id} created.`,
+          successDetails: (data) => {
+            const token = (data as ScriptApiWithSecret).token;
+            return token ? `Bearer token (shown once — save it now): ${token}` : undefined;
+          },
         });
-        if (!result.isError) {
-          const endpoint = (result.structuredContent as { data?: ScriptApiWithSecret })?.data;
+        if (result.ok) {
+          const endpoint = (result.data as { data?: ScriptApiWithSecret } | undefined)?.data;
           if (endpoint?.token) registerVolatileSecret(endpoint.token, `script-api:${endpoint.id}`);
+          // Deliberate one-time reveal — the volatile secret registered above
+          // would otherwise be redacted by the finalize scrubber.
+          return { ...result, allowSecretEgress: true };
         }
         return result;
       }
 
       if (args.action === "rotate") {
-        if (!args.endpointId) return errorResult("endpointId is required for rotate.");
+        if (!args.endpointId) return toolErr("endpointId is required for rotate.");
         const denied = requireScriptApiPermission(
           requestInfo,
           "script.api.rotate",
@@ -168,16 +179,23 @@ export const registerScriptApisTool = (server: McpServer) => {
           path: `/api/scripts/${args.scriptId}/apis/${args.endpointId}/rotate`,
           requestInfo,
           successMessage: () => "Token rotated.",
+          successDetails: (data) => {
+            const token = (data as ScriptApiWithSecret).token;
+            return token ? `New bearer token (shown once — save it now): ${token}` : undefined;
+          },
         });
-        if (!result.isError) {
-          const endpoint = (result.structuredContent as { data?: ScriptApiWithSecret })?.data;
+        if (result.ok) {
+          const endpoint = (result.data as { data?: ScriptApiWithSecret } | undefined)?.data;
           if (endpoint?.token) registerVolatileSecret(endpoint.token, `script-api:${endpoint.id}`);
+          // Deliberate one-time reveal — the volatile secret registered above
+          // would otherwise be redacted by the finalize scrubber.
+          return { ...result, allowSecretEgress: true };
         }
         return result;
       }
 
       if (args.action === "update") {
-        if (!args.endpointId) return errorResult("endpointId is required for update.");
+        if (!args.endpointId) return toolErr("endpointId is required for update.");
         const denied = requireScriptApiPermission(
           requestInfo,
           "script.api.update",
@@ -195,7 +213,7 @@ export const registerScriptApisTool = (server: McpServer) => {
       }
 
       if (args.action === "delete") {
-        if (!args.endpointId) return errorResult("endpointId is required for delete.");
+        if (!args.endpointId) return toolErr("endpointId is required for delete.");
         const denied = requireScriptApiPermission(
           requestInfo,
           "script.api.delete",
@@ -211,7 +229,7 @@ export const registerScriptApisTool = (server: McpServer) => {
         });
       }
 
-      return errorResult(`Unknown action: ${args.action}`);
+      return toolErr(`Unknown action: ${args.action}`);
     },
   );
 };

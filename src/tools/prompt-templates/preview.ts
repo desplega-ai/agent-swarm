@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getTemplateDefinition } from "@/prompts/registry";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { interpolate } from "@/utils/template";
 
 export const registerPreviewPromptTemplateTool = (server: McpServer) => {
@@ -23,25 +23,17 @@ export const registerPreviewPromptTemplateTool = (server: McpServer) => {
           .optional()
           .describe("Variables to interpolate into the template."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        rendered: z.string(),
-        unresolved: z.array(z.string()),
+        rendered: z.string().optional(),
+        unresolved: z.array(z.string()).optional(),
       }),
     },
     async ({ eventType, body: customBody, variables }, requestInfo) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-            rendered: "",
-            unresolved: [],
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.', {
+          data: { rendered: "", unresolved: [] },
+        });
       }
 
       try {
@@ -51,33 +43,15 @@ export const registerPreviewPromptTemplateTool = (server: McpServer) => {
         const composed = header ? `${header}\n\n${templateBody}` : templateBody;
         const { result: rendered, unresolved } = interpolate(composed, variables ?? {});
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Preview for "${eventType}":\n\n${rendered}${unresolved.length > 0 ? `\n\nUnresolved variables: ${unresolved.join(", ")}` : ""}`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: "Template rendered successfully.",
-            rendered,
-            unresolved,
-          },
-        };
+        return toolOk("Template rendered successfully.", {
+          details: `Preview for "${eventType}":\n\n${rendered}${unresolved.length > 0 ? `\n\nUnresolved variables: ${unresolved.join(", ")}` : ""}`,
+          data: { yourAgentId: requestInfo.agentId, rendered, unresolved },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to preview template: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to preview template: ${message}`,
-            rendered: "",
-            unresolved: [],
-          },
-        };
+        return toolErr(`Failed to preview template: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId, rendered: "", unresolved: [] },
+        });
       }
     },
   );

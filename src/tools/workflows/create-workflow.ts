@@ -3,7 +3,7 @@ import { z } from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { createWorkflow } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import {
   AssetKeySchema,
   CooldownConfigSchema,
@@ -84,10 +84,8 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
               "Other JSON-Schema keywords are silently ignored.",
           ),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
         workflow: z.unknown().optional(),
       }),
     },
@@ -107,27 +105,13 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
       requestInfo,
     ) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text" as const, text: "Agent ID required." }],
-          structuredContent: { success: false, message: "Agent ID required." },
-        };
+        return toolErr("Agent ID required.");
       }
       try {
         // Validate definition structure
         const validation = validateDefinition(definition);
         if (!validation.valid) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Invalid definition: ${validation.errors.join("; ")}`,
-              },
-            ],
-            structuredContent: {
-              success: false,
-              message: `Invalid definition: ${validation.errors.join("; ")}`,
-            },
-          };
+          return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
         }
 
         const createdBy =
@@ -148,25 +132,12 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           createdByAgentId: requestInfo.agentId,
           createdBy,
         });
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Created workflow "${workflow.name}" (${workflow.id}).`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Created workflow "${workflow.name}".`,
-            workflow,
-          },
-        };
+        return toolOk(`Created workflow "${workflow.name}".`, {
+          details: `Created workflow "${workflow.name}" (${workflow.id}).`,
+          data: { yourAgentId: requestInfo.agentId, workflow },
+        });
       } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Failed: ${err}` }],
-          structuredContent: { success: false, message: String(err) },
-        };
+        return toolErr(String(err));
       }
     },
   );

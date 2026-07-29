@@ -2,9 +2,23 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getSwarmConfigs, maskSecrets } from "@/be/db";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
-import { SwarmConfigSchema, SwarmConfigScopeSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { SwarmConfigScopeSchema } from "@/types";
 import { registerVolatileSecret } from "@/utils/secret-scrubber";
+
+const configEntryShape = z.looseObject({
+  id: z.string().optional(),
+  scope: SwarmConfigScopeSchema.optional(),
+  scopeId: z.string().nullable().optional(),
+  key: z.string().optional(),
+  value: z.string().optional(),
+  isSecret: z.boolean().optional(),
+  envPath: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+  encrypted: z.boolean().optional(),
+});
 
 export const registerListConfigTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -26,25 +40,17 @@ export const registerListConfigTool = (server: McpServer) => {
           .optional()
           .describe("If true, include actual secret values (default: false)."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        configs: z.array(SwarmConfigSchema),
-        count: z.number(),
+        configs: z.array(configEntryShape).optional(),
+        count: z.number().optional(),
       }),
     },
     async ({ scope, scopeId, key, includeSecrets }, requestInfo) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-            configs: [],
-            count: 0,
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.', {
+          data: { configs: [], count: 0 },
+        });
       }
 
       try {
@@ -89,7 +95,7 @@ export const registerListConfigTool = (server: McpServer) => {
 
         const configList =
           count === 0
-            ? "No configs found."
+            ? undefined
             : result
                 .map(
                   (c) =>
@@ -97,36 +103,22 @@ export const registerListConfigTool = (server: McpServer) => {
                 )
                 .join("\n");
 
-        return {
-          content: [
-            {
-              type: "text",
-              text:
-                count === 0
-                  ? "No configs found."
-                  : `Found ${count} config(s):\n\n${configList}${secretsNote}`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: count === 0 ? "No configs found." : `Found ${count} config(s).${secretsNote}`,
-            configs: result,
-            count,
+        return toolOk(
+          count === 0 ? "No configs found." : `Found ${count} config(s).${secretsNote}`,
+          {
+            details: configList,
+            data: { yourAgentId: requestInfo.agentId, configs: result, count },
+            // Deliberate reveal when the lead asked for unmasked secrets — the
+            // volatile secrets registered above would otherwise be redacted by
+            // the finalize scrubber.
+            allowSecretEgress: effectiveIncludeSecrets,
           },
-        };
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to list configs: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to list configs: ${message}`,
-            configs: [],
-            count: 0,
-          },
-        };
+        return toolErr(`Failed to list configs: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId, configs: [], count: 0 },
+        });
       }
     },
   );

@@ -1,8 +1,30 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getAllServices } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
-import { ServiceSchema, ServiceStatusSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { ServiceStatusSchema } from "@/types";
+
+// Loose mirror of ServiceSchema (+ denormalized agentName) for tool output:
+// every field optional, no url/uuid/datetime format pins.
+const serviceWithAgentNameOutputShape = z.looseObject({
+  id: z.string().optional(),
+  agentId: z.string().optional(),
+  name: z.string().optional(),
+  port: z.number().optional(),
+  description: z.string().optional(),
+  url: z.string().optional(),
+  healthCheckPath: z.string().optional(),
+  status: ServiceStatusSchema.optional(),
+  script: z.string().optional(),
+  cwd: z.string().optional(),
+  interpreter: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+  agentName: z.string().optional(),
+});
 
 export const registerListServicesTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -23,29 +45,17 @@ export const registerListServicesTool = (server: McpServer) => {
           .optional()
           .describe("Include services registered by calling agent (default: true)."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        services: z.array(
-          ServiceSchema.extend({
-            agentName: z.string().optional(),
-          }),
-        ),
-        count: z.number(),
+        services: z.array(serviceWithAgentNameOutputShape).optional(),
+        count: z.number().optional(),
       }),
     },
     async ({ agentId, name, status, includeOwn }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-            services: [],
-            count: 0,
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.', {
+          data: { services: [], count: 0 },
+        });
       }
 
       try {
@@ -80,33 +90,15 @@ export const registerListServicesTool = (server: McpServer) => {
           )
           .join("\n");
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: count === 0 ? statusSummary : `${statusSummary}\n\n${serviceList}`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: statusSummary,
-            services: servicesWithAgentNames,
-            count,
-          },
-        };
+        return toolOk(statusSummary, {
+          details: count === 0 ? undefined : serviceList,
+          data: { yourAgentId: requestInfo.agentId, services: servicesWithAgentNames, count },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to list services: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to list services: ${message}`,
-            services: [],
-            count: 0,
-          },
-        };
+        return toolErr(`Failed to list services: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId, services: [], count: 0 },
+        });
       }
     },
   );

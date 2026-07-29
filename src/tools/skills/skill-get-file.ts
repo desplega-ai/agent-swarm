@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getSkillById, getSkillFile } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerSkillGetFileTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -15,24 +15,15 @@ export const registerSkillGetFileTool = (server: McpServer) => {
         skillId: z.string().describe("Skill ID"),
         path: z.string().describe("Relative path, e.g. references/animations.md"),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        file: z.any().optional(),
+        file: z.looseObject({}).optional(),
       }),
     },
     async (args, requestInfo, _meta) => {
       const skill = getSkillById(args.skillId);
       if (!skill) {
-        return {
-          content: [{ type: "text", text: "Skill not found." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Skill not found.",
-          },
-        };
+        return toolErr("Skill not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
       let file = null;
@@ -40,41 +31,17 @@ export const registerSkillGetFileTool = (server: McpServer) => {
         file = getSkillFile(args.skillId, args.path);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Invalid file path.";
-        return {
-          content: [{ type: "text", text: message }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message,
-          },
-        };
+        return toolErr(message, { data: { yourAgentId: requestInfo.agentId } });
       }
 
       if (!file) {
-        return {
-          content: [{ type: "text", text: "Skill file not found." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Skill file not found.",
-          },
-        };
+        return toolErr("Skill file not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Skill file "${skill.name}/${file.path}" (${file.mimeType}):\n\n${file.content}`,
-          },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          success: true,
-          message: `Found skill file "${file.path}".`,
-          file,
-        },
-      };
+      return toolOk(`Found skill file "${file.path}".`, {
+        details: `Skill file "${skill.name}/${file.path}" (${file.mimeType}):\n\n${file.content}`,
+        data: { yourAgentId: requestInfo.agentId, file },
+      });
     },
   );
 };

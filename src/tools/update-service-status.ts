@@ -1,8 +1,29 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getServiceByAgentAndName, getServiceById, updateServiceStatus } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
-import { ServiceSchema, ServiceStatusSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { ServiceStatusSchema } from "@/types";
+
+// Loose mirror of ServiceSchema for tool output: every field optional, no
+// url/uuid/datetime format pins.
+const serviceOutputShape = z.looseObject({
+  id: z.string().optional(),
+  agentId: z.string().optional(),
+  name: z.string().optional(),
+  port: z.number().optional(),
+  description: z.string().optional(),
+  url: z.string().optional(),
+  healthCheckPath: z.string().optional(),
+  status: ServiceStatusSchema.optional(),
+  script: z.string().optional(),
+  cwd: z.string().optional(),
+  interpreter: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  createdAt: z.string().optional(),
+  lastUpdatedAt: z.string().optional(),
+});
 
 export const registerUpdateServiceStatusTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -20,33 +41,20 @@ export const registerUpdateServiceStatusTool = (server: McpServer) => {
           "New status: 'starting', 'healthy', 'unhealthy', or 'stopped'.",
         ),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        service: ServiceSchema.optional(),
+        service: serviceOutputShape.optional(),
       }),
     },
     async ({ serviceId, name, status }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       if (!serviceId && !name) {
-        return {
-          content: [{ type: "text", text: "Either serviceId or name is required." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Either serviceId or name is required.",
-          },
-        };
+        return toolErr("Either serviceId or name is required.", {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       try {
@@ -57,64 +65,31 @@ export const registerUpdateServiceStatusTool = (server: McpServer) => {
         }
 
         if (!service) {
-          return {
-            content: [{ type: "text", text: "Service not found." }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Service not found.",
-            },
-          };
+          return toolErr("Service not found.", { data: { yourAgentId: requestInfo.agentId } });
         }
 
         // Check ownership
         if (service.agentId !== requestInfo.agentId) {
-          return {
-            content: [{ type: "text", text: "You can only update status of your own services." }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "You can only update status of your own services.",
-            },
-          };
+          return toolErr("You can only update status of your own services.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         const updated = updateServiceStatus(service.id, status);
         if (!updated) {
-          return {
-            content: [{ type: "text", text: "Failed to update service status." }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Failed to update service status.",
-            },
-          };
+          return toolErr("Failed to update service status.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Updated service "${service.name}" status to "${status}".`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Updated service "${service.name}" status to "${status}".`,
-            service: updated,
-          },
-        };
+        return toolOk(`Updated service "${service.name}" status to "${status}".`, {
+          data: { yourAgentId: requestInfo.agentId, service: updated },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to update service status: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to update service status: ${message}`,
-          },
-        };
+        return toolErr(`Failed to update service status: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

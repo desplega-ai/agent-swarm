@@ -1,7 +1,20 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentSkills, listSkills } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+
+function renderSkillList(
+  skills: Array<{ name?: unknown; description?: unknown }>,
+): string | undefined {
+  if (skills.length === 0) return undefined;
+  return skills
+    .map((skill) => {
+      const description =
+        typeof skill.description === "string" && skill.description ? ` — ${skill.description}` : "";
+      return `- ${String(skill.name ?? "?")}${description}`;
+    })
+    .join("\n");
+}
 
 export const registerSkillListTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -24,12 +37,10 @@ export const registerSkillListTool = (server: McpServer) => {
           .optional()
           .describe("Include full content (default false)"),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        skills: z.array(z.any()),
-        total: z.number(),
+        skills: z.array(z.looseObject({})).optional(),
+        total: z.number().optional(),
       }),
     },
     async (args, requestInfo, _meta) => {
@@ -49,28 +60,15 @@ export const registerSkillListTool = (server: McpServer) => {
           ? skills
           : skills.map(({ content: _content, ...rest }) => rest);
 
-        return {
-          content: [{ type: "text", text: `Found ${result.length} skill(s).` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Found ${result.length} skill(s).`,
-            skills: result,
-            total: result.length,
-          },
-        };
+        return toolOk(`Found ${result.length} skill(s).`, {
+          details: renderSkillList(result),
+          data: { yourAgentId: requestInfo.agentId, skills: result, total: result.length },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed: ${message}`,
-            skills: [],
-            total: 0,
-          },
-        };
+        return toolErr(`Failed: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId, skills: [], total: 0 },
+        });
       }
     },
   );

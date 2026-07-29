@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, uninstallSkill } from "@/be/db";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerSkillUninstallTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -15,18 +15,13 @@ export const registerSkillUninstallTool = (server: McpServer) => {
         skillId: z.string().describe("ID of the skill to uninstall"),
         agentId: z.string().optional().describe("Target agent (default: calling agent)"),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
       }),
     },
     async (args, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       const targetAgentId = args.agentId ?? requestInfo.agentId;
@@ -44,28 +39,17 @@ export const registerSkillUninstallTool = (server: McpServer) => {
           source: "mcp",
         });
         if (!decision.allow) {
-          return {
-            content: [{ type: "text", text: "Only leads can uninstall skills for other agents." }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Permission denied.",
-            },
-          };
+          return toolErr("Only leads can uninstall skills for other agents.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
       }
 
       const removed = uninstallSkill(targetAgentId, args.skillId);
-      return {
-        content: [
-          { type: "text", text: removed ? "Skill uninstalled." : "Skill was not installed." },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          success: removed,
-          message: removed ? "Skill uninstalled." : "Skill was not installed for this agent.",
-        },
-      };
+      const message = removed ? "Skill uninstalled." : "Skill was not installed for this agent.";
+      return removed
+        ? toolOk(message, { data: { yourAgentId: requestInfo.agentId } })
+        : toolErr(message, { data: { yourAgentId: requestInfo.agentId } });
     },
   );
 };

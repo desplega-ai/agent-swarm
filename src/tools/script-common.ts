@@ -1,7 +1,13 @@
 import * as z from "zod";
 import { getApiKey } from "@/utils/api-key";
 import { getMcpBaseUrl } from "@/utils/constants";
-import { type RequestInfo, type SwarmToolResult, swarmToolOutputSchema, toolErr, toolOk } from "./utils";
+import {
+  type RequestInfo,
+  type SwarmToolResult,
+  swarmToolOutputSchema,
+  toolErr,
+  toolOk,
+} from "./utils";
 
 export const SCRIPT_TRANSPORT_ERROR =
   "script_* tools require HTTP MCP transport — agent identity is not available over stdio in this build. Switch to MCP_BASE_URL=http://... or invoke the HTTP API directly.";
@@ -44,7 +50,11 @@ type ScriptFailure = { message: string; details?: string };
  * the body) and durable runs carry `run.status` / `run.error` — trusting
  * `res.ok` alone reports failures as successes.
  */
-function describeScriptFailure(resOk: boolean, status: number, data: unknown): ScriptFailure | undefined {
+function describeScriptFailure(
+  resOk: boolean,
+  status: number,
+  data: unknown,
+): ScriptFailure | undefined {
   const body = isRecord(data) ? data : undefined;
 
   if (!resOk) {
@@ -65,11 +75,14 @@ function describeScriptFailure(resOk: boolean, status: number, data: unknown): S
     }
 
     // Label-lint / policy rejections: fold violation detail.
-    const violations = body && Array.isArray(body.violations) ? (body.violations as unknown[]) : undefined;
+    const violations =
+      body && Array.isArray(body.violations) ? (body.violations as unknown[]) : undefined;
     if (violations && violations.length > 0) {
       return {
         message: `${error ?? `Scripts API request failed with ${status}`} — ${violations.length} violation(s)`,
-        details: capDetails(violations.map((v) => (typeof v === "string" ? v : JSON.stringify(v))).join("\n")),
+        details: capDetails(
+          violations.map((v) => (typeof v === "string" ? v : JSON.stringify(v))).join("\n"),
+        ),
       };
     }
 
@@ -84,8 +97,10 @@ function describeScriptFailure(resOk: boolean, status: number, data: unknown): S
     const error = typeof body.error === "string" && body.error ? body.error : undefined;
     const exitCode = typeof body.exitCode === "number" ? body.exitCode : 0;
     if (error || runtimeError || exitCode !== 0) {
-      const reason = [error, runtimeError].filter(Boolean).join(" — ") || `script exited with code ${exitCode}`;
-      const stderr = typeof body.stderr === "string" && body.stderr.trim() ? body.stderr.trim() : undefined;
+      const reason =
+        [error, runtimeError].filter(Boolean).join(" — ") || `script exited with code ${exitCode}`;
+      const stderr =
+        typeof body.stderr === "string" && body.stderr.trim() ? body.stderr.trim() : undefined;
       return {
         message: `Script run failed: ${reason}`,
         details: capDetails(stderr ? `stderr:\n${stderr}` : undefined),
@@ -95,8 +110,11 @@ function describeScriptFailure(resOk: boolean, status: number, data: unknown): S
 
   // Durable run body: { run: { status, error, ... } }.
   if (body && isRecord(body.run) && body.run.status === "failed") {
-    const runError = typeof body.run.error === "string" && body.run.error ? body.run.error : "unknown error";
-    return { message: `Script run ${String(body.run.id ?? "")} failed: ${runError}`.replace("  ", " ") };
+    const runError =
+      typeof body.run.error === "string" && body.run.error ? body.run.error : "unknown error";
+    return {
+      message: `Script run ${String(body.run.id ?? "")} failed: ${runError}`.replace("  ", " "),
+    };
   }
 
   return undefined;

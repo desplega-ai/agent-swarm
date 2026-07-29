@@ -7,10 +7,7 @@ import {
   SCRIPT_AUTHORING_NUDGE,
   type SwarmToolResult,
 } from "../tools/utils";
-import {
-  clearVolatileSecretsForTesting,
-  registerVolatileSecret,
-} from "../utils/secret-scrubber";
+import { clearVolatileSecretsForTesting, registerVolatileSecret } from "../utils/secret-scrubber";
 
 const TEST_DB_PATH = "./test-swarm-tool-result-gate.sqlite";
 
@@ -77,7 +74,9 @@ describe("finalizeSwarmToolResult", () => {
       const text = (result.content?.[0] as { text: string }).text;
       expect(text.trim().length).toBeGreaterThan(0);
       expect(text).toContain(marker);
-      expect((result.structuredContent as { message: string }).message.trim().length).toBeGreaterThan(0);
+      expect(
+        (result.structuredContent as { message: string }).message.trim().length,
+      ).toBeGreaterThan(0);
     }
   });
 
@@ -92,6 +91,28 @@ describe("finalizeSwarmToolResult", () => {
       });
       const serialized = JSON.stringify(result);
       expect(serialized).not.toContain("sk-super-secret-token-123");
+    } finally {
+      clearVolatileSecretsForTesting();
+    }
+  });
+
+  test("allowSecretEgress skips scrubbing for deliberate credential reveals only", () => {
+    registerVolatileSecret("xsk_reveal_me_once_456", "TEST_REVEAL");
+    try {
+      const revealed = finalizeSwarmToolResult("script-apis", {
+        ok: true,
+        message: "Endpoint created.",
+        details: "Bearer token (shown once — save it now): xsk_reveal_me_once_456",
+        data: { token: "xsk_reveal_me_once_456" },
+        allowSecretEgress: true,
+      });
+      expect(JSON.stringify(revealed)).toContain("xsk_reveal_me_once_456");
+
+      const scrubbed = finalizeSwarmToolResult("some-tool", {
+        ok: true,
+        message: "leaky xsk_reveal_me_once_456",
+      });
+      expect(JSON.stringify(scrubbed)).not.toContain("xsk_reveal_me_once_456");
     } finally {
       clearVolatileSecretsForTesting();
     }
@@ -160,7 +181,12 @@ type ZodNode = {
   };
 };
 
-function auditOutputSchema(node: unknown, path: string, violations: string[], seen = new Set<unknown>()): void {
+function auditOutputSchema(
+  node: unknown,
+  path: string,
+  violations: string[],
+  seen = new Set<unknown>(),
+): void {
   if (!node || typeof node !== "object" || seen.has(node)) return;
   seen.add(node);
   const def = (node as ZodNode)._zod?.def;
@@ -189,7 +215,15 @@ function auditOutputSchema(node: unknown, path: string, violations: string[], se
       auditOutputSchema(child, `${path}.${key}`, violations, seen);
     }
   }
-  for (const child of [def.element, def.innerType, def.keyType, def.valueType, def.in, def.out, def.catchall]) {
+  for (const child of [
+    def.element,
+    def.innerType,
+    def.keyType,
+    def.valueType,
+    def.in,
+    def.out,
+    def.catchall,
+  ]) {
     if (child) auditOutputSchema(child, path, violations, seen);
   }
   for (const child of [...(def.options ?? []), ...(def.items ?? [])]) {

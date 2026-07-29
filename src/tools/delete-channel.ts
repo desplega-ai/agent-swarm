@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { deleteChannel, getAgentById, getChannelById, getChannelByName } from "@/be/db";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 const GENERAL_CHANNEL_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -19,29 +19,19 @@ export const registerDeleteChannelTool = (server: McpServer) => {
         channelId: z.string().uuid().optional().describe("The ID of the channel to delete."),
         name: z.string().optional().describe("Channel name (alternative to channelId)."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
       }),
     },
     async (args, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       if (!args.channelId && !args.name) {
-        return {
-          content: [{ type: "text", text: "Either channelId or name must be provided." }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Either channelId or name must be provided.",
-          },
-        };
+        return toolErr("Either channelId or name must be provided.", {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       // Check authorization: must be lead agent
@@ -57,16 +47,9 @@ export const registerDeleteChannelTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) {
-        return {
-          content: [
-            { type: "text", text: "Not authorized. Only the lead agent can delete channels." },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: "Not authorized. Only the lead agent can delete channels.",
-          },
-        };
+        return toolErr("Not authorized. Only the lead agent can delete channels.", {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       try {
@@ -78,65 +61,36 @@ export const registerDeleteChannelTool = (server: McpServer) => {
 
         if (!channel) {
           const identifier = args.channelId || args.name;
-          return {
-            content: [{ type: "text", text: `Channel not found: ${identifier}` }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: `Channel not found: ${identifier}`,
-            },
-          };
+          return toolErr(`Channel not found: ${identifier}`, {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         // Protect the default general channel
         if (channel.id === GENERAL_CHANNEL_ID) {
-          return {
-            content: [{ type: "text", text: 'The default "general" channel cannot be deleted.' }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: 'The default "general" channel cannot be deleted.',
-            },
-          };
+          return toolErr('The default "general" channel cannot be deleted.', {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         const channelName = channel.name;
         const deleted = deleteChannel(channel.id);
 
         if (!deleted) {
-          return {
-            content: [{ type: "text", text: "Failed to delete channel." }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Failed to delete channel.",
-            },
-          };
+          return toolErr("Failed to delete channel.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Deleted channel "${channelName}" and all its messages.`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Deleted channel "${channelName}".`,
-          },
-        };
+        return toolOk(`Deleted channel "${channelName}".`, {
+          details: `Deleted channel "${channelName}" and all its messages.`,
+          data: { yourAgentId: requestInfo.agentId },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to delete channel: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to delete channel: ${message}`,
-          },
-        };
+        return toolErr(`Failed to delete channel: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

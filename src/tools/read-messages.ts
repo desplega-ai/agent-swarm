@@ -10,9 +10,27 @@ import {
   releaseMentionProcessing,
   updateReadState,
 } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import type { ChannelMessage } from "@/types";
-import { ChannelMessageSchema } from "@/types";
+
+const ChannelMessageOutputSchema = z.looseObject({
+  id: z.string().optional(),
+  channelId: z.string().optional(),
+  agentId: z.string().nullable().optional(),
+  agentName: z.string().optional(),
+  content: z.string().optional(),
+  replyToId: z.string().optional(),
+  mentions: z.array(z.string()).optional(),
+  createdAt: z.string().optional(),
+});
+
+/** Concise text rendering of messages for the details channel. */
+function renderMessages(messages: ChannelMessage[]): string | undefined {
+  if (messages.length === 0) return undefined;
+  return messages
+    .map((m) => `- [${m.createdAt}] ${m.agentName ?? m.agentId ?? "?"}: ${m.content}`)
+    .join("\n");
+}
 
 export const registerReadMessagesTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -45,26 +63,19 @@ export const registerReadMessagesTool = (server: McpServer) => {
           .default(true)
           .describe("Update your read position after fetching (default: true)."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
         channelName: z.string().optional(),
-        messages: z.array(ChannelMessageSchema),
+        messages: z.array(ChannelMessageOutputSchema).optional(),
         unreadCount: z.number().optional(),
         totalUnreadCount: z.number().optional(),
       }),
     },
     async ({ channel, limit, since, unreadOnly, mentionsOnly, markAsRead }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-            messages: [],
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.', {
+          data: { messages: [] },
+        });
       }
 
       try {
@@ -97,21 +108,14 @@ export const registerReadMessagesTool = (server: McpServer) => {
             (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
           );
 
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Found ${allMessages.length} unread message(s) across ${allChannels.length} channel(s).`,
-              },
-            ],
-            structuredContent: {
+          return toolOk(`Found ${allMessages.length} unread message(s) across all channels.`, {
+            details: renderMessages(allMessages),
+            data: {
               yourAgentId: requestInfo.agentId,
-              success: true,
-              message: `Found ${allMessages.length} unread message(s) across all channels.`,
               messages: allMessages,
               totalUnreadCount,
             },
-          };
+          });
         }
 
         // Find channel by name or ID
@@ -121,15 +125,9 @@ export const registerReadMessagesTool = (server: McpServer) => {
         }
 
         if (!targetChannel) {
-          return {
-            content: [{ type: "text", text: `Channel "${channel}" not found.` }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: `Channel "${channel}" not found.`,
-              messages: [],
-            },
-          };
+          return toolErr(`Channel "${channel}" not found.`, {
+            data: { yourAgentId: requestInfo.agentId, messages: [] },
+          });
         }
 
         let messages: ChannelMessage[] = [];
@@ -165,33 +163,26 @@ export const registerReadMessagesTool = (server: McpServer) => {
         // Get unread count for context
         const allUnread = getUnreadMessages(requestInfo.agentId, targetChannel.id);
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Found ${messages.length} message(s) in #${targetChannel.name}${unreadOnly ? " (unread)" : ""}${mentionsOnly ? " (mentions)" : ""}.`,
+        return toolOk(
+          `Found ${messages.length} message(s) in #${targetChannel.name}${unreadOnly ? " (unread)" : ""}${mentionsOnly ? " (mentions)" : ""}.`,
+          {
+            details: renderMessages(messages),
+            data: {
+              yourAgentId: requestInfo.agentId,
+              channelName: targetChannel.name,
+              messages,
+              unreadCount: allUnread.length,
             },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Found ${messages.length} message(s) in #${targetChannel.name}.`,
-            channelName: targetChannel.name,
-            messages,
-            unreadCount: allUnread.length,
           },
-        };
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to read messages: ${message}` }],
-          structuredContent: {
+        return toolErr(`Failed to read messages: ${message}`, {
+          data: {
             yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to read messages: ${message}`,
             messages: [],
           },
-        };
+        });
       }
     },
   );

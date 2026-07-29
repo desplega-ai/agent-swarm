@@ -3,7 +3,7 @@ import * as z from "zod";
 import { createSkill, getAgentById, installSkill } from "@/be/db";
 import { parseSkillContent } from "@/be/skill-parser";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerSkillCreateTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -24,19 +24,14 @@ export const registerSkillCreateTool = (server: McpServer) => {
           .optional()
           .describe("Scope: agent (personal) or swarm (shared). Default: agent"),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        skill: z.any().optional(),
+        skill: z.looseObject({}).optional(),
       }),
     },
     async (args, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       try {
@@ -56,19 +51,10 @@ export const registerSkillCreateTool = (server: McpServer) => {
             source: "mcp",
           });
           if (!decision.allow) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: 'Only lead agents can create swarm-scope skills directly. Use "skill-publish" to request approval.',
-                },
-              ],
-              structuredContent: {
-                yourAgentId: requestInfo.agentId,
-                success: false,
-                message: "Only lead agents can create swarm-scope skills directly.",
-              },
-            };
+            return toolErr("Only lead agents can create swarm-scope skills directly.", {
+              details: 'Use "skill-publish" to request approval.',
+              data: { yourAgentId: requestInfo.agentId },
+            });
           }
         }
 
@@ -91,25 +77,14 @@ export const registerSkillCreateTool = (server: McpServer) => {
         // Auto-install for the creating agent
         installSkill(requestInfo.agentId, skill.id);
 
-        return {
-          content: [{ type: "text", text: `Created skill "${skill.name}" (${skill.id})` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Created and installed skill "${skill.name}".`,
-            skill,
-          },
-        };
+        return toolOk(`Created and installed skill "${skill.name}".`, {
+          data: { yourAgentId: requestInfo.agentId, skill },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to create skill: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed: ${message}`,
-          },
-        };
+        return toolErr(`Failed to create skill: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

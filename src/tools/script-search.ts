@@ -42,8 +42,10 @@ export const registerScriptSearchTool = (server: McpServer) => {
         requestInfo,
         successMessage: (data) => {
           const results =
-            typeof data === "object" && data !== null && Array.isArray((data as { results?: unknown[] }).results)
-              ? ((data as { results: unknown[] }).results)
+            typeof data === "object" &&
+            data !== null &&
+            Array.isArray((data as { results?: unknown[] }).results)
+              ? (data as { results: unknown[] }).results
               : [];
           return `Found ${results.length} script(s).`;
         },

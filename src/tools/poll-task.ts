@@ -13,8 +13,8 @@ import {
   startTask,
   updateAgentStatus,
 } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
-import { AgentTaskSchema } from "@/types";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { looseAgentTaskOutputSchema } from "./get-task-details";
 
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 const MAX_POLL_DURATION_MS = 1 * 60 * 1000;
@@ -29,16 +29,18 @@ export const registerPollTaskTool = (server: McpServer) => {
       annotations: { readOnlyHint: true },
 
       inputSchema: z.object({}),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        task: AgentTaskSchema.optional(),
+        task: looseAgentTaskOutputSchema.optional(),
         offeredTasks: z
-          .array(AgentTaskSchema)
+          .array(looseAgentTaskOutputSchema)
+          .optional()
           .describe("Tasks offered to you awaiting accept/reject."),
-        availableCount: z.number().describe("Count of unassigned tasks in the pool."),
-        waitedForSeconds: z.number().describe("Seconds waited before receiving the task."),
+        availableCount: z.number().optional().describe("Count of unassigned tasks in the pool."),
+        waitedForSeconds: z
+          .number()
+          .optional()
+          .describe("Seconds waited before receiving the task."),
         shouldExit: z.boolean().optional().describe("If true, agent should exit immediately."),
         emptyPollCount: z.number().optional().describe("Current consecutive empty poll count."),
       }),
@@ -46,22 +48,15 @@ export const registerPollTaskTool = (server: McpServer) => {
     async (_input, requestInfo, meta) => {
       // Check if agent ID is set
       if (!requestInfo.agentId) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: 'Agent ID not found. The MCP client should define the "X-Agent-ID" header.',
-            },
-          ],
-          structuredContent: {
+        const message = 'Agent ID not found. The MCP client should define the "X-Agent-ID" header.';
+        return toolErr(message, {
+          data: {
             yourAgentId: requestInfo.agentId,
-            success: false,
-            message: 'Agent ID not found. The MCP client should define the "X-Agent-ID" header.',
             offeredTasks: [],
             availableCount: 0,
             waitedForSeconds: 0,
           },
-        };
+        });
       }
 
       const agentId = requestInfo.agentId;
@@ -77,22 +72,14 @@ export const registerPollTaskTool = (server: McpServer) => {
 
       const agent = getAgentById(agentId);
       if (!agent) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Agent with ID "${agentId}" not found in the swarm.`,
-            },
-          ],
-          structuredContent: {
+        return toolErr(`Agent with ID "${agentId}" not found in the swarm.`, {
+          data: {
             yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Agent with ID "${agentId}" not found in the swarm.`,
             offeredTasks: [],
             availableCount: 0,
             waitedForSeconds: 0,
           },
-        };
+        });
       }
 
       // Check for offered tasks first - these need immediate attention
@@ -100,22 +87,18 @@ export const registerPollTaskTool = (server: McpServer) => {
       const availableCount = getUnassignedTasksCount();
 
       if (offeredTasks.length > 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `You have ${offeredTasks.length} task(s) offered to you awaiting accept/reject. Use task-action with action='accept' or 'reject'.`,
+        return toolOk(
+          `You have ${offeredTasks.length} task(s) offered to you awaiting accept/reject.`,
+          {
+            details: `Use task-action with action='accept' or 'reject'.`,
+            data: {
+              yourAgentId: requestInfo.agentId,
+              offeredTasks,
+              availableCount,
+              waitedForSeconds: 0,
             },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `You have ${offeredTasks.length} task(s) offered to you awaiting accept/reject.`,
-            offeredTasks,
-            availableCount,
-            waitedForSeconds: 0,
           },
-        };
+        );
       }
 
       // Poll for pending tasks
@@ -147,24 +130,16 @@ export const registerPollTaskTool = (server: McpServer) => {
 
           const waitedFor = Math.round((Date.now() - now.getTime()) / 1000);
 
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Task "${startedTask.id}" assigned and started.`,
-              },
-            ],
-            structuredContent: {
+          return toolOk(`Task "${startedTask.id}" assigned and started.`, {
+            data: {
               yourAgentId: requestInfo.agentId,
-              success: true,
-              message: `Task "${startedTask.id}" assigned and started.`,
               task: startedTask,
               offeredTasks: [],
               availableCount: getUnassignedTasksCount(),
               waitedForSeconds: waitedFor,
               emptyPollCount: 0,
             },
-          };
+          });
         }
 
         await meta.sendNotification({
@@ -189,29 +164,27 @@ export const registerPollTaskTool = (server: McpServer) => {
         : incrementEmptyPollCount(agentId);
       const shouldExit = newCount >= MAX_EMPTY_POLLS;
 
-      // If no task was found within the time limit
-      return {
-        content: [
-          {
-            type: "text",
-            text: shouldExit
-              ? `No task assigned after ${newCount} polling attempts. EXIT NOW - do not poll again.`
-              : `No task assigned within the polling duration (${waitedForSeconds}s). ${getUnassignedTasksCount()} unassigned task(s) available in pool.`,
+      // If no task was found within the time limit. An empty poll is a routine
+      // outcome, not a tool failure — isError:true here would make every idle
+      // poll look like a failed call to harnesses and retry logic.
+      return toolOk(
+        shouldExit
+          ? `Polling limit reached (${newCount}/${MAX_EMPTY_POLLS}). You must exit now.`
+          : `No task assigned within the polling duration.`,
+        {
+          details: shouldExit
+            ? `No task assigned after ${newCount} polling attempts. EXIT NOW - do not poll again.`
+            : `No task assigned within the polling duration (${waitedForSeconds}s). ${getUnassignedTasksCount()} unassigned task(s) available in pool.`,
+          data: {
+            yourAgentId: requestInfo.agentId,
+            offeredTasks: [],
+            availableCount: getUnassignedTasksCount(),
+            waitedForSeconds,
+            shouldExit,
+            emptyPollCount: newCount,
           },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          success: false,
-          message: shouldExit
-            ? `Polling limit reached (${newCount}/${MAX_EMPTY_POLLS}). You must exit now.`
-            : `No task assigned within the polling duration.`,
-          offeredTasks: [],
-          availableCount: getUnassignedTasksCount(),
-          waitedForSeconds,
-          shouldExit,
-          emptyPollCount: newCount,
         },
-      };
+      );
     },
   );
 };

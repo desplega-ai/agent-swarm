@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { createApprovalRequest, getAgentCurrentTask } from "@/be/db";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { getAppUrl } from "@/utils/constants";
 
 const QuestionSchema = z.object({
@@ -50,29 +50,18 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
           .optional()
           .describe("Timeout in seconds (auto-rejects on timeout)"),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
-        requestId: z.string().uuid().optional(),
+        requestId: z.string().optional(),
         url: z.string().optional(),
       }),
     },
     async ({ title, questions, timeoutSeconds }, requestInfo) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: 'Agent ID not found. The MCP client should define the "X-Agent-ID" header.',
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: 'Agent ID not found. The MCP client should define the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr(
+          'Agent ID not found. The MCP client should define the "X-Agent-ID" header.',
+          { data: { yourAgentId: requestInfo.agentId } },
+        );
       }
 
       // Resolve sourceTaskId: prefer header, fall back to agent's current in-progress task.
@@ -100,21 +89,9 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
       const appUrl = getAppUrl();
       const url = `${appUrl}/approval-requests/${request.id}`;
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Created approval request "${id}". Human can respond at: ${url}`,
-          },
-        ],
-        structuredContent: {
-          yourAgentId: requestInfo.agentId,
-          success: true,
-          message: `Approval request created. Respond at: ${url}`,
-          requestId: request.id,
-          url,
-        },
-      };
+      return toolOk(`Created approval request "${id}". Human can respond at: ${url}`, {
+        data: { yourAgentId: requestInfo.agentId, requestId: request.id, url },
+      });
     },
   );
 };

@@ -5,7 +5,7 @@ import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { parseSlackTs } from "@/slack/message-text";
 import { markdownToSlack } from "@/slack/responses";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerSlackUpdateTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -26,26 +26,18 @@ export const registerSlackUpdateTool = (server: McpServer) => {
           ),
         message: z.string().min(1).max(4000).describe("The new message content."),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
         messageTs: z.string().optional(),
       }),
     },
     async ({ channelId, messageTs, message }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       const agent = getAgentById(requestInfo.agentId);
       if (!agent) {
-        return {
-          content: [{ type: "text", text: "Agent not found." }],
-          structuredContent: { success: false, message: "Agent not found." },
-        };
+        return toolErr("Agent not found.");
       }
 
       const decision = can({
@@ -55,21 +47,12 @@ export const registerSlackUpdateTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) {
-        return {
-          content: [{ type: "text", text: "Editing Slack messages requires lead privileges." }],
-          structuredContent: {
-            success: false,
-            message: "Editing Slack messages requires lead privileges.",
-          },
-        };
+        return toolErr("Editing Slack messages requires lead privileges.");
       }
 
       const app = getSlackApp();
       if (!app) {
-        return {
-          content: [{ type: "text", text: "Slack not configured." }],
-          structuredContent: { success: false, message: "Slack not configured." },
-        };
+        return toolErr("Slack not configured.");
       }
 
       try {
@@ -91,14 +74,7 @@ export const registerSlackUpdateTool = (server: McpServer) => {
           ],
         });
 
-        return {
-          content: [{ type: "text", text: "Message updated successfully." }],
-          structuredContent: {
-            success: true,
-            message: "Message updated successfully.",
-            messageTs: result.ts,
-          },
-        };
+        return toolOk("Message updated successfully.", { data: { messageTs: result.ts } });
       } catch (error) {
         const errorCode = (error as { data?: { error?: string } } | undefined)?.data?.error;
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -124,10 +100,7 @@ export const registerSlackUpdateTool = (server: McpServer) => {
             message = `Failed to update message: ${errorMsg}`;
         }
 
-        return {
-          content: [{ type: "text", text: message }],
-          structuredContent: { success: false, message },
-        };
+        return toolErr(message);
       }
     },
   );

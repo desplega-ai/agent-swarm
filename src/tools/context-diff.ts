@@ -4,7 +4,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getContextVersion } from "@/be/db";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 async function computeDiff(oldContent: string, newContent: string): Promise<string> {
   const tmpDir = tmpdir();
@@ -54,10 +54,8 @@ export const registerContextDiffTool = (server: McpServer) => {
           .optional()
           .describe('The "older" version ID to compare against. Default: previous version.'),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
         field: z.string().optional(),
         fromVersion: z.number().optional(),
         toVersion: z.number().optional(),
@@ -68,26 +66,15 @@ export const registerContextDiffTool = (server: McpServer) => {
     },
     async ({ versionId, compareToVersionId }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       // Get the target version
       const version = getContextVersion(versionId);
       if (!version) {
-        return {
-          content: [{ type: "text", text: `Version ${versionId} not found.` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Version ${versionId} not found.`,
-          },
-        };
+        return toolErr(`Version ${versionId} not found.`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       // Access control: agents can diff their own context, lead can diff any
@@ -104,19 +91,9 @@ export const registerContextDiffTool = (server: McpServer) => {
           source: "mcp",
         });
         if (!decision.allow) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Permission denied. Only the lead can diff other agents' context.",
-              },
-            ],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Permission denied. Only the lead can diff other agents' context.",
-            },
-          };
+          return toolErr("Permission denied. Only the lead can diff other agents' context.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
       }
 
@@ -125,28 +102,14 @@ export const registerContextDiffTool = (server: McpServer) => {
       if (compareToVersionId) {
         compareVersion = getContextVersion(compareToVersionId);
         if (!compareVersion) {
-          return {
-            content: [
-              { type: "text", text: `Comparison version ${compareToVersionId} not found.` },
-            ],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: `Comparison version ${compareToVersionId} not found.`,
-            },
-          };
+          return toolErr(`Comparison version ${compareToVersionId} not found.`, {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
         if (compareVersion.agentId !== version.agentId || compareVersion.field !== version.field) {
-          return {
-            content: [
-              { type: "text", text: "Both versions must be for the same agent and field." },
-            ],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: "Both versions must be for the same agent and field.",
-            },
-          };
+          return toolErr("Both versions must be for the same agent and field.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
       } else if (version.previousVersionId) {
         compareVersion = getContextVersion(version.previousVersionId);
@@ -158,17 +121,10 @@ export const registerContextDiffTool = (server: McpServer) => {
       const fromVersion = compareVersion?.version ?? 0;
       const toVersion = version.version;
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Diff for ${version.field} v${fromVersion} → v${toVersion}:\n\n${diff}`,
-          },
-        ],
-        structuredContent: {
+      return toolOk(`Diff computed for ${version.field} v${fromVersion} → v${toVersion}.`, {
+        details: `Diff for ${version.field} v${fromVersion} → v${toVersion}:\n\n${diff}`,
+        data: {
           yourAgentId: requestInfo.agentId,
-          success: true,
-          message: `Diff computed for ${version.field} v${fromVersion} → v${toVersion}.`,
           field: version.field,
           fromVersion,
           toVersion,
@@ -176,7 +132,7 @@ export const registerContextDiffTool = (server: McpServer) => {
           changeSource: version.changeSource,
           createdAt: version.createdAt,
         },
-      };
+      });
     },
   );
 };

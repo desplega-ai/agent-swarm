@@ -43,7 +43,11 @@ export const registerScriptUpsertTool = (server: McpServer) => {
         body: args,
         requestInfo,
         successMessage: (data) => {
-          const body = (data ?? {}) as { name?: unknown; version?: unknown; contentDeduped?: unknown };
+          const body = (data ?? {}) as {
+            name?: unknown;
+            version?: unknown;
+            contentDeduped?: unknown;
+          };
           const name = typeof body.name === "string" ? body.name : args.name;
           const version = typeof body.version === "number" ? ` v${body.version}` : "";
           const deduped = body.contentDeduped ? " (content unchanged — deduped)" : "";

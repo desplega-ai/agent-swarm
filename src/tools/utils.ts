@@ -111,6 +111,14 @@ export type SwarmToolResult<TData extends SwarmToolData = SwarmToolData> = {
   data?: TData;
   /** Single-sentence conditional steer, appended to BOTH channels. */
   nudge?: string;
+  /**
+   * Skip the finalize pipeline's secret scrubbing for this result. ONLY for
+   * deliberate credential-reveal branches (oauth-access-token, script-apis
+   * create/rotate, get-config includeSecrets) whose entire purpose is handing
+   * the agent a secret — the central scrubber would otherwise redact the
+   * reveal. Everything else stays scrubbed.
+   */
+  allowSecretEgress?: boolean;
 };
 
 export const toolOk = <TData extends SwarmToolData = SwarmToolData>(
@@ -166,7 +174,8 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
 type FinalizeContext = { toolName: string };
 type FinalizeMiddleware = (result: SwarmToolResult, ctx: FinalizeContext) => SwarmToolResult;
 
-const scrubMiddleware: FinalizeMiddleware = (result) => scrubObject(result);
+const scrubMiddleware: FinalizeMiddleware = (result) =>
+  result.allowSecretEgress ? result : scrubObject(result);
 
 const nudgeMiddleware: FinalizeMiddleware = (result, ctx) => {
   if (result.nudge) return result;
@@ -190,7 +199,12 @@ export function finalizeSwarmToolResult(toolName: string, result: SwarmToolResul
   let r = result;
   if (!r.message?.trim()) {
     console.warn(`[mcp] tool ${toolName} returned an empty message — every tool must summarize`);
-    r = { ...r, message: r.ok ? "Tool call succeeded (no message provided)." : "Tool call failed (no message provided)." };
+    r = {
+      ...r,
+      message: r.ok
+        ? "Tool call succeeded (no message provided)."
+        : "Tool call failed (no message provided).",
+    };
   }
   for (const middleware of FINALIZE_PIPELINE) r = middleware(r, { toolName });
 

@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { REFERENCES_SOURCE_MAX_LENGTH, sanitizeReferencesSource } from "@/be/memory/raters/types";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { getApiKey } from "@/utils/api-key";
 import { getMcpBaseUrl } from "@/utils/constants";
 
@@ -58,37 +58,25 @@ export const registerMemoryRateTool = (server: McpServer) => {
           .optional()
           .describe(REFERENCES_SOURCE_DESCRIPTION),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
-      }),
+      outputSchema: swarmToolOutputSchema(),
     },
     async ({ id, useful, note, referencesSource }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        const msg = "Agent ID required. Are you registered in the swarm?";
-        return {
-          content: [{ type: "text", text: msg }],
-          structuredContent: { success: false, message: msg },
-        };
+        return toolErr("Agent ID required. Are you registered in the swarm?");
       }
       if (!requestInfo.sourceTaskId) {
-        const msg = "memory_rate must be called from within a task — no source task ID was found.";
-        return {
-          content: [{ type: "text", text: msg }],
-          structuredContent: { success: false, message: msg },
-        };
+        return toolErr(
+          "memory_rate must be called from within a task — no source task ID was found.",
+        );
       }
 
       let cleanedReferencesSource: string | undefined;
       if (referencesSource !== undefined) {
         const cleaned = sanitizeReferencesSource(referencesSource);
         if (cleaned === null) {
-          const msg =
-            "referencesSource must not contain NUL bytes or strip to empty after control-char removal.";
-          return {
-            content: [{ type: "text", text: msg }],
-            structuredContent: { success: false, message: msg },
-          };
+          return toolErr(
+            "referencesSource must not contain NUL bytes or strip to empty after control-char removal.",
+          );
         }
         cleanedReferencesSource = cleaned;
       }
@@ -120,10 +108,7 @@ export const registerMemoryRateTool = (server: McpServer) => {
         });
 
         if (response.status === 409) {
-          return {
-            content: [{ type: "text", text: DUPLICATE_MESSAGE }],
-            structuredContent: { success: false, message: DUPLICATE_MESSAGE },
-          };
+          return toolErr(DUPLICATE_MESSAGE);
         }
 
         if (response.status === 400) {
@@ -137,31 +122,16 @@ export const registerMemoryRateTool = (server: McpServer) => {
           const msg = serverError
             ? `Memory rating rejected: ${serverError}. The memory must have been retrieved by this task before it can be rated.`
             : "Memory rating rejected. The memory must have been retrieved by this task before it can be rated.";
-          return {
-            content: [{ type: "text", text: msg }],
-            structuredContent: { success: false, message: msg },
-          };
+          return toolErr(msg);
         }
 
         if (!response.ok) {
-          const msg = `Memory rating failed (HTTP ${response.status}).`;
-          return {
-            content: [{ type: "text", text: msg }],
-            structuredContent: { success: false, message: msg },
-          };
+          return toolErr(`Memory rating failed (HTTP ${response.status}).`);
         }
 
-        const successMsg = `Memory ${id} rated as ${useful ? "useful" : "not useful"}.`;
-        return {
-          content: [{ type: "text", text: successMsg }],
-          structuredContent: { success: true, message: successMsg },
-        };
+        return toolOk(`Memory ${id} rated as ${useful ? "useful" : "not useful"}.`);
       } catch (err) {
-        const msg = `Memory rating failed: ${(err as Error).message}`;
-        return {
-          content: [{ type: "text", text: msg }],
-          structuredContent: { success: false, message: msg },
-        };
+        return toolErr(`Memory rating failed: ${(err as Error).message}`);
       }
     },
   );

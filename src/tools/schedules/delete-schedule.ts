@@ -7,7 +7,7 @@ import {
   getScheduledTaskByName,
 } from "@/be/db";
 import { createEvent } from "@/be/events";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerDeleteScheduleTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -22,37 +22,23 @@ export const registerDeleteScheduleTool = (server: McpServer) => {
         scheduleId: z.string().uuid().optional().describe("Schedule ID to delete"),
         name: z.string().optional().describe("Schedule name to delete (alternative to ID)"),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
         deletedSchedule: z
-          .object({
-            id: z.string(),
-            name: z.string(),
+          .looseObject({
+            id: z.string().optional(),
+            name: z.string().optional(),
           })
           .optional(),
       }),
     },
     async ({ scheduleId, name }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       if (!scheduleId && !name) {
-        return {
-          content: [{ type: "text", text: "Either scheduleId or name must be provided." }],
-          structuredContent: {
-            success: false,
-            message: "Either scheduleId or name must be provided.",
-          },
-        };
+        return toolErr("Either scheduleId or name must be provided.");
       }
 
       // Find the schedule
@@ -63,37 +49,19 @@ export const registerDeleteScheduleTool = (server: McpServer) => {
           : null;
 
       if (!schedule) {
-        return {
-          content: [{ type: "text", text: "Schedule not found." }],
-          structuredContent: {
-            success: false,
-            message: "Schedule not found.",
-          },
-        };
+        return toolErr("Schedule not found.");
       }
 
       const caller = getAgentById(requestInfo.agentId);
       if (!caller) {
-        return {
-          content: [{ type: "text", text: "Agent not found." }],
-          structuredContent: {
-            success: false,
-            message: "Agent not found.",
-          },
-        };
+        return toolErr("Agent not found.");
       }
 
       try {
         const deleted = deleteScheduledTask(schedule.id);
 
         if (!deleted) {
-          return {
-            content: [{ type: "text", text: "Failed to delete schedule." }],
-            structuredContent: {
-              success: false,
-              message: "Failed to delete schedule.",
-            },
-          };
+          return toolErr("Failed to delete schedule.");
         }
 
         createEvent({
@@ -109,28 +77,20 @@ export const registerDeleteScheduleTool = (server: McpServer) => {
           },
         });
 
-        return {
-          content: [{ type: "text", text: `Deleted schedule "${schedule.name}".` }],
-          structuredContent: {
+        return toolOk(`Deleted schedule "${schedule.name}".`, {
+          data: {
             yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Deleted schedule "${schedule.name}".`,
             deletedSchedule: {
               id: schedule.id,
               name: schedule.name,
             },
           },
-        };
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to delete schedule: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to delete schedule: ${message}`,
-          },
-        };
+        return toolErr(`Failed to delete schedule: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

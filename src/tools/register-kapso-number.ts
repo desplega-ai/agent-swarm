@@ -10,7 +10,7 @@ import {
   putKapsoNumberMapping,
 } from "@/integrations/kapso/config";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { getPublicMcpBaseUrl } from "@/utils/constants";
 
 /** Build the native inbound webhook URL the swarm exposes for Kapso deliveries. */
@@ -46,19 +46,17 @@ export const registerRegisterKapsoNumberTool = (server: McpServer) => {
           ),
         name: z.string().optional().describe("Human-friendly display name for the number."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
         webhookUrl: z.string().optional(),
         webhookRegistered: z.boolean().optional(),
         mapping: z
-          .object({
-            phoneNumberId: z.string(),
+          .looseObject({
+            phoneNumberId: z.string().optional(),
             agentId: z.string().optional(),
             workflowId: z.string().optional(),
             name: z.string().optional(),
-            createdAt: z.string(),
+            createdAt: z.string().optional(),
           })
           .optional(),
       }),
@@ -79,11 +77,9 @@ export const registerRegisterKapsoNumberTool = (server: McpServer) => {
           source: "mcp",
         });
         if (!decision.allow) {
-          const msg = "Permission denied. Only the lead can register a Kapso number.";
-          return {
-            content: [{ type: "text", text: msg }],
-            structuredContent: { yourAgentId: requestInfo.agentId, success: false, message: msg },
-          };
+          return toolErr("Permission denied. Only the lead can register a Kapso number.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         // Default the routing target to the lead when no agent/workflow is given.
@@ -132,27 +128,17 @@ export const registerRegisterKapsoNumberTool = (server: McpServer) => {
               ? `agent ${ownerAgentId}`
               : "task pool"
         }${webhookNote}`;
-        return {
-          content: [{ type: "text", text }],
-          structuredContent: {
+        return toolOk(text, {
+          data: {
             yourAgentId: requestInfo.agentId,
-            success: true,
-            message: text,
             webhookUrl,
             webhookRegistered,
             mapping,
           },
-        };
+        });
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text", text: `Error: ${errorMessage}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: errorMessage,
-          },
-        };
+        return toolErr(errorMessage, { data: { yourAgentId: requestInfo.agentId } });
       }
     },
   );
@@ -172,10 +158,8 @@ export const registerUnregisterKapsoNumberTool = (server: McpServer) => {
           .min(1)
           .describe("Kapso/Meta phone-number ID whose mapping should be removed."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
       }),
     },
     async ({ phoneNumberId }, requestInfo) => {
@@ -192,11 +176,9 @@ export const registerUnregisterKapsoNumberTool = (server: McpServer) => {
           source: "mcp",
         });
         if (!decision.allow) {
-          const msg = "Permission denied. Only the lead can unregister a Kapso number.";
-          return {
-            content: [{ type: "text", text: msg }],
-            structuredContent: { yourAgentId: requestInfo.agentId, success: false, message: msg },
-          };
+          return toolErr("Permission denied. Only the lead can unregister a Kapso number.", {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         const existing = getKapsoNumberMapping(phoneNumberId);
@@ -204,24 +186,12 @@ export const registerUnregisterKapsoNumberTool = (server: McpServer) => {
         const text = existing
           ? `Unregistered Kapso number ${phoneNumberId}`
           : `No mapping found for Kapso number ${phoneNumberId}`;
-        return {
-          content: [{ type: "text", text }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: deleted,
-            message: text,
-          },
-        };
+        return deleted
+          ? toolOk(text, { data: { yourAgentId: requestInfo.agentId } })
+          : toolErr(text, { data: { yourAgentId: requestInfo.agentId } });
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text", text: `Error: ${errorMessage}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: errorMessage,
-          },
-        };
+        return toolErr(errorMessage, { data: { yourAgentId: requestInfo.agentId } });
       }
     },
   );

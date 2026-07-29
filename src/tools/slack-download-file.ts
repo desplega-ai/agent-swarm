@@ -3,7 +3,7 @@ import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getSlackApp } from "@/slack/app";
 import { DEFAULT_DOWNLOAD_DIR, downloadFile, getFileInfo } from "@/slack/files";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerSlackDownloadFileTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -35,58 +35,41 @@ export const registerSlackDownloadFileTool = (server: McpServer) => {
           .optional()
           .describe("Filename to use when saving. Only used if savePath is a directory."),
       }),
-      outputSchema: z.object({
-        success: z.boolean(),
-        message: z.string(),
+      outputSchema: swarmToolOutputSchema({
         savedPath: z.string().optional(),
         fileInfo: z
-          .object({
-            id: z.string(),
-            name: z.string(),
-            mimetype: z.string(),
-            size: z.number(),
+          .looseObject({
+            id: z.string().optional(),
+            name: z.string().optional(),
+            mimetype: z.string().optional(),
+            size: z.number().optional(),
           })
           .optional(),
       }),
     },
     async ({ fileId, url, savePath, filename }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: "Agent ID not found." }],
-          structuredContent: { success: false, message: "Agent ID not found." },
-        };
+        return toolErr("Agent ID not found.");
       }
 
       const agent = getAgentById(requestInfo.agentId);
       if (!agent) {
-        return {
-          content: [{ type: "text", text: "Agent not found." }],
-          structuredContent: { success: false, message: "Agent not found." },
-        };
+        return toolErr("Agent not found.");
       }
 
       // Must provide either fileId or url
       if (!fileId && !url) {
-        return {
-          content: [{ type: "text", text: "Must provide either fileId or url." }],
-          structuredContent: { success: false, message: "Must provide either fileId or url." },
-        };
+        return toolErr("Must provide either fileId or url.");
       }
 
       const app = getSlackApp();
       if (!app) {
-        return {
-          content: [{ type: "text", text: "Slack not configured." }],
-          structuredContent: { success: false, message: "Slack not configured." },
-        };
+        return toolErr("Slack not configured.");
       }
 
       const token = process.env.SLACK_BOT_TOKEN;
       if (!token) {
-        return {
-          content: [{ type: "text", text: "Slack bot token not configured." }],
-          structuredContent: { success: false, message: "Slack bot token not configured." },
-        };
+        return toolErr("Slack bot token not configured.");
       }
 
       try {
@@ -104,10 +87,7 @@ export const registerSlackDownloadFileTool = (server: McpServer) => {
         if (fileId) {
           const info = await getFileInfo(app.client, fileId);
           if (!info) {
-            return {
-              content: [{ type: "text", text: `File not found: ${fileId}` }],
-              structuredContent: { success: false, message: `File not found: ${fileId}` },
-            };
+            return toolErr(`File not found: ${fileId}`);
           }
 
           downloadUrl = info.url_private_download;
@@ -120,10 +100,7 @@ export const registerSlackDownloadFileTool = (server: McpServer) => {
         }
 
         if (!downloadUrl) {
-          return {
-            content: [{ type: "text", text: "No download URL available." }],
-            structuredContent: { success: false, message: "No download URL available." },
-          };
+          return toolErr("No download URL available.");
         }
 
         // Determine save path
@@ -145,31 +122,14 @@ export const registerSlackDownloadFileTool = (server: McpServer) => {
         });
 
         if (!result.success) {
-          return {
-            content: [{ type: "text", text: `Failed to download file: ${result.error}` }],
-            structuredContent: {
-              success: false,
-              message: `Failed to download file: ${result.error}`,
-            },
-          };
+          return toolErr(`Failed to download file: ${result.error}`);
         }
 
         const successMsg = `File downloaded successfully to ${result.savedPath}`;
-        return {
-          content: [{ type: "text", text: successMsg }],
-          structuredContent: {
-            success: true,
-            message: successMsg,
-            savedPath: result.savedPath,
-            fileInfo,
-          },
-        };
+        return toolOk(successMsg, { data: { savedPath: result.savedPath, fileInfo } });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: `Failed to download file: ${errorMsg}` }],
-          structuredContent: { success: false, message: `Failed to download file: ${errorMsg}` },
-        };
+        return toolErr(`Failed to download file: ${errorMsg}`);
       }
     },
   );

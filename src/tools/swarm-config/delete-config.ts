@@ -3,7 +3,7 @@ import * as z from "zod";
 import { deleteSwarmConfig, getAgentById, getSwarmConfigLookupById } from "@/be/db";
 import { scheduleIntegrationsReload } from "@/http/core";
 import { can } from "@/rbac";
-import { createToolRegistrar } from "@/tools/utils";
+import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerDeleteConfigTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -17,21 +17,13 @@ export const registerDeleteConfigTool = (server: McpServer) => {
       inputSchema: z.object({
         id: z.string().uuid().describe("The config entry ID to delete."),
       }),
-      outputSchema: z.object({
+      outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
-        success: z.boolean(),
-        message: z.string(),
       }),
     },
     async ({ id }, requestInfo) => {
       if (!requestInfo.agentId) {
-        return {
-          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
-          structuredContent: {
-            success: false,
-            message: 'Agent ID not found. Set the "X-Agent-ID" header.',
-          },
-        };
+        return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
       // Deleting any config entry is lead-gated (DES-445 follow-up): a delete
@@ -49,70 +41,40 @@ export const registerDeleteConfigTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) {
-        const message = "Deleting swarm config requires the lead agent.";
-        return {
-          content: [{ type: "text", text: message }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message,
-          },
-        };
+        return toolErr("Deleting swarm config requires the lead agent.", {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
 
       try {
         // Check if config exists first for a better error message
         const existing = getSwarmConfigLookupById(id);
         if (!existing) {
-          return {
-            content: [{ type: "text", text: `Config entry "${id}" not found.` }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: `Config entry "${id}" not found.`,
-            },
-          };
+          return toolErr(`Config entry "${id}" not found.`, {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         const deleted = deleteSwarmConfig(id);
         if (!deleted) {
-          return {
-            content: [{ type: "text", text: `Failed to delete config entry "${id}".` }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: `Failed to delete config entry "${id}".`,
-            },
-          };
+          return toolErr(`Failed to delete config entry "${id}".`, {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
 
         if (existing.scope === "global") {
           scheduleIntegrationsReload();
         }
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Config "${existing.key}" (scope: ${existing.scope}${existing.scopeId ? `, scopeId: ${existing.scopeId}` : ""}) deleted successfully.`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: true,
-            message: `Config "${existing.key}" deleted successfully.`,
-          },
-        };
+        return toolOk(`Config "${existing.key}" deleted successfully.`, {
+          details: `Config "${existing.key}" (scope: ${existing.scope}${existing.scopeId ? `, scopeId: ${existing.scopeId}` : ""}) deleted successfully.`,
+          data: { yourAgentId: requestInfo.agentId },
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        return {
-          content: [{ type: "text", text: `Failed to delete config: ${message}` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Failed to delete config: ${message}`,
-          },
-        };
+        return toolErr(`Failed to delete config: ${message}`, {
+          data: { yourAgentId: requestInfo.agentId },
+        });
       }
     },
   );

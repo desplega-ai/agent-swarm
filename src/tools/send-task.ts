@@ -1,5 +1,4 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
@@ -18,16 +17,22 @@ import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
 import { checkSlackRoutingCoherence } from "@/tasks/slack-routing";
 import { findDuplicateTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
-import { createToolRegistrar } from "@/tools/utils";
+import {
+  createToolRegistrar,
+  type SwarmToolResult,
+  swarmToolOutputSchema,
+  toolErr,
+  toolOk,
+} from "@/tools/utils";
 import {
   type AgentTask,
-  AgentTaskSchema,
   AssetKeySchema,
   FollowUpConfigSchema,
   ModelTierSchema,
   ReasoningEffortSchema,
   splitLegacyModelAlias,
 } from "@/types";
+import { looseAgentTaskOutputSchema } from "./get-task-details";
 
 export const sendTaskInputSchema = z
   .object({
@@ -142,11 +147,9 @@ export const sendTaskInputSchema = z
     }
   });
 
-export const sendTaskOutputSchema = z.object({
+export const sendTaskOutputSchema = swarmToolOutputSchema({
   yourAgentId: z.string().optional(),
-  success: z.boolean(),
-  message: z.string(),
-  task: AgentTaskSchema.optional(),
+  task: looseAgentTaskOutputSchema.optional(),
 });
 
 type SendTaskArgs = z.infer<typeof sendTaskInputSchema>;
@@ -211,21 +214,11 @@ export async function sendTaskHandler(
     requestedByUserId: inputRequestedByUserId,
     followUpConfig,
   }: SendTaskArgs,
-): Promise<CallToolResult> {
+): Promise<SwarmToolResult> {
   if (ctx.kind === "owner" && !ctx.agentId) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: 'Agent ID not found. The MCP client should define the "X-Agent-ID" header.',
-        },
-      ],
-      structuredContent: {
-        yourAgentId: ctx.agentId,
-        success: false,
-        message: 'Agent ID not found. The MCP client should define the "X-Agent-ID" header.',
-      },
-    };
+    return toolErr('Agent ID not found. The MCP client should define the "X-Agent-ID" header.', {
+      data: { yourAgentId: ctx.agentId },
+    });
   }
 
   const creatorAgentId = ctx.kind === "owner" ? ctx.agentId : undefined;
@@ -237,19 +230,9 @@ export async function sendTaskHandler(
       : (inputRequestedByUserId ?? callerTask?.requestedByUserId ?? undefined);
 
   if (ctx.kind === "owner" && agentId === ctx.agentId) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: "Cannot send a task to yourself, are you drunk?",
-        },
-      ],
-      structuredContent: {
-        yourAgentId: ctx.agentId,
-        success: false,
-        message: "Cannot send a task to yourself, are you drunk?",
-      },
-    };
+    return toolErr("Cannot send a task to yourself, are you drunk?", {
+      data: { yourAgentId: ctx.agentId },
+    });
   }
 
   const effectiveVcsRepo = vcsRepo;
@@ -280,14 +263,7 @@ export async function sendTaskHandler(
         routingCheck.verdict === "partial-unit"
           ? `Slack routing rejected: ${routingCheck.detail}`
           : `Slack routing mismatch: you passed ${routingCheck.field}="${routingCheck.got}" but the ${routingCheck.expectedSource} task says "${routingCheck.expected}". Omit the three Slack fields to inherit them from the parent as a unit (preferred), or pass overrideSlackContext: true if the cross-channel routing is deliberate.`;
-      return {
-        content: [{ type: "text", text: msg }],
-        structuredContent: {
-          yourAgentId: creatorAgentId,
-          success: false,
-          message: msg,
-        },
-      };
+      return toolErr(msg, { data: { yourAgentId: creatorAgentId } });
     }
   } else if (slackChannelId || slackThreadTs) {
     console.log(
@@ -308,11 +284,7 @@ export async function sendTaskHandler(
         : error instanceof Error
           ? error.message
           : String(error);
-    return {
-      isError: true,
-      content: [{ type: "text", text: message }],
-      structuredContent: { yourAgentId: creatorAgentId, success: false, message },
-    };
+    return toolErr(message, { data: { yourAgentId: creatorAgentId } });
   }
 
   // Auto-route to parent's worker if parentTaskId is set and no explicit agentId
@@ -327,15 +299,9 @@ export async function sendTaskHandler(
   if (existingTrackerWork) {
     const msg = `Skipped: Linear tracker contextKey ${effectiveParentTask?.contextKey} already has ${existingTrackerWork.reason === "active_task" ? "active task" : "linked open PR"} ${existingTrackerWork.task.id.slice(0, 8)}.`;
     console.log(`[send-task] ${msg}`);
-    return {
-      content: [{ type: "text", text: msg }],
-      structuredContent: {
-        yourAgentId: creatorAgentId,
-        success: true,
-        message: msg,
-        task: existingTrackerWork.task,
-      },
-    };
+    return toolOk(msg, {
+      data: { yourAgentId: creatorAgentId, task: existingTrackerWork.task },
+    });
   }
 
   // Dedup guard: check for similar recent tasks
@@ -347,14 +313,7 @@ export async function sendTaskHandler(
     });
     if (duplicate) {
       const msg = `Duplicate task detected (matches task ${duplicate.task.id.slice(0, 8)}, ${duplicate.reason}). Skipping. Use allowDuplicate: true to override.`;
-      return {
-        content: [{ type: "text", text: msg }],
-        structuredContent: {
-          yourAgentId: creatorAgentId,
-          success: false,
-          message: msg,
-        },
-      };
+      return toolErr(msg, { data: { yourAgentId: creatorAgentId } });
     }
   }
 
@@ -397,14 +356,7 @@ export async function sendTaskHandler(
             new Date(recentCompleted.lastUpdatedAt).getTime();
         if (!cancelledMoreRecent) {
           const msg = `Blocked: re-delegation from follow-up task in a thread that already has completed work (task ${recentCompleted.id.slice(0, 8)}). The original request was already handled.`;
-          return {
-            content: [{ type: "text", text: msg }],
-            structuredContent: {
-              yourAgentId: creatorAgentId,
-              success: false,
-              message: msg,
-            },
-          };
+          return toolErr(msg, { data: { yourAgentId: creatorAgentId } });
         }
         // else: fall through — the cancellation is more recent than the
         // completion, so re-delegation is legitimate.
@@ -557,18 +509,17 @@ export async function sendTaskHandler(
   });
 
   const result = txn();
-  const structuredContent = {
+  const data = {
     yourAgentId: creatorAgentId,
-    ...result,
+    task: result.task,
   };
 
-  return {
-    content: [
-      { type: "text", text: result.message },
-      { type: "text", text: JSON.stringify(result) },
-    ],
-    structuredContent,
-  };
+  // Text channel must carry the created task too — most harnesses never show
+  // the model structuredContent.
+  const details = result.task ? JSON.stringify(result.task, null, 2) : undefined;
+  return result.success
+    ? toolOk(result.message, { data, details })
+    : toolErr(result.message, { data, details });
 }
 
 export const registerSendTaskTool = (server: McpServer) => {
