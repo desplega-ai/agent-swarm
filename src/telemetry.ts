@@ -218,16 +218,19 @@ export async function initTelemetry(
     const existing = await getConfig("telemetry_installation_id");
     if (existing) {
       installationId = existing;
-      // Backfill for installs that minted an ID before `telemetry_installed_at`
-      // existed. This reflects the upgrade date, not the true original install
-      // date, but it's the earliest timestamp we can attribute with certainty
-      // — only api-server (generateIfMissing) backfills, same authority rule
-      // as the installation ID itself.
+      // A pre-existing installation ID with no stored anchor means this
+      // install predates `telemetry_installed_at` tracking. Do NOT mint
+      // now() as a stand-in "install date" here — that back-fills a date
+      // that's wrong by however long the install has actually existed
+      // (seen: 110 days on our own production install after a routine
+      // upgrade). Leave installedAt null so the field is omitted from the
+      // payload: absence unambiguously means "pre-existing install, anchor
+      // unknown", and consumers can fall back to min(occurred_at) per
+      // installation_id in ClickHouse for the real anchor. Only a
+      // genuinely new installationId (the branch below) mints one.
       const existingInstalledAt = await getConfig("telemetry_installed_at");
       if (existingInstalledAt) {
         installedAt = existingInstalledAt;
-      } else if (generateIfMissing) {
-        await tryPersistInstalledAt(setConfig);
       }
     } else if (generateIfMissing) {
       const candidateId = `install_${randomUUID().replace(/-/g, "").slice(0, 16)}`;

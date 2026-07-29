@@ -122,42 +122,23 @@ describe("initTelemetry", () => {
       expect(_getInstalledAtForTests()).toBeNull();
     });
 
-    test("backfill: telemetry_installed_at write fails → existing installationId is preserved, installedAt stays null", async () => {
-      const existing = "install_backfillfailure";
+    test("existing installationId, no stored anchor → installedAt omitted, no backfill write attempted (even with generateIfMissing)", async () => {
+      const existing = "install_noanchor";
       const writes: Array<{ key: string; value: string }> = [];
       await initTelemetry(
         "api-server",
         async (key) => (key === "telemetry_installation_id" ? existing : undefined),
         async (key, value) => {
-          if (key === "telemetry_installed_at") {
-            throw new Error("config write failed");
-          }
           writes.push({ key, value });
         },
         { generateIfMissing: true },
       );
-      // The pre-existing installation ID must survive the unrelated
-      // installed_at write failure — not get discarded for an ephemeral one.
+      // A pre-existing installation ID with no stored anchor must NOT mint
+      // now() as a stand-in install date — that back-fills a wrong date
+      // instead of an honestly-absent one. No write, no fabricated anchor.
       expect(_getInstallationIdForTests()).toBe(existing);
       expect(writes).toEqual([]);
       expect(_getInstalledAtForTests()).toBeNull();
-    });
-
-    test("backfill: telemetry_installed_at write succeeds → mints and persists exactly once", async () => {
-      const existing = "install_backfillsuccess";
-      const writes: Array<{ key: string; value: string }> = [];
-      await initTelemetry(
-        "api-server",
-        async (key) => (key === "telemetry_installation_id" ? existing : undefined),
-        async (key, value) => {
-          writes.push({ key, value });
-        },
-        { generateIfMissing: true },
-      );
-      expect(_getInstallationIdForTests()).toBe(existing);
-      const installedAt = _getInstalledAtForTests();
-      expect(installedAt).not.toBeNull();
-      expect(writes).toEqual([{ key: "telemetry_installed_at", value: installedAt as string }]);
     });
 
     test("already-exists: both installation_id and installed_at present → no writes, reuses existing anchor", async () => {
@@ -845,6 +826,22 @@ describe("initTelemetry", () => {
       expect(metadata.install_preset).toBeUndefined();
       // Freshly minted install → install_created_at is set.
       expect(typeof metadata.install_created_at).toBe("string");
+    });
+
+    test("pre-existing installationId with no stored anchor → install_created_at is absent from the payload, not back-filled with now()", async () => {
+      await initTelemetry(
+        "api-server",
+        async (key) =>
+          key === "telemetry_installation_id" ? "install_existingnoanchor" : undefined,
+        async () => {},
+        { generateIfMissing: true },
+      );
+
+      track({ event: "server.started", properties: {} });
+      await new Promise((r) => setTimeout(r, 0));
+
+      const metadata = (captured as { metadata: Record<string, unknown> }).metadata;
+      expect(metadata.install_created_at).toBeUndefined();
     });
 
     test("wizard install: INSTALL_METHOD + INSTALL_PRESET flow through to properties/metadata", async () => {

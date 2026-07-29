@@ -40,7 +40,7 @@ Every event also includes:
 - `has_slack_channel` / `has_email_channel` / `has_notification_channel` — booleans indicating whether an outbound notification channel (Slack, AgentMail email, or either) is configured. Presence only — never a token, channel ID, or address.
 - `install_method` — enum: `onboard_interactive`, `onboard_noninteractive`, `e2b`, or `manual`. Which entry point produced this install.
 - `install_preset` (metadata, optional) — the onboard wizard preset used (`dev`, `content`, `research`, `solo`, or `custom`), when the install went through the wizard. Allow-listed against the wizard's known preset IDs — any other value (including free text accidentally placed in `INSTALL_PRESET`) is omitted rather than forwarded.
-- `install_created_at` (metadata, optional) — ISO timestamp of when this install's identity was first minted, persisted once alongside the installation ID. Lets analysis reconstruct the time from install to first real task without depending on server-restart timing.
+- `install_created_at` (metadata, optional) — ISO timestamp of when this install's identity was first minted, persisted once alongside the installation ID. Only set when this process genuinely mints a new installation ID; an existing installation ID with no stored anchor emits this field as **absent**, not back-filled with the current time — absence means "pre-existing install, anchor unknown". Use `min(occurred_at)` per `installation_id` in ClickHouse as the real anchor for that population.
 
 ## How it's anonymized
 
