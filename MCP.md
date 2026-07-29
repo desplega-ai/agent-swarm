@@ -32,12 +32,12 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [store-progress](#store-progress)
   - [my-agent-info](#my-agent-info)
   - [cancel-task](#cancel-task)
-  - [steer-task](#steer-task)
-  - [accept-steer](#accept-steer)
   - [resolve-user](#resolve-user)
   - [manage-user](#manage-user)
   - [db-query](#db-query)
   - [get-oauth-access-token](#get-oauth-access-token)
+  - [accept-steer](#accept-steer)
+  - [steer-task](#steer-task)
 - [Task Pool Tools](#task-pool-tools)
   - [task-action](#task-action)
 - [Config Tools](#config-tools)
@@ -248,7 +248,7 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `agentId` | `uuid` | No | - | The agent to assign/offer task to. Omit to create unassigned task for pool. |
+| `agentId` | `string` | No | - | The agent to assign/offer task to. Omit to create unassigned task for pool. |
 | `task` | `string` | Yes | - | The task description to send. |
 | `key` | `unknown` | No | - | Logical namespace key. Child tasks inherit their parent namespace when provided. |
 | `offerMode` | `boolean` | No | false | If true, offer the task instead of direct assign (agent must accept/reject). |
@@ -316,36 +316,6 @@ Cancel a task that is pending or in progress. Only the lead or task creator can 
 | `taskId` | `uuid` | Yes | - | The ID of the task to cancel. |
 | `reason` | `string` | No | - | Reason for cancellation. |
 
-### steer-task
-
-**Steer a running task**
-
-Send additional instructions to a task that is already running. This tool is registered on both the agent and user MCP surfaces. Agents may steer tasks they created, while the lead may steer any task; user calls are restricted by `task.steer.own`.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `taskId` | `uuid` | Yes | - | The running task to steer. |
-| `message` | `string` | Yes | - | Additional instructions to deliver. Empty messages are rejected. |
-| `mode` | `steer \| queue` | No | `queue` | `steer` requests an interrupt; `queue` delivers at the next turn boundary. |
-| `onUnsupported` | `degrade \| fail` | No | `degrade` | Degrade through queue/follow-up when the harness cannot honor the mode, or fail without creating a steering row. |
-
-The structured result includes `success`, `outcome` (`steered`, `queued`, or `promoted`), `effectiveMode`, and the `steeringMessageId`. A degraded result also includes `degradedFrom`; a promoted result includes `promotedTaskId`.
-
-Provider support: pi and Claude Managed support both modes; opencode supports both with a lossy abort-and-re-prompt interrupt; Devin and raw Claude are queue-only; Codex promotes steering to a follow-up task.
-
-### accept-steer
-
-**Acknowledge a steering message**
-
-Agent-only acknowledgement used after the assigned worker has incorporated a delivered steering message. It changes the message from `delivered` to `handled`; it does not deliver or re-run the message.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `steeringMessageId` | `uuid` | Yes | - | Delivered steering message to acknowledge. |
-| `note` | `string` | No | - | Optional note (maximum 500 characters) describing how the instruction was incorporated. Secrets are scrubbed before the note is returned. |
-
-The caller must have an `X-Agent-ID`, own the active source task, and be assigned the task associated with the steering message.
-
 ### resolve-user
 
 **Resolve user identity**
@@ -405,6 +375,36 @@ Return a valid plaintext OAuth access token for an integrated tracker. The token
 | `provider` | `string` | No | - | OAuth provider slug to resolve the default authorization (for example: linear, jira). Provide this OR authorizationId. |
 | `authorizationId` | `string` | No | - | Explicit oauth_authorizations id to resolve. Takes precedence over provider when both are given. |
 | `minValiditySeconds` | `number` | No | 300 | Minimum remaining token lifetime required before returning it. |
+
+### accept-steer
+
+**Acknowledge a steering message**
+
+Agent-only acknowledgement used after the assigned worker has incorporated a delivered steering message. It changes the message from `delivered` to `handled`; it does not deliver or re-run the message.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `steeringMessageId` | `uuid` | Yes | - | Delivered steering message to acknowledge. |
+| `note` | `string` | No | - | Optional note (maximum 500 characters) describing how the instruction was incorporated. Secrets are scrubbed before the note is returned. |
+
+The caller must have an `X-Agent-ID`, own the active source task, and be assigned the task associated with the steering message.
+
+### steer-task
+
+**Steer a running task**
+
+Send additional instructions to a task that is already running. This tool is registered on both the agent and user MCP surfaces when `STEERING_ENABLED=true`. Agents may steer tasks they created, while the lead may steer any task; user calls are restricted by `task.steer.own`.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `taskId` | `uuid` | Yes | - | The running task to steer. |
+| `message` | `string` | Yes | - | Additional instructions to deliver. Empty messages are rejected. |
+| `mode` | `steer \| queue` | No | `queue` | `steer` requests an interrupt; `queue` delivers at the next turn boundary. |
+| `onUnsupported` | `degrade \| fail` | No | `degrade` | Degrade through queue/follow-up when the harness cannot honor the mode, or fail without creating a steering row. |
+
+The structured result includes `success`, `outcome` (`steered`, `queued`, or `promoted`), `effectiveMode`, and the `steeringMessageId`. A degraded result also includes `degradedFrom`; a promoted result includes `promotedTaskId`.
+
+Provider support: pi and Claude Managed support both modes; raw Claude, Devin, and opencode are queue-only; Codex promotes steering to a follow-up task.
 
 ## Task Pool Tools
 
@@ -1057,7 +1057,7 @@ Allows the lead agent to push learnings into a worker's memory. The learning wil
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `agentId` | `uuid` | Yes | - | Target worker agent ID |
+| `agentId` | `string` | Yes | - | Target worker agent ID |
 | `learning` | `string` | Yes | - | The learning content to inject |
 | `category` | `unknown` | Yes | - | Category of the learning: mistake-pattern, best-practice, codebase-knowledge, or preference |
 
@@ -1951,7 +1951,7 @@ Query services registered by agents in the swarm. Use this to discover services 
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `agentId` | `uuid` | No | - | Filter by specific agent ID. |
+| `agentId` | `string` | No | - | Filter by specific agent ID. |
 | `name` | `string` | No | - | Filter by service name (partial match). |
 | `status` | `unknown` | No | - | Filter by health status. |
 | `includeOwn` | `boolean` | No | true | Include services registered by calling agent (default: true). |

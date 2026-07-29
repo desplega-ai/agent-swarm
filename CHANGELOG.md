@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.123.0] - 2026-07-29
+
+### Added
+- **Running tasks can now receive durable mid-run steering** (#1014) — MCP, HTTP, script, dashboard, and opt-in Slack surfaces can queue context or request an interrupt, with provider capability reporting, auditable delivery states, and a safe degradation ladder to queued input or follow-up tasks.
+- **Operators can tune non-secret swarm settings from the dashboard** (#1017) — Settings → Configuration exposes cataloged feature flags, thresholds, integration toggles, and runtime defaults with type-aware controls, value-source indicators, reset actions, and restart-required guidance.
+
+### Fixed
+- **Devin credential health checks now use the supported v3 API** (#1016) — `cog_` keys are validated against `/v3/self` instead of the deprecated v1 sessions endpoint, preventing valid Devin workers from being benched by a false 403.
+- **Steering documentation now matches opencode's verified queue-only capability** (#1014) — MCP and docs-site references no longer promise an abort-and-re-prompt interrupt that live E2E found undeliverable.
+
 ## [1.122.0] - 2026-07-28
 
 ### Added

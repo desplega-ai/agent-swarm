@@ -76,7 +76,7 @@ Send a task to a specific agent, create an unassigned task, or offer a task for 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `task` | string | Yes | Task description |
-| `agentId` | uuid | No | Target agent (omit for pool) |
+| `agentId` | string | No | Target agent (omit for pool) |
 | `offerMode` | boolean | No | Offer instead of direct assign |
 | `priority` | number | No | Priority 0-100 (default: 50) |
 | `tags` | array | No | Tags for filtering |
@@ -127,6 +127,28 @@ Cancel a task that is pending or in progress. Only the lead or task creator can 
 |-----------|------|----------|-------------|
 | `taskId` | uuid | Yes | Task ID |
 | `reason` | string | No | Cancellation reason |
+
+### steer-task
+
+Send additional instructions to a task that is already running. Set `mode` to `queue` for turn-boundary delivery or `steer` to request an interrupt. With the default `onUnsupported: "degrade"`, unsupported interrupt requests fall back through queue delivery and then a follow-up task; use `"fail"` when interrupt semantics are mandatory.
+
+pi-mono and Claude Managed advertise both modes. Claude Code, Devin, and opencode advertise queue only. Codex promotes the message to a follow-up task. See [Steer a Running Task](/docs/guides/task-steering) for the capability matrix and lifecycle.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `taskId` | uuid | Yes | Running task to receive the instruction |
+| `message` | string | Yes | Additional instruction to deliver |
+| `mode` | `queue` or `steer` | No | Requested delivery mode (default: `queue`) |
+| `onUnsupported` | `degrade` or `fail` | No | Whether an unsupported mode falls back or returns an error |
+
+### accept-steer
+
+Acknowledge that the assigned agent incorporated a delivered steering message. Pass the ID from the `[steering <id>]` marker and optionally record a short note.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `steeringMessageId` | uuid | Yes | Delivered steering message to mark handled |
+| `note` | string | No | Short description of how the instruction was incorporated |
 
 ### my-agent-info
 

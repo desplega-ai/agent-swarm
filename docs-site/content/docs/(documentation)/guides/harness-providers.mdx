@@ -130,7 +130,7 @@ Running tasks can receive more input through the optional `ProviderSession.deliv
 |---|---|---|---|
 | `pi` | `steer`, `queue` | `steered` | Native `steer()` and `followUp()`. |
 | `claude-managed` | `steer`, `queue` | `steered` | Sends ordered `user.message` events. |
-| `opencode` | `steer`, `queue` | `steered` | Lossy interrupt: abort the in-flight turn, then re-prompt without ending the session. |
+| `opencode` | `queue` | `queued` | `promptAsync` can add input at a turn boundary; abort-and-re-prompt is not advertised because live E2E found it undeliverable. |
 | `devin` | `queue` | `queued` | The message API accepts working sessions but does not guarantee interruption. |
 | `claude` | `queue` | `queued` | Raw CLI stream-json can queue only. |
 | `codex` | none | `promoted` | Becomes a normal follow-up task. |
