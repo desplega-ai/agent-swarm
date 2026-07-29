@@ -10,7 +10,9 @@ Rules and traps when editing `Dockerfile` (API) or `Dockerfile.worker` — espec
 | `agent-swarm-worker` (`:slim`) | ~1.9 GB | `Dockerfile.worker` target `worker-slim` |
 | `agent-swarm` (API) | ~380 MB | `Dockerfile` |
 
-Compressed ghcr pull size ≈ 35–45 % of uncompressed. The full worker is intrinsically heavy because it ships **four harnesses** (claude / pi / codex / opencode) + Playwright + a full dev toolchain. Don't chase further cuts without measuring with `docker history <img> --format "{{.Size}}\t{{.CreatedBy}}" | sort -h -r | head -10` first. Known irreducible chunk: `libllvm17t64` (~115 MB) is a hard `Depends:` of `postgresql-16` on Ubuntu 24.04 (NOT a recommends), and `libllvm20`+mesa (~180 MB) is a hard dep chain of `libgbm1`, which Chromium needs — both exist only in the full image.
+Compressed ghcr pull size ≈ 35–45 % of uncompressed.
+
+CI tracks uncompressed amd64 sizes over time via the **ci-metrics** swarm script: merge-gate posts `image.api` + `image.worker-slim` per PR (sticky PR comment with a diff vs main), `docker-and-deploy.yml` posts all three (incl. `image.worker`) on main as the baseline. Contract + query examples: `agent-fs cat docs/ci-metrics.md`. The full worker is intrinsically heavy because it ships **four harnesses** (claude / pi / codex / opencode) + Playwright + a full dev toolchain. Don't chase further cuts without measuring with `docker history <img> --format "{{.Size}}\t{{.CreatedBy}}" | sort -h -r | head -10` first. Known irreducible chunk: `libllvm17t64` (~115 MB) is a hard `Depends:` of `postgresql-16` on Ubuntu 24.04 (NOT a recommends), and `libllvm20`+mesa (~180 MB) is a hard dep chain of `libgbm1`, which Chromium needs — both exist only in the full image.
 
 ## Stage map (`Dockerfile.worker`)
 

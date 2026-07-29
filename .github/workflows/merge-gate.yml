@@ -321,13 +321,19 @@ jobs:
         # The worker builds only the worker-slim target here (fast PR gate — it still
         # exercises the shared worker-base layers and the leaf block); the full target
         # is built and published on merge by docker-and-deploy.yml.
+        # `metric` legs load the built image into the local daemon and report its
+        # uncompressed size to the ci-metrics swarm script (sticky PR diff comment).
+        # See agent-fs docs/ci-metrics.md for the script contract.
         include:
           - dockerfile: Dockerfile
             target: ""
+            metric: image.api
           - dockerfile: Dockerfile.worker
             target: worker-slim
+            metric: image.worker-slim
           - dockerfile: apps/evals/Dockerfile
             target: ""
+            metric: ""
 
     steps:
       - name: Checkout repository
@@ -343,7 +349,37 @@ jobs:
           file: ./${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
           push: false
+          load: ${{ matrix.metric != '' }}
           tags: test-image:latest
+
+      # Same-sha calls merge server-side, so each matrix leg posts its own metric
+      # and they all land in ONE sticky "Docker image sizes" PR comment.
+      # Skipped on merge_group events and forks (no secret); never blocks the gate.
+      - name: Report image size to ci-metrics
+        if: matrix.metric != '' && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.SWARM_CI_METRICS_TOKEN }}
+          METRIC: ${{ matrix.metric }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then echo "SWARM_CI_METRICS_TOKEN not available; skipping"; exit 0; fi
+          SIZE=$(docker image inspect test-image:latest --format '{{.Size}}')
+          BODY=$(jq -n \
+            --arg sha "$HEAD_SHA" \
+            --arg branch "$GITHUB_HEAD_REF" \
+            --arg runUrl "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --argjson pr "$PR" \
+            --arg name "$METRIC" \
+            --argjson value "$SIZE" \
+            '{repo: "desplega-ai/agent-swarm", sha: $sha, branch: $branch, prNumber: $pr,
+              runUrl: $runUrl, commentKey: "docker", title: "Docker image sizes (uncompressed, amd64)",
+              metrics: [{name: $name, value: $value, unit: "bytes", group: "docker"}]}')
+          curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/JWCeFHIQUAQQ \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            -d "$BODY" | jq -r '.result.markdown // empty' >> "$GITHUB_STEP_SUMMARY"
 
   ui-lint:
     name: UI Lint and Type Check

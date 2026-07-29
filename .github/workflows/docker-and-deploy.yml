@@ -449,6 +449,62 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:slim
 
+  # Keep the ci-metrics `branch/main` baseline fresh so merge-gate PR runs have
+  # something to diff against (see agent-fs docs/ci-metrics.md). Measures the
+  # UNCOMPRESSED amd64 size of the just-pushed sha images — the same measure
+  # merge-gate reports for PRs — plus the full worker (main-only trend; PRs
+  # only build the slim target).
+  report-metrics:
+    name: Report image metrics
+    runs-on: ubuntu-latest
+    needs:
+      - merge-server
+      - merge-worker
+      - merge-worker-slim
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Log in to Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Measure and report image sizes
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.SWARM_CI_METRICS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then echo "SWARM_CI_METRICS_TOKEN not available; skipping"; exit 0; fi
+          SHORT=$(echo "$GITHUB_SHA" | cut -c1-7)
+          IMG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          size() {
+            docker pull --quiet --platform linux/amd64 "$1" > /dev/null
+            docker image inspect "$1" --format '{{.Size}}'
+          }
+          API_SIZE=$(size "$IMG:sha-$SHORT")
+          WORKER_SIZE=$(size "$IMG-worker:sha-$SHORT")
+          SLIM_SIZE=$(size "$IMG-worker:sha-$SHORT-slim")
+          BODY=$(jq -n \
+            --arg sha "$GITHUB_SHA" \
+            --arg runUrl "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --argjson api "$API_SIZE" \
+            --argjson worker "$WORKER_SIZE" \
+            --argjson slim "$SLIM_SIZE" \
+            '{repo: "desplega-ai/agent-swarm", sha: $sha, branch: "main", runUrl: $runUrl,
+              commentKey: "docker", title: "Docker image sizes (uncompressed, amd64)",
+              metrics: [
+                {name: "image.api", value: $api, unit: "bytes", group: "docker"},
+                {name: "image.worker", value: $worker, unit: "bytes", group: "docker"},
+                {name: "image.worker-slim", value: $slim, unit: "bytes", group: "docker"}
+              ]}')
+          curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/JWCeFHIQUAQQ \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            -d "$BODY" | jq -r '.result.markdown // empty' >> "$GITHUB_STEP_SUMMARY"
+
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
