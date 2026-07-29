@@ -128,6 +128,12 @@ export async function proxyScriptsApi(args: {
   successMessage: (data: unknown) => string;
   /** Optional model-facing rendering of the success payload (appended to the text channel). */
   successDetails?: (data: unknown) => string | undefined;
+  /**
+   * Optional model-facing rendering of the payload when the call fails, used
+   * when the failure itself carries no details (e.g. a failed durable run whose
+   * journal holds the step errors).
+   */
+  failureDetails?: (data: unknown) => string | undefined;
 }): Promise<SwarmToolResult> {
   if (!args.requestInfo.agentId) return toolErr(SCRIPT_TRANSPORT_ERROR);
 
@@ -159,7 +165,10 @@ export async function proxyScriptsApi(args: {
   const toolData = { status: res.status, data };
   const failure = describeScriptFailure(res.ok, res.status, data);
   if (failure) {
-    return toolErr(failure.message, { details: failure.details, data: toolData });
+    return toolErr(failure.message, {
+      details: failure.details ?? capDetails(args.failureDetails?.(data)),
+      data: toolData,
+    });
   }
 
   return toolOk(args.successMessage(data), {

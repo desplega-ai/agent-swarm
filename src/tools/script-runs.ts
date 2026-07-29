@@ -149,6 +149,7 @@ export const registerScriptRunsTools = (server: McpServer) => {
           return `Script run ${id} status: ${status}.`;
         },
         successDetails: renderRunDetail,
+        failureDetails: renderRunDetail,
       }),
   );
 

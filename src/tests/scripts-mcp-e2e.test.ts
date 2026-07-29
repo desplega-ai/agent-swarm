@@ -238,6 +238,9 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(run.isError).toBeFalsy();
     expect(run.structuredContent.success).toBe(true);
     expect(run.structuredContent.data?.result).toEqual({ result: 42 });
+    // truncated is `{ stdout, stderr }` — both false here, so the text must not
+    // claim truncation (a bare truthy check on the object did exactly that).
+    expect(run.content[0]?.text).not.toContain("output truncated");
 
     const del = (await tools.del.handler(
       { name: "times-seven", scope: "agent" },
@@ -359,6 +362,60 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(detail.structuredContent.data?.run.id).toBe(runId);
     expect(detail.structuredContent.data?.run.status).toBe("running");
     expect(detail.structuredContent.data?.journal).toEqual([]);
+  });
+
+  test("failed durable run renders journal entries in the error text", async () => {
+    const tools = buildToolServer();
+    const source = `export default async function main() { return { ok: true }; }`;
+
+    const launched = (await tools.launchScriptRun.handler(
+      { source, scriptName: "mcp-failed-workflow" },
+      meta(workerId),
+    )) as StructuredResult<{ id: string }>;
+    const runId = launched.structuredContent.data?.id;
+    expect(runId).toBeTruthy();
+
+    const internalHeaders = {
+      authorization: `Bearer ${API_KEY}`,
+      "x-agent-id": workerId,
+      "content-type": "application/json",
+    };
+    const step = await dispatchScriptsApi(
+      `http://scripts-mcp-e2e.test/api/internal/script-runs/${runId}/steps`,
+      {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({
+          stepKey: "flaky-step",
+          stepType: "swarm-script",
+          status: "failed",
+          error: "step exploded",
+        }),
+      },
+    );
+    expect(step.status).toBe(201);
+    const failed = await dispatchScriptsApi(
+      `http://scripts-mcp-e2e.test/api/internal/script-runs/${runId}/status`,
+      {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({ status: "failed", error: "workflow failed at flaky-step" }),
+      },
+    );
+    expect(failed.status).toBe(204);
+
+    const detail = (await tools.getScriptRun.handler(
+      { id: runId },
+      meta(workerId),
+    )) as StructuredResult<unknown>;
+    expect(detail.isError).toBe(true);
+    expect(detail.structuredContent.success).toBe(false);
+    expect(detail.structuredContent.message).toContain("workflow failed at flaky-step");
+    // Step errors live in the journal — it must reach the text channel on
+    // failure too, not only via successDetails on the happy path.
+    expect(detail.content[0]?.text).toContain("journal (1 entry)");
+    expect(detail.content[0]?.text).toContain("flaky-step");
+    expect(detail.content[0]?.text).toContain("step exploded");
   });
 
   test("typed SDK fixture passes upsert typecheck and wrong arg type fails", async () => {

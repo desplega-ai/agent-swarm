@@ -18,7 +18,7 @@ function renderRunOutput(data: unknown): string | undefined {
     result?: unknown;
     stdout?: string;
     durationMs?: number;
-    truncated?: boolean;
+    truncated?: { stdout?: boolean; stderr?: boolean };
     autoSaved?: { slug?: string };
     kvSaved?: { namespace?: string; key?: string };
   };
@@ -33,7 +33,9 @@ function renderRunOutput(data: unknown): string | undefined {
   }
   const notes: string[] = [];
   if (typeof body.durationMs === "number") notes.push(`${body.durationMs}ms`);
-  if (body.truncated) notes.push("output truncated by the runtime");
+  if (body.truncated?.stdout || body.truncated?.stderr) {
+    notes.push("output truncated by the runtime");
+  }
   if (body.autoSaved?.slug) notes.push(`auto-saved as scratch script \`${body.autoSaved.slug}\``);
   if (body.kvSaved?.key) {
     notes.push(`output persisted to kv ${body.kvSaved.namespace}/${body.kvSaved.key}`);
