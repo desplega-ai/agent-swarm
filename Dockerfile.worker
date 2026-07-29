@@ -208,7 +208,10 @@ COPY --from=prek /prek /usr/local/bin/prek
 # other harnesses. The qa-use skill is installed in worker-full-base only
 # (its CLI isn't present in slim).
 ARG SKILLS_CLI_VERSION
-RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v0.10.0 --skill agent-fs -g -a claude-code -y \
+# agent-fs version pins BOTH the skill source tag (here) and the CLI in
+# /opt/global-deps (below) — bump the ARG to update both in lockstep.
+ARG AGENT_FS_VERSION=0.10.1
+RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/ai-toolbox@cc-desplega-2.0.0 \
        --skill ask-user --skill brainstorming --skill implementing --skill improve-agents-md \
        --skill learning --skill phase-running --skill planning --skill qa --skill questioning \
@@ -267,14 +270,16 @@ RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
 # @duckdb/node-api is intentionally NOT stubbed: `agent-fs` SQL-over-files
 # runs client-side and the skill actively advertises it.
 USER root
-RUN mkdir -p /opt/global-deps && cat > /opt/global-deps/package.json <<'EOF'
+# NOTE: heredoc delimiter is intentionally UNQUOTED so ${AGENT_FS_VERSION}
+# expands — keep the JSON free of other `$`/backticks.
+RUN mkdir -p /opt/global-deps && cat > /opt/global-deps/package.json <<EOF
 {
   "name": "global-deps",
   "private": true,
   "dependencies": {
     "pm2": "6.0.14",
     "@desplega.ai/wts": "0.2.3",
-    "@desplega.ai/agent-fs": "0.10.0"
+    "@desplega.ai/agent-fs": "${AGENT_FS_VERSION}"
   },
   "overrides": {
     "@huggingface/hub": "2.11.0",
