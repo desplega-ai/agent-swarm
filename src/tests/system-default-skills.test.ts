@@ -38,6 +38,7 @@ describe("system-default skills", () => {
 
     expect(names).toContain("asset-namespaces");
     expect(names).toContain("attio-interaction");
+    expect(names).toContain("browser-interaction");
     expect(names).toContain("script-workflows");
     expect(names).toContain("swarm-scripts");
     expect(names).toContain("taste-minimalist-skill");
@@ -47,6 +48,16 @@ describe("system-default skills", () => {
     expect(names).not.toContain("taste-redesign-skill");
     expect(names).not.toContain("taste-output-skill");
     expect(skills.find((skill) => skill.name === "attio-interaction")?.systemDefault).toBe(true);
+    const browserInteractionSkill = skills.find((skill) => skill.name === "browser-interaction");
+    expect(browserInteractionSkill?.systemDefault).toBe(true);
+    expect(browserInteractionSkill?.content).toContain("ensure-agent-browser");
+    expect(browserInteractionSkill?.content).toContain("agent-browser skills get core");
+    expect(browserInteractionSkill?.content).toContain("agent-fs write --file");
+    expect(browserInteractionSkill?.content).toContain("1440x900");
+    expect(browserInteractionSkill?.content).toContain("390x844");
+    expect(browserInteractionSkill?.content).toBe(
+      await Bun.file(`${import.meta.dir}/../../plugin/skills/browser-interaction/SKILL.md`).text(),
+    );
     const assetNamespacesSkill = skills.find((skill) => skill.name === "asset-namespaces");
     expect(assetNamespacesSkill?.systemDefault).toBe(true);
     expect(assetNamespacesSkill?.content).toContain("**not** a privacy");
@@ -67,6 +78,7 @@ describe("system-default skills", () => {
     const defaults = getSystemDefaultSkills().map((skill) => skill.name);
     expect(defaults).toContain("asset-namespaces");
     expect(defaults).toContain("attio-interaction");
+    expect(defaults).toContain("browser-interaction");
     expect(defaults).toContain("script-workflows");
     expect(defaults).toContain("swarm-scripts");
     expect(defaults).toContain("kv-storage");

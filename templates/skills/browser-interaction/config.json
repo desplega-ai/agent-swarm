@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "browser-interaction",
+  "displayName": "Browser Interaction",
+  "slug": "browser-interaction",
+  "title": "Browser Interaction",
+  "description": "Use agent-browser for website interaction, UI verification, screenshots, recordings, exploratory testing, and browser automation, with durable evidence uploaded to agent-fs.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["browser", "agent-browser", "qa", "screenshots", "recordings"]
+}

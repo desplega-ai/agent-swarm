@@ -23,6 +23,12 @@ import attioInteractionConfig from "../../../templates/skills/attio-interaction/
 import attioInteractionContent from "../../../templates/skills/attio-interaction/content.md" with {
   type: "text",
 };
+import browserInteractionConfig from "../../../templates/skills/browser-interaction/config.json" with {
+  type: "text",
+};
+import browserInteractionContent from "../../../templates/skills/browser-interaction/content.md" with {
+  type: "text",
+};
 import kvStorageConfig from "../../../templates/skills/kv-storage/config.json" with {
   type: "text",
 };
@@ -82,6 +88,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: assetNamespacesConfig, body: assetNamespacesContent },
   { config: attioInteractionConfig, body: attioInteractionContent },
   { config: artifactsConfig, body: artifactsContent },
+  { config: browserInteractionConfig, body: browserInteractionContent },
   { config: kvStorageConfig, body: kvStorageContent },
   { config: pagesConfig, body: pagesContent },
   { config: scriptWorkflowsConfig, body: scriptWorkflowsContent },

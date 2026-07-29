@@ -348,6 +348,7 @@ COPY --from=builder --chmod=755 /build/agent-swarm /usr/local/bin/agent-swarm
 COPY --chmod=755 scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
 COPY --chmod=755 scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
 COPY --chmod=755 scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
+COPY --chmod=755 scripts/ensure-agent-browser.sh /usr/local/bin/ensure-agent-browser
 
 # Copy commands / agents / skills
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
@@ -566,6 +567,7 @@ COPY --from=builder --chmod=755 /build/agent-swarm /usr/local/bin/agent-swarm
 COPY --chmod=755 scripts/init-local-postgres.sh /usr/local/bin/init-local-postgres.sh
 COPY --chmod=755 scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
 COPY --chmod=755 scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
+COPY --chmod=755 scripts/ensure-agent-browser.sh /usr/local/bin/ensure-agent-browser
 
 # Copy commands / agents / skills
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
