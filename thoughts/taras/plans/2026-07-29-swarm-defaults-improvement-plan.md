@@ -1,7 +1,7 @@
 ---
 date: 2026-07-29T15:30:00Z
 topic: "Swarm defaults improvement plan — post welcome-test incident"
-status: research-complete, sequencing pending
+status: PR 1 IMPLEMENTED (PR #1023, awaiting review/merge); PR 2+ (seeds/defaults) not started
 ---
 
 # Swarm defaults improvement plan — post welcome-test incident (2026-07-29)
@@ -95,6 +95,33 @@ Part 2 — prompting (same PR; applies to ALL harnesses — script_rubric includ
 - B1 authoring-contract template (+ exactly-once test, 27→28 count bump), B2 tool descriptions + nameless script-query-types via type-defs route, B3 eval-harness hints, B4 ScriptMain JSDoc, B5 skill description tweak (approved), B6 docs:mcp regen, D6 lead.pi composite fix.
 
 **Deferred follow-ups:** ctx-control middleware (auto-KV pruning of long responses at the registrar transform), C1-C3 seeds, D1-D4 defaults, D7 AST warning, D5 cloud TEMPLATE_ID question.
+
+---
+
+## PR 1 IMPLEMENTATION STATUS (2026-07-29 — this section is the handoff record)
+
+**Shipped as PR #1023** (`feat/swarm-tool-result-refactor`, 4 commits: `4d887375` spec, `363a0f2d` sweep+B+docs, `b303f314` pi E2E export, + rbac-allowlist fix). Awaiting Taras review/merge. Everything in "AGREED sequencing → PR 1" above is DONE:
+
+- Part A complete: `SwarmToolResult` + `toolOk`/`toolErr` + `swarmToolOutputSchema` in `src/tools/utils.ts`; registrar finalize pipeline (scrubSecrets → `NUDGES` → transform); ALL ~120 tools in `src/tools/**` + `src/server-user.ts` converted; `proxyScriptsApi` honest (typecheck diagnostics, run errors, `run.status`, violations folded into message/details); output schemas loose/optional/unpinned; pi adapter throws in `execute()` on `isError` (pi-agent-core's only error channel); validation gate `src/tests/swarm-tool-result-gate.test.ts` (finalize contract + audits every registered output schema — this is the enforcement for future tools).
+- Part B complete: `system.agent.script_authoring_contract` at top of `script_rubric` (renders exactly once for worker/lead/pi-worker/pi-lead/scripts-only — tested); `system.session.lead.pi` composite (D6) wired in `base-prompt.ts` (pi branch now precedes role branch); B2 tool descriptions + nameless `script-query-types` → `/api/scripts/type-defs`; B3 eval-harness hints + `ctxSignatureHint`; B4 `ScriptMain` JSDoc (+regenerated `.d.ts`); B5 skill description; B6 `docs:mcp`.
+- Docs: NEW `runbooks/mcp-tool-results.md` (canonical contract + harness matrix); CLAUDE.md important-if block for `src/tools` authors; `runbooks/harness-providers.md` pi isError section.
+- 12 test files translated to the new envelope; ~39 stale-shape failures fixed; full suite 6591 pass / 0 fail; lint/tsc/db-boundary/api-key-boundary/rbac-boundary/rbac-coverage/dep-graph green; manual E2E items 1–7 verified on a fresh server (incl. live pi-adapter isError conformance via `mcpToolsToDefinitions`, now exported).
+
+**Deviations from the plan text (deliberate, review these):**
+
+1. **`allowSecretEgress?: boolean` added to `SwarmToolResult`** — NOT in the original spec. The central scrub middleware redacted *deliberate* credential reveals (`oauth-access-token` returned `[REDACTED:…]`; script-apis create/rotate tokens too). Flag skips scrubbing for that one result; set ONLY on reveal branches: `oauth-access-token`, `script-apis` create/rotate/list-includeSecrets, `get-config`/`list-config` unmasked paths. Documented in the runbook §2 + gate test.
+2. **Template count 29, not 28** — the plan's 27→28 counted only the authoring contract; `system.session.lead.pi` (D6, same PR) registers too.
+3. **poll-task empty poll returns `ok:true`** — the batch agent made it `toolErr`; reverted in review: an idle poll is a routine outcome, `isError:true` would make every empty poll look like a failed call. (Old wire shape had `success:false` + no isError; new shape is `ok:true` with shouldExit/emptyPollCount in data — the hooks' polling-limit gate reads the server-side counter, not this field.)
+4. **Review round restored text-channel payloads** the sweep dropped: task-action/send-task/cancel-task render the task JSON as `details` (old code emitted it as a second content block); get-workflow renders the full definition; skill-search echoes the query again.
+5. **`scripts/check-rbac-boundary.sh` allowlist** got a `get-swarm.ts` entry — the sweep added a cosmetic `", lead"` tag in the agent-list details rendering (display, not authz).
+
+**Known follow-ups discovered during implementation (not blocking):**
+
+- Scheduling guidance ("Pick the Right targetType") lives INSIDE `system.agent.context_mode`, so pi leads (who now correctly drop context_mode) lose it — split scheduling out of context_mode (incident-relevant: the welcome session misused schedules).
+- `system.agent.script_rubric` mentions `ctx_*` tool names in its decision table — leaks context-mode vocabulary into pi composites (pre-existing).
+- Consider migrating other CallToolResult-era helpers' tests to assert `details` presence (only translated where tests existed).
+
+**Where things live:** contract/`NUDGES` — `src/tools/utils.ts`; honest proxy — `src/tools/script-common.ts`; gate — `src/tests/swarm-tool-result-gate.test.ts`; contract template — `src/prompts/session-templates.ts` (`script_authoring_contract`, before `script_rubric`); canonical doc — `runbooks/mcp-tool-results.md`.
 
 ## Verification anchors
 - `bun test src/tests/scripts-*.test.ts src/tests/prompt-template-session.test.ts src/tests/base-prompt.test.ts src/tests/seed-scripts.test.ts`
