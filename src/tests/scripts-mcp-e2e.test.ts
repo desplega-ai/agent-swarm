@@ -9,12 +9,15 @@ import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { getTemplateDefinition } from "../prompts/registry";
 import { registerScriptDeleteTool } from "../tools/script-delete";
 import { registerScriptRunTool } from "../tools/script-run";
 import { registerScriptRunsTools } from "../tools/script-runs";
 import { registerScriptSearchTool } from "../tools/script-search";
 import { registerScriptUpsertTool } from "../tools/script-upsert";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
+
+import "../prompts/session-templates";
 
 const TEST_DB_PATH = "./test-scripts-mcp-e2e.sqlite";
 const API_KEY = "test-scripts-mcp-key-1234567890";
@@ -207,6 +210,27 @@ beforeEach(() => {
 });
 
 describe("script_ MCP HTTP proxy tools", () => {
+  test("upserts the canonical script authoring contract example verbatim", async () => {
+    const tools = buildToolServer();
+    const contract = getTemplateDefinition("system.agent.script_authoring_contract");
+    const source = contract?.defaultBody.match(/```ts\n([\s\S]*?)\n```/)?.[1];
+    expect(source).toBeTruthy();
+
+    const upsert = (await tools.upsert.handler(
+      {
+        name: "canonical-authoring-contract",
+        source,
+        description: "Canonical authoring contract fixture",
+        intent: "verify documented source typechecks",
+      },
+      meta(workerId),
+    )) as StructuredResult<{ name: string }>;
+
+    expect(upsert.isError).toBeFalsy();
+    expect(upsert.structuredContent.success).toBe(true);
+    expect(upsert.structuredContent.data?.name).toBe("canonical-authoring-contract");
+  });
+
   test("exercise script-upsert -> script-search -> script-run -> script-delete", async () => {
     const tools = buildToolServer();
     const source = `export default async (args: { value: number }) => ({ result: args.value * 7 });`;
@@ -462,8 +486,33 @@ describe("script_ MCP HTTP proxy tools", () => {
     // summarizes ... details carries the payload the model actually needs").
     expect(bad.isError).toBe(true);
     expect(bad.structuredContent.success).toBe(false);
-    expect(bad.structuredContent.message).toContain("Typecheck failed:");
+    expect(bad.structuredContent.message).toMatch(/^Typecheck failed:/);
+    expect(bad.structuredContent.message).not.toContain("(+1 more)");
     expect(bad.structuredContent.details).toBeTruthy();
-    expect(bad.content[0]?.text).toContain("Typecheck failed:");
+    expect(bad.content[0]?.text).toContain(bad.structuredContent.message);
+  });
+
+  test("reports only remaining typecheck diagnostics in the summary", async () => {
+    const tools = buildToolServer();
+    const bad = (await tools.upsert.handler(
+      {
+        name: "two-type-errors",
+        source: `
+          export default async () => {
+            const count: number = "one";
+            const enabled: boolean = 1;
+            return { count, enabled };
+          };
+        `,
+        description: "Two diagnostic fixture",
+        intent: "verify diagnostic summary cardinality",
+      },
+      meta(workerId),
+    )) as StructuredResult<{ diagnostics: string[] }>;
+
+    expect(bad.isError).toBe(true);
+    expect(bad.structuredContent.success).toBe(false);
+    expect(bad.structuredContent.message).toMatch(/\(\+1 more\)$/);
+    expect(bad.structuredContent.message).not.toContain("(+2 more)");
   });
 });

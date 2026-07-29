@@ -450,19 +450,22 @@ registerTemplate({
   defaultBody: `
 ### Script Authoring Contract (read BEFORE writing any script)
 
-**Entry point — \`args\` FIRST, \`ctx\` SECOND.** A one-parameter \`function (ctx)\` still typechecks, but at runtime that parameter receives \`args\`, so every \`ctx.*\` access throws. This is the single most common cause of failed script runs.
+**Entry point — \`args\` FIRST, \`ctx\` SECOND.** A one-parameter \`function (ctx)\` can execute through \`script-run\`, but at runtime that parameter receives \`args\`, so every \`ctx.*\` access throws. \`script-upsert\` also rejects an untyped parameter under strict typechecking. This is the single most common cause of failed script runs.
 
 \`\`\`ts
+import type { ScriptContext } from "swarm-sdk";
 import * as z from "zod";
 
 export const argsSchema = z.object({ taskId: z.string(), limit: z.number().optional() });
 
-export default async function (args: z.infer<typeof argsSchema>, ctx) {
+export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptContext) {
   const res = await ctx.swarm.task_get({ taskId: args.taskId });
-  const task = res?.data ?? res;
+  const task = ((res as { data?: unknown }).data ?? res) as { title?: string };
   return { title: task?.title };
 }
 \`\`\`
+
+**Typechecking:** inline source passed to \`script-run\` executes without a compile-time typecheck. \`script-upsert\` typechecks before saving, so import \`ScriptContext\` from \`"swarm-sdk"\` as shown above to make inline code promotion-safe. Use \`script-query-types\` for the authoritative SDK and stdlib declarations.
 
 **What \`ctx\` actually holds for inline/named scripts (\`script-run\` / \`script-upsert\`) — nothing else:**
 - \`ctx.swarm.*\` — the swarm SDK: \`task_get\`, \`task_send\`, \`task_storeProgress\`, \`task_action\`, \`task_list\`, \`message_post\`, \`message_read\`, \`slack_reply\`, \`memory_search\`, \`kv_get\`/\`kv_set\`/\`kv_del\`/\`kv_incr\`/\`kv_list\`, \`swarm_get\`, \`agent_info\`, and more. Responses are usually wrapped — prefer \`res?.data ?? res\`.

@@ -8679,13 +8679,90 @@ export function updateWorkflowRun(
   return run;
 }
 
-export function listWorkflowRuns(workflowId: string): WorkflowRun[] {
+export type WorkflowRunListOptions = {
+  status?: WorkflowRunStatus;
+  limit?: number;
+  offset?: number;
+};
+
+export type WorkflowRunPage = {
+  runs: WorkflowRun[];
+  page: {
+    limit: number;
+    offset: number;
+    total: number;
+    hasMore: boolean;
+    nextOffset?: number;
+  };
+};
+
+export function listWorkflowRuns(
+  workflowId: string,
+  options: WorkflowRunListOptions = {},
+): WorkflowRun[] {
+  const conditions = ["workflowId = ?"];
+  const params: Array<string | number> = [workflowId];
+  if (options.status) {
+    conditions.push("status = ?");
+    params.push(options.status);
+  }
+
+  let pagination = "";
+  if (options.limit !== undefined) {
+    pagination = " LIMIT ? OFFSET ?";
+    params.push(options.limit, options.offset ?? 0);
+  } else if (options.offset !== undefined) {
+    pagination = " LIMIT -1 OFFSET ?";
+    params.push(options.offset);
+  }
+
   return getDb()
-    .prepare<WorkflowRunRow, [string]>(
-      "SELECT * FROM workflow_runs WHERE workflowId = ? ORDER BY startedAt DESC",
+    .prepare<WorkflowRunRow, Array<string | number>>(
+      `SELECT * FROM workflow_runs
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY startedAt DESC, id DESC${pagination}`,
     )
-    .all(workflowId)
+    .all(...params)
     .map(rowToWorkflowRun);
+}
+
+export function countWorkflowRuns(
+  workflowId: string,
+  options: Pick<WorkflowRunListOptions, "status"> = {},
+): number {
+  const conditions = ["workflowId = ?"];
+  const params: string[] = [workflowId];
+  if (options.status) {
+    conditions.push("status = ?");
+    params.push(options.status);
+  }
+  const row = getDb()
+    .prepare<{ count: number }, string[]>(
+      `SELECT COUNT(*) AS count FROM workflow_runs WHERE ${conditions.join(" AND ")}`,
+    )
+    .get(...params);
+  return row?.count ?? 0;
+}
+
+export function listWorkflowRunsPage(
+  workflowId: string,
+  options: Required<Pick<WorkflowRunListOptions, "limit" | "offset">> &
+    Pick<WorkflowRunListOptions, "status">,
+): WorkflowRunPage {
+  const runs = listWorkflowRuns(workflowId, options);
+  const total = countWorkflowRuns(workflowId, { status: options.status });
+  const nextOffset = options.offset + runs.length;
+  const hasMore = nextOffset < total;
+  return {
+    runs,
+    page: {
+      limit: options.limit,
+      offset: options.offset,
+      total,
+      hasMore,
+      ...(hasMore ? { nextOffset } : {}),
+    },
+  };
 }
 
 // ============================================================================

@@ -10,7 +10,7 @@ import {
 } from "./script-common";
 
 export const SCRIPT_RUN_DESCRIPTION =
-  "Run a named swarm-shared script (callable across agents and from workflow `swarm-script` nodes), OR inline source (auto-saved as scratch to the catalog). Use for swarm-visible, durable scripts. For local-only throwaway TS, use code-mode `run`.";
+  "Run a named swarm-shared script (callable across agents and from workflow `swarm-script` nodes), OR inline source (auto-saved as scratch to the catalog). Inline source executes without the `script-upsert` compile-time typecheck. Use for swarm-visible, durable scripts. For local-only throwaway TS, use code-mode `run`.";
 
 function renderRunOutput(data: unknown): string | undefined {
   if (typeof data !== "object" || data === null) return undefined;
@@ -58,7 +58,7 @@ export const registerScriptRunTool = (server: McpServer) => {
           .min(1)
           .optional()
           .describe(
-            "Inline TypeScript source to run. Must `export default async function (args, ctx)` — args FIRST, ctx second.",
+            'Inline TypeScript source to run without a compile-time typecheck. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" for promotion-safe typing.',
           ),
         args: z.unknown().optional().describe("JSON-serializable script arguments."),
         intent: z.string().default("").describe("Why this script is being run."),

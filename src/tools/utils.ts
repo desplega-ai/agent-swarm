@@ -189,13 +189,14 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
   },
 };
 
-// Cap for the auto-rendered data fallback in the text channel — Codex's
-// ~10KB middle-out truncation is the tightest harness budget.
-const DATA_FALLBACK_CAP = 8_000;
+// Cap for any rendered details string — Codex's ~10KB middle-out truncation is
+// the tightest harness budget. Structured data remains intact; only the
+// human/model-facing rendering is bounded.
+const DETAILS_CAP = 8_000;
 
 function truncateForText(text: string): string {
-  if (text.length <= DATA_FALLBACK_CAP) return text;
-  return `${text.slice(0, DATA_FALLBACK_CAP)}\n… [truncated ${text.length - DATA_FALLBACK_CAP} chars]`;
+  if (text.length <= DETAILS_CAP) return text;
+  return `${text.slice(0, DETAILS_CAP)}\n… [truncated ${text.length - DETAILS_CAP} chars]`;
 }
 
 type FinalizeContext = { toolName: string };
@@ -235,17 +236,22 @@ export function finalizeSwarmToolResult(toolName: string, result: SwarmToolResul
   }
   for (const middleware of FINALIZE_PIPELINE) r = middleware(r, { toolName });
 
+  // Normalize and cap explicit details only after the scrub middleware has
+  // removed secrets. The same bounded value feeds both wire channels.
+  // Whitespace-only details count as absent so data fallback remains visible.
+  const explicitDetails = r.details?.trim() ? truncateForText(r.details.trim()) : undefined;
+
   // Text-channel completeness guarantee: when a tool sets data but no details,
   // render the data as JSON into the text channel. Most harnesses only ever
   // show the model content.text — without this fallback, a data-only payload
   // would be invisible there. Not copied into structuredContent.details (the
   // structured channel already carries data verbatim).
   const dataFallback =
-    !r.details?.trim() && r.data && Object.keys(r.data).length > 0
+    !explicitDetails && r.data && Object.keys(r.data).length > 0
       ? truncateForText(JSON.stringify(r.data, null, 2))
       : undefined;
 
-  const text = [r.message, r.details ?? dataFallback, r.nudge]
+  const text = [r.message, explicitDetails ?? dataFallback, r.nudge]
     .filter((part): part is string => Boolean(part?.trim()))
     .join("\n\n");
   const structuredContent: Record<string, unknown> = {
@@ -253,7 +259,7 @@ export function finalizeSwarmToolResult(toolName: string, result: SwarmToolResul
     success: r.ok,
     message: r.message,
   };
-  if (r.details) structuredContent.details = r.details;
+  if (explicitDetails) structuredContent.details = explicitDetails;
   if (r.nudge) structuredContent.nudge = r.nudge;
 
   return {

@@ -220,8 +220,15 @@ describe("Session templates — individual resolution", () => {
     const result = resolveTemplate("system.agent.script_authoring_contract", {});
     expect(result.skipped).toBe(false);
     expect(result.text).toContain("`args` FIRST, `ctx` SECOND");
+    expect(result.text).toContain('import type { ScriptContext } from "swarm-sdk"');
     expect(result.text).toContain("export default async function (args");
+    expect(result.text).toContain("ctx: ScriptContext");
     expect(result.text).toContain("export const argsSchema");
+    expect(result.text).toContain(
+      "inline source passed to `script-run` executes without a compile-time typecheck",
+    );
+    expect(result.text).toContain("`script-upsert` typechecks before saving");
+    expect(result.text).toContain("`script-query-types`");
     expect(result.text).toContain("ctx.swarm.config");
     expect(result.text).toContain("ctx.api.<slug>");
     expect(result.text).toContain("ctx.stdlib");

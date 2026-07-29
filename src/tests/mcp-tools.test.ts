@@ -48,9 +48,9 @@ describe("script MCP tools", () => {
       "script-search":
         "Semantic search over swarm-shared TypeScript scripts (catalog persisted in the agent-swarm DB; callable from agents and workflows). For ephemeral throwaway TS on your local machine, use code-mode instead.",
       "script-run":
-        "Run a named swarm-shared script (callable across agents and from workflow `swarm-script` nodes), OR inline source (auto-saved as scratch to the catalog). Use for swarm-visible, durable scripts. For local-only throwaway TS, use code-mode `run`.",
+        "Run a named swarm-shared script (callable across agents and from workflow `swarm-script` nodes), OR inline source (auto-saved as scratch to the catalog). Inline source executes without the `script-upsert` compile-time typecheck. Use for swarm-visible, durable scripts. For local-only throwaway TS, use code-mode `run`.",
       "script-upsert":
-        "Persist a TypeScript script to the swarm catalog under your agent scope (or global if you're a lead). Other agents and workflow nodes will be able to find and run it. For local-only scripts, use code-mode `save`.",
+        'Typecheck and persist a TypeScript script to the swarm catalog under your agent scope (or global if you\'re a lead). Import `ScriptContext` from "swarm-sdk" for a real context type. Other agents and workflow nodes will be able to find and run it. For local-only scripts, use code-mode `save`.',
       "script-delete":
         "Remove a swarm-shared script from the catalog. Versions table preserves history.",
       "script-query-types":

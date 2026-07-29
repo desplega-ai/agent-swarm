@@ -11,6 +11,7 @@ import {
   getWorkflowVersion,
   getWorkflowVersions,
   listWorkflowRuns,
+  listWorkflowRunsPage,
   listWorkflows,
   updateWorkflow,
   withFavoriteFlags,
@@ -209,6 +210,8 @@ const listWorkflowRunsRoute = route({
   params: z.object({ id: z.string() }),
   query: z.object({
     status: WorkflowRunStatusSchema.optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+    offset: z.coerce.number().int().min(0).optional(),
   }),
   responses: {
     200: { description: "Workflow run list" },
@@ -754,11 +757,20 @@ export async function handleWorkflows(
   if (listWorkflowRunsRoute.match(req.method, pathSegments)) {
     const parsed = await listWorkflowRunsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    let runs = listWorkflowRuns(parsed.params.id);
-    // Apply optional status filter
-    if (parsed.query?.status) {
-      runs = runs.filter((r) => r.status === parsed.query.status);
+    const paginationRequested =
+      parsed.query?.limit !== undefined || parsed.query?.offset !== undefined;
+    if (paginationRequested) {
+      const page = listWorkflowRunsPage(parsed.params.id, {
+        status: parsed.query?.status,
+        limit: parsed.query?.limit ?? 20,
+        offset: parsed.query?.offset ?? 0,
+      });
+      json(res, page);
+      return true;
     }
+    // Preserve the pre-pagination response for the UI when limit/offset are
+    // omitted: a bare array containing every matching run.
+    const runs = listWorkflowRuns(parsed.params.id, { status: parsed.query?.status });
     json(res, runs);
     return true;
   }

@@ -11,12 +11,17 @@ import {
   closeDb,
   createWorkflowRun,
   createWorkflowRunStep,
+  getDb,
   getWorkflowVersions,
   initDb,
   updateWorkflowRun,
 } from "../be/db";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
+import {
+  listWorkflowRunsHandler,
+  listWorkflowRunsInputSchema,
+} from "../tools/workflows/list-workflow-runs";
 import type {
   Workflow,
   WorkflowDefinition,
@@ -548,6 +553,92 @@ describe("Workflow HTTP API v2", () => {
       for (const run of filteredRuns) {
         expect(run.status).toBe("waiting");
       }
+    });
+
+    test("supports deterministic limit/offset pages while preserving the omitted legacy shape", async () => {
+      const workflow = await createTestWorkflow();
+      const runIds = Array.from({ length: 5 }, () => crypto.randomUUID());
+      const statuses = ["running", "failed", "running", "failed", "running"] as const;
+
+      for (const [index, id] of runIds.entries()) {
+        createWorkflowRun({ id, workflowId: workflow.id });
+        getDb().run("UPDATE workflow_runs SET status = ?, startedAt = ? WHERE id = ?", [
+          statuses[index]!,
+          new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
+          id,
+        ]);
+      }
+
+      const legacyRes = await fetch(`${baseUrl}/api/workflows/${workflow.id}/runs`, { headers });
+      expect(legacyRes.status).toBe(200);
+      const legacyBody = (await legacyRes.json()) as WorkflowRun[];
+      expect(Array.isArray(legacyBody)).toBe(true);
+      expect(legacyBody.map((run) => run.id)).toEqual([...runIds].reverse());
+
+      const pageRes = await fetch(`${baseUrl}/api/workflows/${workflow.id}/runs?limit=2&offset=1`, {
+        headers,
+      });
+      expect(pageRes.status).toBe(200);
+      const pageBody = (await pageRes.json()) as {
+        runs: WorkflowRun[];
+        page: {
+          limit: number;
+          offset: number;
+          total: number;
+          hasMore: boolean;
+          nextOffset?: number;
+        };
+      };
+      expect(pageBody.runs.map((run) => run.id)).toEqual([runIds[3], runIds[2]]);
+      expect(pageBody.page).toEqual({
+        limit: 2,
+        offset: 1,
+        total: 5,
+        hasMore: true,
+        nextOffset: 3,
+      });
+
+      const filteredRes = await fetch(
+        `${baseUrl}/api/workflows/${workflow.id}/runs?status=failed&limit=1`,
+        { headers },
+      );
+      expect(filteredRes.status).toBe(200);
+      const filteredBody = (await filteredRes.json()) as {
+        runs: WorkflowRun[];
+        page: { total: number };
+      };
+      expect(filteredBody.runs.map((run) => run.id)).toEqual([runIds[3]]);
+      expect(filteredBody.page.total).toBe(2);
+
+      const invalidRes = await fetch(`${baseUrl}/api/workflows/${workflow.id}/runs?limit=101`, {
+        headers,
+      });
+      expect(invalidRes.status).toBe(400);
+    });
+
+    test("MCP run listing defaults to a bounded page and exposes page metadata", async () => {
+      const workflow = await createTestWorkflow();
+      const run = createWorkflowRun({ id: crypto.randomUUID(), workflowId: workflow.id });
+      const parsed = listWorkflowRunsInputSchema.parse({ workflowId: workflow.id });
+      expect(parsed.limit).toBe(20);
+      expect(parsed.offset).toBe(0);
+      expect(() =>
+        listWorkflowRunsInputSchema.parse({ workflowId: workflow.id, limit: 101 }),
+      ).toThrow();
+
+      const result = listWorkflowRunsHandler(parsed);
+      expect(result.ok).toBe(true);
+      const data = result.data as {
+        runs: WorkflowRun[];
+        page: { limit: number; offset: number; total: number; hasMore: boolean };
+      };
+      expect(data.runs.map((row) => row.id)).toEqual([run.id]);
+      expect(data.page).toEqual({
+        limit: 20,
+        offset: 0,
+        total: 1,
+        hasMore: false,
+      });
     });
   });
 

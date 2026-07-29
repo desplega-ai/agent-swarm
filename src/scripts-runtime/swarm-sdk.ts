@@ -270,10 +270,20 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
     case "workflow_listRuns": {
       const wfId = typeof body.workflowId === "string" ? body.workflowId : undefined;
       if (!wfId) throw new Error("workflow_listRuns requires string `workflowId`");
+      const limit = body.limit === undefined ? 20 : body.limit;
+      const offset = body.offset === undefined ? 0 : body.offset;
+      if (!Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 100) {
+        throw new Error("workflow_listRuns `limit` must be an integer between 1 and 100");
+      }
+      if (!Number.isInteger(offset) || (offset as number) < 0) {
+        throw new Error("workflow_listRuns `offset` must be a non-negative integer");
+      }
       return {
         method: "GET",
         path: appendQuery(`/api/workflows/${encodeURIComponent(wfId)}/runs`, {
           status: body.status,
+          limit,
+          offset,
         }),
       };
     }

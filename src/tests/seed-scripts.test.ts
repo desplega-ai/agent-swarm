@@ -14,6 +14,7 @@ import compoundInsights from "../be/seed-scripts/catalog/compound-insights";
 import opsCatalogAudit, {
   renderPage as renderOpsCatalogAuditPage,
 } from "../be/seed-scripts/catalog/ops-catalog-audit";
+import taskContextGathering from "../be/seed-scripts/catalog/task-context-gathering";
 import { extractScriptSignature } from "../scripts-runtime/extract-signature";
 import { validateScriptImports } from "../scripts-runtime/import-allowlist";
 
@@ -95,6 +96,48 @@ describe("seed-scripts catalog", () => {
       const sig = extractScriptSignature(s.source);
       expect(sig.description.length, `${s.name} is missing a JSDoc summary`).toBeGreaterThan(0);
     }
+  });
+
+  test("task-context-gathering unwraps the direct REST task response", async () => {
+    const taskId = "task-context-test";
+    const result = await taskContextGathering(
+      { taskId, queries: ["task context"] },
+      {
+        swarm: {
+          async task_get(args: { taskId: string }) {
+            expect(args.taskId).toBe(taskId);
+            return {
+              success: true,
+              status: 200,
+              data: {
+                id: taskId,
+                status: "in_progress",
+                task: "Restore the flattened task response consumer",
+                dependsOn: ["parent-task"],
+                agentId: "agent-test",
+              },
+            };
+          },
+          async memory_search() {
+            return { success: true, status: 200, data: { results: [] } };
+          },
+        },
+      },
+    );
+
+    expect(result.task).toEqual({
+      id: taskId,
+      status: "in_progress",
+      description: "Restore the flattened task response consumer",
+      dependsOn: ["parent-task"],
+      slackChannelId: undefined,
+      slackThreadTs: undefined,
+      createdAt: undefined,
+      finishedAt: undefined,
+      agentId: "agent-test",
+      output: undefined,
+      failureReason: undefined,
+    });
   });
 
   test("scriptsSeeder declares the script kind and one item per catalog entry", async () => {

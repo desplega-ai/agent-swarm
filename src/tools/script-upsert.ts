@@ -10,7 +10,7 @@ import {
 } from "./script-common";
 
 export const SCRIPT_UPSERT_DESCRIPTION =
-  "Persist a TypeScript script to the swarm catalog under your agent scope (or global if you're a lead). Other agents and workflow nodes will be able to find and run it. For local-only scripts, use code-mode `save`.";
+  'Typecheck and persist a TypeScript script to the swarm catalog under your agent scope (or global if you\'re a lead). Import `ScriptContext` from "swarm-sdk" for a real context type. Other agents and workflow nodes will be able to find and run it. For local-only scripts, use code-mode `save`.';
 
 export const registerScriptUpsertTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -25,7 +25,7 @@ export const registerScriptUpsertTool = (server: McpServer) => {
           .string()
           .min(1)
           .describe(
-            "TypeScript source. Must `export default async function (args, ctx)` — args FIRST, ctx second.",
+            'TypeScript source, typechecked before saving. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" to type `ctx`.',
           ),
         description: z.string().default("").describe("Human-readable script description."),
         intent: z.string().default("").describe("Why this script exists."),

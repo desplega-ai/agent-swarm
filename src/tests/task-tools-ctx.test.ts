@@ -74,6 +74,35 @@ describe("task tool ctx", () => {
     expect(data.tasks.every((task) => task.task?.startsWith("owned task"))).toBe(true);
   });
 
+  test("getTasksHandler renders compact escaped markdown without changing structured tasks", async () => {
+    const user = createUser({ name: "Markdown List User" });
+    const taskText = "triage | path\\one\nsecond line";
+    const task = createTaskExtended(taskText, { requestedByUserId: user.id });
+
+    const result = await getTasksHandler(userCtx(user), {
+      includeFull: true,
+      includeHeartbeat: true,
+      limit: 50,
+    });
+
+    expect(result.details).toContain("| ID | Status | Priority | Agent | Task |");
+    expect(result.details).toContain("triage \\| path\\\\one<br>second line");
+    expect(result.details).not.toContain('"tasks":');
+    const data = result.data as { tasks: Array<{ id: string; task?: string }> };
+    expect(data.tasks.find((row) => row.id === task.id)?.task).toBe(taskText);
+  });
+
+  test("getTasksHandler uses a human empty-state instead of a raw data fallback", async () => {
+    const user = createUser({ name: "Empty List User" });
+    const result = await getTasksHandler(userCtx(user), {
+      includeHeartbeat: true,
+      limit: 50,
+    });
+
+    expect(result.details).toBe("No tasks matched the current filters.");
+    expect((result.data as { tasks: unknown[] }).tasks).toEqual([]);
+  });
+
   test("assertOwnsTask gates user tasks and allows owned or owner ctx", () => {
     const owner = createUser({ name: "Task Owner" });
     const foreignUser = createUser({ name: "Foreign User" });

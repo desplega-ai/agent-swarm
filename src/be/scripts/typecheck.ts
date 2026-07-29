@@ -106,7 +106,7 @@ export interface SwarmSdk {
   // --- workflows ---
   workflow_list(args?: { enabled?: boolean; includeFull?: boolean; consecutiveErrorsMin?: number; lastRunStatus?: "running" | "waiting" | "completed" | "failed" | "skipped" | "cancelled" }): Promise<unknown>;
   workflow_get(args: { id: string }): Promise<unknown>;
-  workflow_listRuns(args: { workflowId: string; status?: "running" | "waiting" | "completed" | "failed" | "skipped" | "cancelled" }): Promise<unknown>;
+  workflow_listRuns(args: { workflowId: string; status?: "running" | "waiting" | "completed" | "failed" | "skipped" | "cancelled"; limit?: number; offset?: number }): Promise<unknown>;
   workflow_getRun(args: { id: string }): Promise<unknown>;
   // --- prompt templates ---
   prompt_list(args?: { eventType?: string; scope?: "global" | "agent" | "repo"; scopeId?: string; isDefault?: boolean }): Promise<unknown>;
@@ -299,6 +299,8 @@ export interface ScriptContext {
  * A swarm script's default export. \`args\` comes FIRST, \`ctx\` second — never swap them.
  *
  * @example
+ * import type { ScriptContext } from "swarm-sdk";
+ *
  * export default async function (args: { name: string }, ctx: ScriptContext) {
  *   await ctx.logger.log(\`hello \${args.name}\`);
  *   return { ok: true };
@@ -887,15 +889,17 @@ void _scriptMain;
 
   if (diagnostics.length === 0) return { ok: true };
 
-  const formatted = ts.formatDiagnosticsWithColorAndContext(diagnostics, {
+  const formatHost: ts.FormatDiagnosticsHost = {
     getCanonicalFileName: (fileName) => fileName,
     getCurrentDirectory: () => "/virtual",
     getNewLine: () => "\n",
-  });
+  };
 
   return {
     ok: false,
-    diagnostics: formatted.split("\n\n").filter(Boolean),
+    diagnostics: diagnostics.map((diagnostic) =>
+      ts.formatDiagnosticsWithColorAndContext([diagnostic], formatHost).trimEnd(),
+    ),
     structured: diagnostics.map(toStructured),
   };
 }

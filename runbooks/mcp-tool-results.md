@@ -30,7 +30,8 @@ Build one with `toolOk(message, extras?)` / `toolErr(message, extras?)` (`src/to
 
 1. **scrub** (`scrubMiddleware` → `scrubObject`) — runs first so every later stage only ever sees already-scrubbed data. Escape hatch: a result may set `allowSecretEgress: true` to skip scrubbing — ONLY for deliberate credential-reveal branches whose entire purpose is handing the agent a secret (`oauth-access-token`, `script-apis` create/rotate/list-includeSecrets, `get-config`/`list-config` with unmasked secrets). These tools register the revealed value via `registerVolatileSecret` so every *other* egress (logs, other tool results) still redacts it; without the flag the central scrubber would redact the reveal itself.
 2. **nudge** (`nudgeMiddleware`) — if the tool didn't set an explicit `nudge`, look up `NUDGES[toolName]?.(result)` and attach it if present. An explicit tool-provided nudge always wins over the central map.
-3. *(reserved)* future ctx-control middleware (response pruning, auto-KV overflow) slots in between nudge and the final transform — not implemented yet.
+3. **details normalization** — after middleware scrubbing, explicit `details` is trimmed and capped at ~8KB. The same normalized value is written to text and `structuredContent.details`; whitespace-only details counts as absent so the data fallback remains visible.
+4. *(reserved)* future ctx-control middleware (response pruning, auto-KV overflow) slots in between nudge and the final transform — not implemented yet.
 
 After the pipeline, the transform composes both channels from the same three fields:
 
@@ -40,7 +41,7 @@ structuredContent = { ...data, success: ok, message, details?, nudge? }
 isError = !ok
 ```
 
-**Text-channel completeness guarantee**: when a tool sets `data` but no `details`, the transform auto-renders the data as pretty-printed JSON into the text channel (capped at ~8KB — Codex's middle-out truncation is the tightest harness budget). A payload can therefore never be visible only to structured-content readers; an explicit `details` (curated rendering) always suppresses the fallback, and the fallback is *not* copied into `structuredContent.details` (the structured channel already carries `data` verbatim).
+**Text-channel completeness guarantee**: when a tool sets `data` but no non-blank `details`, the transform auto-renders the data as pretty-printed JSON into the text channel (capped at ~8KB — Codex's middle-out truncation is the tightest harness budget). A payload can therefore never be visible only to structured-content readers; an explicit `details` (curated rendering) always suppresses the fallback, and the fallback is *not* copied into `structuredContent.details` (the structured channel already carries `data` verbatim).
 
 An empty/blank `message` never reaches a harness silently: the registrar logs a warning and substitutes a loud fallback ("Tool call succeeded (no message provided)." / "Tool call failed (no message provided).") so the text channel is never blank.
 
@@ -98,9 +99,9 @@ The `nudgeMiddleware` stage applies `NUDGES[toolName]?.(result)` only when the t
 
 ## 7. Size budget
 
-Target **≤~10KB serialized** per tool result. Codex is the tightest real constraint: its ~10KB middle-out truncation (model-configurable ×1.2) operates on the JSON-string-encoded `structuredContent`, and truncating mid-JSON corrupts the payload rather than gracefully clipping text. `capDetails()` (`src/tools/script-common.ts`, `DETAILS_CAP = 16_000`) caps a single `details` string with a `[truncated N chars]` marker — apply the same discipline to any large `details`/`data` payload.
+Target **≤~10KB serialized** per tool result. Codex is the tightest real constraint: its ~10KB middle-out truncation (model-configurable ×1.2) operates on the JSON-string-encoded `structuredContent`, and truncating mid-JSON corrupts the payload rather than gracefully clipping text. The registrar centrally trims and caps every explicit `details` string at ~8KB with a `[truncated N chars]` marker in both channels. Structured `data` is not truncated, so high-cardinality tools must still paginate or slim that payload at the source.
 
-`message` goes first in the text join, so it survives even if a harness truncates from the tail. Large payloads beyond the budget are a future ctx-control middleware problem (auto-KV storage + a pointer appended to text) — not implemented yet; don't hand-roll pagination/truncation per tool beyond `capDetails`.
+`message` goes first in the text join, so it survives even if a harness truncates from the tail. Large payloads beyond the budget are a future ctx-control middleware problem (auto-KV storage + a pointer appended to text) — not implemented yet. Do not hand-roll `details` truncation per tool; paginate or slim large structured datasets at the source.
 
 Claude Code exposes a per-tool `anthropic/maxResultSizeChars` `_meta` annotation as an available (not yet used) lever for tools that are known to be chunky.
 

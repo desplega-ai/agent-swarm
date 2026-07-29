@@ -81,7 +81,7 @@ export default async function taskContextGathering(args: any, ctx: any) {
   memories.sort((a: any, b: any) => b.compositeScore - a.compositeScore);
 
   return {
-    task: slimTask(taskPayload?.task),
+    task: slimTask(taskPayload),
     requestedBy: taskPayload?.requestedBy,
     attachments: taskPayload?.attachments ?? [],
     queriesRun: queries.length,

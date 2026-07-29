@@ -79,6 +79,45 @@ export const getTasksOutputSchema = swarmToolOutputSchema({
 
 type GetTasksArgs = z.infer<typeof getTasksInputSchema>;
 
+const TASK_DETAILS_CELL_CAP = 180;
+
+function escapeMarkdownCell(value: unknown): string {
+  const text = String(value ?? "—");
+  const compact =
+    text.length > TASK_DETAILS_CELL_CAP ? `${text.slice(0, TASK_DETAILS_CELL_CAP - 1)}…` : text;
+  return compact
+    .replaceAll("\\", "\\\\")
+    .replaceAll("|", "\\|")
+    .replace(/\r\n|\r|\n/g, "<br>");
+}
+
+function renderTaskSummaries(
+  tasks: Array<{
+    id?: string;
+    agentId?: string | null;
+    task?: string;
+    taskPreview?: string;
+    status?: string;
+    priority?: number;
+  }>,
+): string {
+  if (tasks.length === 0) return "No tasks matched the current filters.";
+
+  const header = "| ID | Status | Priority | Agent | Task |";
+  const separator = "| --- | --- | ---: | --- | --- |";
+  const rows = tasks.map((task) => {
+    const cells = [
+      task.id,
+      task.status,
+      task.priority,
+      task.agentId,
+      task.taskPreview ?? task.task,
+    ].map(escapeMarkdownCell);
+    return `| ${cells.join(" | ")} |`;
+  });
+  return [header, separator, ...rows].join("\n");
+}
+
 export async function getTasksHandler(
   ctx: ToolCtx,
   {
@@ -163,7 +202,7 @@ export async function getTasksHandler(
   };
 
   return toolOk(`Found ${taskSummaries.length} task(s)${filterMsg}.`, {
-    details: JSON.stringify(data),
+    details: renderTaskSummaries(taskSummaries),
     data,
   });
 }

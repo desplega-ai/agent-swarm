@@ -586,7 +586,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `name` | `unknown` | No | - | Name of a reusable script to run. |
-| `source` | `string` | No | - | Inline TypeScript source to run. Must `export default async function (args, ctx)` — args FIRST, ctx second. |
+| `source` | `string` | No | - | Inline TypeScript source to run without a compile-time typecheck. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" for promotion-safe typing. |
 | `args` | `unknown` | No | - | JSON-serializable script arguments. |
 | `intent` | `string` | No | "" | Why this script is being run. |
 | `scope` | `unknown` | No | - | Optional scope for named script resolution. |
@@ -600,7 +600,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `name` | `unknown` | Yes | - | Stable script name within the selected scope. |
-| `source` | `string` | Yes | - | TypeScript source. Must `export default async function (args, ctx)` — args FIRST, ctx second. |
+| `source` | `string` | Yes | - | TypeScript source, typechecked before saving. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" to type `ctx`. |
 | `description` | `string` | No | "" | Human-readable script description. |
 | `intent` | `string` | No | "" | Why this script exists. |
 | `scope` | `unknown` | No | "agent" | Persist under agent or global scope. |
@@ -1244,12 +1244,14 @@ Manually trigger a workflow execution, optionally passing trigger data as contex
 
 **List Workflow Runs**
 
-List all execution runs for a given workflow, optionally filtered by status.
+List execution runs for a workflow with offset pagination (default 20, max 100), optionally filtered by status.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `workflowId` | `string` | Yes | - | Workflow ID to list runs for |
-| `status` | `running \| waiting \| completed \| failed \| skipped \| cancelled` | No | - | Filter by run status (running, waiting, completed, failed, skipped) |
+| `status` | `running \| waiting \| completed \| failed \| skipped \| cancelled` | No | - | Filter by run status (running, waiting, completed, failed, skipped, cancelled) |
+| `limit` | `number` | No | 20 | Runs per page (default: 20, max: 100) |
+| `offset` | `number` | No | 0 | Zero-based page offset |
 
 ### get-workflow-run
 

@@ -182,6 +182,8 @@ declare module "swarm-sdk" {
     workflow_listRuns(args: {
       workflowId: string;
       status?: "running" | "waiting" | "completed" | "failed" | "skipped" | "cancelled";
+      limit?: number;
+      offset?: number;
     }): Promise<unknown>;
     workflow_getRun(args: { id: string }): Promise<unknown>;
     // --- prompt templates ---
@@ -442,6 +444,8 @@ declare module "swarm-sdk" {
    * A swarm script's default export. `args` comes FIRST, `ctx` second — never swap them.
    *
    * @example
+   * import type { ScriptContext } from "swarm-sdk";
+   *
    * export default async function (args: { name: string }, ctx: ScriptContext) {
    *   await ctx.logger.log(`hello ${args.name}`);
    *   return { ok: true };

@@ -9,7 +9,7 @@ import {
   mcpToolNameForSdkMethod,
   SDK_ALLOWLIST,
 } from "../scripts-runtime/sdk-allowlist";
-import type { SwarmConfig } from "../scripts-runtime/swarm-config";
+import { SwarmConfig } from "../scripts-runtime/swarm-config";
 import { createSwarmSdk } from "../scripts-runtime/swarm-sdk";
 import { createServer } from "../server";
 
@@ -63,6 +63,39 @@ describe("script SDK allowlist", () => {
     await expect(sdk.join_swarm({})).rejects.toThrow(
       "Tool 'join_swarm' is not exposed to scripts (lifecycle/cred tool)",
     );
+  });
+
+  test("workflow_listRuns sends bounded pagination defaults and rejects an excessive limit", async () => {
+    let requestUrl: URL | undefined;
+    const httpServer = Bun.serve({
+      port: 0,
+      fetch(req) {
+        requestUrl = new URL(req.url);
+        return Response.json({ runs: [], page: { limit: 20, offset: 0, total: 0 } });
+      },
+    });
+    const config = new SwarmConfig({
+      system: {
+        apiKey: { value: "sdk-test-key", isSecret: true },
+        agentId: { value: "sdk-test-agent", isSecret: false },
+        mcpBaseUrl: { value: `http://127.0.0.1:${httpServer.port}`, isSecret: false },
+      },
+      user: {},
+    });
+    const sdk = createSwarmSdk(config);
+
+    try {
+      await sdk.workflow_listRuns({ workflowId: "workflow-1" });
+      expect(requestUrl?.pathname).toBe("/api/workflows/workflow-1/runs");
+      expect(requestUrl?.searchParams.get("limit")).toBe("20");
+      expect(requestUrl?.searchParams.get("offset")).toBe("0");
+
+      await expect(sdk.workflow_listRuns({ workflowId: "workflow-1", limit: 101 })).rejects.toThrow(
+        "between 1 and 100",
+      );
+    } finally {
+      httpServer.stop(true);
+    }
   });
 
   test("bundled swarm-sdk.d.ts exposes only allowlisted methods", async () => {

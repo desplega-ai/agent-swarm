@@ -214,6 +214,41 @@ describe("finalizeSwarmToolResult", () => {
     expect(text).toContain("[truncated");
   });
 
+  test("explicit details are normalized and capped identically in both channels", () => {
+    const blob = "x".repeat(50_000);
+    const result = finalizeSwarmToolResult("some-tool", {
+      ok: true,
+      message: "Big rendered payload.",
+      details: `  ${blob}  `,
+      data: { blob },
+    });
+    const text = (result.content?.[0] as { text: string }).text;
+    const structured = result.structuredContent as {
+      details?: string;
+      blob?: string;
+    };
+
+    expect(structured.details).toContain("[truncated");
+    expect(structured.details!.length).toBeLessThan(10_000);
+    expect(text).toBe(`Big rendered payload.\n\n${structured.details}`);
+    // Only the rendered details are bounded; callers using structured data
+    // still receive the complete payload.
+    expect(structured.blob).toBe(blob);
+  });
+
+  test("whitespace-only details fall back to a rendered data preview", () => {
+    const result = finalizeSwarmToolResult("some-tool", {
+      ok: true,
+      message: "Saved.",
+      details: " \n\t ",
+      data: { taskId: "t-whitespace" },
+    });
+    const text = (result.content?.[0] as { text: string }).text;
+
+    expect(text).toContain('"taskId": "t-whitespace"');
+    expect((result.structuredContent as { details?: string }).details).toBeUndefined();
+  });
+
   test("an explicit tool-provided nudge wins over the central map", () => {
     const result = finalizeSwarmToolResult("script-run", {
       ok: false,

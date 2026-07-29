@@ -123,6 +123,23 @@ describe("typecheckScript", () => {
     expect(d.message).toContain("number");
   });
 
+  test("returns exactly one formatted entry per compiler diagnostic", () => {
+    const result = typecheckScript(`
+      export default async () => {
+        const count: number = "one";
+        const enabled: boolean = 1;
+        return { count, enabled };
+      };
+    `);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+
+    expect(result.structured).toHaveLength(2);
+    expect(result.diagnostics).toHaveLength(result.structured.length);
+    expect(result.diagnostics[0]).toContain("Type 'string' is not assignable to type 'number'");
+    expect(result.diagnostics[1]).toContain("Type 'number' is not assignable to type 'boolean'");
+  });
+
   test("captures the offending identifier on TS2304 (Cannot find name)", () => {
     const result = typecheckScript(`
       export default async () => {
