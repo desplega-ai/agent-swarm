@@ -303,6 +303,12 @@ function mcpToolsToDefinitions(
         .map((c) => c.text ?? "")
         .filter(Boolean)
         .join("\n");
+      // Propagate MCP isError: pi-agent-core derives a tool result's error flag
+      // from whether execute() throws, so a resolved return would silently
+      // report failed tool calls as successes to the model.
+      if (result.isError) {
+        throw new Error(text || `Tool ${tool.name} failed with no error message`);
+      }
       return {
         content: [{ type: "text" as const, text: text || "(no output)" }],
         details: undefined,

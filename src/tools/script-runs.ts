@@ -13,6 +13,35 @@ export const GET_SCRIPT_RUN_DESCRIPTION =
 export const LIST_SCRIPT_RUNS_DESCRIPTION =
   "List durable script workflow runs, optionally filtered by status or agent ID.";
 
+function renderRunDetail(data: unknown): string | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
+  const run = (data as { run?: Record<string, unknown> }).run;
+  if (!run) return undefined;
+  const lines: string[] = [];
+  if (typeof run.status === "string") lines.push(`status: ${run.status}`);
+  if (typeof run.error === "string" && run.error) lines.push(`error: ${run.error}`);
+  if (run.output !== undefined && run.output !== null) {
+    lines.push(`output: ${JSON.stringify(run.output)}`);
+  }
+  const journal = (data as { journal?: unknown[] }).journal;
+  if (Array.isArray(journal)) lines.push(`journal entries: ${journal.length}`);
+  return lines.length > 0 ? lines.join("\n") : undefined;
+}
+
+function renderRunsList(data: unknown): string | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
+  const runs = (data as { runs?: unknown[] }).runs;
+  if (!Array.isArray(runs) || runs.length === 0) return undefined;
+  return runs
+    .map((entry) => {
+      const run = entry as Record<string, unknown>;
+      const name = typeof run.scriptName === "string" && run.scriptName ? ` ${run.scriptName}` : "";
+      const error = typeof run.error === "string" && run.error ? ` — ${run.error}` : "";
+      return `- ${String(run.id ?? "?")}${name}: ${String(run.status ?? "unknown")}${error}`;
+    })
+    .join("\n");
+}
+
 export const registerScriptRunsTools = (server: McpServer) => {
   const register = createToolRegistrar(server);
 
@@ -23,7 +52,12 @@ export const registerScriptRunsTools = (server: McpServer) => {
       description: LAUNCH_SCRIPT_RUN_DESCRIPTION,
       annotations: { openWorldHint: true },
       inputSchema: z.object({
-        source: z.string().min(1).describe("TypeScript script workflow source."),
+        source: z
+          .string()
+          .min(1)
+          .describe(
+            "TypeScript script workflow source. Must `export default async function (args, ctx)` — args FIRST, ctx second.",
+          ),
         args: z.unknown().optional().describe("JSON-serializable workflow arguments."),
         idempotencyKey: z
           .string()
@@ -83,6 +117,7 @@ export const registerScriptRunsTools = (server: McpServer) => {
               : "unknown";
           return `Script run ${id} status: ${status}.`;
         },
+        successDetails: renderRunDetail,
       }),
   );
 
@@ -117,6 +152,7 @@ export const registerScriptRunsTools = (server: McpServer) => {
               : 0;
           return `Found ${Number.isFinite(total) ? total : 0} script run(s).`;
         },
+        successDetails: renderRunsList,
       });
     },
   );
