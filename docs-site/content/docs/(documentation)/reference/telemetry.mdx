@@ -59,7 +59,7 @@ On first startup, the telemetry module checks `swarm_config` for a `telemetry_in
 
 Workers access the installation ID via HTTP (respecting the DB boundary invariant), while the API server reads it directly from the database.
 
-A `telemetry_installed_at` timestamp is minted alongside the installation ID the same way (and backfilled once, on first upgrade, for installs that predate this field) — it anchors "when this install came into being" independent of server restarts.
+A `telemetry_installed_at` timestamp is minted alongside the installation ID, but only when this process genuinely mints a **new** installation ID — it anchors "when this install came into being" independent of server restarts. An existing installation ID with no stored anchor (an install that predates this field) leaves it unset, and the field is omitted from events rather than back-filled with the current time; use `min(occurred_at)` per `installation_id` in ClickHouse as the real anchor for that population.
 
 ## How to opt out
 
