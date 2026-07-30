@@ -20,8 +20,8 @@ type SwarmToolResult<TData> = {
   truncation?: {       // registrar-owned overflow pointer; tools do not set this
     truncated: true;
     fullValueAt: string;
-    originalChars: number;
-    limitChars: number;
+    originalBytes: number;
+    limitBytes: number;
     retrieval: string;
   };
 };
@@ -37,16 +37,18 @@ Build one with `toolOk(message, extras?)` / `toolErr(message, extras?)` (`src/to
 
 1. **scrub** (`scrubMiddleware` → `scrubObject`) — runs first so every later stage only ever sees already-scrubbed data. Escape hatch: a result may set `allowSecretEgress: true` to skip scrubbing — ONLY for deliberate credential-reveal branches whose entire purpose is handing the agent a secret (`oauth-access-token`, `script-apis` create/rotate/list-includeSecrets, `get-config`/`list-config` with unmasked secrets). These tools register the revealed value via `registerVolatileSecret` so every *other* egress (logs, other tool results) still redacts it; without the flag the central scrubber would redact the reveal itself.
 2. **nudge** (`nudgeMiddleware`) — if the tool didn't set an explicit `nudge`, look up `NUDGES[toolName]?.(result)` and attach it if present. An explicit tool-provided nudge always wins over the central map.
-3. **ctx-control** (`ctxControlMiddleware`) — composes the full would-be wire result, measures `Buffer.byteLength(JSON.stringify(result), "utf8")` across `content`, `structuredContent`, and `isError` together, and passes results at or below 10,000 bytes through unchanged. Oversized results are persisted to the server-owned KV store and replaced before the final transform.
+3. **ctx-control** (`ctxControlMiddleware`) — composes the full would-be wire result, measures `Buffer.byteLength(JSON.stringify(result), "utf8")` across `content`, `structuredContent`, and `isError` together, and passes results at or below 10,000 bytes through unchanged. Oversized results are persisted to the server-owned KV store and replaced before the final transform. `kv-get` is exempt (`CTX_CONTROL_EXEMPT_TOOLS`): it is the retrieval path for spilled values, so its oversized results go out whole and the harness applies its own native truncation.
 4. **final transform** (`composeWireResult`) — trims explicit `details`, auto-renders data only when details is absent, and composes the independently usable text and structured channels.
 
 After the pipeline, the transform composes both channels from the same three fields:
 
 ```ts
-text = [message, details ?? autoRenderedData, nudge].filter(Boolean).join("\n\n")
+text = [message, nudge, details ?? autoRenderedData].filter(Boolean).join("\n\n")
 structuredContent = { ...data, success: ok, message, details?, nudge? }
 isError = !ok
 ```
+
+The payload rendering goes LAST in the text join: harnesses that truncate long text cut from the tail (or keep head+tail), so `message` and `nudge` lead and a cut lands inside the payload — a truncated JSON rendering still shows its first key values.
 
 **Text-channel completeness guarantee**: when a tool sets `data` but no non-blank `details`, the transform auto-renders the data as pretty-printed JSON into the text channel. A payload can therefore never be visible only to structured-content readers; an explicit `details` (curated rendering) always suppresses the fallback, and the fallback is *not* copied into `structuredContent.details` (the structured channel already carries `data` verbatim). If the resulting combined wire payload is too large, ctx-control replaces it on both channels as described below.
 
@@ -77,13 +79,13 @@ their private `mcp:overflow:<agentId>` partition.
 {
   truncated: true,
   fullValueAt: "kv://mcp:overflow:<agentId>/v1/<tool>/<sha256>",
-  originalChars: 12345,
-  limitChars: 10000,
-  retrieval: 'kv-get({"namespace":"mcp:overflow:<agentId>","key":"v1/<tool>/<sha256>","offset":0,"limit":512})'
+  originalBytes: 12345,
+  limitBytes: 10000,
+  retrieval: 'kv-get({"namespace":"mcp:overflow:<agentId>","key":"v1/<tool>/<sha256>"}) returns the full value (your harness may truncate it); to filter or aggregate it instead, process it in a script via ctx.swarm.kv_get.'
 }
 ```
 
-The literal retrieval call and compact JSON truncation metadata appear in both `content.text` and `structuredContent`. `kv-get` accepts `offset` plus `limit` (maximum 512 UTF-16 code units) for string values and returns `range: { offset, limit, returnedChars, totalChars, nextOffset, complete }`. The conservative ceiling keeps a multi-byte chunk duplicated across both wire channels below 10KB, so retrieval cannot recursively spill. Follow `nextOffset` until `complete`; concatenating the chunks reconstructs the exact stored string. This is also supported by the REST KV GET routes and `ctx.swarm.kv_get`, so scripts do not need a hand-rolled chunker.
+The retrieval guidance and compact JSON truncation metadata appear in both `content.text` and `structuredContent`. Retrieval is deliberately unbounded: `kv-get` is spill-exempt, so it returns the whole stored value in one call and the harness applies its own native truncation (there is no server-side chunking API — reassembling a big value in 10KB tool results would cost the model several times the payload in context). The `kv-get` entry in `NUDGES` steers big-value work toward scripts, where `ctx.swarm.kv_get` fetches the full value over REST into the sandbox and only the derived answer enters the model's context.
 
 An empty/blank `message` never reaches a harness silently: the registrar logs a warning and substitutes a loud fallback ("Tool call succeeded (no message provided)." / "Tool call failed (no message provided).") so the text channel is never blank.
 
@@ -143,7 +145,7 @@ The `nudgeMiddleware` stage applies `NUDGES[toolName]?.(result)` only when the t
 
 Target **≤10,000 UTF-8 bytes serialized** per tool result. Codex is the tightest real constraint: its ~10KB middle-out truncation (model-configurable ×1.2) operates on the JSON-string-encoded `structuredContent`, and truncating mid-JSON corrupts the payload rather than gracefully clipping text. Ctx-control measures the composed result rather than `details` alone, so duplicated text plus structured data is included in the decision.
 
-`message` goes first in the text join. Oversized results are replaced with a bounded preview/omission plus the same KV pointer and literal bounded retrieval call on **both** channels. Channel separation cannot save context here: pi/OpenCode/claude-managed drop structured content, while Codex drops text content; Claude Code varies by version. Do not hand-roll `details` truncation per tool—paginate/slim at the source when that is the natural contract, otherwise rely on the registrar.
+`message` and `nudge` go first in the text join; the payload rendering is last so a harness-side tail cut lands inside it. Oversized results are replaced with a bounded preview/omission plus the same KV pointer and retrieval guidance on **both** channels. Channel separation cannot save context here: pi/OpenCode/claude-managed drop structured content, while Codex drops text content; Claude Code varies by version. Do not hand-roll `details` truncation per tool—paginate/slim at the source when that is the natural contract, otherwise rely on the registrar.
 
 Claude Code exposes a per-tool `anthropic/maxResultSizeChars` `_meta` annotation as an available (not yet used) lever for tools that are known to be chunky.
 
@@ -155,7 +157,7 @@ Don't return MCP `resource_link` or embedded-resource content blocks. Codex hard
 
 `src/tests/swarm-tool-result-gate.test.ts` is the enforcement mechanism for this whole contract. Two parts:
 
-1. **Finalize-pipeline contract tests** — freeze `finalizeSwarmToolResult`'s behavior: ok/error shape, details+nudge composing identically into both channels, `structuredContent` always present, `data` unable to clobber the envelope, the empty-message fallback, secret scrubbing before spill, UTF-8 wire ceilings, prose-vs-JSON overflow rendering, details-only retention, bounded non-ASCII retrieval/reassembly, and `NUDGES` map behavior (including "explicit nudge wins").
+1. **Finalize-pipeline contract tests** — freeze `finalizeSwarmToolResult`'s behavior: ok/error shape, details+nudge composing identically into both channels, `structuredContent` always present, `data` unable to clobber the envelope, the empty-message fallback, secret scrubbing before spill, UTF-8 wire ceilings, prose-vs-JSON overflow rendering, details-only retention, non-ASCII KV round-trip fidelity, and `NUDGES` map behavior (including "explicit nudge wins").
 2. **Registered-tool output-schema audit** — boots a real server (`createServer({ fullSurface: true })`), walks every registered tool's `outputSchema` via the zod internal `_zod.def` shape, and fails the suite if any declared output schema:
    - pins a `string` format on an output field,
    - is a strict/non-loose object (missing `catchall`, i.e. not built via `z.looseObject` / `swarmToolOutputSchema`),

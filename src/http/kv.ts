@@ -5,7 +5,6 @@ import {
   deleteKv,
   getAgentById,
   getKv,
-  getKvValueRange,
   getTaskById,
   incrKv,
   KvTypeCollisionError,
@@ -15,14 +14,7 @@ import {
 import { mcpOverflowAuthError } from "../kv-overflow";
 import { can } from "../rbac";
 import { agentContextKey, pageContextKey } from "../tasks/context-key";
-import {
-  type KvEntry,
-  KvKeySchema,
-  KvNamespaceSchema,
-  type KvValueRange,
-  KvValueTypeSchema,
-  MAX_KV_VALUE_RANGE_CHARS,
-} from "../types";
+import { KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "../types";
 import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
 
@@ -76,11 +68,6 @@ const kvListQuerySchema = z.object({
   offset: z.coerce.number().int().nonnegative().optional(),
 });
 
-const kvGetQuerySchema = z.object({
-  offset: z.coerce.number().int().nonnegative().optional(),
-  limit: z.coerce.number().int().positive().max(MAX_KV_VALUE_RANGE_CHARS).optional(),
-});
-
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 const RESPONSES_GET = {
@@ -110,7 +97,6 @@ const getKvHeader = route({
   summary: "Get a KV entry by key (namespace resolved from request headers)",
   tags: ["KV"],
   params: z.object({ key: KvKeySchema }),
-  query: kvGetQuerySchema,
   responses: RESPONSES_GET,
 });
 
@@ -172,7 +158,6 @@ const getKvExplicit = route({
   summary: "Get a KV entry by explicit namespace + key",
   tags: ["KV"],
   params: z.object({ namespace: KvNamespaceSchema, key: KvKeySchema }),
-  query: kvGetQuerySchema,
   responses: RESPONSES_GET,
 });
 
@@ -463,7 +448,7 @@ export async function handleKv(
     if (!ns) return true;
     const key = decodeKvSegment(res, parsed.params.key, "key");
     if (!key) return true;
-    return sendGet(req, res, ns, key, parsed.query);
+    return sendGet(req, res, ns, key);
   }
   if (putKvExplicit.match(req.method, pathSegments)) {
     if (enforceContentLengthCap(req, res, MAX_KV_BODY_BYTES) === BODY_TOO_LARGE) return true;
@@ -503,7 +488,7 @@ export async function handleKv(
     }
     const key = decodeKvSegment(res, parsed.params.key, "key");
     if (!key) return true;
-    return sendGet(req, res, ns, key, parsed.query);
+    return sendGet(req, res, ns, key);
   }
   if (putKvHeader.match(req.method, pathSegments)) {
     if (enforceContentLengthCap(req, res, MAX_KV_BODY_BYTES) === BODY_TOO_LARGE) return true;
@@ -624,39 +609,18 @@ function sendGet(
   res: ServerResponse,
   namespace: string,
   key: string,
-  query: z.infer<typeof kvGetQuerySchema>,
 ): boolean {
   const authErr = authorizeRead(namespace, buildAuthCtx(req));
   if (authErr) {
     jsonError(res, authErr.message, authErr.status);
     return true;
   }
-  const wantsRange = query.offset !== undefined || query.limit !== undefined;
-  let entry: KvEntry | null;
-  let range: KvValueRange | undefined;
-  try {
-    if (wantsRange) {
-      const ranged = getKvValueRange(
-        namespace,
-        key,
-        query.offset ?? 0,
-        query.limit ?? MAX_KV_VALUE_RANGE_CHARS,
-      );
-      entry = ranged?.entry ?? null;
-      range = ranged?.range;
-    } else {
-      entry = getKv(namespace, key);
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "bounded read failed";
-    jsonError(res, message, 400);
-    return true;
-  }
+  const entry = getKv(namespace, key);
   if (!entry) {
     jsonError(res, "not found", 404);
     return true;
   }
-  json(res, range ? { ...entry, range } : entry);
+  json(res, entry);
   return true;
 }
 

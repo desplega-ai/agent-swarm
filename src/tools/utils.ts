@@ -17,7 +17,6 @@ import { sweepExpiredKvPrefix, upsertKv } from "../be/db";
 import { MCP_OVERFLOW_NAMESPACE, mcpOverflowNamespace } from "../kv-overflow";
 import { withSpan } from "../otel";
 import type { PermissionVerb } from "../rbac/permissions";
-import { MAX_KV_VALUE_RANGE_CHARS } from "../types";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 
 type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;
@@ -106,8 +105,8 @@ export type SwarmToolData = Record<string, unknown>;
 export type SwarmToolTruncation = {
   truncated: true;
   fullValueAt: string;
-  originalChars: number;
-  limitChars: number;
+  originalBytes: number;
+  limitBytes: number;
   retrieval: string;
 };
 
@@ -120,12 +119,6 @@ export type SwarmToolResult<TData extends SwarmToolData = SwarmToolData> = {
   details?: string;
   /** Structured payload, spread into structuredContent alongside the envelope keys. */
   data?: TData;
-  /**
-   * Structured-content path containing the authoritative full value when the
-   * model-facing rendering exceeds the text-channel ceiling. Internal hint
-   * only; the finalizer exposes it inside `structuredContent.truncation`.
-   */
-  fullValueAt?: string;
   /** Single-sentence conditional steer, appended to BOTH channels. */
   nudge?: string;
   /** Ctx-control metadata attached centrally when the full wire result is spilled. */
@@ -160,8 +153,8 @@ export const toolErr = <TData extends SwarmToolData = SwarmToolData>(
 const swarmToolTruncationSchema = z.looseObject({
   truncated: z.literal(true),
   fullValueAt: z.string(),
-  originalChars: z.number(),
-  limitChars: z.number(),
+  originalBytes: z.number(),
+  limitBytes: z.number(),
   retrieval: z.string(),
 });
 
@@ -215,6 +208,19 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
       ? "Rate memories that help or mislead you with memory_rate."
       : undefined;
   },
+  // kv-get is spill-exempt (retrieval path), so oversized values reach the
+  // harness whole and get natively truncated there. Steer big-value work
+  // toward scripts, where the full value stays out of the model's context.
+  "kv-get": (r) => {
+    if (!r.ok) return undefined;
+    const entry = (r.data as { entry?: { value?: unknown } | null } | undefined)?.entry;
+    if (!entry) return undefined;
+    const rendered =
+      typeof entry.value === "string" ? entry.value : (JSON.stringify(entry.value) ?? "");
+    return rendered.length > MCP_RESULT_WIRE_LIMIT_BYTES
+      ? "Large value — your harness may truncate this result; to filter or aggregate it, process it in a script via ctx.swarm.kv_get instead."
+      : undefined;
+  },
 };
 
 export const MCP_RESULT_WIRE_LIMIT_BYTES = 10_000;
@@ -252,7 +258,10 @@ function composeWireResult(r: SwarmToolResult): CallToolResult {
       ? JSON.stringify(r.data, null, 2)
       : undefined;
 
-  const text = [r.message, normalizedDetails ?? dataFallback, r.nudge]
+  // Payload LAST: harnesses truncate oversized text from the tail (or keep
+  // head+tail), so message and nudge lead and a cut lands inside the payload
+  // rendering — a truncated JSON prefix still shows its first key values.
+  const text = [r.message, r.nudge, normalizedDetails ?? dataFallback]
     .filter((part): part is string => Boolean(part?.trim()))
     .join("\n\n");
   const structuredContent: Record<string, unknown> = {
@@ -278,12 +287,11 @@ function overflowKey(toolName: string, value: string): string {
 }
 
 function overflowRetrieval(namespace: string, key: string): string {
-  return `kv-get(${JSON.stringify({
-    namespace,
-    key,
-    offset: 0,
-    limit: MAX_KV_VALUE_RANGE_CHARS,
-  })})`;
+  return (
+    `kv-get(${JSON.stringify({ namespace, key })}) returns the full value ` +
+    `(your harness may truncate it); to filter or aggregate it instead, ` +
+    `process it in a script via ctx.swarm.kv_get.`
+  );
 }
 
 function canonicalOverflowPayload(toolName: string, result: SwarmToolResult): string {
@@ -304,10 +312,22 @@ function canonicalOverflowPayload(toolName: string, result: SwarmToolResult): st
   });
 }
 
+/**
+ * Tools the spill middleware must never rewrite. kv-get IS the retrieval path
+ * for spilled values — bounding it would re-spill the read into a new pointer
+ * and the full value could never leave the store over MCP. Its oversized
+ * results go out whole; the harness applies its own truncation and the
+ * kv-get nudge steers big-value processing toward scripts.
+ */
+export const CTX_CONTROL_EXEMPT_TOOLS: ReadonlySet<string> = new Set(["kv-get"]);
+
 const ctxControlMiddleware: FinalizeMiddleware = (result, ctx) => {
+  if (CTX_CONTROL_EXEMPT_TOOLS.has(ctx.toolName)) return result;
+
   const fullWire = composeWireResult(result);
   const fullWireJson = JSON.stringify(fullWire);
-  if (Buffer.byteLength(fullWireJson, "utf8") <= MCP_RESULT_WIRE_LIMIT_BYTES) {
+  const fullWireBytes = Buffer.byteLength(fullWireJson, "utf8");
+  if (fullWireBytes <= MCP_RESULT_WIRE_LIMIT_BYTES) {
     return result;
   }
 
@@ -315,8 +335,8 @@ const ctxControlMiddleware: FinalizeMiddleware = (result, ctx) => {
     const truncation: SwarmToolTruncation = {
       truncated: true,
       fullValueAt: "unavailable: authenticated agent identity required",
-      originalChars: fullWireJson.length,
-      limitChars: MCP_RESULT_WIRE_LIMIT_BYTES,
+      originalBytes: fullWireBytes,
+      limitBytes: MCP_RESULT_WIRE_LIMIT_BYTES,
       retrieval: "Retry the tool with an authenticated X-Agent-ID to retain the full value.",
     };
     return {
@@ -353,8 +373,8 @@ const ctxControlMiddleware: FinalizeMiddleware = (result, ctx) => {
   const truncation: SwarmToolTruncation = {
     truncated: true,
     fullValueAt,
-    originalChars: fullWireJson.length,
-    limitChars: MCP_RESULT_WIRE_LIMIT_BYTES,
+    originalBytes: fullWireBytes,
+    limitBytes: MCP_RESULT_WIRE_LIMIT_BYTES,
     retrieval,
   };
   const pointer =

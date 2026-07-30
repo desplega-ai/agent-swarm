@@ -65,8 +65,8 @@ type StructuredResult<T> = {
     truncation?: {
       truncated: true;
       fullValueAt: string;
-      originalChars: number;
-      limitChars: number;
+      originalBytes: number;
+      limitBytes: number;
       retrieval: string;
     };
     status?: number;
@@ -302,10 +302,10 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(fullValueAt.startsWith(`kv://${overflowNamespace}/v1/script-run/`)).toBe(true);
     expect(run.structuredContent.truncation).toMatchObject({
       truncated: true,
-      limitChars: 10_000,
-      retrieval: expect.stringContaining('"limit":512'),
+      limitBytes: 10_000,
+      retrieval: expect.stringContaining("ctx.swarm.kv_get"),
     });
-    expect(run.structuredContent.truncation?.originalChars).toBeGreaterThan(blob.length);
+    expect(run.structuredContent.truncation?.originalBytes).toBeGreaterThan(blob.length);
     const afterBytes = Buffer.byteLength(JSON.stringify(run), "utf8");
     expect(afterBytes).toBeLessThanOrEqual(10_000);
     expect(text).toContain('result:\n{\n  "blob": "');

@@ -84,7 +84,6 @@ export const registerScriptRunTool = (server: McpServer) => {
         requestInfo,
         successMessage: () => "Script run completed.",
         successDetails: renderRunOutput,
-        fullValueAt: "structuredContent.data.result",
       }),
   );
 };

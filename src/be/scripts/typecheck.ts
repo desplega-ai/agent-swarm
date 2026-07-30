@@ -72,7 +72,7 @@ export interface SwarmSdk {
   task_storeProgress(args: Record<string, unknown>): Promise<unknown>;
   task_poll(args?: Record<string, unknown>): Promise<unknown>;
   // --- kv ---
-  kv_get(args: { key: string; namespace?: string; offset?: number; limit?: number }): Promise<unknown>;
+  kv_get(args: { key: string; namespace?: string }): Promise<unknown>;
   kv_set(args: { key: string; value: unknown; namespace?: string; ttlSeconds?: number; valueType?: "string" | "json" | "integer" }): Promise<unknown>;
   kv_del(args: { key: string; namespace?: string }): Promise<unknown>;
   kv_incr(args: { key: string; by?: number; namespace?: string }): Promise<unknown>;

@@ -118,10 +118,7 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
 
     // ── kv ──
     case "kv_get":
-      return {
-        method: "GET",
-        path: appendQuery(kvPath(body), { offset: body.offset, limit: body.limit }),
-      };
+      return { method: "GET", path: kvPath(body) };
     case "kv_set":
       return {
         method: "PUT",

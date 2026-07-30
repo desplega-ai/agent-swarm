@@ -44,7 +44,6 @@ import type {
   InboxMessageStatus,
   InputValue,
   KvEntry,
-  KvValueRange,
   KvValueType,
   McpServer,
   McpServerScope,
@@ -13656,41 +13655,6 @@ export function getKv(namespace: string, key: string): KvEntry | null {
     return null;
   }
   return decodeKvRow(row);
-}
-
-/**
- * Read a bounded character range from a string KV value. The returned entry
- * preserves the original metadata while replacing `value` with only the
- * requested chunk. Non-string values are rejected because slicing serialized
- * JSON would produce an ambiguous, usually invalid payload.
- */
-export function getKvValueRange(
-  namespace: string,
-  key: string,
-  offset: number,
-  limit: number,
-): { entry: KvEntry; range: KvValueRange } | null {
-  const entry = getKv(namespace, key);
-  if (!entry) return null;
-  if (entry.valueType !== "string" || typeof entry.value !== "string") {
-    throw new Error("bounded range reads require a string KV value");
-  }
-
-  const totalChars = entry.value.length;
-  const boundedOffset = Math.min(offset, totalChars);
-  const value = entry.value.slice(boundedOffset, boundedOffset + limit);
-  const nextOffset = boundedOffset + value.length;
-  return {
-    entry: { ...entry, value },
-    range: {
-      offset: boundedOffset,
-      limit,
-      returnedChars: value.length,
-      totalChars,
-      nextOffset: nextOffset < totalChars ? nextOffset : null,
-      complete: nextOffset >= totalChars,
-    },
-  };
 }
 
 /** Delete expired entries in one namespace. Used by internal TTL-backed stores

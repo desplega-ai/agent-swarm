@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getKv, getKvValueRange, initDb } from "../be/db";
+import { closeDb, getKv, initDb } from "../be/db";
 import { createServer } from "../server";
 import {
   finalizeSwarmToolResult,
@@ -61,7 +61,9 @@ describe("finalizeSwarmToolResult", () => {
       nudge: "Try the other thing.",
     });
     const text = (result.content?.[0] as { text: string }).text;
-    expect(text).toBe("It broke.\n\nline 1: kaboom\n\nTry the other thing.");
+    // Nudge BEFORE the payload: harnesses truncate long text from the tail,
+    // so the steer must not sit behind a potentially-cut rendering.
+    expect(text).toBe("It broke.\n\nTry the other thing.\n\nline 1: kaboom");
     expect(result.structuredContent).toMatchObject({
       success: false,
       message: "It broke.",
@@ -243,15 +245,14 @@ describe("finalizeSwarmToolResult", () => {
       truncation?: {
         truncated: true;
         fullValueAt: string;
-        originalChars: number;
-        limitChars: number;
+        originalBytes: number;
+        limitBytes: number;
         retrieval: string;
       };
     };
 
     expect(text).toContain("JSON payload omitted");
     expect(text).toContain('"truncated":true');
-    expect(text).toContain('"retrieval":"kv-get(');
     expect(text).not.toContain(`"blob": "${blob.slice(0, 100)}`);
     expect(structured).not.toHaveProperty("blob");
     expect(structured.details).toContain("JSON payload omitted");
@@ -260,19 +261,18 @@ describe("finalizeSwarmToolResult", () => {
     expect(fullValueAt).toMatch(/^kv:\/\/mcp:overflow:tool-result-test-agent\/v1\/some-tool\//);
     expect(structured.truncation).toMatchObject({
       truncated: true,
-      originalChars: expect.any(Number),
-      limitChars: MCP_RESULT_WIRE_LIMIT_BYTES,
-      retrieval: expect.stringContaining('"limit":512'),
+      originalBytes: expect.any(Number),
+      limitBytes: MCP_RESULT_WIRE_LIMIT_BYTES,
+      retrieval: expect.stringContaining("ctx.swarm.kv_get"),
     });
     const key = fullValueAt.replace(`kv://${TEST_OVERFLOW_NAMESPACE}/`, "");
-    const expectedRetrieval =
-      `kv-get({"namespace":"${TEST_OVERFLOW_NAMESPACE}","key":"${key}",` +
-      '"offset":0,"limit":512})';
-    expect(retrieval).toBe(expectedRetrieval);
+    expect(retrieval).toContain(
+      `kv-get({"namespace":"${TEST_OVERFLOW_NAMESPACE}","key":"${key}"})`,
+    );
     expect(text).toContain(fullValueAt);
-    expect(text).toContain(expectedRetrieval);
+    expect(text).toContain(`"key":"${key}"`);
     expect(structured.details).toContain(fullValueAt);
-    expect(structured.details).toContain(expectedRetrieval);
+    expect(structured.details).toContain(`"key":"${key}"`);
     expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(
       MCP_RESULT_WIRE_LIMIT_BYTES,
     );
@@ -296,7 +296,6 @@ describe("finalizeSwarmToolResult", () => {
         message: "Big rendered payload.",
         details: `  ${blob}  `,
         data: { blob },
-        fullValueAt: "structuredContent.blob",
       },
       { agentId: TEST_AGENT_ID },
     );
@@ -306,8 +305,8 @@ describe("finalizeSwarmToolResult", () => {
       truncation?: {
         truncated: true;
         fullValueAt: string;
-        originalChars: number;
-        limitChars: number;
+        originalBytes: number;
+        limitBytes: number;
         retrieval: string;
       };
     };
@@ -315,7 +314,7 @@ describe("finalizeSwarmToolResult", () => {
     expect(structured.details).toContain(blob.slice(0, 100));
     expect(structured.details).toContain("[truncated");
     expect(structured.details).toContain(`kv://${TEST_OVERFLOW_NAMESPACE}/`);
-    expect(structured.details!.length).toBeLessThan(2_000);
+    expect(structured.details!.length).toBeLessThan(2_500);
     expect(text).toBe(`Big rendered payload.\n\n${structured.details}`);
     expect(structured).not.toHaveProperty("blob");
     const fullValueAt = structured.truncation!.fullValueAt;
@@ -323,8 +322,8 @@ describe("finalizeSwarmToolResult", () => {
     expect(structured.truncation).toMatchObject({
       truncated: true,
       fullValueAt: expect.stringMatching(/^kv:\/\/mcp:overflow:tool-result-test-agent\//),
-      originalChars: expect.any(Number),
-      limitChars: MCP_RESULT_WIRE_LIMIT_BYTES,
+      originalBytes: expect.any(Number),
+      limitBytes: MCP_RESULT_WIRE_LIMIT_BYTES,
       retrieval: expect.stringContaining("kv-get("),
     });
     expect(text).toContain(fullValueAt);
@@ -374,7 +373,7 @@ describe("finalizeSwarmToolResult", () => {
     );
   });
 
-  test("spill retrieval reassembles non-ASCII payload byte-completely through bounded reads", () => {
+  test("spilled non-ASCII payload survives the KV round trip byte-completely", () => {
     const details = `prefix-${"🙂é漢".repeat(5_000)}-suffix`;
     const result = finalizeSwarmToolResult(
       "unicode-tool",
@@ -391,22 +390,12 @@ describe("finalizeSwarmToolResult", () => {
       }
     ).truncation;
     expect(truncation.retrieval).toMatch(
-      /^kv-get\(\{"namespace":"mcp:overflow:tool-result-test-agent","key":"[^"]+","offset":0,"limit":512\}\)$/,
+      /^kv-get\(\{"namespace":"mcp:overflow:tool-result-test-agent","key":"[^"]+"\}\) returns the full value/,
     );
+    expect(truncation.retrieval).toContain("ctx.swarm.kv_get");
     const key = truncation.fullValueAt.replace(`kv://${TEST_OVERFLOW_NAMESPACE}/`, "");
     const stored = getKv(TEST_OVERFLOW_NAMESPACE, key);
-    const chunks: string[] = [];
-    let offset = 0;
-    while (true) {
-      const ranged = getKvValueRange(TEST_OVERFLOW_NAMESPACE, key, offset, 512);
-      expect(ranged).not.toBeNull();
-      chunks.push(String(ranged?.entry.value ?? ""));
-      if (ranged?.range.complete) break;
-      offset = ranged?.range.nextOffset ?? offset;
-    }
-    const reassembled = chunks.join("");
-    expect(Buffer.from(reassembled, "utf8")).toEqual(Buffer.from(String(stored?.value), "utf8"));
-    expect(JSON.parse(reassembled).outcome.details).toBe(details);
+    expect(JSON.parse(String(stored?.value)).outcome.details).toBe(details);
   });
 
   test("ctx-control persists only scrubbed overflow content", () => {

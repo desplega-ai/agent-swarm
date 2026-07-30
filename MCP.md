@@ -1510,8 +1510,6 @@ Read a key from the swarm KV store. Returns the entry or null if missing/expired
 |-----------|------|----------|---------|-------------|
 | `key` | `unknown` | Yes | - | KV key (≤512 chars, [a-zA-Z0-9._:/-]). |
 | `namespace` | `unknown` | No | - | Optional explicit namespace. Defaults to the caller's contextKey. |
-| `offset` | `number` | No | - | Character offset for a bounded string-value read. Defaults to 0. |
-| `limit` | `number` | No | - | Maximum UTF-16 code units to return from a string value (≤512). Use with offset to retrieve large values safely. |
 
 ### kv-set
 

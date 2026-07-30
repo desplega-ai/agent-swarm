@@ -2626,25 +2626,6 @@ export const KvKeySchema = z
   .regex(KV_NAME_REGEX, "key must match [a-zA-Z0-9._:/%-]{1,512}");
 
 /**
- * Maximum UTF-16 code units returned by one bounded KV value read.
- *
- * A ranged MCP response renders the chunk in both text and structured
- * channels. 512 keeps even multi-byte text comfortably below the 10KB
- * composed-wire ceiling instead of recursively spilling the retrieval call.
- */
-export const MAX_KV_VALUE_RANGE_CHARS = 512;
-
-export const KvValueRangeSchema = z.looseObject({
-  offset: z.number().int().nonnegative(),
-  limit: z.number().int().positive().max(MAX_KV_VALUE_RANGE_CHARS),
-  returnedChars: z.number().int().nonnegative(),
-  totalChars: z.number().int().nonnegative(),
-  nextOffset: z.number().int().nonnegative().nullable(),
-  complete: z.boolean(),
-});
-export type KvValueRange = z.infer<typeof KvValueRangeSchema>;
-
-/**
  * A single KV row, as returned by the API. `value` is decoded per
  * `valueType`: `'json'` returns the parsed JS value, `'string'` returns the
  * raw string, `'integer'` returns a number.
