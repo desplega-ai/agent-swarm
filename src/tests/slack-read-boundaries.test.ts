@@ -8,6 +8,7 @@ import { runScript } from "../scripts-runtime/loader";
 import { mcpOverflowNamespace } from "../tools/utils";
 
 const TEST_DB_PATH = "./test-slack-read-boundaries.sqlite";
+const API_KEY = "test-slack-read-boundaries-key-1234567890";
 const AGENT_ID = "aaaaaaaa-0000-4000-8000-000000000001";
 const CHANNEL_ID = "C_BUSY_BOUNDARY";
 const FULL_MESSAGE_COUNT = 20;
@@ -55,8 +56,11 @@ async function removeDbFiles(): Promise<void> {
 describe("slack-read response boundaries", () => {
   let directTool: RegisteredTool;
   let handleMcpBridge: typeof import("../http/mcp-bridge").handleMcpBridge;
+  let savedApiKey: string | undefined;
 
   beforeAll(async () => {
+    savedApiKey = process.env.AGENT_SWARM_API_KEY;
+    process.env.AGENT_SWARM_API_KEY = API_KEY;
     await removeDbFiles();
     initDb(TEST_DB_PATH);
     createAgent({ id: AGENT_ID, name: "Boundary Lead", isLead: true, status: "idle" });
@@ -74,6 +78,8 @@ describe("slack-read response boundaries", () => {
   });
 
   afterAll(async () => {
+    if (savedApiKey === undefined) delete process.env.AGENT_SWARM_API_KEY;
+    else process.env.AGENT_SWARM_API_KEY = savedApiKey;
     closeDb();
     await removeDbFiles();
   });
