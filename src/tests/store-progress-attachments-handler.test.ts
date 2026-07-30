@@ -112,7 +112,7 @@ describe("store-progress handler — attachments insert path", () => {
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
+    startTask(task.id);
 
     const tool = buildServer();
     const result = (await tool.handler(
@@ -137,7 +137,7 @@ describe("store-progress handler — attachments insert path", () => {
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
+    startTask(task.id);
     const completed = completeTask(task.id, "done");
     expect(completed?.status).toBe("completed");
 
@@ -166,7 +166,7 @@ describe("store-progress handler — attachments insert path", () => {
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
+    startTask(task.id);
 
     const tool = buildServer();
     const result = (await tool.handler(
@@ -201,7 +201,7 @@ describe("store-progress handler — attachments insert path", () => {
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
+    startTask(task.id);
 
     const tool = buildServer();
     const result = (await tool.handler(
@@ -251,7 +251,7 @@ describe("store-progress handler — attachments insert path", () => {
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id, agentId);
+      startTask(task.id);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -306,7 +306,7 @@ describe("store-progress handler — attachments insert path", () => {
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id, agentId);
+      startTask(task.id);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -338,7 +338,7 @@ describe("store-progress handler — attachments insert path", () => {
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id, agentId);
+      startTask(task.id);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -380,7 +380,7 @@ describe("store-progress handler — attachments insert path", () => {
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id, agentId);
+      startTask(task.id);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -424,7 +424,7 @@ describe("store-progress handler — attachments insert path", () => {
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id, agentId);
+      startTask(task.id);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -461,7 +461,7 @@ describe("store-progress handler — attachments insert path", () => {
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
+    startTask(task.id);
     completeTask(task.id, "first");
 
     const tool = buildServer();
@@ -491,7 +491,7 @@ describe("store-progress handler — attachments insert path", () => {
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
+    startTask(task.id);
 
     const tool = buildServer();
     const result = (await tool.handler(
