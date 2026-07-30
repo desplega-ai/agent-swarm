@@ -61,6 +61,12 @@ type StructuredResult<T> = {
     message: string;
     details?: string;
     nudge?: string;
+    truncation?: {
+      truncated: true;
+      fullValueAt: string;
+      originalChars: number;
+      limitChars: number;
+    };
     status?: number;
     data?: T;
   };
@@ -273,6 +279,33 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(del.isError).toBeFalsy();
     expect(del.structuredContent.success).toBe(true);
     expect(del.structuredContent.data?.deleted).toBe(true);
+  });
+
+  test("oversized script result stays complete in structured data and is explicit on text", async () => {
+    const tools = buildToolServer();
+    const blob = "x".repeat(11_800);
+    const source = `export default async () => ({ blob: "${blob}" });`;
+
+    const run = (await tools.run.handler(
+      { source, intent: "oversized payload regression" },
+      meta(workerId),
+    )) as StructuredResult<{ result: { blob: string } }>;
+
+    const text = run.content[0]?.text ?? "";
+    expect(run.isError).toBeFalsy();
+    expect(run.structuredContent.success).toBe(true);
+    expect(run.structuredContent.data?.result.blob).toBe(blob);
+    expect(run.structuredContent.truncation).toMatchObject({
+      truncated: true,
+      fullValueAt: "structuredContent.data.result",
+      limitChars: 8_000,
+    });
+    expect(run.structuredContent.truncation?.originalChars).toBeGreaterThan(blob.length);
+    expect(text.length).toBeLessThan(1_000);
+    expect(text).toContain("Text-channel payload omitted");
+    expect(text).toContain("structuredContent.data.result");
+    expect(text).not.toContain(`result:\n${blob.slice(0, 100)}`);
+    expect(text).not.toContain("[truncated");
   });
 
   test("persists a successful inline run with kind 'inline' and no journal", async () => {

@@ -134,6 +134,8 @@ export async function proxyScriptsApi(args: {
    * journal holds the step errors).
    */
   failureDetails?: (data: unknown) => string | undefined;
+  /** Structured-content path containing the authoritative unrendered payload. */
+  fullValueAt?: string;
   /**
    * Skip the generic details cap. Only for payloads that are authoritative in
    * full (e.g. script-query-types' type blobs, which exceed the cap and have
@@ -174,6 +176,7 @@ export async function proxyScriptsApi(args: {
     return toolErr(failure.message, {
       details: failure.details ?? capDetails(args.failureDetails?.(data)),
       data: toolData,
+      fullValueAt: args.fullValueAt,
     });
   }
 
@@ -181,5 +184,6 @@ export async function proxyScriptsApi(args: {
   return toolOk(args.successMessage(data), {
     details: args.uncappedDetails ? successDetails : capDetails(successDetails),
     data: toolData,
+    fullValueAt: args.fullValueAt,
   });
 }

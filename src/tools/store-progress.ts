@@ -18,9 +18,8 @@ import { getRetrievalsForTask } from "@/be/memory/raters/retrieval";
 import { runServerRaters } from "@/be/memory/raters/run-server-raters";
 import { shouldPersistTaskCompletionMemory } from "@/memory/automatic-task-gate";
 import { createWorkerTaskFollowUp } from "@/tasks/worker-follow-up";
-import { looseAgentTaskOutputSchema } from "@/tools/get-task-details";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
-import { AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
+import { AgentTaskStatusSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
 import { validateJsonSchema } from "@/workflows/json-schema-validator";
 
 // Phase 11: the `cost` / `costData` field was removed from this tool's input
@@ -31,9 +30,16 @@ import { validateJsonSchema } from "@/workflows/json-schema-validator";
 // that double-counted alongside the harness's authoritative entry.
 
 export const storeProgressOutputSchema = swarmToolOutputSchema({
-  // Loose, output-only mirror of AgentTaskSchema (see get-task-details.ts) —
-  // no uuid()/datetime() pins so a write doesn't fail output validation.
-  task: looseAgentTaskOutputSchema.optional(),
+  // Bounded confirmation only. The handler keeps the full task row internally
+  // for completion memory, raters, and follow-up creation, but never echoes it
+  // across the MCP boundary.
+  task: z
+    .looseObject({
+      id: z.string(),
+      status: AgentTaskStatusSchema,
+      finishedAt: z.string().optional(),
+    })
+    .optional(),
   // Plain string, NOT .uuid(): agents may join with custom IDs (AGENT_ID env /
   // join-swarm agentId), and a UUID constraint here makes the response fail MCP
   // output validation after the handler already ran.
@@ -460,8 +466,19 @@ export const registerStoreProgressTool = (server: McpServer) => {
         }
       }
 
-      const { success, message, ...rest } = result;
-      const data = { yourAgentId: requestInfo.agentId, ...rest };
+      const { success, message } = result;
+      const task = result.task
+        ? {
+            id: result.task.id,
+            status: result.task.status,
+            ...(result.task.finishedAt ? { finishedAt: result.task.finishedAt } : {}),
+          }
+        : undefined;
+      const data = {
+        yourAgentId: requestInfo.agentId,
+        ...(task ? { task } : {}),
+        ...("wasNoOp" in result && result.wasNoOp ? { wasNoOp: true } : {}),
+      };
       return success ? toolOk(message, { data }) : toolErr(message, { data });
     },
   );

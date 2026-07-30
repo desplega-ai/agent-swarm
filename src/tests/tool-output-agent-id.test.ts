@@ -107,15 +107,21 @@ describe("agent-id fields accept non-UUID agent ids", () => {
     expect(parsed.task?.agentId).toBe(SLUG_AGENT_ID);
   });
 
-  test("store-progress output accepts a slug yourAgentId and embedded task", () => {
+  test("store-progress output accepts a slug yourAgentId and bounded task confirmation", () => {
     const parsed = storeProgressOutputSchema.parse({
       success: true,
       message: "Progress stored",
-      task: slugTask,
+      task: {
+        id: TASK_UUID,
+        status: "in_progress",
+      },
       yourAgentId: SLUG_AGENT_ID,
     });
     expect(parsed.yourAgentId).toBe(SLUG_AGENT_ID);
-    expect(parsed.task?.agentId).toBe(SLUG_AGENT_ID);
+    expect(parsed.task).toEqual({
+      id: TASK_UUID,
+      status: "in_progress",
+    });
   });
 
   test("memory-search output accepts a slug yourAgentId", () => {

@@ -109,6 +109,12 @@ export type SwarmToolResult<TData extends SwarmToolData = SwarmToolData> = {
   details?: string;
   /** Structured payload, spread into structuredContent alongside the envelope keys. */
   data?: TData;
+  /**
+   * Structured-content path containing the authoritative full value when the
+   * model-facing rendering exceeds the text-channel ceiling. Internal hint
+   * only; the finalizer exposes it inside `structuredContent.truncation`.
+   */
+  fullValueAt?: string;
   /** Single-sentence conditional steer, appended to BOTH channels. */
   nudge?: string;
   /**
@@ -138,11 +144,19 @@ export const toolErr = <TData extends SwarmToolData = SwarmToolData>(
  * client-side validators (opencode's official-SDK client) reject the spread
  * `data` keys after the write already landed.
  */
+const swarmToolTruncationSchema = z.looseObject({
+  truncated: z.literal(true),
+  fullValueAt: z.string(),
+  originalChars: z.number(),
+  limitChars: z.number(),
+});
+
 export const swarmToolEnvelopeShape = {
   success: z.boolean(),
   message: z.string(),
   details: z.string().optional(),
   nudge: z.string().optional(),
+  truncation: swarmToolTruncationSchema.optional(),
 };
 
 /** Build a permissive output schema: envelope + optional tool-specific data shape. */
@@ -194,9 +208,29 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
 // human/model-facing rendering is bounded.
 const DETAILS_CAP = 8_000;
 
-function truncateForText(text: string): string {
-  if (text.length <= DETAILS_CAP) return text;
-  return `${text.slice(0, DETAILS_CAP)}\n… [truncated ${text.length - DETAILS_CAP} chars]`;
+type TextRendering = {
+  text: string;
+  truncation?: {
+    truncated: true;
+    fullValueAt: string;
+    originalChars: number;
+    limitChars: number;
+  };
+};
+
+function renderForText(text: string, fullValueAt: string): TextRendering {
+  if (text.length <= DETAILS_CAP) return { text };
+  return {
+    text:
+      `Text-channel payload omitted: ${text.length} characters exceed the ` +
+      `${DETAILS_CAP}-character limit. Full value: ${fullValueAt}.`,
+    truncation: {
+      truncated: true,
+      fullValueAt,
+      originalChars: text.length,
+      limitChars: DETAILS_CAP,
+    },
+  };
 }
 
 type FinalizeContext = { toolName: string };
@@ -239,7 +273,11 @@ export function finalizeSwarmToolResult(toolName: string, result: SwarmToolResul
   // Normalize and cap explicit details only after the scrub middleware has
   // removed secrets. The same bounded value feeds both wire channels.
   // Whitespace-only details count as absent so data fallback remains visible.
-  const explicitDetails = r.details?.trim() ? truncateForText(r.details.trim()) : undefined;
+  const normalizedDetails = r.details?.trim() || undefined;
+  const defaultFullValueAt = r.data ? "structuredContent" : "not retained";
+  const explicitDetails = normalizedDetails
+    ? renderForText(normalizedDetails, r.fullValueAt ?? defaultFullValueAt)
+    : undefined;
 
   // Text-channel completeness guarantee: when a tool sets data but no details,
   // render the data as JSON into the text channel. Most harnesses only ever
@@ -248,10 +286,11 @@ export function finalizeSwarmToolResult(toolName: string, result: SwarmToolResul
   // structured channel already carries data verbatim).
   const dataFallback =
     !explicitDetails && r.data && Object.keys(r.data).length > 0
-      ? truncateForText(JSON.stringify(r.data, null, 2))
+      ? renderForText(JSON.stringify(r.data, null, 2), r.fullValueAt ?? "structuredContent")
       : undefined;
 
-  const text = [r.message, explicitDetails ?? dataFallback, r.nudge]
+  const renderedPayload = explicitDetails ?? dataFallback;
+  const text = [r.message, renderedPayload?.text, r.nudge]
     .filter((part): part is string => Boolean(part?.trim()))
     .join("\n\n");
   const structuredContent: Record<string, unknown> = {
@@ -259,8 +298,11 @@ export function finalizeSwarmToolResult(toolName: string, result: SwarmToolResul
     success: r.ok,
     message: r.message,
   };
-  if (explicitDetails) structuredContent.details = explicitDetails;
+  if (explicitDetails) structuredContent.details = explicitDetails.text;
   if (r.nudge) structuredContent.nudge = r.nudge;
+  if (renderedPayload?.truncation) {
+    structuredContent.truncation = renderedPayload.truncation;
+  }
 
   return {
     content: [{ type: "text", text }],

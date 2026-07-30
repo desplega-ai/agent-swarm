@@ -203,37 +203,69 @@ describe("finalizeSwarmToolResult", () => {
     expect(curatedText).not.toContain('"taskId"');
   });
 
-  test("auto-rendered data fallback is capped for the tightest harness budget", () => {
+  test("oversized data fallback becomes a complete omission notice with a structured pointer", () => {
+    const blob = "x".repeat(50_000);
     const result = finalizeSwarmToolResult("some-tool", {
       ok: true,
       message: "Big payload.",
-      data: { blob: "x".repeat(50_000) },
+      data: { blob },
     });
     const text = (result.content?.[0] as { text: string }).text;
-    expect(text.length).toBeLessThan(10_000);
-    expect(text).toContain("[truncated");
+    const structured = result.structuredContent as {
+      blob?: string;
+      truncation?: {
+        truncated: true;
+        fullValueAt: string;
+        originalChars: number;
+        limitChars: number;
+      };
+    };
+
+    expect(text.length).toBeLessThan(1_000);
+    expect(text).toContain("Text-channel payload omitted");
+    expect(text).not.toContain(`"blob": "${blob.slice(0, 100)}`);
+    expect(text).not.toContain("[truncated");
+    expect(structured.blob).toBe(blob);
+    expect(structured.truncation).toEqual({
+      truncated: true,
+      fullValueAt: "structuredContent",
+      originalChars: expect.any(Number),
+      limitChars: 8_000,
+    });
   });
 
-  test("explicit details are normalized and capped identically in both channels", () => {
+  test("oversized explicit details become a complete omission notice in both channels", () => {
     const blob = "x".repeat(50_000);
     const result = finalizeSwarmToolResult("some-tool", {
       ok: true,
       message: "Big rendered payload.",
       details: `  ${blob}  `,
       data: { blob },
+      fullValueAt: "structuredContent.blob",
     });
     const text = (result.content?.[0] as { text: string }).text;
     const structured = result.structuredContent as {
       details?: string;
       blob?: string;
+      truncation?: {
+        truncated: true;
+        fullValueAt: string;
+        originalChars: number;
+        limitChars: number;
+      };
     };
 
-    expect(structured.details).toContain("[truncated");
-    expect(structured.details!.length).toBeLessThan(10_000);
+    expect(structured.details).toContain("Text-channel payload omitted");
+    expect(structured.details).not.toContain(blob.slice(0, 100));
+    expect(structured.details!.length).toBeLessThan(1_000);
     expect(text).toBe(`Big rendered payload.\n\n${structured.details}`);
-    // Only the rendered details are bounded; callers using structured data
-    // still receive the complete payload.
     expect(structured.blob).toBe(blob);
+    expect(structured.truncation).toEqual({
+      truncated: true,
+      fullValueAt: "structuredContent.blob",
+      originalChars: blob.length,
+      limitChars: 8_000,
+    });
   });
 
   test("whitespace-only details fall back to a rendered data preview", () => {
