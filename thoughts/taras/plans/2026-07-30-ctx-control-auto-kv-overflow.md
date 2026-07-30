@@ -1,7 +1,10 @@
 ---
-status: completed
+status: in-progress
 owner: Picateclas
 task: e9f43c59-0be9-438b-a9cb-a4a97f5d2238
+follow_up_task: 05bef5e3-5e89-4fdf-962e-e434a420140c
+last_updated: 2026-07-30
+last_updated_by: Picateclas
 ---
 
 # Ctx-Control Auto-KV Overflow Implementation Plan
@@ -146,6 +149,84 @@ Ship updated runbooks and generated surfaces, complete repository checks, and op
 
 #### Automated QA:
 - [ ] PR body includes a before/after measurement and byte-complete retrieval result.
+
+#### Manual Verification:
+- [ ] Taras reviews and decides whether to merge.
+
+---
+
+## Phase 4: Script SDK Response-Boundary Follow-up
+
+### Overview
+
+Audit and complete the committed follow-up so the 10 KB context ceiling applies only at agent-facing boundaries, while in-sandbox SDK calls receive full results behind a separate loud 64 MiB memory guard.
+
+### Changes Required:
+
+#### 1. Origin-aware result finalization
+**File**: `src/tools/utils.ts`, `src/http/mcp-bridge.ts`, `src/scripts-runtime/swarm-sdk.ts`, `src/script-workflows/workflow-ctx.ts`
+**Changes**: Ensure script-runtime SDK dispatch bypasses context truncation by explicit call origin, without tool-name allowlists, and enforce the higher in-sandbox response guard.
+
+#### 2. In-place collection truncation
+**File**: `src/tools/utils.ts`
+**Changes**: Preserve oversized array keys with the largest non-empty fitting prefix, keep `data.truncation`, and reconcile human-readable counts with surviving elements.
+
+#### 3. Boundary regression tests and docs
+**File**: `src/tests/slack-read-boundaries.test.ts`, `src/tests/swarm-tool-result-gate.test.ts`, `src/tests/scripts-runtime.test.ts`, `src/tests/scripts-mcp-e2e.test.ts`, `runbooks/mcp-tool-results.md`, `CLAUDE.md`
+**Changes**: Cover complete in-sandbox reads, bounded direct reads, loud guard failure, per-agent overflow isolation, dead store-progress echo, and clean list/search surfaces.
+
+### Success Criteria:
+
+#### Automated Verification:
+- [x] Focused result-boundary and script-runtime tests pass.
+- [x] In-sandbox SDK responses remain complete below 64 MiB and fail loudly above it.
+- [x] Agent-facing overflow keeps a non-empty array, truncation metadata, and an accurate human-readable count.
+
+#### Automated QA:
+- [x] Commit diff uses explicit call origin rather than tool-name exceptions.
+- [x] Existing per-agent KV isolation and no-echo behavior remain covered.
+
+#### Manual Verification:
+- [ ] None.
+
+---
+
+## Phase 5: Live Acceptance, Repository Checks, and Review-Gated PR
+
+### Overview
+
+Exercise the behavior against the live service, run every repository PR check, push the branch, open the PR, and confirm CI without merging.
+
+### Changes Required:
+
+#### 1. Live boundary verification
+**File**: Live agent-swarm MCP and script runtime
+**Changes**: Compare `ctx.swarm.slack_read({limit:20})` with direct `slack-read` on the same busy channel, then sanity-check `task_list`, `memory_search`, per-agent overflow isolation, and store-progress echo behavior.
+
+#### 2. Full repository validation and PR
+**File**: GitHub PR
+**Changes**: Run all mandated checks, document the behavior-widening/bug-fix asymmetry and 64 MiB rationale, assign review, and leave merge to Taras.
+
+### Acceptance Evidence:
+
+- Deployed pre-fix baseline on task `05bef5e3-5e89-4fdf-962e-e434a420140c`: both the script SDK and direct `slack_read({ limit: 20 })` paths spill a 33,484-byte result but omit `messages`; `task_list` and `memory_search` remain clean.
+- Branch post-fix integration (`bun test src/tests/slack-read-boundaries.test.ts`): the real sandbox/MCP path returns all 20 requested messages to `ctx.swarm.slack_read`, while the direct agent-facing path stays below 10,000 bytes, keeps a non-empty message prefix, and preserves the per-agent overflow pointer.
+
+### Success Criteria:
+
+#### Automated Verification:
+- [x] `bun run lint`
+- [x] `bun run tsc:check`
+- [x] `bun test`
+- [x] `bash scripts/check-db-boundary.sh`
+- [x] `bun run check:dep-graph`
+- [x] `bun run check:rbac-coverage`
+- [ ] PR CI is green.
+
+#### Automated QA:
+- [x] Deployed pre-fix script SDK failure is measured; the branch's real sandbox/MCP integration returns all requested Slack messages.
+- [x] Deployed pre-fix direct failure is measured; the branch integration stays bounded and returns a non-empty truncated array plus overflow pointer.
+- [ ] PR body calls out behavior widening, bug fix, guard rationale, compatibility audit, and live measurements.
 
 #### Manual Verification:
 - [ ] Taras reviews and decides whether to merge.
