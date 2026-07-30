@@ -33,7 +33,11 @@ const apiKey = requiredEnv("AGENT_SWARM_API_KEY");
 const baseUrl = requiredEnv("MCP_BASE_URL").replace(/\/$/, "");
 const sourceFile = requiredEnv("SCRIPT_RUN_SOURCE_FILE");
 const argsFile = requiredEnv("SCRIPT_RUN_ARGS_FILE");
-const userModulePath = `${requiredEnv("SCRIPT_RUN_TMPDIR")}/user-script.ts`;
+// Subdirectory, not the tmpdir itself: the executor spawns this harness with
+// cwd = tmpdir, and Bun (>= 1.3.12) snapshots the cwd listing at startup — a
+// file written into cwd after launch is invisible to the module resolver. See
+// the same fix in src/scripts-runtime/eval-harness.ts.
+const userModulePath = `${requiredEnv("SCRIPT_RUN_TMPDIR")}/user-module/user-script.ts`;
 
 const heartbeat = setInterval(() => {
   fetch(`${baseUrl}/api/internal/script-runs/${runId}/heartbeat`, {

@@ -37,7 +37,11 @@ try {
   await createShims(tmpdir);
 
   const source = await Bun.file(sourceFile).text();
-  const userModulePath = `${tmpdir}/user-script.ts`;
+  // Subdirectory, not the tmpdir itself: this harness runs with cwd = tmpdir,
+  // and Bun (>= 1.3.12) snapshots the cwd listing at startup — a file written
+  // into cwd after launch is invisible to the module resolver. See the same
+  // fix in eval-harness.ts.
+  const userModulePath = `${tmpdir}/user-module/user-script.ts`;
   await Bun.write(userModulePath, source);
 
   let mod: Record<string, unknown>;
