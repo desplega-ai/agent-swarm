@@ -1,5 +1,6 @@
 import { scrubObject } from "../utils/secret-scrubber";
 import { Redacted } from "./redacted";
+import { readScriptSdkJsonResponse } from "./response-limit";
 import { isSdkToolAllowed, mcpToolNameForSdkMethod } from "./sdk-allowlist";
 import type { SwarmConfig } from "./swarm-config";
 
@@ -443,8 +444,7 @@ async function callBridgeApi(
       headers: headers(config),
       body: JSON.stringify({ tool: mcpToolName, args: args ?? {} }),
     });
-    const text = await res.text();
-    const data = text ? JSON.parse(text) : {};
+    const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);
     if (!res.ok && options.throwOnError) {
       const message =
         data && typeof data === "object" && "error" in data
@@ -460,8 +460,7 @@ async function callBridgeApi(
     headers: headers(config),
     body: request.body === undefined ? undefined : JSON.stringify(request.body),
   });
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : {};
+  const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);
   if (!res.ok && options.throwOnError) {
     const message =
       data && typeof data === "object" && "error" in data

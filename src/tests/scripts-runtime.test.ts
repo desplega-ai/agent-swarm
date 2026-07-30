@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createApiRegistryClient } from "../scripts-runtime/api-client";
 import { runScript } from "../scripts-runtime/loader";
+import {
+  readScriptSdkJsonResponse,
+  SCRIPT_SDK_RESPONSE_LIMIT_BYTES,
+} from "../scripts-runtime/response-limit";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 
 const savedEnv = { ...process.env };
@@ -27,6 +31,35 @@ afterEach(() => {
 });
 
 describe("runScript", () => {
+  test("script SDK accepts responses above the model-context ceiling", async () => {
+    const blob = "x".repeat(20_000);
+    const parsed = (await readScriptSdkJsonResponse(Response.json({ blob }), "ctx.swarm.test")) as {
+      blob: string;
+    };
+    expect(parsed.blob).toBe(blob);
+  });
+
+  test("script SDK hard guard throws loudly instead of truncating", async () => {
+    const response = new Response("{}", {
+      headers: { "content-length": String(SCRIPT_SDK_RESPONSE_LIMIT_BYTES + 1) },
+    });
+    await expect(readScriptSdkJsonResponse(response, "ctx.swarm.test")).rejects.toThrow(
+      /exceeded the .* hard limit/,
+    );
+
+    const streamed = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"blob":"0123456789"}'));
+          controller.close();
+        },
+      }),
+    );
+    await expect(readScriptSdkJsonResponse(streamed, "ctx.swarm.test", 10)).rejects.toThrow(
+      /ctx\.swarm\.test exceeded the 10-byte hard limit/,
+    );
+  });
+
   test("runs a trivial transform", async () => {
     const output = await runScript({
       agentId: "agent-1",

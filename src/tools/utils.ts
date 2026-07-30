@@ -21,11 +21,19 @@ import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 
 type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
+const scriptSdkRequestOrigins = new WeakSet<object>();
+
+export function markScriptSdkRequestOrigin<T extends object>(meta: T): T {
+  scriptSdkRequestOrigins.add(meta);
+  return meta;
+}
+
 export type RequestInfo = {
   sessionId: string | undefined;
   agentId: string | undefined;
   sourceTaskId: string | undefined;
   contextKey: string | undefined;
+  callOrigin: "mcp" | "script-sdk";
 };
 
 export const getRequestInfo = (req: Meta): RequestInfo => {
@@ -59,6 +67,7 @@ export const getRequestInfo = (req: Meta): RequestInfo => {
     agentId,
     sourceTaskId,
     contextKey,
+    callOrigin: scriptSdkRequestOrigins.has(req) ? "script-sdk" : "mcp",
   };
 };
 
@@ -228,7 +237,11 @@ export { MCP_OVERFLOW_NAMESPACE, mcpOverflowNamespace };
 export const MCP_OVERFLOW_TTL_MS = 24 * 60 * 60 * 1_000;
 const MCP_PROSE_PREVIEW_CHARS = 1_200;
 
-type FinalizeContext = { toolName: string; agentId: string | undefined };
+type FinalizeContext = {
+  toolName: string;
+  agentId: string | undefined;
+  callOrigin: RequestInfo["callOrigin"];
+};
 type FinalizeMiddleware = (result: SwarmToolResult, ctx: FinalizeContext) => SwarmToolResult;
 
 const scrubMiddleware: FinalizeMiddleware = (result) =>
@@ -321,7 +334,193 @@ function canonicalOverflowPayload(toolName: string, result: SwarmToolResult): st
  */
 export const CTX_CONTROL_EXEMPT_TOOLS: ReadonlySet<string> = new Set(["kv-get"]);
 
+type ArrayTarget = {
+  path: string;
+  parent: Record<string, unknown>;
+  key: string;
+  originalItems: unknown[];
+};
+
+function cloneResultData(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cloneResultData);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, child]) => [
+      key,
+      cloneResultData(child),
+    ]),
+  );
+}
+
+function collectArrayTargets(
+  value: unknown,
+  path: string,
+  targets: ArrayTarget[],
+  parent?: Record<string, unknown>,
+  key?: string,
+): void {
+  if (Array.isArray(value)) {
+    if (parent !== undefined && key !== undefined && value.length > 0) {
+      targets.push({ path, parent, key, originalItems: value.slice() });
+    }
+    // Treat array elements as atomic records. Truncating a parent array is
+    // clearer than independently truncating nested arrays in retained items.
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [childKey, child] of Object.entries(value as Record<string, unknown>)) {
+    collectArrayTargets(
+      child,
+      `${path}.${childKey}`,
+      targets,
+      value as Record<string, unknown>,
+      childKey,
+    );
+  }
+}
+
+function setArrayLength(target: ArrayTarget, length: number): void {
+  target.parent[target.key] = target.originalItems.slice(0, length);
+}
+
+function currentArrayLength(target: ArrayTarget): number {
+  const value = target.parent[target.key];
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function pruneBranchesWithoutArrays(value: unknown): boolean {
+  if (Array.isArray(value)) return true;
+  if (!value || typeof value !== "object") return false;
+
+  let containsArray = false;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (pruneBranchesWithoutArrays(child)) {
+      containsArray = true;
+    } else {
+      delete (value as Record<string, unknown>)[key];
+    }
+  }
+  return containsArray;
+}
+
+function arrayTruncationMessage(message: string, targets: ArrayTarget[]): string {
+  const truncatedTargets = targets.filter(
+    (target) => currentArrayLength(target) < target.originalItems.length,
+  );
+  if (truncatedTargets.length === 1) {
+    const [target] = truncatedTargets;
+    if (target) {
+      const kept = currentArrayLength(target);
+      const original = target.originalItems.length;
+      const originalCount = new RegExp(`\\b${original}\\b`);
+      if (originalCount.test(message)) {
+        const rewritten = message.replace(originalCount, String(kept)).replace(/\.\s*$/, "");
+        return `${rewritten} (truncated from ${original}; ${target.path} shortened in this bounded response).`;
+      }
+    }
+  }
+  const summaries = truncatedTargets.map(
+    (target) =>
+      `${currentArrayLength(target)} of ${target.originalItems.length} ${target.path} item(s)`,
+  );
+  if (summaries.length === 0) return message;
+  return `${message} Returned ${summaries.join(", ")} in this bounded response.`;
+}
+
+function arrayPreservingOverflowResult(
+  result: SwarmToolResult,
+  data: SwarmToolData,
+  targets: ArrayTarget[],
+  truncation: SwarmToolTruncation,
+  pointer: string,
+): SwarmToolResult {
+  const normalizedDetails = result.details?.trim() || undefined;
+  const details = normalizedDetails
+    ? `${normalizedDetails.slice(0, MCP_PROSE_PREVIEW_CHARS)}\n… [truncated ${Math.max(
+        normalizedDetails.length - MCP_PROSE_PREVIEW_CHARS,
+        0,
+      )} chars]\n${pointer}`
+    : `JSON payload truncated in place:\n${JSON.stringify(data, null, 2)}\n${pointer}`;
+  return {
+    ok: result.ok,
+    message: arrayTruncationMessage(result.message, targets),
+    details,
+    data,
+    nudge: result.nudge,
+    truncation,
+  };
+}
+
+/**
+ * Prefer a short, valid prefix for array-shaped data over deleting the data
+ * field wholesale. This prevents idiomatic `res.data.items ?? []` callers
+ * from silently interpreting overflow as a genuine empty result.
+ */
+function truncateArraysInPlace(
+  result: SwarmToolResult,
+  truncation: SwarmToolTruncation,
+  pointer: string,
+): SwarmToolResult | undefined {
+  if (!result.data) return undefined;
+  const data = cloneResultData(result.data) as SwarmToolData;
+  const targets: ArrayTarget[] = [];
+  collectArrayTargets(data, "data", targets);
+  if (targets.length === 0) return undefined;
+
+  targets.sort(
+    (a, b) =>
+      Buffer.byteLength(JSON.stringify(b.originalItems), "utf8") -
+      Buffer.byteLength(JSON.stringify(a.originalItems), "utf8"),
+  );
+
+  const render = () => arrayPreservingOverflowResult(result, data, targets, truncation, pointer);
+  const fits = () =>
+    Buffer.byteLength(JSON.stringify(composeWireResult(render())), "utf8") <=
+    MCP_RESULT_WIRE_LIMIT_BYTES;
+
+  for (const target of targets) {
+    setArrayLength(target, 0);
+    if (!fits()) continue;
+
+    let low = 0;
+    let high = target.originalItems.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      setArrayLength(target, mid);
+      if (fits()) low = mid;
+      else high = mid - 1;
+    }
+    setArrayLength(target, low);
+    return render();
+  }
+
+  if (fits()) return render();
+
+  // A large scalar sibling can keep the result oversized even after every
+  // array is emptied. Prefer dropping those non-array branches over dropping
+  // the array keys—the complete canonical result is already in overflow KV.
+  pruneBranchesWithoutArrays(data);
+  if (!fits()) return undefined;
+
+  for (const target of targets) {
+    let low = 0;
+    let high = target.originalItems.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      setArrayLength(target, mid);
+      if (fits()) low = mid;
+      else high = mid - 1;
+    }
+    setArrayLength(target, low);
+  }
+  return render();
+}
+
 const ctxControlMiddleware: FinalizeMiddleware = (result, ctx) => {
+  // Calls made through ctx.swarm.* execute inside a script sandbox, so their
+  // response never enters the model's context. The script SDK has a separate,
+  // much higher hard response limit to protect the sandbox heap.
+  if (ctx.callOrigin === "script-sdk") return result;
   if (CTX_CONTROL_EXEMPT_TOOLS.has(ctx.toolName)) return result;
 
   const fullWire = composeWireResult(result);
@@ -331,44 +530,32 @@ const ctxControlMiddleware: FinalizeMiddleware = (result, ctx) => {
     return result;
   }
 
-  if (!ctx.agentId) {
-    const truncation: SwarmToolTruncation = {
-      truncated: true,
-      fullValueAt: "unavailable: authenticated agent identity required",
-      originalBytes: fullWireBytes,
-      limitBytes: MCP_RESULT_WIRE_LIMIT_BYTES,
-      retrieval: "Retry the tool with an authenticated X-Agent-ID to retain the full value.",
-    };
-    return {
-      ok: result.ok,
-      message: result.message,
-      details:
-        `Result omitted because the composed result exceeded ${MCP_RESULT_WIRE_LIMIT_BYTES} bytes and no authenticated agent identity was available.\n` +
-        `Truncation: ${JSON.stringify(truncation)}`,
-      nudge: result.nudge,
-      truncation,
-    };
+  let fullValueAt: string;
+  let retrieval: string;
+  if (ctx.agentId) {
+    const storedValue = canonicalOverflowPayload(ctx.toolName, result);
+    const key = overflowKey(ctx.toolName, storedValue);
+    const namespace = mcpOverflowNamespace(ctx.agentId);
+    fullValueAt = `kv://${namespace}/${key}`;
+    retrieval = overflowRetrieval(namespace, key);
+    const expiresAt = Date.now() + MCP_OVERFLOW_TTL_MS;
+
+    // The public KV write surfaces cap values at 2 MiB, while the SQLite TEXT
+    // column and this direct server-side helper have no declared size limit.
+    // Sweep the whole per-agent namespace family so expired rows from inactive
+    // agents do not wait for their owner to spill again.
+    sweepExpiredKvPrefix(MCP_OVERFLOW_NAMESPACE);
+    upsertKv({
+      namespace,
+      key,
+      value: storedValue,
+      valueType: "string",
+      expiresAt,
+    });
+  } else {
+    fullValueAt = "unavailable: authenticated agent identity required";
+    retrieval = "Retry the tool with an authenticated X-Agent-ID to retain the full value.";
   }
-
-  const storedValue = canonicalOverflowPayload(ctx.toolName, result);
-  const key = overflowKey(ctx.toolName, storedValue);
-  const namespace = mcpOverflowNamespace(ctx.agentId);
-  const fullValueAt = `kv://${namespace}/${key}`;
-  const retrieval = overflowRetrieval(namespace, key);
-  const expiresAt = Date.now() + MCP_OVERFLOW_TTL_MS;
-
-  // The public KV write surfaces cap values at 2 MiB, while the SQLite TEXT
-  // column and this direct server-side helper have no declared size limit.
-  // Sweep the whole per-agent namespace family so expired rows from inactive
-  // agents do not wait for their owner to spill again.
-  sweepExpiredKvPrefix(MCP_OVERFLOW_NAMESPACE);
-  upsertKv({
-    namespace,
-    key,
-    value: storedValue,
-    valueType: "string",
-    expiresAt,
-  });
 
   const truncation: SwarmToolTruncation = {
     truncated: true,
@@ -380,6 +567,9 @@ const ctxControlMiddleware: FinalizeMiddleware = (result, ctx) => {
   const pointer =
     `Full value: ${fullValueAt}\nRetrieval: ${retrieval}\n` +
     `Truncation: ${JSON.stringify(truncation)}`;
+  const arrayPreservingResult = truncateArraysInPlace(result, truncation, pointer);
+  if (arrayPreservingResult) return arrayPreservingResult;
+
   const normalizedDetails = result.details?.trim() || undefined;
   const details = normalizedDetails
     ? `${normalizedDetails.slice(0, MCP_PROSE_PREVIEW_CHARS)}\n… [truncated ${Math.max(
@@ -415,7 +605,9 @@ const FINALIZE_PIPELINE: FinalizeMiddleware[] = [
 export function finalizeSwarmToolResult(
   toolName: string,
   result: SwarmToolResult,
-  requestInfo: Pick<RequestInfo, "agentId"> = { agentId: undefined },
+  requestInfo: Pick<RequestInfo, "agentId"> & Partial<Pick<RequestInfo, "callOrigin">> = {
+    agentId: undefined,
+  },
 ): CallToolResult {
   let r = result;
   if (!r.message?.trim()) {
@@ -428,7 +620,11 @@ export function finalizeSwarmToolResult(
     };
   }
   for (const middleware of FINALIZE_PIPELINE) {
-    r = middleware(r, { toolName, agentId: requestInfo.agentId });
+    r = middleware(r, {
+      toolName,
+      agentId: requestInfo.agentId,
+      callOrigin: requestInfo.callOrigin ?? "mcp",
+    });
   }
   return composeWireResult(r);
 }

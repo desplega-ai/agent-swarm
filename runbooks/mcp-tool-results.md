@@ -2,7 +2,7 @@
 
 > **Maintained doc — current logic only (no history).** This runbook is the canonical reference for the `SwarmToolResult` contract every MCP tool returns and the per-harness evidence behind it. Keep it in sync with the code: when you change any of this, update this file in the same PR (enforced by the CLAUDE.md rule). It documents *current* behavior — do not turn it into a changelog.
 
-Owner code: `src/tools/utils.ts` (contract + registrar finalize pipeline), `src/tools/script-common.ts` (`proxyScriptsApi` — the reference honest-failure-detection implementation), `src/providers/pi-mono-adapter.ts` (`mcpToolsToDefinitions` — the pi-side `isError` propagation), `src/tests/swarm-tool-result-gate.test.ts` (the validation gate).
+Owner code: `src/tools/utils.ts` (contract + registrar finalize pipeline), `src/http/mcp-bridge.ts` (server-authored script-call origin), `src/scripts-runtime/response-limit.ts` (script SDK hard response guard), `src/tools/script-common.ts` (`proxyScriptsApi` — the reference honest-failure-detection implementation), `src/providers/pi-mono-adapter.ts` (`mcpToolsToDefinitions` — the pi-side `isError` propagation), `src/tests/swarm-tool-result-gate.test.ts` (the validation gate).
 
 ---
 
@@ -37,7 +37,7 @@ Build one with `toolOk(message, extras?)` / `toolErr(message, extras?)` (`src/to
 
 1. **scrub** (`scrubMiddleware` → `scrubObject`) — runs first so every later stage only ever sees already-scrubbed data. Escape hatch: a result may set `allowSecretEgress: true` to skip scrubbing — ONLY for deliberate credential-reveal branches whose entire purpose is handing the agent a secret (`oauth-access-token`, `script-apis` create/rotate/list-includeSecrets, `get-config`/`list-config` with unmasked secrets). These tools register the revealed value via `registerVolatileSecret` so every *other* egress (logs, other tool results) still redacts it; without the flag the central scrubber would redact the reveal itself.
 2. **nudge** (`nudgeMiddleware`) — if the tool didn't set an explicit `nudge`, look up `NUDGES[toolName]?.(result)` and attach it if present. An explicit tool-provided nudge always wins over the central map.
-3. **ctx-control** (`ctxControlMiddleware`) — composes the full would-be wire result, measures `Buffer.byteLength(JSON.stringify(result), "utf8")` across `content`, `structuredContent`, and `isError` together, and passes results at or below 10,000 bytes through unchanged. Oversized results are persisted to the server-owned KV store and replaced before the final transform. `kv-get` is exempt (`CTX_CONTROL_EXEMPT_TOOLS`): it is the retrieval path for spilled values, so its oversized results go out whole and the harness applies its own native truncation.
+3. **ctx-control** (`ctxControlMiddleware`) — first checks the server-authored call origin. Calls made by `ctx.swarm.*` through `/api/mcp-bridge` are script-internal and skip the model-context ceiling. Agent-facing calls compose the full would-be wire result, measure `Buffer.byteLength(JSON.stringify(result), "utf8")` across `content`, `structuredContent`, and `isError` together, and pass results at or below 10,000 bytes through unchanged. Oversized agent-facing results are persisted to the server-owned KV store and replaced before the final transform. `kv-get` is exempt (`CTX_CONTROL_EXEMPT_TOOLS`): it is the retrieval path for spilled values, so its oversized results go out whole and the harness applies its own native truncation.
 4. **final transform** (`composeWireResult`) — trims explicit `details`, auto-renders data only when details is absent, and composes the independently usable text and structured channels.
 
 After the pipeline, the transform composes both channels from the same three fields:
@@ -66,7 +66,7 @@ Ctx-control stores the full canonical, scrubbed outcome directly through the API
   lazy-expiry behavior.
 - **Value:** raw string JSON containing `{ version, toolName, outcome }`, including full `details`/`data`/`nudge`. The KV table itself has no declared `TEXT` size constraint; the public KV PUT surfaces impose a separate 2 MiB request cap, which does not apply to this direct server-side write.
 
-The wire replacement keeps `message` and `nudge`, drops oversized structured data, and writes the same bounded `details` plus `truncation` to both channel families. Tool-authored prose keeps a readable prefix and marker. Auto-rendered JSON is omitted as a complete unit—returning a JSON prefix would be malformed and misleading. Details-only outcomes are persisted the same way as data outcomes, so `fullValueAt` can never become `"not retained"`.
+The wire replacement keeps `message`, `nudge`, and `truncation` on both channel families. For array-shaped structured data, ctx-control preserves the array key and finds the largest leading element prefix that fits after accounting for the pointer, prose preview, and both wire channels. It also rewrites or augments the human message with the surviving count, so callers cannot confuse a shortened array with a genuine full or empty result. Tool-authored prose keeps a readable prefix and marker. Scalar-only oversized JSON is still omitted as a complete unit—returning a scalar or malformed JSON prefix would be misleading. Details-only outcomes are persisted the same way as data outcomes, so `fullValueAt` can never become `"not retained"`.
 
 An oversized request without an authenticated agent identity is never written
 to a shared fallback namespace. It receives an explicit unavailable pointer and
@@ -85,7 +85,19 @@ their private `mcp:overflow:<agentId>` partition.
 }
 ```
 
-The retrieval guidance and compact JSON truncation metadata appear in both `content.text` and `structuredContent`. Retrieval is deliberately unbounded: `kv-get` is spill-exempt, so it returns the whole stored value in one call and the harness applies its own native truncation (there is no server-side chunking API — reassembling a big value in 10KB tool results would cost the model several times the payload in context). The `kv-get` entry in `NUDGES` steers big-value work toward scripts, where `ctx.swarm.kv_get` fetches the full value over REST into the sandbox and only the derived answer enters the model's context.
+The retrieval guidance and compact JSON truncation metadata appear in both `content.text` and `structuredContent`. Retrieval is deliberately unbounded at the model-facing `kv-get` tool: it returns the whole stored value and the harness applies its own native truncation (there is no server-side chunking API — reassembling a big value in 10KB tool results would cost the model several times the payload in context). The `kv-get` entry in `NUDGES` steers big-value work toward scripts, where `ctx.swarm.kv_get` fetches the full value into the sandbox and only the derived answer enters the model's context.
+
+### Script-internal SDK boundary
+
+The 10,000-byte ceiling protects model context, not the script sandbox heap. The bridge therefore marks its synthetic MCP request object in a server-private `WeakSet`; this origin cannot be selected through request headers or the bridge body. The registrar still scrubs secrets and applies nudges, but skips ctx-control for that internal call. REST-mapped SDK methods already bypass the registrar and remain full as well.
+
+Both script clients—inline/named scripts in `src/scripts-runtime/swarm-sdk.ts` and durable workflow scripts in `src/script-workflows/workflow-ctx.ts`—stream every response through `readScriptSdkJsonResponse`. It accepts up to 64 MiB and then cancels the body and throws a loud error; it never silently truncates or deletes a field. Sixty-four MiB is deliberately far above the model-context ceiling while leaving headroom inside the standard runtime's 512 MiB process limit for the UTF-16 string, parsed JSON graph, user code, and runtime overhead.
+
+The three boundaries are therefore intentionally asymmetric:
+
+1. Agent → MCP tool → model context: 10,000-byte ctx-control applies.
+2. `ctx.swarm.*` → script sandbox heap: full response up to the separate 64 MiB hard-error guard.
+3. Script return → `script-run` MCP tool → model context: 10,000-byte ctx-control applies again.
 
 An empty/blank `message` never reaches a harness silently: the registrar logs a warning and substitutes a loud fallback ("Tool call succeeded (no message provided)." / "Tool call failed (no message provided).") so the text channel is never blank.
 
@@ -143,7 +155,7 @@ The `nudgeMiddleware` stage applies `NUDGES[toolName]?.(result)` only when the t
 
 ## 7. Size budget
 
-Target **≤10,000 UTF-8 bytes serialized** per tool result. Codex is the tightest real constraint: its ~10KB middle-out truncation (model-configurable ×1.2) operates on the JSON-string-encoded `structuredContent`, and truncating mid-JSON corrupts the payload rather than gracefully clipping text. Ctx-control measures the composed result rather than `details` alone, so duplicated text plus structured data is included in the decision.
+Target **≤10,000 UTF-8 bytes serialized** per agent-facing tool result. Codex is the tightest real constraint: its ~10KB middle-out truncation (model-configurable ×1.2) operates on the JSON-string-encoded `structuredContent`, and truncating mid-JSON corrupts the payload rather than gracefully clipping text. Ctx-control measures the composed result rather than `details` alone, so duplicated text plus structured data is included in the decision. Script-internal SDK responses use the separate 64 MiB hard-error guard described above.
 
 `message` and `nudge` go first in the text join; the payload rendering is last so a harness-side tail cut lands inside it. Oversized results are replaced with a bounded preview/omission plus the same KV pointer and retrieval guidance on **both** channels. Channel separation cannot save context here: pi/OpenCode/claude-managed drop structured content, while Codex drops text content; Claude Code varies by version. Do not hand-roll `details` truncation per tool—paginate/slim at the source when that is the natural contract, otherwise rely on the registrar.
 
@@ -170,6 +182,8 @@ Run it with `bun run test:root -- src/tests/swarm-tool-result-gate.test.ts`. Any
 This runbook applies when modifying:
 
 - `src/tools/utils.ts` (the contract, registrar, finalize pipeline, `NUDGES` map)
+- `src/http/mcp-bridge.ts` (script-internal origin stamping)
+- `src/scripts-runtime/response-limit.ts`, `src/scripts-runtime/swarm-sdk.ts`, or `src/script-workflows/workflow-ctx.ts` (script-internal response guard)
 - `src/tools/script-common.ts` (`proxyScriptsApi` honest-failure detection, `capDetails`)
 - Any file under `src/tools/` that registers an MCP tool
 - `src/providers/pi-mono-adapter.ts`'s `mcpToolsToDefinitions` (isError propagation)

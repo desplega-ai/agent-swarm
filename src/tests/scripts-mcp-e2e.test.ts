@@ -340,6 +340,45 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(beforeBytes).toBeGreaterThan(10_000);
   });
 
+  test("oversized script-return arrays keep a shortened non-empty prefix", async () => {
+    const tools = buildToolServer();
+    const source = `
+      export default async () =>
+        Array.from({ length: 20 }, (_, index) => ({
+          index,
+          text: "x".repeat(900),
+        }));
+    `;
+
+    const run = (await tools.run.handler(
+      { source, intent: "oversized array boundary-three regression" },
+      meta(workerId),
+    )) as StructuredResult<{ result: Array<{ index: number; text: string }> }>;
+
+    const kept = run.structuredContent.data?.result ?? [];
+    expect(run.isError).toBeFalsy();
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept.length).toBeLessThan(20);
+    expect(kept.map((item) => item.index)).toEqual(
+      Array.from({ length: kept.length }, (_, index) => index),
+    );
+    expect(run.structuredContent.message).toContain(`Script run completed`);
+    expect(run.structuredContent.message).toContain(`${kept.length} of 20`);
+    expect(run.structuredContent.truncation).toBeDefined();
+    expect(Buffer.byteLength(JSON.stringify(run), "utf8")).toBeLessThanOrEqual(10_000);
+
+    const overflowNamespace = mcpOverflowNamespace(workerId);
+    const fullValueAt = run.structuredContent.truncation?.fullValueAt ?? "";
+    const key = fullValueAt.replace(`kv://${overflowNamespace}/`, "");
+    const stored = getKv(overflowNamespace, key);
+    const canonical = JSON.parse(String(stored?.value)) as {
+      outcome: {
+        data: { data: { result: Array<{ index: number; text: string }> } };
+      };
+    };
+    expect(canonical.outcome.data.data.result).toHaveLength(20);
+  });
+
   test("persists a successful inline run with kind 'inline' and no journal", async () => {
     const tools = buildToolServer();
     const source = `export default async (args: { value: number }) => ({ doubled: args.value * 2 });`;

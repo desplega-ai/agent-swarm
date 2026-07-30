@@ -1,3 +1,4 @@
+import { readScriptSdkJsonResponse } from "../scripts-runtime/response-limit";
 import { mcpToolNameForSdkMethod } from "../scripts-runtime/sdk-allowlist";
 import { stdlib } from "../scripts-runtime/stdlib";
 
@@ -70,11 +71,6 @@ function headers(apiKey: string, agentId: string): Record<string, string> {
   };
 }
 
-async function readJson(res: Response): Promise<unknown> {
-  const text = await res.text();
-  return text ? JSON.parse(text) : {};
-}
-
 function apiError(prefix: string, status: number, body: unknown): Error {
   const message =
     body && typeof body === "object" && "error" in body
@@ -98,7 +94,7 @@ export function buildWorkflowCtx(input: {
       ...init,
       headers: { ...authHeaders, ...((init.headers as Record<string, string>) ?? {}) },
     });
-    const body = await readJson(res);
+    const body = await readScriptSdkJsonResponse(res, path);
     if (!res.ok) throw apiError(path, res.status, body);
     return body;
   }
@@ -113,7 +109,10 @@ export function buildWorkflowCtx(input: {
       },
     );
     if (res.status === 404) return { found: false };
-    const body = (await readJson(res)) as StepStatusResponse;
+    const body = (await readScriptSdkJsonResponse(
+      res,
+      `script workflow step ${label}`,
+    )) as StepStatusResponse;
     if (!res.ok) throw apiError(`step ${label}`, res.status, body);
     return { found: true, result: "result" in body ? body.result : undefined };
   }
