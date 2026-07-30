@@ -13,7 +13,8 @@ import type {
   ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod";
-import { sweepExpiredKv, upsertKv } from "../be/db";
+import { sweepExpiredKvPrefix, upsertKv } from "../be/db";
+import { MCP_OVERFLOW_NAMESPACE, mcpOverflowNamespace } from "../kv-overflow";
 import { withSpan } from "../otel";
 import type { PermissionVerb } from "../rbac/permissions";
 import { MAX_KV_VALUE_RANGE_CHARS } from "../types";
@@ -217,11 +218,11 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
 };
 
 export const MCP_RESULT_WIRE_LIMIT_BYTES = 10_000;
-export const MCP_OVERFLOW_NAMESPACE = "mcp:overflow";
+export { MCP_OVERFLOW_NAMESPACE, mcpOverflowNamespace };
 export const MCP_OVERFLOW_TTL_MS = 24 * 60 * 60 * 1_000;
 const MCP_PROSE_PREVIEW_CHARS = 1_200;
 
-type FinalizeContext = { toolName: string };
+type FinalizeContext = { toolName: string; agentId: string | undefined };
 type FinalizeMiddleware = (result: SwarmToolResult, ctx: FinalizeContext) => SwarmToolResult;
 
 const scrubMiddleware: FinalizeMiddleware = (result) =>
@@ -310,19 +311,39 @@ const ctxControlMiddleware: FinalizeMiddleware = (result, ctx) => {
     return result;
   }
 
+  if (!ctx.agentId) {
+    const truncation: SwarmToolTruncation = {
+      truncated: true,
+      fullValueAt: "unavailable: authenticated agent identity required",
+      originalChars: fullWireJson.length,
+      limitChars: MCP_RESULT_WIRE_LIMIT_BYTES,
+      retrieval: "Retry the tool with an authenticated X-Agent-ID to retain the full value.",
+    };
+    return {
+      ok: result.ok,
+      message: result.message,
+      details:
+        `Result omitted because the composed result exceeded ${MCP_RESULT_WIRE_LIMIT_BYTES} bytes and no authenticated agent identity was available.\n` +
+        `Truncation: ${JSON.stringify(truncation)}`,
+      nudge: result.nudge,
+      truncation,
+    };
+  }
+
   const storedValue = canonicalOverflowPayload(ctx.toolName, result);
   const key = overflowKey(ctx.toolName, storedValue);
-  const fullValueAt = `kv://${MCP_OVERFLOW_NAMESPACE}/${key}`;
-  const retrieval = overflowRetrieval(MCP_OVERFLOW_NAMESPACE, key);
+  const namespace = mcpOverflowNamespace(ctx.agentId);
+  const fullValueAt = `kv://${namespace}/${key}`;
+  const retrieval = overflowRetrieval(namespace, key);
   const expiresAt = Date.now() + MCP_OVERFLOW_TTL_MS;
 
   // The public KV write surfaces cap values at 2 MiB, while the SQLite TEXT
   // column and this direct server-side helper have no declared size limit.
-  // Proactively sweep the dedicated namespace so 24h spill rows do not wait
-  // for a caller to point-read each expired key.
-  sweepExpiredKv(MCP_OVERFLOW_NAMESPACE);
+  // Sweep the whole per-agent namespace family so expired rows from inactive
+  // agents do not wait for their owner to spill again.
+  sweepExpiredKvPrefix(MCP_OVERFLOW_NAMESPACE);
   upsertKv({
-    namespace: MCP_OVERFLOW_NAMESPACE,
+    namespace,
     key,
     value: storedValue,
     valueType: "string",
@@ -371,7 +392,11 @@ const FINALIZE_PIPELINE: FinalizeMiddleware[] = [
  * structuredContent is ALWAYS present (opencode's SDK client throws when a
  * declared outputSchema has no structuredContent).
  */
-export function finalizeSwarmToolResult(toolName: string, result: SwarmToolResult): CallToolResult {
+export function finalizeSwarmToolResult(
+  toolName: string,
+  result: SwarmToolResult,
+  requestInfo: Pick<RequestInfo, "agentId"> = { agentId: undefined },
+): CallToolResult {
   let r = result;
   if (!r.message?.trim()) {
     console.warn(`[mcp] tool ${toolName} returned an empty message — every tool must summarize`);
@@ -382,7 +407,9 @@ export function finalizeSwarmToolResult(toolName: string, result: SwarmToolResul
         : "Tool call failed (no message provided).",
     };
   }
-  for (const middleware of FINALIZE_PIPELINE) r = middleware(r, { toolName });
+  for (const middleware of FINALIZE_PIPELINE) {
+    r = middleware(r, { toolName, agentId: requestInfo.agentId });
+  }
   return composeWireResult(r);
 }
 
@@ -457,7 +484,7 @@ export const createToolRegistrar = (server: McpServer) => {
                 meta: Meta,
               ) => SwarmToolResult | Promise<SwarmToolResult>
             )(requestInfo, meta);
-            const result = finalizeSwarmToolResult(name, outcome);
+            const result = finalizeSwarmToolResult(name, outcome, requestInfo);
             span.setAttributes(toolResultAttributes(result));
             return result;
           },
@@ -480,7 +507,7 @@ export const createToolRegistrar = (server: McpServer) => {
               meta: Meta,
             ) => SwarmToolResult | Promise<SwarmToolResult>
           )(args, requestInfo, meta);
-          const result = finalizeSwarmToolResult(name, outcome);
+          const result = finalizeSwarmToolResult(name, outcome, requestInfo);
           span.setAttributes(toolResultAttributes(result));
           return result;
         },

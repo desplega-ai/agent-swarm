@@ -15,6 +15,7 @@ import { registerScriptRunTool } from "../tools/script-run";
 import { registerScriptRunsTools } from "../tools/script-runs";
 import { registerScriptSearchTool } from "../tools/script-search";
 import { registerScriptUpsertTool } from "../tools/script-upsert";
+import { mcpOverflowNamespace } from "../tools/utils";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 
 import "../prompts/session-templates";
@@ -297,7 +298,8 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(run.structuredContent.success).toBe(true);
     expect(run.structuredContent.data).toBeUndefined();
     const fullValueAt = run.structuredContent.truncation?.fullValueAt ?? "";
-    expect(fullValueAt).toMatch(/^kv:\/\/mcp:overflow\/v1\/script-run\//);
+    const overflowNamespace = mcpOverflowNamespace(workerId);
+    expect(fullValueAt.startsWith(`kv://${overflowNamespace}/v1/script-run/`)).toBe(true);
     expect(run.structuredContent.truncation).toMatchObject({
       truncated: true,
       limitChars: 10_000,
@@ -308,10 +310,10 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(afterBytes).toBeLessThanOrEqual(10_000);
     expect(text).toContain('result:\n{\n  "blob": "');
     expect(text).toContain("[truncated");
-    expect(text).toContain("kv://mcp:overflow/");
+    expect(text).toContain(`kv://${overflowNamespace}/`);
 
-    const key = fullValueAt.replace("kv://mcp:overflow/", "");
-    const stored = getKv("mcp:overflow", key);
+    const key = fullValueAt.replace(`kv://${overflowNamespace}/`, "");
+    const stored = getKv(overflowNamespace, key);
     const canonical = JSON.parse(String(stored?.value)) as {
       outcome: {
         ok: boolean;

@@ -54,22 +54,32 @@ isError = !ok
 
 Ctx-control stores the full canonical, scrubbed outcome directly through the API server's DB helper—never by calling the MCP `kv-set` tool:
 
-- **Namespace:** `mcp:overflow`.
+- **Namespace:** `mcp:overflow:<agentId>`. Both MCP and REST KV surfaces enforce
+  ownership for this namespace family; another authenticated agent cannot get,
+  list, overwrite, increment, or delete an agent's spill rows.
 - **Key:** `v1/<sanitized-tool-name>/<sha256(canonical-payload)>`. Identical scrubbed outcomes reuse the same deterministic key and refresh its TTL.
-- **TTL:** 24 hours. The middleware proactively deletes expired rows in this namespace before every spill; point reads retain the KV store's normal lazy-expiry behavior.
+- **TTL:** 24 hours. Before every spill, the middleware proactively deletes
+  expired rows across the entire `mcp:overflow:*` namespace family, including
+  rows owned by inactive agents; point reads retain the KV store's normal
+  lazy-expiry behavior.
 - **Value:** raw string JSON containing `{ version, toolName, outcome }`, including full `details`/`data`/`nudge`. The KV table itself has no declared `TEXT` size constraint; the public KV PUT surfaces impose a separate 2 MiB request cap, which does not apply to this direct server-side write.
 
 The wire replacement keeps `message` and `nudge`, drops oversized structured data, and writes the same bounded `details` plus `truncation` to both channel families. Tool-authored prose keeps a readable prefix and marker. Auto-rendered JSON is omitted as a complete unit—returning a JSON prefix would be malformed and misleading. Details-only outcomes are persisted the same way as data outcomes, so `fullValueAt` can never become `"not retained"`.
+
+An oversized request without an authenticated agent identity is never written
+to a shared fallback namespace. It receives an explicit unavailable pointer and
+guidance to retry with `X-Agent-ID`; normal authenticated MCP calls always use
+their private `mcp:overflow:<agentId>` partition.
 
 `truncation` is machine-readable:
 
 ```ts
 {
   truncated: true,
-  fullValueAt: "kv://mcp:overflow/v1/<tool>/<sha256>",
+  fullValueAt: "kv://mcp:overflow:<agentId>/v1/<tool>/<sha256>",
   originalChars: 12345,
   limitChars: 10000,
-  retrieval: 'kv-get({"namespace":"mcp:overflow","key":"v1/<tool>/<sha256>","offset":0,"limit":512})'
+  retrieval: 'kv-get({"namespace":"mcp:overflow:<agentId>","key":"v1/<tool>/<sha256>","offset":0,"limit":512})'
 }
 ```
 

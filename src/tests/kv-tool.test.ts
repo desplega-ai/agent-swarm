@@ -22,6 +22,7 @@ import {
   registerKvListTool,
   registerKvSetTool,
 } from "../tools/kv";
+import { finalizeSwarmToolResult, mcpOverflowNamespace } from "../tools/utils";
 
 const TEST_DB_PATH = "./test-kv-tool.sqlite";
 
@@ -151,6 +152,52 @@ describe("kv MCP tools", () => {
     });
     expect(Buffer.byteLength(JSON.stringify(getRes), "utf8")).toBeLessThan(10_000);
     expect(getRes.structuredContent).not.toHaveProperty("truncation");
+  });
+
+  test("overflow retrieval hint round-trips for its owner and rejects another agent", async () => {
+    const tools = buildServer();
+    const blob = "private-result:".concat("x".repeat(30_000));
+    const spill = finalizeSwarmToolResult(
+      "private-tool",
+      { ok: true, message: "Large result.", data: { blob } },
+      { agentId: agentA },
+    );
+    const truncation = (
+      spill.structuredContent as {
+        truncation: { fullValueAt: string; retrieval: string };
+      }
+    ).truncation;
+    const namespace = mcpOverflowNamespace(agentA);
+    const key = truncation.fullValueAt.replace(`kv://${namespace}/`, "");
+
+    expect(truncation.retrieval).toContain(`"namespace":"${namespace}"`);
+    const ownerRead = (await tools.get.handler(
+      { key, namespace, offset: 0, limit: 512 },
+      meta(agentA),
+    )) as StructuredResult<{
+      success: boolean;
+      entry: { value: string };
+      range: { complete: boolean };
+    }>;
+    expect(ownerRead.structuredContent.success).toBe(true);
+    expect(ownerRead.structuredContent.entry.value).toContain('"private-result:');
+    expect(ownerRead.structuredContent.range.complete).toBe(false);
+
+    const intruderRead = (await tools.get.handler(
+      { key, namespace },
+      meta(agentB),
+    )) as StructuredResult<{ success: boolean; message: string; entry?: unknown }>;
+    expect(intruderRead.structuredContent.success).toBe(false);
+    expect(intruderRead.structuredContent.message).toMatch(/another agent/);
+    expect(intruderRead.structuredContent.entry).toBeUndefined();
+
+    const intruderList = (await tools.list.handler(
+      { namespace },
+      meta(agentB),
+    )) as StructuredResult<{ success: boolean; message: string; entries?: unknown[] }>;
+    expect(intruderList.structuredContent.success).toBe(false);
+    expect(intruderList.structuredContent.message).toMatch(/another agent/);
+    expect(intruderList.structuredContent.entries).toBeUndefined();
   });
 
   test("kv-incr creates + increments + reports value", async () => {

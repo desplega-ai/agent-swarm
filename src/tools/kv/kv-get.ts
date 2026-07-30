@@ -10,6 +10,7 @@ import {
   KvValueTypeSchema,
   MAX_KV_VALUE_RANGE_CHARS,
 } from "@/types";
+import { kvReadAuthError } from "./kv-read-auth";
 import { resolveNamespace } from "./resolve-namespace";
 
 // Loose, format-pin-free mirror of KvEntrySchema for MCP output validation.
@@ -75,6 +76,12 @@ export const registerKvGetTool = (server: McpServer) => {
       const resolved = resolveNamespace(namespace, requestInfo);
       if ("error" in resolved) {
         return toolErr(resolved.error, { data: { yourAgentId: requestInfo.agentId } });
+      }
+      const authErr = kvReadAuthError(resolved.namespace, { agentId: requestInfo.agentId });
+      if (authErr) {
+        return toolErr(authErr, {
+          data: { yourAgentId: requestInfo.agentId, namespace: resolved.namespace },
+        });
       }
 
       const wantsRange = offset !== undefined || limit !== undefined;

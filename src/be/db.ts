@@ -13707,6 +13707,22 @@ export function sweepExpiredKv(namespace: string, now = Date.now()): number {
   return result.changes;
 }
 
+/** Delete expired entries across a namespace family (`prefix` and
+ * `prefix:*`). Used by per-agent internal stores whose inactive owners may
+ * never return to trigger a namespace-local sweep. */
+export function sweepExpiredKvPrefix(prefix: string, now = Date.now()): number {
+  const escaped = prefix.replace(/[\\%_]/g, "\\$&");
+  const result = getDb()
+    .prepare<unknown, [string, string, number]>(
+      `DELETE FROM kv_entries
+        WHERE (namespace = ? OR namespace LIKE ? ESCAPE '\\')
+          AND expires_at IS NOT NULL
+          AND expires_at <= ?`,
+    )
+    .run(prefix, `${escaped}:%`, now);
+  return result.changes;
+}
+
 /**
  * Upsert a KV entry. Caller passes the decoded value + valueType; we encode
  * before storing. `expiresAt` is unix-ms (NULL means no expiry).
