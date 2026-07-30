@@ -20,7 +20,9 @@ if [[ "$test_status" -ne 0 ]]; then
 
   if [[ -n "$error_count" && "$error_count" -gt 0 ]]; then
     message="Bun reported ${error_count} unhandled error(s) outside normal test failures (${fail_count:-unknown} fail). Search this step for '# Unhandled error between tests'."
-    echo "::error title=Bun unhandled test error::${message}"
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+      echo "::error title=Bun unhandled test error::${message}"
+    fi
 
     if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
       {

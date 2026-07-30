@@ -198,7 +198,7 @@ jobs:
         # apps/evals/ is excluded from the root run via bunfig.toml pathIgnorePatterns
         # (it's a separate bun package with its own deps + its own CI test step in
         # the lint-and-typecheck job).
-        run: bash scripts/run-bun-tests-ci.sh
+        run: bun run test:root
 
   pi-skills-freshness:
     name: Pi-Skills Freshness Check

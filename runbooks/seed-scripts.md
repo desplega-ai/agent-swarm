@@ -85,8 +85,8 @@ typecheck → signature + argsSchema extraction → upsert at `global` scope).
 2. Text-import it in `src/be/seed-scripts/index.ts` and add a `SEED_SCRIPTS`
    manifest entry. Write a keyword-rich `description` + `intent` — they power
    `script-search` ranking.
-3. `bun test src/tests/seed-scripts.test.ts` typechecks every catalog script and
-   verifies seeding + versioning. `bun test src/tests/seed.test.ts` covers the
+3. `bun run test:root -- src/tests/seed-scripts.test.ts` typechecks every catalog script and
+   verifies seeding + versioning. `bun run test:root -- src/tests/seed.test.ts` covers the
    generic harness.
 
 ## Adding a new seedable kind

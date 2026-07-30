@@ -23,7 +23,7 @@ CI detects what changed and runs the matching jobs:
 | Job | Local equivalent | Common failure |
 |---|---|---|
 | **Lint and Type Check** | `bun run lint && bun run tsc:check && bash scripts/check-db-boundary.sh && bash scripts/check-rbac-boundary.sh && bun run check:dep-graph` | Worker code imported `bun:sqlite` or `src/be/db` — DB boundary violation (grep + dependency-cruiser graph rules); or an inline `isLead` authz check in `src/tools/`/`src/http/` — RBAC boundary violation (use `can()` from `src/rbac/`) |
-| **Run Tests** | `bun test` | New test or test that depends on undocumented setup |
+| **Run Tests** | `bun run test:root` | New test or test that depends on undocumented setup |
 | **Pi-Skills Freshness** | `bun run build:pi-skills` (must produce zero diff in `plugin/pi-skills/`) | Edited `plugin/commands/*.md` without rebuilding |
 | **Script SDK Types Freshness** | `bun run check:script-types` (regenerates `src/scripts-runtime/types/*.d.ts`, must produce zero diff) | Edited `src/be/scripts/typecheck.ts` (the source of truth) without `bun run build:script-types`, or edited the generated `.d.ts` files directly (never do that) |
 | **OpenAPI Spec Freshness** | `bun run docs:openapi` (must produce zero diff in `openapi.json` AND `docs-site/content/docs/api-reference/`) | Edited an HTTP route or bumped `package.json` `version` without regenerating |
@@ -49,7 +49,7 @@ Run this from the repo root before every push. It mirrors merge-gate exactly for
 bun install --frozen-lockfile
 bun run lint            # NOT lint:fix — CI fails on warnings, not just errors
 bun run tsc:check
-bun test
+bun run test:root
 bash scripts/check-db-boundary.sh
 bash scripts/check-rbac-boundary.sh
 bun run check:rbac-coverage

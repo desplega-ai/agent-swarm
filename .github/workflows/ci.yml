@@ -67,4 +67,4 @@ jobs:
       - name: Run tests
         # apps/evals/ excluded from the root run via bunfig.toml pathIgnorePatterns
         # (separate bun package with its own deps + CI test step).
-        run: bash scripts/run-bun-tests-ci.sh --timeout 10000
+        run: bun run test:root -- --timeout 10000

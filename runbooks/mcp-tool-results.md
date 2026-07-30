@@ -119,7 +119,7 @@ Don't return MCP `resource_link` or embedded-resource content blocks. Codex hard
    - is a strict/non-loose object (missing `catchall`, i.e. not built via `z.looseObject` / `swarmToolOutputSchema`),
    - rejects the bare result envelope (`{ success, message, details, nudge, extraDataKey }`) — i.e. has a required data field.
 
-Run it with `bun test src/tests/swarm-tool-result-gate.test.ts`. Any new tool with an `outputSchema` is covered automatically — no per-tool test to add.
+Run it with `bun run test:root -- src/tests/swarm-tool-result-gate.test.ts`. Any new tool with an `outputSchema` is covered automatically — no per-tool test to add.
 
 ## Trigger paths
 

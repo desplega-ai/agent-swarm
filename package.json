@@ -65,6 +65,7 @@
     "mono:test": "turbo run test",
     "mono:lint": "turbo run lint",
     "mono:dev": "turbo run dev",
+    "test:root": "bash scripts/run-bun-tests.sh",
     "prepack": "bun run build:cli",
     "tsc:check": "bun tsc --noEmit",
     "check:db-boundary": "bash scripts/check-db-boundary.sh",
