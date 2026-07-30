@@ -146,6 +146,39 @@ describe("/api/kv REST — header-resolved namespace", () => {
     expect(got.value).toEqual({ hello: "world" });
   });
 
+  test("GET offset + limit returns a bounded string chunk with range metadata", async () => {
+    await authedFetch("/api/kv/ranged", {
+      method: "PUT",
+      body: JSON.stringify({ value: "abcdefghij", valueType: "string" }),
+      agentId,
+    });
+    const get = await authedFetch("/api/kv/ranged?offset=3&limit=4", { agentId });
+    expect(get.status).toBe(200);
+    const got = await get.json();
+    expect(got.value).toBe("defg");
+    expect(got.range).toEqual({
+      offset: 3,
+      limit: 4,
+      returnedChars: 4,
+      totalChars: 10,
+      nextOffset: 7,
+      complete: false,
+    });
+  });
+
+  test("GET range rejects non-string values and caps limit at 512", async () => {
+    await authedFetch("/api/kv/json-range", {
+      method: "PUT",
+      body: JSON.stringify({ value: { hello: "world" } }),
+      agentId,
+    });
+    const wrongType = await authedFetch("/api/kv/json-range?offset=0&limit=10", { agentId });
+    expect(wrongType.status).toBe(400);
+
+    const tooLarge = await authedFetch("/api/kv/json-range?offset=0&limit=513", { agentId });
+    expect(tooLarge.status).toBe(400);
+  });
+
   test("X-Source-Task-Id wins over X-Agent-ID — namespace is the task's contextKey", async () => {
     const put = await authedFetch("/api/kv/cursor", {
       method: "PUT",

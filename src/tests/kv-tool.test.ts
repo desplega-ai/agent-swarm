@@ -121,6 +121,38 @@ describe("kv MCP tools", () => {
     expect(getRes.structuredContent.entry).toBeNull();
   });
 
+  test("kv-get bounded range stays below the wire ceiling for multi-byte text", async () => {
+    const tools = buildServer();
+    const value = "🙂漢é".repeat(600);
+    await tools.set.handler({ key: "large", value, valueType: "string" }, meta(agentA));
+    const getRes = (await tools.get.handler(
+      { key: "large", offset: 0, limit: 512 },
+      meta(agentA),
+    )) as StructuredResult<{
+      success: boolean;
+      entry: { value: string };
+      range: {
+        offset: number;
+        returnedChars: number;
+        totalChars: number;
+        nextOffset: number | null;
+        complete: boolean;
+      };
+    }>;
+
+    expect(getRes.structuredContent.entry.value).toBe(value.slice(0, 512));
+    expect(getRes.structuredContent.range).toEqual({
+      offset: 0,
+      limit: 512,
+      returnedChars: 512,
+      totalChars: value.length,
+      nextOffset: 512,
+      complete: false,
+    });
+    expect(Buffer.byteLength(JSON.stringify(getRes), "utf8")).toBeLessThan(10_000);
+    expect(getRes.structuredContent).not.toHaveProperty("truncation");
+  });
+
   test("kv-incr creates + increments + reports value", async () => {
     const tools = buildServer();
     const r1 = (await tools.incr.handler({ key: "ctr", by: 5 }, meta(agentA))) as StructuredResult<{

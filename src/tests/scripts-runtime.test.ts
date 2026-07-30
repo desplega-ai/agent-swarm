@@ -74,6 +74,8 @@ describe("runScript", () => {
           return Response.json({ key, value: body.value });
         }
         if (req.method === "GET" && url.pathname.startsWith("/api/kv/")) {
+          expect(url.searchParams.get("offset")).toBe("120");
+          expect(url.searchParams.get("limit")).toBe("512");
           const key = decodeURIComponent(url.pathname.slice("/api/kv/".length));
           return Response.json({ key, value: entries.get(key) ?? null });
         }
@@ -89,7 +91,7 @@ describe("runScript", () => {
         source: `
           export default async (_args, ctx) => {
             await ctx.swarm.kv_set({ key: "bridge-smoke", value: { ok: true } });
-            return await ctx.swarm.kv_get({ key: "bridge-smoke" });
+            return await ctx.swarm.kv_get({ key: "bridge-smoke", offset: 120, limit: 512 });
           };
         `,
       });

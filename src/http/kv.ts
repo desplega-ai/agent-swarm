@@ -5,6 +5,7 @@ import {
   deleteKv,
   getAgentById,
   getKv,
+  getKvValueRange,
   getTaskById,
   incrKv,
   KvTypeCollisionError,
@@ -13,7 +14,14 @@ import {
 } from "../be/db";
 import { can } from "../rbac";
 import { agentContextKey, pageContextKey } from "../tasks/context-key";
-import { KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "../types";
+import {
+  type KvEntry,
+  KvKeySchema,
+  KvNamespaceSchema,
+  type KvValueRange,
+  KvValueTypeSchema,
+  MAX_KV_VALUE_RANGE_CHARS,
+} from "../types";
 import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
 
@@ -67,6 +75,11 @@ const kvListQuerySchema = z.object({
   offset: z.coerce.number().int().nonnegative().optional(),
 });
 
+const kvGetQuerySchema = z.object({
+  offset: z.coerce.number().int().nonnegative().optional(),
+  limit: z.coerce.number().int().positive().max(MAX_KV_VALUE_RANGE_CHARS).optional(),
+});
+
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 const RESPONSES_GET = {
@@ -96,6 +109,7 @@ const getKvHeader = route({
   summary: "Get a KV entry by key (namespace resolved from request headers)",
   tags: ["KV"],
   params: z.object({ key: KvKeySchema }),
+  query: kvGetQuerySchema,
   responses: RESPONSES_GET,
 });
 
@@ -157,6 +171,7 @@ const getKvExplicit = route({
   summary: "Get a KV entry by explicit namespace + key",
   tags: ["KV"],
   params: z.object({ namespace: KvNamespaceSchema, key: KvKeySchema }),
+  query: kvGetQuerySchema,
   responses: RESPONSES_GET,
 });
 
@@ -435,7 +450,7 @@ export async function handleKv(
     if (!ns) return true;
     const key = decodeKvSegment(res, parsed.params.key, "key");
     if (!key) return true;
-    return sendGet(res, ns, key);
+    return sendGet(res, ns, key, parsed.query);
   }
   if (putKvExplicit.match(req.method, pathSegments)) {
     if (enforceContentLengthCap(req, res, MAX_KV_BODY_BYTES) === BODY_TOO_LARGE) return true;
@@ -475,7 +490,7 @@ export async function handleKv(
     }
     const key = decodeKvSegment(res, parsed.params.key, "key");
     if (!key) return true;
-    return sendGet(res, ns, key);
+    return sendGet(res, ns, key, parsed.query);
   }
   if (putKvHeader.match(req.method, pathSegments)) {
     if (enforceContentLengthCap(req, res, MAX_KV_BODY_BYTES) === BODY_TOO_LARGE) return true;
@@ -591,13 +606,38 @@ async function handleIncr(
   return true;
 }
 
-function sendGet(res: ServerResponse, namespace: string, key: string): boolean {
-  const entry = getKv(namespace, key);
+function sendGet(
+  res: ServerResponse,
+  namespace: string,
+  key: string,
+  query: z.infer<typeof kvGetQuerySchema>,
+): boolean {
+  const wantsRange = query.offset !== undefined || query.limit !== undefined;
+  let entry: KvEntry | null;
+  let range: KvValueRange | undefined;
+  try {
+    if (wantsRange) {
+      const ranged = getKvValueRange(
+        namespace,
+        key,
+        query.offset ?? 0,
+        query.limit ?? MAX_KV_VALUE_RANGE_CHARS,
+      );
+      entry = ranged?.entry ?? null;
+      range = ranged?.range;
+    } else {
+      entry = getKv(namespace, key);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "bounded read failed";
+    jsonError(res, message, 400);
+    return true;
+  }
   if (!entry) {
     jsonError(res, "not found", 404);
     return true;
   }
-  json(res, entry);
+  json(res, range ? { ...entry, range } : entry);
   return true;
 }
 

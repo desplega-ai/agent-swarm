@@ -1244,7 +1244,7 @@ Manually trigger a workflow execution, optionally passing trigger data as contex
 
 **List Workflow Runs**
 
-List execution runs for a workflow with offset pagination (default 20, max 100), optionally filtered by status.
+List execution runs for a workflow with offset pagination (default 20, max 100), optionally filtered by status. Returns SLIM rows WITHOUT the full `context` or trigger data — each row carries a bounded `triggerDataSummary` instead. To inspect a run's context and steps, call `get-workflow-run` by id, or pass `includeContext: true` here.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1252,6 +1252,7 @@ List execution runs for a workflow with offset pagination (default 20, max 100),
 | `status` | `running \| waiting \| completed \| failed \| skipped \| cancelled` | No | - | Filter by run status (running, waiting, completed, failed, skipped, cancelled) |
 | `limit` | `number` | No | 20 | Runs per page (default: 20, max: 100) |
 | `offset` | `number` | No | 0 | Zero-based page offset |
+| `includeContext` | `boolean` | No | false | Return the full run `context` + trigger data instead of slim rows. Default false — prefer `get-workflow-run` to fetch a single run in full. |
 
 ### get-workflow-run
 
@@ -1509,6 +1510,8 @@ Read a key from the swarm KV store. Returns the entry or null if missing/expired
 |-----------|------|----------|---------|-------------|
 | `key` | `unknown` | Yes | - | KV key (≤512 chars, [a-zA-Z0-9._:/-]). |
 | `namespace` | `unknown` | No | - | Optional explicit namespace. Defaults to the caller's contextKey. |
+| `offset` | `number` | No | - | Character offset for a bounded string-value read. Defaults to 0. |
+| `limit` | `number` | No | - | Maximum UTF-16 code units to return from a string value (≤512). Use with offset to retrieve large values safely. |
 
 ### kv-set
 

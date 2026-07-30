@@ -6,10 +6,12 @@ import {
   deleteKv,
   getDb,
   getKv,
+  getKvValueRange,
   incrKv,
   initDb,
   KvTypeCollisionError,
   listKv,
+  sweepExpiredKv,
   upsertKv,
 } from "../be/db";
 
@@ -71,6 +73,60 @@ describe("kv-storage helpers", () => {
     const got = getKv(NS, "s");
     expect(got?.value).toBe('hello "world"');
     expect(got?.valueType).toBe("string");
+  });
+
+  test("bounded string reads expose stable range metadata and reassemble byte-completely", () => {
+    const value = "zero🙂one🙂two🙂three";
+    upsertKv({ namespace: NS, key: "ranged", value, valueType: "string" });
+
+    const chunks: string[] = [];
+    let offset = 0;
+    do {
+      const result = getKvValueRange(NS, "ranged", offset, 5);
+      expect(result).not.toBeNull();
+      chunks.push(String(result?.entry.value ?? ""));
+      offset = result?.range.nextOffset ?? value.length;
+      if (result?.range.complete) break;
+    } while (offset < value.length);
+
+    expect(chunks.join("")).toBe(value);
+    const final = getKvValueRange(NS, "ranged", value.length, 5);
+    expect(final?.entry.value).toBe("");
+    expect(final?.range).toMatchObject({
+      returnedChars: 0,
+      totalChars: value.length,
+      nextOffset: null,
+      complete: true,
+    });
+  });
+
+  test("bounded reads reject non-string values instead of returning malformed JSON prefixes", () => {
+    upsertKv({ namespace: NS, key: "json-range", value: { ok: true }, valueType: "json" });
+    expect(() => getKvValueRange(NS, "json-range", 0, 10)).toThrow(
+      "bounded range reads require a string KV value",
+    );
+  });
+
+  test("namespace sweep proactively removes only expired entries", () => {
+    const now = Date.now();
+    upsertKv({
+      namespace: NS,
+      key: "expired-spill",
+      value: "old",
+      valueType: "string",
+      expiresAt: now - 1,
+    });
+    upsertKv({
+      namespace: NS,
+      key: "live-spill",
+      value: "new",
+      valueType: "string",
+      expiresAt: now + 10_000,
+    });
+
+    expect(sweepExpiredKv(NS, now)).toBe(1);
+    expect(countKv(NS, {})).toBe(1);
+    expect(getKv(NS, "live-spill")?.value).toBe("new");
   });
 
   test("integer value type stores as number", () => {

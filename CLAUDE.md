@@ -148,6 +148,7 @@ Tools return a `SwarmToolResult` (`toolOk(message, extras?)` / `toolErr(message,
 - `message` summarizes the outcome (required, non-empty); `details` carries the payload the model actually needs to act on (diagnostics, stderr, a rendered table) — not just a count.
 - Declare `outputSchema` via `swarmToolOutputSchema(dataShape?)` — loose (`z.looseObject`), every data field optional, no `.uuid()`/`.email()`/format pins on OUTPUT fields (double-validated by our SDK + opencode's client; a strict/pinned schema rejects an honest response after the side effect already landed). Input schemas may stay strict.
 - Conditional one-sentence steers go in the central `NUDGES` map in `src/tools/utils.ts`, not ad-hoc per-tool strings.
+- Do not hand-truncate `details` or move a large payload to only one channel. The registrar measures the composed wire result, spills overflow to 24-hour `mcp:overflow` KV, and puts the same bounded pointer on both channels. Retrieve with the literal bounded `kv-get({ offset, limit })` call in `truncation.retrieval`.
 
 Full contract, the per-harness verified matrix, and the validation gate: [runbooks/mcp-tool-results.md](./runbooks/mcp-tool-results.md).
 

@@ -3,7 +3,7 @@ import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDb, getKv, initDb } from "../be/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
@@ -66,6 +66,7 @@ type StructuredResult<T> = {
       fullValueAt: string;
       originalChars: number;
       limitChars: number;
+      retrieval: string;
     };
     status?: number;
     data?: T;
@@ -281,7 +282,7 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(del.structuredContent.data?.deleted).toBe(true);
   });
 
-  test("oversized script result stays complete in structured data and is explicit on text", async () => {
+  test("oversized script result spills byte-completely and stays below the wire ceiling", async () => {
     const tools = buildToolServer();
     const blob = "x".repeat(11_800);
     const source = `export default async () => ({ blob: "${blob}" });`;
@@ -294,18 +295,47 @@ describe("script_ MCP HTTP proxy tools", () => {
     const text = run.content[0]?.text ?? "";
     expect(run.isError).toBeFalsy();
     expect(run.structuredContent.success).toBe(true);
-    expect(run.structuredContent.data?.result.blob).toBe(blob);
+    expect(run.structuredContent.data).toBeUndefined();
+    const fullValueAt = run.structuredContent.truncation?.fullValueAt ?? "";
+    expect(fullValueAt).toMatch(/^kv:\/\/mcp:overflow\/v1\/script-run\//);
     expect(run.structuredContent.truncation).toMatchObject({
       truncated: true,
-      fullValueAt: "structuredContent.data.result",
-      limitChars: 8_000,
+      limitChars: 10_000,
+      retrieval: expect.stringContaining('"limit":512'),
     });
     expect(run.structuredContent.truncation?.originalChars).toBeGreaterThan(blob.length);
-    expect(text.length).toBeLessThan(1_000);
-    expect(text).toContain("Text-channel payload omitted");
-    expect(text).toContain("structuredContent.data.result");
-    expect(text).not.toContain(`result:\n${blob.slice(0, 100)}`);
-    expect(text).not.toContain("[truncated");
+    const afterBytes = Buffer.byteLength(JSON.stringify(run), "utf8");
+    expect(afterBytes).toBeLessThanOrEqual(10_000);
+    expect(text).toContain('result:\n{\n  "blob": "');
+    expect(text).toContain("[truncated");
+    expect(text).toContain("kv://mcp:overflow/");
+
+    const key = fullValueAt.replace("kv://mcp:overflow/", "");
+    const stored = getKv("mcp:overflow", key);
+    const canonical = JSON.parse(String(stored?.value)) as {
+      outcome: {
+        ok: boolean;
+        message: string;
+        details?: string;
+        data: { status: number; data: { result: { blob: string } } };
+      };
+    };
+    expect(canonical.outcome.data.data.result.blob).toBe(blob);
+
+    const fallback = JSON.stringify(canonical.outcome.data, null, 2);
+    const rendered = canonical.outcome.details ?? fallback;
+    const beforeWire = {
+      content: [{ type: "text", text: `${canonical.outcome.message}\n\n${rendered}` }],
+      structuredContent: {
+        ...canonical.outcome.data,
+        success: canonical.outcome.ok,
+        message: canonical.outcome.message,
+        ...(canonical.outcome.details ? { details: canonical.outcome.details } : {}),
+      },
+      isError: !canonical.outcome.ok,
+    };
+    const beforeBytes = Buffer.byteLength(JSON.stringify(beforeWire), "utf8");
+    expect(beforeBytes).toBeGreaterThan(10_000);
   });
 
   test("persists a successful inline run with kind 'inline' and no journal", async () => {

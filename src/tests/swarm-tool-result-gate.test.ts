@@ -1,9 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, initDb } from "../be/db";
+import { closeDb, getKv, getKvValueRange, initDb } from "../be/db";
 import { createServer } from "../server";
 import {
   finalizeSwarmToolResult,
+  MCP_OVERFLOW_NAMESPACE,
+  MCP_OVERFLOW_TTL_MS,
+  MCP_RESULT_WIRE_LIMIT_BYTES,
   SCRIPT_AUTHORING_NUDGE,
   type SwarmToolResult,
 } from "../tools/utils";
@@ -17,6 +20,24 @@ const TEST_DB_PATH = "./test-swarm-tool-result-gate.sqlite";
 // transform every converted tool relies on.
 
 describe("finalizeSwarmToolResult", () => {
+  beforeAll(async () => {
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        await unlink(TEST_DB_PATH + suffix);
+      } catch {}
+    }
+    initDb(TEST_DB_PATH);
+  });
+
+  afterAll(async () => {
+    closeDb();
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        await unlink(TEST_DB_PATH + suffix);
+      } catch {}
+    }
+  });
+
   test("ok result: text = message, structuredContent has success + message, isError false", () => {
     const result = finalizeSwarmToolResult("some-tool", { ok: true, message: "All good." });
     expect(result.isError).toBe(false);
@@ -203,7 +224,7 @@ describe("finalizeSwarmToolResult", () => {
     expect(curatedText).not.toContain('"taskId"');
   });
 
-  test("oversized data fallback becomes a complete omission notice with a structured pointer", () => {
+  test("oversized JSON spills the full payload and emits a bounded omission on BOTH channels", () => {
     const blob = "x".repeat(50_000);
     const result = finalizeSwarmToolResult("some-tool", {
       ok: true,
@@ -212,29 +233,46 @@ describe("finalizeSwarmToolResult", () => {
     });
     const text = (result.content?.[0] as { text: string }).text;
     const structured = result.structuredContent as {
-      blob?: string;
+      details?: string;
       truncation?: {
         truncated: true;
         fullValueAt: string;
         originalChars: number;
         limitChars: number;
+        retrieval: string;
       };
     };
 
-    expect(text.length).toBeLessThan(1_000);
-    expect(text).toContain("Text-channel payload omitted");
+    expect(text).toContain("JSON payload omitted");
+    expect(text).toContain('"truncated":true');
+    expect(text).toContain('"retrieval":"kv-get(');
     expect(text).not.toContain(`"blob": "${blob.slice(0, 100)}`);
-    expect(text).not.toContain("[truncated");
-    expect(structured.blob).toBe(blob);
-    expect(structured.truncation).toEqual({
+    expect(structured).not.toHaveProperty("blob");
+    expect(structured.details).toContain("JSON payload omitted");
+    const fullValueAt = structured.truncation!.fullValueAt;
+    expect(fullValueAt).toMatch(/^kv:\/\/mcp:overflow\/v1\/some-tool\//);
+    expect(structured.truncation).toMatchObject({
       truncated: true,
-      fullValueAt: "structuredContent",
       originalChars: expect.any(Number),
-      limitChars: 8_000,
+      limitChars: MCP_RESULT_WIRE_LIMIT_BYTES,
+      retrieval: expect.stringContaining('"limit":512'),
     });
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(
+      MCP_RESULT_WIRE_LIMIT_BYTES,
+    );
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(MCP_RESULT_WIRE_LIMIT_BYTES);
+    expect(Buffer.byteLength(JSON.stringify(result.structuredContent), "utf8")).toBeLessThanOrEqual(
+      MCP_RESULT_WIRE_LIMIT_BYTES,
+    );
+
+    const key = fullValueAt.replace(`kv://${MCP_OVERFLOW_NAMESPACE}/`, "");
+    const stored = getKv(MCP_OVERFLOW_NAMESPACE, key);
+    expect(stored?.valueType).toBe("string");
+    expect(JSON.parse(String(stored?.value)).outcome.data.blob).toBe(blob);
+    expect((stored?.expiresAt ?? 0) - Date.now()).toBeGreaterThan(MCP_OVERFLOW_TTL_MS - 60_000);
   });
 
-  test("oversized explicit details become a complete omission notice in both channels", () => {
+  test("oversized prose keeps a readable prefix + marker + resolvable pointer on both channels", () => {
     const blob = "x".repeat(50_000);
     const result = finalizeSwarmToolResult("some-tool", {
       ok: true,
@@ -246,26 +284,100 @@ describe("finalizeSwarmToolResult", () => {
     const text = (result.content?.[0] as { text: string }).text;
     const structured = result.structuredContent as {
       details?: string;
-      blob?: string;
       truncation?: {
         truncated: true;
         fullValueAt: string;
         originalChars: number;
         limitChars: number;
+        retrieval: string;
       };
     };
 
-    expect(structured.details).toContain("Text-channel payload omitted");
-    expect(structured.details).not.toContain(blob.slice(0, 100));
-    expect(structured.details!.length).toBeLessThan(1_000);
+    expect(structured.details).toContain(blob.slice(0, 100));
+    expect(structured.details).toContain("[truncated");
+    expect(structured.details).toContain("kv://mcp:overflow/");
+    expect(structured.details!.length).toBeLessThan(2_000);
     expect(text).toBe(`Big rendered payload.\n\n${structured.details}`);
-    expect(structured.blob).toBe(blob);
-    expect(structured.truncation).toEqual({
+    expect(structured).not.toHaveProperty("blob");
+    expect(structured.truncation).toMatchObject({
       truncated: true,
-      fullValueAt: "structuredContent.blob",
-      originalChars: blob.length,
-      limitChars: 8_000,
+      fullValueAt: expect.stringMatching(/^kv:\/\/mcp:overflow\//),
+      originalChars: expect.any(Number),
+      limitChars: MCP_RESULT_WIRE_LIMIT_BYTES,
+      retrieval: expect.stringContaining("kv-get("),
     });
+  });
+
+  test("details-only overflow is retained in KV and never points at 'not retained'", () => {
+    const details = `details-only:${"z".repeat(30_000)}`;
+    const result = finalizeSwarmToolResult("details-only-tool", {
+      ok: true,
+      message: "Large prose.",
+      details,
+    });
+    const structured = result.structuredContent as {
+      truncation: { fullValueAt: string; retrieval: string };
+    };
+    expect(structured.truncation.fullValueAt).not.toContain("not retained");
+    const key = structured.truncation.fullValueAt.replace(`kv://${MCP_OVERFLOW_NAMESPACE}/`, "");
+    const stored = getKv(MCP_OVERFLOW_NAMESPACE, key);
+    expect(JSON.parse(String(stored?.value)).outcome.details).toBe(details);
+    expect((result.content?.[0] as { text: string }).text).toContain(
+      structured.truncation.retrieval,
+    );
+  });
+
+  test("spill retrieval reassembles non-ASCII payload byte-completely through bounded reads", () => {
+    const details = `prefix-${"🙂é漢".repeat(5_000)}-suffix`;
+    const result = finalizeSwarmToolResult("unicode-tool", {
+      ok: true,
+      message: "Unicode payload.",
+      details,
+    });
+    const truncation = (
+      result.structuredContent as {
+        truncation: { fullValueAt: string; retrieval: string };
+      }
+    ).truncation;
+    expect(truncation.retrieval).toMatch(
+      /^kv-get\(\{"namespace":"mcp:overflow","key":"[^"]+","offset":0,"limit":512\}\)$/,
+    );
+    const key = truncation.fullValueAt.replace(`kv://${MCP_OVERFLOW_NAMESPACE}/`, "");
+    const stored = getKv(MCP_OVERFLOW_NAMESPACE, key);
+    const chunks: string[] = [];
+    let offset = 0;
+    while (true) {
+      const ranged = getKvValueRange(MCP_OVERFLOW_NAMESPACE, key, offset, 512);
+      expect(ranged).not.toBeNull();
+      chunks.push(String(ranged?.entry.value ?? ""));
+      if (ranged?.range.complete) break;
+      offset = ranged?.range.nextOffset ?? offset;
+    }
+    const reassembled = chunks.join("");
+    expect(Buffer.from(reassembled, "utf8")).toEqual(Buffer.from(String(stored?.value), "utf8"));
+    expect(JSON.parse(reassembled).outcome.details).toBe(details);
+  });
+
+  test("ctx-control persists only scrubbed overflow content", () => {
+    registerVolatileSecret("sk-overflow-secret-789", "OVERFLOW_TEST");
+    try {
+      const result = finalizeSwarmToolResult("secret-overflow", {
+        ok: true,
+        message: "Large result.",
+        data: { blob: `sk-overflow-secret-789:${"x".repeat(30_000)}` },
+      });
+      const fullValueAt = (
+        result.structuredContent as {
+          truncation: { fullValueAt: string };
+        }
+      ).truncation.fullValueAt;
+      const key = fullValueAt.replace(`kv://${MCP_OVERFLOW_NAMESPACE}/`, "");
+      const stored = getKv(MCP_OVERFLOW_NAMESPACE, key);
+      expect(String(stored?.value)).not.toContain("sk-overflow-secret-789");
+      expect(String(stored?.value)).toContain("[REDACTED:OVERFLOW_TEST]");
+    } finally {
+      clearVolatileSecretsForTesting();
+    }
   });
 
   test("whitespace-only details fall back to a rendered data preview", () => {
