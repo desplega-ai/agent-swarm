@@ -191,7 +191,10 @@ describe("task steering core", () => {
     ]);
   });
 
-  test("codex requests are promoted into a follow-up task", () => {
+  test("codex steer requests degrade to queue and stay pending for the hook", () => {
+    // Codex is queue-capable via harness-side hook delivery: the row must
+    // stay `pending` (never promoted at request time, never dispatched by the
+    // runner) until the codex-hook marks it delivered.
     const task = runningTask("codex", "codex parent");
     const result = requestSteering({
       taskId: task.id,
@@ -203,27 +206,21 @@ describe("task steering core", () => {
     });
 
     expect(result).toMatchObject({
-      outcome: "promoted",
-      effectiveMode: "steer",
+      outcome: "queued",
+      effectiveMode: "queue",
+      degradedFrom: "steer",
     });
-    expect(result.promotedTaskId).toBeDefined();
-    const child = getTaskById(result.promotedTaskId!);
-    expect(child).toMatchObject({
-      parentTaskId: task.id,
-      task: "continue with a safer approach",
-      agentId: task.agentId,
-    });
+    expect(result.promotedTaskId).toBeUndefined();
     expect(getSteeringMessagesForTask(task.id)).toEqual([
       expect.objectContaining({
         id: result.steeringMessageId,
         mode: "steer",
-        status: "promoted",
-        promotedTaskId: result.promotedTaskId,
+        status: "pending",
       }),
     ]);
   });
 
-  test("codex promotion bypasses Linear tracker context dedup", () => {
+  test("undeliverable promotion bypasses Linear tracker context dedup", () => {
     const parent = createTaskExtended("linear-backed codex parent", {
       agentId: agentIds.get("codex"),
       source: "linear",
@@ -237,10 +234,12 @@ describe("task steering core", () => {
       source: "api",
       createdByKind: "system",
     });
+    expect(result.outcome).toBe("queued");
 
-    expect(result.outcome).toBe("promoted");
-    expect(result.promotedTaskId).not.toBe(parent.id);
-    expect(getTaskById(result.promotedTaskId!)).toMatchObject({
+    const promoted = markSteeringUndeliverable(result.steeringMessageId, "session died");
+    expect(promoted.message.status).toBe("promoted");
+    expect(promoted.promotedTaskId).not.toBe(parent.id);
+    expect(getTaskById(promoted.promotedTaskId!)).toMatchObject({
       parentTaskId: parent.id,
       contextKey: parent.contextKey,
       task: "promote this into distinct follow-up work",
@@ -351,7 +350,7 @@ describe("task steering core", () => {
     expect(getSteeringMessageById(result.steeringMessageId)?.status).toBe("pending");
   });
 
-  test("pending codex tasks still promote (no live steering at any point)", () => {
+  test("pending codex tasks queue for hook delivery once the session starts", () => {
     const task = createTaskExtended("pending codex target", {
       agentId: agentIds.get("codex"),
       source: "api",
@@ -364,8 +363,9 @@ describe("task steering core", () => {
       createdByKind: "system",
     });
 
-    expect(result.outcome).toBe("promoted");
-    expect(result.promotedTaskId).toBeDefined();
+    expect(result.outcome).toBe("queued");
+    expect(result.promotedTaskId).toBeUndefined();
+    expect(getSteeringMessageById(result.steeringMessageId)?.status).toBe("pending");
   });
 
   test("latest lead task lookup excludes newer worker-assigned Slack tasks", () => {

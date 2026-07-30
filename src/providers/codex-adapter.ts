@@ -1,8 +1,10 @@
 /**
  * Codex provider adapter.
  *
- * Wraps the `@openai/codex-sdk` (which drives the `codex app-server` JSON-RPC
- * protocol via a child process). This file owns:
+ * Wraps the `@openai/codex-sdk` (which spawns `codex exec --experimental-json`
+ * as a child process, writes the prompt to stdin and closes it, then reads
+ * JSONL events from stdout — NOT the `codex app-server` JSON-RPC protocol;
+ * migrating to app-server is issue #1034). This file owns:
  *
  *   Phase 1 — factory wiring + skeleton classes.
  *   Phase 2 — event stream normalization, CostData, AbortController, log file,
@@ -95,6 +97,7 @@ import type {
   ProviderResult,
   ProviderSession,
   ProviderSessionConfig,
+  ProviderTraits,
 } from "./types";
 
 /** Alias for the SDK's (unexported) `CodexConfigObject` type. */
@@ -514,6 +517,9 @@ export interface SummarizeSessionForCodexDeps {
 
 /** Running session backed by a Codex `Thread`. */
 export class CodexSession implements ProviderSession {
+  // Steering reaches codex via the codex-hook (harness lifecycle hooks), not
+  // an in-process channel — the runner's dispatch poll must skip this session.
+  readonly steeringDeliveredExternally = true;
   private readonly thread: Thread;
   private readonly config: ProviderSessionConfig;
   private readonly agentsMdHandle: CodexAgentsMdHandle;
@@ -1546,6 +1552,8 @@ interface CodexSubprocessInput {
  * stderr is forwarded verbatim into the runner's stdout (for prod logs).
  */
 class CodexSubprocessSession implements ProviderSession {
+  // Mirrors CodexSession: steering is delivered by the codex-hook, not here.
+  readonly steeringDeliveredExternally = true;
   private readonly proc: ReturnType<typeof Bun.spawn>;
   private readonly listeners: Array<(event: ProviderEvent) => void> = [];
   private readonly eventQueue: ProviderEvent[] = [];
@@ -1738,8 +1746,16 @@ class CodexSubprocessSession implements ProviderSession {
 
 export class CodexAdapter implements ProviderAdapter {
   readonly name = "codex";
-  // Decision 4: Codex never accepts live steering; the server promotes it to a follow-up task.
-  readonly traits = { hasMcp: true, hasLocalEnvironment: true, steerModes: [] };
+  // Queue-only steering, delivered harness-side: the codex-hook
+  // (SessionStart/PostToolUse/Stop) polls pending steering rows and injects
+  // them as hook `additionalContext` — there is no in-process channel
+  // (`CodexSession.steeringDeliveredExternally`). Native `turn/steer` needs
+  // the app-server migration (issue #1034).
+  readonly traits: ProviderTraits = {
+    hasMcp: true,
+    hasLocalEnvironment: true,
+    steerModes: ["queue"],
+  };
 
   /**
    * Optional override for the skill resolver's skills directory. When unset,

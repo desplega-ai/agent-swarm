@@ -247,6 +247,36 @@ RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
   } \
 }' > /home/worker/.claude/settings.json
 
+# Codex steering hooks as ADMIN-MANAGED requirements: /etc/codex/requirements.toml
+# hooks are "managed, trusted by policy" (developers.openai.com/codex/hooks), so
+# they run without the per-hook trusted_hash review that user-level hooks.json
+# needs — codex silently skips untrusted hooks, which in a headless worker means
+# steering would never deliver. PreToolUse is deliberately absent: codex drops
+# its additionalContext (openai/codex#19385). Runtime no-ops unless
+# STEERING_ENABLED reaches the codex env (live-reconciled by the runner).
+# Root-owned on purpose: it's the admin-enforced layer (and /etc needs root).
+USER root
+RUN mkdir -p /etc/codex && printf '%s\n' \
+  '[features]' \
+  'hooks = true' \
+  '' \
+  '[[hooks.SessionStart]]' \
+  '[[hooks.SessionStart.hooks]]' \
+  'type = "command"' \
+  'command = "/usr/local/bin/agent-swarm codex-hook"' \
+  '' \
+  '[[hooks.PostToolUse]]' \
+  '[[hooks.PostToolUse.hooks]]' \
+  'type = "command"' \
+  'command = "/usr/local/bin/agent-swarm codex-hook"' \
+  '' \
+  '[[hooks.Stop]]' \
+  '[[hooks.Stop.hooks]]' \
+  'type = "command"' \
+  'command = "/usr/local/bin/agent-swarm codex-hook"' \
+  > /etc/codex/requirements.toml
+USER worker
+
 # Base global npm tools (pinned versions for cache stability): the set the
 # entrypoint and core agent workflows depend on. Full-image extras (qa-use,
 # sentry-cli, localtunnel, claude-bridge) live in a SEPARATE staging dir in

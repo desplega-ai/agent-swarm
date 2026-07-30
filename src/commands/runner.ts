@@ -21,6 +21,7 @@ import {
 } from "../prompts/defaults.ts";
 import { renderMemoriesPrompt } from "../prompts/memories.ts";
 import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver.ts";
+import { renderSteeringDelivery } from "../prompts/steering-delivery.ts";
 import { authJsonToCredentialSelection } from "../providers/codex-oauth/auth-json.js";
 import { materializeCodexAuthJson } from "../providers/codex-oauth/auth-json-fs.js";
 import { loadAllCodexOAuthSlots } from "../providers/codex-oauth/storage.js";
@@ -486,29 +487,10 @@ export function createSteeringDispatchState(): SteeringDispatchState {
   };
 }
 
-/**
- * Wrap a steering body in the registered delivery envelope so the injected
- * message carries its own ID. `accept-steer` takes that ID, and it is the only
- * route to `handled` — without the envelope the agent obeys the message but
- * can never acknowledge it, and the row sits at `delivered` forever.
- *
- * Falls back to the bare body if template resolution fails: delivering an
- * un-acknowledgeable message beats not delivering one at all.
- */
-export async function renderSteeringDelivery(
-  steeringMessageId: string,
-  body: string,
-): Promise<string> {
-  try {
-    const result = await resolveTemplateAsync("system.agent.steering.delivery", {
-      steeringMessageId,
-      body,
-    });
-    return result.skipped || !result.text.trim() ? body : result.text;
-  } catch {
-    return body;
-  }
-}
+// Moved to src/prompts/steering-delivery.ts so the codex-hook can render the
+// same envelope without importing the whole runner. Re-exported for existing
+// consumers (steering-transport tests).
+export { renderSteeringDelivery };
 
 export async function pollAndDispatchSteering(
   config: ApiConfig,
@@ -518,6 +500,12 @@ export async function pollAndDispatchSteering(
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   if (!isSteeringEnabled()) return;
+  // Harness-side delivery (codex hooks): the hook polls pending rows and
+  // injects them itself. Dispatching here would race it into a false
+  // "Provider session does not support live steering" undeliverable →
+  // premature promotion. Leave the rows pending; the terminal sweep still
+  // promotes anything the hook never delivered.
+  if (session.steeringDeliveredExternally) return;
 
   const headers = {
     Authorization: `Bearer ${config.apiKey}`,

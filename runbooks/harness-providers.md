@@ -51,7 +51,7 @@ MCP tools return `isError` on the wire `CallToolResult` (see [runbooks/mcp-tool-
 | `opencode` | Lossy: SDK abort, then `promptAsync` | Native `promptAsync` | Interrupt discards the in-flight turn before re-prompting; queue is the zero-loss path. |
 | `devin` | No | Yes | `sendMessage` accepts a working session but does not guarantee interruption, so the adapter always reports `mode: "queue"`. |
 | `claude` | No | Conditional | Raw CLI stream-json queues input at a turn boundary; it does not interrupt. See the gate below. |
-| `codex` | No | No | No live stdin remains after session startup; steering is promoted to a follow-up task. |
+| `codex` | No | Yes (harness-side) | No in-process channel exists (`@openai/codex-sdk` drives `codex exec` with stdin closed; native `turn/steer` is app-server-only — issue #1034). The codex-hook delivers instead. See below. |
 
 The server-side `PROVIDER_STEER_CAPABILITIES` map in `src/types.ts` must deep-equal each adapter's `traits.steerModes ?? []`. `src/tests/provider-steering-capabilities.test.ts` iterates the canonical `ProviderNameSchema` list through `createProviderAdapter()` and names the offending provider on drift. Adding a provider requires updating the schema, factory, adapter traits, and capability map together.
 
@@ -69,6 +69,15 @@ With `CLAUDE_QUEUE_STEERING` unset, the adapter enables stream-json input only w
 `CLAUDE_QUEUE_STEERING=0|false|off|no` forces the feature off and keeps `-p`. `CLAUDE_QUEUE_STEERING=1|true|on|yes` is an operator force-on override and skips the automatic version/wrapper decision. Invalid or empty values behave like unset.
 
 When disabled, the adapter keeps `-p <prompt>` and the live session exposes no `deliverSteering`; an undeliverable message is promoted to a follow-up task. The provider trait remains queue-capable because the stock, supported Claude runtime implements that mode; the per-session gate is an operational availability check.
+
+### Codex harness-side delivery (codex-hook)
+
+Codex sessions have no in-process delivery seam, so `CodexSession`/`CodexSubprocessSession` set `steeringDeliveredExternally: true` and the runner's dispatch poll (`pollAndDispatchSteering`) leaves their rows `pending` instead of synthesizing an undeliverable report. Delivery happens inside the codex lifecycle:
+
+- The worker image bakes `/etc/codex/requirements.toml` (Dockerfile.worker, worker-base) registering `agent-swarm codex-hook` for `SessionStart`, `PostToolUse`, and `Stop`. Requirements-managed hooks are "trusted by policy" — user-level `hooks.json` would be silently skipped without a per-hook `trusted_hash` review, which never happens in a headless worker.
+- `src/hooks/codex-hook.ts` polls `GET /api/steering-messages` (agent-scoped), POSTs `/delivered` per row, and only then injects the rendered envelope (`src/prompts/steering-delivery.ts`) as `hookSpecificOutput.additionalContext` (SessionStart/PostToolUse) or a one-shot `{"decision":"block","reason":...}` on Stop. Delivered-before-inject is the one-shot guarantee; a failed POST leaves the row pending for the next event.
+- `PreToolUse` is deliberately not registered: codex drops its `additionalContext` (openai/codex#19385). Empirical per-event matrix at codex-cli 0.146.0: `thoughts/taras/research/2026-07-30-steering-transport-hooks-and-artificial-steering.md` §4a-bis.
+- Rows a dying session never picks up are promoted by the terminal sweep, same as every other provider. Local dev outside Docker has no `/etc/codex/requirements.toml`, so steers on local codex tasks sit pending until terminal promotion unless you install the hooks yourself.
 
 ## Per-task `outputSchema` support
 

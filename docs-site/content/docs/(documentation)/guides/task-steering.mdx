@@ -21,9 +21,9 @@ Not every harness can interrupt. Task responses include `supportedSteerModes`, a
 | opencode | `queue` | `queued` |
 | Devin | `queue` | `queued` |
 | Claude Code | `queue` | `queued` |
-| Codex | none | `promoted` to a follow-up task |
+| Codex | `queue` | `queued` (delivered by Codex lifecycle hooks at the next tool-call boundary) |
 
-Claude Code queue delivery additionally depends on a supported stock CLI invocation. See [Harness Providers: Claude queue-steering gate](/docs/guides/harness-providers#claude-queue-steering-gate).
+Claude Code queue delivery additionally depends on a supported stock CLI invocation. See [Harness Providers: Claude queue-steering gate](/docs/guides/harness-providers#claude-queue-steering-gate). Codex delivery is harness-side: the worker image registers managed Codex hooks that inject queued messages into the running session; there is no mid-turn interrupt. See [Harness Providers: Codex harness-side delivery](/docs/guides/harness-providers#codex-harness-side-delivery-codex-hook).
 
 ## Enable steering
 

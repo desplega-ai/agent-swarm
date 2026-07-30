@@ -133,7 +133,7 @@ Running tasks can receive more input through the optional `ProviderSession.deliv
 | `opencode` | `queue` | `queued` | `promptAsync` can add input at a turn boundary; abort-and-re-prompt is not advertised because live E2E found it undeliverable. |
 | `devin` | `queue` | `queued` | The message API accepts working sessions but does not guarantee interruption. |
 | `claude` | `queue` | `queued` | Raw CLI stream-json can queue only. |
-| `codex` | none | `promoted` | Becomes a normal follow-up task. |
+| `codex` | `queue` | `queued` | Harness-side delivery via managed Codex hooks; no in-process channel. See below. |
 
 The static `PROVIDER_STEER_CAPABILITIES` map drives `supportedSteerModes` in task responses and `onUnsupported: "fail"` admission. It must match `adapter.traits.steerModes ?? []`. `src/tests/provider-steering-capabilities.test.ts` iterates every name in `ProviderNameSchema`, constructs its adapter, and fails with the provider name if the two drift.
 
@@ -146,6 +146,10 @@ The operator override accepts:
 - `0`, `false`, `off`, `no`: force the queue-steering path off.
 - `1`, `true`, `on`, `yes`: force stream-json on without the automatic version/wrapper decision.
 - unset, empty, or another value: use automatic probing.
+
+#### Codex harness-side delivery (codex-hook)
+
+Codex has no in-process input channel: `@openai/codex-sdk` runs `codex exec` with stdin closed after the prompt, and the app-server's native `turn/steer` is not reachable through the SDK. Codex sessions therefore set `steeringDeliveredExternally`, which tells the worker's dispatch poll to leave `pending` rows alone, and delivery happens inside the Codex lifecycle instead: the worker image bakes `/etc/codex/requirements.toml` registering `agent-swarm codex-hook` for `SessionStart`, `PostToolUse`, and `Stop`. The hook polls the agent's pending steering messages, marks each `delivered`, and injects the rendered envelope as hook `additionalContext` (or a one-shot Stop block for a session about to finish). Requirements-managed hooks are trusted by policy, so no interactive hook-trust review is needed in headless workers. `PreToolUse` is not used because Codex drops its `additionalContext`. Messages a session never picks up are promoted to follow-up tasks by the terminal sweep, like any other provider.
 
 For user-facing modes, degradation, entry points, and message states, see [Steer a running task](/docs/guides/task-steering).
 
