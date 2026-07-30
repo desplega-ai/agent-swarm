@@ -117,7 +117,12 @@ Status icons cover the full task lifecycle: 🗂️ `backlog`, 📭 `unassigned`
 
 When an agent posts its results directly to a Slack thread via the `slack-reply` tool, the task's completion message automatically switches to a minimal one-liner instead of repeating the full output. This prevents duplicate content in threads — the agent's detailed reply appears once, and the status message simply confirms completion.
 
-For delegated tasks tracked in a task tree, substantive prose output is posted inline in the originating thread when the agent has not already used `slack-reply` and the task has no primary attachment. Primary file, page, and pull-request deliverables keep the compact completion card because its task link already points at the deliverable. Inline prose is converted to Slack mrkdwn and capped at 4,000 characters; truncated messages end with a link to the full task output.
+For delegated tasks tracked in a task tree, output that would be truncated in
+the compact tree preview is delivered in full to the originating thread before
+the terminal tree is cleaned up. Long results are converted to Slack mrkdwn and
+split into safe Block Kit chunks across as many messages as needed. Successful
+delivery marks the task as replied so the completion watcher does not duplicate
+it; if delivery fails, tree cleanup waits and retries.
 
 The watcher also persists its tracked task-message map across restarts, so an API or worker reboot does not recreate already-seen Slack thread updates as fresh tasks.
 
