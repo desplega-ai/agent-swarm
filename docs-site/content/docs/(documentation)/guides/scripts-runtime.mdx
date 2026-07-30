@@ -9,6 +9,38 @@ Swarm scripts are TypeScript modules persisted in the catalog via
 aligned — what passes the typecheck is what actually runs. This page documents
 the full surface so script authors don't have to bisect.
 
+## Authoring contract
+
+The default export always receives `args` first and `ctx` second. A
+one-parameter `function (ctx)` treats the script arguments as `ctx` at runtime,
+so every `ctx.*` access fails. For named scripts, export an `argsSchema` so
+callers, schedules, and workflows can discover the JSON input contract:
+
+```ts
+import type { ScriptContext } from "swarm-sdk";
+import * as z from "zod";
+
+export const argsSchema = z.object({
+  taskId: z.string(),
+  limit: z.number().optional(),
+});
+
+export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptContext) {
+  const response = await ctx.swarm.task_get({ taskId: args.taskId });
+  const task = ((response as { data?: unknown }).data ?? response) as {
+    title?: string;
+  };
+  return { title: task.title };
+}
+```
+
+Inline source passed to `script-run` skips the compile-time typecheck.
+`script-upsert` typechecks before saving, so importing `ScriptContext` also
+makes inline code promotion-safe. Use `script-query-types` for the authoritative
+SDK and stdlib declarations. There is no ambient task context: values such as
+`taskId` must arrive through `args`; the agent identity is propagated
+automatically.
+
 ## What the runtime provides
 
 Scripts run inside a `bun run` subprocess (`src/scripts-runtime/eval-harness.ts`)
@@ -90,11 +122,33 @@ The `ScriptContext` passed to your `default` export carries:
   repos, schedules). Method allowlist: see
   `src/scripts-runtime/sdk-allowlist.ts`.
 - `ctx.swarm.config` — `apiKey`, `agentId`, `mcpBaseUrl` (all wrapped in
-  `Redacted<string>`; unwrap via `ctx.stdlib.Redacted.value(...)`).
+  `Redacted<string>`), plus `ctx.swarm.config.get("KEY")` for user config.
+  Redacted values stringify and serialize as `<redacted>`; never unwrap one
+  into a return value, log line, or request body assembled by hand.
+- `ctx.api.<slug>` / `ctx.mcp.<slug>` — typed clients for registered script
+  connections. They exist only for configured connections; inspect
+  `Object.keys(ctx.api ?? {})` or `Object.keys(ctx.mcp ?? {})` before use.
 - `ctx.stdlib` — the runtime helpers (`fetch`, `fetchJson`, `grep`, `glob`,
   `table`, `Redacted`).
 - `ctx.logger` — Console-compatible logger; same destination as the global
   `console`.
+
+Most SDK results are wrapper objects; read `response.data ?? response` before
+narrowing the payload. Prefer registered connections for authenticated calls:
+credentials are attached server-side and do not enter script source or args.
+
+### Durable workflow context
+
+Scripts launched through `launch-script-run` receive a different context:
+
+- `ctx.run` — the durable run's `id`, `agentId`, and `args`
+- `ctx.step.rawLlm(label, config)`, `ctx.step.agentTask(label, config)`, and
+  `ctx.step.swarmScript(label, config)` — replay-safe, journaled steps
+- `ctx.swarm`, `ctx.stdlib`, and `ctx.logger`
+
+Durable runs do not receive `ctx.api`, `ctx.mcp`, or `ctx.swarm.config`. When a
+durable workflow needs a registered connection, call a named script through
+`ctx.step.swarmScript`.
 
 ### Allowed bare imports
 

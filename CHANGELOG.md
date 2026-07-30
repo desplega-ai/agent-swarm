@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.124.0] - 2026-07-30
+
+### Added
+- **MCP tools now return one consistent, machine-checkable result contract** (#1023) — tools use `SwarmToolResult` helpers and loose output schemas so text and structured payload channels agree, while script authors get an explicit args-first entrypoint contract and promotion-safe `ScriptContext` typing.
+- **Anonymous telemetry now measures activation prerequisites without collecting identifiers** (#1024) — events record boolean embedding/notification availability plus allow-listed install method and onboard preset metadata.
+- **The dashboard model picker now follows a live models.dev catalog** (#1022) — the API refreshes a slim provider catalog at boot and every 12 hours, while the UI keeps the bundled snapshot as an in-flight and outage fallback.
+- **Releases now publish distinct full and slim worker images** (#1021) — both variants include every harness, while the slim target omits browser automation, build toolchains, local databases, and other production extras for faster CI and E2B use.
+
+### Fixed
+- **Truncated delegated-task results are delivered before Slack tree cleanup** (#1020) — full output is split into safe Block Kit chunks, marked delivered after success, and retried before the terminal tree is removed.
+- **Workflow run listings are bounded and slim by default** (#1028) — MCP pages default to 20 rows, cap at 100, replace unbounded context payloads with a 400-character trigger summary, and retain explicit full retrieval through `get-workflow-run` or `includeContext`.
+- **Existing installs no longer receive a fabricated install timestamp during telemetry upgrades** (#1026) — installs without a historical anchor omit the field so downstream analysis can use the first observed event.
+- **Post-contract MCP verification gaps are closed** (#1027) — script type diagnostics remain one-per-entry, generated SDK workflow pagination matches the HTTP bridge, and task/tool result paths satisfy the shared result gate.
+
 ## [1.123.0] - 2026-07-29
 
 ### Added

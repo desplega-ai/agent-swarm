@@ -570,12 +570,19 @@ Get details of a specific workflow run including step statuses.
 
 ### list-workflow-runs
 
-List runs for a specific workflow.
+List a paginated page of runs for a workflow. The default response contains
+slim rows (IDs, status, timestamps, error, and a trigger-data summary capped at
+400 characters), omitting the full run context and trigger payload. Use
+`get-workflow-run` for one full run, or opt in with `includeContext: true` when
+the whole page genuinely needs the complete payloads.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `workflowId` | uuid | Yes | Workflow ID |
 | `status` | string | No | Filter by run status |
+| `limit` | number | No | Runs per page (default: 20, max: 100) |
+| `offset` | number | No | Zero-based page offset (default: 0) |
+| `includeContext` | boolean | No | Include full context and trigger data for every row (default: false) |
 
 ### retry-workflow-run
 
@@ -920,12 +927,16 @@ Search the swarm-shared scripts catalog.
 
 ### script-run
 
-Run a named reusable script, OR inline TypeScript source (auto-saved as scratch to the catalog).
+Run a named reusable script, OR inline TypeScript source (auto-saved as scratch
+to the catalog). Inline source executes without a compile-time typecheck. Its
+default export must receive `args` first and `ctx` second; import
+`ScriptContext` from `"swarm-sdk"` so the same source remains safe to promote
+with `script-upsert`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `name` | string | No | Name of a reusable script to run |
-| `source` | string | No | Inline TypeScript source to run |
+| `source` | string | No | Inline TypeScript source exporting `function (args, ctx)`; no compile-time typecheck |
 | `args` | unknown | No | JSON-serializable script arguments |
 | `intent` | string | No | Why this script is being run |
 | `scope` | string | No | Optional scope for named script resolution |
@@ -933,7 +944,10 @@ Run a named reusable script, OR inline TypeScript source (auto-saved as scratch 
 
 ### script-upsert
 
-Create or update a named script. Source must export a default function. Runs `tsc --noEmit` against the generated `.d.ts` and rejects on diagnostics.
+Create or update a named script. Source must export a default
+`function (args, ctx)` and should type `ctx` as `ScriptContext` from
+`"swarm-sdk"`. Unlike inline `script-run`, upsert runs `tsc --noEmit` against
+the generated `.d.ts` and rejects on diagnostics.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -942,6 +956,13 @@ Create or update a named script. Source must export a default function. Runs `ts
 | `intent` | string | No | Why this script exists |
 
 A script may also export a Zod schema named `argsSchema` describing its expected arguments. On upsert the runtime extracts it, converts it to JSON Schema via `zod`'s `toJSONSchema`, and stores it on the catalog entry as `argsJsonSchema` — so callers can discover a script's argument shape before running it. The export is optional; scripts without it simply have a `null` `argsJsonSchema`.
+
+There is no ambient task context: pass values such as `taskId` through `args`.
+Inline and named scripts receive `ctx.swarm`, registered `ctx.api` / `ctx.mcp`
+connection clients, `ctx.stdlib`, and `ctx.logger`. Durable
+`launch-script-run` workflows instead receive `ctx.run` and journaled
+`ctx.step.*` helpers, with no connection clients or `ctx.swarm.config`. See
+[Scripts runtime](/docs/guides/scripts-runtime) for the full authoring contract.
 
 ### script-delete
 

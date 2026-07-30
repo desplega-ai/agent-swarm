@@ -376,9 +376,16 @@ Every workflow update creates a snapshot in the version history table, recording
 | `delete-workflow` | Delete a workflow and its run history |
 | `trigger-workflow` | Manually trigger a workflow execution |
 | `get-workflow-run` | Get details of a specific workflow run |
-| `list-workflow-runs` | List runs for a workflow |
+| `list-workflow-runs` | List paginated slim run rows (20 by default, 100 max); use `includeContext: true` only when a page needs full contexts |
 | `retry-workflow-run` | Retry a failed workflow run |
 | `cancel-workflow-run` | Cancel a running or waiting workflow run |
+
+`list-workflow-runs` returns bounded rows by default: run identifiers, status,
+timestamps, error, and a trigger-data summary capped at 400 characters. It
+omits full `context` and trigger data to keep routine history queries small.
+Follow `page.hasMore` / `page.nextOffset` for pagination, call
+`get-workflow-run` to retrieve one run with its steps and context, or pass
+`includeContext: true` for an explicitly full page.
 
 ## Dashboard UI
 
