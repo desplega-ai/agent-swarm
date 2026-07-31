@@ -2,6 +2,7 @@ import type {
   ScriptApiConnectionDescriptor,
   ScriptApiCredentialDescriptor,
   ScriptApiOperationDescriptor,
+  ScriptApiParameterDescriptor,
   ScriptApiRegistryClient,
 } from "./api-types";
 
@@ -51,6 +52,66 @@ function applyCredential(
   }
 }
 
+// Top-level keys a ctx.api.<slug>.<op>(args) call may use. Restricted to the
+// buckets the operation actually declares — a caller passing an unrecognized
+// or misplaced key (e.g. `{ userIds: [...] }` instead of `{ query: { user_ids
+// } }`) gets a loud error instead of a silently-ignored filter (see
+// validateTopLevelArgs).
+function allowedTopLevelKeys(operation: ScriptApiOperationDescriptor): string[] {
+  const keys: string[] = [];
+  if (operation.parameters.some((p) => p.in === "path")) keys.push("path");
+  if (operation.parameters.some((p) => p.in === "query")) keys.push("query");
+  if (operation.parameters.some((p) => p.in === "header")) keys.push("header");
+  if (operation.hasBody) keys.push("body");
+  return keys;
+}
+
+function normalizeArgKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function suggestParameterFor(
+  operation: ScriptApiOperationDescriptor,
+  unknownKey: string,
+): ScriptApiParameterDescriptor | undefined {
+  const target = normalizeArgKey(unknownKey);
+  return operation.parameters.find((param) => normalizeArgKey(param.name) === target);
+}
+
+function unknownTopLevelArgsError(
+  slug: string,
+  operation: ScriptApiOperationDescriptor,
+  badKeys: string[],
+): Error {
+  const allowed = allowedTopLevelKeys(operation);
+  const quoted = badKeys.map((key) => `"${key}"`).join(", ");
+  const noun = badKeys.length === 1 ? "argument" : "arguments";
+  const hints = badKeys
+    .map((key) => {
+      const suggestion = suggestParameterFor(operation, key);
+      return suggestion ? `Did you mean \`${suggestion.in}: { ${suggestion.name}: ... }\`?` : null;
+    })
+    .filter((hint): hint is string => hint !== null);
+  const hintText = hints.length > 0 ? ` ${hints.join(" ")}` : "";
+  return new Error(
+    `ctx.api.${slug}.${operation.name}: unknown top-level ${noun} ${quoted}.${hintText} Allowed top-level keys: ${allowed.join(", ")}.`,
+  );
+}
+
+// Unknown top-level keys (e.g. `{ userIds: [...] }` on an operation that only
+// declares `query.user_ids`) must fail loudly. Silently dropping them
+// previously produced a 200 with an unfiltered superset of rows —
+// indistinguishable at the call site from "the filter matched everything".
+function validateTopLevelArgs(
+  slug: string,
+  operation: ScriptApiOperationDescriptor,
+  args: Record<string, unknown>,
+): void {
+  const allowed = new Set(allowedTopLevelKeys(operation));
+  const badKeys = Object.keys(args).filter((key) => !allowed.has(key));
+  if (badKeys.length > 0) throw unknownTopLevelArgsError(slug, operation, badKeys);
+}
+
 function operationUrl(
   baseUrl: string,
   operation: ScriptApiOperationDescriptor,
@@ -80,7 +141,14 @@ function operationUrl(
       if (param.required) throw new Error(`Missing query parameter ${param.name}`);
       continue;
     }
-    url.searchParams.set(param.name, String(value));
+    // OpenAPI default for query params is style: form, explode: true — repeat
+    // the param once per array element rather than comma-joining (comma-join
+    // only "looks" correct for single-element arrays).
+    if (Array.isArray(value)) {
+      for (const item of value) url.searchParams.append(param.name, String(item));
+    } else {
+      url.searchParams.set(param.name, String(value));
+    }
   }
   return url;
 }
@@ -193,6 +261,7 @@ export function createApiRegistryClient(
       client[operation.name] = async (rawArgs = {}, options?: unknown) => {
         const raw = isRawOptions(options);
         const args = rawArgs as Record<string, unknown>;
+        validateTopLevelArgs(descriptor.slug, operation, args);
         const url = operationUrl(descriptor.baseUrl, operation, args);
         const headers = new Headers();
         const headerArgs = (
@@ -204,7 +273,11 @@ export function createApiRegistryClient(
             if (param.required) throw new Error(`Missing header parameter ${param.name}`);
             continue;
           }
-          headers.set(param.name, String(value));
+          if (Array.isArray(value)) {
+            for (const item of value) headers.append(param.name, String(item));
+          } else {
+            headers.set(param.name, String(value));
+          }
         }
 
         applyCredential(descriptor.credential, url, headers);

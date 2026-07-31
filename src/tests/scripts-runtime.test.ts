@@ -682,6 +682,228 @@ describe("runScript", () => {
     expect(await result.response.json()).toEqual({ error: "rate limited" });
   });
 
+  test("ctx.api OpenAPI client throws on an unknown top-level argument with a did-you-mean hint", async () => {
+    let fetchCalled = false;
+    const client = createApiRegistryClient(
+      [
+        {
+          slug: "composio",
+          kind: "openapi",
+          baseUrl: "https://api.composio.test",
+          credential: null,
+          operations: [
+            {
+              name: "getV31ConnectedAccounts",
+              method: "GET",
+              path: "/v3/connected_accounts",
+              parameters: [{ name: "user_ids", in: "query", required: false, schema: {} }],
+              hasBody: false,
+              successStatus: "200",
+              responseSchema: {},
+              requestType: "ComposioGetV31ConnectedAccountsArgs",
+              responseType: "ComposioGetV31ConnectedAccountsResponse",
+            },
+          ],
+        },
+      ],
+      {
+        fetch: (async () => {
+          fetchCalled = true;
+          return Response.json({});
+        }) as typeof fetch,
+      },
+    );
+
+    await expect(
+      client.composio.getV31ConnectedAccounts({ userIds: ["t@desplega.ai"] }),
+    ).rejects.toThrow(
+      'ctx.api.composio.getV31ConnectedAccounts: unknown top-level argument "userIds". ' +
+        "Did you mean `query: { user_ids: ... }`? Allowed top-level keys: query.",
+    );
+    // Validation must reject before any network call is made.
+    expect(fetchCalled).toBe(false);
+  });
+
+  test("ctx.api OpenAPI client throws on an unrelated unknown top-level argument without a hint", async () => {
+    const client = createApiRegistryClient([
+      {
+        slug: "composio",
+        kind: "openapi",
+        baseUrl: "https://api.composio.test",
+        credential: null,
+        operations: [
+          {
+            name: "getV31ConnectedAccounts",
+            method: "GET",
+            path: "/v3/connected_accounts",
+            parameters: [{ name: "user_ids", in: "query", required: false, schema: {} }],
+            hasBody: false,
+            successStatus: "200",
+            responseSchema: {},
+            requestType: "ComposioGetV31ConnectedAccountsArgs",
+            responseType: "ComposioGetV31ConnectedAccountsResponse",
+          },
+        ],
+      },
+    ]);
+
+    await expect(client.composio.getV31ConnectedAccounts({ foo: 1 })).rejects.toThrow(
+      'ctx.api.composio.getV31ConnectedAccounts: unknown top-level argument "foo". ' +
+        "Allowed top-level keys: query.",
+    );
+  });
+
+  test("ctx.api OpenAPI client rejects a body argument on an operation with hasBody: false", async () => {
+    const client = createApiRegistryClient([
+      {
+        slug: "composio",
+        kind: "openapi",
+        baseUrl: "https://api.composio.test",
+        credential: null,
+        operations: [
+          {
+            name: "getV31ConnectedAccounts",
+            method: "GET",
+            path: "/v3/connected_accounts",
+            parameters: [{ name: "user_ids", in: "query", required: false, schema: {} }],
+            hasBody: false,
+            successStatus: "200",
+            responseSchema: {},
+            requestType: "ComposioGetV31ConnectedAccountsArgs",
+            responseType: "ComposioGetV31ConnectedAccountsResponse",
+          },
+        ],
+      },
+    ]);
+
+    await expect(
+      client.composio.getV31ConnectedAccounts({ body: { user_ids: ["t@desplega.ai"] } }),
+    ).rejects.toThrow(
+      'ctx.api.composio.getV31ConnectedAccounts: unknown top-level argument "body". ' +
+        "Allowed top-level keys: query.",
+    );
+  });
+
+  test("ctx.api OpenAPI client still accepts a correctly nested query call and serializes arrays as repeated params", async () => {
+    let observedUrl = "";
+    const client = createApiRegistryClient(
+      [
+        {
+          slug: "composio",
+          kind: "openapi",
+          baseUrl: "https://api.composio.test",
+          credential: null,
+          operations: [
+            {
+              name: "getV31ConnectedAccounts",
+              method: "GET",
+              path: "/v3/connected_accounts",
+              parameters: [{ name: "user_ids", in: "query", required: false, schema: {} }],
+              hasBody: false,
+              successStatus: "200",
+              responseSchema: {},
+              requestType: "ComposioGetV31ConnectedAccountsArgs",
+              responseType: "ComposioGetV31ConnectedAccountsResponse",
+            },
+          ],
+        },
+      ],
+      {
+        fetch: (async (input) => {
+          observedUrl = String(input);
+          return Response.json({ items: [] });
+        }) as typeof fetch,
+      },
+    );
+
+    const result = await client.composio.getV31ConnectedAccounts({
+      query: { user_ids: ["t@desplega.ai", "eze@desplega.ai"] },
+    });
+
+    expect(result).toEqual({ items: [] });
+    const url = new URL(observedUrl);
+    expect(url.searchParams.getAll("user_ids")).toEqual(["t@desplega.ai", "eze@desplega.ai"]);
+    expect(observedUrl).not.toContain("t@desplega.ai,eze@desplega.ai");
+  });
+
+  test("ctx.api OpenAPI client serializes array header params as a single coalesced header", async () => {
+    let observedToolkitSlugs: string | null = null;
+    const client = createApiRegistryClient(
+      [
+        {
+          slug: "composio",
+          kind: "openapi",
+          baseUrl: "https://api.composio.test",
+          credential: null,
+          operations: [
+            {
+              name: "listToolkits",
+              method: "GET",
+              path: "/v3/toolkits",
+              parameters: [{ name: "toolkit_slugs", in: "header", required: false, schema: {} }],
+              hasBody: false,
+              successStatus: "200",
+              responseSchema: {},
+              requestType: "ComposioListToolkitsArgs",
+              responseType: "ComposioListToolkitsResponse",
+            },
+          ],
+        },
+      ],
+      {
+        fetch: (async (_input, init) => {
+          observedToolkitSlugs = new Headers(init?.headers).get("toolkit_slugs");
+          return Response.json({ items: [] });
+        }) as typeof fetch,
+      },
+    );
+
+    await client.composio.listToolkits({ header: { toolkit_slugs: ["gmail", "slack"] } });
+
+    expect(observedToolkitSlugs).toBe("gmail, slack");
+  });
+
+  test("ctx.api OpenAPI client validates top-level args before making a request in raw mode", async () => {
+    let fetchCalled = false;
+    const client = createApiRegistryClient(
+      [
+        {
+          slug: "repos",
+          kind: "openapi",
+          baseUrl: "https://api.vendor.test",
+          credential: null,
+          operations: [
+            {
+              name: "getRepo",
+              method: "GET",
+              path: "/repos/{owner}/{repo}",
+              parameters: [
+                { name: "owner", in: "path", required: true, schema: {} },
+                { name: "repo", in: "path", required: true, schema: {} },
+              ],
+              hasBody: false,
+              successStatus: "200",
+              responseSchema: {},
+              requestType: "ReposGetRepoArgs",
+              responseType: "ReposGetRepoResponse",
+            },
+          ],
+        },
+      ],
+      {
+        fetch: (async () => {
+          fetchCalled = true;
+          return Response.json({});
+        }) as typeof fetch,
+      },
+    );
+
+    await expect(
+      client.repos.getRepo({ owner: "desplega-ai", repo: "agent-swarm" }, { raw: true }),
+    ).rejects.toThrow(/unknown top-level arguments "owner", "repo"/);
+    expect(fetchCalled).toBe(false);
+  });
+
   test("ctx.api GraphQL client throws on errors-only responses", async () => {
     globalThis.fetch = (async () =>
       Response.json({ errors: [{ message: "Cannot query field nope" }] })) as typeof fetch;
