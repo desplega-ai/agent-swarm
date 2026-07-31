@@ -189,15 +189,35 @@ Tunnels are protected by **HTTP Basic auth** by default:
 - **Username:** `hi` (hardcoded MVP default in `src/artifact-sdk/tunnel.ts`)
 - **Password:** the agent's `API_KEY`
 
-Two equivalent URL forms:
+> **Never put the API key in the URL.** The Basic-auth password *is* the swarm
+> `API_KEY` — it authenticates against the whole swarm API, not just this
+> artifact. A `https://user:key@host` URL leaks that credential into shell
+> history, browser history, proxy and tunnel access logs, referrer headers, and
+> anything you paste it into. Treat a credential-bearing URL as a leaked key.
+
+The URL you share is always the plain one — a browser will prompt for the
+credentials:
 
 ```
-# Plain (browser will prompt for credentials)
 https://<agentId>-<name>.lt.desplega.ai
-
-# Auth-prefilled (works in curl, scripts, and most browsers without a prompt)
-https://hi:<API_KEY>@<agentId>-<name>.lt.desplega.ai
 ```
+
+For scripts and `curl`, pass the credential out-of-band instead of inlining it,
+and read it from the environment so it never appears as a literal:
+
+```bash
+# -u keeps the credential out of the URL; --netrc-file keeps it out of argv too.
+curl -u "hi:$API_KEY" https://<agentId>-<name>.lt.desplega.ai
+
+# Better for anything long-lived or logged — argv is visible to other processes:
+printf 'machine %s-%s.lt.desplega.ai login hi password %s\n' \
+  "$AGENT_ID" "$NAME" "$API_KEY" > /tmp/artifact-netrc
+chmod 600 /tmp/artifact-netrc
+curl --netrc-file /tmp/artifact-netrc https://<agentId>-<name>.lt.desplega.ai
+```
+
+Do not echo the assembled command, and do not paste the credential into a task
+report, Slack message, PR body, or page — those are all persisted.
 
 Use `--no-auth` only for genuinely public content. Anyone who learns the
 subdomain can read it.

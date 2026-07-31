@@ -7,7 +7,6 @@
  * user-modified skills are preserved.
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import artifactsConfig from "../../../templates/skills/artifacts/config.json" with { type: "text" };
 import artifactsContent from "../../../templates/skills/artifacts/content.md" with { type: "text" };
@@ -181,56 +180,72 @@ function seedSkillFromSource(
 }
 
 /** Recursively collect `<skillDir>/files/**` as skill-relative bundled files. */
-function readSkillFilesDir(skillDir: string): SeedSkillFile[] {
+async function readSkillFilesDir(skillDir: string): Promise<SeedSkillFile[]> {
   const filesRoot = join(skillDir, "files");
-  if (!existsSync(filesRoot)) return [];
-
   const collected: SeedSkillFile[] = [];
-  const walk = (dir: string, prefix: string): void => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name);
-      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        walk(full, rel);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      collected.push({ path: rel, content: readFileSync(full, "utf-8") });
+
+  try {
+    for await (const relative of new Bun.Glob("**/*").scan({ cwd: filesRoot, onlyFiles: true })) {
+      // Bun.Glob yields platform-native separators; skill_files paths are POSIX.
+      const path = relative.split("\\").join("/");
+      collected.push({ path, content: await Bun.file(join(filesRoot, relative)).text() });
     }
-  };
-  walk(filesRoot, "");
+  } catch {
+    // `files/` is optional — a scan over a missing directory yields nothing on
+    // some platforms and throws on others. Both mean "no bundled files".
+    return [];
+  }
 
   return collected.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-export function loadSeedSkills(templatesDir?: string): SeedSkill[] {
+/**
+ * Load the seeded-skill catalog.
+ *
+ * With no argument this is pure in-memory work over the build-time embedded
+ * sources — the production path, since the compiled API has no `templates/` on
+ * disk. Passing `templatesDir` reads the repo instead (tests + the seed CLI).
+ *
+ * Async because the directory branch does file I/O through Bun's APIs;
+ * `Seeder.items()` accepts a promise, so this costs the harness nothing.
+ */
+export async function loadSeedSkills(templatesDir?: string): Promise<SeedSkill[]> {
   if (!templatesDir) {
     return BUILT_IN_SKILL_SOURCES.map(({ config, body }) => seedSkillFromSource(config, body))
       .filter((skill): skill is SeedSkill => skill !== null)
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  if (!existsSync(templatesDir)) return [];
-
   const skills: SeedSkill[] = [];
-  for (const entry of readdirSync(templatesDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
 
-    const dir = join(templatesDir, entry.name);
-    const configPath = join(dir, "config.json");
-    const contentPath = join(dir, "content.md");
-    if (!existsSync(configPath) || !existsSync(contentPath)) continue;
+  // One entry per skill directory that ships a config; `content.md` is required
+  // for a seeded skill and checked below.
+  let configPaths: string[] = [];
+  try {
+    configPaths = await Array.fromAsync(new Bun.Glob("*/config.json").scan({ cwd: templatesDir }));
+  } catch {
+    return [];
+  }
 
-    const config = JSON.parse(readFileSync(configPath, "utf-8")) as SkillTemplateConfig;
+  for (const configRelative of configPaths.sort()) {
+    const dirName = configRelative.split(/[/\\]/)[0];
+    if (!dirName) continue;
+
+    const dir = join(templatesDir, dirName);
+    const contentFile = Bun.file(join(dir, "content.md"));
+    if (!(await contentFile.exists())) continue;
+
+    const config = (await Bun.file(
+      join(templatesDir, configRelative),
+    ).json()) as SkillTemplateConfig;
     if (!config.runAllSeedersCandidate) continue;
 
-    const body = readFileSync(contentPath, "utf-8");
     skills.push({
       name: config.name,
       description: config.description,
-      content: buildSkillContent(config, body),
+      content: buildSkillContent(config, await contentFile.text()),
       systemDefault: config.systemDefault === true,
-      files: readSkillFilesDir(dir),
+      files: await readSkillFilesDir(dir),
     });
   }
 
@@ -259,8 +274,9 @@ type SkillSeedItem = SeedItem & { skill: SeedSkill };
 export const skillsSeeder: Seeder<SkillSeedItem> = {
   kind: "skill",
 
-  items(): SkillSeedItem[] {
-    return loadSeedSkills().map((skill) => ({
+  async items(): Promise<SkillSeedItem[]> {
+    const skills = await loadSeedSkills();
+    return skills.map((skill) => ({
       key: skill.name,
       contentHash: skillSeedHash(skill.content, skill.systemDefault, skill.files),
       skill,

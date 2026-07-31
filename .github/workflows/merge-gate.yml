@@ -81,12 +81,21 @@ jobs:
           # pi-skills freshness: generator inputs + outputs.
           PI_SKILLS=$(match '^(plugin/commands/|plugin/pi-skills/|plugin/build-pi-skills\.ts$)')
 
-          # seeded-skill manifest freshness + the skill seeder tests. NOTE: neither
-          # LINT nor TEST matches templates/, so a PR that only touches
-          # templates/skills/** would otherwise run nothing but the Docker build and
-          # could merge a stale bundled-files.generated.json — shipping a compiled API
-          # that seeds old or missing skill files. This flag owns that surface.
-          SEED_SKILLS=$(match '^(templates/skills/|scripts/build-seed-skill-files\.ts$|src/be/seed-skills/|src/utils/skill-fs-writer\.ts$)')
+          # seeded-skill invariants + manifest freshness + the skill seeder tests.
+          # NOTE: neither LINT nor TEST matches templates/ or plugin/skills/, so
+          # without this flag a PR touching only those would run nothing but the
+          # Docker build and could merge a stale bundled-files.generated.json — or a
+          # baked skill colliding with a seeded one, which is the exact bug
+          # check-skill-sources.ts exists to prevent.
+          #
+          # This must list every INPUT the checks read, not just the seeded content:
+          #   templates/skills/       seeded skills + bundled files
+          #   plugin/skills/          baked skills (duplicate-delivery-path rule)
+          #   integrations-catalog.ts templatePath entries (missing-remote-skill rule)
+          #   the two scripts         the checkers themselves
+          #   src/be/seed-skills/     seeder + generated manifest
+          #   skill-fs-writer.ts      the FS reconcile the tests cover
+          SEED_SKILLS=$(match '^(templates/skills/|plugin/skills/|src/be/seed-skills/|src/utils/skill-fs-writer\.ts$|scripts/(build-seed-skill-files|check-skill-sources)\.ts$|apps/ui/src/lib/integrations-catalog\.ts$)')
 
           # script SDK types freshness: source constants + generator + outputs +
           # allowlist/registry (generation validates SDK_ALLOWLIST against server.ts).

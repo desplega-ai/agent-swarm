@@ -58,8 +58,8 @@ describe("seeded skills with bundled files", () => {
     await removeDbFiles(TEST_DB_PATH);
   });
 
-  test("embedded manifest exposes bundled files for artifacts and pages", () => {
-    const skills = loadSeedSkills();
+  test("embedded manifest exposes bundled files for artifacts and pages", async () => {
+    const skills = await loadSeedSkills();
 
     const artifacts = skills.find((skill) => skill.name === "artifacts");
     expect(artifacts?.files.map((file) => file.path).sort()).toEqual([
@@ -79,9 +79,9 @@ describe("seeded skills with bundled files", () => {
     expect(skills.find((skill) => skill.name === "kv-storage")?.files).toEqual([]);
   });
 
-  test("embedded manifest matches the on-disk templates", () => {
-    const embedded = loadSeedSkills();
-    const fromDisk = loadSeedSkills(TEMPLATES_DIR);
+  test("embedded manifest matches the on-disk templates", async () => {
+    const embedded = await loadSeedSkills();
+    const fromDisk = await loadSeedSkills(TEMPLATES_DIR);
 
     for (const name of ["artifacts", "pages"]) {
       const a = embedded.find((skill) => skill.name === name);
@@ -90,11 +90,13 @@ describe("seeded skills with bundled files", () => {
     }
   });
 
-  test("generated manifest is not stale relative to templates/", () => {
+  test("generated manifest is not stale relative to templates/", async () => {
     // Mirrors `bun run check:seed-skill-files`, so a contributor who edits a
     // bundled file without regenerating fails here rather than in production.
-    const fromDisk = loadSeedSkills(TEMPLATES_DIR).filter((skill) => skill.files.length > 0);
-    const embedded = loadSeedSkills();
+    const fromDisk = (await loadSeedSkills(TEMPLATES_DIR)).filter(
+      (skill) => skill.files.length > 0,
+    );
+    const embedded = await loadSeedSkills();
 
     for (const skill of fromDisk) {
       const match = embedded.find((candidate) => candidate.name === skill.name);
@@ -128,7 +130,7 @@ describe("seeded skills with bundled files", () => {
   });
 
   test("a bundled-file edit registers as drift and is preserved", async () => {
-    const item = skillsSeeder.items().find((candidate) => candidate.key === "artifacts");
+    const item = (await skillsSeeder.items()).find((candidate) => candidate.key === "artifacts");
     expect(item).toBeDefined();
     if (!item) return;
 
@@ -182,7 +184,7 @@ describe("seeded skills with bundled files", () => {
     const legacyHash = computeContentHash(`${legacyContent}\n\n# seed:systemDefault=1\n`);
     recordSeedState("skill", "artifacts", legacyHash);
 
-    const item = skillsSeeder.items().find((candidate) => candidate.key === "artifacts");
+    const item = (await skillsSeeder.items()).find((candidate) => candidate.key === "artifacts");
     if (!item) throw new Error("artifacts seed item missing");
 
     // Pristine: upstream (file-less) still hashes in the old format.

@@ -33,7 +33,7 @@ describe("system-default skills", () => {
   });
 
   test("seed catalog includes swarm-scripts and marks built-in defaults", async () => {
-    const skills = loadSeedSkills();
+    const skills = await loadSeedSkills();
     const names = skills.map((skill) => skill.name);
 
     expect(names).toContain("asset-namespaces");
