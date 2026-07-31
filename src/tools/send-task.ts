@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
+import { canDispatchToAgent } from "@/be/circuit-breaker";
 import {
   createTaskExtended,
   findCompletedTaskInThread,
@@ -423,6 +424,20 @@ export async function sendTaskHandler(
       return {
         success: false,
         message: `Cannot assign tasks to the lead agent "${agent.name}", wtf?`,
+      };
+    }
+
+    // Provider-health circuit breaker: this is the chokepoint that closes the
+    // 2026-07-31 incident's amplification loop. A Lead re-dispatch to a
+    // crashed agent mints a fresh task with no resume-generation heritage, so
+    // the per-lineage generation cap never engages on this path — this
+    // per-agent check is what actually stops it, whether the dispatch is a
+    // manual redelegation or an automated reroute-decision follow-up.
+    const dispatchDecision = canDispatchToAgent(effectiveAgentId);
+    if (!dispatchDecision.allowed) {
+      return {
+        success: false,
+        message: `Cannot assign task to agent "${agent.name}": ${dispatchDecision.reason}`,
       };
     }
 

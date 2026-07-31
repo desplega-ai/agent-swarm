@@ -901,6 +901,17 @@ export const AgentSchema = z.object({
     .nullable()
     .optional(),
 
+  // Provider-health circuit breaker (migration 123). 'open' means the
+  // dispatch chokepoints (resume creation, pool auto-assign, send-task)
+  // refuse new work for this agent — see src/be/circuit-breaker.ts. Optional
+  // (not `.default()`, matching `emptyPollCount`/`maxTasks` above) since
+  // `createAgent` never needs to supply these — new rows start closed/0 via
+  // the migration's SQL column default, not an application-layer default.
+  circuitBreakerState: z.enum(["closed", "open"]).optional(),
+  consecutiveZeroTokenSessions: z.number().int().min(0).optional(),
+  circuitBreakerTrippedAt: z.iso.datetime().nullable().optional(),
+  circuitBreakerReason: z.string().nullable().optional(),
+
   createdAt: z.iso.datetime().default(() => new Date().toISOString()),
   lastUpdatedAt: z.iso.datetime().default(() => new Date().toISOString()),
 });

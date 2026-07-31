@@ -262,6 +262,33 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "boolean",
         defaultValue: "true",
       },
+      {
+        key: "CIRCUIT_BREAKER_ZERO_TOKEN_THRESHOLD",
+        label: "Circuit breaker trip threshold",
+        description:
+          "Consecutive zero-token sessions (provider rejected the call — dead key or exhausted credits) before an agent's dispatch circuit breaker trips.",
+        kind: "number",
+        defaultValue: "3",
+        placeholder: "3",
+      },
+      {
+        key: "CIRCUIT_BREAKER_ZERO_TOKEN_MAX_DURATION_MS",
+        label: "Circuit breaker death duration (ms)",
+        description:
+          "A session must finish faster than this AND report zero tokens to count as a provider-rejection 'death' rather than a legitimately cheap session.",
+        kind: "number",
+        defaultValue: "5000",
+        placeholder: "5000",
+      },
+      {
+        key: "CIRCUIT_BREAKER_COOLDOWN_MIN",
+        label: "Circuit breaker cooldown (min)",
+        description:
+          "Minutes an agent's tripped circuit breaker stays fully open before a single half-open probe dispatch is allowed through.",
+        kind: "number",
+        defaultValue: "30",
+        placeholder: "30",
+      },
     ],
   },
   {

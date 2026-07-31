@@ -28,6 +28,10 @@ const agentOutputShape = z.looseObject({
   credentialMissing: z.array(z.string()).nullable().optional(),
   credStatus: z.looseObject({}).nullable().optional(),
   avatar: z.looseObject({}).nullable().optional(),
+  circuitBreakerState: z.enum(["closed", "open"]).optional(),
+  consecutiveZeroTokenSessions: z.number().optional(),
+  circuitBreakerTrippedAt: z.string().nullable().optional(),
+  circuitBreakerReason: z.string().nullable().optional(),
   createdAt: z.string().optional(),
   lastUpdatedAt: z.string().optional(),
 });
@@ -61,7 +65,10 @@ export const registerGetSwarmTool = (server: McpServer) => {
       // Include the ID — send-task targets agents by ID, and text-only
       // harnesses never see the structured data to look it up.
       const agentList = agents
-        .map((a) => `- ${a.name} (${a.status}${a.isLead ? ", lead" : ""}) — id: ${a.id}`)
+        .map(
+          (a) =>
+            `- ${a.name} (${a.status}${a.isLead ? ", lead" : ""}${a.circuitBreakerState === "open" ? ", CIRCUIT OPEN" : ""}) — id: ${a.id}`,
+        )
         .join("\n");
 
       return toolOk(

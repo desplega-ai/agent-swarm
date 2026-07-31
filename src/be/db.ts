@@ -663,6 +663,11 @@ type AgentRow = {
   cred_status: string | null;
   /** Migration 119: custom avatar (JSON of AgentAvatar). NULL = deterministic hash-derived fallback. */
   avatar: string | null;
+  /** Migration 123: provider-health circuit breaker state. See src/be/circuit-breaker.ts. */
+  circuitBreakerState: string;
+  consecutiveZeroTokenSessions: number;
+  circuitBreakerTrippedAt: string | null;
+  circuitBreakerReason: string | null;
 };
 
 /** Safe-parse the `avatar` JSON column. Malformed/invalid content (e.g. a
@@ -706,6 +711,10 @@ function rowToAgent(row: AgentRow, slim = false): Agent {
       : null,
     credStatus: row.cred_status ? (JSON.parse(row.cred_status) as AgentCredStatus) : null,
     avatar: parseAgentAvatar(row.avatar),
+    circuitBreakerState: row.circuitBreakerState === "open" ? "open" : "closed",
+    consecutiveZeroTokenSessions: row.consecutiveZeroTokenSessions ?? 0,
+    circuitBreakerTrippedAt: row.circuitBreakerTrippedAt ?? null,
+    circuitBreakerReason: row.circuitBreakerReason ?? null,
   };
   if (slim) return base;
   return {
@@ -991,6 +1000,75 @@ export function resetEmptyPollCount(agentId: string): void {
 export function shouldBlockPolling(agentId: string): boolean {
   const agent = getAgentById(agentId);
   return (agent?.emptyPollCount ?? 0) >= MAX_EMPTY_POLLS;
+}
+
+// ============================================================================
+// Provider-health circuit breaker (persistence only — decision logic lives in
+// src/be/circuit-breaker.ts, see that file for the "why").
+// ============================================================================
+
+export interface CircuitBreakerUpdate {
+  state: "closed" | "open";
+  consecutiveZeroTokenSessions: number;
+  trippedAt: string | null;
+  reason: string | null;
+}
+
+export function updateAgentCircuitBreaker(
+  agentId: string,
+  update: CircuitBreakerUpdate,
+): Agent | null {
+  const row = getDb()
+    .prepare<AgentRow, [string, number, string | null, string | null, string]>(
+      `UPDATE agents
+       SET circuitBreakerState = ?,
+           consecutiveZeroTokenSessions = ?,
+           circuitBreakerTrippedAt = ?,
+           circuitBreakerReason = ?,
+           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ?
+       RETURNING *`,
+    )
+    .get(
+      update.state,
+      update.consecutiveZeroTokenSessions,
+      update.trippedAt,
+      update.reason,
+      agentId,
+    );
+  return row ? rowToAgent(row) : null;
+}
+
+/** Closed + zero counter + no timestamp/reason. Called on a real-token session and on explicit reset (e.g. agent reconnect). */
+export function resetAgentCircuitBreaker(agentId: string): Agent | null {
+  return updateAgentCircuitBreaker(agentId, {
+    state: "closed",
+    consecutiveZeroTokenSessions: 0,
+    trippedAt: null,
+    reason: null,
+  });
+}
+
+/**
+ * Atomically claim the single half-open probe slot for a tripped agent: only
+ * succeeds if the breaker is still `open` AND the cooldown has elapsed since
+ * the last trip/probe attempt (`circuitBreakerTrippedAt <= cooldownCutoffIso`).
+ * Bumps `circuitBreakerTrippedAt` to now in the SAME statement, so a burst of
+ * concurrent dispatch attempts can only ever let ONE through per cooldown
+ * window — SQLite's single-writer semantics serialize this UPDATE, and every
+ * other concurrent caller's WHERE clause misses once the first writer commits
+ * the new timestamp. Returns true iff this call won the probe slot.
+ */
+export function tryClaimCircuitBreakerProbe(agentId: string, cooldownCutoffIso: string): boolean {
+  const row = getDb()
+    .prepare<{ id: string }, [string, string]>(
+      `UPDATE agents
+       SET circuitBreakerTrippedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND circuitBreakerState = 'open' AND circuitBreakerTrippedAt <= ?
+       RETURNING id`,
+    )
+    .get(agentId, cooldownCutoffIso);
+  return row != null;
 }
 
 export function deleteAgent(id: string): boolean {

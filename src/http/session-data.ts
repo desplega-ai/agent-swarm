@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { recordSessionForCircuitBreaker } from "../be/circuit-breaker";
 import {
   createSessionCost,
   createSessionLogs,
@@ -292,6 +293,7 @@ export async function handleSessionData(
         isError: parsed.body.isError ?? false,
         costSource,
       });
+      recordSessionForCircuitBreaker(cost);
       recordSessionCost({
         totalCostUsd,
         harness: parsed.body.provider ?? "unknown",

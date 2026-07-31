@@ -1,3 +1,4 @@
+import { canDispatchToAgent } from "../be/circuit-breaker";
 import {
   assignUnassignedTaskPending,
   backfillSupersedeTaskResumeTaskId,
@@ -448,6 +449,30 @@ function remediateCrashedWorkerTask(
     return;
   }
 
+  // Provider-health circuit breaker: this is the resume-creation chokepoint
+  // the 2026-07-31 incident's amplification loop went through. Checked BEFORE
+  // the per-lineage generation cap because that cap resets to zero on every
+  // Lead re-dispatch (fresh task, no inherited tag) — the circuit breaker is
+  // per-agent and survives across lineages, so it is the actual global brake.
+  const dispatchDecision = canDispatchToAgent(task.agentId);
+  if (!dispatchDecision.allowed) {
+    const failed = failTask(task.id, "provider_circuit_open");
+    if (failed) {
+      findings.autoFailedTasks.push({
+        taskId: task.id,
+        agentId: task.agentId,
+        reason: "provider_circuit_open",
+      });
+      if (opts.cleanupActiveSession) deleteActiveSession(task.id);
+      console.warn(
+        `[Heartbeat] Auto-failed task ${task.id.slice(0, 8)} — provider circuit breaker open for agent ${task.agentId.slice(0, 8)}: ${dispatchDecision.reason}`,
+      );
+      const remaining = getActiveTaskCount(task.agentId);
+      if (remaining === 0) updateAgentStatus(task.agentId, "idle");
+    }
+    return;
+  }
+
   const nextResumeGeneration = getNextResumeGeneration(task);
   if (nextResumeGeneration > maxResumeGenerations()) {
     const failed = failTask(task.id, RESUME_BUDGET_EXHAUSTED_REASON);
@@ -759,9 +784,13 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
     // Skip idle workers whose accumulated empty-poll count has hit the gate;
     // assigning to them would just have them exit on their next poll. Filter on
     // the rows already returned (emptyPollCount is populated) rather than
-    // re-querying per worker via shouldBlockPolling().
+    // re-querying per worker via shouldBlockPolling(). Also skip workers with
+    // an open provider-health circuit breaker — pool tasks are fungible, so
+    // route them to a healthy worker instead; a tripped worker recovers via
+    // explicit reconnect (restart) or a Lead-driven send-task half-open probe,
+    // not an unattended pool auto-assign.
     const idleWorkers = getIdleWorkersWithCapacity().filter(
-      (w) => (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS,
+      (w) => (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS && w.circuitBreakerState !== "open",
     );
     if (idleWorkers.length === 0) return;
 
@@ -839,6 +868,24 @@ function escalateUnreclaimedResumes(findings: HeartbeatFindings): void {
 
   for (const resume of stale) {
     if (!resume.parentTaskId) continue; // Defensive — resumes always have a parent.
+
+    // Provider circuit breaker: a resume pinned to an agent whose breaker is
+    // open is provably not going to succeed by escalating to the Lead for a
+    // re-delegation decision (send-task to the same agent will be refused
+    // anyway, see the send-task gate) — terminalize directly rather than
+    // spending a Lead decision task on a foregone conclusion.
+    if (resume.agentId) {
+      const dispatchDecision = canDispatchToAgent(resume.agentId);
+      if (!dispatchDecision.allowed) {
+        const failed = failPendingResumeIfUnclaimed(resume.id, "failed", "provider_circuit_open");
+        if (failed) {
+          console.warn(
+            `[Heartbeat] Unreclaimed pinned resume ${resume.id.slice(0, 8)} — provider circuit breaker open for agent ${resume.agentId.slice(0, 8)}, terminalized without escalating to Lead`,
+          );
+        }
+        continue;
+      }
+    }
 
     // Budget guard: a resume already at the generation cap must NOT spawn another
     // Lead re-delegation (send-task does not enforce the generation tag, so a

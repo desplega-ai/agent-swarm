@@ -10,6 +10,7 @@ import {
   getAllAgentsWithTasks,
   getDb,
   getSwarmConfigs,
+  resetAgentCircuitBreaker,
   resetEmptyPollCount,
   setAgentHarnessProvider,
   updateAgentActivity,
@@ -315,6 +316,13 @@ export async function handleAgentRegister(
           setAgentHarnessProvider(existingAgent.id, parsed.body.harness_provider);
         }
         resetEmptyPollCount(existingAgent.id);
+        // Explicit human action (process/container restart) is the documented
+        // "recover without a redeploy" path for a tripped provider-health
+        // circuit breaker — a customer who topped up their provider credits
+        // and restarted must not have to wait out the cooldown.
+        if (existingAgent.circuitBreakerState === "open") {
+          resetAgentCircuitBreaker(existingAgent.id);
+        }
         return { agent: getAgentById(agentId), created: false };
       }
 
