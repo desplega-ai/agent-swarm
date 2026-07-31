@@ -7,8 +7,14 @@ import {
   ensureTaskFinished,
   getBridgeFailureDiagnostics,
   handleStructuredOutputFallback,
+  resolveProviderOutput,
   trackAssistantText,
 } from "../commands/runner";
+import {
+  clearVolatileSecretsForTesting,
+  refreshSecretScrubberCache,
+  registerVolatileSecret,
+} from "../utils/secret-scrubber";
 
 // Configurable mock responses per test
 let mockGetTask: Record<string, unknown> | null = null;
@@ -254,6 +260,77 @@ describe("trackAssistantText", () => {
     trackAssistantText(holder, { type: "message", role: "assistant", content: exactText });
     expect(holder.value).toBe(exactText);
   });
+
+  test("scrubs registered and env secrets before the output cap and finish boundary", async () => {
+    const envKey = "RUNNER_FINAL_OUTPUT_TEST_SECRET";
+    const previousEnvValue = process.env[envKey];
+    const envSecret = `env-${"a".repeat(120)}`;
+    const registeredSecret = `registered-${"b".repeat(120)}`;
+
+    process.env[envKey] = envSecret;
+    refreshSecretScrubberCache();
+    registerVolatileSecret(registeredSecret, "runner.final-output-test");
+
+    try {
+      resetMocks();
+      mockGetTask = {
+        id: "task-scrubbed-runner-buffer",
+        task: "Do work",
+        status: "in_progress",
+        output: null,
+        progress: null,
+        logs: [],
+      };
+      const holder: { value?: string } = {};
+      const content = `${"x".repeat(29_850)} env=${envSecret} registered=${registeredSecret}`;
+
+      trackAssistantText(holder, { type: "message", role: "assistant", content });
+      await ensureTaskFinished(
+        makeConfig(),
+        "worker",
+        "task-scrubbed-runner-buffer",
+        0,
+        undefined,
+        resolveProviderOutput({}, holder),
+        "codex",
+      );
+
+      expect(lastFinishBody?.output).toContain(`[REDACTED:${envKey}]`);
+      expect(lastFinishBody?.output).toContain("[REDACTED:runner.final-output-test]");
+      expect(lastFinishBody?.output).not.toContain(envSecret);
+      expect(lastFinishBody?.output).not.toContain(registeredSecret.slice(0, 20));
+      expect(lastFinishBody?.output).not.toContain("… [truncated]");
+    } finally {
+      if (previousEnvValue === undefined) {
+        delete process.env[envKey];
+      } else {
+        process.env[envKey] = previousEnvValue;
+      }
+      clearVolatileSecretsForTesting();
+      refreshSecretScrubberCache();
+    }
+  });
+});
+
+describe("resolveProviderOutput", () => {
+  test("prefers a non-empty adapter output over the runner buffer", () => {
+    expect(
+      resolveProviderOutput({ output: "adapter final answer" }, { value: "runner buffer" }),
+    ).toBe("adapter final answer");
+  });
+
+  test("falls through to the runner buffer for empty or absent adapter output", () => {
+    expect(resolveProviderOutput({ output: "" }, { value: "runner buffer" })).toBe("runner buffer");
+    expect(resolveProviderOutput({}, { value: "runner buffer" })).toBe("runner buffer");
+  });
+
+  test("uses the runner buffer for a Codex-shaped result without adapter output", () => {
+    const codexResult = { exitCode: 0, isError: false };
+
+    expect(resolveProviderOutput(codexResult, { value: "codex final answer" })).toBe(
+      "codex final answer",
+    );
+  });
 });
 
 describe("ensureTaskFinished", () => {
@@ -345,10 +422,10 @@ describe("ensureTaskFinished", () => {
       ],
     };
 
-    // Codex's ProviderResult never populates `output`; the runner's call
-    // site merges `result.output ?? assistantText?.value` before calling
-    // ensureTaskFinished, so `providerOutput` here is the buffered text —
-    // never the tool-narration progress line above.
+    // Codex's ProviderResult never populates `output`; the runner's
+    // resolveProviderOutput call falls through to assistantText before calling
+    // ensureTaskFinished, so providerOutput here is the buffered text — never
+    // the tool-narration progress line above.
     await ensureTaskFinished(
       makeConfig(),
       "worker",
@@ -381,9 +458,9 @@ describe("ensureTaskFinished", () => {
       ],
     };
 
-    // `result.output ?? assistantText?.value` is `undefined` when the
-    // adapter emitted no `message` events at all (e.g. OpenCode) — call-site
-    // behavior must be byte-identical to passing no providerOutput.
+    // resolveProviderOutput returns `undefined` when the adapter emitted no
+    // output or `message` events at all (e.g. OpenCode) — call-site behavior
+    // must be byte-identical to passing no providerOutput.
     await ensureTaskFinished(
       makeConfig(),
       "worker",

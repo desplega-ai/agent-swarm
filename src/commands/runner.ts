@@ -1054,12 +1054,23 @@ export function toolCallToProgress(toolName: string, args: unknown): string | nu
  */
 export function trackAssistantText(holder: { value?: string }, event: ProviderEvent): void {
   if (event.type !== "message" || event.role !== "assistant") return;
-  const text = event.content;
+  const text = scrubSecrets(event.content);
   if (!text || !text.trim()) return;
   holder.value =
     text.length > ASSISTANT_TEXT_OUTPUT_CAP
       ? `${text.slice(0, ASSISTANT_TEXT_OUTPUT_CAP)}… [truncated]`
       : text;
+}
+
+/**
+ * Prefer a non-empty adapter result, falling back to the runner's captured
+ * assistant text for adapters (currently Codex) that do not return one.
+ */
+export function resolveProviderOutput(
+  result: Pick<ProviderResult, "output">,
+  assistantText?: { value?: string },
+): string | undefined {
+  return result.output || assistantText?.value;
 }
 
 /**
@@ -4083,7 +4094,7 @@ async function checkCompletedProcesses(
         // for adapters that never populate `ProviderResult.output` (Codex
         // today, any future adapter). Empty buffer -> `undefined`, byte
         // identical to pre-fix behavior.
-        result.output ?? assistantText?.value,
+        resolveProviderOutput(result, assistantText),
         harnessProvider,
         bridgeFailureDiagnostics,
       );
