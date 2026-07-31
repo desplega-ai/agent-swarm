@@ -101,7 +101,7 @@ describe("script SDK allowlist", () => {
   test("bundled swarm-sdk.d.ts exposes only allowlisted methods", async () => {
     const types = await Bun.file("src/scripts-runtime/types/swarm-sdk.d.ts").text();
     for (const name of SDK_ALLOWLIST) {
-      expect(types).toMatch(new RegExp(`\\b${name}(?:<[^>]+>)?\\(args`));
+      expect(types).toMatch(new RegExp(`\\b${name}(?:<[^>]+>)?\\(\\s*args`));
     }
     expect(types).not.toContain("join_swarm(");
     expect(types).not.toContain("start_worker(");
