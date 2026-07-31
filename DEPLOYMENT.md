@@ -515,6 +515,28 @@ Worker requirements for this path:
 
 Your laptop can use a public API URL while containers use an internal one, as long as both point to the same swarm API and database.
 
+#### Managed Codex steering hooks
+
+Queued steering for Codex depends on lifecycle hooks installed at image build
+time. The official worker image writes a root-owned
+`/etc/codex/requirements.toml` that enables hooks and registers
+`agent-swarm codex-hook` for `SessionStart`, `PostToolUse`, and `Stop`.
+Requirements-managed hooks are trusted by policy, which avoids an interactive
+hook-trust prompt in headless workers. `PreToolUse` is deliberately omitted
+because Codex does not apply its `additionalContext`.
+
+The hook requires the same `API_KEY`, `MCP_BASE_URL`, and stable `AGENT_ID` as
+the worker, and it is active only when `STEERING_ENABLED=true` (or `1`). It
+polls pending messages, marks each one delivered before injecting it, and
+silently leaves messages pending for a later lifecycle event if the API cannot
+be reached.
+
+If you build your own worker image, rebuild it from the current
+`Dockerfile.worker` or reproduce this managed requirements file. Restarting an
+older container alone does not add the build-time hook configuration; without
+it, Codex queue messages remain pending until the terminal sweep promotes them
+to follow-up tasks.
+
 ---
 
 ## Slack Integration

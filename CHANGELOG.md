@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.125.0] - 2026-07-31
+
+### Added
+- **Codex tasks now receive queued steering through managed lifecycle hooks** (#1036) — worker images install trusted `SessionStart`, `PostToolUse`, and `Stop` hooks that deliver pending messages at tool-call boundaries instead of immediately promoting them to follow-up tasks.
+
+### Changed
+- **The root test command now reports the file responsible for timeout failures** (#1033) — `bun run test:root` runs test files through an attributable wrapper while preserving the suite's existing timeout budget.
+
+### Fixed
+- **Oversized MCP results stay bounded for agents without starving scripts of data** (#1032, #1037) — model-facing responses spill recoverable full values to private, expiring KV pointers, while `ctx.swarm.*` receives complete scrubbed SDK responses up to a loud 64 MiB safety limit.
+
 ## [1.124.0] - 2026-07-30
 
 ### Added

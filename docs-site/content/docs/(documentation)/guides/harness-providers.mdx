@@ -891,7 +891,7 @@ Run before opening the PR (per `CLAUDE.md`):
 ```bash
 bun run lint:fix
 bun run tsc:check
-bun test
+bun run test:root
 bash scripts/check-db-boundary.sh
 bun run docs:openapi   # only if you added HTTP endpoints
 ```

@@ -27,6 +27,23 @@ All MCP tools have structured annotations (`readOnlyHint`, `destructiveHint`, `i
 
 This reduces context window overhead by ~85% compared to loading all tools upfront.
 
+## Large Result Handling
+
+Agent-facing MCP results are capped at 10,000 serialized UTF-8 bytes. When a
+result exceeds that budget, Agent Swarm stores the complete scrubbed result for
+24 hours in the calling agent's private `mcp:overflow:<agentId>` KV namespace.
+The bounded response keeps the largest fitting leading slice of an array, or a
+readable prose preview; scalar JSON is omitted as a complete unit rather than
+cut into invalid JSON. Both MCP result channels receive the same
+machine-readable `truncation` metadata and `kv-get` retrieval pointer.
+
+`kv-get` returns the complete stored value, although the active harness may
+still apply its own display limit. For filtering or aggregation, fetch the
+value inside a script with `ctx.swarm.kv_get` and return only the derived
+answer. Script-internal `ctx.swarm.*` responses are not subject to the 10 KB
+model-context ceiling; see [Scripts runtime](/docs/guides/scripts-runtime) for
+that separate boundary.
+
 ## Core Tools
 
 Always available tools for basic swarm operations.
@@ -132,7 +149,12 @@ Cancel a task that is pending or in progress. Only the lead or task creator can 
 
 Send additional instructions to a task that is already running. Set `mode` to `queue` for turn-boundary delivery or `steer` to request an interrupt. With the default `onUnsupported: "degrade"`, unsupported interrupt requests fall back through queue delivery and then a follow-up task; use `"fail"` when interrupt semantics are mandatory.
 
-pi-mono and Claude Managed advertise both modes. Claude Code, Devin, and opencode advertise queue only. Codex promotes the message to a follow-up task. See [Steer a Running Task](/docs/guides/task-steering) for the capability matrix and lifecycle.
+pi-mono and Claude Managed advertise both modes. Claude Code, Devin, opencode,
+and Codex advertise queue only. Codex delivers queued messages at the next
+`SessionStart`, `PostToolUse`, or `Stop` lifecycle hook; messages that are never
+picked up are promoted to follow-up tasks by the terminal sweep. See
+[Steer a Running Task](/docs/guides/task-steering) for the capability matrix
+and lifecycle.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
