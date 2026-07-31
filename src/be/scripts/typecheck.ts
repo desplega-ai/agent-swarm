@@ -61,6 +61,16 @@ export interface SwarmConfig {
   get<T = string>(key: string): Redacted<T> | undefined;
 }
 
+export interface KvEntry<T = unknown> {
+  namespace: string;
+  key: string;
+  value: T;
+  valueType: "json" | "string" | "integer";
+  expiresAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface SwarmSdk {
   // --- memory ---
   memory_search(args: { query: string; intent: string; scope?: "all" | "agent" | "swarm"; limit?: number; source?: string }): Promise<unknown>;
@@ -73,7 +83,9 @@ export interface SwarmSdk {
   task_poll(args?: Record<string, unknown>): Promise<unknown>;
   // --- kv ---
   kv_get(args: { key: string; namespace?: string }): Promise<unknown>;
+  kv_getOrNull<T = unknown>(args: { key: string; namespace?: string }): Promise<KvEntry<T> | null>;
   kv_set(args: { key: string; value: unknown; namespace?: string; ttlSeconds?: number; valueType?: "string" | "json" | "integer" }): Promise<unknown>;
+  kv_delete(args: { key: string; namespace?: string }): Promise<unknown>;
   kv_del(args: { key: string; namespace?: string }): Promise<unknown>;
   kv_incr(args: { key: string; by?: number; namespace?: string }): Promise<unknown>;
   kv_list(args?: { prefix?: string; namespace?: string; limit?: number }): Promise<unknown>;

@@ -101,7 +101,7 @@ describe("script SDK allowlist", () => {
   test("bundled swarm-sdk.d.ts exposes only allowlisted methods", async () => {
     const types = await Bun.file("src/scripts-runtime/types/swarm-sdk.d.ts").text();
     for (const name of SDK_ALLOWLIST) {
-      expect(types).toContain(`${name}(args`);
+      expect(types).toMatch(new RegExp(`\\b${name}(?:<[^>]+>)?\\(args`));
     }
     expect(types).not.toContain("join_swarm(");
     expect(types).not.toContain("start_worker(");
@@ -112,6 +112,11 @@ describe("script SDK allowlist", () => {
       const mcpName = mcpToolNameForSdkMethod(sdkName);
       expect(isMcpToolAllowedForScripts(mcpName)).toBe(true);
     }
+  });
+
+  test("KV delete names share the existing delete tool mapping", () => {
+    expect(mcpToolNameForSdkMethod("kv_delete")).toBe("kv-delete");
+    expect(mcpToolNameForSdkMethod("kv_del")).toBe("kv-delete");
   });
 
   test("isMcpToolAllowedForScripts rejects non-mapped MCP names", () => {

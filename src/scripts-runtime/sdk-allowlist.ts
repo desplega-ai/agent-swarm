@@ -19,7 +19,9 @@ export const SDK_TOOL_NAME_MAP = {
 
   // ── kv ──
   kv_get: "kv-get",
+  kv_getOrNull: "kv-get",
   kv_set: "kv-set",
+  kv_delete: "kv-delete",
   kv_del: "kv-delete",
   kv_incr: "kv-incr",
   kv_list: "kv-list",

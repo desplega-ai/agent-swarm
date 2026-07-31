@@ -119,6 +119,7 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
 
     // ── kv ──
     case "kv_get":
+    case "kv_getOrNull":
       return { method: "GET", path: kvPath(body) };
     case "kv_set":
       return {
@@ -130,6 +131,7 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
           expiresInSec: body.expiresInSec ?? body.ttlSeconds,
         },
       };
+    case "kv_delete":
     case "kv_del":
       return { method: "DELETE", path: kvPath(body) };
     case "kv_incr":
@@ -480,6 +482,23 @@ async function callTool(name: string, args: unknown, config: SwarmConfig): Promi
 
   if (name === "script_search" || name === "script_run") {
     return callBridgeApi(name, args, config, { throwOnError: true });
+  }
+
+  if (name === "kv_getOrNull") {
+    const result = (await callBridgeApi(name, args, config)) as {
+      success: boolean;
+      status: number;
+      data: unknown;
+    };
+    if (result.status === 404) return null;
+    if (!result.success) {
+      const message =
+        result.data && typeof result.data === "object" && "error" in result.data
+          ? String((result.data as { error: unknown }).error)
+          : "api failed";
+      throw new Error(`swarm-sdk: ${name} failed with ${result.status}: ${message}`);
+    }
+    return result.data;
   }
 
   return callBridgeApi(name, args, config);
