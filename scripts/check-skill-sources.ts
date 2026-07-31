@@ -63,6 +63,22 @@ const templateNames = await skillDirs(TEMPLATES_DIR, "config.json").catch(() => 
 const pluginNames = await skillDirs(PLUGIN_DIR, "SKILL.md").catch(() => []);
 const seederSource = await Bun.file(SEEDER_INDEX).text();
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Local binding a module path is imported as, or null when it is not imported. */
+function importAliasFor(source: string, modulePath: string): string | null {
+  const match = source.match(
+    new RegExp(`import\\s+(\\w+)\\s+from\\s+"[^"]*${escapeRegex(modulePath)}"`),
+  );
+  return match?.[1] ?? null;
+}
+
+/** Body of the BUILT_IN_SKILL_SOURCES array literal, or null if not found. */
+const catalogBody =
+  seederSource.match(/const BUILT_IN_SKILL_SOURCES\s*=\s*\[([\s\S]*?)\n\];/)?.[1] ?? null;
+
 // ── 1. No name may exist in both delivery paths ─────────────────────────────
 for (const name of templateNames) {
   if (pluginNames.includes(name)) {
@@ -117,14 +133,47 @@ for (const name of templateNames) {
   // ── 4. A seeded skill must be wired into the seeder ───────────────────────
   // Content is embedded at build time (the compiled API has no templates/ on
   // disk), so a template nobody imported silently never reaches any agent.
-  const configImport = `templates/skills/${name}/config.json`;
-  const contentImport = `templates/skills/${name}/content.md`;
-  if (!seederSource.includes(configImport) || !seederSource.includes(contentImport)) {
+  //
+  // Importing is necessary but NOT sufficient: unused imports are legal, so a
+  // contributor can add both imports, forget the BUILT_IN_SKILL_SOURCES entry,
+  // and the skill still never reaches production. Resolve each import to its
+  // local binding and require BOTH bindings to appear in the catalog array.
+  const configAlias = importAliasFor(seederSource, `templates/skills/${name}/config.json`);
+  const contentAlias = importAliasFor(seederSource, `templates/skills/${name}/content.md`);
+
+  if (!configAlias || !contentAlias) {
     fail(
       "not-wired",
-      `templates/skills/${name} has runAllSeedersCandidate: true but is not imported in ` +
-        `src/be/seed-skills/index.ts. It will never be seeded. Add its config.json + ` +
-        `content.md text-imports and an entry in BUILT_IN_SKILL_SOURCES.`,
+      `templates/skills/${name} has runAllSeedersCandidate: true but its ` +
+        `${!configAlias ? "config.json" : "content.md"} is not imported in ` +
+        `src/be/seed-skills/index.ts. It will never be seeded. Add both text-imports ` +
+        `and an entry in BUILT_IN_SKILL_SOURCES.`,
+    );
+    continue;
+  }
+
+  if (!catalogBody) {
+    fail(
+      "catalog-unparseable",
+      `Could not locate the BUILT_IN_SKILL_SOURCES array in src/be/seed-skills/index.ts. ` +
+        `If it was renamed or reshaped, update scripts/check-skill-sources.ts to match — ` +
+        `otherwise this check silently stops verifying anything.`,
+    );
+    break;
+  }
+
+  const referenced =
+    new RegExp(`\\bconfig:\\s*${configAlias}\\b`).test(catalogBody) &&
+    new RegExp(`\\bbody:\\s*${contentAlias}\\b`).test(catalogBody);
+
+  if (!referenced) {
+    fail(
+      "not-wired",
+      `templates/skills/${name} is imported into src/be/seed-skills/index.ts as ` +
+        `{ ${configAlias}, ${contentAlias} } but has no BUILT_IN_SKILL_SOURCES entry. ` +
+        `Unused imports are legal, so this compiles and passes tests while ` +
+        `loadSeedSkills() never returns the skill and production never seeds it. ` +
+        `Add: { config: ${configAlias}, body: ${contentAlias} }`,
     );
   }
 }

@@ -205,6 +205,46 @@ describe("seeded skills with bundled files", () => {
     expect(second.skippedUserModified).toBe(0);
   });
 
+  test("a failed bundled-file write leaves no partial skill row", () => {
+    // Why this matters: if the row landed but file sync then threw, the harness
+    // would catch the error and skip recording seed_state. The next boot would
+    // see an unrecorded row whose hash — computed over files it does not have —
+    // differs from the source, classify it as user-modified, and refuse to
+    // touch it again. A system-default skill would stay broken permanently,
+    // even after the underlying cause was fixed. apply() runs in a transaction
+    // so a failure rolls the row back and the next run retries cleanly.
+    //
+    // The failure is forced with a bundled path the DB layer rejects
+    // (`normalizeSkillFilePath` refuses "SKILL.md" — the body lives on the
+    // skill row). That is deterministic and needs no mocking; the file-count
+    // and size limits are module-level constants read at import time, so
+    // setting SKILL_FILES_MAX_COUNT here would have no effect.
+    const name = "zz-atomic-probe";
+    expect(getSkillByName(name, "swarm")).toBeNull();
+
+    const poisoned = {
+      key: name,
+      contentHash: "probe",
+      skill: {
+        name,
+        description: "atomicity probe",
+        content: `---\nname: ${name}\ndescription: atomicity probe\n---\n\nbody\n`,
+        systemDefault: false,
+        files: [
+          { path: "examples/fine.ts", content: "// this one is valid" },
+          { path: "SKILL.md", content: "// rejected: reserved path" },
+        ],
+      },
+    };
+
+    expect(() => skillsSeeder.apply(poisoned, "create")).toThrow();
+
+    // The row must not survive the failed file write...
+    expect(getSkillByName(name, "swarm")).toBeNull();
+    // ...and neither must the file that was written before the bad one.
+    expect(getSkillFiles(poisoned.key).length).toBe(0);
+  });
+
   test("bundled files survive repeated filesystem syncs (the reconcile bug)", () => {
     const artifacts = getSkillByName("artifacts", "swarm");
     expect(artifacts).toBeTruthy();

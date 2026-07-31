@@ -64,6 +64,7 @@ import {
   computeContentHash,
   createSkill,
   deleteSkillFile,
+  getDb,
   getSkillByName,
   getSkillFiles,
   updateSkill,
@@ -295,33 +296,48 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
     return skillSeedHash(existing.content, existing.systemDefault, liveFiles);
   },
 
+  /**
+   * Land the skill row and its bundled files as ONE atomic unit.
+   *
+   * A partial apply is unrecoverable, not merely untidy. If the row is written
+   * but file sync then throws (e.g. an operator sets `SKILL_FILES_MAX_COUNT`
+   * below a skill's file count), the harness catches the error and does NOT
+   * record `seed_state`. On the next boot the seeder sees an unrecorded row
+   * whose hash — computed over the files it does not have — differs from the
+   * source, classifies it as user-modified, and refuses to touch it again. The
+   * system-default skill would stay broken forever, even after the limit is
+   * fixed. The transaction makes the failure clean so the next run retries.
+   */
   apply(item): void {
     const { skill } = item;
-    const existing = getSkillByName(skill.name, "swarm");
 
-    if (existing) {
-      updateSkill(existing.id, {
+    getDb().transaction(() => {
+      const existing = getSkillByName(skill.name, "swarm");
+
+      if (existing) {
+        updateSkill(existing.id, {
+          name: skill.name,
+          description: skill.description,
+          content: skill.content,
+          scope: "swarm",
+          systemDefault: skill.systemDefault,
+          isComplex: skill.files.length > 0,
+        });
+        syncSeededSkillFiles(existing.id, skill.files);
+        return;
+      }
+
+      const created = createSkill({
         name: skill.name,
         description: skill.description,
         content: skill.content,
+        type: "personal",
         scope: "swarm",
+        ownerAgentId: undefined,
         systemDefault: skill.systemDefault,
         isComplex: skill.files.length > 0,
       });
-      syncSeededSkillFiles(existing.id, skill.files);
-      return;
-    }
-
-    const created = createSkill({
-      name: skill.name,
-      description: skill.description,
-      content: skill.content,
-      type: "personal",
-      scope: "swarm",
-      ownerAgentId: undefined,
-      systemDefault: skill.systemDefault,
-      isComplex: skill.files.length > 0,
-    });
-    syncSeededSkillFiles(created.id, skill.files);
+      syncSeededSkillFiles(created.id, skill.files);
+    })();
   },
 };

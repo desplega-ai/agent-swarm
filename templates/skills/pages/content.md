@@ -503,4 +503,6 @@ human-facing summary.
   servers, not static content.
 - The **`kv-storage`** skill — page-scoped state via `swarmSdk.kv`.
 - `runbooks/secret-scrubbing.md` — egress scrubbing details.
-- SPA listing: `${UI_URL}/pages`.
+- SPA listing: `${APP_URL}/pages` — the same `APP_URL` used for share links above.
+  Prefer the `app_url` that `create_page` returns; build URLs by hand only when
+  you have no page id.
