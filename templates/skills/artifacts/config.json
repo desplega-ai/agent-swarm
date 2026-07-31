@@ -4,11 +4,11 @@
   "displayName": "Artifacts",
   "slug": "artifacts",
   "title": "Artifacts",
-  "description": "Store logs, screenshots, exports, and generated files as durable task artifacts.",
-  "version": "1.0.0",
+  "description": "Store durable task outputs (reports, screenshots, exports, logs) in agent-fs or the shared workspace, and serve interactive web content to a public auth-protected URL via localtunnel. Use when asked to save evidence for a PR/ticket, share a file, \"create an artifact for X\", \"host this for me\", \"spin up a web server\", or \"give me a live link\". Covers agent-fs writes and verification, binary uploads, naming and attachment conventions, the `agent-swarm artifact` CLI, Hono apps, PM2 daemonization, HTTP Basic auth, and the injected browser SDK.",
+  "version": "2.0.0",
   "category": "skills",
   "placeholders": [],
   "runAllSeedersCandidate": true,
   "systemDefault": true,
-  "tags": ["artifacts", "evidence", "qa"]
+  "tags": ["artifacts", "evidence", "qa", "agent-fs", "serving", "tunnel"]
 }

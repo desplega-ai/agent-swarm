@@ -61,8 +61,17 @@ import workflowStructuredOutputConfig from "../../../templates/skills/workflow-s
 import workflowStructuredOutputContent from "../../../templates/skills/workflow-structured-output/content.md" with {
   type: "text",
 };
-import { computeContentHash, createSkill, getSkillByName, updateSkill } from "../db";
+import {
+  computeContentHash,
+  createSkill,
+  deleteSkillFile,
+  getSkillByName,
+  getSkillFiles,
+  updateSkill,
+  upsertSkillFiles,
+} from "../db";
 import type { Seeder, SeedItem } from "../seed/types";
+import bundledFilesManifest from "./bundled-files.generated.json";
 
 type SkillTemplateConfig = {
   name: string;
@@ -71,12 +80,38 @@ type SkillTemplateConfig = {
   systemDefault?: boolean;
 };
 
+/** One bundled file shipped alongside a skill's SKILL.md. */
+export type SeedSkillFile = {
+  /** Path relative to the skill directory, e.g. `examples/report-page.html`. */
+  path: string;
+  content: string;
+};
+
 export type SeedSkill = {
   name: string;
   description: string;
   content: string;
   systemDefault: boolean;
+  /** Bundled files. Empty for simple (single-SKILL.md) skills. */
+  files: SeedSkillFile[];
 };
+
+/**
+ * Bundled files per skill, keyed by skill name.
+ *
+ * Generated from `templates/skills/<name>/files/**` by
+ * `bun run build:seed-skill-files` — never hand-edit the JSON.
+ *
+ * It has to be embedded at build time: the API runs from a `bun build --compile`
+ * binary and `templates/` only exists in the Dockerfile's builder stage, so the
+ * seeder cannot read the directory at runtime. A single JSON module is used
+ * rather than one text-import per file because TypeScript resolves `.ts` imports
+ * as modules and types `.html` imports as `HTMLBundle` — neither is a string.
+ *
+ * `loadSeedSkills(templatesDir)` reads the directory directly instead — that
+ * path is for tests and the seed CLI, where the repo is on disk.
+ */
+const BUILT_IN_SKILL_FILES = bundledFilesManifest as Record<string, SeedSkillFile[]>;
 
 const BUILT_IN_SKILL_SOURCES = [
   { config: assetNamespacesConfig, body: assetNamespacesContent },
@@ -95,8 +130,38 @@ function buildSkillContent(config: SkillTemplateConfig, body: string): string {
   return `---\nname: ${config.name}\ndescription: ${config.description}\n---\n\n${body.trim()}\n`;
 }
 
-function skillSeedHash(content: string, systemDefault: boolean): string {
-  return computeContentHash(`${content}\n\n# seed:systemDefault=${systemDefault ? "1" : "0"}\n`);
+/** Canonical, order-independent rendering of a bundled file set for hashing. */
+function canonicalFiles(files: SeedSkillFile[]): string {
+  return [...files]
+    .sort((a, b) => a.path.localeCompare(b.path))
+    .map((file) => `${file.path}\n${file.content}`)
+    .join("\n\x00\n");
+}
+
+/**
+ * Hash the full seeded definition: SKILL.md body, the systemDefault flag, and
+ * every bundled file. Bundled files are part of the identity — editing one must
+ * register as a source change, or the seeder would never propagate it.
+ *
+ * BACKWARD COMPATIBILITY — do not "simplify" this branch.
+ *
+ * The file section is appended ONLY when a skill actually has bundled files, so
+ * a file-less skill hashes byte-identically to the pre-bundled-files scheme.
+ * `seed_state` rows written by earlier releases hold hashes in that old format;
+ * if every skill switched to the new format at once, `upstreamHash` would stop
+ * matching the recorded `seededHash` for every already-seeded skill, the harness
+ * would classify all of them as user-modified, and it would silently never
+ * update them again.
+ *
+ * The transition works because an existing DB row has no `skill_files` yet, so
+ * its upstream hash is still computed in the old format and matches the recorded
+ * state (pristine) — while the source, which now carries files, hashes
+ * differently and is therefore correctly seen as a changed source.
+ */
+function skillSeedHash(content: string, systemDefault: boolean, files: SeedSkillFile[]): string {
+  const base = `${content}\n\n# seed:systemDefault=${systemDefault ? "1" : "0"}\n`;
+  if (files.length === 0) return computeContentHash(base);
+  return computeContentHash(`${base}# seed:files\n${canonicalFiles(files)}\n`);
 }
 
 function seedSkillFromSource(
@@ -111,7 +176,31 @@ function seedSkillFromSource(
     description: config.description,
     content: buildSkillContent(config, body),
     systemDefault: config.systemDefault === true,
+    files: BUILT_IN_SKILL_FILES[config.name] ?? [],
   };
+}
+
+/** Recursively collect `<skillDir>/files/**` as skill-relative bundled files. */
+function readSkillFilesDir(skillDir: string): SeedSkillFile[] {
+  const filesRoot = join(skillDir, "files");
+  if (!existsSync(filesRoot)) return [];
+
+  const collected: SeedSkillFile[] = [];
+  const walk = (dir: string, prefix: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(full, rel);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      collected.push({ path: rel, content: readFileSync(full, "utf-8") });
+    }
+  };
+  walk(filesRoot, "");
+
+  return collected.sort((a, b) => a.path.localeCompare(b.path));
 }
 
 export function loadSeedSkills(templatesDir?: string): SeedSkill[] {
@@ -141,10 +230,28 @@ export function loadSeedSkills(templatesDir?: string): SeedSkill[] {
       description: config.description,
       content: buildSkillContent(config, body),
       systemDefault: config.systemDefault === true,
+      files: readSkillFilesDir(dir),
     });
   }
 
   return skills.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Make the skill's `skill_files` rows exactly match the seeded source set.
+ *
+ * Deleting removed paths matters: the filesystem writer treats `skill_files` as
+ * authoritative and prunes anything else out of a `.swarm-managed` skill dir,
+ * so a stale DB row would keep resurrecting a file the source no longer ships.
+ */
+function syncSeededSkillFiles(skillId: string, files: SeedSkillFile[]): void {
+  const desired = new Set(files.map((file) => file.path));
+
+  for (const existing of getSkillFiles(skillId)) {
+    if (!desired.has(existing.path)) deleteSkillFile(skillId, existing.path);
+  }
+
+  if (files.length > 0) upsertSkillFiles(skillId, files);
 }
 
 type SkillSeedItem = SeedItem & { skill: SeedSkill };
@@ -155,14 +262,21 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
   items(): SkillSeedItem[] {
     return loadSeedSkills().map((skill) => ({
       key: skill.name,
-      contentHash: skillSeedHash(skill.content, skill.systemDefault),
+      contentHash: skillSeedHash(skill.content, skill.systemDefault, skill.files),
       skill,
     }));
   },
 
   upstreamHash(item): string | null {
     const existing = getSkillByName(item.key, "swarm");
-    return existing ? skillSeedHash(existing.content, existing.systemDefault) : null;
+    if (!existing) return null;
+    // Hash the live bundled files too, so an edit to one is detected as drift
+    // on the same footing as an edit to SKILL.md.
+    const liveFiles = getSkillFiles(existing.id).map((file) => ({
+      path: file.path,
+      content: file.content,
+    }));
+    return skillSeedHash(existing.content, existing.systemDefault, liveFiles);
   },
 
   apply(item): void {
@@ -176,11 +290,13 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
         content: skill.content,
         scope: "swarm",
         systemDefault: skill.systemDefault,
+        isComplex: skill.files.length > 0,
       });
+      syncSeededSkillFiles(existing.id, skill.files);
       return;
     }
 
-    createSkill({
+    const created = createSkill({
       name: skill.name,
       description: skill.description,
       content: skill.content,
@@ -188,6 +304,8 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
       scope: "swarm",
       ownerAgentId: undefined,
       systemDefault: skill.systemDefault,
+      isComplex: skill.files.length > 0,
     });
+    syncSeededSkillFiles(created.id, skill.files);
   },
 };

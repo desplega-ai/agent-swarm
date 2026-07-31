@@ -176,6 +176,9 @@ jobs:
       - name: Check RBAC coverage (tools, verbs, routes)
         run: bun scripts/check-rbac-coverage.ts
 
+      - name: Check seeded skill bundled-file manifest freshness
+        run: bun run check:seed-skill-files
+
   test:
     name: Run Tests
     needs: detect-changes

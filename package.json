@@ -59,6 +59,8 @@
   ],
   "scripts": {
     "build:pi-skills": "bun run plugin/build-pi-skills.ts",
+    "build:seed-skill-files": "bun scripts/build-seed-skill-files.ts",
+    "check:seed-skill-files": "bun scripts/build-seed-skill-files.ts --check",
     "build:script-types": "bun scripts/bundle-script-types.ts",
     "build:cli": "bun run scripts/build-cli.ts",
     "mono:build": "turbo run build",

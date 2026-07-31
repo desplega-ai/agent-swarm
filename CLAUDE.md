@@ -57,6 +57,7 @@ New MCP tools: when adding a tool, register it in `SDK_TOOL_NAME_MAP` (`src/scri
 | `bun run docs:openapi` | Regenerate `openapi.json` |
 | `bun run docs:business-use` | Regenerate `BUSINESS_USE.md` (requires BU backend) |
 | `bun run build:pi-skills` | Regenerate `plugin/pi-skills/` from `plugin/commands/*.md` |
+| `bun run build:seed-skill-files` | Regenerate the seeded-skill bundled-file manifest from `templates/skills/*/files/` |
 | `docker compose -f docker-compose.local.yml up --build` | Local compose (API + lead + worker) |
 | `uvx business-use-core@latest server dev` | BU backend on :13370 |
 
@@ -122,6 +123,30 @@ Default Gemini model: `google/gemini-3-flash-preview` (this is from OpenRouter).
 File-based, forward-only SQL in `src/be/migrations/NNN_descriptive_name.sql`. Runner auto-applies on startup.
 
 Test against a fresh DB (`rm agent-swarm-db.sqlite && bun run start:http`) **and** an existing one. Never modify an applied migration — create a new one. No `down` migrations (SQLite rollbacks flake). Keep `AgentTaskSourceSchema` in `src/types.ts` in sync with SQL CHECK constraints.
+
+</important>
+
+<important if="you are adding or editing an agent skill (templates/skills/, plugin/skills/, or src/be/seed-skills/)">
+
+**One skill name, one delivery path.** A skill name must exist in `templates/skills/` (DB-seeded) **or** `plugin/skills/` (baked into the worker image) — never both. Both write `~/.claude/skills/<name>/SKILL.md`, the DB copy wins at runtime, and the FS writer then prunes any bundled file that has no `skill_files` row. That silently truncated `artifacts` / `kv-storage` / `pages` and deleted their examples in production.
+
+**Prefer `templates/skills/`** — DB-seeded skills are live-updatable (no image rebuild), listed by the skills API, editable in the UI, per-agent toggleable, and version-tracked with user-edit preservation.
+
+Layout:
+
+```
+templates/skills/<name>/
+  config.json          # name, description, runAllSeedersCandidate, systemDefault
+  content.md           # SKILL.md body — NO frontmatter (built from config.json)
+  files/               # optional bundled files → skill_files rows
+    examples/foo.ts
+```
+
+- `runAllSeedersCandidate: true` seeds it; `systemDefault: true` installs it for every agent. Any `scope='swarm'` skill reaches all agents with no `agent_skills` row.
+- New skill → add the `config.json` + `content.md` text-imports to `BUILT_IN_SKILL_SOURCES` in `src/be/seed-skills/index.ts`. They must be **static** imports: the API runs from a compiled binary and `templates/` only exists in the Dockerfile builder stage.
+- Added anything under `files/`? → `bun run build:seed-skill-files` and commit `bundled-files.generated.json`. Enforced by `bun run check:seed-skill-files` (CI).
+- Bundled files must be text — `skill_files.content` is TEXT and the FS writer skips binaries. Executable bits are not preserved.
+- Tests: `bun run test:root -- src/tests/seed-skills-bundled-files.test.ts src/tests/system-default-skills.test.ts`
 
 </important>
 
@@ -270,6 +295,7 @@ bun run check:dep-graph
 Drift checks — run only if you touched the trigger files, MUST commit any regenerated output:
 
 - Edited `plugin/commands/*.md`? → `bun run build:pi-skills`
+- Added/edited a file under `templates/skills/*/files/`? → `bun run build:seed-skill-files` and commit `src/be/seed-skills/bundled-files.generated.json` (NEVER hand-edit that JSON)
 - Edited `src/be/scripts/typecheck.ts` or `src/scripts-runtime/sdk-allowlist.ts`? → `bun run build:script-types` and commit `src/scripts-runtime/types/*.d.ts` (NEVER edit those `.d.ts` files directly — they're generated from `typecheck.ts`)
 - Edited an HTTP route OR bumped `package.json` `version`? → `bun run docs:openapi` (regenerates `openapi.json` AND `docs-site/content/docs/api-reference/**`)
 - Touched `apps/ui/` — or root `bun.lock`/`package.json`/`bunfig.toml` (ui deps resolve from the root lock)? → `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b` (CI uses `tsc -b`, not `--noEmit`)
