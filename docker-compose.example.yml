@@ -164,8 +164,8 @@ services:
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
-      # Replace by a valid UUID
-      - AGENT_ID=d454d1a5-4df9-49bd-8a89-e58d6a657dc3
+      # Generate once with `uuidgen`, set LEAD_AGENT_ID in .env, and keep it stable across restarts.
+      - "AGENT_ID=${LEAD_AGENT_ID:?Set LEAD_AGENT_ID in .env (generate one with uuidgen)}"
 
       # Important: Lead agent role
       - AGENT_ROLE=lead
@@ -209,8 +209,8 @@ services:
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
-      # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
-      - AGENT_ID=38d36438-58a0-45b5-8602-a5d52b07c2f1
+      # Generate once with `uuidgen`, set WORKER_1_AGENT_ID in .env, and keep it stable across restarts.
+      - "AGENT_ID=${WORKER_1_AGENT_ID:?Set WORKER_1_AGENT_ID in .env (generate one with uuidgen)}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/coder
@@ -252,8 +252,8 @@ services:
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
-      # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
-      - AGENT_ID=c1e2f3a4-5678-90ab-cdef-1234567890ab
+      # Generate once with `uuidgen`, set WORKER_2_AGENT_ID in .env, and keep it stable across restarts.
+      - "AGENT_ID=${WORKER_2_AGENT_ID:?Set WORKER_2_AGENT_ID in .env (generate one with uuidgen)}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/coder
@@ -295,8 +295,8 @@ services:
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
-      # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
-      - AGENT_ID=322999d8-a1d0-4ae1-a6a0-5ba292d85720
+      # Generate once with `uuidgen`, set CONTENT_WRITER_AGENT_ID in .env, and keep it stable across restarts.
+      - "AGENT_ID=${CONTENT_WRITER_AGENT_ID:?Set CONTENT_WRITER_AGENT_ID in .env (generate one with uuidgen)}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/content-writer
@@ -342,8 +342,8 @@ services:
 
     environment:
       - API_KEY=${API_KEY}
-      # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
-      - AGENT_ID=fc637423-24db-418a-ad03-a64e17c7b10a
+      # Generate once with `uuidgen`, set CONTENT_REVIEWER_AGENT_ID in .env, and keep it stable across restarts.
+      - "AGENT_ID=${CONTENT_REVIEWER_AGENT_ID:?Set CONTENT_REVIEWER_AGENT_ID in .env (generate one with uuidgen)}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/content-reviewer
@@ -392,8 +392,8 @@ services:
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
-      # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
-      - AGENT_ID=7f95f57e-fff6-42fd-8e5b-cc345feab985
+      # Generate once with `uuidgen`, set CONTENT_STRATEGIST_AGENT_ID in .env, and keep it stable across restarts.
+      - "AGENT_ID=${CONTENT_STRATEGIST_AGENT_ID:?Set CONTENT_STRATEGIST_AGENT_ID in .env (generate one with uuidgen)}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/content-strategist
@@ -436,8 +436,8 @@ services:
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
-      # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
-      - AGENT_ID=22d30bc3-c72f-4cb4-bcb3-f5709b535961
+      # Generate once with `uuidgen`, set UX_PRINCIPLES_AGENT_ID in .env, and keep it stable across restarts.
+      - "AGENT_ID=${UX_PRINCIPLES_AGENT_ID:?Set UX_PRINCIPLES_AGENT_ID in .env (generate one with uuidgen)}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/ux-principles
@@ -480,8 +480,8 @@ services:
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
-      # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
-      - AGENT_ID=3794020f-4bab-4d7e-a1e3-f9e2f2be33ce
+      # Generate once with `uuidgen`, set DISCOVERABILITY_AGENT_ID in .env, and keep it stable across restarts.
+      - "AGENT_ID=${DISCOVERABILITY_AGENT_ID:?Set DISCOVERABILITY_AGENT_ID in .env (generate one with uuidgen)}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/discoverability-optimizer
