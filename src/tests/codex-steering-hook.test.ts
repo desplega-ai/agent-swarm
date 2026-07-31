@@ -66,6 +66,26 @@ afterAll(() => {
 });
 
 describe("codex steering hook", () => {
+  test("standalone hook rendering loads the delivery template defaults", async () => {
+    const steeringMessageId = crypto.randomUUID();
+    const moduleUrl = new URL("../prompts/steering-delivery.ts", import.meta.url).href;
+    const script = [
+      `import { renderSteeringDelivery } from ${JSON.stringify(moduleUrl)};`,
+      `console.log(await renderSteeringDelivery(${JSON.stringify(steeringMessageId)}, "change course now"));`,
+    ].join("\n");
+    const subprocess = Bun.spawn([process.execPath, "-e", script], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [exitCode, stdout] = await Promise.all([
+      subprocess.exited,
+      new Response(subprocess.stdout).text(),
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain(`[steering ${steeringMessageId}]`);
+  });
+
   test("PostToolUse injects the envelope and marks the row delivered first", async () => {
     const pending = message();
     const deliveredCalls: string[] = [];
@@ -83,7 +103,7 @@ describe("codex steering hook", () => {
     };
     expect(hookOutput.hookEventName).toBe("PostToolUse");
     expect(hookOutput.additionalContext).toContain(pending.body);
-    expect(hookOutput.additionalContext).toContain(pending.id);
+    expect(hookOutput.additionalContext).toContain(`[steering ${pending.id}]`);
     expect(hookOutput.additionalContext).toContain("accept-steer");
   });
 

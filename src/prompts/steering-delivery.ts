@@ -1,3 +1,6 @@
+// The codex hook is a standalone CLI entry point, so it does not load the
+// base-prompt module that normally registers these code-default templates.
+import "./session-templates.ts";
 import { resolveTemplateAsync } from "./resolver.ts";
 
 /**
