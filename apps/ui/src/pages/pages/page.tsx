@@ -347,7 +347,7 @@ export default function PagesListingPage() {
         <EmptyState
           icon={Globe}
           title="No pages yet"
-          description="Pages are created via the create_page MCP tool. See plugin/skills/pages/SKILL.md for the agent contract."
+          description="Pages are created via the create_page MCP tool. See the built-in “pages” skill for the agent contract."
         />
       ) : (
         <DataGrid

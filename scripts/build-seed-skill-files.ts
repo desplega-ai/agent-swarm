@@ -13,13 +13,12 @@
  *      `HTMLBundle`, so a text-import per bundled file does not typecheck.
  *
  * One `.json` import sidesteps both: JSON is embedded at build time and types
- * cleanly as a string.
+ * cleanly.
  *
  * Usage:  bun run build:seed-skill-files
- *         bun run build:seed-skill-files --check    # CI drift check, no write
+ *         bun run check:seed-skill-files    # CI drift check, no write
  */
 
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const REPO_ROOT = join(import.meta.dir, "..");
@@ -28,44 +27,38 @@ const OUT_PATH = join(REPO_ROOT, "src", "be", "seed-skills", "bundled-files.gene
 
 type BundledFile = { path: string; content: string };
 
-function collectFiles(filesRoot: string): BundledFile[] {
+/** Collect `<skillDir>/files/**` as skill-relative bundled files. */
+async function collectFiles(filesRoot: string): Promise<BundledFile[]> {
   const collected: BundledFile[] = [];
 
-  const walk = (dir: string, prefix: string): void => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name);
-      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        walk(full, rel);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      collected.push({ path: rel, content: readFileSync(full, "utf-8") });
-    }
-  };
-  walk(filesRoot, "");
+  for await (const relative of new Bun.Glob("**/*").scan({ cwd: filesRoot, onlyFiles: true })) {
+    // Bun.Glob yields platform-native separators; skill_files paths are POSIX.
+    const path = relative.split("\\").join("/");
+    collected.push({ path, content: await Bun.file(join(filesRoot, relative)).text() });
+  }
 
   return collected.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-function build(): string {
+async function build(): Promise<string> {
   const manifest: Record<string, BundledFile[]> = {};
 
-  for (const entry of readdirSync(TEMPLATES_DIR, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-
-    const skillDir = join(TEMPLATES_DIR, entry.name);
+  // Every skill directory that ships a config; `files/` is optional.
+  for await (const configRelative of new Bun.Glob("*/config.json").scan({ cwd: TEMPLATES_DIR })) {
+    const skillDir = join(TEMPLATES_DIR, configRelative, "..");
     const filesRoot = join(skillDir, "files");
-    if (!existsSync(filesRoot)) continue;
+
+    // `files/` is optional — a scan over a missing directory yields nothing on
+    // some platforms and throws on others, so treat both as "no bundled files".
+    const files = await collectFiles(filesRoot).catch(() => [] as BundledFile[]);
+    if (files.length === 0) continue;
 
     // Key by the config's declared name, which is what the seeder looks up.
-    const configPath = join(skillDir, "config.json");
-    if (!existsSync(configPath)) continue;
-    const config = JSON.parse(readFileSync(configPath, "utf-8")) as { name?: string };
-    const name = config.name ?? entry.name;
-
-    const files = collectFiles(filesRoot);
-    if (files.length > 0) manifest[name] = files;
+    const config = (await Bun.file(join(TEMPLATES_DIR, configRelative)).json()) as {
+      name?: string;
+    };
+    const name = config.name ?? configRelative.split("/")[0];
+    if (name) manifest[name] = files;
   }
 
   // Stable key order so the generated file is byte-reproducible.
@@ -77,11 +70,12 @@ function build(): string {
   return `${JSON.stringify(ordered, null, 2)}\n`;
 }
 
-const generated = build();
+const generated = await build();
 const checkOnly = process.argv.includes("--check");
 
 if (checkOnly) {
-  const current = existsSync(OUT_PATH) ? readFileSync(OUT_PATH, "utf-8") : "";
+  const out = Bun.file(OUT_PATH);
+  const current = (await out.exists()) ? await out.text() : "";
   if (current !== generated) {
     console.error(
       "[build-seed-skill-files] bundled-files.generated.json is stale.\n" +
@@ -91,7 +85,7 @@ if (checkOnly) {
   }
   console.log("[build-seed-skill-files] up to date");
 } else {
-  writeFileSync(OUT_PATH, generated);
+  await Bun.write(OUT_PATH, generated);
   const skillCount = Object.keys(JSON.parse(generated)).length;
   console.log(`[build-seed-skill-files] wrote ${skillCount} skill(s) to ${OUT_PATH}`);
 }
