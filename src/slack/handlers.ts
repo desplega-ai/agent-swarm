@@ -20,6 +20,7 @@ import { extractTaskFromMessage, hasOtherUserMention, routeMessage } from "./rou
 import "./templates";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { extractSlackMessageText } from "./message-text";
+import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
 import { registerTreeMessage } from "./watcher";
@@ -578,10 +579,12 @@ export function registerMessageHandler(app: App): void {
 
       // Bot was mentioned (or message is in assistant thread) but no online agents matched — queue the request
       if (!checkRateLimit(msg.user)) {
-        await say({
-          text: ":satellite: _You're sending too many requests. Please slow down._",
-          thread_ts: msg.thread_ts || msg.ts,
-        });
+        if (!isSlackRenderV2Enabled()) {
+          await say({
+            text: ":satellite: _You're sending too many requests. Please slow down._",
+            thread_ts: msg.thread_ts || msg.ts,
+          });
+        }
         return;
       }
 
@@ -589,7 +592,7 @@ export function registerMessageHandler(app: App): void {
         ? effectiveText
         : extractTaskFromMessage(effectiveText, botUserId);
       if (!taskDescription) {
-        if (!isImplicitMention) {
+        if (!isImplicitMention && !isSlackRenderV2Enabled()) {
           await say({
             text: ":satellite: _Please provide a task description after mentioning an agent._",
             thread_ts: msg.thread_ts || msg.ts,
@@ -617,7 +620,7 @@ export function registerMessageHandler(app: App): void {
       }
 
       const lead = getLeadAgent();
-      createTaskWithSiblingAwareness(fullTaskDescription, {
+      const task = createTaskWithSiblingAwareness(fullTaskDescription, {
         agentId: lead?.id,
         source: "slack",
         slackChannelId: msg.channel,
@@ -627,29 +630,37 @@ export function registerMessageHandler(app: App): void {
         contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
       });
 
-      await say({
-        text: ":satellite: _No agents are online right now. Your request has been queued and will be processed when agents come back up._",
-        thread_ts: threadTs,
-      });
+      if (isSlackRenderV2Enabled()) {
+        await ensureSlackThreadTree([task.id]);
+      } else {
+        await say({
+          text: ":satellite: _No agents are online right now. Your request has been queued and will be processed when agents come back up._",
+          thread_ts: threadTs,
+        });
+      }
       return;
     }
 
     // Rate limit check
     if (!checkRateLimit(msg.user)) {
-      await say({
-        text: ":satellite: _You're sending too many requests. Please slow down._",
-        thread_ts: msg.thread_ts || msg.ts,
-      });
+      if (!isSlackRenderV2Enabled()) {
+        await say({
+          text: ":satellite: _You're sending too many requests. Please slow down._",
+          thread_ts: msg.thread_ts || msg.ts,
+        });
+      }
       return;
     }
 
     // Extract task description (using effective text which includes attachment metadata)
     const taskDescription = extractTaskFromMessage(effectiveText, botUserId);
     if (!taskDescription) {
-      await say({
-        text: ":satellite: _Please provide a task description after mentioning an agent._",
-        thread_ts: msg.thread_ts || msg.ts,
-      });
+      if (!isSlackRenderV2Enabled()) {
+        await say({
+          text: ":satellite: _Please provide a task description after mentioning an agent._",
+          thread_ts: msg.thread_ts || msg.ts,
+        });
+      }
       return;
     }
 
@@ -758,80 +769,89 @@ export function registerMessageHandler(app: App): void {
     // Send consolidated summary as initial tree with Block Kit
     const totalResults = results.assigned.length + results.queued.length + results.failed.length;
     if (totalResults > 0) {
-      // Build initial tree nodes from assignment results
-      const initialNodes: TreeNode[] = results.assigned.map(({ agentName, taskId }) => ({
-        taskId,
-        agentName,
-        status: "in_progress" as const,
-        children: [],
-      }));
-
-      // Add queued tasks
-      for (const q of results.queued) {
-        initialNodes.push({
-          taskId: q.taskId,
-          agentName: q.agentName,
-          status: "pending" as const,
-          children: [],
-        });
-      }
-
-      const blocks = buildTreeBlocks(initialNodes);
-
-      // Append failed assignment lines as context below the tree
-      if (results.failed.length > 0) {
-        const failedLines = results.failed
-          .map((f) => `⚠️ Could not assign to: *${f.agentName}* — ${f.reason}`)
-          .join("\n");
-        blocks.push({
-          type: "context",
-          elements: [{ type: "mrkdwn", text: failedLines }],
-        });
-      }
-
-      // Build plain-text fallback
-      const parts: string[] = [];
-      if (results.assigned.length > 0) {
-        const names = results.assigned.map((a) => `${a.agentName}`).join(", ");
-        parts.push(`Task assigned to: ${names}`);
-      }
-      if (results.queued.length > 0) {
-        const names = results.queued.map((q) => `${q.agentName}`).join(", ");
-        parts.push(`Task queued for: ${names}`);
-      }
-      if (results.failed.length > 0) {
-        const names = results.failed.map((f) => `${f.agentName}`).join(", ");
-        parts.push(`Could not assign to: ${names}`);
-      }
-
-      console.log(
-        `[Slack] Posting initial tree message with ${initialNodes.length} node(s)${results.failed.length > 0 ? ` and ${results.failed.length} failed assignment(s)` : ""}`,
+      const successfulTaskIds = [...results.assigned, ...results.queued].map(
+        ({ taskId }) => taskId,
       );
+      if (isSlackRenderV2Enabled()) {
+        if (successfulTaskIds.length > 0) await ensureSlackThreadTree(successfulTaskIds);
+      } else {
+        // Build initial tree nodes from assignment results
+        const initialNodes: TreeNode[] = results.assigned.map(({ agentName, taskId }) => ({
+          taskId,
+          agentName,
+          status: "in_progress" as const,
+          children: [],
+        }));
 
-      const resp = await say({
-        text: parts.join(". "),
-        blocks,
-        thread_ts: msg.thread_ts || msg.ts,
-      });
-
-      // Register the tree message so the watcher can update it in-place
-      // (assignment → progress → completion all in one evolving tree message)
-      if (resp?.ts) {
-        for (const { taskId } of results.assigned) {
-          registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
+        // Add queued tasks
+        for (const q of results.queued) {
+          initialNodes.push({
+            taskId: q.taskId,
+            agentName: q.agentName,
+            status: "pending" as const,
+            children: [],
+          });
         }
-        // Also register queued tasks so they appear in the tree when they start
-        for (const { taskId } of results.queued) {
-          registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
+
+        const blocks = buildTreeBlocks(initialNodes);
+
+        // Append failed assignment lines as context below the tree
+        if (results.failed.length > 0) {
+          const failedLines = results.failed
+            .map((f) => `⚠️ Could not assign to: *${f.agentName}* — ${f.reason}`)
+            .join("\n");
+          blocks.push({
+            type: "context",
+            elements: [{ type: "mrkdwn", text: failedLines }],
+          });
+        }
+
+        // Build plain-text fallback
+        const parts: string[] = [];
+        if (results.assigned.length > 0) {
+          const names = results.assigned.map((a) => `${a.agentName}`).join(", ");
+          parts.push(`Task assigned to: ${names}`);
+        }
+        if (results.queued.length > 0) {
+          const names = results.queued.map((q) => `${q.agentName}`).join(", ");
+          parts.push(`Task queued for: ${names}`);
+        }
+        if (results.failed.length > 0) {
+          const names = results.failed.map((f) => `${f.agentName}`).join(", ");
+          parts.push(`Could not assign to: ${names}`);
+        }
+
+        console.log(
+          `[Slack] Posting initial tree message with ${initialNodes.length} node(s)${results.failed.length > 0 ? ` and ${results.failed.length} failed assignment(s)` : ""}`,
+        );
+
+        const resp = await say({
+          text: parts.join(". "),
+          blocks,
+          thread_ts: msg.thread_ts || msg.ts,
+        });
+
+        // Register the tree message so the watcher can update it in-place
+        // (assignment → progress → completion all in one evolving tree message)
+        if (resp?.ts) {
+          for (const { taskId } of results.assigned) {
+            registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
+          }
+          // Also register queued tasks so they appear in the tree when they start
+          for (const { taskId } of results.queued) {
+            registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
+          }
         }
       }
     }
 
-    for (const steered of results.steered) {
-      await say({
-        text: `${steered.acknowledgement} *${steered.agentName}* will receive it.`,
-        thread_ts: threadTs,
-      });
+    if (!isSlackRenderV2Enabled()) {
+      for (const steered of results.steered) {
+        await say({
+          text: `${steered.acknowledgement} *${steered.agentName}* will receive it.`,
+          thread_ts: threadTs,
+        });
+      }
     }
   });
 

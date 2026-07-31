@@ -3,11 +3,14 @@ import * as z from "zod";
 import {
   getAgentById,
   getInboxMessageById,
+  getSlackTreeMessageByThread,
   getTaskById,
   markInboxMessageResponded,
   markTaskSlackReplySent,
+  recordSlackMessage,
 } from "@/be/db";
 import { getSlackApp } from "@/slack/app";
+import { getTaskLink } from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
 import { markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -31,12 +34,17 @@ export const registerSlackReplyTool = (server: McpServer) => {
           .optional()
           .describe("The task ID with Slack context (for task-related threads)."),
         message: z.string().min(1).max(4000).describe("The message to send to the Slack thread."),
+        blocks: z
+          .array(z.record(z.string(), z.unknown()))
+          .max(50)
+          .optional()
+          .describe("Optional Block Kit blocks. When omitted, a mrkdwn section is generated."),
       }),
       outputSchema: swarmToolOutputSchema({
         messageTs: z.string().optional(),
       }),
     },
-    async ({ inboxMessageId, taskId, message }, requestInfo, _meta) => {
+    async ({ inboxMessageId, taskId, message, blocks }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return toolErr("Agent ID not found.");
       }
@@ -48,6 +56,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
 
       let slackChannelId: string | undefined;
       let slackThreadTs: string | undefined;
+      let contextKey: string | undefined;
 
       // Determine Slack context from inbox message or task
       if (inboxMessageId) {
@@ -74,6 +83,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
         }
         slackChannelId = task.slackChannelId;
         slackThreadTs = task.slackThreadTs;
+        contextKey = task.contextKey;
       } else {
         return toolErr("Must provide inboxMessageId or taskId.");
       }
@@ -91,6 +101,33 @@ export const registerSlackReplyTool = (server: McpServer) => {
       try {
         const slackMessage = markdownToSlack(message);
 
+        const tree = getSlackTreeMessageByThread(slackChannelId, slackThreadTs);
+        const messageBlocks: Record<string, unknown>[] = [
+          ...(blocks ?? [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: slackMessage,
+              },
+            },
+          ]),
+        ];
+        if (taskId && tree?.permalink) {
+          if (messageBlocks.length >= 50) {
+            return toolErr("At most 49 blocks are allowed when a provenance footer is added.");
+          }
+          messageBlocks.push({
+            type: "context",
+            elements: [
+              {
+                type: "mrkdwn",
+                text: `${agent.name} · ${getTaskLink(taskId)} · <${tree.permalink}|↑ tree>`,
+              },
+            ],
+          });
+        }
+
         const result = await withAutoJoin(app.client, slackChannelId, () =>
           app.client.chat.postMessage({
             channel: slackChannelId,
@@ -98,19 +135,24 @@ export const registerSlackReplyTool = (server: McpServer) => {
             text: slackMessage, // Fallback for notifications
             username: agent.name,
             icon_emoji: agent.isLead ? ":crown:" : ":robot_face:",
-            blocks: [
-              {
-                type: "section",
-                text: {
-                  type: "mrkdwn",
-                  text: slackMessage,
-                },
-              },
-            ],
+            // biome-ignore lint/suspicious/noExplicitAny: MCP accepts arbitrary valid Block Kit JSON
+            blocks: messageBlocks as any,
           }),
         );
 
         const messageTs = result.ts;
+        if (messageTs) {
+          recordSlackMessage({
+            contextKey: contextKey ?? `task:slack:${slackChannelId}:${slackThreadTs}`,
+            channelId: slackChannelId,
+            threadTs: slackThreadTs,
+            ts: messageTs,
+            kind: "agent",
+            taskId,
+            finalized: true,
+            actorId: agent.id,
+          });
+        }
 
         // After successful postMessage, mark task as having a Slack reply
         if (taskId) {

@@ -18,6 +18,8 @@ import * as slackEnrichModule from "../slack/enrich";
 import * as slackEventDedupModule from "../slack/event-dedup";
 import * as siblingAwarenessModule from "../tasks/sibling-awareness";
 
+process.env.SLACK_RENDER_V2 = "false";
+
 // ---------------------------------------------------------------------------
 // Production-handler spies.
 //

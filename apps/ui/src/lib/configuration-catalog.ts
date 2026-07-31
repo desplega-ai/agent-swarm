@@ -307,6 +307,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
+        key: "SLACK_RENDER_V2",
+        label: "Slack thread renderer v2",
+        description:
+          "Use one editable task tree per thread and immutable streamed outcome cards. Turn off to restore the legacy per-task message renderer.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
         key: "GITHUB_DISABLE",
         label: "Disable GitHub",
         description:

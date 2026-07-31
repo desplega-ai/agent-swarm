@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getAgentById } from "@/be/db";
+import { getAgentById, getTaskById, recordSlackMessage } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { withAutoJoin } from "@/slack/channel-join";
@@ -19,6 +19,11 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
       inputSchema: z.object({
         channelId: z.string().min(1).describe("The Slack channel ID to post to."),
         message: z.string().min(1).max(4000).describe("The message content to post."),
+        blocks: z
+          .array(z.record(z.string(), z.unknown()))
+          .max(50)
+          .optional()
+          .describe("Optional Block Kit blocks. When omitted, a mrkdwn section is generated."),
       }),
       outputSchema: swarmToolOutputSchema({
         channelId: z.string().optional(),
@@ -26,7 +31,7 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
         messageTs: z.string().optional(),
       }),
     },
-    async ({ channelId, message }, requestInfo, _meta) => {
+    async ({ channelId, message, blocks }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return toolErr("Agent ID not found.");
       }
@@ -53,6 +58,15 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
 
       try {
         const slackMessage = markdownToSlack(message);
+        const messageBlocks = blocks ?? [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: slackMessage,
+            },
+          },
+        ];
 
         const result = await withAutoJoin(app.client, channelId, () =>
           app.client.chat.postMessage({
@@ -60,15 +74,8 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
             text: slackMessage, // Fallback for notifications
             username: agent.name,
             icon_emoji: ":crown:",
-            blocks: [
-              {
-                type: "section",
-                text: {
-                  type: "mrkdwn",
-                  text: slackMessage,
-                },
-              },
-            ],
+            // biome-ignore lint/suspicious/noExplicitAny: MCP accepts arbitrary valid Block Kit JSON
+            blocks: messageBlocks as any,
           }),
         );
 
@@ -80,6 +87,20 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
             data: { channelId: resolvedChannelId },
           });
         }
+
+        const sourceTask = requestInfo.sourceTaskId
+          ? getTaskById(requestInfo.sourceTaskId)
+          : undefined;
+        recordSlackMessage({
+          contextKey: sourceTask?.contextKey ?? `task:slack:${resolvedChannelId}:${ts}`,
+          channelId: resolvedChannelId,
+          threadTs: ts,
+          ts,
+          kind: "agent",
+          taskId: sourceTask?.id,
+          finalized: true,
+          actorId: agent.id,
+        });
 
         return toolOk("Thread started successfully.", {
           details: `Thread started. channelId=${resolvedChannelId}, ts=${ts}. Pass ts as threadTs on slack-post to reply in-thread.`,

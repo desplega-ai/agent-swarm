@@ -135,6 +135,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "POOL_AFFINITY_ENFORCEMENT",
     "SCRIPTS_ONLY_MCP",
     "SLACK_DISABLE",
+    "SLACK_RENDER_V2",
     "GITHUB_DISABLE",
     "GITLAB_DISABLE",
     "LINEAR_DISABLE",

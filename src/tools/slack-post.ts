@@ -1,8 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getAgentById } from "@/be/db";
+import {
+  getAgentById,
+  getSlackTreeMessageByThread,
+  getTaskById,
+  recordSlackMessage,
+} from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
+import { getTaskLink } from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
 import { markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -19,6 +25,11 @@ export const registerSlackPostTool = (server: McpServer) => {
       inputSchema: z.object({
         channelId: z.string().min(1).describe("The Slack channel ID to post to."),
         message: z.string().min(1).max(4000).describe("The message content to post."),
+        blocks: z
+          .array(z.record(z.string(), z.unknown()))
+          .max(50)
+          .optional()
+          .describe("Optional Block Kit blocks. When omitted, a mrkdwn section is generated."),
         threadTs: z
           .string()
           .optional()
@@ -30,7 +41,7 @@ export const registerSlackPostTool = (server: McpServer) => {
         messageTs: z.string().optional(),
       }),
     },
-    async ({ channelId, message, threadTs }, requestInfo, _meta) => {
+    async ({ channelId, message, threadTs, blocks }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return toolErr("Agent ID not found.");
       }
@@ -59,6 +70,37 @@ export const registerSlackPostTool = (server: McpServer) => {
       try {
         const slackMessage = markdownToSlack(message);
 
+        const sourceTask = requestInfo.sourceTaskId
+          ? getTaskById(requestInfo.sourceTaskId)
+          : undefined;
+        const contextKey = sourceTask?.contextKey;
+        const tree = threadTs ? getSlackTreeMessageByThread(channelId, threadTs) : null;
+        const messageBlocks: Record<string, unknown>[] = [
+          ...(blocks ?? [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: slackMessage,
+              },
+            },
+          ]),
+        ];
+        if (sourceTask && tree?.permalink) {
+          if (messageBlocks.length >= 50) {
+            return toolErr("At most 49 blocks are allowed when a provenance footer is added.");
+          }
+          messageBlocks.push({
+            type: "context",
+            elements: [
+              {
+                type: "mrkdwn",
+                text: `${agent.name} · ${getTaskLink(sourceTask.id)} · <${tree.permalink}|↑ tree>`,
+              },
+            ],
+          });
+        }
+
         const result = await withAutoJoin(app.client, channelId, () =>
           app.client.chat.postMessage({
             channel: channelId,
@@ -66,19 +108,25 @@ export const registerSlackPostTool = (server: McpServer) => {
             username: agent.name,
             icon_emoji: ":crown:",
             ...(threadTs ? { thread_ts: threadTs } : {}),
-            blocks: [
-              {
-                type: "section",
-                text: {
-                  type: "mrkdwn",
-                  text: slackMessage,
-                },
-              },
-            ],
+            // biome-ignore lint/suspicious/noExplicitAny: MCP accepts arbitrary valid Block Kit JSON
+            blocks: messageBlocks as any,
           }),
         );
 
         const messageTs = result.ts;
+        if (messageTs) {
+          const effectiveThreadTs = threadTs ?? messageTs;
+          recordSlackMessage({
+            contextKey: contextKey ?? `task:slack:${channelId}:${effectiveThreadTs}`,
+            channelId,
+            threadTs: effectiveThreadTs,
+            ts: messageTs,
+            kind: "agent",
+            taskId: sourceTask?.id,
+            finalized: true,
+            actorId: agent.id,
+          });
+        }
 
         return toolOk("Message posted successfully.", {
           details: messageTs ? `Message timestamp: ${messageTs}` : undefined,

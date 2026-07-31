@@ -4,6 +4,7 @@ import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";
 import { resolveSlackUserId } from "./enrich";
+import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 
 export function registerActionHandlers(app: App): void {
   // "View Full Logs" — URL button, just ack (Slack opens the link automatically)
@@ -90,14 +91,17 @@ export function registerActionHandlers(app: App): void {
         : undefined,
     });
 
+    if (isSlackRenderV2Enabled()) {
+      await ensureSlackThreadTree([followUpTask.id]);
+      return;
+    }
+
     const taskLink = getTaskLink(followUpTask.id);
     const agentName = lead ? lead.name : "queue";
-    const threadTs = originalTask.slackThreadTs;
-
     try {
       await client.chat.postMessage({
         channel: originalTask.slackChannelId,
-        thread_ts: threadTs,
+        thread_ts: originalTask.slackThreadTs,
         text: `💬 Follow-up sent to *${agentName}* (${taskLink})`,
       });
     } catch (error) {

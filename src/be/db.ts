@@ -1578,6 +1578,253 @@ export function getTaskById(id: string): AgentTask | null {
   return row ? rowToAgentTask(row) : null;
 }
 
+export type SlackMessageKind = "tree" | "outcome" | "agent";
+
+export interface SlackMessageRecord {
+  id: string;
+  contextKey: string;
+  channelId: string;
+  threadTs: string;
+  ts: string;
+  kind: SlackMessageKind;
+  taskId?: string;
+  permalink?: string;
+  finalizedAt?: string;
+  streamChunksAppended: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+type SlackMessageRow = {
+  id: string;
+  context_key: string;
+  channel_id: string;
+  thread_ts: string;
+  ts: string;
+  kind: SlackMessageKind;
+  task_id: string | null;
+  permalink: string | null;
+  finalized_at: string | null;
+  stream_chunks_appended: number;
+  created_at: string;
+  updated_at: string;
+};
+
+function rowToSlackMessage(row: SlackMessageRow): SlackMessageRecord {
+  return {
+    id: row.id,
+    contextKey: row.context_key,
+    channelId: row.channel_id,
+    threadTs: row.thread_ts,
+    ts: row.ts,
+    kind: row.kind,
+    taskId: row.task_id ?? undefined,
+    permalink: row.permalink ?? undefined,
+    finalizedAt: row.finalized_at ?? undefined,
+    streamChunksAppended: row.stream_chunks_appended,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function recordSlackMessage(input: {
+  contextKey: string;
+  channelId: string;
+  threadTs: string;
+  ts: string;
+  kind: SlackMessageKind;
+  taskId?: string;
+  permalink?: string;
+  finalized?: boolean;
+  streamChunksAppended?: number;
+  actorId?: string;
+}): SlackMessageRecord {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<
+      SlackMessageRow,
+      [
+        string,
+        string,
+        string,
+        string,
+        string,
+        SlackMessageKind,
+        string | null,
+        string | null,
+        string | null,
+        number,
+        string,
+        string,
+        string | null,
+        string | null,
+      ]
+    >(
+      `INSERT INTO slack_messages (
+         id, context_key, channel_id, thread_ts, ts, kind, task_id, permalink,
+         finalized_at, stream_chunks_appended, created_at, updated_at, created_by, updated_by
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(channel_id, ts) DO UPDATE SET
+         context_key = excluded.context_key,
+         kind = excluded.kind,
+         task_id = COALESCE(excluded.task_id, slack_messages.task_id),
+         permalink = COALESCE(excluded.permalink, slack_messages.permalink),
+         finalized_at = COALESCE(excluded.finalized_at, slack_messages.finalized_at),
+         stream_chunks_appended = MAX(
+           excluded.stream_chunks_appended,
+           slack_messages.stream_chunks_appended
+         ),
+         updated_at = excluded.updated_at,
+         updated_by = excluded.updated_by
+       RETURNING *`,
+    )
+    .get(
+      id,
+      input.contextKey,
+      input.channelId,
+      input.threadTs,
+      input.ts,
+      input.kind,
+      input.taskId ?? null,
+      input.permalink ?? null,
+      input.finalized ? now : null,
+      input.streamChunksAppended ?? 0,
+      now,
+      now,
+      input.actorId ?? null,
+      input.actorId ?? null,
+    );
+  if (!row) throw new Error("Failed to record Slack message");
+  return rowToSlackMessage(row);
+}
+
+export function updateSlackMessageRecord(
+  id: string,
+  updates: {
+    permalink?: string;
+    finalized?: boolean;
+    streamChunksAppended?: number;
+    actorId?: string;
+  },
+): SlackMessageRecord | null {
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<
+      SlackMessageRow,
+      [string | null, number, string, number | null, string, string | null, string]
+    >(
+      `UPDATE slack_messages SET
+         permalink = COALESCE(?, permalink),
+         finalized_at = CASE WHEN ? = 1 THEN COALESCE(finalized_at, ?) ELSE finalized_at END,
+         stream_chunks_appended = COALESCE(?, stream_chunks_appended),
+         updated_at = ?,
+         updated_by = COALESCE(?, updated_by)
+       WHERE id = ?
+       RETURNING *`,
+    )
+    .get(
+      updates.permalink ?? null,
+      updates.finalized ? 1 : 0,
+      now,
+      updates.streamChunksAppended ?? null,
+      now,
+      updates.actorId ?? null,
+      id,
+    );
+  return row ? rowToSlackMessage(row) : null;
+}
+
+export function getSlackTreeMessage(contextKey: string): SlackMessageRecord | null {
+  const row = getDb()
+    .prepare<SlackMessageRow, [string]>(
+      `SELECT * FROM slack_messages WHERE context_key = ? AND kind = 'tree' LIMIT 1`,
+    )
+    .get(contextKey);
+  return row ? rowToSlackMessage(row) : null;
+}
+
+export function getSlackTreeMessageByThread(
+  channelId: string,
+  threadTs: string,
+): SlackMessageRecord | null {
+  const row = getDb()
+    .prepare<SlackMessageRow, [string, string]>(
+      `SELECT * FROM slack_messages
+       WHERE channel_id = ? AND thread_ts = ? AND kind = 'tree'
+       LIMIT 1`,
+    )
+    .get(channelId, threadTs);
+  return row ? rowToSlackMessage(row) : null;
+}
+
+export function getSlackOutcomeMessage(taskId: string): SlackMessageRecord | null {
+  const row = getDb()
+    .prepare<SlackMessageRow, [string]>(
+      `SELECT * FROM slack_messages WHERE task_id = ? AND kind = 'outcome' LIMIT 1`,
+    )
+    .get(taskId);
+  return row ? rowToSlackMessage(row) : null;
+}
+
+export function getSlackTreeMessages(): SlackMessageRecord[] {
+  return getDb()
+    .prepare<SlackMessageRow, []>(
+      `SELECT tree.*
+       FROM slack_messages tree
+       WHERE tree.kind = 'tree'
+       AND (
+         EXISTS (
+           SELECT 1 FROM agent_tasks task
+           WHERE task.slackChannelId = tree.channel_id
+           AND task.slackThreadTs = tree.thread_ts
+           AND task.status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+         )
+         OR EXISTS (
+           SELECT 1 FROM agent_tasks task
+           WHERE task.slackChannelId = tree.channel_id
+           AND task.slackThreadTs = tree.thread_ts
+           AND task.lastUpdatedAt > tree.updated_at
+         )
+         OR EXISTS (
+           SELECT 1 FROM slack_messages outcome
+           WHERE outcome.kind = 'outcome'
+           AND outcome.context_key = tree.context_key
+           AND (
+             outcome.finalized_at IS NULL
+             OR outcome.updated_at > tree.updated_at
+           )
+         )
+       )
+       ORDER BY tree.created_at ASC`,
+    )
+    .all()
+    .map(rowToSlackMessage);
+}
+
+export function getSlackMessageByChannelTs(
+  channelId: string,
+  ts: string,
+): SlackMessageRecord | null {
+  const row = getDb()
+    .prepare<SlackMessageRow, [string, string]>(
+      `SELECT * FROM slack_messages WHERE channel_id = ? AND ts = ? LIMIT 1`,
+    )
+    .get(channelId, ts);
+  return row ? rowToSlackMessage(row) : null;
+}
+
+export function getSlackTasksInThread(channelId: string, threadTs: string): AgentTask[] {
+  return getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `SELECT * FROM agent_tasks
+       WHERE slackChannelId = ? AND slackThreadTs = ?
+       ORDER BY createdAt ASC, rowid ASC`,
+    )
+    .all(channelId, threadTs)
+    .map(rowToAgentTask);
+}
+
 export function markTaskSlackReplySent(taskId: string): void {
   getDb().run(`UPDATE agent_tasks SET slackReplySent = 1 WHERE id = ?`, [taskId]);
 }
