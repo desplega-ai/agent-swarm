@@ -104,6 +104,13 @@ RUN mkdir -p /home/worker/.local/bin /home/worker/.local/share /home/worker/.loc
 # runtime worker-scoped global installs.
 ENV PATH="/home/worker/.bun/bin:$PATH"
 
+# gh v2.90+ only offers to install gh-stack interactively, which never fires
+# in headless workers. Install the official extension explicitly as the runtime
+# user; a transient GitHub failure should warn without blocking the image build.
+RUN if ! gh extension install github/gh-stack; then \
+      echo "WARNING: failed to install github/gh-stack; continuing without gh stack" >&2; \
+    fi
+
 # Install Claude CLI (pinned version — bump ARG to update)
 ARG CLAUDE_CODE_VERSION=2.1.220
 USER root
