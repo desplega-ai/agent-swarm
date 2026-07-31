@@ -118,20 +118,23 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined;
         const assetKey = key ? authorizeAssetKeyWrite(key, createdBy) : undefined;
 
-        const workflow = createWorkflow({
-          key: assetKey,
-          name,
-          description,
-          definition,
-          triggers,
-          cooldown,
-          input,
-          dir,
-          vcsRepo,
-          triggerSchema,
-          createdByAgentId: requestInfo.agentId,
-          createdBy,
-        });
+        const workflow = createWorkflow(
+          {
+            key: assetKey,
+            name,
+            description,
+            definition,
+            triggers,
+            cooldown,
+            input,
+            dir,
+            vcsRepo,
+            triggerSchema,
+            createdByAgentId: requestInfo.agentId,
+            createdBy,
+          },
+          "mcp",
+        );
         return toolOk(`Created workflow "${workflow.name}".`, {
           details: `Created workflow "${workflow.name}" (${workflow.id}).`,
           data: { yourAgentId: requestInfo.agentId, workflow },

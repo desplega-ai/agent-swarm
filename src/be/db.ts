@@ -8318,20 +8318,23 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
   };
 }
 
-export function createWorkflow(data: {
-  key?: string;
-  name: string;
-  description?: string;
-  definition: WorkflowDefinition;
-  triggers?: TriggerConfig[];
-  cooldown?: CooldownConfig;
-  input?: Record<string, InputValue>;
-  triggerSchema?: Record<string, unknown>;
-  dir?: string;
-  vcsRepo?: string;
-  createdByAgentId?: string;
-  createdBy?: string;
-}): Workflow {
+export function createWorkflow(
+  data: {
+    key?: string;
+    name: string;
+    description?: string;
+    definition: WorkflowDefinition;
+    triggers?: TriggerConfig[];
+    cooldown?: CooldownConfig;
+    input?: Record<string, InputValue>;
+    triggerSchema?: Record<string, unknown>;
+    dir?: string;
+    vcsRepo?: string;
+    createdByAgentId?: string;
+    createdBy?: string;
+  },
+  source?: "api" | "mcp",
+): Workflow {
   const id = crypto.randomUUID();
   const row = getDb()
     .prepare<WorkflowRow, (string | null)[]>(
@@ -8355,7 +8358,13 @@ export function createWorkflow(data: {
       data.createdBy ?? null,
     );
   if (!row) throw new Error("Failed to create workflow");
-  return rowToWorkflow(row);
+  const workflow = rowToWorkflow(row);
+  telemetry.workflow("created", {
+    workflowId: workflow.id,
+    nodeCount: workflow.definition.nodes.length,
+    ...(source ? { source } : {}),
+  });
+  return workflow;
 }
 
 export function getWorkflow(id: string): Workflow | null {
@@ -8531,7 +8540,7 @@ export function updateWorkflow(
   return row ? rowToWorkflow(row) : null;
 }
 
-export function deleteWorkflow(id: string): boolean {
+export function deleteWorkflow(id: string, source?: "api" | "mcp"): boolean {
   const db = getDb();
   // Cascade delete in FK-safe order:
   // 1. Unlink agent_tasks (they reference steps and runs)
@@ -8548,7 +8557,14 @@ export function deleteWorkflow(id: string): boolean {
   db.run("DELETE FROM workflow_runs WHERE workflowId = ?", [id]);
   // 4. Delete workflow
   const result = db.run("DELETE FROM workflows WHERE id = ?", [id]);
-  return result.changes > 0;
+  const deleted = result.changes > 0;
+  if (deleted) {
+    telemetry.workflow("deleted", {
+      workflowId: id,
+      ...(source ? { source } : {}),
+    });
+  }
+  return deleted;
 }
 
 /**

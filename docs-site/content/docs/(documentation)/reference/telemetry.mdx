@@ -25,6 +25,8 @@ Telemetry tracks high-level lifecycle and operational events — no task content
 | `session.failure` | A provider session ends with an error | agentId, provider, model, errorCategory, durationMs, wasRateLimited |
 | `schedule.executed` | A schedule run completes | scheduleType, triggeredWorkflows, wasRecovered |
 | `schedule.error` | A schedule run errors | scheduleType, triggeredWorkflows, wasRecovered, consecutiveErrors |
+| `workflow.created` | A workflow definition is created | workflowId, nodeCount, source (when known) |
+| `workflow.deleted` | A workflow definition is deleted | workflowId, source (when known) |
 | `workflow.started` / `workflow.completed` / `workflow.failed` | Workflow lifecycle transitions | runId, workflowId, durationMs, executor metadata |
 | `compaction.triggered` | A harness emits a compaction event | compactTrigger, preCompactTokens, contextTotalTokens |
 
