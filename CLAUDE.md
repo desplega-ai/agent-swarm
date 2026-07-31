@@ -128,25 +128,23 @@ Test against a fresh DB (`rm agent-swarm-db.sqlite && bun run start:http`) **and
 
 <important if="you are adding or editing an agent skill (templates/skills/, plugin/skills/, or src/be/seed-skills/)">
 
-**One skill name, one delivery path.** A skill name must exist in `templates/skills/` (DB-seeded) **or** `plugin/skills/` (baked into the worker image) — never both. Both write `~/.claude/skills/<name>/SKILL.md`, the DB copy wins at runtime, and the FS writer then prunes any bundled file that has no `skill_files` row. That silently truncated `artifacts` / `kv-storage` / `pages` and deleted their examples in production.
+Full authoring guide, the three delivery paths, versioning semantics, and every enforced rule: [runbooks/skills.md](./runbooks/skills.md).
 
-**Prefer `templates/skills/`** — DB-seeded skills are live-updatable (no image rebuild), listed by the skills API, editable in the UI, per-agent toggleable, and version-tracked with user-edit preservation.
+**The rule that matters: one skill name must not be both seeded and baked.** `templates/skills/<name>/` (DB-seeded) and `plugin/skills/<name>/` (baked into the worker image) both write `~/.claude/skills/<name>/SKILL.md`. The DB copy wins, the baked content is silently discarded, and the FS writer then prunes any bundled file with no `skill_files` row. That truncated `artifacts` / `kv-storage` / `pages` and deleted their examples in production.
 
-Layout:
+**Prefer `templates/skills/`** — seeded skills are live-updatable (no image rebuild), listed by the skills API, editable in the UI, per-agent toggleable, and version-tracked with user-edit preservation.
 
 ```
 templates/skills/<name>/
-  config.json          # name, description, runAllSeedersCandidate, systemDefault
-  content.md           # SKILL.md body — NO frontmatter (built from config.json)
+  config.json          # name (= directory), description, runAllSeedersCandidate, systemDefault
+  content.md           # SKILL.md body — NO frontmatter (generated from config.json)
   files/               # optional bundled files → skill_files rows
-    examples/foo.ts
 ```
 
-- `runAllSeedersCandidate: true` seeds it; `systemDefault: true` installs it for every agent. Any `scope='swarm'` skill reaches all agents with no `agent_skills` row.
-- New skill → add the `config.json` + `content.md` text-imports to `BUILT_IN_SKILL_SOURCES` in `src/be/seed-skills/index.ts`. They must be **static** imports: the API runs from a compiled binary and `templates/` only exists in the Dockerfile builder stage.
-- Added anything under `files/`? → `bun run build:seed-skill-files` and commit `bundled-files.generated.json`. Enforced by `bun run check:seed-skill-files` (CI).
-- Bundled files must be text — `skill_files.content` is TEXT and the FS writer skips binaries. Executable bits are not preserved.
-- Tests: `bun run test:root -- src/tests/seed-skills-bundled-files.test.ts src/tests/system-default-skills.test.ts`
+- New skill → add **static** `config.json` + `content.md` text-imports to `BUILT_IN_SKILL_SOURCES` in `src/be/seed-skills/index.ts`. Static because the API runs from a compiled binary and `templates/` only exists in the Dockerfile builder stage.
+- Touched `files/`? → `bun run build:seed-skill-files`, commit `bundled-files.generated.json` (never hand-edit it).
+- A `SKILL.md` beside a `content.md` is **not** a mistake — the seeder reads `content.md`, while `skill-install-remote` serves `SKILL.md` to the integrations catalog.
+- Verify: `bun run check:skill-sources && bun run check:seed-skill-files` (both CI-enforced via the **Seeded Skills Check** job).
 
 </important>
 
@@ -339,7 +337,7 @@ Full rulebook: [apps/evals/SCENARIO-AUTHORING.md](./apps/evals/SCENARIO-AUTHORIN
 
 ## Related
 
-- [runbooks/](./runbooks/) — ci, release, local-development, testing, workflows, memory-system, secret-scrubbing, harness-providers, seed-scripts, heartbeat-crash-recovery
+- [runbooks/](./runbooks/) — ci, release, local-development, testing, workflows, skills, memory-system, secret-scrubbing, harness-providers, seed-scripts, heartbeat-crash-recovery
 - [LOCAL_TESTING.md](./LOCAL_TESTING.md) — unit / E2E / entrypoint / MCP / UI testing recipes
 - [BUSINESS_USE.md](./BUSINESS_USE.md) — flow diagrams and instrumentation
 - [MCP.md](./MCP.md) — MCP tools reference
