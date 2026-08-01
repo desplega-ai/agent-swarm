@@ -1,14 +1,19 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
+  cancelTask,
   closeDb,
   completeTask,
   createAgent,
   createTaskExtended,
   failTask,
+  getDb,
   getSlackOutcomeMessage,
   getSlackTreeMessage,
+  getSlackTreeMessageByThread,
+  getSlackTreeMessages,
   initDb,
+  isPendingSlackMessage,
   startTask,
 } from "../be/db";
 import { MAX_SECTION_LENGTH } from "../slack/blocks";
@@ -30,6 +35,43 @@ let outcomeCounter = 0;
 let appendCallsUntilFailure: number | undefined;
 let permalinkFailuresRemaining = 0;
 let slackAddressSequence = 0;
+let missingMessageTs: string | undefined;
+let updateFailuresRemaining = 0;
+
+type RemoteMessage = {
+  channel: string;
+  threadTs: string;
+  ts: string;
+  text: string;
+  metadata?: { event_type?: string; event_payload?: Record<string, unknown> };
+  streaming?: boolean;
+};
+
+const remoteMessages = new Map<string, RemoteMessage>();
+
+function remoteKey(channel: string, ts: string): string {
+  return `${channel}:${ts}`;
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for test condition");
+    await Bun.sleep(5);
+  }
+}
+
+let nextUpdateBarrier:
+  | { started: ReturnType<typeof deferred>; released: ReturnType<typeof deferred> }
+  | undefined;
 
 function uniqueSlackAddress(label: string): { channelId: string; threadTs: string } {
   slackAddressSequence++;
@@ -41,8 +83,46 @@ function uniqueSlackAddress(label: string): { channelId: string; threadTs: strin
 
 const mockApiCall = mock(async (method: string, payload: Record<string, unknown>) => {
   calls.push({ method, payload });
-  if (method === "chat.postMessage") return { ok: true, ts: `tree.${++treeCounter}` };
-  if (method === "chat.startStream") return { ok: true, ts: `outcome.${++outcomeCounter}` };
+  if (method === "conversations.replies") {
+    const includeAllMetadata = payload.include_all_metadata === true;
+    return {
+      ok: true,
+      messages: [...remoteMessages.values()]
+        .filter((message) => message.channel === payload.channel && message.threadTs === payload.ts)
+        .map((message) => ({
+          ...message,
+          metadata: message.metadata
+            ? {
+                event_type: message.metadata.event_type,
+                ...(includeAllMetadata ? { event_payload: message.metadata.event_payload } : {}),
+              }
+            : undefined,
+        })),
+      response_metadata: { next_cursor: "" },
+    };
+  }
+  if (method === "chat.postMessage") {
+    const ts = `tree.${++treeCounter}`;
+    remoteMessages.set(remoteKey(String(payload.channel), ts), {
+      channel: String(payload.channel),
+      threadTs: String(payload.thread_ts),
+      ts,
+      text: String(payload.text ?? ""),
+      metadata: payload.metadata as RemoteMessage["metadata"],
+    });
+    return { ok: true, ts };
+  }
+  if (method === "chat.startStream") {
+    const ts = `outcome.${++outcomeCounter}`;
+    remoteMessages.set(remoteKey(String(payload.channel), ts), {
+      channel: String(payload.channel),
+      threadTs: String(payload.thread_ts),
+      ts,
+      text: String(payload.markdown_text ?? ""),
+      streaming: true,
+    });
+    return { ok: true, ts };
+  }
   if (method === "chat.appendStream" && appendCallsUntilFailure !== undefined) {
     if (appendCallsUntilFailure === 0) {
       appendCallsUntilFailure = undefined;
@@ -50,15 +130,51 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
     }
     appendCallsUntilFailure--;
   }
+  if (method === "chat.appendStream") {
+    const message = remoteMessages.get(remoteKey(String(payload.channel), String(payload.ts)));
+    if (!message) throw { data: { error: "message_not_found" } };
+    message.text += String(payload.markdown_text ?? "");
+    return { ok: true };
+  }
+  if (method === "chat.stopStream") {
+    const message = remoteMessages.get(remoteKey(String(payload.channel), String(payload.ts)));
+    if (!message) throw { data: { error: "message_not_found" } };
+    if (!message.streaming) throw { data: { error: "message_not_in_streaming_state" } };
+    message.streaming = false;
+    return { ok: true };
+  }
   if (method === "chat.getPermalink") {
     if (permalinkFailuresRemaining > 0) {
       permalinkFailuresRemaining--;
       throw new Error("temporary permalink failure");
     }
+    if (
+      missingMessageTs === payload.message_ts ||
+      !remoteMessages.has(remoteKey(String(payload.channel), String(payload.message_ts)))
+    ) {
+      throw { data: { error: "message_not_found" } };
+    }
     return {
       ok: true,
       permalink: `https://workspace.slack.com/archives/${payload.channel}/p${String(payload.message_ts).replaceAll(".", "")}`,
     };
+  }
+  if (method === "chat.update") {
+    if (updateFailuresRemaining > 0) {
+      updateFailuresRemaining--;
+      throw new Error("temporary update failure");
+    }
+    if (missingMessageTs === payload.ts) throw { data: { error: "message_not_found" } };
+    const message = remoteMessages.get(remoteKey(String(payload.channel), String(payload.ts)));
+    if (!message) throw { data: { error: "message_not_found" } };
+    const barrier = nextUpdateBarrier;
+    if (barrier) {
+      nextUpdateBarrier = undefined;
+      barrier.started.resolve();
+      await barrier.released.promise;
+    }
+    message.text = String(payload.text ?? "");
+    return { ok: true };
   }
   if (method === "auth.test") return { ok: true, team_id: "T_TEST" };
   return { ok: true };
@@ -76,18 +192,25 @@ async function removeDbFiles() {
   }
 }
 
-beforeAll(async () => {
-  await removeDbFiles();
+beforeAll(() => {
   process.env.APP_URL = "https://app.agent-swarm.dev";
   process.env.SLACK_RENDER_V2 = "true";
-  initDb(TEST_DB_PATH);
 });
 
-beforeEach(() => {
+beforeEach(async () => {
+  closeDb();
+  await removeDbFiles();
+  initDb(TEST_DB_PATH);
   calls.length = 0;
+  remoteMessages.clear();
+  treeCounter = 0;
+  outcomeCounter = 0;
   mockApiCall.mockClear();
   appendCallsUntilFailure = undefined;
   permalinkFailuresRemaining = 0;
+  missingMessageTs = undefined;
+  updateFailuresRemaining = 0;
+  nextUpdateBarrier = undefined;
   _resetSlackRenderV2ForTests();
 });
 
@@ -151,6 +274,48 @@ describe("Slack renderer v2", () => {
     _resetSlackRenderV2ForTests();
   });
 
+  test("reconciles a tree accepted before its timestamp bind without reposting", async () => {
+    const lead = createAgent({ name: "Tree Crash Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_TREE_BIND_CRASH");
+    const contextKey = slackContextKey({ channelId, threadTs });
+    const ask = createTaskExtended("survive tree bind crash", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey,
+    });
+    startTask(ask.id);
+    getDb().run(`CREATE TRIGGER fail_tree_timestamp_bind
+      BEFORE UPDATE OF ts ON slack_messages
+      WHEN OLD.kind = 'tree' AND OLD.ts LIKE 'pending:%'
+      BEGIN SELECT RAISE(ABORT, 'simulated tree bind crash'); END`);
+
+    await expect(ensureSlackThreadTree([ask.id])).rejects.toThrow("simulated tree bind crash");
+    const pending = getSlackTreeMessage(contextKey)!;
+    expect(isPendingSlackMessage(pending)).toBe(true);
+    expect(calls.filter((call) => call.method === "chat.postMessage")).toHaveLength(1);
+    expect(
+      [...remoteMessages.values()].filter((message) => message.channel === channelId),
+    ).toHaveLength(1);
+
+    getDb().run("DROP TRIGGER fail_tree_timestamp_bind");
+    completeTask(ask.id, "The tree state changed while its timestamp was not bound.");
+    calls.length = 0;
+    const recovered = await ensureSlackThreadTree([ask.id]);
+
+    expect(isPendingSlackMessage(recovered!)).toBe(false);
+    expect(recovered?.id).toBe(pending.id);
+    expect(calls.some((call) => call.method === "chat.postMessage")).toBe(false);
+    const replies = calls.find((call) => call.method === "conversations.replies");
+    expect(replies?.payload.include_all_metadata).toBe(true);
+    const remote = remoteMessages.get(remoteKey(channelId, recovered!.ts));
+    expect(remote?.text).toContain("✅");
+    expect(
+      [...remoteMessages.values()].filter((message) => message.channel === channelId),
+    ).toHaveLength(1);
+  });
+
   test("reuses the physical thread tree when a later task has a different context key", async () => {
     const lead = createAgent({ name: "Thread Identity Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_THREAD_IDENTITY");
@@ -169,8 +334,10 @@ describe("Slack renderer v2", () => {
       contextKey: `custom:second:${channelId}`,
     });
 
-    const tree = await ensureSlackThreadTree([first.id]);
-    const reused = await ensureSlackThreadTree([second.id]);
+    const [tree, reused] = await Promise.all([
+      ensureSlackThreadTree([first.id]),
+      ensureSlackThreadTree([second.id]),
+    ]);
 
     expect(reused?.id).toBe(tree?.id);
     expect(calls.filter((call) => call.method === "chat.postMessage")).toHaveLength(1);
@@ -263,6 +430,104 @@ describe("Slack renderer v2", () => {
     for (const task of tasks) failTask(task.id, "test cleanup");
   });
 
+  test("caps a pathological tree line and keeps the newest task in valid sections", async () => {
+    const lead = createAgent({ name: "Pathological Lead", isLead: true, status: "idle" });
+    const worker = createAgent({
+      name: `Worker ${"x".repeat(5_000)}`,
+      isLead: false,
+      status: "idle",
+    });
+    const { channelId, threadTs } = uniqueSlackAddress("C_TREE_LONG_LINE");
+    const contextKey = slackContextKey({ channelId, threadTs });
+    const ask = createTaskExtended("pathological tree line", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey,
+    });
+    const child = createTaskExtended("render the long worker label", {
+      agentId: worker.id,
+      source: "mcp",
+      parentTaskId: ask.id,
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey,
+      followUpConfig: { disabled: true },
+    });
+
+    await ensureSlackThreadTree([child.id]);
+
+    const posted = calls.find((call) => call.method === "chat.postMessage")!;
+    const blocks = posted.payload.blocks as Array<{ text: { text: string } }>;
+    expect(blocks.every((block) => block.text.text.length <= MAX_SECTION_LENGTH)).toBe(true);
+    expect(blocks.map((block) => block.text.text).join("\n")).toContain(child.id.slice(0, 8));
+  });
+
+  test("discovers an ask that completed before the first poll and emits one tree and card", async () => {
+    const lead = createAgent({ name: "Fast Terminal Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_FAST_TERMINAL");
+    const ask = createTaskExtended("finish before renderer poll", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    startTask(ask.id);
+    completeTask(ask.id, "Finished before the renderer observed the in-progress state.");
+
+    await processSlackRenderV2();
+
+    expect(calls.filter((call) => call.method === "chat.postMessage")).toHaveLength(1);
+    expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(1);
+    expect(calls.some((call) => call.method === "conversations.replies")).toBe(false);
+    expect(getSlackTreeMessageByThread(channelId, threadTs)).not.toBeNull();
+    expect(getSlackOutcomeMessage(ask.id)?.finalizedAt).toBeDefined();
+  });
+
+  test("reconciles a started outcome before its timestamp bind without a duplicate stream", async () => {
+    const lead = createAgent({ name: "Outcome Crash Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_OUTCOME_BIND_CRASH");
+    const ask = createTaskExtended("survive outcome bind crash", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    completeTask(ask.id, "Recover this outcome through its deterministic task link.");
+    getDb().run(`CREATE TRIGGER fail_outcome_timestamp_bind
+      BEFORE UPDATE OF ts ON slack_messages
+      WHEN OLD.kind = 'outcome' AND OLD.ts LIKE 'pending:%'
+      BEGIN SELECT RAISE(ABORT, 'simulated outcome bind crash'); END`);
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    const pending = getSlackOutcomeMessage(ask.id)!;
+    expect(isPendingSlackMessage(pending)).toBe(true);
+    expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(1);
+    getDb().run("DROP TRIGGER fail_outcome_timestamp_bind");
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    expect(calls.some((call) => call.method === "chat.startStream")).toBe(false);
+    expect(calls.some((call) => call.method === "conversations.replies")).toBe(true);
+    expect(getSlackOutcomeMessage(ask.id)?.id).toBe(pending.id);
+    expect(getSlackOutcomeMessage(ask.id)?.finalizedAt).toBeDefined();
+    expect(
+      [...remoteMessages.values()].filter(
+        (message) => message.channel === channelId && message.ts.startsWith("outcome."),
+      ),
+    ).toHaveLength(1);
+  });
+
   test("reuses one persisted tree and streams one immutable outcome before linking it", async () => {
     const lead = createAgent({ name: "Lead v2", isLead: true, status: "idle" });
     const worker = createAgent({ name: "Researcher v2", isLead: false, status: "idle" });
@@ -318,8 +583,8 @@ describe("Slack renderer v2", () => {
       .map((call) => call.method)
       .filter((method) => method.startsWith("chat."));
     expect(chatSequence).toEqual([
+      "chat.getPermalink",
       "chat.startStream",
-      "chat.appendStream",
       "chat.appendStream",
       "chat.appendStream",
       "chat.stopStream",
@@ -335,6 +600,7 @@ describe("Slack renderer v2", () => {
       thread_ts: threadTs,
       recipient_user_id: "U_REQUESTER",
       recipient_team_id: "T_TEST",
+      markdown_text: expect.stringContaining(ask.id),
     });
     const stopped = calls.find(
       (call) => call.method === "chat.stopStream" && call.payload.channel === channelId,
@@ -368,7 +634,7 @@ describe("Slack renderer v2", () => {
     expect(outcome?.permalink).toContain("outcome1");
   });
 
-  test("updates a failed top-level ask in place without creating an outcome card", async () => {
+  test("streams a bounded failed outcome with its reason", async () => {
     const lead = createAgent({ name: "Failure Lead", isLead: true, status: "idle" });
     const channelId = "C_RENDER_FAILURE";
     const threadTs = "400.1";
@@ -382,18 +648,176 @@ describe("Slack renderer v2", () => {
     startTask(ask.id);
     const tree = await ensureSlackThreadTree([ask.id]);
     await Bun.sleep(2);
-    failTask(ask.id, "expected test failure");
+    const reason = `expected test failure ${"detail ".repeat(200)}`;
+    failTask(ask.id, reason);
     calls.length = 0;
     _resetSlackRenderV2ForTests();
 
     await processSlackRenderV2();
 
-    expect(calls.some((call) => call.method === "chat.startStream")).toBe(false);
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toContain("❌ *Failed*");
+    const outcome = getSlackOutcomeMessage(ask.id);
+    const remote = remoteMessages.get(remoteKey(channelId, outcome!.ts));
+    expect(remote?.text).toContain("expected test failure");
+    expect(remote!.text.length).toBeLessThan(800);
     const update = calls.find(
       (call) => call.method === "chat.update" && call.payload.ts === tree?.ts,
     );
     expect(update?.payload.ts).toBe(tree?.ts);
     expect(update?.payload.text).toContain("└─ ❌ failing ask");
+    expect(update?.payload.text).toContain("→ <https://workspace.slack.com/");
+  });
+
+  test("renders cancellation distinctly and carries the bounded reason", async () => {
+    const lead = createAgent({ name: "Cancellation Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_CANCELLED");
+    const ask = createTaskExtended("cancelled ask", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    startTask(ask.id);
+    const tree = await ensureSlackThreadTree([ask.id]);
+    cancelTask(ask.id, `requester changed direction ${"context ".repeat(200)}`);
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toContain("🚫 *Cancelled*");
+    const outcome = getSlackOutcomeMessage(ask.id)!;
+    const remote = remoteMessages.get(remoteKey(channelId, outcome.ts));
+    expect(remote?.text).toContain("requester changed direction");
+    expect(remote!.text.length).toBeLessThan(800);
+    const update = calls.find(
+      (call) => call.method === "chat.update" && call.payload.ts === tree?.ts,
+    );
+    expect(update?.payload.text).toContain("└─ 🚫 cancelled ask");
+  });
+
+  test("serializes concurrent tree writers and leaves the newest outcome link visible", async () => {
+    const lead = createAgent({ name: "Concurrent Writer Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_TREE_WRITER_RACE");
+    const ask = createTaskExtended("serialize tree writers", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    startTask(ask.id);
+    const tree = await ensureSlackThreadTree([ask.id]);
+    _resetSlackRenderV2ForTests();
+    calls.length = 0;
+    nextUpdateBarrier = { started: deferred(), released: deferred() };
+    const barrier = nextUpdateBarrier;
+
+    await ensureSlackThreadTree([ask.id]);
+    await barrier.started.promise;
+    completeTask(ask.id, "The serialized writer must retain this result link.");
+    const processing = processSlackRenderV2();
+    await waitFor(() => calls.some((call) => call.method === "chat.stopStream"));
+    barrier.released.resolve();
+    await processing;
+
+    const remoteTree = remoteMessages.get(remoteKey(channelId, tree!.ts));
+    expect(remoteTree?.text).toContain("→ <https://workspace.slack.com/");
+    const updates = calls.filter((call) => call.method === "chat.update");
+    expect(updates).toHaveLength(2);
+    expect(updates.at(-1)?.payload.text).toContain("→ <https://workspace.slack.com/");
+  });
+
+  test("replaces a deleted tree exactly once after message_not_found", async () => {
+    const lead = createAgent({ name: "Deleted Tree Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_TREE_DELETED");
+    const ask = createTaskExtended("replace deleted tree", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    startTask(ask.id);
+    const original = await ensureSlackThreadTree([ask.id]);
+    _resetSlackRenderV2ForTests();
+    completeTask(ask.id, "Create an outcome, then replace the deleted tree.");
+    missingMessageTs = original!.ts;
+    calls.length = 0;
+
+    await processSlackRenderV2();
+
+    const replacement = getSlackTreeMessageByThread(channelId, threadTs)!;
+    expect(replacement.id).not.toBe(original?.id);
+    expect(replacement.ts).not.toBe(original?.ts);
+    expect(calls.filter((call) => call.method === "chat.postMessage")).toHaveLength(1);
+    const remoteTree = remoteMessages.get(remoteKey(channelId, replacement.ts));
+    expect(remoteTree?.text).toContain("→ <https://workspace.slack.com/");
+    const stopped = calls.find((call) => call.method === "chat.stopStream");
+    expect(JSON.stringify(stopped?.payload.blocks)).toContain(replacement.permalink!);
+
+    calls.length = 0;
+    await processSlackRenderV2();
+    expect(calls.some((call) => call.method === "chat.postMessage")).toBe(false);
+  });
+
+  test("advances the tree watermark for an identical snapshot without a Slack update", async () => {
+    const worker = createAgent({ name: "Watermark Worker", isLead: false, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_TREE_WATERMARK_NOOP");
+    const task = createTaskExtended("settle identical tree state", {
+      agentId: worker.id,
+      source: "mcp",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+      followUpConfig: { disabled: true },
+    });
+    startTask(task.id);
+    failTask(task.id, "stable terminal snapshot");
+    const tree = await ensureSlackThreadTree([task.id]);
+    await Bun.sleep(2);
+    getDb().run(`UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?`, [
+      new Date().toISOString(),
+      task.id,
+    ]);
+    calls.length = 0;
+
+    await processSlackRenderV2();
+
+    expect(calls.some((call) => call.method === "chat.update")).toBe(false);
+    expect(getSlackTreeMessageByThread(channelId, threadTs)?.updatedAt).not.toBe(tree?.updatedAt);
+    expect(getSlackTreeMessages()).toHaveLength(0);
+  });
+
+  test("does not advance the tree watermark when Slack update fails", async () => {
+    const worker = createAgent({ name: "Retry Watermark Worker", isLead: false, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_TREE_WATERMARK_RETRY");
+    const task = createTaskExtended("retry failed tree update", {
+      agentId: worker.id,
+      source: "mcp",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+      followUpConfig: { disabled: true },
+    });
+    startTask(task.id);
+    const tree = await ensureSlackThreadTree([task.id]);
+    _resetSlackRenderV2ForTests();
+    failTask(task.id, "state that must be retried");
+    updateFailuresRemaining = 1;
+    calls.length = 0;
+
+    await processSlackRenderV2();
+
+    expect(getSlackTreeMessageByThread(channelId, threadTs)?.updatedAt).toBe(tree?.updatedAt);
+    expect(calls.filter((call) => call.method === "chat.update")).toHaveLength(1);
+    calls.length = 0;
+    await processSlackRenderV2();
+    expect(calls.filter((call) => call.method === "chat.update")).toHaveLength(1);
+    expect(getSlackTreeMessageByThread(channelId, threadTs)?.updatedAt).not.toBe(tree?.updatedAt);
   });
 
   test("resumes an unfinished outcome by physical thread across context keys", async () => {
@@ -409,6 +833,8 @@ describe("Slack renderer v2", () => {
     startTask(firstAsk.id);
     const tree = await ensureSlackThreadTree([firstAsk.id]);
     failTask(firstAsk.id, "test setup");
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
 
     const ask = createTaskExtended("recover streamed outcome", {
       agentId: lead.id,
@@ -431,7 +857,7 @@ describe("Slack renderer v2", () => {
     expect(interrupted?.channelId).toBe(tree?.channelId);
     expect(interrupted?.threadTs).toBe(tree?.threadTs);
     expect(interrupted?.finalizedAt).toBeUndefined();
-    expect(interrupted?.streamChunksAppended).toBe(1);
+    expect(interrupted?.streamChunksAppended).toBe(2);
     expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(1);
 
     calls.length = 0;
@@ -439,7 +865,7 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     expect(calls.some((call) => call.method === "chat.startStream")).toBe(false);
-    expect(calls.filter((call) => call.method === "chat.appendStream")).toHaveLength(2);
+    expect(calls.filter((call) => call.method === "chat.appendStream")).toHaveLength(1);
     expect(calls.some((call) => call.method === "chat.stopStream")).toBe(true);
     expect(getSlackOutcomeMessage(ask.id)?.finalizedAt).toBeDefined();
   });

@@ -1595,6 +1595,12 @@ export interface SlackMessageRecord {
   updatedAt: string;
 }
 
+const PENDING_SLACK_MESSAGE_TS_PREFIX = "pending:";
+
+export function isPendingSlackMessage(record: SlackMessageRecord): boolean {
+  return record.ts.startsWith(PENDING_SLACK_MESSAGE_TS_PREFIX);
+}
+
 type SlackMessageRow = {
   id: string;
   context_key: string;
@@ -1699,6 +1705,87 @@ export function recordSlackMessage(input: {
   return rowToSlackMessage(row);
 }
 
+export function reserveSlackMessage(input: {
+  contextKey: string;
+  channelId: string;
+  threadTs: string;
+  kind: "tree" | "outcome";
+  taskId?: string;
+  actorId?: string;
+}): { record: SlackMessageRecord; created: boolean } {
+  if (input.kind === "outcome" && !input.taskId) {
+    throw new Error("Outcome Slack message reservations require a task ID");
+  }
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const pendingTs = `${PENDING_SLACK_MESSAGE_TS_PREFIX}${id}`;
+  const inserted = getDb()
+    .prepare<
+      SlackMessageRow,
+      [
+        string,
+        string,
+        string,
+        string,
+        string,
+        "tree" | "outcome",
+        string | null,
+        string,
+        string,
+        string | null,
+        string | null,
+      ]
+    >(
+      `INSERT INTO slack_messages (
+         id, context_key, channel_id, thread_ts, ts, kind, task_id,
+         stream_chunks_appended, created_at, updated_at, created_by, updated_by
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+       ON CONFLICT DO NOTHING
+       RETURNING *`,
+    )
+    .get(
+      id,
+      input.contextKey,
+      input.channelId,
+      input.threadTs,
+      pendingTs,
+      input.kind,
+      input.taskId ?? null,
+      now,
+      now,
+      input.actorId ?? null,
+      input.actorId ?? null,
+    );
+  if (inserted) return { record: rowToSlackMessage(inserted), created: true };
+
+  const existing =
+    input.kind === "tree"
+      ? getSlackTreeMessageByThread(input.channelId, input.threadTs)
+      : getSlackOutcomeMessage(input.taskId!);
+  if (!existing) throw new Error("Failed to reserve Slack message");
+  return { record: existing, created: false };
+}
+
+export function bindSlackMessageTimestamp(
+  id: string,
+  ts: string,
+  options: { streamChunksAppended?: number; renderedThrough?: string } = {},
+): SlackMessageRecord | null {
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<SlackMessageRow, [string, number, string | null, string, string]>(
+      `UPDATE slack_messages SET
+         ts = ?,
+         stream_chunks_appended = MAX(stream_chunks_appended, ?),
+         updated_at = COALESCE(?, ?)
+       WHERE id = ? AND ts LIKE 'pending:%'
+       RETURNING *`,
+    )
+    .get(ts, options.streamChunksAppended ?? 0, options.renderedThrough ?? null, now, id);
+  return row ? rowToSlackMessage(row) : null;
+}
+
 export function updateSlackMessageRecord(
   id: string,
   updates: {
@@ -1706,19 +1793,20 @@ export function updateSlackMessageRecord(
     finalized?: boolean;
     streamChunksAppended?: number;
     actorId?: string;
+    touchUpdatedAt?: boolean;
   },
 ): SlackMessageRecord | null {
   const now = new Date().toISOString();
   const row = getDb()
     .prepare<
       SlackMessageRow,
-      [string | null, number, string, number | null, string, string | null, string]
+      [string | null, number, string, number | null, number, string, string | null, string]
     >(
       `UPDATE slack_messages SET
          permalink = COALESCE(?, permalink),
          finalized_at = CASE WHEN ? = 1 THEN COALESCE(finalized_at, ?) ELSE finalized_at END,
          stream_chunks_appended = COALESCE(?, stream_chunks_appended),
-         updated_at = ?,
+         updated_at = CASE WHEN ? = 1 THEN ? ELSE updated_at END,
          updated_by = COALESCE(?, updated_by)
        WHERE id = ?
        RETURNING *`,
@@ -1728,11 +1816,30 @@ export function updateSlackMessageRecord(
       updates.finalized ? 1 : 0,
       now,
       updates.streamChunksAppended ?? null,
+      updates.touchUpdatedAt === false ? 0 : 1,
       now,
       updates.actorId ?? null,
       id,
     );
   return row ? rowToSlackMessage(row) : null;
+}
+
+export function markSlackTreeRendered(
+  id: string,
+  renderedThrough: string,
+): SlackMessageRecord | null {
+  const row = getDb()
+    .prepare<SlackMessageRow, [string, string]>(
+      `UPDATE slack_messages SET updated_at = ?
+       WHERE id = ? AND kind = 'tree'
+       RETURNING *`,
+    )
+    .get(renderedThrough, id);
+  return row ? rowToSlackMessage(row) : null;
+}
+
+export function deleteSlackMessageRecord(id: string): boolean {
+  return getDb().run(`DELETE FROM slack_messages WHERE id = ?`, [id]).changes > 0;
 }
 
 export function getSlackTreeMessage(contextKey: string): SlackMessageRecord | null {
@@ -1774,6 +1881,21 @@ export function getSlackTreeMessages(): SlackMessageRecord[] {
        FROM slack_messages tree
        WHERE tree.kind = 'tree'
        AND (
+         tree.ts LIKE 'pending:%'
+         OR EXISTS (
+           SELECT 1 FROM agent_tasks task
+           WHERE task.slackChannelId = tree.channel_id
+           AND task.slackThreadTs = tree.thread_ts
+           AND task.source = 'slack'
+           AND task.status IN ('completed', 'failed', 'cancelled')
+           AND NOT EXISTS (
+             SELECT 1 FROM slack_messages outcome
+             WHERE outcome.kind = 'outcome'
+             AND outcome.task_id = task.id
+             AND outcome.finalized_at IS NOT NULL
+           )
+         )
+         OR
          EXISTS (
            SELECT 1 FROM agent_tasks task
            WHERE task.slackChannelId = tree.channel_id
@@ -2458,6 +2580,27 @@ export function getInProgressSlackTasks(): AgentTask[] {
        WHERE slackChannelId IS NOT NULL
        AND status = 'in_progress'
        ORDER BY lastUpdatedAt DESC
+       LIMIT 200`,
+    )
+    .all()
+    .map(rowToAgentTask);
+}
+
+export function getSlackTasksMissingTree(): AgentTask[] {
+  return getDb()
+    .prepare<AgentTaskRow, []>(
+      `SELECT task.* FROM agent_tasks task
+       WHERE task.source = 'slack'
+       AND task.slackChannelId IS NOT NULL
+       AND task.slackThreadTs IS NOT NULL
+       AND task.status NOT IN ('backlog', 'unassigned', 'superseded')
+       AND NOT EXISTS (
+         SELECT 1 FROM slack_messages tree
+         WHERE tree.kind = 'tree'
+         AND tree.channel_id = task.slackChannelId
+         AND tree.thread_ts = task.slackThreadTs
+       )
+       ORDER BY task.lastUpdatedAt DESC
        LIMIT 200`,
     )
     .all()
