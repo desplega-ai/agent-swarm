@@ -68,6 +68,14 @@ Branch: `spike/swarm-apps` off main@4a192581. **Never merge to main** (auto-depl
 
 Theme: **the iteration loop** (spike 1 proved creation; agents maintaining apps is the product loop).
 
+From the initial plan, what else fits here (Taras Q): **script-backed custom actions** fit spike 2 —
+they exercise the action taxonomy beyond CRUD (a `mutation` kind referencing an existing swarm
+script that writes through the app-model endpoints) and reuse a primitive we already have; a
+**task-backed action** ("tackle" kind with observable status) is the differentiator and also needs
+no sync machinery, so it's a strong stretch goal. **Workflows, schedules, and syncs stay spike 3** —
+they're one cluster (the autopilot story) and share the join-key/freshness risk class, not the
+iteration-loop machinery.
+
 1. `app-get` / `app-list` / `app-patch` MCP tools (Taras: patch like the workflows tooling — app
    JSONs get big). Patch shape: JSON Merge Patch for shallow fields + whole-subtree replace for
    `page.elements.<id>` (agents are bad at RFC 6902 pointers); validate the PATCHED RESULT with the
@@ -80,21 +88,42 @@ Theme: **the iteration loop** (spike 1 proved creation; agents maintaining apps 
 4. Proof task: worker gets "add a rating filter to Bookmarks" → app-get → app-patch → running app
    updates. End-to-end iteration demo.
 5. Cheap safety fix to include: reserved-namespace guard for `apps:*` on the generic KV surface.
+6. Script-backed custom actions (`mutation` kind → existing script, writes via app-model endpoints);
+   stretch: task-backed action kind with observable status.
+7. **Server-side page validator** (answers "what does renderable mean" — all statically checkable):
+   tree connected (every element reachable from root, no orphan/cycle, children ids exist);
+   component types ∈ catalog enum, props validate against per-component schema (shared/generated
+   from the UI zod catalog — kills the two-sources-of-truth drift); `$state` bindings resolve to a
+   declared query (`/queries/<name>`) or a `/forms/<formId>` whose Form element exists; action
+   chains use known actions, `app.mutate` references an existing model, valid op, and update/delete
+   carry a rowId binding. Reject at app-upsert/patch time with the same issues[] contract.
 
-Deferred to spike 3: sync/PM app (different risk class: join keys, schedules).
+Deferred to spike 3: sync/PM app + schedules/workflows/autopilot (one cluster; different risk
+class: join keys, freshness, entity resolution).
 
-### UI catalog gaps (priority order, from Q&A)
-Record detail modal/drawer + DetailList; user-driven filtering (Select/SearchInput/filter bar →
-query overrides); List/Inbox component; Tabs + Grid/Split responsive layout; Metric aggregates
-({aggregate: count} queries); Markdown (Streamdown), EmptyState, field-level Form validation
-display, date picker.
+### UI catalog gaps (priority order, updated per Taras review)
+
+1. **Layout primitives first (Taras: key):** Stack/Row/Col, Grid, Split, spacing via tokens (enums,
+   not px), breakpoint-keyed responsive props — the brainstorm's JSON-UI survey already converged
+   on this inventory; action item: audit 1–2 strong design systems / JSON-UI catalogs (e.g.
+   shadcn's composition set, Puck/DivKit component inventories) to pin the EXACT primitive list
+   before building.
+2. **Multi-page apps / internal navigation (Taras):** the brainstorm's "app tree: pages — hard tree
+   structure" — nav component + per-app routes (`/apps/:id/p/:page`), definition grows a `pages`
+   tree instead of a single `page`. Candidate for spike 2's dashboard-polish item.
+3. **Search / autocomplete (Taras: key):** SearchInput bound to query overrides + Combobox/
+   Autocomplete field (Command primitive exists in the dashboard) for relation columns and filters.
+4. Record detail modal/drawer + DetailList; user-driven filtering (Select/filter bar → query
+   overrides); List/Inbox component; Tabs; Metric aggregates ({aggregate: count} queries);
+   Markdown (Streamdown), EmptyState, field-level Form validation display, date picker.
 
 ### Risks/unknowns logged (from Q&A)
-Catalog schema client-side only (server can't reject unrenderable pages); PUT schema change leaves
-stale rows/orphaned idx keys (migration-on-change is a design problem); apps:* KV namespace
-writable via generic kv-set (bypasses traits+mutex); in-process mutex assumes single API instance
-(the no-CAS answer breaks on replicas); $row/$form invented semantics must live in the skill or
-agents will guess $item; opus-5 cost $1.35 for a simple app build → consider modelTier routing.
+Catalog schema client-side only — addressed by the page validator, spike 2 item 7 (Taras confirmed
+the validator direction: tree connectivity, state refs, action sanity are all statically checkable);
+PUT schema change leaves stale rows/orphaned idx keys (migration-on-change is a design problem);
+apps:* KV namespace writable via generic kv-set (bypasses traits+mutex) — spike 2 item 5;
+in-process mutex assumes single API instance (the no-CAS answer breaks on replicas);
+$row/$form invented semantics must live in the skill or agents will guess $item.
 
 ## Spike verdict — what the platform version needs that the spike exposed
 
@@ -103,7 +132,8 @@ agents will guess $item; opus-5 cost $1.35 for a simple app build → consider m
 2. An `app-get`/`app-list` MCP tool (agent had no way to read back an app definition via MCP).
 3. Scroll/layout: JSON-rendered pages need the layout contract handled by the runtime, not the
    definition (done in spike).
-4. UI edit loop still missing (edit definition in dashboard) — expected, out of spike scope.
+4. UI edit loop missing (edit definition in dashboard) — Taras: fine as long as the AGENT can edit
+   it → app-get/app-patch (spike 2 item 1) is the edit loop; a human UI editor is not a priority.
 
 ## Gotchas learned
 
