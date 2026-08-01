@@ -43,6 +43,8 @@ export default async function main(args, ctx) {
 }
 ```
 
+`ctx.step.agentTask` blocks until the dispatched task reaches a terminal status (default `waitForCompletion: true`, default `timeoutMs` 2h) and journals its real output — a sequential `plan → implement → review` chain will not fan out. Pass `waitForCompletion: false` for the legacy fire-and-poll-yourself shape, or `failOnTaskFailure: false` to receive `{taskId, status: "failed", error}` instead of a throw when the task fails/is cancelled.
+
 ## Label Rules
 
 Step labels are durability keys. They must be stable and unique for each logical step. Do not reuse the same literal label inside a loop; launch will fail with `label_lint_violation`.
