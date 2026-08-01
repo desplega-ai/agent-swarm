@@ -10,6 +10,7 @@
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "check:tokens": "bash scripts/check-design-tokens.sh",
+    "generate:catalog-schema": "bun run scripts/generate-catalog-schema.ts",
     "preview": "vite preview"
   },
   "dependencies": {

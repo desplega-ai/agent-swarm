@@ -136,6 +136,12 @@ function AppRuntime({ app }: { app: AppDetail }) {
             setActionError(e instanceof Error ? e.message : String(e));
           }
         },
+        // Placeholder registered at contract-freeze time so the catalog
+        // compiles; the spike-2 UI slice replaces this with the real
+        // POST /api/apps/:id/actions/:name handler (+ /actions/<name> state).
+        "app.action": async () => {
+          setActionError("app.action is not wired up yet (spike 2 UI slice).");
+        },
       },
     });
     return {

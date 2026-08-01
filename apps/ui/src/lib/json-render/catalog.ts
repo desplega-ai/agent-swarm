@@ -21,7 +21,9 @@
 import { defineCatalog } from "@json-render/core";
 import { schema } from "@json-render/react";
 import { z } from "zod";
-import { SWARM_SDK_METHODS, type SwarmSdkMethod } from "@/lib/swarm-sdk";
+// Relative (not `@/`) so `scripts/generate-catalog-schema.ts` can run under plain
+// `bun run` — bun does not resolve the vite alias from tsconfig.app.json.
+import { SWARM_SDK_METHODS, type SwarmSdkMethod } from "../swarm-sdk";
 
 // ─── Action schemas (also exported for the discovery endpoint mirror) ───────
 
@@ -52,6 +54,17 @@ export const appMutateActionSchema = z.object({
 /** `app.refresh` — refetch one named query (`query`) or all of them. */
 export const appRefreshActionSchema = z.object({
   query: z.string().optional(),
+});
+
+/**
+ * `app.action` — invoke a named custom action declared in the app definition's
+ * `actions` map (script- or task-backed) via `POST /api/apps/:id/actions/:name`.
+ * The invocation result lands in json-render state at `/actions/<name>` as
+ * `{ status: "running"|"ok"|"error", result?, error?, taskId?, taskStatus? }`.
+ */
+export const appActionActionSchema = z.object({
+  name: z.string(),
+  input: z.record(z.string(), z.unknown()).optional(),
 });
 
 // ─── Component prop schemas ─────────────────────────────────────────────────
@@ -200,7 +213,15 @@ export type ActionChain = z.infer<typeof actionChainSchema>;
 
 // ─── Catalog ────────────────────────────────────────────────────────────────
 
-export const swarmCatalog = defineCatalog(schema, {
+/**
+ * The plain catalog spec (zod prop/param schemas + slots + descriptions),
+ * exported separately from `swarmCatalog` so `scripts/generate-catalog-schema.ts`
+ * can serialize it (via `z.toJSONSchema`) into `src/apps/catalog.generated.json`
+ * — the artifact the API server's page validator consumes. Root `src/` must not
+ * import this module directly (React peer dep via `@json-render/react`).
+ * If you change any schema here, re-run `bun run generate:catalog-schema`.
+ */
+export const swarmCatalogSpec = {
   components: {
     Container: {
       props: containerProps,
@@ -265,5 +286,12 @@ export const swarmCatalog = defineCatalog(schema, {
       params: appRefreshActionSchema,
       description: "Refetch one named swarm-app query, or all of them when `query` is omitted.",
     },
+    "app.action": {
+      params: appActionActionSchema,
+      description:
+        "Invoke a named custom action from the app definition's `actions` map (script- or task-backed). Result lands in state at `/actions/<name>`.",
+    },
   },
-});
+};
+
+export const swarmCatalog = defineCatalog(schema, swarmCatalogSpec);
