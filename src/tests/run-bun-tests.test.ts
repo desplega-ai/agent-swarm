@@ -168,4 +168,54 @@ exit 0
       "test\nsrc/tests/example.test.ts\n--timeout\n1234\n",
     );
   });
+
+  test("allows the worker count to be tuned for the host", async () => {
+    fixtureDir = await mkdtemp(join(tmpdir(), "bun-test-wrapper-"));
+    const fakeBinDir = join(fixtureDir, "bin");
+    const fakeBun = join(fakeBinDir, "bun");
+    const argsFile = join(fixtureDir, "args.txt");
+
+    await mkdir(fakeBinDir);
+    await writeFile(
+      fakeBun,
+      `#!/usr/bin/env bash
+printf '%s\\n' "$*" >>"$BUN_ARGS_FILE"
+exit 0
+`,
+    );
+    await chmod(fakeBun, 0o755);
+
+    const result = Bun.spawnSync(["bash", "scripts/run-bun-tests.sh"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        PATH: `${fakeBinDir}:${process.env.PATH ?? ""}`,
+        BUN_ARGS_FILE: argsFile,
+        BUN_TEST_PARALLELISM: "2",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect((await readFile(argsFile, "utf-8")).trim().split("\n").sort()).toEqual([
+      "test --shard=1/2",
+      "test --shard=2/2",
+    ]);
+  });
+
+  test("rejects a non-positive worker count before running tests", () => {
+    const result = Bun.spawnSync(["bash", "scripts/run-bun-tests.sh"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        BUN_TEST_PARALLELISM: "0",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr.toString()).toContain("BUN_TEST_PARALLELISM must be a positive integer");
+  });
 });

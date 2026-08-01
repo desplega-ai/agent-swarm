@@ -62,10 +62,17 @@ delete process.env.OPENROUTER_API_KEY;
 // may swap this out via __resetEncryptionKeyForTests + env mutation.
 process.env.SECRETS_ENCRYPTION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
-// Build one fully-migrated AND fully-seeded SQLite template per worker.
-// initDb runs all migrations, ensureAgentProfileColumns, seedContextVersions,
-// seedDefaultTemplates, etc. We serialize the result so each test suite can
-// restore from it instantly — no per-suite migration or seeding work at all.
-initDb(":memory:");
-testTemplateGlobals.__testMigrationTemplate = getDb().serialize();
-closeDb();
+const sharedTemplatePath = process.env.AGENT_SWARM_TEST_DB_TEMPLATE;
+
+if (sharedTemplatePath) {
+  // The suite wrapper builds one migrated database up front, then each process
+  // shard reads it instead of independently repeating migrations and seeding.
+  const templateBytes = await Bun.file(sharedTemplatePath).bytes();
+  testTemplateGlobals.__testMigrationTemplate = templateBytes;
+} else {
+  // Keep direct `bun test` invocations self-contained.
+  initDb(":memory:");
+  const templateBytes = getDb().serialize();
+  testTemplateGlobals.__testMigrationTemplate = templateBytes;
+  closeDb();
+}
