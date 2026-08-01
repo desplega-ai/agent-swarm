@@ -64,6 +64,38 @@ Branch: `spike/swarm-apps` off main@4a192581. **Never merge to main** (auto-depl
 - Apps: Ideas (789025c0), Notes Mini (bae5343b), Bookmarks (fe3f60c8)
 - Cleanup: `pkill -f apps-spike-e2e; pkill -f 'port 5375'; pkill -f 'cli.tsx worker'` (or by log grep)
 
+## Spike 2 candidate scope (Taras + Claude, 2026-08-01 — pick up in a NEW session)
+
+Theme: **the iteration loop** (spike 1 proved creation; agents maintaining apps is the product loop).
+
+1. `app-get` / `app-list` / `app-patch` MCP tools (Taras: patch like the workflows tooling — app
+   JSONs get big). Patch shape: JSON Merge Patch for shallow fields + whole-subtree replace for
+   `page.elements.<id>` (agents are bad at RFC 6902 pointers); validate the PATCHED RESULT with the
+   same zod, return the same issues[].
+2. Seeded `apps` skill in templates/skills/apps/ (what apps are, definition format, catalog
+   reference, $row/$form semantics, worked example) + prompt mention. Converts the spike's
+   prompt-primer into platform surface — proven to be the 1-call vs flailing difference.
+3. Dashboard polish (Taras): sidebar entry ABOVE Approvals w/ beta icon + tooltip; name-based
+   breadcrumbs; detail page cleaner like pages; full/chromeless view mode, query-string compatible.
+4. Proof task: worker gets "add a rating filter to Bookmarks" → app-get → app-patch → running app
+   updates. End-to-end iteration demo.
+5. Cheap safety fix to include: reserved-namespace guard for `apps:*` on the generic KV surface.
+
+Deferred to spike 3: sync/PM app (different risk class: join keys, schedules).
+
+### UI catalog gaps (priority order, from Q&A)
+Record detail modal/drawer + DetailList; user-driven filtering (Select/SearchInput/filter bar →
+query overrides); List/Inbox component; Tabs + Grid/Split responsive layout; Metric aggregates
+({aggregate: count} queries); Markdown (Streamdown), EmptyState, field-level Form validation
+display, date picker.
+
+### Risks/unknowns logged (from Q&A)
+Catalog schema client-side only (server can't reject unrenderable pages); PUT schema change leaves
+stale rows/orphaned idx keys (migration-on-change is a design problem); apps:* KV namespace
+writable via generic kv-set (bypasses traits+mutex); in-process mutex assumes single API instance
+(the no-CAS answer breaks on replicas); $row/$form invented semantics must live in the skill or
+agents will guess $item; opus-5 cost $1.35 for a simple app build → consider modelTier routing.
+
 ## Spike verdict — what the platform version needs that the spike exposed
 
 1. App-authoring guidance must ship server-side (tool description / seeded skill): the worker
