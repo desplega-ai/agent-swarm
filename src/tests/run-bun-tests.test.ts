@@ -204,7 +204,7 @@ exit 0
     ]);
   });
 
-  test("uses half the available CPUs when the worker count is not configured", async () => {
+  test("runs serially on a four-core host when the worker count is not configured", async () => {
     fixtureDir = await mkdtemp(join(tmpdir(), "bun-test-wrapper-"));
     const fakeBinDir = join(fixtureDir, "bin");
     const fakeBun = join(fakeBinDir, "bun");
@@ -241,10 +241,7 @@ printf '4\\n'
     });
 
     expect(result.exitCode).toBe(0);
-    expect((await readFile(argsFile, "utf-8")).trim().split("\n").sort()).toEqual([
-      "test --shard=1/2",
-      "test --shard=2/2",
-    ]);
+    expect((await readFile(argsFile, "utf-8")).trim()).toBe("test");
   });
 
   test("rejects a non-positive worker count before running tests", () => {

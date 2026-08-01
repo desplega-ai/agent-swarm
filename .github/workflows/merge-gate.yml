@@ -194,10 +194,14 @@ jobs:
         run: bun scripts/check-rbac-coverage.ts
 
   test:
-    name: Run Tests
+    name: Run Tests (${{ matrix.shard }}/4)
     needs: detect-changes
     if: needs.detect-changes.outputs.test == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout repository
@@ -214,8 +218,9 @@ jobs:
       - name: Run tests
         # apps/evals/ is excluded from the root run via bunfig.toml pathIgnorePatterns
         # (it's a separate bun package with its own deps + its own CI test step in
-        # the lint-and-typecheck job).
-        run: bun run test:root
+        # the lint-and-typecheck job). Each shard gets its own runner because these
+        # tests start servers, subprocesses, and SQLite workers.
+        run: bun run test:root -- --shard=${{ matrix.shard }}/4
 
   pi-skills-freshness:
     name: Pi-Skills Freshness Check

@@ -45,12 +45,13 @@ if [[ -z "$parallelism" ]]; then
   fi
 
   # Bun test processes also spawn servers, subprocesses, and SQLite workers.
-  # Leave half the host CPUs for that work, while capping larger hosts at the
-  # four-way split that gives the best local full-suite runtime.
-  parallelism=$((host_cpus / 2))
-  if [[ "$parallelism" -lt 1 ]]; then
+  # Four-core hosts cannot sustain two full-suite processes without starving
+  # server fixtures, while larger development hosts benefit from local sharding.
+  if [[ "$host_cpus" -le 4 ]]; then
     parallelism=1
-  elif [[ "$parallelism" -gt 4 ]]; then
+  elif [[ "$host_cpus" -le 7 ]]; then
+    parallelism=2
+  else
     parallelism=4
   fi
 fi

@@ -32,6 +32,7 @@ let createAssistantFn: typeof import("../slack/assistant").createAssistant;
 let registerMessageHandlerFn: typeof import("../slack/handlers").registerMessageHandler;
 
 let createTaskWithSiblingAwarenessSpy: any;
+let getAllAgentsSpy: any;
 let getAgentWorkingOnThreadSpy: any;
 let getLeadAgentSpy: any;
 let getMostRecentTaskInThreadSpy: any;
@@ -58,6 +59,7 @@ function restoreEnvValue(key: keyof typeof originalEnv): void {
 
 function installSpyImplementations(): void {
   createTaskWithSiblingAwarenessSpy.mockImplementation(() => ({ id: "mock-task-id-prod-path" }));
+  getAllAgentsSpy.mockImplementation(() => []);
   getAgentWorkingOnThreadSpy.mockImplementation(() => null);
   getLeadAgentSpy.mockImplementation(() => ({
     id: "lead-prod-test-1",
@@ -81,6 +83,7 @@ beforeAll(async () => {
     siblingAwarenessModule,
     "createTaskWithSiblingAwareness",
   );
+  getAllAgentsSpy = spyOn(dbModule, "getAllAgents");
   getAgentWorkingOnThreadSpy = spyOn(dbModule, "getAgentWorkingOnThread");
   getLeadAgentSpy = spyOn(dbModule, "getLeadAgent");
   getMostRecentTaskInThreadSpy = spyOn(dbModule, "getMostRecentTaskInThread");
@@ -98,6 +101,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   createTaskWithSiblingAwarenessSpy.mockClear();
+  getAllAgentsSpy.mockClear();
   getAgentWorkingOnThreadSpy.mockClear();
   getLeadAgentSpy.mockClear();
   getMostRecentTaskInThreadSpy.mockClear();
