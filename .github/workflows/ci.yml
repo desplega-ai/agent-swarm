@@ -205,6 +205,8 @@ jobs:
         continue-on-error: true
         env:
           TOKEN: ${{ secrets.SWARM_CI_TIMINGS_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || 'null' }}
           LINT_DURATION: ${{ steps.lint.outputs.duration_ms || '0' }}
           LINT_STATUS: ${{ steps.lint.outputs.status || 'skipped' }}
           TSC_DURATION: ${{ steps.tsc.outputs.duration_ms || '0' }}
@@ -241,17 +243,17 @@ jobs:
             if [ "$status" = skipped ]; then BOUNDARIES_STATUS=skipped; fi
           done
           BODY=$(jq -n \
-            --arg repo "${{ github.repository }}" \
-            --arg branch "${{ github.head_ref || github.ref_name }}" \
-            --arg sha "${{ github.event.pull_request.head.sha || github.sha }}" \
-            --arg base "${{ github.base_ref }}" \
-            --argjson pr "${{ github.event.pull_request.number || 'null' }}" \
-            --arg runId "${{ github.run_id }}" \
-            --arg attempt "${{ github.run_attempt }}" \
-            --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            --arg wf "${{ github.workflow }}" \
-            --arg event "${{ github.event_name }}" \
-            --arg actor "${{ github.actor }}" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg branch "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" \
+            --arg sha "$HEAD_SHA" \
+            --arg base "$GITHUB_BASE_REF" \
+            --argjson pr "$PR_NUMBER" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg wf "$GITHUB_WORKFLOW" \
+            --arg event "$GITHUB_EVENT_NAME" \
+            --arg actor "$GITHUB_ACTOR" \
             --argjson lintDur "$LINT_DURATION" --arg lintStatus "$LINT_STATUS" \
             --argjson tscDur "$TSC_DURATION" --arg tscStatus "$TSC_STATUS" \
             --argjson evalsTscDur "$EVALS_TSC_DURATION" --arg evalsTscStatus "$EVALS_TSC_STATUS" \
@@ -308,21 +310,23 @@ jobs:
         continue-on-error: true
         env:
           TOKEN: ${{ secrets.SWARM_CI_TIMINGS_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || 'null' }}
         run: |
           set -euo pipefail
           if [ -z "$TOKEN" ]; then echo "SWARM_CI_TIMINGS_TOKEN not available; skipping"; exit 0; fi
           BODY=$(jq -n \
-            --arg repo "${{ github.repository }}" \
-            --arg branch "${{ github.head_ref || github.ref_name }}" \
-            --arg sha "${{ github.event.pull_request.head.sha || github.sha }}" \
-            --arg base "${{ github.base_ref }}" \
-            --argjson pr "${{ github.event.pull_request.number || 'null' }}" \
-            --arg runId "${{ github.run_id }}" \
-            --arg attempt "${{ github.run_attempt }}" \
-            --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            --arg wf "${{ github.workflow }}" \
-            --arg event "${{ github.event_name }}" \
-            --arg actor "${{ github.actor }}" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg branch "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" \
+            --arg sha "$HEAD_SHA" \
+            --arg base "$GITHUB_BASE_REF" \
+            --argjson pr "$PR_NUMBER" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg wf "$GITHUB_WORKFLOW" \
+            --arg event "$GITHUB_EVENT_NAME" \
+            --arg actor "$GITHUB_ACTOR" \
             --argjson dur "${{ steps.tests.outputs.duration_ms || '0' }}" \
             --arg status "${{ steps.tests.outputs.status || 'skipped' }}" \
             '{repo:$repo, branch:$branch, sha:$sha, baseBranch:$base, prNumber:$pr,
