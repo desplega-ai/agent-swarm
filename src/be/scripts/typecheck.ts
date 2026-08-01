@@ -267,6 +267,12 @@ export interface SwarmSdk {
   mcpServer_uninstall(args: Record<string, unknown>): Promise<unknown>;
 
   // --- pages & metrics ---
+  app_upsert(args: {
+    name: string;
+    description?: string;
+    definition: Record<string, unknown>;
+    appId?: string;
+  }): Promise<unknown>;
   page_create(args: Record<string, unknown>): Promise<unknown>;
   page_delete(args: { pageId?: string; slug?: string }): Promise<unknown>;
   metric_create(args: Record<string, unknown>): Promise<unknown>;

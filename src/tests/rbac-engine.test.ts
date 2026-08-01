@@ -91,6 +91,7 @@ const LEAD_OR_TASK_CREATOR_VERBS: PermissionVerb[] = ["task.cancel.any", "task.s
 const LEAD_OR_OWN_NAMESPACE_VERBS: PermissionVerb[] = ["kv.write.any"];
 
 const ANY_AUTHENTICATED_VERBS: PermissionVerb[] = [
+  "app.manage",
   "script-connection.invoke",
   "mcp-oauth.authorize.any",
   "task.create.own",

@@ -185,7 +185,14 @@ afterAll(async () => {
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
 });
 
-beforeEach(() => {
+beforeEach(async () => {
+  // Other files exercise these process-wide integration singletons against
+  // their own databases. Reset before the first test as well as after each
+  // test so this file never inherits an initialized instance from the suite.
+  const { resetLinear } = await import("../linear/app");
+  const { resetJira } = await import("../jira/app");
+  resetLinear();
+  resetJira();
   includeRefreshToken = true;
   cloudIdResolves = true;
   resetLinearClient();

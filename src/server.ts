@@ -9,6 +9,7 @@ import { registerGithubTaskReactions } from "./github/task-reactions";
 import { loadGlobalConfigsIntoEnv } from "./http/core";
 import { isRbacEnabled } from "./rbac";
 import { registerAcceptSteerTool } from "./tools/accept-steer";
+import { registerAppUpsertTool } from "./tools/app-upsert";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";
@@ -462,6 +463,7 @@ export function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolea
 
   // Pages capability - DB-backed lightweight artifacts (HTML / JSON specs).
   if (hasCapability("pages")) {
+    registerAppUpsertTool(server);
     registerCreatePageTool(server);
     registerDeletePageTool(server);
   }

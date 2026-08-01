@@ -44,6 +44,7 @@ import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
 import { handleApiKeys } from "./api-keys";
 import { handleApprovalRequests } from "./approval-requests";
+import { handleApps } from "./apps";
 import { handleAssets } from "./assets";
 import { handleBudgets } from "./budgets";
 import { handleCodexOAuthKeepWarm } from "./codex-oauth-keep-warm";
@@ -323,6 +324,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleWorkflows(req, res, pathSegments, queryParams, myAgentId),
         () => handleWorkflowEvents(req, res, pathSegments, queryParams),
         () => handleApprovalRequests(req, res, pathSegments, queryParams),
+        () => handleApps(req, res, pathSegments, queryParams, myAgentId),
         () => handleConfig(req, res, pathSegments, queryParams),
         () => handleFs(req, res, pathSegments, queryParams, myAgentId),
         () => handleKv(req, res, pathSegments, queryParams),
