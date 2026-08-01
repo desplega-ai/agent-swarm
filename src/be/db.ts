@@ -1578,6 +1578,29 @@ export function getTaskById(id: string): AgentTask | null {
   return row ? rowToAgentTask(row) : null;
 }
 
+export function getSlackRenderV2ActivatedAt(): string | null {
+  return (
+    getDb()
+      .prepare<{ activated_at: string }, []>(
+        `SELECT activated_at FROM slack_render_v2_state WHERE id = 1`,
+      )
+      .get()?.activated_at ?? null
+  );
+}
+
+export function ensureSlackRenderV2Activation(): string {
+  const activatedAt = new Date().toISOString();
+  getDb().run(
+    `INSERT INTO slack_render_v2_state (id, activated_at)
+     VALUES (1, ?)
+     ON CONFLICT(id) DO NOTHING`,
+    [activatedAt],
+  );
+  const persisted = getSlackRenderV2ActivatedAt();
+  if (!persisted) throw new Error("Failed to persist Slack render v2 activation");
+  return persisted;
+}
+
 export type SlackMessageKind = "tree" | "outcome" | "agent";
 
 export interface SlackMessageRecord {
@@ -1879,14 +1902,16 @@ export function getSlackTreeMessages(): SlackMessageRecord[] {
     .prepare<SlackMessageRow, []>(
       `SELECT tree.*
        FROM slack_messages tree
+       JOIN slack_render_v2_state state ON state.id = 1
        WHERE tree.kind = 'tree'
        AND (
-         tree.ts LIKE 'pending:%'
+         (tree.ts LIKE 'pending:%' AND tree.created_at >= state.activated_at)
          OR EXISTS (
            SELECT 1 FROM agent_tasks task
            WHERE task.slackChannelId = tree.channel_id
            AND task.slackThreadTs = tree.thread_ts
            AND task.source = 'slack'
+           AND task.createdAt >= state.activated_at
            AND task.status IN ('completed', 'failed', 'cancelled')
            AND NOT EXISTS (
              SELECT 1 FROM slack_messages outcome
@@ -1900,19 +1925,23 @@ export function getSlackTreeMessages(): SlackMessageRecord[] {
            SELECT 1 FROM agent_tasks task
            WHERE task.slackChannelId = tree.channel_id
            AND task.slackThreadTs = tree.thread_ts
+           AND task.createdAt >= state.activated_at
            AND task.status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
          )
          OR EXISTS (
            SELECT 1 FROM agent_tasks task
            WHERE task.slackChannelId = tree.channel_id
            AND task.slackThreadTs = tree.thread_ts
+           AND task.createdAt >= state.activated_at
            AND task.lastUpdatedAt > tree.updated_at
          )
          OR EXISTS (
            SELECT 1 FROM slack_messages outcome
+           JOIN agent_tasks task ON task.id = outcome.task_id
            WHERE outcome.kind = 'outcome'
            AND outcome.channel_id = tree.channel_id
            AND outcome.thread_ts = tree.thread_ts
+           AND task.createdAt >= state.activated_at
            AND (
              outcome.finalized_at IS NULL
              OR outcome.updated_at > tree.updated_at
@@ -2590,10 +2619,19 @@ export function getSlackTasksMissingTree(): AgentTask[] {
   return getDb()
     .prepare<AgentTaskRow, []>(
       `SELECT task.* FROM agent_tasks task
+       JOIN slack_render_v2_state state ON state.id = 1
        WHERE task.source = 'slack'
        AND task.slackChannelId IS NOT NULL
        AND task.slackThreadTs IS NOT NULL
+       AND task.createdAt >= state.activated_at
        AND task.status NOT IN ('backlog', 'unassigned', 'superseded')
+       AND NOT EXISTS (
+         SELECT 1 FROM agent_tasks earlier
+         WHERE earlier.source = 'slack'
+         AND earlier.slackChannelId = task.slackChannelId
+         AND earlier.slackThreadTs = task.slackThreadTs
+         AND earlier.createdAt < state.activated_at
+       )
        AND NOT EXISTS (
          SELECT 1 FROM slack_messages tree
          WHERE tree.kind = 'tree'

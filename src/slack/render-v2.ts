@@ -2,6 +2,7 @@ import type { WebClient } from "@slack/web-api";
 import {
   bindSlackMessageTimestamp,
   deleteSlackMessageRecord,
+  ensureSlackRenderV2Activation,
   getAgentById,
   getSlackOutcomeMessage,
   getSlackTasksInThread,
@@ -393,6 +394,8 @@ async function createThreadTree(task: AgentTask): Promise<SlackMessageRecord | n
       thread_ts: task.slackThreadTs,
       text,
       blocks: treeBlocks(text),
+      unfurl_links: false,
+      unfurl_media: false,
       metadata: {
         event_type: SLACK_RENDER_METADATA_EVENT,
         event_payload: { message_id: reservation.id, kind: "tree" },
@@ -408,6 +411,8 @@ async function createThreadTree(task: AgentTask): Promise<SlackMessageRecord | n
       ts: remote.ts,
       text,
       blocks: treeBlocks(text),
+      unfurl_links: false,
+      unfurl_media: false,
     });
   }
   let record = bindSlackMessageTimestamp(reservation.id, remote.ts, {
@@ -542,6 +547,8 @@ async function updateThreadTree(
         ts: current.ts,
         text,
         blocks: treeBlocks(text),
+        unfurl_links: false,
+        unfurl_media: false,
       });
     } catch (error) {
       if (isSlackMessageNotFound(error)) return "missing" as const;
@@ -578,23 +585,14 @@ function isOutcomeStatus(
   return status === "completed" || status === "failed" || status === "cancelled";
 }
 
-function outcomeContent(task: AgentTask, duration: string): { header: string; summary: string } {
+function outcomeContent(task: AgentTask): string {
   if (task.status === "failed") {
-    return {
-      header: `❌ *Failed* · ${duration} · ${getTaskLink(task.id)}`,
-      summary: outcomeSummary(task.failureReason || "Task failed."),
-    };
+    return `❌ *Failed* ${outcomeSummary(task.failureReason || "Task failed.")}`;
   }
   if (task.status === "cancelled") {
-    return {
-      header: `🚫 *Cancelled* · ${duration} · ${getTaskLink(task.id)}`,
-      summary: outcomeSummary(task.failureReason || "Task was cancelled."),
-    };
+    return `🚫 *Cancelled* ${outcomeSummary(task.failureReason || "Task was cancelled.")}`;
   }
-  return {
-    header: `✅ *Done* · ${duration} · ${getTaskLink(task.id)}`,
-    summary: outcomeSummary(task.output),
-  };
+  return `✅ ${outcomeSummary(task.output)}`;
 }
 
 function attachmentLine(attachments: TaskAttachment[]): string | undefined {
@@ -620,12 +618,9 @@ function presentationChunks(text: string, count = 3): string[] {
   return chunks.filter(Boolean);
 }
 
-function outcomePresentationChunks(
-  content: { header: string; summary: string },
-  attachment: string | undefined,
-): string[] {
-  const details = [content.summary, attachment].filter(Boolean).join("\n");
-  return [content.header, ...presentationChunks(details, 2)].filter(Boolean);
+function outcomePresentationChunks(content: string, attachment: string | undefined): string[] {
+  const body = [content, attachment].filter(Boolean).join("\n");
+  return presentationChunks(`${body}\n`);
 }
 
 function isStreamAlreadyStopped(error: unknown): boolean {
@@ -641,7 +636,12 @@ async function slackTeamId(client: WebClient): Promise<string | undefined> {
   return cachedTeamId;
 }
 
-function outcomeFooter(task: AgentTask, tasks: AgentTask[], treePermalink: string): unknown[] {
+function outcomeFooter(
+  task: AgentTask,
+  tasks: AgentTask[],
+  treePermalink: string,
+  duration: string,
+): unknown[] {
   const childrenByParent = new Map<string, AgentTask[]>();
   for (const candidate of tasks) {
     if (!candidate.parentTaskId) continue;
@@ -670,7 +670,7 @@ function outcomeFooter(task: AgentTask, tasks: AgentTask[], treePermalink: strin
       : task.agentId
         ? getAgentById(task.agentId)?.name
         : undefined;
-  const parts = [who, getTaskLink(task.id), `<${treePermalink}|↑ tree>`].filter(Boolean);
+  const parts = [duration, who, getTaskLink(task.id), `<${treePermalink}|↑ tree>`].filter(Boolean);
   if (parts.length === 0) return [];
   return [{ type: "context", elements: [{ type: "mrkdwn", text: parts.join(" · ") }] }];
 }
@@ -689,13 +689,15 @@ export async function streamOutcomeCard(
   const tasks = getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
   const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
   const attachment = attachmentLine(getTaskAttachments(task.id));
-  const content = outcomeContent(task, duration);
+  const content = outcomeContent(task);
   const chunks = outcomePresentationChunks(content, attachment);
+  const firstChunk = chunks[0];
+  if (!firstChunk) throw new Error(`Outcome presentation is empty for task ${task.id}`);
 
   const startPayload: Record<string, unknown> = {
     channel: task.slackChannelId,
     thread_ts: task.slackThreadTs,
-    markdown_text: chunks[0],
+    markdown_text: firstChunk,
   };
   if (!task.slackChannelId.startsWith("D") && task.slackUserId) {
     const teamId = await slackTeamId(app.client);
@@ -720,7 +722,7 @@ export async function streamOutcomeCard(
   if (isPendingSlackMessage(outcome)) {
     const reconciled = reservationWasCreated
       ? undefined
-      : await findReservedSlackMessage(app.client, outcome, content.header);
+      : await findReservedSlackMessage(app.client, outcome, firstChunk);
     const started =
       reconciled ?? (await callSlackWithRetry(app.client, "chat.startStream", startPayload));
     if (typeof started.ts !== "string" || !started.ts) {
@@ -744,7 +746,7 @@ export async function streamOutcomeCard(
     await callSlackWithRetry(app.client, "chat.stopStream", {
       channel: task.slackChannelId,
       ts: outcome.ts,
-      blocks: outcomeFooter(task, tasks, tree.permalink),
+      blocks: outcomeFooter(task, tasks, tree.permalink, duration),
     });
   } catch (error) {
     // A process may have stopped the stream before it persisted the final
@@ -757,7 +759,11 @@ export async function streamOutcomeCard(
 }
 
 export async function processSlackRenderV2(): Promise<void> {
+  if (!isSlackRenderV2Enabled()) return;
+  const activatedAt = ensureSlackRenderV2Activation();
+
   for (const task of getSlackTasksMissingTree()) {
+    if (!isSlackRenderV2Enabled()) return;
     if (!task.slackChannelId || !task.slackThreadTs) continue;
     try {
       await ensureSlackThreadTree([task.id]);
@@ -767,6 +773,7 @@ export async function processSlackRenderV2(): Promise<void> {
   }
 
   for (const storedTree of getSlackTreeMessages()) {
+    if (!isSlackRenderV2Enabled()) return;
     let tree = storedTree;
     const initialTasks = getSlackTasksInThread(tree.channelId, tree.threadTs);
     if (isPendingSlackMessage(tree)) {
@@ -803,6 +810,7 @@ export async function processSlackRenderV2(): Promise<void> {
     const needsOutcome = tasks.some(
       (task) =>
         task.source === "slack" &&
+        task.createdAt >= activatedAt &&
         isOutcomeStatus(task.status) &&
         !getSlackOutcomeMessage(task.id)?.finalizedAt,
     );
@@ -827,7 +835,9 @@ export async function processSlackRenderV2(): Promise<void> {
     }
     let outcomeCreated = false;
     for (const task of tasks) {
+      if (!isSlackRenderV2Enabled()) return;
       if (task.source !== "slack" || !isOutcomeStatus(task.status)) continue;
+      if (task.createdAt < activatedAt) continue;
       if (getSlackOutcomeMessage(task.id)?.finalizedAt) continue;
       try {
         const outcome = await streamOutcomeCard(task, tree);
