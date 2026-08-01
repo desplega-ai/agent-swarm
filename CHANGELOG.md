@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.126.0] - 2026-08-01
+
+### Added
+- **Workflow-definition telemetry now covers creation and deletion** (#1040) — anonymous events expose definition lifecycle counts with workflow, node-count, and entry-point metadata instead of observing only workflows that ran.
+- **Worker images now include GitHub's official stacked-PR extension** (#1055) — both slim and full workers can use `gh stack` without per-session installation.
+
+### Changed
+- **System-default skills now keep one canonical seeded source with bundled files** (#1044) — `artifacts`, `kv-storage`, and `pages` retain their reference files and examples across database seeding and worker reconciliation instead of colliding with truncated baked copies.
+
+### Fixed
+- **Terminal task output now uses the agent's real final message** (#1042, #1054) — the runner no longer substitutes progress narration, structured-output fallback can use the captured answer, and buffered text is scrubbed before it reaches task consumers.
+- **Script KV CRUD now has safe optional reads and a canonical delete method** (#1043) — `kv_getOrNull` returns `null` for missing keys without hiding other errors, while `kv_delete` replaces `kv_del` as the documented name without breaking existing scripts.
+- **OpenAPI script connections now reject misplaced arguments and encode arrays correctly** (#1049) — unknown top-level keys fail with location hints, and array query/header parameters use repeated values instead of silent comma coercion.
+- **Codex steering deliveries always include their acknowledgement ID** (#1039) — standalone hooks load the registered delivery template so agents receive the required `[steering <uuid>]` marker.
+- **Public deployment examples no longer embed production agent IDs** (#1041) — Compose requires stable, service-specific UUIDs supplied through the deployer's environment.
+
 ## [1.125.0] - 2026-07-31
 
 ### Added

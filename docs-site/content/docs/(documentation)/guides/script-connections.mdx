@@ -72,6 +72,13 @@ await ctx.api.notion.retrieveAPage({
 });
 ```
 
+The runtime validates these top-level location buckets. A misplaced parameter
+such as `{ userIds: [...] }` fails with a hint to use the declared location
+(for example, `query: { user_ids: [...] }`) instead of silently dropping the
+filter. Array-valued query parameters use OpenAPI's default exploded form, so
+`["a", "b"]` is sent as `?key=a&key=b`; array-valued headers are appended using
+the corresponding HTTP header semantics.
+
 Base paths in `baseUrl` (e.g. `https://host/api/v3`) are preserved when spec
 paths are resolved against it.
 
@@ -286,6 +293,9 @@ endpoint's run-as agent).
 
 - OpenAPI specs may be JSON or YAML (YAML is converted to JSON at ingest and
   stored canonically).
+- Array query parameters use OpenAPI's default `form` + `explode: true`
+  encoding. Per-operation custom `style` / `explode` settings are not modeled
+  yet.
 - `ctx.mcp` returns the raw MCP result envelope (`content` +
   `structuredContent`); unwrap it in the script.
 - GraphQL results are untyped (`any`); OpenAPI response types are generated

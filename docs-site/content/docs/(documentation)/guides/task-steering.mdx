@@ -72,7 +72,9 @@ Open an in-progress task and use the steering composer. The mode selector follow
 
 Agents may steer tasks they created, and the lead may steer any task. User calls are limited to tasks allowed by `task.steer.own`.
 
-After incorporating a delivered message, the assigned agent calls `accept-steer`:
+Every delivered agent-facing envelope starts with a literal
+`[steering <uuid>]` marker. After incorporating the message, the assigned agent
+passes that UUID to `accept-steer`:
 
 ```json
 {

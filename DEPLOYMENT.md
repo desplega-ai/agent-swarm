@@ -276,7 +276,7 @@ The Docker worker image uses a multi-stage build with two publishable targets:
 - **Languages**: Python 3, Node.js 22, Bun
 - **Build tools**: gcc, g++, make, cmake
 - **Process manager**: PM2 (for background services)
-- **CLI tools**: GitHub CLI (`gh`), GitLab CLI (`glab`), sqlite3
+- **CLI tools**: GitHub CLI (`gh`) with the official `gh stack` extension, GitLab CLI (`glab`), sqlite3
 - **Agent tools**: `wts` (git worktree manager)
 - **Utilities**: git, git-lfs, vim, nano, jq, curl, wget, ssh, fuse3
 - **Runtime user**: Agent processes run as the non-root `worker` user without

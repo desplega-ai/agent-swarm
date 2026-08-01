@@ -137,6 +137,13 @@ Most SDK results are wrapper objects; read `response.data ?? response` before
 narrowing the payload. Prefer registered connections for authenticated calls:
 credentials are attached server-side and do not enter script source or args.
 
+KV reads are the notable optional-read exception. Use
+`ctx.swarm.kv_getOrNull<T>({ key, namespace? })` when a missing key is expected:
+it returns the entry directly, returns `null` on a 404, and throws on other
+errors. The original `kv_get` keeps its wrapped response contract for
+compatibility. Use `kv_delete` for hard deletes; `kv_del` remains an alias for
+existing scripts.
+
 `ctx.swarm.*` receives the complete scrubbed SDK response instead of the
 10,000-byte model-facing MCP replacement. Both inline/named scripts and durable
 workflow scripts stream these responses through a separate 64 MiB hard limit.

@@ -105,6 +105,10 @@ You should see the lead and workers listed with `status: "idle"`.
 The bundled worker image already includes the Ubuntu runtime libraries required by Playwright's Chromium binary. Browser-driven tasks such as `qa-use`, Playwright smoke tests, and screenshot workflows no longer need a per-agent `apt install` workaround just to launch the bundled browser.
 </Callout>
 
+<Callout type="info">
+Worker images also install GitHub's official `gh-stack` extension for stacked pull-request workflows. Run `gh stack --help` inside a worker to see the available stack commands; both the slim and full targets include it.
+</Callout>
+
 ### Startup-script privilege boundary
 
 Since v1.106.0, per-agent `setupScript` / `/workspace/start-up.*` hooks run as the non-root `worker` user after the container drops privileges, and the worker image no longer grants blanket passwordless sudo. This was a security hardening change for the setup-script privilege boundary.
