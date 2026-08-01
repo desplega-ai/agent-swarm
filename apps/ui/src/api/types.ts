@@ -2474,3 +2474,53 @@ export interface SwarmMetrics {
   sessions: { active: number };
   skills: { total: number };
 }
+
+// ─── Swarm apps (spike) ─────────────────────────────────────────────────────
+// Mirrors the frozen `AppDefinition` contract served by `/api/apps/*`.
+
+export type AppColumnKind = "string" | "number" | "boolean" | "date" | "enum";
+
+export interface AppColumnDef {
+  kind: AppColumnKind;
+  required?: boolean;
+  enum?: string[];
+  index?: boolean;
+  default?: string | number | boolean;
+}
+
+export interface AppModelDef {
+  columns: Record<string, AppColumnDef>;
+}
+
+export interface AppQueryDef {
+  model: string;
+  filter?: Record<string, string | number | boolean>;
+  sort?: { column: string; dir: "asc" | "desc" };
+  limit?: number;
+}
+
+export interface AppDefinition {
+  models: Record<string, AppModelDef>;
+  queries?: Record<string, AppQueryDef>;
+  /** json-render spec — validated as "is an object" server-side. */
+  page: Record<string, unknown>;
+}
+
+export interface AppListItem {
+  id: string;
+  name: string;
+  description?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AppDetail extends AppListItem {
+  definition: AppDefinition;
+}
+
+/** A row from `app/<appId>/<model>/row/<rowId>`. */
+export type AppRow = Record<string, unknown> & {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+};

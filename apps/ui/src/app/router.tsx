@@ -55,6 +55,8 @@ const MemoryPage = lazy(() => import("@/pages/memory/page"));
 const MetricsPage = lazy(() => import("@/pages/metrics/page"));
 const PageDetailPage = lazy(() => import("@/pages/pages/[id]/page"));
 const PagesListingPage = lazy(() => import("@/pages/pages/page"));
+const AppsListingPage = lazy(() => import("@/pages/apps/page"));
+const AppDetailPage = lazy(() => import("@/pages/apps/[id]/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
 
 /**
@@ -157,6 +159,8 @@ export const router = createBrowserRouter([
       { path: "memory", element: <MemoryPage /> },
       { path: "pages", element: <PagesListingPage /> },
       { path: "pages/:id", element: <PageDetailPage /> },
+      { path: "apps", element: <AppsListingPage /> },
+      { path: "apps/:id", element: <AppDetailPage /> },
       ...redirectRoutes,
       { path: "*", element: <NotFoundPage /> },
     ],

@@ -1,0 +1,152 @@
+{
+  "models": {
+    "idea": {
+      "columns": {
+        "title": { "kind": "string", "required": true },
+        "status": {
+          "kind": "enum",
+          "enum": ["open", "in_progress", "done"],
+          "default": "open"
+        },
+        "votes": { "kind": "number", "default": 0 },
+        "notes": { "kind": "string" }
+      }
+    }
+  },
+  "queries": {
+    "allIdeas": {
+      "model": "idea",
+      "sort": { "column": "createdAt", "dir": "desc" }
+    }
+  },
+  "page": {
+    "root": "root",
+    "elements": {
+      "root": {
+        "type": "Container",
+        "props": { "direction": "column", "gap": "lg" },
+        "children": ["title", "newIdeaCard", "ideasCard"]
+      },
+      "title": {
+        "type": "Heading",
+        "props": { "text": "Ideas", "level": "h1" }
+      },
+      "newIdeaCard": {
+        "type": "Card",
+        "props": {
+          "title": "Add an idea",
+          "description": "New ideas land in the tracker as open."
+        },
+        "children": ["newIdeaForm"]
+      },
+      "newIdeaForm": {
+        "type": "Form",
+        "props": {
+          "id": "newIdea",
+          "submitLabel": "Add idea",
+          "fields": [
+            {
+              "name": "title",
+              "label": "Title",
+              "kind": "string",
+              "required": true,
+              "placeholder": "What should we build?"
+            },
+            {
+              "name": "notes",
+              "label": "Notes",
+              "kind": "text",
+              "placeholder": "Context, links, why it matters…"
+            }
+          ],
+          "onSubmit": [
+            {
+              "action": "app.mutate",
+              "params": {
+                "model": "idea",
+                "op": "create",
+                "values": { "$form": "" }
+              }
+            }
+          ]
+        }
+      },
+      "ideasCard": {
+        "type": "Card",
+        "props": { "title": "All ideas" },
+        "children": ["ideasTable"]
+      },
+      "ideasTable": {
+        "type": "Table",
+        "props": {
+          "data": { "$state": "/queries/allIdeas/data" },
+          "loading": { "$state": "/queries/allIdeas/loading" },
+          "error": { "$state": "/queries/allIdeas/error" },
+          "emptyMessage": "No ideas yet — add the first one above.",
+          "columns": [
+            { "key": "title", "label": "Title" },
+            {
+              "key": "status",
+              "label": "Status",
+              "kind": "badge",
+              "width": 140,
+              "tones": { "open": "info", "in_progress": "active", "done": "success" }
+            },
+            { "key": "votes", "label": "Votes", "kind": "number", "width": 100 }
+          ],
+          "rowActions": [
+            {
+              "label": "Start",
+              "variant": "outline",
+              "actions": [
+                {
+                  "action": "app.mutate",
+                  "params": {
+                    "model": "idea",
+                    "op": "update",
+                    "rowId": { "$row": "id" },
+                    "values": { "status": "in_progress" }
+                  }
+                }
+              ]
+            },
+            {
+              "label": "Done",
+              "variant": "outline",
+              "actions": [
+                {
+                  "action": "app.mutate",
+                  "params": {
+                    "model": "idea",
+                    "op": "update",
+                    "rowId": { "$row": "id" },
+                    "values": { "status": "done" }
+                  }
+                }
+              ]
+            },
+            {
+              "label": "Delete",
+              "variant": "destructive-outline",
+              "confirm": {
+                "title": "Delete idea?",
+                "description": "This permanently removes the idea from the tracker. This action cannot be undone.",
+                "confirmLabel": "Delete idea"
+              },
+              "actions": [
+                {
+                  "action": "app.mutate",
+                  "params": {
+                    "model": "idea",
+                    "op": "delete",
+                    "rowId": { "$row": "id" }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -8,6 +8,9 @@ import type {
   AgentTask,
   AgentWithTasks,
   ApiKeyStatusResponse,
+  AppDetail,
+  AppListItem,
+  AppRow,
   ApprovalRequest,
   ApprovalRequestsResponse,
   AssetEntityType,
@@ -2734,6 +2737,87 @@ class ApiClient {
     });
     if (!res.ok) throw new Error(`runMetric ${id}: ${res.status}`);
     return res.json();
+  }
+
+  // ─── Swarm apps (spike) ───────────────────────────────────────────────────
+  // `/api/apps/*`. Validation failures come back as 400 with
+  // `{ error, issues?: [{path, message}] }` — surfaced verbatim so the app
+  // runtime can show the server's own wording.
+
+  private async appRequest<T>(
+    path: string,
+    init: RequestInit | undefined,
+    label: string,
+  ): Promise<T> {
+    const res = await fetch(`${this.getBaseUrl()}${path}`, {
+      ...init,
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as {
+        error?: string;
+        issues?: { path?: string; message?: string }[];
+      } | null;
+      const issues = body?.issues?.length
+        ? ` (${body.issues.map((i) => `${i.path ?? ""}: ${i.message ?? ""}`).join("; ")})`
+        : "";
+      throw new Error(`${label}: ${body?.error ?? res.status}${issues}`);
+    }
+    return res.json() as Promise<T>;
+  }
+
+  async listApps(): Promise<{ apps: AppListItem[] }> {
+    return this.appRequest("/api/apps", undefined, "Failed to list apps");
+  }
+
+  async getApp(id: string): Promise<{ app: AppDetail }> {
+    return this.appRequest(`/api/apps/${encodeURIComponent(id)}`, undefined, "Failed to load app");
+  }
+
+  /** Resolve a named query from the app definition. */
+  async runAppQuery(appId: string, queryName: string): Promise<{ rows: AppRow[] }> {
+    return this.appRequest(
+      `/api/apps/${encodeURIComponent(appId)}/queries/${encodeURIComponent(queryName)}`,
+      undefined,
+      `Failed to run query ${queryName}`,
+    );
+  }
+
+  async createAppRow(
+    appId: string,
+    model: string,
+    values: Record<string, unknown>,
+  ): Promise<{ row: AppRow }> {
+    return this.appRequest(
+      `/api/apps/${encodeURIComponent(appId)}/models/${encodeURIComponent(model)}/rows`,
+      { method: "POST", body: JSON.stringify({ values }) },
+      `Failed to create ${model}`,
+    );
+  }
+
+  async updateAppRow(
+    appId: string,
+    model: string,
+    rowId: string,
+    values: Record<string, unknown>,
+  ): Promise<{ row: AppRow }> {
+    return this.appRequest(
+      `/api/apps/${encodeURIComponent(appId)}/models/${encodeURIComponent(
+        model,
+      )}/rows/${encodeURIComponent(rowId)}`,
+      { method: "PATCH", body: JSON.stringify({ values }) },
+      `Failed to update ${model}`,
+    );
+  }
+
+  async deleteAppRow(appId: string, model: string, rowId: string): Promise<{ ok: boolean }> {
+    return this.appRequest(
+      `/api/apps/${encodeURIComponent(appId)}/models/${encodeURIComponent(
+        model,
+      )}/rows/${encodeURIComponent(rowId)}`,
+      { method: "DELETE" },
+      `Failed to delete ${model}`,
+    );
   }
 }
 
