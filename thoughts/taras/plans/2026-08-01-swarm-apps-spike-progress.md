@@ -135,6 +135,54 @@ $row/$form invented semantics must live in the skill or agents will guess $item.
 4. UI edit loop missing (edit definition in dashboard) — Taras: fine as long as the AGENT can edit
    it → app-get/app-patch (spike 2 item 1) is the edit loop; a human UI editor is not a priority.
 
+## Spike 2 results (2026-08-01, complete — same session family, frozen spec ./2026-08-01-swarm-apps-spike2-spec.md)
+
+Commits: `b4be8c07` contract freeze (spec + app.action catalog schema + generated
+catalog artifact), `02c3bf73` UI slice, `5a8daf01` server slice. Flow: recon workflow
+(6 Sonnet readers → /tmp/recon2-*.md) → freeze → Codex sol server slice ∥ Opus workflow
+UI slice → two-lens review (Opus core + Sonnet periphery) → fix round (Codex resume +
+orchestrator) → commits → E2E.
+
+- **Everything in scope shipped**: app-get/app-list/app-patch (merge patch per spec:
+  RFC 7396 + atomic `page.elements.*`/`actions.*`, null-clears, validate-merged-result);
+  server-side page validator driven by `src/apps/catalog.generated.json` (generated from
+  the UI zod catalog via `apps/ui/scripts/generate-catalog-schema.ts`); seeded `apps`
+  skill (systemDefault) + `system.agent.apps` prompt block; dashboard polish (sidebar
+  above Approvals w/ BETA tooltip, name breadcrumbs, pages-style chrome, ?mode=full,
+  ?mode=chromeless); `apps:*` reserved-namespace guard at both generic KV write choke
+  points; custom actions: `script` kind (runs under script owner — documented spike
+  tradeoff) and `task` kind (observable via GET /api/tasks/:id + UI polling into
+  `/actions/<name>` state).
+- **Review headline (A1, caught pre-E2E)**: the validator initially hard-rejected the
+  live Bookmarks app — its page mirrored MODEL column kinds (`"string"`) into Table
+  column `kind` and used a bare-string `confirm`. Fix: catalog accepts the aliases +
+  string-confirm shorthand. Lesson: **the validator must never reject what the runtime
+  renders**; live app definitions are the regression fixtures that catch this
+  (`src/tests/fixtures/bookmarks-definition.json.txt`).
+- **Finale PASSED (the iteration loop, zero-shot)**: worker task "add a rating feature
+  + filter by rating to Bookmarks", NO format primer. Agent: app-list → app-get →
+  loaded the seeded `apps` Skill → ONE app-patch, **0 validation rejections**, $3.07.
+  Added rating column, star row-actions (★1–5 + Clear), per-rating queries + tables +
+  unrated section. The dashboard browser-verify agent caught the app updating LIVE
+  between its screenshots. All 6 browser checks + 13 HTTP checks + MCP battery green.
+- **Worker's own catalog verdict** (in its task result): static query filters forced a
+  7-table layout; it explicitly asked for "$state-bindable query filters or implemented
+  `visible` semantics with equality comparison" — confirms catalog gap №3/№4 (search /
+  user-driven filtering via query overrides) as the top UI-catalog priority.
+- Visual follow-ups from browser verify (not fixed, spike): duplicate "Bookmarks"
+  heading (PageHeader + app's own H1); row-action cluster clipped in default/full mode
+  (7+ actions overflow the grid column); hard cell truncation without ellipsis; dead
+  space under short tables; "All apps" bare link inconsistent next to buttons.
+- Productization flags: script actions need invoker-rights/invoker-brokered credentials
+  (comment at the run-as site in src/http/apps.ts); no app versioning/snapshot before
+  patch (unlike workflows); task-kind `agentId` is format-checked only.
+- New env facts: stack restarted on new code — API :3113 pid via
+  `lsof -iTCP:3113 -sTCP:LISTEN`, worker relaunched from /tmp/apps-worker-ws (env:
+  MCP_BASE_URL/AGENT_SWARM_API_KEY/AGENT_ID + *_DISABLE=true). Scratch app
+  d5968b96 "Spike2 Scratch" left in DB (used by the E2E battery). `codex exec resume
+  --last` takes neither `-C` nor `-s` (only `-o`/`-c`/`-m`) — first two fix-round
+  launches died instantly on that.
+
 ## Gotchas learned
 
 - zsh `rm -f glob*` with no match aborts the whole command (broke a background boot once).
