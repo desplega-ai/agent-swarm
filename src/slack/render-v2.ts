@@ -174,19 +174,17 @@ function renderNodeLabel(node: RenderNode, isAsk: boolean): string {
 function renderNodeLines(
   node: RenderNode,
   prefix: string,
-  isLast: boolean,
   now: Date,
   outcomeLinks: ReadonlyMap<string, string>,
   isAsk: boolean,
 ): string[] {
-  const connector = isLast ? "└─" : "├─";
   const duration = formatV2Duration(new Date(node.task.createdAt), terminalEnd(node.task, now));
   const result = outcomeLinks.get(node.task.id);
   const boundedPrefix =
     prefix.length > MAX_TREE_PREFIX_LENGTH
       ? `${prefix.slice(0, MAX_TREE_PREFIX_LENGTH - 1)}…`
       : prefix;
-  let line = `${boundedPrefix}${connector} ${statusIcon(node.task.status)} ${renderNodeLabel(node, isAsk)} · ${duration} · ${getTaskLink(node.task.id)}`;
+  let line = `${boundedPrefix}↳ ${statusIcon(node.task.status)} ${renderNodeLabel(node, isAsk)} · ${duration} · ${getTaskLink(node.task.id)}`;
   const resultLink = result ? ` → <${result}|result>` : "";
   if (resultLink && line.length + resultLink.length <= MAX_TREE_NODE_LINE_LENGTH) {
     line += resultLink;
@@ -195,18 +193,9 @@ function renderNodeLines(
     line = `${line.slice(0, MAX_TREE_NODE_LINE_LENGTH - 1).trimEnd()}…`;
   }
   const lines = [line];
-  const childPrefix = `${prefix}${isLast ? "   " : "│  "}`;
-  node.children.forEach((child, index) => {
-    lines.push(
-      ...renderNodeLines(
-        child,
-        childPrefix,
-        index === node.children.length - 1,
-        now,
-        outcomeLinks,
-        false,
-      ),
-    );
+  const childPrefix = `${prefix}   `;
+  node.children.forEach((child) => {
+    lines.push(...renderNodeLines(child, childPrefix, now, outcomeLinks, false));
   });
   return lines;
 }
@@ -231,17 +220,8 @@ export function renderThreadTree(
   const threadDuration = formatV2Duration(new Date(first.createdAt), threadEnd);
   const lines = [`🧵 *${cleanTaskDescription(first)}* · ${threadDuration}`];
   const roots = buildRenderForest(tasks);
-  roots.forEach((root, index) => {
-    lines.push(
-      ...renderNodeLines(
-        root,
-        "",
-        index === roots.length - 1,
-        now,
-        outcomeLinks,
-        root.task.source === "slack",
-      ),
-    );
+  roots.forEach((root) => {
+    lines.push(...renderNodeLines(root, "", now, outcomeLinks, root.task.source === "slack"));
   });
   const text = lines.join("\n");
   if (text.length <= MAX_SECTION_LENGTH) return text;
@@ -253,7 +233,6 @@ export function renderThreadTree(
     const recentLine = renderNodeLines(
       { task, children: [] },
       "",
-      true,
       now,
       outcomeLinks,
       task.source === "slack",

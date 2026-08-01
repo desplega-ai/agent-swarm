@@ -588,13 +588,15 @@ describe("Slack renderer v2", () => {
       now,
     );
 
-    expect(text).toContain("🧵 *format tests* · 8m05s");
-    expect(text).toContain(
-      `├─ ⏳ format tests · 8m05s · <https://app.agent-swarm.dev/tasks/${ask.id}|\`${ask.id.slice(0, 8)}\`>`,
+    expect(text).toBe(
+      [
+        "🧵 *format tests* · 8m05s",
+        `↳ ⏳ format tests · 8m05s · <https://app.agent-swarm.dev/tasks/${ask.id}|\`${ask.id.slice(0, 8)}\`>`,
+        `   ↳ ⏳ Researcher · 8m05s · <https://app.agent-swarm.dev/tasks/${child.id}|\`${child.id.slice(0, 8)}\`>`,
+        `      ↳ ⏳ Researcher · 8m05s · <https://app.agent-swarm.dev/tasks/${grandchild.id}|\`${grandchild.id.slice(0, 8)}\`>`,
+        `↳ ⏳ this PR · 8m05s · <https://app.agent-swarm.dev/tasks/${secondAsk.id}|\`${secondAsk.id.slice(0, 8)}\`>`,
+      ].join("\n"),
     );
-    expect(text).toContain("│  └─ ⏳ Researcher");
-    expect(text).toContain("│     └─ ⏳ Researcher");
-    expect(text).toContain("└─ ⏳ this PR");
     expect(text).not.toContain("```");
   });
 
@@ -623,6 +625,8 @@ describe("Slack renderer v2", () => {
     expect(text).toContain("older tasks collapsed");
     expect(text).toContain(tasks.at(-1)!.id.slice(0, 8));
     expect(text).not.toContain(tasks[1]!.id.slice(0, 8));
+    expect(text.split("\n").filter((line) => line.startsWith("↳"))).not.toHaveLength(0);
+    expect(text).not.toMatch(/[├└│]/);
 
     for (const task of tasks) failTask(task.id, "test cleanup");
   });
@@ -902,7 +906,7 @@ describe("Slack renderer v2", () => {
       (call) => call.method === "chat.update" && call.payload.ts === tree?.ts,
     );
     expect(update?.payload.ts).toBe(tree?.ts);
-    expect(update?.payload.text).toContain("└─ ❌ failing ask");
+    expect(update?.payload.text).toContain("↳ ❌ failing ask");
     expect(update?.payload.text).toContain("→ <https://workspace.slack.com/");
   });
 
@@ -935,7 +939,7 @@ describe("Slack renderer v2", () => {
     const update = calls.find(
       (call) => call.method === "chat.update" && call.payload.ts === tree?.ts,
     );
-    expect(update?.payload.text).toContain("└─ 🚫 cancelled ask");
+    expect(update?.payload.text).toContain("↳ 🚫 cancelled ask");
   });
 
   test("serializes concurrent tree writers and leaves the newest outcome link visible", async () => {
