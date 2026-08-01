@@ -102,53 +102,41 @@ When enabled via `ADDITIVE_SLACK=true`, thread replies that do NOT @mention the 
 
 ### Tree-Based Status Messages
 
-Tasks that spawn subtasks are rendered as a visual tree in a single evolving Slack message. The tree shows each subtask's status with icons, indentation, and truncated output:
+The legacy per-task renderer remains the default. Set `SLACK_RENDER_V2=true` to opt in to the v2 preview, where each Slack thread owns exactly one engine message: a task tree that is updated in place with `chat.update`. Later asks append to the same tree, delegated tasks stay nested under their parent, and task IDs remain clickable:
 
 ```
-✅ Research phase (3m)
-├─ ✅ Analyze codebase — Found 12 relevant files
-├─ 👀 Review dependencies — awaiting reviewer feedback
-└─ ⏳ Write report
+🧵 Thread title · 44m
+├─ ✅ First ask · 7m51s · task-id
+├─ ⏳ Current ask · 8m05s · task-id
+│  └─ ✅ Researcher · 8m24s · task-id
+└─ ✅ Completed ask · 12m · task-id → result
 ```
 
-Status icons cover the full task lifecycle: 🗂️ `backlog`, 📭 `unassigned`, 📨 `offered`, 👀 `reviewing`, 📡 `pending`, ⏳ `in_progress`, ⏸️ `paused`, ✅ `completed`, ❌ `failed`, 🚫 `cancelled`, and ↪️ `superseded`. Trees show up to 8 children per node with an overflow indicator for larger task graphs.
+The tree contains status, elapsed time, hierarchy, task links, and links to completed results. It does not contain worker output or a footer. Updates are debounced and rate-limit retries honor Slack backoff.
 
-### Message Deduplication
+### Outcome Cards and Message Provenance
 
-When an agent posts its results directly to a Slack thread via the `slack-reply` tool, the task's completion message automatically switches to a minimal one-liner instead of repeating the full output. This prevents duplicate content in threads — the agent's detailed reply appears once, and the status message simply confirms completion.
+Each completed Slack ask gets one compact outcome card. The renderer writes it once with `chat.startStream`, about three `chat.appendStream` calls, and `chat.stopStream`; it is never passed to `chat.update`, so Slack does not stamp it as edited. The card links back to the tree, and the tree links to the card.
 
-For delegated tasks tracked in a task tree, output that would be truncated in
-the compact tree preview is delivered in full to the originating thread before
-the terminal tree is cleaned up. Long results are converted to Slack mrkdwn and
-split into safe Block Kit chunks across as many messages as needed. Successful
-delivery marks the task as replied so the completion watcher does not duplicate
-it; if delivery fails, tree cleanup waits and retries.
+Raw worker output is not automatically relayed into Slack. Additional messages only appear when an agent explicitly calls `slack-reply`, `slack-post`, or `slack-start-thread`. Those tools accept optional Block Kit `blocks`; when omitted they generate a mrkdwn section. Their compact context footer contains only useful provenance: agent, task, and a link back to the tree when available.
 
-The watcher also persists its tracked task-message map across restarts, so an API or worker reboot does not recreate already-seen Slack thread updates as fresh tasks.
+Tree, outcome, and explicit agent message timestamps are persisted in `slack_messages`, so the renderer can reuse and cross-link messages after a restart.
 
-### Single Evolving Message
+### Opt In to the Renderer
 
-Each task gets a single Slack message that evolves through its lifecycle — from assignment to progress to completion. Instead of posting multiple messages, the bot uses `chat.update` to update one message in place:
-
-1. **Assignment** — When a task is created from Slack, the bot posts a structured Block Kit message with the task link, assigned agent, and status
-2. **Progress** — As the agent works, progress updates replace the message content (keeping the same message)
-3. **Completion** — The final message shows the task output, status, and action buttons
-
-This keeps threads clean and avoids message spam during long-running tasks.
+Leave `SLACK_RENDER_V2` unset or set it to `false` to use the default legacy per-task assignment/progress/completion renderer. Set `SLACK_RENDER_V2=true` to preview the new task tree and streamed outcome cards without changing the deployment.
 
 ### Rich Block Kit Messages
 
-All Slack responses use structured [Block Kit](https://api.slack.com/block-kit) layouts instead of plain text:
+The v2 tree is plain `mrkdwn`, which keeps every task ID clickable. Outcome and explicit agent messages use [Block Kit](https://api.slack.com/block-kit) only where it adds structure:
 
-- **Headers** with task status indicators
-- **Context blocks** showing agent name, task ID, and timestamps
-- **Section blocks** for progress and output text
-- **Action buttons** for follow-up and viewing task logs
+- **Context blocks** for the compact provenance footer
+- **Section blocks** for explicitly supplied agent content
 - Markdown is automatically converted to Slack's `mrkdwn` format
 
 ### Interactive Actions
 
-Task completion messages include interactive buttons:
+The default legacy renderer's task messages include interactive buttons when `SLACK_RENDER_V2` is unset or `false`:
 
 - **Follow-up** — Opens a modal to send a follow-up message to the same agent, creating a new task with dependency on the completed one
 - **View Full Logs** — Links to the task detail page in the dashboard
@@ -167,7 +155,7 @@ The bot supports Slack's [Assistant](https://api.slack.com/docs/apps/ai) sidebar
 
 ### Progress Updates
 
-Workers reply in Slack threads with progress updates using the `slack-reply` MCP tool. This keeps the conversation context in one place.
+The engine reflects progress by updating the thread tree. Agents can choose to send a distinct message with `slack-reply`, but routine start, progress, completion, and failure receipts are not posted automatically.
 
 ### Reading Messages
 

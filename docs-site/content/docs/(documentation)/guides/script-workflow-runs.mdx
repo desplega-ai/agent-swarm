@@ -320,7 +320,7 @@ The internal journal flow is:
 1. The launch endpoint creates a `script_runs` row with status `running`.
 2. The supervisor starts the harness subprocess and records `pid` plus `lastHeartbeatAt`.
 3. `ctx.step.*` checks `GET /api/internal/script-runs/{runId}/steps/{stepKey}` before executing.
-4. If a journal entry exists, the step returns the stored result.
+4. If a journal entry exists, the step replays it: a `completed` entry returns the stored result, a `failed` entry rethrows the stored error. A recorded failure must not replay as a success — otherwise a harness that died after journaling the failure but before reporting it would let the resumed run continue past a failed step and finish `completed`.
 5. If no journal entry exists, the step executes and writes through `POST /api/internal/script-runs/{runId}/steps`.
 6. When the subprocess exits, the supervisor marks the run `completed` or `failed`.
 
@@ -352,7 +352,49 @@ await ctx.step.swarmScript("normalize-records", {
 });
 ```
 
-`ctx.step.agentTask(label, config)` creates or waits for a swarm task as a durable step. The output of the task becomes the journaled result.
+`ctx.step.agentTask(label, config)` dispatches a swarm task and **blocks until it reaches a terminal status**, journaling its real output as the step result. This is the natural semantic for a durable step — a sequential `plan → review → implement` chain will not fan out or pass a placeholder downstream.
+
+Dispatch and wait are journal-separable: the server looks up an existing task by a `(runId, label)` context key before creating one, so if the harness process restarts mid-wait (crash, supervisor reconciliation, `SCRIPT_RUN_MAX_WALL_MS` eviction), replay resumes polling the same task instead of dispatching a duplicate. The step is only journaled once the task reaches a terminal status.
+
+Config options beyond the task-dispatch fields (`template`/`task`/`agentId`/`tags`/…):
+
+| Option | Default | Behavior |
+|---|---|---|
+| `waitForCompletion` | `true` | `false` reverts to the legacy fire-and-forget shape: a single dispatch call that journals `{taskId, status}` immediately (usually `status: "pending"`). |
+| `timeoutMs` | 2 hours | Max time to wait for a terminal status before throwing. Checked with ~30s granularity (each poll round-trip already long-polls server-side). Only applies when `waitForCompletion` is true. |
+| `failOnTaskFailure` | `true` | When the task ends `failed`/`cancelled`/`superseded`: `true` throws so the failure surfaces to the workflow author; `false` resolves with `{taskId, status: "failed", error}` instead. |
+
+```ts
+const review = await ctx.step.agentTask("implement-fix", {
+  task: "Implement the fix described in the plan output.",
+  timeoutMs: 4 * 60 * 60 * 1000, // this step commonly runs long — give it more room
+  failOnTaskFailure: false, // let the workflow decide how to handle a rejected/failed implementation
+});
+if (review.status === "failed") {
+  // review.taskId / review.error are available here
+}
+```
+
+`timeoutMs` is a per-step request; the *effective* deadline is always clamped to the run's own shared, absolute wall-clock cap (`SCRIPT_RUN_MAX_WALL_MS`, computed from the run's persisted start time — not per-process, not divided across concurrent steps). If the run-level cap arrives first, every step waiting at that moment times out together, the supervisor may kill the harness process, and — per the replay-safety guarantee above — resumed steps poll the same taskId on the next reconciliation rather than duplicating work.
+
+### Fan-out with Promise.all
+
+`ctx.step.agentTask` calls made inside `Promise.all` dispatch and wait **concurrently** — there is no shared mutex or serializing queue, so wall time is bounded by the slowest step, not the sum. Give each parallel step a label derived from its loop index (not a literal), same rule as any other loop:
+
+```ts
+export default async function main(args, ctx) {
+  const reviews = await Promise.all(
+    args.items.map((item, i) =>
+      ctx.step.agentTask(`review-${i}`, { task: `Review ${item.name}` }),
+    ),
+  );
+  return { reviews };
+}
+```
+
+This is durable and replay-safe exactly like the sequential case: each label gets its own `(runId, label)` context key, so a crash mid-fan-out resumes every still-pending label against its already-dispatched task, and results come back in the same order as `args.items`.
+
+If one step in a `Promise.all` throws (e.g. `failOnTaskFailure` on a sibling), the *other* in-flight steps are not silently discarded — the harness gives them a bounded grace period to finish their own journal write before it finalizes the run, so a task that was about to complete on the server is not orphaned by the sibling's failure. "In flight" covers the whole step lifecycle from the moment `ctx.step.*` is called, including a sibling still waiting on its very first journal lookup — not just one that has already dispatched.
 
 `ctx.step.humanInTheLoop()` exists in the type surface but is stubbed in Script Workflows v1.
 
@@ -364,7 +406,9 @@ The persisted run lifecycle is a small state machine, while each `ctx.step.*` ca
 flowchart TD
     queued["queued\nPOST /api/script-runs accepted"] --> running["running\nsupervisor owns subprocess"]
     running --> lookup["step label lookup\n(runId, label)"]
-    lookup -->|journal hit| replay["durable replay\nreturn stored result"]
+    lookup -->|journal hit: completed| replay["durable replay\nreturn stored result"]
+    lookup -->|journal hit: failed| replayFail["durable replay\nrethrow stored error"]
+    replayFail --> failed
     lookup -->|journal miss| execute["execute step\nswarm-script / raw-llm / agent-task"]
     execute --> write["write journal row\ncompleted or failed"]
     replay --> next["next source line"]
@@ -400,8 +444,9 @@ Every `ctx.step.*` call follows the same durable pattern:
 
 ```text
 look up journal row by (runId, label)
-if found: return stored result
-if missing: execute step, write result or error, return/throw
+if found and completed: return stored result
+if found and failed:    rethrow stored error
+if missing:             execute step, write result or error, return/throw
 ```
 
 In live QA, a run called `ctx.step.swarmScript("durable-double", ...)` twice with different source. The second call returned the first journaled result, and the run kept exactly one `durable-double` journal row. That behavior is intentional: label reuse means "this is the same logical step", not "run another step with the same name".

@@ -10,6 +10,8 @@ import {
   initDb,
 } from "../be/db";
 
+process.env.SLACK_RENDER_V2 = "false";
+
 const TEST_DB_PATH = "./test-slack-assistant.sqlite";
 
 let _leadAgent: ReturnType<typeof createAgent>;

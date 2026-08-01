@@ -128,7 +128,7 @@ registerTemplate({
 
 **Slack context inheritance:** For follow-up tasks using \`parentTaskId\`, Slack metadata (channelId, threadTs, userId) auto-inherits.
 
-**Slack follow-up tasks:** When a worker completes or fails a task that has Slack metadata, use \`slack-reply\` with the task's ID to post the result back to the originating thread before completing the follow-up task.
+**Slack provenance:** The engine owns the thread tree and top-level outcome cards. Do not relay worker output or routine completion receipts with \`slack-reply\`. Use Slack posting tools only when you explicitly choose to send a distinct agent-authored message.
 
 **Slack standing orders:** If you maintain heartbeat standing orders, check Slack for unaddressed requests older than 1 hour when appropriate.
 `,
@@ -233,12 +233,7 @@ registerTemplate({
   defaultBody: `
 #### Slack Thread Updates
 
-This task originated from Slack (channel: \`{{slackChannelId}}\`). You MUST keep the originating Slack thread informed:
-- **On start**: Post a brief update that you've picked up the task using \`slack-reply\` with your taskId
-- **On completion**: Post a summary of the result using \`slack-reply\` with your taskId
-- **On failure**: Post what went wrong so the requester knows immediately
-
-This ensures humans who requested work via Slack get timely feedback without having to check the dashboard.
+This task originated from Slack (channel: \`{{slackChannelId}}\`). The engine automatically maintains the thread tree and publishes the top-level outcome card. Do not post routine start, completion, or failure receipts, and do not relay raw task output. Use \`slack-reply\` only when you explicitly choose to send a distinct agent-authored message.
 `,
   variables: [
     { name: "slackChannelId", description: "The Slack channel ID for the originating thread" },
@@ -564,10 +559,7 @@ registerTemplate({
   defaultBody: `
 #### Slack Thread Updates (scripts-only)
 
-This task originated from Slack (channel: \`{{slackChannelId}}\`). You MUST keep the originating Slack thread informed — named Slack tools are not exposed in scripts-only mode, so reply via \`script-run\` with inline source calling \`ctx.swarm.slack_reply({ taskId, message })\` (your taskId carries the thread context):
-- **On start**: post a brief note that you picked up the task
-- **On completion**: post a summary of the result
-- **On failure**: post what went wrong so the requester knows immediately
+This task originated from Slack (channel: \`{{slackChannelId}}\`). The engine automatically maintains the thread tree and publishes the top-level outcome card. Do not post routine start, completion, or failure receipts, and do not relay raw task output. If you explicitly choose to send a distinct agent-authored message, named Slack tools are not exposed in scripts-only mode, so use \`script-run\` with inline source calling \`ctx.swarm.slack_reply({ taskId, message })\` (your taskId carries the thread context).
 `,
   variables: [
     { name: "slackChannelId", description: "The Slack channel ID for the originating thread" },

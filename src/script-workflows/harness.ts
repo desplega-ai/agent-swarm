@@ -50,6 +50,8 @@ const heartbeat = setInterval(() => {
 }, 10_000);
 heartbeat.unref?.();
 
+let drainInFlightSteps: ((graceMs?: number) => Promise<void>) | undefined;
+
 try {
   const source = await Bun.file(sourceFile).text();
   const args = JSON.parse(await Bun.file(argsFile).text());
@@ -58,14 +60,22 @@ try {
   if (typeof mod.default !== "function") {
     throw new Error("Script workflow must export a default function");
   }
-  const ctx = buildWorkflowCtx({ runId, agentId, apiKey, baseUrl, args });
-  const output = await mod.default(args, ctx);
+  const built = buildWorkflowCtx({ runId, agentId, apiKey, baseUrl, args });
+  drainInFlightSteps = built.drainInFlightSteps;
+  const output = await mod.default(args, built.ctx);
   await postStatus(runId, baseUrl, agentId, apiKey, {
     status: "completed",
     output: output ?? null,
   });
   process.exit(0);
 } catch (err) {
+  // A rejection here can happen while Promise.all siblings of the failing
+  // step are still in flight (Promise.all rejects as soon as ANY member
+  // does, without waiting for the rest). Give them a bounded chance to
+  // finish their own journal write before this process exits — otherwise
+  // their work is silently orphaned even though the underlying agent task
+  // may have already completed server-side.
+  await drainInFlightSteps?.().catch(() => {});
   console.error(err instanceof Error ? err.stack || err.message : String(err));
   await postStatus(runId, baseUrl, agentId, apiKey, {
     status: "failed",

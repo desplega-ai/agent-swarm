@@ -69,6 +69,18 @@ describe("swarm-config-guard: Configuration-page value validation", () => {
     expect(validateConfigValue("RBAC_AUDIT_RETENTION_DAYS", "30")).toBeNull();
   });
 
+  test("WORKER_API_READY_TIMEOUT_SECONDS requires a positive integer", () => {
+    expect(validateConfigValue("WORKER_API_READY_TIMEOUT_SECONDS", "90")).toBeNull();
+    expect(validateConfigValue("WORKER_API_READY_TIMEOUT_SECONDS", "1")).toBeNull();
+    expect(validateConfigValue("WORKER_API_READY_TIMEOUT_SECONDS", "0")).toContain("integer >= 1");
+    expect(validateConfigValue("WORKER_API_READY_TIMEOUT_SECONDS", "-30")).toContain(
+      "integer >= 1",
+    );
+    expect(validateConfigValue("WORKER_API_READY_TIMEOUT_SECONDS", "abc")).toContain(
+      "integer >= 1",
+    );
+  });
+
   test("HEARTBEAT_MAX_AUTO_ASSIGN allows 0 (assign nothing)", () => {
     expect(validateConfigValue("HEARTBEAT_MAX_AUTO_ASSIGN", "0")).toBeNull();
     expect(validateConfigValue("HEARTBEAT_MAX_AUTO_ASSIGN", "5")).toBeNull();

@@ -190,8 +190,8 @@ export interface SwarmSdk {
 
   // --- write: slack ---
   slack_post(args: { channelId: string; message: string; blocks?: unknown }): Promise<unknown>;
-  slack_reply(args: { channelId?: string; threadTs?: string; message: string; taskId?: string }): Promise<unknown>;
-  slack_startThread(args: { channelId: string; message: string }): Promise<unknown>;
+  slack_reply(args: { channelId?: string; threadTs?: string; message: string; taskId?: string; blocks?: unknown }): Promise<unknown>;
+  slack_startThread(args: { channelId: string; message: string; blocks?: unknown }): Promise<unknown>;
   slack_uploadFile(args: Record<string, unknown>): Promise<unknown>;
   slack_downloadFile(args: { url: string }): Promise<unknown>;
   slack_delete(args: { channelId: string; messageTs: string }): Promise<unknown>;
@@ -312,6 +312,12 @@ export interface ScriptWorkflowSteps {
       parentTaskId?: string;
       requestedByUserId?: string;
       outputSchema?: Record<string, unknown>;
+      /** Wait for the dispatched task to reach a terminal status before resolving. Default: true. */
+      waitForCompletion?: boolean;
+      /** Max ms to wait for a terminal status before throwing. Default: 2h. Only used when waitForCompletion is true. */
+      timeoutMs?: number;
+      /** Throw when the task ends failed/cancelled/superseded (default), or resolve with {taskId,status,error} when false. */
+      failOnTaskFailure?: boolean;
     },
   ): Promise<unknown>;
   swarmScript(

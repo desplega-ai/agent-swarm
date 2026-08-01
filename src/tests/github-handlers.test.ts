@@ -14,7 +14,7 @@
  *   - No `enrichUserFromIntegration('github', ...)` helper is invoked (no
  *     module-level email-fetch path exists at all).
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, createUser, deleteKv, getDb, getKv, initDb } from "../be/db";
 import { linkIdentity } from "../be/users";
@@ -31,6 +31,19 @@ import type {
   PullRequestEvent,
   PullRequestReviewEvent,
 } from "../github/types";
+
+mock.module("../github/app", () => ({
+  getInstallationToken: async (installationId: number) => {
+    if (installationId > 0) return "mock-token-for-tests";
+    return null;
+  },
+  isReactionsEnabled: () => false,
+  initGitHub: () => true,
+  resetGitHub: () => {},
+  getWebhookSecret: () => null,
+  isGitHubEnabled: () => true,
+  verifyWebhookSignature: async () => false,
+}));
 
 const TEST_DB_PATH = "./test-github-handlers.sqlite";
 const UNMAPPED_NAMESPACE = "integration:unmapped:github";
@@ -119,13 +132,21 @@ function makeCommentEvent(senderLogin: string, body: string): CommentEvent {
   };
 }
 
-function makeReviewEvent(senderLogin: string, reviewId = 1): PullRequestReviewEvent {
+function makeReviewEvent(
+  senderLogin: string,
+  reviewId = 1,
+  options: {
+    body?: string | null;
+    state?: PullRequestReviewEvent["review"]["state"];
+    installationId?: number;
+  } = {},
+): PullRequestReviewEvent {
   return {
     action: "submitted",
     review: {
       id: reviewId,
-      body: "Looks good",
-      state: "approved",
+      body: options.body === undefined ? "Looks good" : options.body,
+      state: options.state ?? "approved",
       html_url: "https://github.com/test/repo/pull/99#pullrequestreview-1",
       user: { login: senderLogin },
       submitted_at: "2026-01-01T00:00:00Z",
@@ -141,6 +162,9 @@ function makeReviewEvent(senderLogin: string, reviewId = 1): PullRequestReviewEv
     },
     repository: BASE_REPO,
     sender: { login: senderLogin },
+    ...(options.installationId !== undefined
+      ? { installation: { id: options.installationId } }
+      : {}),
   };
 }
 
@@ -233,6 +257,61 @@ describe("known github sender", () => {
 
     const text = getLatestTaskText();
     expect(text).toContain("Pair Reviewer (github:pair-reviewer)");
+  });
+});
+
+describe("self-authored review suppression", () => {
+  test("empty commented review from the bot is ignored when inline comments are unverifiable", async () => {
+    const result = await handlePullRequestReview(
+      makeReviewEvent(GITHUB_BOT_NAME, 2001, { body: null, state: "commented" }),
+    );
+
+    expect(result.created).toBe(false);
+    expect(
+      getDb().prepare<{ n: number }, never>("SELECT COUNT(*) AS n FROM agent_tasks").get()?.n,
+    ).toBe(0);
+    expect(getKv(UNMAPPED_NAMESPACE, `${GITHUB_BOT_NAME}:meta`)).toBeNull();
+  });
+
+  test("commented review from the bot is ignored before inline comments are fetched", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify([
+            {
+              id: 3001,
+              path: "src/github/handlers.ts",
+              line: 1,
+              body: "Bot-authored inline reply",
+              html_url: "https://github.com/test/repo/pull/99#discussion_r3001",
+              diff_hunk: "@@ -1,1 +1,1 @@",
+            },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+
+    try {
+      const result = await handlePullRequestReview(
+        makeReviewEvent(GITHUB_BOT_NAME, 2002, {
+          body: null,
+          state: "commented",
+          installationId: 123,
+        }),
+      );
+      expect(result.created).toBe(false);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  test("degraded empty review from a non-bot reviewer still creates a task", async () => {
+    const result = await handlePullRequestReview(
+      makeReviewEvent("third-party-reviewer", 2003, { body: null, state: "commented" }),
+    );
+
+    expect(result.created).toBe(true);
   });
 });
 

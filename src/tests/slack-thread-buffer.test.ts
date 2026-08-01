@@ -16,6 +16,8 @@ import {
   isThreadBuffered,
 } from "../slack/thread-buffer";
 
+process.env.SLACK_RENDER_V2 = "false";
+
 const SYSTEM_ACTOR: IdentityActor = { kind: "system", id: "test" };
 
 const TEST_DB_PATH = "./test-slack-thread-buffer.sqlite";
