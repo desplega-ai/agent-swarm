@@ -1789,7 +1789,8 @@ export function getSlackTreeMessages(): SlackMessageRecord[] {
          OR EXISTS (
            SELECT 1 FROM slack_messages outcome
            WHERE outcome.kind = 'outcome'
-           AND outcome.context_key = tree.context_key
+           AND outcome.channel_id = tree.channel_id
+           AND outcome.thread_ts = tree.thread_ts
            AND (
              outcome.finalized_at IS NULL
              OR outcome.updated_at > tree.updated_at

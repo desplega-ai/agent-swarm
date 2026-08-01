@@ -18,7 +18,7 @@ import type { AgentTask, TaskAttachment } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { getSlackApp } from "./app";
-import { getTaskLink, markdownToSlack } from "./blocks";
+import { getTaskLink, MAX_SECTION_LENGTH, markdownToSlack } from "./blocks";
 
 const TREE_UPDATE_DEBOUNCE_MS = 500;
 const TREE_UPDATE_MIN_INTERVAL_MS = 3_000;
@@ -36,7 +36,7 @@ let cachedTeamId: string | undefined;
 type SlackApiResult = Record<string, unknown> & { ok?: boolean; ts?: string; permalink?: string };
 
 export function isSlackRenderV2Enabled(): boolean {
-  return isEnvFlagEnabled("SLACK_RENDER_V2", true);
+  return isEnvFlagEnabled("SLACK_RENDER_V2", false);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -207,7 +207,32 @@ export function renderThreadTree(
       ),
     );
   });
-  return lines.join("\n");
+  const text = lines.join("\n");
+  if (text.length <= MAX_SECTION_LENGTH) return text;
+
+  const header = lines[0]!;
+  const recentLines: string[] = [];
+  for (let index = tasks.length - 1; index >= 0; index--) {
+    const task = tasks[index]!;
+    const recentLine = renderNodeLines(
+      { task, children: [] },
+      "",
+      true,
+      now,
+      outcomeLinks,
+      task.source === "slack",
+    )[0]!;
+    const candidateLines = [recentLine, ...recentLines];
+    const omitted = index;
+    const marker = `… _${omitted} older task${omitted === 1 ? "" : "s"} collapsed_`;
+    const candidate = [header, ...(omitted > 0 ? [marker] : []), ...candidateLines].join("\n");
+    if (candidate.length > MAX_SECTION_LENGTH) break;
+    recentLines.unshift(recentLine);
+  }
+
+  const omitted = tasks.length - recentLines.length;
+  const marker = `… _${omitted} older task${omitted === 1 ? "" : "s"} collapsed_`;
+  return [header, ...(omitted > 0 ? [marker] : []), ...recentLines].join("\n");
 }
 
 function treeBlocks(text: string): unknown[] {

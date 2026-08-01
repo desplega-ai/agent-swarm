@@ -11,6 +11,7 @@ import {
   initDb,
   startTask,
 } from "../be/db";
+import { MAX_SECTION_LENGTH } from "../slack/blocks";
 import {
   _resetSlackRenderV2ForTests,
   callSlackWithRetry,
@@ -97,12 +98,12 @@ afterAll(async () => {
 });
 
 describe("Slack renderer v2", () => {
-  test("defaults on and accepts an explicit off switch", () => {
+  test("defaults off and accepts an explicit opt-in", () => {
     const previous = process.env.SLACK_RENDER_V2;
     delete process.env.SLACK_RENDER_V2;
-    expect(isSlackRenderV2Enabled()).toBe(true);
-    process.env.SLACK_RENDER_V2 = "false";
     expect(isSlackRenderV2Enabled()).toBe(false);
+    process.env.SLACK_RENDER_V2 = "true";
+    expect(isSlackRenderV2Enabled()).toBe(true);
     if (previous === undefined) delete process.env.SLACK_RENDER_V2;
     else process.env.SLACK_RENDER_V2 = previous;
   });
@@ -231,6 +232,35 @@ describe("Slack renderer v2", () => {
     expect(text).toContain("│     └─ ⏳ Researcher");
     expect(text).toContain("└─ ⏳ this PR");
     expect(text).not.toContain("```");
+  });
+
+  test("collapses older tasks before a persistent tree exceeds Slack's section limit", async () => {
+    const lead = createAgent({ name: "Overflow Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_TREE_OVERFLOW");
+    const tasks = Array.from({ length: 80 }, (_, index) =>
+      createTaskExtended(`overflow task ${index} ${"x".repeat(60)}`, {
+        agentId: lead.id,
+        source: "slack",
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
+        contextKey: slackContextKey({ channelId, threadTs }),
+      }),
+    );
+
+    await ensureSlackThreadTree([tasks.at(-1)!.id]);
+
+    const posted = calls.find(
+      (call) => call.method === "chat.postMessage" && call.payload.channel === channelId,
+    )!;
+    const text = posted.payload.text as string;
+    const blocks = posted.payload.blocks as Array<{ text: { text: string } }>;
+    expect(text.length).toBeLessThanOrEqual(MAX_SECTION_LENGTH);
+    expect(blocks[0]?.text.text).toBe(text);
+    expect(text).toContain("older tasks collapsed");
+    expect(text).toContain(tasks.at(-1)!.id.slice(0, 8));
+    expect(text).not.toContain(tasks[1]!.id.slice(0, 8));
+
+    for (const task of tasks) failTask(task.id, "test cleanup");
   });
 
   test("reuses one persisted tree and streams one immutable outcome before linking it", async () => {
@@ -366,18 +396,29 @@ describe("Slack renderer v2", () => {
     expect(update?.payload.text).toContain("└─ ❌ failing ask");
   });
 
-  test("resumes an unfinished persisted outcome stream without starting a duplicate", async () => {
+  test("resumes an unfinished outcome by physical thread across context keys", async () => {
     const lead = createAgent({ name: "Recovery Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_RECOVERY");
+    const firstAsk = createTaskExtended("establish the physical thread tree", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: `custom:first:${channelId}`,
+    });
+    startTask(firstAsk.id);
+    const tree = await ensureSlackThreadTree([firstAsk.id]);
+    failTask(firstAsk.id, "test setup");
+
     const ask = createTaskExtended("recover streamed outcome", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
-      contextKey: slackContextKey({ channelId, threadTs }),
+      contextKey: `custom:later:${channelId}`,
     });
     startTask(ask.id);
-    await ensureSlackThreadTree([ask.id]);
+    expect((await ensureSlackThreadTree([ask.id]))?.id).toBe(tree?.id);
     completeTask(ask.id, "Recovered the outcome stream after a temporary interruption.");
     calls.length = 0;
     _resetSlackRenderV2ForTests();
@@ -386,6 +427,9 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const interrupted = getSlackOutcomeMessage(ask.id);
+    expect(interrupted?.contextKey).not.toBe(tree?.contextKey);
+    expect(interrupted?.channelId).toBe(tree?.channelId);
+    expect(interrupted?.threadTs).toBe(tree?.threadTs);
     expect(interrupted?.finalizedAt).toBeUndefined();
     expect(interrupted?.streamChunksAppended).toBe(1);
     expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(1);

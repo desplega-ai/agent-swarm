@@ -310,9 +310,9 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "SLACK_RENDER_V2",
         label: "Slack thread renderer v2",
         description:
-          "Use one editable task tree per thread and immutable streamed outcome cards. Turn off to restore the legacy per-task message renderer.",
+          "Opt in to preview one editable task tree per thread and immutable streamed outcome cards. Leave off to use the legacy per-task message renderer.",
         kind: "boolean",
-        defaultValue: "true",
+        defaultValue: "false",
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {

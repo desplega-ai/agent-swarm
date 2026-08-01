@@ -102,7 +102,7 @@ When enabled via `ADDITIVE_SLACK=true`, thread replies that do NOT @mention the 
 
 ### Tree-Based Status Messages
 
-With `SLACK_RENDER_V2=true` (the default), each Slack thread owns exactly one engine message: a task tree that is updated in place with `chat.update`. Later asks append to the same tree, delegated tasks stay nested under their parent, and task IDs remain clickable:
+The legacy per-task renderer remains the default. Set `SLACK_RENDER_V2=true` to opt in to the v2 preview, where each Slack thread owns exactly one engine message: a task tree that is updated in place with `chat.update`. Later asks append to the same tree, delegated tasks stay nested under their parent, and task IDs remain clickable:
 
 ```
 🧵 Thread title · 44m
@@ -122,9 +122,9 @@ Raw worker output is not automatically relayed into Slack. Additional messages o
 
 Tree, outcome, and explicit agent message timestamps are persisted in `slack_messages`, so the renderer can reuse and cross-link messages after a restart.
 
-### Roll Back the Renderer
+### Opt In to the Renderer
 
-Set `SLACK_RENDER_V2=false` to restore the legacy per-task assignment/progress/completion renderer without reverting the deployment.
+Leave `SLACK_RENDER_V2` unset or set it to `false` to use the default legacy per-task assignment/progress/completion renderer. Set `SLACK_RENDER_V2=true` to preview the new task tree and streamed outcome cards without changing the deployment.
 
 ### Rich Block Kit Messages
 
@@ -136,7 +136,7 @@ The v2 tree is plain `mrkdwn`, which keeps every task ID clickable. Outcome and 
 
 ### Interactive Actions
 
-The legacy renderer's task messages include interactive buttons when `SLACK_RENDER_V2=false`:
+The default legacy renderer's task messages include interactive buttons when `SLACK_RENDER_V2` is unset or `false`:
 
 - **Follow-up** — Opens a modal to send a follow-up message to the same agent, creating a new task with dependency on the completed one
 - **View Full Logs** — Links to the task detail page in the dashboard
