@@ -37,7 +37,23 @@ if [[ -z "${AGENT_SWARM_TEST_DB_TEMPLATE:-}" ]]; then
   export AGENT_SWARM_TEST_DB_TEMPLATE="$test_db_template"
 fi
 
-parallelism="${BUN_TEST_PARALLELISM:-4}"
+parallelism="${BUN_TEST_PARALLELISM:-}"
+if [[ -z "$parallelism" ]]; then
+  host_cpus="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+  if [[ ! "$host_cpus" =~ ^[1-9][0-9]*$ ]]; then
+    host_cpus=2
+  fi
+
+  # Bun test processes also spawn servers, subprocesses, and SQLite workers.
+  # Leave half the host CPUs for that work, while capping larger hosts at the
+  # four-way split that gives the best local full-suite runtime.
+  parallelism=$((host_cpus / 2))
+  if [[ "$parallelism" -lt 1 ]]; then
+    parallelism=1
+  elif [[ "$parallelism" -gt 4 ]]; then
+    parallelism=4
+  fi
+fi
 if [[ ! "$parallelism" =~ ^[1-9][0-9]*$ ]]; then
   echo "BUN_TEST_PARALLELISM must be a positive integer, got: $parallelism" >&2
   exit 2
