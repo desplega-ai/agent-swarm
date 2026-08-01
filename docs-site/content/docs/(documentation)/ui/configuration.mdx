@@ -26,7 +26,7 @@ Each row shows a source chip when the underlying environment variable is set on 
 | Steering | `STEERING_ENABLED`, `SLACK_THREAD_STEERING`, `SLACK_THREAD_STEERING_MODE` |
 | Memory | `MEMORY_HYBRID_SEARCH`, `MEMORY_GRAPH_EXPANSION`, `MEMORY_RATERS`, `EMBEDDING_MODEL` |
 | Heartbeat & crash recovery | `HEARTBEAT_INTERVAL_MS`, `HEARTBEAT_STALL_THRESHOLD_MIN`, `HEARTBEAT_PIN_CRASH_RESUME` |
-| Harness & tools | `SCRIPTS_ONLY_MCP`, `CAPABILITIES` |
+| Harness & tools | `SCRIPTS_ONLY_MCP`, `CAPABILITIES`, `WORKER_API_READY_TIMEOUT_SECONDS` |
 | Integrations | `SLACK_DISABLE`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL` |
 | Security & access | `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS` |
 | Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS` |
@@ -51,6 +51,12 @@ Every row shows its default, and rows with a stored value offer a **Reset** acti
 
 <Callout type="info" title="Credentials live elsewhere">
   This page intentionally excludes secrets. Integration credentials (Slack tokens, GitHub app keys, OAuth secrets) are managed on the [Integrations](/docs/guides/slack-integration) pages, and swarm-wide secret values on the Secrets page — see the [secrets encryption guide](/docs/guides/secrets-encryption).
+</Callout>
+
+<Callout type="warn" title="WORKER_API_READY_TIMEOUT_SECONDS is bootstrap-only">
+  Every worker and lead container's `docker-entrypoint.sh` polls the control-plane API's public `GET /health` endpoint before doing anything else that depends on it (fetching config, syncing skills, restoring services). If the API never becomes reachable within `WORKER_API_READY_TIMEOUT_SECONDS` (a positive integer, default `90`), the container logs a stable `[entrypoint] FATAL: API readiness timed out after Ns waiting for <url>; exiting.` line and exits non-zero rather than starting half-provisioned.
+
+  This check runs **before** the container can reach the API at all, so it can only ever read the value from its own process environment — a row saved here documents and validates the setting (and is what the **Restart required** badge refers to), but it cannot reach an already-waiting container. Set it as a real deployment environment variable on the worker/lead container, not just in the dashboard.
 </Callout>
 
 ## Access control

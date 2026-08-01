@@ -19,6 +19,61 @@ set -e
 # Validate required environment variables based on provider
 HARNESS_PROVIDER="${HARNESS_PROVIDER:-claude}"
 
+# Role defaults to worker, can be set to "lead". Resolved here (rather than
+# later in the file) because the API-readiness gate below needs MCP_URL
+# before any provider-specific block reads the control-plane API.
+ROLE="${AGENT_ROLE:-worker}"
+MCP_URL="${MCP_BASE_URL:-http://host.docker.internal:3013}"
+
+if [ -z "$API_KEY" ]; then
+    echo "Error: API_KEY environment variable is required"
+    exit 1
+fi
+
+# ─── API readiness gate ──────────────────────────────────────────────────────
+# The control-plane API must be reachable before ANY provider-specific setup
+# reads it — the claude-managed / codex OAuth restore blocks immediately
+# below both fetch swarm_config over HTTP. A worker that can't reach the API
+# can't poll tasks either, so a half-provisioned worker that limps into
+# credential-wait with no config is worse than a container that exits
+# cleanly. Bounded so a dead API never blocks boot forever. Timeout is
+# operator-tunable via WORKER_API_READY_TIMEOUT_SECONDS — see
+# apps/ui/src/lib/configuration-catalog.ts.
+# BEGIN wait_for_api_ready (extracted verbatim by src/tests/entrypoint-api-readiness.test.ts — keep markers stable)
+wait_for_api_ready() {
+    local base_url="$1"
+    local url="${base_url%/}/health"
+    local timeout_raw="${WORKER_API_READY_TIMEOUT_SECONDS:-90}"
+
+    case "$timeout_raw" in
+        ''|*[!0-9]*)
+            echo "[entrypoint] FATAL: WORKER_API_READY_TIMEOUT_SECONDS must be a positive integer, got '${timeout_raw}'; exiting."
+            exit 1
+            ;;
+    esac
+    if [ "$timeout_raw" -le 0 ]; then
+        echo "[entrypoint] FATAL: WORKER_API_READY_TIMEOUT_SECONDS must be a positive integer, got '${timeout_raw}'; exiting."
+        exit 1
+    fi
+
+    local deadline=$(( $(date +%s) + timeout_raw ))
+    echo "[entrypoint] Waiting for API readiness at ${url} (timeout ${timeout_raw}s)..."
+    while true; do
+        if curl -sf --connect-timeout 2 --max-time 3 -o /dev/null "$url"; then
+            echo "[entrypoint] API ready at ${url}"
+            return 0
+        fi
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "[entrypoint] FATAL: API readiness timed out after ${timeout_raw}s waiting for ${url}; exiting."
+            exit 1
+        fi
+        sleep 1
+    done
+}
+# END wait_for_api_ready
+
+wait_for_api_ready "$MCP_URL"
+
 if [ "$HARNESS_PROVIDER" = "pi" ]; then
     # Pi-mono auth: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or auth.json must
     # exist — UNLESS MODEL_OVERRIDE selects amazon-bedrock, in which case
@@ -188,11 +243,6 @@ else
     fi
 fi
 
-if [ -z "$API_KEY" ]; then
-    echo "Error: API_KEY environment variable is required"
-    exit 1
-fi
-
 # ---- Verify provider binary is reachable ----
 if [ "$HARNESS_PROVIDER" = "codex" ]; then
     CODEX_BIN="${CODEX_BINARY:-codex}"
@@ -249,9 +299,8 @@ mkdir -p /workspace/personal/memory 2>/dev/null || true
 chown worker:worker /workspace/personal 2>/dev/null || true
 chown worker:worker /workspace/personal/memory 2>/dev/null || true
 
-# Role defaults to worker, can be set to "lead"
-ROLE="${AGENT_ROLE:-worker}"
-MCP_URL="${MCP_BASE_URL:-http://host.docker.internal:3013}"
+# ROLE and MCP_URL are resolved earlier (see the API readiness gate above),
+# before any provider-specific block can read the control-plane API.
 
 # Get version from compiled binary (extract just the version number)
 VERSION=$(/usr/local/bin/agent-swarm version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")

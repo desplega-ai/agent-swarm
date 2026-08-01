@@ -167,6 +167,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       "WORKFLOW_MAX_STEPS_PER_RUN",
       "SCHEDULER_INTERVAL_MS",
       "SCRIPT_RUN_CONCURRENCY_CAP",
+      "WORKER_API_READY_TIMEOUT_SECONDS",
     ],
     1,
   ),
