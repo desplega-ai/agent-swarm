@@ -312,6 +312,12 @@ export interface ScriptWorkflowSteps {
       parentTaskId?: string;
       requestedByUserId?: string;
       outputSchema?: Record<string, unknown>;
+      /** Wait for the dispatched task to reach a terminal status before resolving. Default: true. */
+      waitForCompletion?: boolean;
+      /** Max ms to wait for a terminal status before throwing. Default: 2h. Only used when waitForCompletion is true. */
+      timeoutMs?: number;
+      /** Throw when the task ends failed/cancelled/superseded (default), or resolve with {taskId,status,error} when false. */
+      failOnTaskFailure?: boolean;
     },
   ): Promise<unknown>;
   swarmScript(

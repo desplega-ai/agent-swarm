@@ -2,7 +2,15 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
-import { closeDb, createAgent, getDb, initDb, updateScriptRun } from "../be/db";
+import {
+  closeDb,
+  completeTask,
+  createAgent,
+  getDb,
+  getLatestTaskByContextKey,
+  initDb,
+  updateScriptRun,
+} from "../be/db";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -213,7 +221,43 @@ describe("/api/script-runs HTTP", () => {
     expect(await replayed.json()).toEqual({
       stepKey: "summarize",
       stepType: "raw-llm",
+      status: "completed",
       result: { text: "hi" },
+    });
+  });
+
+  test("exposes journal status and error so a failed step can be replayed as a failure", async () => {
+    const created = await dispatch("/api/script-runs", {
+      method: "POST",
+      agentId,
+      body: createBody(),
+    });
+    const { id } = (await created.json()) as { id: string };
+
+    const recorded = await dispatch(`/api/internal/script-runs/${id}/steps`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({
+        stepKey: "implement",
+        stepType: "agent-task",
+        config: { task: "do it" },
+        status: "failed",
+        error: "agent-task implement failed: Agent task failed (taskId task-9)",
+      }),
+    });
+    expect(recorded.status).toBe(201);
+
+    const replayed = await dispatch(`/api/internal/script-runs/${id}/steps/implement`, {
+      agentId,
+    });
+    expect(replayed.status).toBe(200);
+    // Without these two fields the harness replays a failed step as a
+    // successful `undefined` and the workflow completes past a failed child.
+    expect(await replayed.json()).toEqual({
+      stepKey: "implement",
+      stepType: "agent-task",
+      status: "failed",
+      error: "agent-task implement failed: Agent task failed (taskId task-9)",
     });
   });
 
@@ -254,6 +298,92 @@ describe("/api/script-runs HTTP", () => {
     const body = (await detail.json()) as { run: { status: string; error?: string } };
     expect(body.run.status).toBe("aborted_limit");
     expect(body.run.error).toContain("SCRIPT_RUN_MAX_STEPS");
+  });
+
+  test("SCRIPT_RUN_MAX_AGENT_TASKS is enforced across concurrent dispatches, not just sequential ones", async () => {
+    // Simulates N ctx.step.agentTask calls journaling near-simultaneously
+    // via Promise.all inside a workflow. The cap check re-reads the DB
+    // count synchronously right after each write (no await in between), so
+    // concurrent journal writes for the same run don't under-count each
+    // other even though their HTTP request parsing interleaves.
+    process.env.SCRIPT_RUN_MAX_AGENT_TASKS = "3";
+    const created = await dispatch("/api/script-runs", {
+      method: "POST",
+      agentId,
+      body: createBody(),
+    });
+    const { id } = (await created.json()) as { id: string };
+
+    const responses = await Promise.all(
+      ["t1", "t2", "t3", "t4", "t5"].map((stepKey) =>
+        dispatch(`/api/internal/script-runs/${id}/steps`, {
+          method: "POST",
+          agentId,
+          body: JSON.stringify({
+            stepKey,
+            stepType: "agent-task",
+            status: "completed",
+            result: { taskId: stepKey },
+          }),
+        }),
+      ),
+    );
+
+    const okCount = responses.filter((r) => r.status === 201).length;
+    const limitedCount = responses.filter((r) => r.status === 429).length;
+    expect(okCount).toBe(3);
+    expect(limitedCount).toBe(2);
+
+    const detail = await dispatch(`/api/script-runs/${id}`, { agentId });
+    const body = (await detail.json()) as { run: { status: string; error?: string } };
+    expect(body.run.status).toBe("aborted_limit");
+    expect(body.run.error).toContain("SCRIPT_RUN_MAX_AGENT_TASKS");
+  });
+
+  test("agent-task dispatch is idempotent by (runId, stepKey) — the replay-safety guarantee ctx.step.agentTask relies on", async () => {
+    const created = await dispatch("/api/script-runs", {
+      method: "POST",
+      agentId,
+      body: createBody(),
+    });
+    const { id: runId } = (await created.json()) as { id: string };
+
+    // Kick off the first call without awaiting yet — the endpoint's poll loop
+    // blocks until the task is terminal or 30s elapses, so complete the task
+    // out-of-band (as a real worker would) while it's in flight.
+    const firstCallPromise = dispatch(`/api/internal/script-runs/${runId}/agent-task`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({ stepKey: "implement", task: "do the thing" }),
+    });
+
+    await Bun.sleep(50);
+    const contextKey = `script-run:${runId}:implement`;
+    const dispatched = getLatestTaskByContextKey(contextKey);
+    expect(dispatched).not.toBeNull();
+    completeTask((dispatched as { id: string }).id, JSON.stringify({ done: true }));
+
+    const first = await firstCallPromise;
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as { taskId: string; taskOutput: unknown };
+    expect(firstBody.taskId).toBe((dispatched as { id: string }).id);
+
+    // Replay: same stepKey again (what ctx.step.agentTask's poll loop does,
+    // and what a resumed harness process does after a crash mid-wait). Must
+    // resolve the SAME task, never create a second one.
+    const second = await dispatch(`/api/internal/script-runs/${runId}/agent-task`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({ stepKey: "implement", task: "do the thing" }),
+    });
+    expect(second.status).toBe(200);
+    const secondBody = (await second.json()) as { taskId: string };
+    expect(secondBody.taskId).toBe((dispatched as { id: string }).id);
+
+    const count = getDb()
+      .query("SELECT COUNT(*) as c FROM agent_tasks WHERE contextKey = ?")
+      .get(contextKey) as { c: number };
+    expect(count.c).toBe(1);
   });
 
   test("cancel leaves terminal script runs unchanged", async () => {

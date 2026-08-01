@@ -288,6 +288,17 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "string",
         placeholder: "core,tasks,scripts,memory,workflows",
       },
+      {
+        key: "WORKER_API_READY_TIMEOUT_SECONDS",
+        label: "API readiness timeout (s)",
+        description:
+          "How long docker-entrypoint.sh waits for the control-plane API's /health endpoint before exiting the worker/lead container non-zero. This is a bootstrap-only setting read from the container's environment before the API is reachable — saving a value here documents and validates the intended deployment env var, it cannot affect a container that is already waiting.",
+        kind: "number",
+        defaultValue: "90",
+        placeholder: "90",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration`,
+      },
     ],
   },
   {

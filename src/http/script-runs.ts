@@ -427,7 +427,16 @@ export async function handleScriptRuns(
       jsonError(res, "Script run journal step not found", 404);
       return true;
     }
-    json(res, { stepKey: step.stepKey, stepType: step.stepType, result: step.result });
+    // `status` + `error` are part of the replay contract, not diagnostics: the
+    // harness rethrows a recorded failure instead of replaying it as a
+    // successful `undefined` (see durableStep in script-workflows/workflow-ctx).
+    json(res, {
+      stepKey: step.stepKey,
+      stepType: step.stepType,
+      status: step.status,
+      result: step.result,
+      error: step.error,
+    });
     return true;
   }
 

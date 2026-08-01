@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ScriptRun } from "../types";
+import { scriptRunMaxWallMs } from "./limits";
 
 export type ScriptExecutionResult = {
   exitCode: number | null;
@@ -71,6 +72,14 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
         SCRIPT_RUN_TMPDIR: tmpdir,
         SCRIPT_RUN_SOURCE_FILE: sourceFile,
         SCRIPT_RUN_ARGS_FILE: argsFile,
+        // Durable, restart-surviving reference for a shared absolute
+        // ctx.step.agentTask wait deadline — see workflow-ctx.ts. Sourced
+        // from the persisted run row (not Date.now() at spawn time) so a
+        // supervisor-restarted process computes the SAME deadline as the
+        // original one, and from the server's own limits.ts (not raw env
+        // passthrough) so the subprocess never re-interprets the env var.
+        SCRIPT_RUN_STARTED_AT: run.startedAt,
+        SCRIPT_RUN_MAX_WALL_MS: String(scriptRunMaxWallMs()),
       },
     });
 

@@ -31,6 +31,18 @@ describe("lintWorkflowLabels", () => {
     expect(result).toEqual({ ok: true });
   });
 
+  test("allows the Promise.all fan-out idiom — derived labels inside .map() are not literal", () => {
+    const result = lintWorkflowLabels(`
+      export default async function main(args, ctx) {
+        return Promise.all(
+          args.items.map((item, i) => ctx.step.agentTask(\`phase-\${i}\`, { task: item.task }))
+        );
+      }
+    `);
+
+    expect(result).toEqual({ ok: true });
+  });
+
   test("allows literal step labels outside loops", () => {
     const result = lintWorkflowLabels(`
       export default async function main(_args, ctx) {
