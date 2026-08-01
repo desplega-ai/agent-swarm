@@ -5,7 +5,6 @@ set -o pipefail
 test_log="$(mktemp "${RUNNER_TEMP:-/tmp}/bun-test.log.XXXXXX")"
 test_db_template=""
 template_log=""
-shard_logs=()
 cleanup() {
   rm -f "$test_log"
   if [[ -n "$test_db_template" ]]; then
@@ -14,9 +13,6 @@ cleanup() {
   if [[ -n "$template_log" ]]; then
     rm -f "$template_log"
   fi
-  for shard_log in "${shard_logs[@]}"; do
-    rm -f "$shard_log"
-  done
 }
 trap cleanup EXIT
 
@@ -37,55 +33,9 @@ if [[ -z "${AGENT_SWARM_TEST_DB_TEMPLATE:-}" ]]; then
   export AGENT_SWARM_TEST_DB_TEMPLATE="$test_db_template"
 fi
 
-parallelism="${BUN_TEST_PARALLELISM:-}"
-if [[ -z "$parallelism" ]]; then
-  host_cpus="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
-  if [[ ! "$host_cpus" =~ ^[1-9][0-9]*$ ]]; then
-    host_cpus=2
-  fi
-
-  # Bun test processes also spawn servers, subprocesses, and SQLite workers.
-  # Four-core hosts cannot sustain two full-suite processes without starving
-  # server fixtures, while larger development hosts benefit from local sharding.
-  if [[ "$host_cpus" -le 4 ]]; then
-    parallelism=1
-  elif [[ "$host_cpus" -le 7 ]]; then
-    parallelism=2
-  else
-    parallelism=4
-  fi
-fi
-if [[ ! "$parallelism" =~ ^[1-9][0-9]*$ ]]; then
-  echo "BUN_TEST_PARALLELISM must be a positive integer, got: $parallelism" >&2
-  exit 2
-fi
-
 set +e
-if [[ "$#" -gt 0 || "$parallelism" -eq 1 ]]; then
-  bun test "$@" 2>&1 | tee "$test_log"
-  test_status="${PIPESTATUS[0]}"
-else
-  shard_pids=()
-  for ((shard_index = 1; shard_index <= parallelism; shard_index++)); do
-    shard_log="$(mktemp "${RUNNER_TEMP:-/tmp}/bun-test-shard.log.XXXXXX")"
-    shard_logs+=("$shard_log")
-    bun test --shard="$shard_index/$parallelism" 2>&1 | tee "$shard_log" &
-    shard_pids+=("$!")
-  done
-
-  test_status=0
-  for shard_pid in "${shard_pids[@]}"; do
-    wait "$shard_pid"
-    shard_status="$?"
-    if [[ "$test_status" -eq 0 && "$shard_status" -ne 0 ]]; then
-      test_status="$shard_status"
-    fi
-  done
-
-  for shard_log in "${shard_logs[@]}"; do
-    cat "$shard_log" >>"$test_log"
-  done
-fi
+bun test "$@" 2>&1 | tee "$test_log"
+test_status="${PIPESTATUS[0]}"
 set -e
 
 if [[ "$test_status" -ne 0 ]]; then

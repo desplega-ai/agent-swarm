@@ -169,7 +169,7 @@ exit 0
     );
   });
 
-  test("allows the worker count to be tuned for the host", async () => {
+  test("runs one Bun process when no shard is passed", async () => {
     fixtureDir = await mkdtemp(join(tmpdir(), "bun-test-wrapper-"));
     const fakeBinDir = join(fixtureDir, "bin");
     const fakeBun = join(fakeBinDir, "bun");
@@ -191,71 +191,75 @@ exit 0
         ...process.env,
         PATH: `${fakeBinDir}:${process.env.PATH ?? ""}`,
         BUN_ARGS_FILE: argsFile,
-        BUN_TEST_PARALLELISM: "2",
       },
       stdout: "pipe",
       stderr: "pipe",
     });
 
     expect(result.exitCode).toBe(0);
-    expect((await readFile(argsFile, "utf-8")).trim().split("\n").sort()).toEqual([
-      "test --shard=1/2",
-      "test --shard=2/2",
-    ]);
+    expect(await readFile(argsFile, "utf-8")).toBe("test\n");
   });
 
-  test("runs serially on a four-core host when the worker count is not configured", async () => {
+  test("forwards an explicit CI shard without spawning sibling shards", async () => {
     fixtureDir = await mkdtemp(join(tmpdir(), "bun-test-wrapper-"));
     const fakeBinDir = join(fixtureDir, "bin");
     const fakeBun = join(fakeBinDir, "bun");
-    const fakeGetconf = join(fakeBinDir, "getconf");
     const argsFile = join(fixtureDir, "args.txt");
 
     await mkdir(fakeBinDir);
     await writeFile(
       fakeBun,
       `#!/usr/bin/env bash
-printf '%s\\n' "$*" >>"$BUN_ARGS_FILE"
+printf '%s\\n' "$@" >"$BUN_ARGS_FILE"
 exit 0
 `,
     );
-    await writeFile(
-      fakeGetconf,
-      `#!/usr/bin/env bash
-printf '4\\n'
-`,
-    );
     await chmod(fakeBun, 0o755);
-    await chmod(fakeGetconf, 0o755);
 
-    const result = Bun.spawnSync(["bash", "scripts/run-bun-tests.sh"], {
+    const result = Bun.spawnSync(["bash", "scripts/run-bun-tests.sh", "--shard=2/4"], {
       cwd: process.cwd(),
       env: {
         ...process.env,
         PATH: `${fakeBinDir}:${process.env.PATH ?? ""}`,
         BUN_ARGS_FILE: argsFile,
-        BUN_TEST_PARALLELISM: "",
       },
       stdout: "pipe",
       stderr: "pipe",
     });
 
     expect(result.exitCode).toBe(0);
-    expect((await readFile(argsFile, "utf-8")).trim()).toBe("test");
+    expect(await readFile(argsFile, "utf-8")).toBe("test\n--shard=2/4\n");
   });
 
-  test("rejects a non-positive worker count before running tests", () => {
-    const result = Bun.spawnSync(["bash", "scripts/run-bun-tests.sh"], {
+  test("preserves a failing explicit shard's exit status", async () => {
+    fixtureDir = await mkdtemp(join(tmpdir(), "bun-test-wrapper-"));
+    const fakeBinDir = join(fixtureDir, "bin");
+    const fakeBun = join(fakeBinDir, "bun");
+    const argsFile = join(fixtureDir, "args.txt");
+
+    await mkdir(fakeBinDir);
+    await writeFile(
+      fakeBun,
+      `#!/usr/bin/env bash
+printf '%s\\n' "$@" >"$BUN_ARGS_FILE"
+echo " 1 fail"
+exit 7
+`,
+    );
+    await chmod(fakeBun, 0o755);
+
+    const result = Bun.spawnSync(["bash", "scripts/run-bun-tests.sh", "--shard=3/4"], {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        BUN_TEST_PARALLELISM: "0",
+        PATH: `${fakeBinDir}:${process.env.PATH ?? ""}`,
+        BUN_ARGS_FILE: argsFile,
       },
       stdout: "pipe",
       stderr: "pipe",
     });
 
-    expect(result.exitCode).toBe(2);
-    expect(result.stderr.toString()).toContain("BUN_TEST_PARALLELISM must be a positive integer");
+    expect(result.exitCode).toBe(7);
+    expect(await readFile(argsFile, "utf-8")).toBe("test\n--shard=3/4\n");
   });
 });

@@ -13,7 +13,11 @@ if (process.platform === "darwin") {
     "/usr/local/opt/sqlite/lib/libsqlite3.dylib",
   ]) {
     if (await Bun.file(candidate).exists()) {
-      Database.setCustomSQLite(candidate);
+      try {
+        Database.setCustomSQLite(candidate);
+      } catch {
+        // Already loaded or unavailable — fall back to in-memory cosine.
+      }
       break;
     }
   }
