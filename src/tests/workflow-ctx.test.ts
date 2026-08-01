@@ -515,4 +515,151 @@ describe("workflow-ctx: ctx.step.agentTask under Promise.all concurrency", () =>
       restore();
     }
   });
+
+  test("a sibling still awaiting its INITIAL journal lookup is drained, not orphaned (delayed-GET race)", async () => {
+    const journaled: Record<string, { status?: string; result?: unknown }> = {};
+    let raceBLookupStarted = false;
+
+    const restore = installFetchMock(async (url, init) => {
+      if (url.includes("/steps/race-a")) {
+        // A's journal lookup resolves immediately, so A races ahead to its
+        // terminal failure while B is still blocked on its own lookup.
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }
+      if (url.includes("/steps/race-b")) {
+        // THE RACE: B's very first GET is slow (a loaded API server, a
+        // retried connection, ordinary latency). Before the fix, B was not
+        // registered as in-flight until this resolved — so drainInFlightSteps
+        // saw an empty set and process.exit(1) killed B before it dispatched.
+        raceBLookupStarted = true;
+        await sleepReal(60);
+        return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      }
+      if (url.endsWith("/agent-task")) {
+        const body = JSON.parse(String(init?.body)) as { stepKey: string };
+        if (body.stepKey === "race-a") {
+          return new Response(JSON.stringify({ error: "Agent task failed", taskId: "task-a" }), {
+            status: 409,
+          });
+        }
+        return new Response(JSON.stringify({ taskId: "task-b", taskOutput: { ok: true } }), {
+          status: 200,
+        });
+      }
+      if (url.endsWith("/steps")) {
+        const body = JSON.parse(String(init?.body)) as { stepKey: string; status?: string };
+        journaled[body.stepKey] = body;
+        return new Response(JSON.stringify({ ok: true }), { status: 201 });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    try {
+      const { ctx, drainInFlightSteps } = buildCtxWithBaseline("run-race");
+
+      await expect(
+        Promise.all([
+          ctx.step.agentTask("race-a", { task: "a" }),
+          ctx.step.agentTask("race-b", { task: "b" }),
+        ]),
+      ).rejects.toThrow(/failed/i);
+
+      // Pin the race window: at the moment the harness would drain, B has
+      // started but not finished its initial lookup — it has not dispatched
+      // and has nothing journaled.
+      expect(raceBLookupStarted).toBe(true);
+      expect(journaled["race-b"]).toBeUndefined();
+
+      await drainInFlightSteps();
+
+      expect(journaled["race-a"]?.status).toBe("failed");
+      expect(journaled["race-b"]?.status).toBe("completed"); // not orphaned
+      expect(journaled["race-b"]?.result).toEqual({ ok: true });
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe("workflow-ctx: replay of a journaled failure", () => {
+  test("crash after a failed journal write rethrows the recorded failure instead of replaying undefined", async () => {
+    const recordedError = "agent-task crashed-step failed: Agent task failed (taskId task-9)";
+    let agentTaskCalls = 0;
+    let journalWrites = 0;
+
+    const restore = installFetchMock(async (url) => {
+      if (url.includes("/steps/crashed-step")) {
+        // What the previous harness process journaled right before it died —
+        // status "failed" plus the recorded error, never reported as a run
+        // failure because the process never got that far.
+        return new Response(
+          JSON.stringify({
+            stepKey: "crashed-step",
+            stepType: "agent-task",
+            status: "failed",
+            result: null,
+            error: recordedError,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.endsWith("/agent-task")) {
+        agentTaskCalls++;
+        return new Response(JSON.stringify({ taskId: "task-9", taskOutput: { ok: true } }), {
+          status: 200,
+        });
+      }
+      if (url.endsWith("/steps")) {
+        journalWrites++;
+        return new Response(JSON.stringify({ ok: true }), { status: 201 });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    try {
+      // The resumed process replays the source from the top and hits the
+      // same step. It must NOT resolve `undefined` (which would let the
+      // workflow continue and finish "completed" past a failed child).
+      await expect(
+        buildCtxWithBaseline("run-crash-replay").ctx.step.agentTask("crashed-step", { task: "x" }),
+      ).rejects.toThrow(recordedError);
+
+      expect(agentTaskCalls).toBe(0); // replayed from the journal, not re-dispatched
+      expect(journalWrites).toBe(0); // the existing failed entry is left untouched
+    } finally {
+      restore();
+    }
+  });
+
+  test("a journaled completion still replays its result, and a status-less entry stays backward compatible", async () => {
+    const restore = installFetchMock(async (url) => {
+      if (url.includes("/steps/done-step")) {
+        return new Response(
+          JSON.stringify({
+            stepKey: "done-step",
+            stepType: "agent-task",
+            status: "completed",
+            result: { text: "hi" },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/steps/legacy-step")) {
+        // An older API build that returned `result` with no `status` field.
+        return new Response(
+          JSON.stringify({ stepKey: "legacy-step", stepType: "raw-llm", result: { text: "old" } }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    try {
+      const { ctx } = buildCtxWithBaseline("run-replay-ok");
+      expect(await ctx.step.agentTask("done-step", { task: "x" })).toEqual({ text: "hi" });
+      expect(await ctx.step.rawLlm("legacy-step", { prompt: "x" })).toEqual({ text: "old" });
+    } finally {
+      restore();
+    }
+  });
 });

@@ -320,7 +320,7 @@ The internal journal flow is:
 1. The launch endpoint creates a `script_runs` row with status `running`.
 2. The supervisor starts the harness subprocess and records `pid` plus `lastHeartbeatAt`.
 3. `ctx.step.*` checks `GET /api/internal/script-runs/{runId}/steps/{stepKey}` before executing.
-4. If a journal entry exists, the step returns the stored result.
+4. If a journal entry exists, the step replays it: a `completed` entry returns the stored result, a `failed` entry rethrows the stored error. A recorded failure must not replay as a success — otherwise a harness that died after journaling the failure but before reporting it would let the resumed run continue past a failed step and finish `completed`.
 5. If no journal entry exists, the step executes and writes through `POST /api/internal/script-runs/{runId}/steps`.
 6. When the subprocess exits, the supervisor marks the run `completed` or `failed`.
 
@@ -394,7 +394,7 @@ export default async function main(args, ctx) {
 
 This is durable and replay-safe exactly like the sequential case: each label gets its own `(runId, label)` context key, so a crash mid-fan-out resumes every still-pending label against its already-dispatched task, and results come back in the same order as `args.items`.
 
-If one step in a `Promise.all` throws (e.g. `failOnTaskFailure` on a sibling), the *other* in-flight steps are not silently discarded — the harness gives them a bounded grace period to finish their own journal write before it finalizes the run, so a task that was about to complete on the server is not orphaned by the sibling's failure.
+If one step in a `Promise.all` throws (e.g. `failOnTaskFailure` on a sibling), the *other* in-flight steps are not silently discarded — the harness gives them a bounded grace period to finish their own journal write before it finalizes the run, so a task that was about to complete on the server is not orphaned by the sibling's failure. "In flight" covers the whole step lifecycle from the moment `ctx.step.*` is called, including a sibling still waiting on its very first journal lookup — not just one that has already dispatched.
 
 `ctx.step.humanInTheLoop()` exists in the type surface but is stubbed in Script Workflows v1.
 
@@ -406,7 +406,9 @@ The persisted run lifecycle is a small state machine, while each `ctx.step.*` ca
 flowchart TD
     queued["queued\nPOST /api/script-runs accepted"] --> running["running\nsupervisor owns subprocess"]
     running --> lookup["step label lookup\n(runId, label)"]
-    lookup -->|journal hit| replay["durable replay\nreturn stored result"]
+    lookup -->|journal hit: completed| replay["durable replay\nreturn stored result"]
+    lookup -->|journal hit: failed| replayFail["durable replay\nrethrow stored error"]
+    replayFail --> failed
     lookup -->|journal miss| execute["execute step\nswarm-script / raw-llm / agent-task"]
     execute --> write["write journal row\ncompleted or failed"]
     replay --> next["next source line"]
@@ -442,8 +444,9 @@ Every `ctx.step.*` call follows the same durable pattern:
 
 ```text
 look up journal row by (runId, label)
-if found: return stored result
-if missing: execute step, write result or error, return/throw
+if found and completed: return stored result
+if found and failed:    rethrow stored error
+if missing:             execute step, write result or error, return/throw
 ```
 
 In live QA, a run called `ctx.step.swarmScript("durable-double", ...)` twice with different source. The second call returned the first journaled result, and the run kept exactly one `durable-double` journal row. That behavior is intentional: label reuse means "this is the same logical step", not "run another step with the same name".

@@ -221,7 +221,43 @@ describe("/api/script-runs HTTP", () => {
     expect(await replayed.json()).toEqual({
       stepKey: "summarize",
       stepType: "raw-llm",
+      status: "completed",
       result: { text: "hi" },
+    });
+  });
+
+  test("exposes journal status and error so a failed step can be replayed as a failure", async () => {
+    const created = await dispatch("/api/script-runs", {
+      method: "POST",
+      agentId,
+      body: createBody(),
+    });
+    const { id } = (await created.json()) as { id: string };
+
+    const recorded = await dispatch(`/api/internal/script-runs/${id}/steps`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({
+        stepKey: "implement",
+        stepType: "agent-task",
+        config: { task: "do it" },
+        status: "failed",
+        error: "agent-task implement failed: Agent task failed (taskId task-9)",
+      }),
+    });
+    expect(recorded.status).toBe(201);
+
+    const replayed = await dispatch(`/api/internal/script-runs/${id}/steps/implement`, {
+      agentId,
+    });
+    expect(replayed.status).toBe(200);
+    // Without these two fields the harness replays a failed step as a
+    // successful `undefined` and the workflow completes past a failed child.
+    expect(await replayed.json()).toEqual({
+      stepKey: "implement",
+      stepType: "agent-task",
+      status: "failed",
+      error: "agent-task implement failed: Agent task failed (taskId task-9)",
     });
   });
 

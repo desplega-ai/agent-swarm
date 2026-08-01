@@ -2,9 +2,23 @@ import { readScriptSdkJsonResponse } from "../scripts-runtime/response-limit";
 import { mcpToolNameForSdkMethod } from "../scripts-runtime/sdk-allowlist";
 import { stdlib } from "../scripts-runtime/stdlib";
 
-type StepStatusResponse =
-  | { stepKey: string; stepType: string; result: unknown }
-  | { error: string };
+type StepStatusResponse = {
+  stepKey: string;
+  stepType: string;
+  /**
+   * Journal status. Optional only for wire-compat with an older API build
+   * that returned `result` alone — a missing status is read as "completed",
+   * which is exactly how those builds behaved.
+   */
+  status?: "completed" | "failed";
+  result?: unknown;
+  error?: string;
+};
+
+type ReplayedStep =
+  | { found: true; status: "completed"; result: unknown }
+  | { found: true; status: "failed"; error?: string }
+  | { found: false };
 
 type StepWriteResponse = { ok: true } | { error: string };
 
@@ -166,9 +180,7 @@ export function buildWorkflowCtx(input: {
     return body;
   }
 
-  async function completedStep(
-    label: string,
-  ): Promise<{ found: true; result: unknown } | { found: false }> {
+  async function completedStep(label: string): Promise<ReplayedStep> {
     const res = await fetch(
       `${baseUrl}/api/internal/script-runs/${input.runId}/steps/${encodeStepKey(label)}`,
       {
@@ -181,7 +193,8 @@ export function buildWorkflowCtx(input: {
       `script workflow step ${label}`,
     )) as StepStatusResponse;
     if (!res.ok) throw apiError(`step ${label}`, res.status, body);
-    return { found: true, result: "result" in body ? body.result : undefined };
+    if (body.status === "failed") return { found: true, status: "failed", error: body.error };
+    return { found: true, status: "completed", result: body.result };
   }
 
   async function writeStep(
@@ -278,23 +291,45 @@ export function buildWorkflowCtx(input: {
   }
 
   // Every ctx.step.* call — sequential or fired concurrently via
-  // Promise.all — registers its settling promise here. If one step in a
-  // Promise.all rejects, the others keep running detached in the
-  // background; drainInFlightSteps() (called by the harness before it
-  // finalizes the run and exits) gives them a bounded chance to reach
-  // their own journal write instead of being silently orphaned.
+  // Promise.all — registers its settling promise here, synchronously, before
+  // its first await (so a step still blocked on its initial journal lookup
+  // counts as in-flight too). If one step in a Promise.all rejects, the
+  // others keep running detached in the background; drainInFlightSteps()
+  // (called by the harness before it finalizes the run and exits) gives them
+  // a bounded chance to reach their own journal write instead of being
+  // silently orphaned.
   const inFlight = new Set<Promise<unknown>>();
 
-  async function durableStep(
+  // Deliberately NOT `async`: the whole durable-step lifecycle — including
+  // the very first `GET /steps/:label` journal lookup — lives inside
+  // `settled`, and `inFlight.add(settled)` runs in the SAME synchronous turn
+  // as the ctx.step.* call. Registering after the lookup left a window where
+  // a Promise.all sibling could reject, the harness's drainInFlightSteps()
+  // would see an empty set, and process.exit(1) would kill this step before
+  // it ever dispatched, polled, or journaled anything.
+  function durableStep(
     label: string,
     stepType: string,
     config: unknown,
     execute: () => Promise<unknown>,
   ): Promise<unknown> {
-    const replayed = await completedStep(label);
-    if (replayed.found) return replayed.result;
-    const startedAt = Date.now();
     const settled = (async () => {
+      const replayed = await completedStep(label);
+      if (replayed.found) {
+        if (replayed.status === "failed") {
+          // The journal already recorded this step as failed (e.g. the
+          // harness died after the failure write but before it could post
+          // the run failure). Rethrow the recorded error verbatim so the
+          // resumed run fails exactly the way the original did — returning
+          // `undefined` here would let the workflow sail past a failed
+          // default-`failOnTaskFailure` child and be marked completed.
+          throw new Error(
+            replayed.error ?? `script workflow step ${label} failed (no error recorded)`,
+          );
+        }
+        return replayed.result;
+      }
+      const startedAt = Date.now();
       try {
         const result = await execute();
         const durationMs = Date.now() - startedAt;
