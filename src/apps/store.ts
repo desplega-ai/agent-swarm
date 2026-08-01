@@ -83,7 +83,7 @@ export function listApps(): Array<Omit<AppRecord, "definition">> {
 
 export function updateApp(
   id: string,
-  patch: { name?: string; description?: string; definition?: AppDefinition },
+  patch: { name?: string; description?: string | null; definition?: AppDefinition },
 ): AppRecord | null {
   const existing = getApp(id);
   if (!existing) return null;
@@ -97,7 +97,7 @@ export function updateApp(
     )
     .get(
       patch.name ?? existing.name,
-      patch.description ?? existing.description ?? null,
+      patch.description === undefined ? (existing.description ?? null) : patch.description,
       JSON.stringify(patch.definition ?? existing.definition),
       updatedAt,
       id,

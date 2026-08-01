@@ -163,7 +163,10 @@ export const DEFERRED_TOOLS = new Set([
   "resolve-user",
   "manage-user",
 
-  // Pages and apps (3)
+  // Pages and apps (6)
+  "app-get",
+  "app-list",
+  "app-patch",
   "app-upsert",
   "create_page",
   "delete-page",

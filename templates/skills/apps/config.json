@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "apps",
+  "displayName": "Apps",
+  "slug": "apps",
+  "title": "Apps",
+  "description": "Build and iterate on schema-backed Swarm Apps with live models, named queries, custom actions, and json-render interfaces using the app-upsert, app-get, app-list, and app-patch tools.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["apps", "json-render", "crud", "dashboards"]
+}

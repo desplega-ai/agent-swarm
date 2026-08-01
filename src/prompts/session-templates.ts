@@ -728,6 +728,19 @@ For lightweight static reports / dashboards (HTML or JSON), prefer the
 });
 
 registerTemplate({
+  eventType: "system.agent.apps",
+  header: "",
+  defaultBody: `
+### Swarm Apps
+
+Agents can build persistent internal apps with live models, named queries, custom actions, and validated json-render interfaces.
+Use the \`/apps\` skill for the definition contract and iteration workflow; use \`app-list\` and \`app-get\` to inspect apps, \`app-upsert\` to create or fully replace one, and \`app-patch\` for focused edits.
+`,
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
   eventType: "system.agent.share_urls",
   header: "",
   defaultBody: `
@@ -807,6 +820,21 @@ Honor this requester profile in tone, depth, and format where it doesn't conflic
       name: "requester_notes_section",
       description: "Formatted notes section sourced from users.notes, or empty string",
     },
+  ],
+  category: "task_lifecycle",
+});
+
+registerTemplate({
+  eventType: "task.app.action",
+  header: "",
+  defaultBody: `{{prompt}}
+
+[App action] app={{app_id}} action={{action_name}} input={{input_json}}`,
+  variables: [
+    { name: "prompt", description: "The task prompt configured on the app action" },
+    { name: "app_id", description: "The app identifier" },
+    { name: "action_name", description: "The invoked action name" },
+    { name: "input_json", description: "The action input serialized as JSON" },
   ],
   category: "task_lifecycle",
 });

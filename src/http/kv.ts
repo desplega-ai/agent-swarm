@@ -12,6 +12,7 @@ import {
   upsertKv,
 } from "../be/db";
 import { mcpOverflowAuthError } from "../kv-overflow";
+import { reservedNamespaceError } from "../kv-reserved-namespaces";
 import { can } from "../rbac";
 import { agentContextKey, pageContextKey } from "../tasks/context-key";
 import { KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "../types";
@@ -322,6 +323,11 @@ function authorizeWrite(
   namespace: string,
   ctx: AuthCtx,
 ): { status: number; message: string } | null {
+  const reservedErr = reservedNamespaceError(namespace);
+  if (reservedErr) {
+    return { status: 403, message: reservedErr };
+  }
+
   const overflowAuthErr = mcpOverflowAuthError(namespace, ctx.callerAgentId);
   if (overflowAuthErr) {
     return { status: 403, message: overflowAuthErr };

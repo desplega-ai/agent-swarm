@@ -1796,6 +1796,68 @@
           }
         }
       },
+      "patch": {
+        "summary": "Patch an app",
+        "description": "Applies an RFC 7396 merge patch to the definition, with app actions and page elements treated as atomic entries.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "definition": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Patched app"
+          },
+          "400": {
+            "description": "Invalid app definition"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "App not found"
+          }
+        }
+      },
       "delete": {
         "summary": "Delete an app and all of its rows",
         "tags": [
@@ -2242,6 +2304,69 @@
           },
           "404": {
             "description": "App or query not found"
+          }
+        }
+      }
+    },
+    "/api/apps/{id}/actions/{name}": {
+      "post": {
+        "summary": "Run a custom app action",
+        "description": "Runs the saved script or creates the agent task named by the app definition.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-zA-Z0-9_]{0,39}$"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Action invoked"
+          },
+          "400": {
+            "description": "Invalid action input or stale script reference"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "App or action not found"
           }
         }
       }

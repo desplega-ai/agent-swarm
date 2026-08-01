@@ -5,6 +5,7 @@ import {
   AppNameSchema,
   type AppQueryDef,
   type AppValidationIssue,
+  applyAppDefinitionPatch,
   isIso8601Date,
   type ModelDef,
   parseAppDefinition,
@@ -22,10 +23,20 @@ import {
   purgeAppRows,
 } from "../apps/row-store";
 import { createApp, deleteApp, getApp, listApps, updateApp } from "../apps/store";
-import { getAgentById } from "../be/db";
+import { getAgentById, getLeadAgent } from "../be/db";
+import {
+  getScriptApiConnectionDescriptors,
+  getScriptMcpConnectionDescriptors,
+} from "../be/script-connections";
+import { buildScriptCredentialBindingsWithFailures } from "../be/script-credential-broker";
+import { getScriptById } from "../be/scripts/db";
+import { resolveTemplate } from "../prompts/resolver";
 import type { RbacPrincipal } from "../rbac";
 import { can } from "../rbac";
+import { runScript } from "../scripts-runtime/loader";
+import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { scrubObject } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
 
@@ -98,6 +109,29 @@ const updateAppRoute = route({
   }),
   responses: {
     200: { description: "Updated app" },
+    400: { description: "Invalid app definition" },
+    403: { description: "Permission denied" },
+    404: { description: "App not found" },
+  },
+  rbac: { permission: "app.manage" },
+});
+
+const patchAppRoute = route({
+  method: "patch",
+  path: "/api/apps/{id}",
+  pattern: ["api", "apps", null],
+  summary: "Patch an app",
+  description:
+    "Applies an RFC 7396 merge patch to the definition, with app actions and page elements treated as atomic entries.",
+  tags: ["Apps"],
+  params: appParamsSchema,
+  body: z.object({
+    name: z.string().min(1).optional(),
+    description: z.string().nullable().optional(),
+    definition: z.record(z.string(), z.unknown()).optional(),
+  }),
+  responses: {
+    200: { description: "Patched app" },
     400: { description: "Invalid app definition" },
     403: { description: "Permission denied" },
     404: { description: "App not found" },
@@ -228,6 +262,24 @@ const runNamedQueryRoute = route({
     200: { description: "Named query rows" },
     404: { description: "App or query not found" },
   },
+});
+
+const runActionRoute = route({
+  method: "post",
+  path: "/api/apps/{id}/actions/{name}",
+  pattern: ["api", "apps", null, "actions", null],
+  summary: "Run a custom app action",
+  description: "Runs the saved script or creates the agent task named by the app definition.",
+  tags: ["Apps"],
+  params: z.object({ id: z.string().min(1), name: AppNameSchema }),
+  body: z.object({ input: z.record(z.string(), z.unknown()).optional() }),
+  responses: {
+    200: { description: "Action invoked" },
+    400: { description: "Invalid action input or stale script reference" },
+    403: { description: "Permission denied" },
+    404: { description: "App or action not found" },
+  },
+  rbac: { permission: "app.manage" },
 });
 
 function authorizeAppWrite(
@@ -483,7 +535,14 @@ export async function handleApps(
           column !== "updatedAt" &&
           !Object.hasOwn(resolved.model.columns, column))
       ) {
-        json(res, { error: "invalid sort" }, 400);
+        json(
+          res,
+          {
+            error: "invalid sort",
+            issues: [{ path: "sort", message: "must be <column>:<asc|desc> for a known column" }],
+          },
+          400,
+        );
         return true;
       }
       rows.sort((a, b) => {
@@ -580,6 +639,134 @@ export async function handleApps(
     }
     const model = app.definition.models[query.model]!;
     json(res, { rows: applyQuery(listAppRows(app.id, query.model), query, model) });
+    return true;
+  }
+
+  if (runActionRoute.match(req.method, pathSegments)) {
+    if (enforceContentLengthCap(req, res, MAX_APP_ROW_BODY_BYTES) === BODY_TOO_LARGE) return true;
+    const parsed = await runActionRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!authorizeAppWrite(req, res, myAgentId)) return true;
+
+    const app = getApp(parsed.params.id);
+    if (!app) {
+      jsonError(res, "app not found", 404);
+      return true;
+    }
+    const actions = app.definition.actions;
+    if (!actions || !Object.hasOwn(actions, parsed.params.name)) {
+      jsonError(res, "app action not found", 404);
+      return true;
+    }
+
+    const action = actions[parsed.params.name]!;
+    const input = parsed.body.input ?? {};
+    if (action.kind === "script") {
+      const script = getScriptById(action.scriptId);
+      if (!script) {
+        json(
+          res,
+          {
+            error: "invalid app action",
+            issues: [
+              {
+                path: `actions.${parsed.params.name}.scriptId`,
+                message: `script "${action.scriptId}" no longer exists`,
+              },
+            ],
+          },
+          400,
+        );
+        return true;
+      }
+
+      // Spike tradeoff: app managers currently run saved scripts with the owner's bindings; revisit
+      // with invoker-rights checks or invoker-brokered credentials before productization.
+      const runAsAgentId = script.scopeId ?? script.createdByAgentId;
+      if (!runAsAgentId) {
+        jsonError(res, "agentId is required: this script has no owning agent to run as", 400);
+        return true;
+      }
+
+      const credentials = await buildScriptCredentialBindingsWithFailures({
+        agentId: runAsAgentId,
+      });
+      const output = await runScript({
+        source: script.source,
+        args: { ...action.args, ...input, app: { id: app.id } },
+        fsMode: script.fsMode,
+        agentId: runAsAgentId,
+        egressSecrets: credentials.egressSecrets,
+        failedBindings: credentials.failedBindings,
+        apiConnections: getScriptApiConnectionDescriptors({ agentId: runAsAgentId }),
+        mcpConnections: getScriptMcpConnectionDescriptors({ agentId: runAsAgentId }),
+      });
+      const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
+      const error = ok
+        ? undefined
+        : output.runtimeError
+          ? `${output.runtimeError.name}: ${output.runtimeError.message}`
+          : (output.error ?? `Script exited with code ${output.exitCode}`);
+      json(
+        res,
+        scrubObject({
+          ok,
+          result: output.result,
+          stdout: output.stdout,
+          ...(error === undefined ? {} : { error }),
+          durationMs: output.durationMs,
+        }),
+      );
+      return true;
+    }
+
+    const lead = action.agentId ? null : getLeadAgent();
+    const taskPrompt = resolveTemplate("task.app.action", {
+      prompt: action.prompt,
+      app_id: app.id,
+      action_name: parsed.params.name,
+      input_json: JSON.stringify(input),
+    });
+    const task = createTaskWithSiblingAwareness(taskPrompt.text, {
+      source: "api",
+      agentId: action.agentId ?? lead?.id,
+    });
+    json(res, { ok: true, taskId: task.id, status: task.status });
+    return true;
+  }
+
+  if (patchAppRoute.match(req.method, pathSegments)) {
+    if (enforceContentLengthCap(req, res, MAX_APP_BODY_BYTES) === BODY_TOO_LARGE) return true;
+    const parsed = await patchAppRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!authorizeAppWrite(req, res, myAgentId)) return true;
+
+    const existing = getApp(parsed.params.id);
+    if (!existing) {
+      jsonError(res, "app not found", 404);
+      return true;
+    }
+    const patch = applyAppDefinitionPatch(existing.definition, parsed.body.definition ?? {});
+    if (!patch.success) {
+      invalidDefinition(res, patch.issues);
+      return true;
+    }
+    const definition = parseAppDefinition(patch.definition);
+    if (!definition.success) {
+      invalidDefinition(res, definition.issues);
+      return true;
+    }
+    // Spike limitation: schema updates do not migrate rows or rebuild KV indexes.
+    const app = updateApp(parsed.params.id, {
+      name: parsed.body.name,
+      description: parsed.body.description,
+      definition: definition.definition,
+    });
+    if (!app) {
+      jsonError(res, "app not found", 404);
+      return true;
+    }
+    json(res, { app });
     return true;
   }
 

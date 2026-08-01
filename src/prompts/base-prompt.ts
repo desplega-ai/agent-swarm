@@ -356,6 +356,14 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
       conditionalSuffix += artifactsResult.text;
     }
 
+    // App tools register under the server's `pages` capability. Prefer the
+    // authoritative server report; retain the legacy agent-tag fallback only
+    // for servers that predate capability reporting.
+    if (serverHasCapability("pages", !args.capabilities || args.capabilities.includes("pages"))) {
+      const appsResult = await resolveTemplateAsync("system.agent.apps", {});
+      conditionalSuffix += appsResult.text;
+    }
+
     if (args.capabilities) {
       conditionalSuffix += `
 ### Capabilities enabled for this agent:

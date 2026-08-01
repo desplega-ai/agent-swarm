@@ -432,6 +432,14 @@ declare module "swarm-sdk" {
     mcpServer_uninstall(args: Record<string, unknown>): Promise<unknown>;
 
     // --- pages & metrics ---
+    app_get(args: { appId: string }): Promise<unknown>;
+    app_list(args?: Record<string, never>): Promise<unknown>;
+    app_patch(args: {
+      appId: string;
+      name?: string;
+      description?: string | null;
+      definition?: Record<string, unknown>;
+    }): Promise<unknown>;
     app_upsert(args: {
       name: string;
       description?: string;

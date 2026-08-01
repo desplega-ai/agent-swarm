@@ -1,5 +1,6 @@
 import { getAgentById } from "@/be/db";
 import { mcpOverflowAuthError } from "@/kv-overflow";
+import { reservedNamespaceError } from "@/kv-reserved-namespaces";
 import { can } from "@/rbac";
 
 /**
@@ -16,6 +17,9 @@ export function kvWriteAuthError(
   namespace: string,
   info: { agentId: string | undefined },
 ): string | null {
+  const reservedErr = reservedNamespaceError(namespace);
+  if (reservedErr) return reservedErr;
+
   const overflowAuthErr = mcpOverflowAuthError(namespace, info.agentId);
   if (overflowAuthErr) return overflowAuthErr;
 
