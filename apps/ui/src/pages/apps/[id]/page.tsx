@@ -161,7 +161,7 @@ function AppRuntime({ app }: { app: AppDetail }) {
   }
 
   return (
-    <div className="flex flex-col gap-4" data-testid="app-runtime">
+    <div className="flex flex-col flex-1 min-h-0 overflow-y-auto gap-4" data-testid="app-runtime">
       <PageHeader
         title={app.name}
         description={app.description ?? undefined}
@@ -201,7 +201,7 @@ export default function AppDetailPage() {
 
   if (error || !data?.app) {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col flex-1 min-h-0 overflow-y-auto gap-4">
         <PageHeader title="App" />
         <AlertCallout tone="error" icon={LayoutGrid} title="Failed to load app">
           {errorMessage(error) ?? `No app found for id ${id}`}

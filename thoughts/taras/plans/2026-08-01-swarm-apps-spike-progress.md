@@ -38,21 +38,40 @@ Branch: `spike/swarm-apps` off main@4a192581. **Never merge to main** (auto-depl
 - **Review (workflow, Opus core + Sonnet periphery): 0 blockers/majors, 5 minors + 6 nits.**
   Findings + dispositions: ./2026-08-01-swarm-apps-spike-review-findings.md (fix all except F6).
 
-## In flight
+## Finale results (2026-08-01, complete)
 
-- Codex fix round via `codex exec resume --last` (first attempt was killed mid-run; resumed with
-  crash-recovery instructions). Report lands at /tmp/codex-fix-report.md.
+- Fix round: all 10 review findings fixed (codex), 15/15 tests, full suite green. Server slice
+  committed 16cbf498; scroll-region fix committed after (apps/:id owns scroll per lg:overflow-hidden
+  layout contract).
+- **Agent-first test PASSED:** local worker (claude-opus-5) built the "Bookmarks" app
+  (fe3f60c8-3408-41d4-994b-07d1d98c75cd) from a natural-language task via app-upsert —
+  **first try, 1 tool call, 0 validation rejections**, ~$1.35 session. App fully functional in
+  browser (form create, Mark-read row action, table poll refresh). The agent added its own polish
+  (description copy, placeholders, an "Added" relative-time column).
+- Attempt 1 failure worth remembering: a bare `bun src/cli.tsx worker` inherits the LOCAL user's
+  ~/.claude config → no local swarm MCP, my prod agent-swarm-user MCP leaked in ($1.14 wasted,
+  agent correctly reported blocker). Fix: write `.mcp.json` with the agent-swarm entry
+  (url + Authorization + X-Agent-ID headers) into the worker cwd — runner merges it per-session.
+- Verdict on the brainstorm's failure signal: building on-platform is FAR lighter than the
+  kv-typed-store hand-rolled version — one definition JSON vs manual key layouts/index rewrites,
+  and reads are native (no 300ms script startup anywhere in the read path).
 
-## Remaining
+## Running environment (leave up for Taras)
 
-1. Verify codex fixes (targeted re-checks + full gates), commit server slice.
-2. Restart isolated stack (:3113/:5375 — commands above), quick re-smoke (null-clear, empty filter 400).
-3. Agent-first finale: local worker (HARNESS_PROVIDER=claude, MCP_BASE_URL=http://localhost:3113)
-   gets task "build a <something> tracker app" → must author via app-upsert and produce a working
-   /apps/:id. This is the bet's real test.
-4. Score the brainstorm's failure signal: was building the ideas tracker on-platform lighter than
-   the kv-typed-store skill's hand-rolled version? (So far: yes by a wide margin — definition JSON
-   + zero hand-written index code vs. the skill's manual key/index machinery.)
+- API :3113 (nohup, log /tmp/apps-api.log), DB /tmp/apps-spike-e2e.sqlite
+- UI  http://localhost:5375 (nohup vite, log /tmp/apps-vite.log), connected via ?config to :3113
+- Worker (nohup, log /tmp/apps-worker.log, agent 43172bc2, cwd /tmp/apps-worker-ws)
+- Apps: Ideas (789025c0), Notes Mini (bae5343b), Bookmarks (fe3f60c8)
+- Cleanup: `pkill -f apps-spike-e2e; pkill -f 'port 5375'; pkill -f 'cli.tsx worker'` (or by log grep)
+
+## Spike verdict — what the platform version needs that the spike exposed
+
+1. App-authoring guidance must ship server-side (tool description / seeded skill): the worker
+   succeeded because the task embedded a format primer; naked schema would've been format-guessing.
+2. An `app-get`/`app-list` MCP tool (agent had no way to read back an app definition via MCP).
+3. Scroll/layout: JSON-rendered pages need the layout contract handled by the runtime, not the
+   definition (done in spike).
+4. UI edit loop still missing (edit definition in dashboard) — expected, out of spike scope.
 
 ## Gotchas learned
 
