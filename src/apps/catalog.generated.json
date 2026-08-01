@@ -12,38 +12,22 @@
     "Table",
     "Form"
   ],
-  "actionTypes": [
-    "swarm.sdk",
-    "swarm.call",
-    "app.mutate",
-    "app.refresh",
-    "app.action"
-  ],
+  "actionTypes": ["swarm.sdk", "swarm.call", "app.mutate", "app.refresh", "app.action"],
   "components": {
     "Container": {
       "description": "Layout container (flex row or column with gap).",
-      "slots": [
-        "default"
-      ],
+      "slots": ["default"],
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
           "direction": {
             "type": "string",
-            "enum": [
-              "row",
-              "column"
-            ]
+            "enum": ["row", "column"]
           },
           "gap": {
             "type": "string",
-            "enum": [
-              "none",
-              "sm",
-              "md",
-              "lg"
-            ]
+            "enum": ["none", "sm", "md", "lg"]
           }
         },
         "additionalProperties": false
@@ -51,9 +35,7 @@
     },
     "Card": {
       "description": "Bordered card with optional title and description.",
-      "slots": [
-        "default"
-      ],
+      "slots": ["default"],
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -79,16 +61,10 @@
           },
           "level": {
             "type": "string",
-            "enum": [
-              "h1",
-              "h2",
-              "h3"
-            ]
+            "enum": ["h1", "h2", "h3"]
           }
         },
-        "required": [
-          "text"
-        ],
+        "required": ["text"],
         "additionalProperties": false
       }
     },
@@ -103,15 +79,10 @@
           },
           "tone": {
             "type": "string",
-            "enum": [
-              "default",
-              "muted"
-            ]
+            "enum": ["default", "muted"]
           }
         },
-        "required": [
-          "content"
-        ],
+        "required": ["content"],
         "additionalProperties": false
       }
     },
@@ -126,18 +97,10 @@
           },
           "variant": {
             "type": "string",
-            "enum": [
-              "default",
-              "secondary",
-              "outline",
-              "ghost",
-              "destructive"
-            ]
+            "enum": ["default", "secondary", "outline", "ghost", "destructive"]
           }
         },
-        "required": [
-          "label"
-        ],
+        "required": ["label"],
         "additionalProperties": false
       }
     },
@@ -161,10 +124,7 @@
             ]
           }
         },
-        "required": [
-          "label",
-          "value"
-        ],
+        "required": ["label", "value"],
         "additionalProperties": false
       }
     },
@@ -179,20 +139,13 @@
           },
           "tone": {
             "type": "string",
-            "enum": [
-              "info",
-              "success",
-              "warning",
-              "error"
-            ]
+            "enum": ["info", "success", "warning", "error"]
           },
           "title": {
             "type": "string"
           }
         },
-        "required": [
-          "message"
-        ],
+        "required": ["message"],
         "additionalProperties": false
       }
     },
@@ -226,9 +179,7 @@
             ]
           }
         },
-        "required": [
-          "text"
-        ],
+        "required": ["text"],
         "additionalProperties": false
       }
     },
@@ -261,13 +212,7 @@
                 },
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "text",
-                    "number",
-                    "boolean",
-                    "date",
-                    "badge"
-                  ]
+                  "enum": ["text", "string", "number", "boolean", "date", "badge", "enum"]
                 },
                 "tones": {
                   "type": "object",
@@ -292,9 +237,7 @@
                   "type": "number"
                 }
               },
-              "required": [
-                "key"
-              ],
+              "required": ["key"],
               "additionalProperties": false
             }
           },
@@ -336,6 +279,9 @@
                         }
                       },
                       "additionalProperties": false
+                    },
+                    {
+                      "type": "string"
                     }
                   ]
                 },
@@ -355,17 +301,12 @@
                         "additionalProperties": {}
                       }
                     },
-                    "required": [
-                      "action"
-                    ],
+                    "required": ["action"],
                     "additionalProperties": false
                   }
                 }
               },
-              "required": [
-                "label",
-                "actions"
-              ],
+              "required": ["label", "actions"],
               "additionalProperties": false
             }
           },
@@ -386,9 +327,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "columns"
-        ],
+        "required": ["columns"],
         "additionalProperties": false
       }
     },
@@ -417,14 +356,7 @@
                 },
                 "kind": {
                   "type": "string",
-                  "enum": [
-                    "string",
-                    "text",
-                    "number",
-                    "boolean",
-                    "date",
-                    "enum"
-                  ]
+                  "enum": ["string", "text", "number", "boolean", "date", "enum"]
                 },
                 "options": {
                   "type": "array",
@@ -439,9 +371,7 @@
                   "type": "boolean"
                 }
               },
-              "required": [
-                "name"
-              ],
+              "required": ["name"],
               "additionalProperties": false
             }
           },
@@ -464,18 +394,12 @@
                   "additionalProperties": {}
                 }
               },
-              "required": [
-                "action"
-              ],
+              "required": ["action"],
               "additionalProperties": false
             }
           }
         },
-        "required": [
-          "id",
-          "fields",
-          "onSubmit"
-        ],
+        "required": ["id", "fields", "onSubmit"],
         "additionalProperties": false
       }
     }
@@ -533,9 +457,7 @@
             "additionalProperties": {}
           }
         },
-        "required": [
-          "sdk"
-        ],
+        "required": ["sdk"],
         "additionalProperties": false
       }
     },
@@ -547,13 +469,7 @@
         "properties": {
           "method": {
             "type": "string",
-            "enum": [
-              "GET",
-              "POST",
-              "PUT",
-              "DELETE",
-              "PATCH"
-            ]
+            "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"]
           },
           "endpoint": {
             "type": "string"
@@ -566,10 +482,7 @@
             "additionalProperties": {}
           }
         },
-        "required": [
-          "method",
-          "endpoint"
-        ],
+        "required": ["method", "endpoint"],
         "additionalProperties": false
       }
     },
@@ -584,11 +497,7 @@
           },
           "op": {
             "type": "string",
-            "enum": [
-              "create",
-              "update",
-              "delete"
-            ]
+            "enum": ["create", "update", "delete"]
           },
           "rowId": {
             "type": "string"
@@ -604,10 +513,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "model",
-          "op"
-        ],
+        "required": ["model", "op"],
         "additionalProperties": false
       }
     },
@@ -641,9 +547,7 @@
             "additionalProperties": {}
           }
         },
-        "required": [
-          "name"
-        ],
+        "required": ["name"],
         "additionalProperties": false
       }
     }

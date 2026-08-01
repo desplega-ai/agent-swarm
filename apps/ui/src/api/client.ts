@@ -8,6 +8,7 @@ import type {
   AgentTask,
   AgentWithTasks,
   ApiKeyStatusResponse,
+  AppActionResponse,
   AppDetail,
   AppListItem,
   AppRow,
@@ -2807,6 +2808,24 @@ class ApiClient {
       )}/rows/${encodeURIComponent(rowId)}`,
       { method: "PATCH", body: JSON.stringify({ values }) },
       `Failed to update ${model}`,
+    );
+  }
+
+  /**
+   * Invoke a named custom action from the app definition's `actions` map.
+   * Script actions answer inline (`ok`/`result`/`stdout`); task actions answer
+   * with the created `taskId`, whose status the caller then polls via
+   * `fetchTask`.
+   */
+  async invokeAppAction(
+    appId: string,
+    name: string,
+    input?: Record<string, unknown>,
+  ): Promise<AppActionResponse> {
+    return this.appRequest(
+      `/api/apps/${encodeURIComponent(appId)}/actions/${encodeURIComponent(name)}`,
+      { method: "POST", body: JSON.stringify({ input: input ?? {} }) },
+      `Failed to run action ${name}`,
     );
   }
 

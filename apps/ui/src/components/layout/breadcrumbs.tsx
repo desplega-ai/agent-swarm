@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight, CornerDownRight, Home } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useAgent } from "@/api/hooks/use-agents";
 import { useApprovalRequest } from "@/api/hooks/use-approval-requests";
+import { useApp } from "@/api/hooks/use-apps";
 import { useMcpServer } from "@/api/hooks/use-mcp-servers";
 import { usePage } from "@/api/hooks/use-pages";
 import { useRepo } from "@/api/hooks/use-repos";
@@ -25,6 +26,7 @@ import { cn, sessionDisplayTitle } from "@/lib/utils";
 
 const routeLabels: Record<string, string> = {
   dashboard: "Dashboard",
+  apps: "Apps",
   agents: "Agents",
   tasks: "Tasks",
   sessions: "Sessions",
@@ -124,6 +126,7 @@ export function Breadcrumbs() {
   const sessionId = parent === "sessions" && detailId ? detailId : undefined;
   const { data: sessionMeta } = useSession(sessionId);
 
+  const { data: appMeta } = useApp(idFor("apps") || undefined);
   const { data: agentMeta } = useAgent(idFor("agents"));
   const { data: taskMeta } = useTask(idFor("tasks"));
   const { data: workflowMeta } = useWorkflow(idFor("workflows"));
@@ -141,35 +144,37 @@ export function Breadcrumbs() {
   // Resolve the contextual name for the detail-id segment, if any. Falls back
   // to `undefined` (→ truncated-id display) while the entity is still loading.
   const contextualName: string | undefined = detailId
-    ? parent === "pages"
-      ? pageMeta?.title
-      : parent === "people"
-        ? personMeta?.name
-        : parent === "sessions"
-          ? sessionMeta && sessionDisplayTitle(sessionMeta.root)
-          : parent === "agents"
-            ? agentMeta?.name
-            : parent === "tasks"
-              ? taskMeta?.task
-              : parent === "workflows"
-                ? workflowMeta?.name
-                : parent === "schedules"
-                  ? scheduleMeta?.name
-                  : parent === "scripts"
-                    ? scriptMeta?.name
-                    : parent === "script-runs"
-                      ? scriptRunMeta?.run.scriptName
-                      : parent === "skills"
-                        ? skillMeta?.name
-                        : parent === "mcp-servers"
-                          ? mcpServerMeta?.name
-                          : parent === "repos"
-                            ? repoMeta?.name
-                            : parent === "approval-requests"
-                              ? approvalMeta?.title
-                              : parent === "connections"
-                                ? connectionMeta?.slug
-                                : undefined
+    ? parent === "apps"
+      ? appMeta?.app.name
+      : parent === "pages"
+        ? pageMeta?.title
+        : parent === "people"
+          ? personMeta?.name
+          : parent === "sessions"
+            ? sessionMeta && sessionDisplayTitle(sessionMeta.root)
+            : parent === "agents"
+              ? agentMeta?.name
+              : parent === "tasks"
+                ? taskMeta?.task
+                : parent === "workflows"
+                  ? workflowMeta?.name
+                  : parent === "schedules"
+                    ? scheduleMeta?.name
+                    : parent === "scripts"
+                      ? scriptMeta?.name
+                      : parent === "script-runs"
+                        ? scriptRunMeta?.run.scriptName
+                        : parent === "skills"
+                          ? skillMeta?.name
+                          : parent === "mcp-servers"
+                            ? mcpServerMeta?.name
+                            : parent === "repos"
+                              ? repoMeta?.name
+                              : parent === "approval-requests"
+                                ? approvalMeta?.title
+                                : parent === "connections"
+                                  ? connectionMeta?.slug
+                                  : undefined
     : undefined;
 
   const crumbs = segments.map((segment, index) => {

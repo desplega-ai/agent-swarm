@@ -2499,11 +2499,35 @@ export interface AppQueryDef {
   limit?: number;
 }
 
+/**
+ * A named custom action of an app definition, invoked from the runtime via the
+ * `app.action` json-render action (`POST /api/apps/:id/actions/:name`).
+ */
+export type AppActionDef =
+  | { kind: "script"; scriptId: string; args?: Record<string, unknown> }
+  | { kind: "task"; prompt: string; agentId?: string };
+
 export interface AppDefinition {
   models: Record<string, AppModelDef>;
   queries?: Record<string, AppQueryDef>;
-  /** json-render spec — validated as "is an object" server-side. */
+  actions?: Record<string, AppActionDef>;
+  /** json-render spec — validated against the shared catalog server-side. */
   page: Record<string, unknown>;
+}
+
+/**
+ * `POST /api/apps/:id/actions/:name` response. One loose shape covering both
+ * action kinds: script runs answer with `result`/`stdout`/`durationMs`, task
+ * actions answer with `taskId` + the freshly created task's `status`.
+ */
+export interface AppActionResponse {
+  ok: boolean;
+  result?: unknown;
+  stdout?: string;
+  error?: string;
+  durationMs?: number;
+  taskId?: string;
+  status?: AgentTaskStatus;
 }
 
 export interface AppListItem {

@@ -83,7 +83,7 @@ const alertTone: Record<
   error: { tone: "error", icon: AlertCircle },
 };
 
-/** Badge tone → semantic status-token classes (see ui/CLAUDE.md theming). */
+/** Badge tone → semantic status-token classes (see apps/ui/CLAUDE.md theming). */
 const badgeToneClass: Record<BadgeTone, string> = {
   neutral: "border-status-neutral/40 bg-status-neutral/10 text-status-neutral",
   success: "border-status-success/40 bg-status-success/10 text-status-success-strong",
@@ -137,7 +137,7 @@ const DESTRUCTIVE_VARIANTS = new Set(["destructive", "destructive-outline"]);
 
 /**
  * Whether a row action must go through an `AlertDialog` first, and with what
- * copy. `ui/CLAUDE.md` makes confirmation a hard rule for destructive actions,
+ * copy. `apps/ui/CLAUDE.md` makes confirmation a hard rule for destructive actions,
  * so destructive variants default to confirming even when the JSON author says
  * nothing — an app definition cannot ship a one-click delete by omission.
  */
@@ -147,6 +147,7 @@ function confirmConfigFor(rowAction: TableRowAction): TableRowActionConfirm | nu
   if (confirm === undefined)
     return DESTRUCTIVE_VARIANTS.has(rowAction.variant ?? "outline") ? {} : null;
   if (confirm === true) return {};
+  if (typeof confirm === "string") return { description: confirm };
   return confirm;
 }
 

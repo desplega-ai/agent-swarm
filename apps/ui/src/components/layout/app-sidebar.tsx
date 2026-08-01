@@ -10,6 +10,7 @@ import {
   FileText,
   Globe,
   Home,
+  LayoutGrid,
   Link2,
   ListTodo,
   MessageSquare,
@@ -27,6 +28,7 @@ import type { UserRole } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { UserSwitcher } from "@/components/identity/user-switcher";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import {
   Sidebar,
@@ -41,6 +43,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCost } from "@/lib/cost-format";
 import { cn, formatCompactNumber } from "@/lib/utils";
 import { SwarmSwitcher } from "./swarm-switcher";
@@ -55,6 +58,12 @@ interface NavItem {
   }>;
   /** When set, item is shown as disabled with this tooltip when condition fails. */
   gate?: { minVersion: string };
+  /**
+   * Experimental surface — renders a "BETA" tag chip next to the label (with
+   * an explanatory tooltip). Expanded sidebar only; the icon-collapsed mirror
+   * keeps its plain icon + tooltip.
+   */
+  beta?: { tooltip: string };
   /**
    * Declarative minimum role required to see this item. Purely a type-level
    * annotation for future RBAC — render logic does NOT consult it today, so
@@ -91,6 +100,12 @@ const navGroups: NavGroup[] = [
       { title: "Home", path: "/", icon: Home },
       { title: "Tasks", path: "/tasks", icon: ListTodo },
       { title: "Sessions", path: "/sessions", icon: MessageSquare, gate: { minVersion: "1.76.0" } },
+      {
+        title: "Apps",
+        path: "/apps",
+        icon: LayoutGrid,
+        beta: { tooltip: "Swarm Apps — experimental: agent-built internal apps" },
+      },
       { title: "Approvals", path: "/approval-requests", icon: ClipboardCheck },
     ],
   },
@@ -157,6 +172,28 @@ const footerNav: FooterItem[] = [
     ],
   },
 ];
+
+/**
+ * "BETA" chip shown after an experimental nav item's label. Hover/focus
+ * explains what the surface is — the sidebar already mounts a
+ * `TooltipProvider` (delayDuration 0) around its whole subtree.
+ */
+function BetaTag({ tooltip }: { tooltip: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge
+          variant="outline"
+          size="tag"
+          className="ml-auto border-status-info/30 text-status-info-strong"
+        >
+          BETA
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent side="right">{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 /** Delay (ms) before a flyout closes on mouse-leave — lets the cursor cross
  * the gap between trigger and flyout content without it snapping shut. */
@@ -377,6 +414,7 @@ export function AppSidebar() {
                               <NavLink to={item.path} end={item.path === "/"}>
                                 <item.icon className="size-4" />
                                 <span>{item.title}</span>
+                                {item.beta && <BetaTag tooltip={item.beta.tooltip} />}
                               </NavLink>
                             </SidebarMenuButton>
                             {/* Live count — auto-hidden when icon-collapsed. */}

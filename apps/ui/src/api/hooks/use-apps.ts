@@ -46,6 +46,21 @@ export function useAppQueries(appId: string, queryNames: string[]) {
 }
 
 /**
+ * Manual "Refresh" for `/apps/:id`: re-reads the app definition AND every one
+ * of its named queries. The definition itself only polls every 30s, so this is
+ * what an operator reaches for right after an agent re-upserts the app.
+ */
+export function useAppRefresh(appId: string) {
+  const queryClient = useQueryClient();
+  return useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["app", appId] }),
+      queryClient.invalidateQueries({ queryKey: ["app-query", appId] }),
+    ]);
+  }, [appId, queryClient]);
+}
+
+/**
  * Imperative refetch helpers used by the `app.mutate` / `app.refresh`
  * actions. `refetchModel` re-runs every named query whose `model` matches the
  * mutated model, so a create/update/delete is reflected without waiting for

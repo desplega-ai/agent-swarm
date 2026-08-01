@@ -44,4 +44,7 @@ const artifact = {
 
 const outUrl = new URL("../../../src/apps/catalog.generated.json", import.meta.url);
 await Bun.write(outUrl, `${JSON.stringify(artifact, null, 2)}\n`);
+// Root `bun run lint` covers the artifact — normalize to the root biome style.
+const repoRoot = new URL("../../../", import.meta.url).pathname;
+await Bun.$`bunx biome format --write ${outUrl.pathname}`.cwd(repoRoot);
 console.log(`wrote ${outUrl.pathname}`);

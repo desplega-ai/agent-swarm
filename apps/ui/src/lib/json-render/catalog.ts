@@ -141,8 +141,12 @@ const actionChainSchema = z.array(
 const tableColumnSchema = z.object({
   key: z.string(),
   label: z.string().optional(),
-  /** `badge` renders a status pill; `date` renders a smart relative time. */
-  kind: z.enum(["text", "number", "boolean", "date", "badge"]).optional(),
+  /**
+   * `badge` renders a status pill; `date` renders a smart relative time.
+   * `string` / `enum` are accepted aliases of `text` — agents naturally mirror
+   * the MODEL column kinds here, and a mirrored kind must never reject a page.
+   */
+  kind: z.enum(["text", "string", "number", "boolean", "date", "badge", "enum"]).optional(),
   /** For `kind: "badge"` — cell value → badge tone. Falls back to `neutral`. */
   tones: z.record(z.string(), z.enum(BADGE_TONES)).optional(),
   width: z.number().optional(),
@@ -161,13 +165,20 @@ const tableRowActionSchema = z.object({
     .enum(["default", "secondary", "outline", "ghost", "destructive", "destructive-outline"])
     .optional(),
   /**
-   * Gate the action behind an `AlertDialog` (ui/CLAUDE.md: destructive actions
+   * Gate the action behind an `AlertDialog` (apps/ui/CLAUDE.md: destructive actions
    * MUST confirm — no click-again patterns). Omitted → confirmation is implied
    * for `destructive` / `destructive-outline` variants and skipped otherwise,
    * so a JSON author cannot accidentally ship a one-click delete. `false`
    * opts a destructive-looking-but-reversible action out.
    */
-  confirm: z.union([z.boolean(), tableRowActionConfirmSchema]).optional(),
+  confirm: z
+    .union([
+      z.boolean(),
+      tableRowActionConfirmSchema,
+      // Shorthand: a bare string is the dialog description.
+      z.string(),
+    ])
+    .optional(),
   /** Action chain run per row; params may reference `$row` / `$rowIndex`. */
   actions: actionChainSchema,
 });
