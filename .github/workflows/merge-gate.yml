@@ -634,7 +634,6 @@ jobs:
         run: echo "started_at=$(date +%s%3N)" >> "$GITHUB_OUTPUT"
 
       - name: Build Docker image
-        id: docker-build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -652,11 +651,11 @@ jobs:
         env:
           TOKEN: ${{ secrets.SWARM_CI_TIMINGS_TOKEN }}
           STARTED_AT: ${{ steps.docker-timer.outputs.started_at || '0' }}
-          BUILD_STATUS: ${{ steps.docker-build.outcome || 'skipped' }}
+          BUILD_STATUS: ${{ job.status }}
         run: |
           set -euo pipefail
           if [ -z "$TOKEN" ]; then echo "SWARM_CI_TIMINGS_TOKEN not available; skipping"; exit 0; fi
-          if [ "$STARTED_AT" -eq 0 ]; then DURATION=0; else DURATION=$(( $(date +%s%3N) - STARTED_AT )); fi
+          if [ "$STARTED_AT" -eq 0 ]; then DURATION=0; BUILD_STATUS=skipped; else DURATION=$(( $(date +%s%3N) - STARTED_AT )); fi
           BODY=$(jq -n \
             --arg repo "${{ github.repository }}" \
             --arg branch "${{ github.head_ref || github.ref_name }}" \
