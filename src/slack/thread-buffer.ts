@@ -212,6 +212,7 @@ async function slackFlush(
     source: "slack",
     slackChannelId: channelId,
     slackThreadTs: threadTs,
+    slackTriggerMessageTs: items.at(-1)!.ts,
     slackUserId: originalRequesterId,
     dependsOn,
     parentTaskId: mostRecentTask?.id,

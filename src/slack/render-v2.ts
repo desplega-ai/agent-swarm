@@ -23,16 +23,25 @@ import type { AgentTask, TaskAttachment } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 import { getSlackApp } from "./app";
-import { getTaskLink, MAX_SECTION_LENGTH, markdownToSlack, splitSlackSectionText } from "./blocks";
+import {
+  getTaskLink,
+  getTaskUrl,
+  MAX_SECTION_LENGTH,
+  markdownToSlack,
+  splitSlackSectionText,
+} from "./blocks";
 
 const TREE_UPDATE_DEBOUNCE_MS = 500;
 const TREE_UPDATE_MIN_INTERVAL_MS = 3_000;
 const MAX_SLACK_RETRIES = 3;
 const MAX_RETRY_DELAY_MS = 30_000;
 const MAX_TITLE_LENGTH = 72;
-const MAX_OUTCOME_SUMMARY_LENGTH = 600;
+const MAX_OUTCOME_MARKDOWN_LENGTH = 12_000;
 const MAX_TREE_NODE_LINE_LENGTH = 1_000;
 const MAX_TREE_PREFIX_LENGTH = 120;
+const MAX_TREE_PROGRESS_LENGTH = 60;
+const TREE_INDENT = { topLevel: 1, levelStep: 3 } as const;
+const FIGURE_SPACE = "\u2007";
 const SLACK_RENDER_METADATA_EVENT = "agent_swarm_render_v2";
 
 const treeCreationPromises = new Map<string, Promise<SlackMessageRecord | null>>();
@@ -40,6 +49,7 @@ const pendingTreeUpdates = new Map<string, ReturnType<typeof setTimeout>>();
 const treeUpdateTails = new Map<string, Promise<void>>();
 const lastTreeText = new Map<string, string>();
 const lastTreeUpdateAt = new Map<string, number>();
+const triggerPermalinkPromises = new Map<string, Promise<string | undefined>>();
 let cachedTeamId: string | undefined;
 
 type SlackApiResult = Record<string, unknown> & { ok?: boolean; ts?: string; permalink?: string };
@@ -119,15 +129,21 @@ export function formatV2Duration(start: Date, end: Date): string {
 }
 
 function terminalEnd(task: AgentTask, now: Date): Date {
-  const terminal = ["completed", "failed", "cancelled", "superseded"].includes(task.status);
-  const end = terminal ? (task.finishedAt ?? task.lastUpdatedAt) : undefined;
+  const end = isTerminalTreeStatus(task.status)
+    ? (task.finishedAt ?? task.lastUpdatedAt)
+    : undefined;
   return end ? new Date(end) : now;
+}
+
+function isTerminalTreeStatus(status: AgentTask["status"]): boolean {
+  return ["completed", "failed", "cancelled", "superseded"].includes(status);
 }
 
 function cleanTaskDescription(task: AgentTask): string {
   if (task.title?.trim()) return task.title.trim();
   let text = task.task
     .replace(/<thread_context>[\s\S]*?<\/thread_context>/g, "")
+    .trim()
     .replace(/^\[Thread follow-up[^\]]*\]\s*/i, "")
     .replace(/^[-#*\s]+/, "")
     .trim();
@@ -165,37 +181,60 @@ function buildRenderForest(tasks: AgentTask[]): RenderNode[] {
 }
 
 function renderNodeLabel(node: RenderNode, isAsk: boolean): string {
-  if (isAsk) return cleanTaskDescription(node.task);
+  if (isAsk) return markdownToSlack(cleanTaskDescription(node.task));
   return truncateTreeLabel(
     node.task.agentId ? (getAgentById(node.task.agentId)?.name ?? "Worker") : "Worker",
   );
 }
 
+function renderProgress(progress: string | undefined): string | undefined {
+  const normalized = markdownToSlack(progress ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return undefined;
+  if (normalized.length <= MAX_TREE_PROGRESS_LENGTH) return `${normalized}…`;
+  const boundary = normalized.lastIndexOf(" ", MAX_TREE_PROGRESS_LENGTH);
+  const cut = boundary >= MAX_TREE_PROGRESS_LENGTH / 2 ? boundary : MAX_TREE_PROGRESS_LENGTH;
+  return `${normalized.slice(0, cut).trimEnd()}…`;
+}
+
 function renderNodeLines(
   node: RenderNode,
-  prefix: string,
+  depth: number,
   now: Date,
   outcomeLinks: ReadonlyMap<string, string>,
+  triggerLinks: ReadonlyMap<string, string>,
   isAsk: boolean,
 ): string[] {
   const duration = formatV2Duration(new Date(node.task.createdAt), terminalEnd(node.task, now));
   const result = outcomeLinks.get(node.task.id);
+  const trigger = triggerLinks.get(node.task.id);
+  const indent = FIGURE_SPACE.repeat(
+    TREE_INDENT.topLevel + Math.max(0, depth - 1) * TREE_INDENT.levelStep,
+  );
   const boundedPrefix =
-    prefix.length > MAX_TREE_PREFIX_LENGTH
-      ? `${prefix.slice(0, MAX_TREE_PREFIX_LENGTH - 1)}…`
-      : prefix;
+    indent.length > MAX_TREE_PREFIX_LENGTH
+      ? `${indent.slice(0, MAX_TREE_PREFIX_LENGTH - 1)}…`
+      : indent;
   let line = `${boundedPrefix}↳ ${statusIcon(node.task.status)} ${renderNodeLabel(node, isAsk)} · ${duration} · ${getTaskLink(node.task.id)}`;
-  const resultLink = result ? ` → <${result}|result>` : "";
-  if (resultLink && line.length + resultLink.length <= MAX_TREE_NODE_LINE_LENGTH) {
-    line += resultLink;
+  if (trigger) line += ` <${trigger}|↵>`;
+  const progress = renderProgress(node.task.progress);
+  const suffix = isTerminalTreeStatus(node.task.status)
+    ? result
+      ? ` → <${result}|result>`
+      : ""
+    : progress
+      ? ` · ${progress}`
+      : "";
+  if (suffix && line.length + suffix.length <= MAX_TREE_NODE_LINE_LENGTH) {
+    line += suffix;
   }
   if (line.length > MAX_TREE_NODE_LINE_LENGTH) {
     line = `${line.slice(0, MAX_TREE_NODE_LINE_LENGTH - 1).trimEnd()}…`;
   }
   const lines = [line];
-  const childPrefix = `${prefix}   `;
   node.children.forEach((child) => {
-    lines.push(...renderNodeLines(child, childPrefix, now, outcomeLinks, false));
+    lines.push(...renderNodeLines(child, depth + 1, now, outcomeLinks, triggerLinks, false));
   });
   return lines;
 }
@@ -204,13 +243,12 @@ export function renderThreadTree(
   tasks: AgentTask[],
   outcomeLinks: ReadonlyMap<string, string> = new Map(),
   now = new Date(),
+  triggerLinks: ReadonlyMap<string, string> = new Map(),
 ): string {
-  if (tasks.length === 0) return "🧵 *Task thread* · 0s";
+  if (tasks.length === 0) return "🧵 worked for 0s";
   const asks = tasks.filter((task) => task.source === "slack");
   const first = asks[0] ?? tasks[0]!;
-  const hasActiveTask = tasks.some(
-    (task) => !["completed", "failed", "cancelled", "superseded"].includes(task.status),
-  );
+  const hasActiveTask = tasks.some((task) => !isTerminalTreeStatus(task.status));
   const threadEnd = hasActiveTask
     ? now
     : tasks.reduce((latest, task) => {
@@ -218,10 +256,12 @@ export function renderThreadTree(
         return end > latest ? end : latest;
       }, new Date(first.createdAt));
   const threadDuration = formatV2Duration(new Date(first.createdAt), threadEnd);
-  const lines = [`🧵 *${cleanTaskDescription(first)}* · ${threadDuration}`];
+  const lines = [`🧵 worked for ${threadDuration}`];
   const roots = buildRenderForest(tasks);
   roots.forEach((root) => {
-    lines.push(...renderNodeLines(root, "", now, outcomeLinks, root.task.source === "slack"));
+    lines.push(
+      ...renderNodeLines(root, 1, now, outcomeLinks, triggerLinks, root.task.source === "slack"),
+    );
   });
   const text = lines.join("\n");
   if (text.length <= MAX_SECTION_LENGTH) return text;
@@ -232,9 +272,10 @@ export function renderThreadTree(
     const task = tasks[index]!;
     const recentLine = renderNodeLines(
       { task, children: [] },
-      "",
+      1,
       now,
       outcomeLinks,
+      triggerLinks,
       task.source === "slack",
     )[0]!;
     const candidateLines = [recentLine, ...recentLines];
@@ -252,8 +293,8 @@ export function renderThreadTree(
 
 function treeBlocks(text: string): unknown[] {
   return splitSlackSectionText(text).map((chunk) => ({
-    type: "section",
-    text: { type: "mrkdwn", text: chunk },
+    type: "context",
+    elements: [{ type: "mrkdwn", text: chunk }],
   }));
 }
 
@@ -266,6 +307,36 @@ async function resolvePermalink(client: WebClient, channelId: string, ts: string
     throw new Error(`Slack did not return a permalink for ${channelId}/${ts}`);
   }
   return result.permalink;
+}
+
+async function triggerLinksFor(
+  client: WebClient,
+  tasks: AgentTask[],
+): Promise<Map<string, string>> {
+  const links = new Map<string, string>();
+  await Promise.all(
+    tasks.map(async (task) => {
+      if (!task.slackChannelId || !task.slackTriggerMessageTs) return;
+      const key = physicalThreadKey(task.slackChannelId, task.slackTriggerMessageTs);
+      let pending = triggerPermalinkPromises.get(key);
+      if (!pending) {
+        pending = resolvePermalink(client, task.slackChannelId, task.slackTriggerMessageTs).catch(
+          (error) => {
+            triggerPermalinkPromises.delete(key);
+            console.warn(
+              `[Slack] Failed to resolve direct trigger permalink for ${task.id}:`,
+              error,
+            );
+            return undefined;
+          },
+        );
+        triggerPermalinkPromises.set(key, pending);
+      }
+      const permalink = await pending;
+      if (permalink) links.set(task.id, permalink);
+    }),
+  );
+  return links;
 }
 
 async function ensureTreePermalink(
@@ -352,7 +423,8 @@ async function createThreadTree(task: AgentTask): Promise<SlackMessageRecord | n
 
   const renderedThrough = new Date().toISOString();
   const tasks = getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
-  const text = renderThreadTree(tasks, outcomeLinksFor(tasks));
+  const triggerLinks = await triggerLinksFor(app.client, tasks);
+  const text = renderThreadTree(tasks, outcomeLinksFor(tasks), new Date(), triggerLinks);
   const reserved = existing
     ? { record: existing, created: false }
     : reserveSlackMessage({
@@ -508,7 +580,8 @@ async function updateThreadTree(
     const renderedThrough = new Date().toISOString();
     const tasks = getSlackTasksInThread(current.channelId, current.threadTs);
     if (tasks.length === 0) return "unchanged" as const;
-    const text = renderThreadTree(tasks, outcomeLinksFor(tasks));
+    const triggerLinks = await triggerLinksFor(app.client, tasks);
+    const text = renderThreadTree(tasks, outcomeLinksFor(tasks), new Date(), triggerLinks);
     const lastText = lastTreeText.get(current.id);
     const lastUpdate = lastTreeUpdateAt.get(current.id) ?? 0;
     if (text === lastText) {
@@ -546,60 +619,93 @@ async function updateThreadTree(
   return result === "updated";
 }
 
-function outcomeSummary(output: string | null | undefined): string {
-  const normalized = markdownToSlack(output?.trim() || "Task completed.")
-    .replace(/^#+\s*/gm, "")
-    .replace(/\n{2,}[\s\S]*$/, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (normalized.length <= MAX_OUTCOME_SUMMARY_LENGTH) return normalized;
-  const boundary = normalized.lastIndexOf(" ", MAX_OUTCOME_SUMMARY_LENGTH - 1);
-  const cut = boundary > 300 ? boundary : MAX_OUTCOME_SUMMARY_LENGTH - 1;
-  return `${normalized.slice(0, cut).trimEnd()}…`;
-}
-
 function isOutcomeStatus(
   status: AgentTask["status"],
 ): status is "completed" | "failed" | "cancelled" {
   return status === "completed" || status === "failed" || status === "cancelled";
 }
 
+function outcomeText(value: string | null | undefined, fallback: string): string {
+  return value?.trim() ? value : fallback;
+}
+
 function outcomeContent(task: AgentTask): string {
   if (task.status === "failed") {
-    return `❌ *Failed* ${outcomeSummary(task.failureReason || "Task failed.")}`;
+    return `❌ **Failed**\n\n${outcomeText(task.failureReason, "Task failed.")}`;
   }
   if (task.status === "cancelled") {
-    return `🚫 *Cancelled* ${outcomeSummary(task.failureReason || "Task was cancelled.")}`;
+    return `🚫 **Cancelled**\n\n${outcomeText(task.failureReason, "Task was cancelled.")}`;
   }
-  return `✅ ${outcomeSummary(task.output)}`;
+  return `✅\n\n${outcomeText(task.output, "Task completed.")}`;
 }
 
 function attachmentLine(attachments: TaskAttachment[]): string | undefined {
   const attachment = attachments.find((item) => item.isPrimary) ?? attachments[0];
   if (!attachment) return undefined;
   const url = taskAttachmentDisplayUrl(attachment);
-  return /^https?:\/\//.test(url) ? `📎 <${url}|${attachment.name}>` : undefined;
+  return /^https?:\/\//.test(url) ? `📎 [${attachment.name}](${url})` : undefined;
 }
 
-function presentationChunks(text: string, count = 3): string[] {
-  if (text.length <= count) return [...text];
-  const chunks: string[] = [];
-  let cursor = 0;
-  for (let index = 0; index < count - 1; index++) {
-    const target = Math.ceil((text.length - cursor) / (count - index));
-    let end = cursor + target;
-    const nextSpace = text.indexOf(" ", end);
-    if (nextSpace !== -1 && nextSpace - end < 40) end = nextSpace + 1;
-    chunks.push(text.slice(cursor, end));
-    cursor = end;
+type MarkdownFence = { character: "`" | "~"; length: number };
+
+function fenceAt(line: string): MarkdownFence | undefined {
+  const match = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/);
+  if (!match) return undefined;
+  const marker = match[1];
+  if (!marker) return undefined;
+  return { character: marker.startsWith("`") ? "`" : "~", length: marker.length };
+}
+
+function closesFence(line: string, fence: MarkdownFence): boolean {
+  const pattern = fence.character === "`" ? "`" : "~";
+  return new RegExp(`^[ \\t]{0,3}${pattern}{${fence.length},}[ \\t]*$`).test(line);
+}
+
+function safeMarkdownBoundary(markdown: string, maxLength: number): number {
+  let fence: MarkdownFence | undefined;
+  let lastLineBoundary = 0;
+  let lastWordBoundary = 0;
+  let offset = 0;
+
+  for (const match of markdown.matchAll(/.*(?:\r?\n|$)/g)) {
+    const rawLine = match[0];
+    if (!rawLine) break;
+    const line = rawLine.replace(/\r?\n$/, "");
+    const lineEnd = offset + line.length;
+    const wasInsideFence = !!fence;
+
+    if (fence) {
+      if (closesFence(line, fence)) fence = undefined;
+    } else {
+      fence = fenceAt(line);
+    }
+
+    if (!wasInsideFence && !fence) {
+      for (const whitespace of line.matchAll(/\s+/g)) {
+        const boundary = offset + (whitespace.index ?? 0);
+        if (boundary <= maxLength) lastWordBoundary = boundary;
+      }
+    }
+    if (!fence && lineEnd <= maxLength) lastLineBoundary = lineEnd;
+    if (offset > maxLength) break;
+    offset += rawLine.length;
   }
-  chunks.push(text.slice(cursor));
-  return chunks.filter(Boolean);
+
+  return lastLineBoundary || lastWordBoundary;
 }
 
-function outcomePresentationChunks(content: string, attachment: string | undefined): string[] {
-  const body = [content, attachment].filter(Boolean).join("\n");
-  return presentationChunks(`${body}\n`);
+function outcomePresentation(
+  task: AgentTask,
+  content: string,
+  attachment: string | undefined,
+): string {
+  const combined = [content, attachment].filter(Boolean).join("\n\n");
+  const body = combined.endsWith("\n") ? combined : `${combined}\n`;
+  if (body.length <= MAX_OUTCOME_MARKDOWN_LENGTH) return body;
+
+  const suffix = `\n\n… [View full task output](${getTaskUrl(task.id)})`;
+  const boundary = safeMarkdownBoundary(body, MAX_OUTCOME_MARKDOWN_LENGTH - suffix.length);
+  return `${body.slice(0, boundary).trimEnd()}${suffix}`;
 }
 
 function isStreamAlreadyStopped(error: unknown): boolean {
@@ -669,14 +775,13 @@ export async function streamOutcomeCard(
   const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
   const attachment = attachmentLine(getTaskAttachments(task.id));
   const content = outcomeContent(task);
-  const chunks = outcomePresentationChunks(content, attachment);
-  const firstChunk = chunks[0];
-  if (!firstChunk) throw new Error(`Outcome presentation is empty for task ${task.id}`);
+  const presentation = outcomePresentation(task, content, attachment);
+  if (!presentation) throw new Error(`Outcome presentation is empty for task ${task.id}`);
 
   const startPayload: Record<string, unknown> = {
     channel: task.slackChannelId,
     thread_ts: task.slackThreadTs,
-    markdown_text: firstChunk,
+    markdown_text: presentation,
   };
   if (!task.slackChannelId.startsWith("D") && task.slackUserId) {
     const teamId = await slackTeamId(app.client);
@@ -701,7 +806,7 @@ export async function streamOutcomeCard(
   if (isPendingSlackMessage(outcome)) {
     const reconciled = reservationWasCreated
       ? undefined
-      : await findReservedSlackMessage(app.client, outcome, firstChunk);
+      : await findReservedSlackMessage(app.client, outcome, presentation);
     const started =
       reconciled ?? (await callSlackWithRetry(app.client, "chat.startStream", startPayload));
     if (typeof started.ts !== "string" || !started.ts) {
@@ -712,14 +817,6 @@ export async function streamOutcomeCard(
     });
     if (!persisted) throw new Error("Failed to persist the outcome stream timestamp");
     outcome = persisted;
-  }
-  for (let index = outcome.streamChunksAppended; index < chunks.length; index++) {
-    await callSlackWithRetry(app.client, "chat.appendStream", {
-      channel: task.slackChannelId,
-      ts: outcome.ts,
-      markdown_text: chunks[index],
-    });
-    outcome = updateSlackMessageRecord(outcome.id, { streamChunksAppended: index + 1 }) ?? outcome;
   }
   try {
     await callSlackWithRetry(app.client, "chat.stopStream", {
@@ -839,6 +936,7 @@ export function _resetSlackRenderV2ForTests(): void {
   treeCreationPromises.clear();
   lastTreeText.clear();
   lastTreeUpdateAt.clear();
+  triggerPermalinkPromises.clear();
   treeUpdateTails.clear();
   cachedTeamId = undefined;
 }

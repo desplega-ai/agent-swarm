@@ -198,6 +198,9 @@ describe("assistant.ts — userMessage production-path co-mention guard", () => 
     });
 
     expect(createTaskWithSiblingAwarenessSpy).toHaveBeenCalledTimes(1);
+    expect(createTaskWithSiblingAwarenessSpy.mock.calls[0]?.[1]).toMatchObject({
+      slackTriggerMessageTs: "1000000001.000002",
+    });
   });
 
   test("does NOT spawn a task when message @-mentions a human user but not our bot", async () => {
@@ -301,6 +304,9 @@ describe("registerMessageHandler — assistant_thread co-mention guard (producti
     });
 
     expect(createTaskWithSiblingAwarenessSpy).toHaveBeenCalledTimes(1);
+    expect(createTaskWithSiblingAwarenessSpy.mock.calls[0]?.[1]).toMatchObject({
+      slackTriggerMessageTs: delivery.ts,
+    });
   });
 
   test("does NOT spawn a task when assistant_thread message @-mentions a human (not our bot)", async () => {

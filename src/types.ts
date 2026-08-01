@@ -488,6 +488,7 @@ export const AgentTaskSchema = z.object({
   // Slack-specific metadata (optional)
   slackChannelId: z.string().optional(),
   slackThreadTs: z.string().optional(),
+  slackTriggerMessageTs: z.string().optional(),
   slackUserId: z.string().optional(),
   slackReplySent: z.boolean().default(false),
   slackProgressMessageTs: z.string().optional(),

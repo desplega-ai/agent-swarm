@@ -35,7 +35,7 @@ const TEST_DB_PATH = "./test-slack-render-v2.sqlite";
 const calls: Array<{ method: string; payload: Record<string, unknown> }> = [];
 let treeCounter = 0;
 let outcomeCounter = 0;
-let appendCallsUntilFailure: number | undefined;
+let stopCallsUntilFailure: number | undefined;
 let permalinkFailuresRemaining = 0;
 let slackAddressSequence = 0;
 let missingMessageTs: string | undefined;
@@ -55,6 +55,10 @@ const remoteMessages = new Map<string, RemoteMessage>();
 
 function remoteKey(channel: string, ts: string): string {
   return `${channel}:${ts}`;
+}
+
+function seedRemoteSlackMessage(channel: string, threadTs: string, ts: string, text: string): void {
+  remoteMessages.set(remoteKey(channel, ts), { channel, threadTs, ts, text });
 }
 
 function deferred() {
@@ -121,6 +125,9 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
     return { ok: true, ts };
   }
   if (method === "chat.startStream") {
+    if (String(payload.markdown_text ?? "").length > 12_000) {
+      throw new Error("markdown_text exceeded Slack's streaming limit");
+    }
     const ts = `outcome.${++outcomeCounter}`;
     remoteMessages.set(remoteKey(String(payload.channel), ts), {
       channel: String(payload.channel),
@@ -131,13 +138,6 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
     });
     return { ok: true, ts };
   }
-  if (method === "chat.appendStream" && appendCallsUntilFailure !== undefined) {
-    if (appendCallsUntilFailure === 0) {
-      appendCallsUntilFailure = undefined;
-      throw new Error("temporary append failure");
-    }
-    appendCallsUntilFailure--;
-  }
   if (method === "chat.appendStream") {
     const message = remoteMessages.get(remoteKey(String(payload.channel), String(payload.ts)));
     if (!message) throw { data: { error: "message_not_found" } };
@@ -145,6 +145,13 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
     return { ok: true };
   }
   if (method === "chat.stopStream") {
+    if (stopCallsUntilFailure !== undefined) {
+      if (stopCallsUntilFailure === 0) {
+        stopCallsUntilFailure = undefined;
+        throw new Error("temporary stop failure");
+      }
+      stopCallsUntilFailure--;
+    }
     const message = remoteMessages.get(remoteKey(String(payload.channel), String(payload.ts)));
     if (!message) throw { data: { error: "message_not_found" } };
     if (!message.streaming) throw { data: { error: "message_not_in_streaming_state" } };
@@ -215,7 +222,7 @@ beforeEach(async () => {
   treeCounter = 0;
   outcomeCounter = 0;
   mockApiCall.mockClear();
-  appendCallsUntilFailure = undefined;
+  stopCallsUntilFailure = undefined;
   permalinkFailuresRemaining = 0;
   missingMessageTs = undefined;
   updateFailuresRemaining = 0;
@@ -549,7 +556,7 @@ describe("Slack renderer v2", () => {
     expect(formatV2Duration(start, new Date("2026-07-31T20:12:00.000Z"))).toBe("12m");
   });
 
-  test("renders asks as thread roots and preserves real delegated nesting", () => {
+  test("renders the frozen context tree with direct triggers, progress, and real nesting", () => {
     const lead = createAgent({ name: "Lead", isLead: true, status: "idle" });
     const researcher = createAgent({ name: "Researcher", isLead: false, status: "idle" });
     const contextKey = slackContextKey({ channelId: "C_TREE_SHAPE", threadTs: "100.1" });
@@ -558,6 +565,7 @@ describe("Slack renderer v2", () => {
       source: "slack",
       slackChannelId: "C_TREE_SHAPE",
       slackThreadTs: "100.1",
+      slackTriggerMessageTs: "100.2",
       contextKey,
     });
     const child = createTaskExtended("research exact Slack API behavior", {
@@ -578,26 +586,104 @@ describe("Slack renderer v2", () => {
       parentTaskId: grandchild.id,
       slackChannelId: "C_TREE_SHAPE",
       slackThreadTs: "100.1",
+      slackTriggerMessageTs: "100.3",
       contextKey,
     });
+    expect(getTaskById(ask.id)?.slackTriggerMessageTs).toBe("100.2");
+    expect(getTaskById(child.id)?.slackTriggerMessageTs).toBeUndefined();
+    expect(getTaskById(grandchild.id)?.slackTriggerMessageTs).toBeUndefined();
     const fixedStart = new Date("2026-07-31T20:00:00.000Z").toISOString();
     const now = new Date("2026-07-31T20:08:05.000Z");
+    const finishedAt = new Date("2026-07-31T20:04:00.000Z").toISOString();
+    const outcomeUrl = "https://workspace.slack.com/archives/C_TREE_SHAPE/p1004";
+    const triggerLinks = new Map([
+      [ask.id, "https://workspace.slack.com/archives/C_TREE_SHAPE/p1002"],
+      [secondAsk.id, "https://workspace.slack.com/archives/C_TREE_SHAPE/p1003"],
+    ]);
     const text = renderThreadTree(
-      [ask, child, grandchild, secondAsk].map((task) => ({ ...task, createdAt: fixedStart })),
-      new Map(),
+      [
+        { ...ask, createdAt: fixedStart },
+        { ...child, createdAt: fixedStart, progress: "Reading **Slack docs** carefully" },
+        {
+          ...grandchild,
+          createdAt: fixedStart,
+          status: "completed" as const,
+          finishedAt,
+        },
+        {
+          ...secondAsk,
+          task: "<thread_context>\nold context\n</thread_context>\n\n[Thread follow-up — 1 message(s) buffered]\n\nship this PR",
+          createdAt: fixedStart,
+        },
+      ],
+      new Map([[grandchild.id, outcomeUrl]]),
       now,
+      triggerLinks,
     );
 
     expect(text).toBe(
       [
-        "🧵 *format tests* · 8m05s",
-        `↳ ⏳ format tests · 8m05s · <https://app.agent-swarm.dev/tasks/${ask.id}|\`${ask.id.slice(0, 8)}\`>`,
-        `   ↳ ⏳ Researcher · 8m05s · <https://app.agent-swarm.dev/tasks/${child.id}|\`${child.id.slice(0, 8)}\`>`,
-        `      ↳ ⏳ Researcher · 8m05s · <https://app.agent-swarm.dev/tasks/${grandchild.id}|\`${grandchild.id.slice(0, 8)}\`>`,
-        `↳ ⏳ this PR · 8m05s · <https://app.agent-swarm.dev/tasks/${secondAsk.id}|\`${secondAsk.id.slice(0, 8)}\`>`,
+        "🧵 worked for 8m05s",
+        ` ↳ ⏳ format tests · 8m05s · <https://app.agent-swarm.dev/tasks/${ask.id}|\`${ask.id.slice(0, 8)}\`> <https://workspace.slack.com/archives/C_TREE_SHAPE/p1002|↵>`,
+        `    ↳ ⏳ Researcher · 8m05s · <https://app.agent-swarm.dev/tasks/${child.id}|\`${child.id.slice(0, 8)}\`> · Reading *Slack docs* carefully…`,
+        `       ↳ ✅ Researcher · 4m · <https://app.agent-swarm.dev/tasks/${grandchild.id}|\`${grandchild.id.slice(0, 8)}\`> → <${outcomeUrl}|result>`,
+        ` ↳ ⏳ ship this PR · 8m05s · <https://app.agent-swarm.dev/tasks/${secondAsk.id}|\`${secondAsk.id.slice(0, 8)}\`> <https://workspace.slack.com/archives/C_TREE_SHAPE/p1003|↵>`,
       ].join("\n"),
     );
     expect(text).not.toContain("```");
+    expect(text).not.toContain("↩");
+    expect(text).not.toContain(":leftwards_arrow_with_hook:");
+    const rows = text.split("\n").slice(1);
+    expect(rows.slice(0, 3).map((row) => row.match(/^ +/u)?.[0].length)).toEqual([1, 4, 7]);
+  });
+
+  test("resolves and caches distinct direct-trigger permalinks while omitting workers", async () => {
+    const lead = createAgent({ name: "Trigger Lead", isLead: true, status: "idle" });
+    const worker = createAgent({ name: "Trigger Worker", isLead: false, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_TRIGGER_LINKS");
+    const contextKey = slackContextKey({ channelId, threadTs });
+    const firstTs = `${slackAddressSequence}.2`;
+    const secondTs = `${slackAddressSequence}.3`;
+    seedRemoteSlackMessage(channelId, threadTs, firstTs, "first human ask");
+    seedRemoteSlackMessage(channelId, threadTs, secondTs, "second human ask");
+    const first = createTaskExtended("first human ask", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackTriggerMessageTs: firstTs,
+      contextKey,
+    });
+    const child = createTaskExtended("delegated work", {
+      agentId: worker.id,
+      source: "mcp",
+      parentTaskId: first.id,
+      followUpConfig: { disabled: true },
+    });
+    const second = createTaskExtended("second human ask", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackTriggerMessageTs: secondTs,
+      contextKey,
+    });
+
+    await ensureSlackThreadTree([first.id, child.id, second.id]);
+
+    const posted = calls.find((call) => call.method === "chat.postMessage")!;
+    expect(posted.payload.text).toContain(`p${firstTs.replaceAll(".", "")}|↵>`);
+    expect(posted.payload.text).toContain(`p${secondTs.replaceAll(".", "")}|↵>`);
+    expect(String(posted.payload.text).match(/\|↵>/g)).toHaveLength(2);
+    expect(String(posted.payload.text)).not.toContain("↩");
+    expect(String(posted.payload.text)).not.toContain(":leftwards_arrow_with_hook:");
+    expect(calls.filter((call) => call.method === "chat.getPermalink")).toHaveLength(3);
+    const blocks = posted.payload.blocks as Array<{
+      type: string;
+      elements: Array<{ type: string; text: string }>;
+    }>;
+    expect(blocks.every((block) => block.type === "context")).toBe(true);
+    expect(blocks.every((block) => block.elements[0]?.type === "mrkdwn")).toBe(true);
   });
 
   test("collapses older tasks before a persistent tree exceeds Slack's section limit", async () => {
@@ -619,13 +705,13 @@ describe("Slack renderer v2", () => {
       (call) => call.method === "chat.postMessage" && call.payload.channel === channelId,
     )!;
     const text = posted.payload.text as string;
-    const blocks = posted.payload.blocks as Array<{ text: { text: string } }>;
+    const blocks = posted.payload.blocks as Array<{ elements: Array<{ text: string }> }>;
     expect(text.length).toBeLessThanOrEqual(MAX_SECTION_LENGTH);
-    expect(blocks[0]?.text.text).toBe(text);
+    expect(blocks[0]?.elements[0]?.text).toBe(text);
     expect(text).toContain("older tasks collapsed");
     expect(text).toContain(tasks.at(-1)!.id.slice(0, 8));
     expect(text).not.toContain(tasks[1]!.id.slice(0, 8));
-    expect(text.split("\n").filter((line) => line.startsWith("↳"))).not.toHaveLength(0);
+    expect(text.split("\n").filter((line) => line.startsWith(" ↳"))).not.toHaveLength(0);
     expect(text).not.toMatch(/[├└│]/);
 
     for (const task of tasks) failTask(task.id, "test cleanup");
@@ -660,9 +746,13 @@ describe("Slack renderer v2", () => {
     await ensureSlackThreadTree([child.id]);
 
     const posted = calls.find((call) => call.method === "chat.postMessage")!;
-    const blocks = posted.payload.blocks as Array<{ text: { text: string } }>;
-    expect(blocks.every((block) => block.text.text.length <= MAX_SECTION_LENGTH)).toBe(true);
-    expect(blocks.map((block) => block.text.text).join("\n")).toContain(child.id.slice(0, 8));
+    const blocks = posted.payload.blocks as Array<{ elements: Array<{ text: string }> }>;
+    expect(blocks.every((block) => block.elements[0]!.text.length <= MAX_SECTION_LENGTH)).toBe(
+      true,
+    );
+    expect(blocks.map((block) => block.elements[0]!.text).join("\n")).toContain(
+      child.id.slice(0, 8),
+    );
   });
 
   test("discovers an ask that completed before the first poll and emits one tree and card", async () => {
@@ -778,7 +868,7 @@ describe("Slack renderer v2", () => {
     completeTask(child.id, "PRIVATE RAW WORKER OUTPUT THAT MUST NOT REACH SLACK");
     completeTask(
       ask.id,
-      "Implemented the Slack renderer and opened a focused pull request.\n\nInternal details that should not be relayed.",
+      "Implemented the Slack renderer and opened a focused pull request.\n\nSecond paragraph that must be rendered.",
     );
     calls.length = 0;
     _resetSlackRenderV2ForTests();
@@ -792,8 +882,6 @@ describe("Slack renderer v2", () => {
     expect(chatSequence).toEqual([
       "chat.getPermalink",
       "chat.startStream",
-      "chat.appendStream",
-      "chat.appendStream",
       "chat.stopStream",
       "chat.getPermalink",
       "chat.update",
@@ -803,24 +891,20 @@ describe("Slack renderer v2", () => {
       (call) => call.method === "chat.startStream" && call.payload.channel === channelId,
     )!;
     const outcomeChunks = calls
-      .filter(
-        (call) =>
-          call.payload.channel === channelId &&
-          (call.method === "chat.startStream" || call.method === "chat.appendStream"),
-      )
+      .filter((call) => call.payload.channel === channelId && call.method === "chat.startStream")
       .map((call) => String(call.payload.markdown_text));
     const outcomeBody = outcomeChunks.join("");
-    expect(outcomeChunks).toHaveLength(3);
+    expect(outcomeChunks).toHaveLength(1);
     expect(outcomeBody).toBe(
-      "✅ Implemented the Slack renderer and opened a focused pull request.\n",
+      "✅\n\nImplemented the Slack renderer and opened a focused pull request.\n\nSecond paragraph that must be rendered.\n",
     );
-    expect(outcomeBody).not.toContain("*Done*");
+    expect(outcomeBody).not.toContain("**Done**");
     expect(outcomeBody).not.toContain(getTaskLink(ask.id));
     expect(started.payload.channel).toBe(channelId);
     expect(started.payload.thread_ts).toBe(threadTs);
     expect(started.payload.recipient_user_id).toBe("U_REQUESTER");
     expect(started.payload.recipient_team_id).toBe("T_TEST");
-    expect(String(started.payload.markdown_text).startsWith("✅ Implemented")).toBe(true);
+    expect(String(started.payload.markdown_text).startsWith("✅\n\nImplemented")).toBe(true);
     expect(Object.keys(started.payload).sort()).toEqual([
       "channel",
       "markdown_text",
@@ -828,9 +912,7 @@ describe("Slack renderer v2", () => {
       "recipient_user_id",
       "thread_ts",
     ]);
-    for (const appended of calls.filter((call) => call.method === "chat.appendStream")) {
-      expect(Object.keys(appended.payload).sort()).toEqual(["channel", "markdown_text", "ts"]);
-    }
+    expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
     const stopped = calls.find(
       (call) => call.method === "chat.stopStream" && call.payload.channel === channelId,
     )!;
@@ -873,7 +955,104 @@ describe("Slack renderer v2", () => {
     expect(outcome?.permalink).toContain("outcome1");
   });
 
-  test("streams a bounded failed outcome with its reason", async () => {
+  test("preserves complete native Markdown beyond the Block Kit text ceiling", async () => {
+    const lead = createAgent({ name: "Markdown Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_OUTCOME_MARKDOWN");
+    const ask = createTaskExtended("preserve native Markdown", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    const output = [
+      "# Complete result",
+      "",
+      "**Bold text** and [a labeled link](https://example.com/result).",
+      "",
+      "- first item",
+      "  - nested item",
+      "",
+      "```ts",
+      'const message = "preserved";',
+      "```",
+      "",
+      `Long section: ${"native markdown remains intact. ".repeat(150)}`,
+    ].join("\n");
+    expect(output.length).toBeGreaterThan(3_000);
+    expect(output.length).toBeLessThan(12_000);
+    startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    completeTask(ask.id, output);
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toBe(`✅\n\n${output}\n`);
+    expect(String(started?.payload.markdown_text)).toContain("# Complete result");
+    expect(String(started?.payload.markdown_text)).toContain("**Bold text**");
+    expect(String(started?.payload.markdown_text)).toContain(
+      "[a labeled link](https://example.com/result)",
+    );
+    expect(String(started?.payload.markdown_text)).toContain("  - nested item");
+    expect(String(started?.payload.markdown_text)).toContain(
+      '```ts\nconst message = "preserved";\n```',
+    );
+    expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
+  });
+
+  test("truncates oversized Markdown before a code fence and links the full task", async () => {
+    const lead = createAgent({ name: "Overflow Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_OUTCOME_OVERFLOW");
+    const ask = createTaskExtended("truncate oversized Markdown safely", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    const safeParagraphs = Array.from(
+      { length: 60 },
+      (_, index) =>
+        `Safe paragraph ${index}: every complete sentence stays intact at a line boundary before overflow.`,
+    ).join("\n\n");
+    const oversizedFence = `\`\`\`ts\n${"const omitted = true;\n".repeat(500)}\`\`\``;
+    const output = [
+      "# Full result",
+      "",
+      "```ts",
+      "const included = true;",
+      "```",
+      "",
+      safeParagraphs,
+      "",
+      oversizedFence,
+    ].join("\n");
+    expect(output.length).toBeGreaterThan(12_000);
+    startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    completeTask(ask.id, output);
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    const started = calls.find((call) => call.method === "chat.startStream");
+    const markdown = String(started?.payload.markdown_text);
+    const suffix = `… [View full task output](https://app.agent-swarm.dev/tasks/${ask.id})`;
+    expect(markdown.length).toBeLessThanOrEqual(12_000);
+    expect(markdown).toEndWith(suffix);
+    expect(markdown).toContain("Safe paragraph 59:");
+    expect(markdown).not.toContain("const omitted = true;");
+    expect(markdown.match(/^```/gm)).toHaveLength(2);
+    expect(markdown.slice(0, -suffix.length).trimEnd()).toEndWith("before overflow.");
+    expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
+    expect(getSlackOutcomeMessage(ask.id)?.finalizedAt).toBeDefined();
+  });
+
+  test("streams the complete failed outcome with its reason", async () => {
     const lead = createAgent({ name: "Failure Lead", isLead: true, status: "idle" });
     const channelId = "C_RENDER_FAILURE";
     const threadTs = "400.1";
@@ -895,13 +1074,12 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const started = calls.find((call) => call.method === "chat.startStream");
-    expect(started?.payload.markdown_text).toContain("❌ *Failed*");
+    expect(started?.payload.markdown_text).toContain("❌ **Failed**");
     const outcome = getSlackOutcomeMessage(ask.id);
     const remote = remoteMessages.get(remoteKey(channelId, outcome!.ts));
-    expect(remote?.text.startsWith("❌ *Failed* expected test failure")).toBe(true);
-    expect(remote?.text.endsWith("\n")).toBe(true);
+    expect(remote?.text).toBe(`❌ **Failed**\n\n${reason}\n`);
     expect(remote?.text).not.toContain(getTaskLink(ask.id));
-    expect(remote!.text.length).toBeLessThan(800);
+    expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
     const update = calls.find(
       (call) => call.method === "chat.update" && call.payload.ts === tree?.ts,
     );
@@ -910,7 +1088,7 @@ describe("Slack renderer v2", () => {
     expect(update?.payload.text).toContain("→ <https://workspace.slack.com/");
   });
 
-  test("renders cancellation distinctly and carries the bounded reason", async () => {
+  test("renders cancellation distinctly and carries the complete reason", async () => {
     const lead = createAgent({ name: "Cancellation Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_CANCELLED");
     const ask = createTaskExtended("cancelled ask", {
@@ -929,13 +1107,14 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const started = calls.find((call) => call.method === "chat.startStream");
-    expect(started?.payload.markdown_text).toContain("🚫 *Cancelled*");
+    expect(started?.payload.markdown_text).toContain("🚫 **Cancelled**");
     const outcome = getSlackOutcomeMessage(ask.id)!;
     const remote = remoteMessages.get(remoteKey(channelId, outcome.ts));
-    expect(remote?.text.startsWith("🚫 *Cancelled* requester changed direction")).toBe(true);
-    expect(remote?.text.endsWith("\n")).toBe(true);
+    expect(remote?.text).toBe(
+      `🚫 **Cancelled**\n\nrequester changed direction ${"context ".repeat(200)}\n`,
+    );
     expect(remote?.text).not.toContain(getTaskLink(ask.id));
-    expect(remote!.text.length).toBeLessThan(800);
+    expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
     const update = calls.find(
       (call) => call.method === "chat.update" && call.payload.ts === tree?.ts,
     );
@@ -1091,7 +1270,7 @@ describe("Slack renderer v2", () => {
     completeTask(ask.id, "Recovered the outcome stream after a temporary interruption.");
     calls.length = 0;
     _resetSlackRenderV2ForTests();
-    appendCallsUntilFailure = 1;
+    stopCallsUntilFailure = 0;
 
     await processSlackRenderV2();
 
@@ -1100,15 +1279,16 @@ describe("Slack renderer v2", () => {
     expect(interrupted?.channelId).toBe(tree?.channelId);
     expect(interrupted?.threadTs).toBe(tree?.threadTs);
     expect(interrupted?.finalizedAt).toBeUndefined();
-    expect(interrupted?.streamChunksAppended).toBe(2);
+    expect(interrupted?.streamChunksAppended).toBe(1);
     expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(1);
+    expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
 
     calls.length = 0;
     _resetSlackRenderV2ForTests();
     await processSlackRenderV2();
 
     expect(calls.some((call) => call.method === "chat.startStream")).toBe(false);
-    expect(calls.filter((call) => call.method === "chat.appendStream")).toHaveLength(1);
+    expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
     expect(calls.some((call) => call.method === "chat.stopStream")).toBe(true);
     expect(getSlackOutcomeMessage(ask.id)?.finalizedAt).toBeDefined();
   });

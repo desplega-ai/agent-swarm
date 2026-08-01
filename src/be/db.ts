@@ -1154,6 +1154,7 @@ type AgentTaskRow = {
   rejectionReason: string | null;
   slackChannelId: string | null;
   slackThreadTs: string | null;
+  slackTriggerMessageTs: string | null;
   slackUserId: string | null;
   slackReplySent: number;
   slackProgressMessageTs: string | null;
@@ -1269,6 +1270,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     rejectionReason: row.rejectionReason ?? undefined,
     slackChannelId: row.slackChannelId ?? undefined,
     slackThreadTs: row.slackThreadTs ?? undefined,
+    slackTriggerMessageTs: row.slackTriggerMessageTs ?? undefined,
     slackUserId: row.slackUserId ?? undefined,
     slackReplySent: !!row.slackReplySent,
     slackProgressMessageTs: row.slackProgressMessageTs ?? undefined,
@@ -4557,6 +4559,8 @@ export interface CreateTaskOptions {
   status?: "backlog" | "unassigned"; // Explicitly set initial status
   slackChannelId?: string;
   slackThreadTs?: string;
+  /** Exact Slack message that directly triggered this task; never inherited. */
+  slackTriggerMessageTs?: string;
   slackUserId?: string;
   /**
    * Opt out of the residual Slack/contextKey normalization below (see the
@@ -4908,13 +4912,13 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       `INSERT INTO agent_tasks (
         id, "key", agentId, creatorAgentId, task, status, source,
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
-        slackChannelId, slackThreadTs, slackUserId,
+        slackChannelId, slackThreadTs, slackTriggerMessageTs, slackUserId,
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -4932,6 +4936,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.offeredTo ? now : null,
       options?.slackChannelId ?? null,
       options?.slackThreadTs ?? null,
+      options?.slackTriggerMessageTs ?? null,
       options?.slackUserId ?? null,
       options?.vcsProvider ?? null,
       options?.vcsRepo ?? null,
