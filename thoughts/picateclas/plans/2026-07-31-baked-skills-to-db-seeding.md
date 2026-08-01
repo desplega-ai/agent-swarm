@@ -2,7 +2,7 @@
 
 ## Overview
 
-Move the remaining repository-owned and pinned ai-toolbox skills from worker-image installation into the existing database seeder, while making worker startup fail clearly when the API never becomes ready. The work is split into three independently shippable PRs; the collision and multi-file foundation described as Phase 0 in the research is already shipped in PR #1044 and is not planned again here.
+Move the remaining repository-owned and pinned ai-toolbox skills from worker-image installation into the existing database seeder, while making worker startup fail clearly when the API or its required seed catalog never becomes ready. The work is split into three separately reviewable PRs; Phases 1 and 2 are deploy-safe in either order, while Phase 3 intentionally builds on Phase 1's generated-catalog foundation. The collision and multi-file foundation described as Phase 0 in the research is already shipped in PR #1044 and is not planned again here.
 
 - **Motivation**: collapse parallel skill delivery paths, make skill updates reproducible and live-updatable, and prevent workers from starting half-provisioned when their control-plane API is unavailable. This is an update-velocity and correctness project, not an image-size or boot-speed optimization.
 - **Related**: [`thoughts/taras/research/2026-07-31-baked-skills-to-db-seeding.md`](../../taras/research/2026-07-31-baked-skills-to-db-seeding.md), [PR #1044](https://github.com/desplega-ai/agent-swarm/pull/1044), `runbooks/skills.md`, `runbooks/docker-images.md`, `LOCAL_TESTING.md`
@@ -33,7 +33,7 @@ It intentionally left the later phases untouched: the production source catalog 
 ### Worker boot
 
 - `docker-entrypoint.sh` performs API reads before and throughout setup, but all current failures are best-effort; skill sync explicitly continues when no response arrives (`docker-entrypoint.sh:58-76`, `docker-entrypoint.sh:126-166`, `docker-entrypoint.sh:284-308`, `docker-entrypoint.sh:327-369`, `docker-entrypoint.sh:706-754`).
-- The canonical public readiness endpoint is `GET /health`, not `/api/health` (`src/http/core.ts:289-305`). The server starts listening only after startup configuration and built-in seeders finish, making this endpoint a suitable seeding-readiness signal.
+- The canonical public process-readiness endpoint is `GET /health`, not `/api/health` (`src/http/core.ts:289-305`). It is not a seed-catalog compatibility proof: startup catches built-in seeder errors and continues toward `listen()` (`src/http/index.ts:542-553`), and an older API can return 200 without containing the five migrated skills.
 - `ROLE` and `MCP_URL` are currently resolved too late for a gate that must precede the earliest provider-specific API reads (`docker-entrypoint.sh:252-255`).
 
 ### ai-toolbox installation
@@ -56,10 +56,11 @@ It intentionally left the later phases untouched: the production source catalog 
 
 - The five repository-owned skills exist only under `templates/skills/`, seed at swarm scope, retain their existing content, and are delivered by DB refresh to Claude, Pi, Codex, OpenCode, and the universal Agents tree.
 - The compiled production catalog is generated deterministically from `templates/skills/*/config.json` and `content.md`; adding a seeded template requires regeneration, not hand-written imports.
-- Worker and lead containers poll `${MCP_BASE_URL}/health` before any API-dependent setup, stop waiting after a validated timeout, and exit non-zero with a stable non-secret fatal message when the API remains unavailable.
+- The Phase-1 worker image removes its repository-skill fallback only after it can prove the reachable API advertises the additive `repository-skills-v1` seed capability and has completed the corresponding seed run; an old healthy or seed-incomplete API makes the worker exit non-zero before the runner starts.
+- Worker and lead containers also poll `${MCP_BASE_URL}/health` before any API-dependent setup, stop waiting after a validated timeout, and exit non-zero with a stable non-secret fatal message when the API remains unavailable. This Phase-2 liveness gate complements rather than replaces the Phase-1 catalog-capability gate.
 - The pinned 18-skill ai-toolbox snapshot lives under `templates/skills/`, including its 14 supported auxiliary files, with a non-interactive sync/check script and CI drift gate.
 - Worker images no longer run the ai-toolbox `npx skills add` block or copy repository skills, while `agent-fs`, `qa-use`, `plugin/commands/`, and `plugin/agents/` retain their intended baked delivery.
-- Each of the three phases can merge alone without relying on an unmerged later phase.
+- Phase 1 is rollout-safe without Phase 2, Phase 2 is rollout-safe without Phase 1, and Phase 3 lands only after Phase 1 because it consumes the generated catalog.
 
 ## What We're NOT Doing
 
@@ -74,11 +75,13 @@ It intentionally left the later phases untouched: the production source catalog 
 
 ## Implementation Approach
 
-- Land three PRs corresponding exactly to Phases 1-3 below. Phase 2 is independent and may land before or after either skill migration.
+- Land three PRs corresponding exactly to Phases 1-3 below. Phase 2 is independent and may land before or after Phase 1; Phase 3 follows Phase 1.
 - Make Phase 1 the catalog-discovery foundation. Use a generated, checked catalog artifact so the compiled binary embeds discovered sources without a runtime templates dependency.
+- Give Phase 1 its own additive catalog contract. The API reports `repository-skills-v1` only after the current process finishes a failure-free skill seed and verifies the five required DB rows; the worker requires that capability before starting. Do not infer catalog compatibility from `/health`.
 - Preserve delivery parity before deleting image fanout: the pinned installer must copy retained baked skills to all supported agent targets, with assertions on the five paths the swarm actually uses.
 - Treat vendoring as a reproducible transformation: explicit upstream paths and pin, staged writes, strict validation, deterministic output, and a `--check` mode.
-- Keep verification evidence inside each PR. Fresh-DB and existing-DB runs must use isolated/local data only; never run destructive DB commands against a live deployment.
+- Keep verification evidence inside each PR. Fresh/existing-DB coverage is implemented as isolated test fixtures that create unique temporary SQLite files and remove the `.sqlite`, `-wal`, and `-shm` files in `afterAll`; no implementation gate deletes the default development DB.
+- Put each deployment scenario behind a committed package command and wire it into the relevant Merge Gate change detector. A checklist item is not complete when a human has only observed logs or queried SQLite ad hoc.
 
 ## Quick Verification Reference
 
@@ -109,7 +112,7 @@ bun run docker:build:worker
 
 ### Overview
 
-Deliver a compiled, generated seed catalog containing the five formerly baked repository skills, remove their image copies and generic leaf-stage mirrors, and preserve all-harness delivery of the intentionally retained baked dependencies. This phase is one independently shippable PR.
+Deliver a compiled, generated seed catalog containing the five formerly baked repository skills, an API proof that the catalog was seeded successfully, and a fail-closed worker check for that proof before removing image copies and generic leaf-stage mirrors. Preserve all-harness delivery of the intentionally retained baked dependencies. This phase is one independently deploy-safe PR even when Phase 2 has not landed.
 
 ### Changes Required:
 
@@ -130,7 +133,7 @@ Deliver a compiled, generated seed catalog containing the five formerly baked re
 
 **Changes**:
 
-- Add a Bun generator that scans `templates/skills/*/config.json`, validates directory/name/body rules, filters `runAllSeedersCandidate: true`, reads `content.md`, sorts by skill name, and writes a deterministic embedded catalog containing config plus body text.
+- Add a Bun generator that scans `templates/skills/*/config.json`, validates directory/name/body rules, filters `runAllSeedersCandidate: true`, reads `content.md`, sorts by skill name, and writes a deterministic embedded catalog containing config plus body text. Include an additive `capabilities` array whose first migration marker is `repository-skills-v1`; later catalog additions append capabilities rather than changing the meaning of this marker.
 - Support `--check` and add paired package commands (for example, `build:seed-skill-catalog` and `check:seed-skill-catalog`). Never make production `loadSeedSkills()` depend on filesystem scanning.
 - Replace the 20 static imports and hand-written `BUILT_IN_SKILL_SOURCES` list with one generated JSON import. Preserve the current explicit disk-loader branch for tests and the separate bundled-file manifest unless a focused refactor proves a single combined generated artifact is simpler without weakening the #1044 hash/upgrade tests.
 - Rewrite `check-skill-sources.ts` so it compares all seed-candidate template directories with the generated catalog rather than parsing removed import aliases/array syntax. Retain duplicate-delivery-path, name-mismatch, missing-content, and missing-remote-skill checks.
@@ -158,15 +161,31 @@ Deliver a compiled, generated seed catalog containing the five formerly baked re
 - Keep the duplicated `plugin/commands/` and `plugin/agents/` leaf logic and the Pi/Codex command variants unchanged.
 - Update the Docker runbook so it no longer claims that a generic leaf mirror performs fanout.
 
-#### 5. Update skill authoring and CI guidance
+#### 5. Prove the required seed catalog before removing the fallback
 
-**Files**: `CLAUDE.md`, `runbooks/skills.md`, `.github/workflows/merge-gate.yml`, `src/tests/system-default-skills.test.ts`, `src/tests/seed-skills-bundled-files.test.ts`
+**Files**: `src/be/seed-skills/readiness.ts` (new), `src/be/seed/registry.ts`, `src/http/skills.ts`, `docker-entrypoint.sh`, `src/tests/seed-catalog-readiness-http.test.ts` (new), `src/tests/entrypoint-seed-catalog-readiness.test.ts` (new), `src/tests/fixtures/seed-catalog-readiness/{old-healthy.json,seed-incomplete.json,repository-skills-v1.json,empty-agent-skills.json,malformed-agent-skills.json,partial-agent-skills.json}` (new)
+
+**Changes**:
+
+- Retain the current process's `skillsSeeder` result from `runAllSeeders()` and expose an authenticated `GET /api/seed-catalog/readiness` route. Return 200 with `ready: true` and `capabilities: ["repository-skills-v1", ...]` only after the skill seeder completed with zero failed items and DB verification finds exactly one enabled swarm-scope row for each of the five required names. Return 503 while the seed run is absent, failed, or incomplete. Do not derive this response from `/health` alone.
+- Keep the capability additive instead of requiring equality with a whole-catalog content hash: a Phase-1 worker remains compatible with a later Phase-3 API, while an old API has no endpoint/capability and cannot falsely satisfy the gate.
+- Before deleting either image fallback, add a marked/extractable `wait_for_seed_catalog` helper near the existing entrypoint skill-sync block for every non-`claude-managed` worker or lead that uses filesystem skills. Poll the authenticated endpoint with short curl connect/request timeouts for a fixed, bounded 30-second compatibility window and require `repository-skills-v1`. An endpoint 404, 200 without the capability, 503 seed-incomplete response, invalid JSON, or timeout exits with stable code 78 and a non-secret fatal line before the runner starts.
+- After the capability proof, make the required-five agent-skill fetch/write fail closed rather than using the current `|| true` path. Require a successful `/api/agents/${AGENT_ID}/skills` response containing each required name exactly once with non-empty simple-skill content; reject an empty, malformed, duplicate, or partial response. Stage each required skill and atomically install it into `.claude/skills`, `.pi/agent/skills`, `.codex/skills`, `.opencode/skills`, and `.agents/skills`; any fetch, parse, staging, or filesystem error exits 78 before runner launch. Other non-required legacy/remote skill handling may remain best-effort after this required set is durable, and runner refresh still owns later live reconciliation.
+- Keep Phase 2's later `/health` gate separate: if Phase 2 lands first it can wait for generic API liveness, but Phase 1 still requires the catalog capability. If Phase 1 lands first, this local 30-second gate alone prevents a new worker from starting without DB-delivered replacements.
+- Document API-first rollout: deploy the new API, wait until `/api/seed-catalog/readiness` reports `repository-skills-v1`, then deploy Phase-1 workers. Roll back workers before rolling the API below this capability. During a mistaken API-first rollback, new workers fail closed/restart rather than silently launching without skills; existing workers keep their last synchronized filesystem copies.
+- Test the real extracted helpers against the committed HTTP fixtures: `old-healthy.json` returns 200 from `/health` but 404/no capability from the catalog route; `seed-incomplete.json` returns 503; `repository-skills-v1.json` returns the required capability and complete agent-skill payload; and the empty/malformed/partial fixtures fail after capability success. Assert every incompatible or incomplete case exits 78 within the bounded window without launching the runner, while the complete fixture produces byte-correct files in all five trees and proceeds.
+
+#### 6. Add deterministic migration/inventory gates and update authoring guidance
+
+**Files**: `CLAUDE.md`, `runbooks/skills.md`, `.github/workflows/merge-gate.yml`, `package.json`, `src/tests/seed-skill-catalog.test.ts` (new), `src/tests/fixtures/worker-skill-delivery/repository-owned.json` (new), `scripts/test-worker-skill-delivery.ts` (new), `src/tests/system-default-skills.test.ts`, `src/tests/seed-skills-bundled-files.test.ts`
 
 **Changes**:
 
 - Replace instructions to add static imports/list entries with the generated-catalog workflow.
-- Add the catalog generator/checker and generated output to the Seeded Skills change detector and job.
-- Extend seed tests to assert the exact five migrated names, their descriptions/content, system-default behavior, deterministic embedded-vs-disk equality, idempotent re-seeding, and no duplicate rows on an existing DB.
+- Add exact package entrypoints: `test:seed-skill-catalog` runs `bun run test:root -- src/tests/seed-skill-catalog.test.ts src/tests/seed-catalog-readiness-http.test.ts`; `test:seed-catalog-rollout` runs `bun run test:root -- src/tests/entrypoint-seed-catalog-readiness.test.ts`; and `test:worker-skill-delivery:repository` runs `bun scripts/test-worker-skill-delivery.ts --scenario repository-owned`. Add their source/fixture files plus the catalog generator/output to the Seeded Skills and Docker change detectors, and invoke all three commands from their respective Merge Gate jobs.
+- Make `src/tests/seed-skill-catalog.test.ts` own the fresh/existing DB proof. Its fixture creates a unique SQLite path, runs `skillsSeeder` once, asserts the exact five names/description/body/scope/default flags and one row per name, runs it again against the same DB, and asserts no duplicates. A second named test changes one seeded body and bundled file before re-running and deterministically asserts the user modification is preserved. `afterAll` removes the DB plus WAL/SHM companions.
+- Make `repository-owned.json` the exact expected inventory for all five harness trees. `scripts/test-worker-skill-delivery.ts --scenario repository-owned` must (1) inspect slim/full images before API sync, proving the migrated five are absent while retained baked inventory is present in the expected trees, (2) run the real fail-closed entrypoint catalog/fetch/write helpers against the complete fixture into mounted temporary homes, and (3) compare all five post-sync trees byte-for-byte to the fixture. Repeat the sync and assert an empty filesystem diff; separately run the empty/malformed/partial payloads and assert no runner launch or partially installed required set.
+- Extend existing focused seed tests to assert deterministic embedded-vs-disk equality, generated-catalog completeness, and the Composio remote-path move. Keep browser screenshots out of these non-visual gates.
 
 ### Success Criteria:
 
@@ -179,26 +198,26 @@ Deliver a compiled, generated seed catalog containing the five formerly baked re
 - [ ] Worker/API database ownership remains intact: `bash scripts/check-db-boundary.sh`
 - [ ] Dependency boundaries pass: `bun run check:dep-graph`
 - [ ] Skill invariants and both generated manifests are current: `bun run check:skill-sources && bun run check:seed-skill-catalog && bun run check:seed-skill-files`
-- [ ] Focused skill tests pass: `bun run test:root -- src/tests/seed-skills-bundled-files.test.ts src/tests/system-default-skills.test.ts src/tests/skill-fs-writer.test.ts src/tests/skill-sync.test.ts`
+- [ ] Fresh/existing DB catalog assertions and focused skill tests pass: `bun run test:seed-skill-catalog && bun run test:root -- src/tests/seed-skills-bundled-files.test.ts src/tests/system-default-skills.test.ts src/tests/skill-fs-writer.test.ts src/tests/skill-sync.test.ts`
+- [ ] Old-healthy, seed-incomplete, empty, malformed, partial, and complete rollout fixtures pass against the real shell helpers: `bun run test:seed-catalog-rollout`
 - [ ] UI checks required by the Composio catalog change pass: `(cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b)`
 - [ ] Package-triggered API artifacts remain current: `bun run docs:openapi && git diff --exit-code -- openapi.json docs-site/content/docs/api-reference`
-- [ ] The full Docker matrix builds: `docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worker-slim . && docker build -f Dockerfile.worker . && docker build -f apps/evals/Dockerfile .`
-- [ ] Fresh-DB seeding succeeds on an isolated local checkout: `rm agent-swarm-db.sqlite && bun run start:http`; wait for `curl -sf http://localhost:3013/health`, then assert the five skills exist once at swarm scope with their expected content. Remove local `-wal`/`-shm` companions before the run if present.
-- [ ] Existing-DB seeding succeeds: stop and restart `bun run start:http` against that same local DB, assert the seeder settles without duplicates or failed items, and verify a deliberately user-modified seeded skill remains preserved.
+- [ ] The full Docker matrix builds and tags the exact images consumed below: `docker build -f Dockerfile -t agent-swarm-api:latest . && bun run docker:build:worker:slim && bun run docker:build:worker && docker build -f apps/evals/Dockerfile -t agent-swarm-evals:latest .`
+- [ ] Slim/full pre-sync inventory plus repeatable five-tree post-sync delivery match the committed fixture: `bun run test:worker-skill-delivery:repository -- --slim-image agent-swarm-worker:slim --full-image agent-swarm-worker:latest`
 
 #### Automated QA:
 
-- [ ] Boot slim and full worker images before the API sync and verify `agent-fs` exists in all five harness trees, ai-toolbox remains present in all five for this intermediate phase, and `qa-use` exists in all five only in the full image.
-- [ ] With a fresh API/DB and valid UUID agent ID, boot a worker and verify all five migrated skills appear in `.claude/skills`, `.pi/agent/skills`, `.codex/skills`, `.opencode/skills`, and `.agents/skills` after runner refresh; restart the worker and verify they remain stable.
-- [ ] Verify the image contains no `plugin/skills`-sourced copy of the five migrated skills before API synchronization.
-- [ ] Run a `qa-use` session against Settings/Integrations and capture a screenshot showing Composio's recommended skill resolves to `templates/skills/composio`; exercise the install action and confirm no remote 404.
+- [ ] Execute the committed Docker/filesystem inventory scenario, including slim/full pre-sync assertions, ready-catalog sync, restart, and repeat-sync empty diff: `bun run test:worker-skill-delivery:repository -- --slim-image agent-swarm-worker:slim --full-image agent-swarm-worker:latest`
+- [ ] Execute the rollout matrix proving old-healthy, seed-incomplete, empty, malformed, and partial skill APIs fail closed while the complete capability-bearing API writes all five trees and proceeds: `bun run test:seed-catalog-rollout`
+- [ ] Execute the HTTP contract and DB-backed readiness assertions directly: `bun run test:root -- src/tests/seed-catalog-readiness-http.test.ts src/tests/seed-skill-catalog.test.ts`
 
 #### Manual Verification:
 
 - [ ] Review the five migrated skill bodies against their deleted `plugin/skills/*/SKILL.md` sources to confirm the transformation changed layout/frontmatter only, not operational guidance.
 - [ ] Inspect slim/full Docker history to confirm the generic mirror layers and repository-skill COPY layers are gone while `agent-fs` and `qa-use` stay pinned.
+- [ ] Run `qa-use` against Settings → Integrations, capture the required screenshot, and confirm Composio displays and installs from `templates/skills/composio` without a remote 404.
 
-**Implementation Note**: Ship this as one PR and pause after verification. Phase 3 assumes this generated-catalog contract but Phase 1 must remain correct with ai-toolbox still baked.
+**Implementation Note**: Ship this as one PR and pause after verification. Do not remove the Docker fallback unless the capability endpoint, fail-closed entrypoint gate, old/incomplete API fixtures, and worker-delivery command land in the same PR. Phase 3 assumes this generated-catalog contract, but Phase 1 remains correct with ai-toolbox still baked.
 
 ---
 
@@ -206,7 +225,7 @@ Deliver a compiled, generated seed catalog containing the five formerly baked re
 
 ### Overview
 
-Deliver a bounded, non-secret readiness poll at the shared lead/worker entrypoint before any API-dependent setup. The container exits non-zero on timeout instead of continuing with missing config and skills. This phase is independent and may land in any order.
+Deliver a bounded, non-secret process-readiness poll at the shared lead/worker entrypoint before any API-dependent setup. The container exits non-zero on timeout instead of continuing with missing config and skills. This phase is independent and may land before or after Phase 1, but `/health` success never bypasses Phase 1's seed-catalog capability proof.
 
 ### Changes Required:
 
@@ -224,13 +243,16 @@ Deliver a bounded, non-secret readiness poll at the shared lead/worker entrypoin
 
 #### 2. Add executable regression tests for the real shell helper
 
-**File**: `src/tests/entrypoint-api-readiness.test.ts` (new)
+**Files**: `src/tests/entrypoint-api-readiness.test.ts` (new), `src/tests/api-readiness-boot.test.ts` (new), `src/tests/fixtures/entrypoint-api-readiness/{immediate.json,delayed.json,unreachable.json}` (new), `scripts/test-entrypoint-api-readiness.ts` (new), `package.json`, `.github/workflows/merge-gate.yml`
 
 **Changes**:
 
 - Extract the actual helper between stable markers from `docker-entrypoint.sh` and execute it in a temporary Bash process, following the deployed-shell extraction pattern in `src/tests/entrypoint-codex-oauth-seed.test.ts`.
 - Cover immediate success, transient failures followed by success, unreachable timeout with exact fatal output/non-zero status, invalid/zero/negative timeout, trailing-slash normalization, bounded curl flags, and absence of secrets from stdout/stderr.
 - Add a source-order assertion that the invocation precedes the first provider-specific config request.
+- Make `src/tests/api-readiness-boot.test.ts` the repeatable fresh/existing DB gate. It creates a unique temporary SQLite path, launches the real API once with an empty DB and once with the same initialized DB, runs the extracted wait helper against both boots, and asserts waiting → ready → first API-backed request in order. It terminates both child processes and removes the SQLite/WAL/SHM files in `afterAll`.
+- Make `scripts/test-entrypoint-api-readiness.ts` the Docker-level scenario runner. It consumes the three committed fixtures, uses valid generated UUIDs, starts the built worker image as both worker and lead, and asserts immediate success, delayed start, and unused-port timeout. For the timeout case, assert exact exit status, maximum wall-clock bound, stable fatal text, no API-backed request before readiness, and no occurrence of the fixture API key in stdout/stderr.
+- Add exact package entrypoints: `test:entrypoint-api-readiness` runs `bun run test:root -- src/tests/entrypoint-api-readiness.test.ts src/tests/api-readiness-boot.test.ts`; `test:entrypoint-api-readiness:docker` runs `bun scripts/test-entrypoint-api-readiness.ts`. Invoke them from the root-test and Docker Merge Gate jobs whenever the helper, fixtures, configuration validation, or Docker entrypoint changes.
 
 #### 3. Register and validate the operator setting
 
@@ -261,23 +283,22 @@ Deliver a bounded, non-secret readiness poll at the shared lead/worker entrypoin
 - [ ] Full root tests pass: `bun run test:root`
 - [ ] Worker/API database ownership remains intact: `bash scripts/check-db-boundary.sh`
 - [ ] Dependency boundaries pass: `bun run check:dep-graph`
-- [ ] Focused readiness/config tests pass: `bun run test:root -- src/tests/entrypoint-api-readiness.test.ts src/tests/env-flag.test.ts`
+- [ ] Shell-unit, fresh/existing DB boot, and config validation tests pass: `bun run test:entrypoint-api-readiness && bun run test:root -- src/tests/env-flag.test.ts`
 - [ ] UI checks pass: `(cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b)`
-- [ ] Shell syntax and all Docker images affected by the entrypoint pass: `bash -n docker-entrypoint.sh && docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worker-slim . && docker build -f Dockerfile.worker . && docker build -f apps/evals/Dockerfile .`
-- [ ] Fresh-DB readiness succeeds: start a worker against a stopped local API, then run `rm agent-swarm-db.sqlite && bun run start:http` in an isolated local checkout; assert the worker waits until `/health` is live and then proceeds through config/skill setup. Remove local `-wal`/`-shm` companions before the run if present.
-- [ ] Existing-DB readiness succeeds: restart `bun run start:http` against the same local DB while another worker waits; assert the same ready transition and no fresh-only seeding assumption.
+- [ ] Shell syntax and all Docker images affected by the entrypoint pass, with exact test tags: `bash -n docker-entrypoint.sh && docker build -f Dockerfile -t agent-swarm-api:latest . && bun run docker:build:worker:slim && bun run docker:build:worker && docker build -f apps/evals/Dockerfile -t agent-swarm-evals:latest .`
+- [ ] Worker/lead Docker readiness scenarios pass against the committed immediate, delayed, and unreachable fixtures: `bun run test:entrypoint-api-readiness:docker -- --image agent-swarm-worker:latest --roles worker,lead`
 
 #### Automated QA:
 
-- [ ] Run the delayed-start Docker scenario for both worker and lead: logs show waiting → ready → API-backed setup in order, and neither process performs API config/skill fetches before readiness.
-- [ ] Boot both roles against an unused port with `WORKER_API_READY_TIMEOUT_SECONDS=2`; each exits non-zero within the bounded interval, emits the stable fatal line, and does not leak the API key.
-- [ ] Run `qa-use` against Settings → Configuration and capture the Harness & tools timeout row, default, and restart badge; verify `0` and non-numeric values are rejected by the API/UI.
-- [ ] Confirm a post-readiness optional integration failure still logs a warning and does not terminate the worker.
+- [ ] Run the real-image worker/lead matrix and let the script assert log order, bounded exit, stable fatal output, and secret absence: `bun run test:entrypoint-api-readiness:docker -- --image agent-swarm-worker:latest --roles worker,lead`
+- [ ] Run the isolated real-API fresh/existing DB lifecycle tests: `bun run test:root -- src/tests/api-readiness-boot.test.ts`
+- [ ] Run the extracted-helper cases for invalid settings, trailing slashes, bounded curl flags, and post-readiness optional integration failures: `bun run test:root -- src/tests/entrypoint-api-readiness.test.ts src/tests/env-flag.test.ts`
 
 #### Manual Verification:
 
 - [ ] Review representative boot logs for concise wording, reasonable retry cadence, and no secret-bearing headers or values.
 - [ ] Confirm the docs make the bootstrap-only environment limitation understandable rather than implying a dashboard save can alter an already-waiting container.
+- [ ] Run `qa-use` against Settings → Configuration, capture the required screenshot of the Harness & tools timeout row/default/restart badge, and confirm the UI rejects `0` and non-numeric input.
 
 **Implementation Note**: Ship this as one PR. Do not combine it with Docker skill-source removal even if both touch `Dockerfile.worker` indirectly through image verification.
 
@@ -318,14 +339,17 @@ Deliver a reproducibly vendored snapshot of the 18 ai-toolbox skills at `cc-desp
 
 #### 3. Wire sync drift checks into the seeded-skills gate
 
-**Files**: `package.json`, `.github/workflows/merge-gate.yml`, `runbooks/skills.md`, `src/tests/system-default-skills.test.ts`, `src/tests/seed-skills-bundled-files.test.ts`
+**Files**: `package.json`, `.github/workflows/merge-gate.yml`, `runbooks/skills.md`, `src/tests/ai-toolbox-seeding.test.ts` (new), `src/tests/fixtures/worker-skill-delivery/ai-toolbox.json` (new), `scripts/test-worker-skill-delivery.ts`, `src/tests/system-default-skills.test.ts`, `src/tests/seed-skills-bundled-files.test.ts`
 
 **Changes**:
 
-- Add `sync:ai-toolbox-skills` and `check:ai-toolbox-skills` package commands.
-- Add the sync script to the Seeded Skills change detector and run its `--check` path in that job alongside catalog/source and bundled-file checks.
+- Add exact package entrypoints: `sync:ai-toolbox-skills` runs `bun scripts/sync-ai-toolbox-skills.ts`; `check:ai-toolbox-skills` adds `--check`; `test:ai-toolbox-seeding` runs `bun run test:root -- src/tests/ai-toolbox-seeding.test.ts`; and `test:worker-skill-delivery:ai-toolbox` runs `bun scripts/test-worker-skill-delivery.ts --scenario ai-toolbox`.
+- Add the sync script, exact inventory fixture, seed test, and managed template paths to the Seeded Skills/Docker change detectors. Run `--check`, the isolated DB test, and the worker-delivery command in their respective Merge Gate jobs alongside catalog/source and bundled-file checks.
 - Document the pinned update procedure and which template directories are generated/vendor-managed.
-- Assert the exact 18-name catalog inventory, exact ten-complex/14-file mapping, embedded-vs-disk equality, DB complex flags, idempotent fresh/existing seeding, user-edit preservation, and repeated five-tree filesystem reconciliation.
+- Make `ai-toolbox.json` the canonical expected 18-name and ten-complex/14-file inventory, including every relative auxiliary-file path and source digest from the pinned commit.
+- Make `src/tests/ai-toolbox-seeding.test.ts` the fresh/existing DB proof. With a unique temporary SQLite path, run `skillsSeeder`, compare rows/files to `ai-toolbox.json`, run again against the same DB and assert no duplicates or mutations, then deliberately edit one body and one bundled file and assert a third run preserves both. Remove the SQLite/WAL/SHM files in `afterAll`.
+- Extend `scripts/test-worker-skill-delivery.ts --scenario ai-toolbox` to inspect slim/full images before sync, run the real filesystem refresh into mounted temporary homes, compare all five harness trees to `ai-toolbox.json`, repeat the refresh, and assert an empty filesystem diff. Also assert `agent-fs` remains in all five trees, `qa-use` remains full-only, and build logs contain no ai-toolbox network install.
+- Keep the existing focused tests for embedded-vs-disk equality and DB complex flags; drive every expected name/file from the committed fixture so a missing or extra item produces a deterministic diff.
 
 #### 4. Remove only the ai-toolbox build-time install
 
@@ -348,23 +372,22 @@ Deliver a reproducibly vendored snapshot of the 18 ai-toolbox skills at `cc-desp
 - [ ] Worker/API database ownership remains intact: `bash scripts/check-db-boundary.sh`
 - [ ] Dependency boundaries pass: `bun run check:dep-graph`
 - [ ] Vendor, source, catalog, and bundled-file drift checks pass: `bun run check:ai-toolbox-skills && bun run check:skill-sources && bun run check:seed-skill-catalog && bun run check:seed-skill-files`
-- [ ] Focused skill tests pass: `bun run test:root -- src/tests/seed-skills-bundled-files.test.ts src/tests/system-default-skills.test.ts src/tests/skill-fs-writer.test.ts src/tests/skill-sync.test.ts`
+- [ ] Fresh/existing DB ai-toolbox assertions and focused skill tests pass: `bun run test:ai-toolbox-seeding && bun run test:root -- src/tests/seed-skills-bundled-files.test.ts src/tests/system-default-skills.test.ts src/tests/skill-fs-writer.test.ts src/tests/skill-sync.test.ts`
 - [ ] Package-triggered generated/API/UI checks remain clean: `bun run docs:openapi && git diff --exit-code -- openapi.json docs-site/content/docs/api-reference && (cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b)`
-- [ ] The full Docker matrix builds: `docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worker-slim . && docker build -f Dockerfile.worker . && docker build -f apps/evals/Dockerfile .`
-- [ ] Fresh-DB seeding succeeds on an isolated local checkout: `rm agent-swarm-db.sqlite && bun run start:http`; wait for `/health`, then assert all 18 rows plus the exact 14 bundled files are present. Remove local `-wal`/`-shm` companions before the run if present.
-- [ ] Existing-DB seeding succeeds: restart against the same local DB, assert a no-op/duplicate-free seed, and verify a deliberately edited vendored skill/body or bundled file is preserved by seed-state drift handling.
+- [ ] The full Docker matrix builds and tags the exact images consumed below: `docker build -f Dockerfile -t agent-swarm-api:latest . && bun run docker:build:worker:slim && bun run docker:build:worker && docker build -f apps/evals/Dockerfile -t agent-swarm-evals:latest .`
+- [ ] Slim/full pre-sync inventory plus repeatable five-tree ai-toolbox delivery match the exact committed fixture: `bun run test:worker-skill-delivery:ai-toolbox -- --slim-image agent-swarm-worker:slim --full-image agent-swarm-worker:latest`
 
 #### Automated QA:
 
-- [ ] Run `bun run sync:ai-toolbox-skills` followed by all generated-file commands and `git diff --exit-code` to prove a sync from the pinned tag is deterministic.
-- [ ] Boot a fresh slim worker against the seeded API and verify all 18 skills plus all 14 auxiliary files exist in all five harness trees and survive at least two runner refresh passes.
-- [ ] Boot a fresh full worker and verify the same DB-delivered ai-toolbox set, retained all-harness `agent-fs`, and retained full-only `qa-use`; confirm no ai-toolbox network install runs during the image build.
-- [ ] Exercise representative simple and complex skills (`ask-user`, `planning`, `script-builder`, `wts-expert`) through the skills API/UI and compare their rendered bodies/files with the pinned upstream snapshot.
+- [ ] Rebuild from the pinned upstream snapshot and prove every generated artifact is deterministic: `bun run sync:ai-toolbox-skills && bun run build:seed-skill-catalog && bun run build:seed-skill-files && git diff --exit-code`
+- [ ] Run the committed slim/full and repeated five-tree delivery scenario, including retained `agent-fs`, full-only `qa-use`, and absence of the ai-toolbox network install: `bun run test:worker-skill-delivery:ai-toolbox -- --slim-image agent-swarm-worker:slim --full-image agent-swarm-worker:latest`
+- [ ] Run the deterministic API/file contract tests for representative simple and complex vendored skills: `bun run test:root -- src/tests/skill-files-http.test.ts src/tests/skill-get-file-tool.test.ts src/tests/ai-toolbox-seeding.test.ts`
 
 #### Manual Verification:
 
 - [ ] Review the sync diff against the pinned upstream tag for all 18 skills, with special attention to frontmatter removal and auxiliary-file paths.
 - [ ] Inspect Docker build logs/history to confirm only the ai-toolbox install disappeared and the `agent-fs`/`qa-use` pins remain intact.
+- [ ] Use the Skills UI to inspect `ask-user`, `planning`, `script-builder`, and `wts-expert`, and capture screenshots confirming their rendered bodies/files match the pinned fixture; keep this visual evidence out of the automated API assertions.
 
 **Implementation Note**: Ship this as one PR after Phase 1's generated-catalog foundation. Do not migrate `agent-fs` or `qa-use` as a follow-on inside this PR.
 
