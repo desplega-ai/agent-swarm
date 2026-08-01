@@ -437,16 +437,15 @@ export async function ensureSlackThreadTree(taskIds: string[]): Promise<SlackMes
   const existing = findThreadTree(contextKey, task.slackChannelId, task.slackThreadTs);
   if (existing && !isPendingSlackMessage(existing)) {
     const app = getSlackApp();
-    let resolved = existing;
     try {
-      resolved = app ? await ensureTreePermalink(app.client, existing) : existing;
+      const resolved = app ? await ensureTreePermalink(app.client, existing) : existing;
+      scheduleSlackTreeUpdate(resolved);
+      return resolved;
     } catch (error) {
       if (!isSlackMessageNotFound(error)) throw error;
       discardTreeRecord(existing);
       return ensureSlackThreadTree(taskIds);
     }
-    scheduleSlackTreeUpdate(resolved);
-    return resolved;
   }
   const creationKey = physicalThreadKey(task.slackChannelId, task.slackThreadTs);
   const inFlight = treeCreationPromises.get(creationKey);
