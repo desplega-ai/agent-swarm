@@ -556,7 +556,7 @@ describe("Slack renderer v2", () => {
     expect(formatV2Duration(start, new Date("2026-07-31T20:12:00.000Z"))).toBe("12m");
   });
 
-  test("renders the frozen context tree with direct triggers, progress, and real nesting", () => {
+  test("renders the frozen context tree without permalink backlinks", () => {
     const lead = createAgent({ name: "Lead", isLead: true, status: "idle" });
     const researcher = createAgent({ name: "Researcher", isLead: false, status: "idle" });
     const contextKey = slackContextKey({ channelId: "C_TREE_SHAPE", threadTs: "100.1" });
@@ -624,12 +624,17 @@ describe("Slack renderer v2", () => {
     expect(text).toBe(
       [
         "🧵 worked for 8m05s",
-        ` ↳ ⏳ format tests · 8m05s · <https://app.agent-swarm.dev/tasks/${ask.id}|\`${ask.id.slice(0, 8)}\`> <https://workspace.slack.com/archives/C_TREE_SHAPE/p1002|↵>`,
+        ` ↳ ⏳ format tests · 8m05s · <https://app.agent-swarm.dev/tasks/${ask.id}|\`${ask.id.slice(0, 8)}\`>`,
         `    ↳ ⏳ Researcher · 8m05s · <https://app.agent-swarm.dev/tasks/${child.id}|\`${child.id.slice(0, 8)}\`> · Reading *Slack docs* carefully…`,
-        `       ↳ ✅ Researcher · 4m · <https://app.agent-swarm.dev/tasks/${grandchild.id}|\`${grandchild.id.slice(0, 8)}\`> → <${outcomeUrl}|result>`,
-        ` ↳ ⏳ ship this PR · 8m05s · <https://app.agent-swarm.dev/tasks/${secondAsk.id}|\`${secondAsk.id.slice(0, 8)}\`> <https://workspace.slack.com/archives/C_TREE_SHAPE/p1003|↵>`,
+        `       ↳ ✅ Researcher · 4m · <https://app.agent-swarm.dev/tasks/${grandchild.id}|\`${grandchild.id.slice(0, 8)}\`>`,
+        ` ↳ ⏳ ship this PR · 8m05s · <https://app.agent-swarm.dev/tasks/${secondAsk.id}|\`${secondAsk.id.slice(0, 8)}\`>`,
       ].join("\n"),
     );
+    expect(text).not.toContain("workspace.slack.com");
+    expect(text).not.toContain("|↵>");
+    expect(text).not.toContain("|result>");
+    expect(text).toContain(getTaskLink(ask.id));
+    expect(text).toContain(`\`${ask.id.slice(0, 8)}\``);
     expect(text).not.toContain("```");
     expect(text).not.toContain("↩");
     expect(text).not.toContain(":leftwards_arrow_with_hook:");
@@ -637,7 +642,7 @@ describe("Slack renderer v2", () => {
     expect(rows.slice(0, 3).map((row) => row.match(/^ +/u)?.[0].length)).toEqual([1, 4, 7]);
   });
 
-  test("resolves and caches distinct direct-trigger permalinks while omitting workers", async () => {
+  test("does not resolve or render direct-trigger permalink backlinks", async () => {
     const lead = createAgent({ name: "Trigger Lead", isLead: true, status: "idle" });
     const worker = createAgent({ name: "Trigger Worker", isLead: false, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_TRIGGER_LINKS");
@@ -672,12 +677,12 @@ describe("Slack renderer v2", () => {
     await ensureSlackThreadTree([first.id, child.id, second.id]);
 
     const posted = calls.find((call) => call.method === "chat.postMessage")!;
-    expect(posted.payload.text).toContain(`p${firstTs.replaceAll(".", "")}|↵>`);
-    expect(posted.payload.text).toContain(`p${secondTs.replaceAll(".", "")}|↵>`);
-    expect(String(posted.payload.text).match(/\|↵>/g)).toHaveLength(2);
+    expect(posted.payload.text).not.toContain(`p${firstTs.replaceAll(".", "")}|↵>`);
+    expect(posted.payload.text).not.toContain(`p${secondTs.replaceAll(".", "")}|↵>`);
+    expect(String(posted.payload.text)).not.toContain("|↵>");
     expect(String(posted.payload.text)).not.toContain("↩");
     expect(String(posted.payload.text)).not.toContain(":leftwards_arrow_with_hook:");
-    expect(calls.filter((call) => call.method === "chat.getPermalink")).toHaveLength(3);
+    expect(calls.filter((call) => call.method === "chat.getPermalink")).toHaveLength(1);
     const blocks = posted.payload.blocks as Array<{
       type: string;
       elements: Array<{ type: string; text: string }>;
@@ -868,7 +873,7 @@ describe("Slack renderer v2", () => {
     completeTask(child.id, "PRIVATE RAW WORKER OUTPUT THAT MUST NOT REACH SLACK");
     completeTask(
       ask.id,
-      "Implemented the Slack renderer and opened a focused pull request.\n\nSecond paragraph that must be rendered.",
+      "Implemented the Slack renderer and opened a focused pull request.\n\n\n\nSecond paragraph that must be rendered.   ",
     );
     calls.length = 0;
     _resetSlackRenderV2ForTests();
@@ -896,8 +901,10 @@ describe("Slack renderer v2", () => {
     const outcomeBody = outcomeChunks.join("");
     expect(outcomeChunks).toHaveLength(1);
     expect(outcomeBody).toBe(
-      "✅\n\nImplemented the Slack renderer and opened a focused pull request.\n\nSecond paragraph that must be rendered.\n",
+      "✅\n\nImplemented the Slack renderer and opened a focused pull request.\n\nSecond paragraph that must be rendered.",
     );
+    expect(outcomeBody).not.toMatch(/\n{3,}/);
+    expect(outcomeBody).toBe(outcomeBody.trim());
     expect(outcomeBody).not.toContain("**Done**");
     expect(outcomeBody).not.toContain(getTaskLink(ask.id));
     expect(started.payload.channel).toBe(channelId);
@@ -928,7 +935,7 @@ describe("Slack renderer v2", () => {
         elements: [
           {
             type: "mrkdwn",
-            text: `${duration} · 1 worker · ${getTaskLink(ask.id)} · <${firstTree!.permalink}|↑ tree>`,
+            text: `${duration} · 1 worker · ${getTaskLink(ask.id)}`,
           },
         ],
       },
@@ -942,7 +949,8 @@ describe("Slack renderer v2", () => {
       unfurl_links: false,
       unfurl_media: false,
     });
-    expect(treeUpdate.payload.text).toContain("→ <https://workspace.slack.com/");
+    expect(treeUpdate.payload.text).not.toContain("workspace.slack.com");
+    expect(treeUpdate.payload.text).not.toContain("|result>");
     expect(treeUpdate.payload.text).not.toContain("PRIVATE RAW WORKER OUTPUT");
     expect(treeUpdate.payload.text).not.toContain("Tasks completed:");
     expect(
@@ -990,7 +998,7 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const started = calls.find((call) => call.method === "chat.startStream");
-    expect(started?.payload.markdown_text).toBe(`✅\n\n${output}\n`);
+    expect(started?.payload.markdown_text).toBe(`✅\n\n${output.trim()}`);
     expect(String(started?.payload.markdown_text)).toContain("# Complete result");
     expect(String(started?.payload.markdown_text)).toContain("**Bold text**");
     expect(String(started?.payload.markdown_text)).toContain(
@@ -1077,7 +1085,7 @@ describe("Slack renderer v2", () => {
     expect(started?.payload.markdown_text).toContain("❌ **Failed**");
     const outcome = getSlackOutcomeMessage(ask.id);
     const remote = remoteMessages.get(remoteKey(channelId, outcome!.ts));
-    expect(remote?.text).toBe(`❌ **Failed**\n\n${reason}\n`);
+    expect(remote?.text).toBe(`❌ **Failed**\n\n${reason.trim()}`);
     expect(remote?.text).not.toContain(getTaskLink(ask.id));
     expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
     const update = calls.find(
@@ -1085,7 +1093,7 @@ describe("Slack renderer v2", () => {
     );
     expect(update?.payload.ts).toBe(tree?.ts);
     expect(update?.payload.text).toContain("↳ ❌ failing ask");
-    expect(update?.payload.text).toContain("→ <https://workspace.slack.com/");
+    expect(update?.payload.text).not.toContain("workspace.slack.com");
   });
 
   test("renders cancellation distinctly and carries the complete reason", async () => {
@@ -1111,7 +1119,7 @@ describe("Slack renderer v2", () => {
     const outcome = getSlackOutcomeMessage(ask.id)!;
     const remote = remoteMessages.get(remoteKey(channelId, outcome.ts));
     expect(remote?.text).toBe(
-      `🚫 **Cancelled**\n\nrequester changed direction ${"context ".repeat(200)}\n`,
+      `🚫 **Cancelled**\n\nrequester changed direction ${"context ".repeat(200)}`.trim(),
     );
     expect(remote?.text).not.toContain(getTaskLink(ask.id));
     expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
@@ -1121,7 +1129,7 @@ describe("Slack renderer v2", () => {
     expect(update?.payload.text).toContain("↳ 🚫 cancelled ask");
   });
 
-  test("serializes concurrent tree writers and leaves the newest outcome link visible", async () => {
+  test("serializes concurrent tree writers and leaves the newest terminal state visible", async () => {
     const lead = createAgent({ name: "Concurrent Writer Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_TREE_WRITER_RACE");
     const ask = createTaskExtended("serialize tree writers", {
@@ -1147,10 +1155,12 @@ describe("Slack renderer v2", () => {
     await processing;
 
     const remoteTree = remoteMessages.get(remoteKey(channelId, tree!.ts));
-    expect(remoteTree?.text).toContain("→ <https://workspace.slack.com/");
+    expect(remoteTree?.text).toContain(`↳ ✅ serialize tree writers`);
+    expect(remoteTree?.text).not.toContain("workspace.slack.com");
     const updates = calls.filter((call) => call.method === "chat.update");
     expect(updates).toHaveLength(2);
-    expect(updates.at(-1)?.payload.text).toContain("→ <https://workspace.slack.com/");
+    expect(updates.at(-1)?.payload.text).toContain(`↳ ✅ serialize tree writers`);
+    expect(updates.at(-1)?.payload.text).not.toContain("workspace.slack.com");
   });
 
   test("replaces a deleted tree exactly once after message_not_found", async () => {
@@ -1177,9 +1187,11 @@ describe("Slack renderer v2", () => {
     expect(replacement.ts).not.toBe(original?.ts);
     expect(calls.filter((call) => call.method === "chat.postMessage")).toHaveLength(1);
     const remoteTree = remoteMessages.get(remoteKey(channelId, replacement.ts));
-    expect(remoteTree?.text).toContain("→ <https://workspace.slack.com/");
+    expect(remoteTree?.text).toContain(`↳ ✅ replace deleted tree`);
+    expect(remoteTree?.text).not.toContain("workspace.slack.com");
     const stopped = calls.find((call) => call.method === "chat.stopStream");
-    expect(JSON.stringify(stopped?.payload.blocks)).toContain(replacement.permalink!);
+    expect(JSON.stringify(stopped?.payload.blocks)).not.toContain(replacement.permalink!);
+    expect(JSON.stringify(stopped?.payload.blocks)).toContain(getTaskLink(ask.id));
 
     calls.length = 0;
     await processSlackRenderV2();

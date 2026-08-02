@@ -185,6 +185,8 @@ async function slackFlush(
             channel: channelId,
             thread_ts: threadTs,
             text: formatSlackSteeringAck(steering.result),
+            unfurl_links: false,
+            unfurl_media: false,
           });
         } catch (error) {
           console.error("[Slack] Failed to post steering feedback:", error);
@@ -246,6 +248,8 @@ async function slackFlush(
         channel: channelId,
         thread_ts: threadTs,
         text: fallbackText,
+        unfurl_links: false,
+        unfurl_media: false,
         // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
         blocks: blocks as any,
       });

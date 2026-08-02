@@ -72,6 +72,8 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
           app.client.chat.postMessage({
             channel: channelId,
             text: slackMessage, // Fallback for notifications
+            unfurl_links: false,
+            unfurl_media: false,
             username: agent.name,
             icon_emoji: ":crown:",
             // biome-ignore lint/suspicious/noExplicitAny: MCP accepts arbitrary valid Block Kit JSON

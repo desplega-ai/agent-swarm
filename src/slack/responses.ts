@@ -1,4 +1,4 @@
-import type { WebClient } from "@slack/web-api";
+import type { ChatUpdateArguments, WebClient } from "@slack/web-api";
 import { getAgentById, getTaskAttachments, markTaskSlackReplySent } from "../be/db";
 import type { Agent, AgentTask } from "../types";
 import { getSlackApp } from "./app";
@@ -20,6 +20,11 @@ import {
 export { markdownToSlack } from "./blocks";
 
 export type SlackUpdateResult = "ok" | "not_found" | "failed";
+
+type ChatUpdatePayload = ChatUpdateArguments & {
+  unfurl_links: false;
+  unfurl_media: false;
+};
 
 function classifySlackUpdateError(error: unknown): SlackUpdateResult {
   const errorCode = (error as { data?: { error?: string } } | undefined)?.data?.error;
@@ -237,13 +242,16 @@ export async function updateProgressInPlace(
   const blocks = buildProgressBlocks({ agentName: agent.name, taskId: task.id, progress });
 
   try {
-    await app.client.chat.update({
+    const updatePayload = {
       channel: task.slackChannelId,
       ts: messageTs,
       text: progress,
+      unfurl_links: false,
+      unfurl_media: false,
       // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
       blocks: blocks as any,
-    });
+    } satisfies ChatUpdatePayload;
+    await app.client.chat.update(updatePayload);
     return "ok";
   } catch (error) {
     const result = classifySlackUpdateError(error);
@@ -307,13 +315,16 @@ export async function updateToFinal(task: AgentTask, messageTs: string): Promise
   }
 
   try {
-    await app.client.chat.update({
+    const updatePayload = {
       channel: task.slackChannelId,
       ts: messageTs,
       text,
+      unfurl_links: false,
+      unfurl_media: false,
       // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
       blocks: blocks as any,
-    });
+    } satisfies ChatUpdatePayload;
+    await app.client.chat.update(updatePayload);
 
     if (completionBlockBatches) {
       for (let i = 1; i < completionBlockBatches.length; i++) {
@@ -348,13 +359,16 @@ export async function updateTreeMessage(
   if (!app) return "failed";
 
   try {
-    await app.client.chat.update({
+    const updatePayload = {
       channel: channelId,
       ts: messageTs,
       text: fallbackText,
+      unfurl_links: false,
+      unfurl_media: false,
       // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
       blocks: blocks as any,
-    });
+    } satisfies ChatUpdatePayload;
+    await app.client.chat.update(updatePayload);
     return "ok";
   } catch (error) {
     const result = classifySlackUpdateError(error);
@@ -391,6 +405,8 @@ async function sendWithPersona(
     channel: options.channel,
     thread_ts: options.thread_ts,
     text: options.text, // Fallback for notifications
+    unfurl_links: false,
+    unfurl_media: false,
     ...(isDM ? {} : { username: options.username, icon_emoji: options.icon_emoji }),
     // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects are typed as plain JSON
     blocks: blocks as any,

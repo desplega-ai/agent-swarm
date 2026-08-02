@@ -86,7 +86,7 @@ export const registerSlackPostTool = (server: McpServer) => {
             },
           ]),
         ];
-        if (sourceTask && tree?.permalink) {
+        if (sourceTask && tree) {
           if (messageBlocks.length >= 50) {
             return toolErr("At most 49 blocks are allowed when a provenance footer is added.");
           }
@@ -95,7 +95,7 @@ export const registerSlackPostTool = (server: McpServer) => {
             elements: [
               {
                 type: "mrkdwn",
-                text: `${agent.name} · ${getTaskLink(sourceTask.id)} · <${tree.permalink}|↑ tree>`,
+                text: `${agent.name} · ${getTaskLink(sourceTask.id)}`,
               },
             ],
           });
@@ -105,6 +105,8 @@ export const registerSlackPostTool = (server: McpServer) => {
           app.client.chat.postMessage({
             channel: channelId,
             text: slackMessage, // Fallback for notifications
+            unfurl_links: false,
+            unfurl_media: false,
             username: agent.name,
             icon_emoji: ":crown:",
             ...(threadTs ? { thread_ts: threadTs } : {}),

@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ChatUpdateArguments } from "@slack/web-api";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { can } from "@/rbac";
@@ -6,6 +7,11 @@ import { getSlackApp } from "@/slack/app";
 import { parseSlackTs } from "@/slack/message-text";
 import { markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+
+type ChatUpdatePayload = ChatUpdateArguments & {
+  unfurl_links: false;
+  unfurl_media: false;
+};
 
 export const registerSlackUpdateTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -59,10 +65,12 @@ export const registerSlackUpdateTool = (server: McpServer) => {
         const ts = parseSlackTs(messageTs);
         const slackMessage = markdownToSlack(message);
 
-        const result = await app.client.chat.update({
+        const updatePayload = {
           channel: channelId,
           ts,
           text: slackMessage,
+          unfurl_links: false,
+          unfurl_media: false,
           blocks: [
             {
               type: "section",
@@ -72,7 +80,8 @@ export const registerSlackUpdateTool = (server: McpServer) => {
               },
             },
           ],
-        });
+        } satisfies ChatUpdatePayload;
+        const result = await app.client.chat.update(updatePayload);
 
         return toolOk("Message updated successfully.", { data: { messageTs: result.ts } });
       } catch (error) {

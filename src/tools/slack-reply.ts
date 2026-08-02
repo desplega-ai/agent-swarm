@@ -113,7 +113,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
             },
           ]),
         ];
-        if (taskId && tree?.permalink) {
+        if (taskId && tree) {
           if (messageBlocks.length >= 50) {
             return toolErr("At most 49 blocks are allowed when a provenance footer is added.");
           }
@@ -122,7 +122,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
             elements: [
               {
                 type: "mrkdwn",
-                text: `${agent.name} · ${getTaskLink(taskId)} · <${tree.permalink}|↑ tree>`,
+                text: `${agent.name} · ${getTaskLink(taskId)}`,
               },
             ],
           });
@@ -133,6 +133,8 @@ export const registerSlackReplyTool = (server: McpServer) => {
             channel: slackChannelId,
             thread_ts: slackThreadTs,
             text: slackMessage, // Fallback for notifications
+            unfurl_links: false,
+            unfurl_media: false,
             username: agent.name,
             icon_emoji: agent.isLead ? ":crown:" : ":robot_face:",
             // biome-ignore lint/suspicious/noExplicitAny: MCP accepts arbitrary valid Block Kit JSON
