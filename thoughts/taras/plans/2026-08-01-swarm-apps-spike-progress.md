@@ -211,6 +211,34 @@ orchestrator) → commits → E2E.
   (missing element ids) and silently shifts positional indices — positional components must use
   the raw children array.
 
+## Spike 3 (2026-08-02, in progress — spec ./2026-08-02-swarm-apps-spike3-sync-spec.md)
+
+- **Task 0 (action-loop browser proof): PASS 3/3.** Saved script `notes-add-sample`
+  (agent-scoped under e2e-probe 21bc3294) writes a note row via the app-model row
+  endpoint using `ctx.stdlib.fetch` + `Redacted.value(ctx.swarm.config.{mcpBaseUrl,apiKey})`;
+  wired as `addSample`/`failDemo` (script kind) + `tackleDemo` (task kind) on Notes Mini
+  with status Badges bound to `/actions/<name>/...`. Browser: running→ok + refetch shows
+  the new row; error path shows the thrown message; task action mirrored
+  unassigned→in_progress→completed→ok in ~85s (worker picked it up from the pool).
+  Screenshots /tmp/spike3-task0-*.png.
+- **Env bug found by task 0**: repo `.env` carries `MCP_BASE_URL=https://taras-swarm.ngrok.dev`
+  (dead tunnel); Bun auto-loads it and `runScript` falls back to `process.env.MCP_BASE_URL`,
+  so scripts launched by the isolated API got the ngrok URL (script fetch → 404 HTML).
+  Fix: the isolated API MUST be started with explicit `MCP_BASE_URL=http://localhost:3113`
+  (done; keep on every restart).
+- Cosmetic follow-ups (not spike-blocking): Badge renders literal "UNDEFINED" for unbound
+  pre-click state (badge binding stringifies undefined); AG Grid console error #200
+  (cellClass w/o CellStyleModule) on app tables; failDemo long error text wraps tall.
+- Recon workflow (6 Sonnet readers) → /tmp/recon3-*.md. Load-bearing: schedules already
+  do `targetType:'script'` in-process on :3113 (+ `POST /api/schedules/{id}/run` to fire
+  now; schedule scripts run as the schedule's createdByAgentId — create schedules under
+  a registered agent); no Linear creds anywhere in the isolated DB → source #2 =
+  **GitHub public issues on desplega-ai/agent-swarm** (2 open real issues; `state`
+  open↔all patching demos the stale flag); scripts have NO row-write surface (SDK has
+  only definition-level app tools) → sync engine is server-side, exposed via new
+  `app-sync`/`app-query` MCP tools; UI needs ZERO changes (sync action returns the
+  script-kind response shape; freshness = date/badge columns).
+
 ## Gotchas learned
 
 - zsh `rm -f glob*` with no match aborts the whole command (broke a background boot once).

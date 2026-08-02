@@ -12,7 +12,7 @@ export const registerAppPatchTool = (server: McpServer) => {
     {
       title: "Patch an app",
       description:
-        "Partially update an app. The definition uses RFC 7396 JSON Merge Patch semantics, except each page.elements.<id> and actions.<name> value is replaced atomically; null deletes a key.",
+        "Partially update an app. The definition uses RFC 7396 JSON Merge Patch semantics, except each page.elements.<id>, actions.<name>, models.<name>.columns.<col>, and models.<name>.sources.<src> value is replaced atomically; null deletes a key.",
       annotations: { destructiveHint: false },
       inputSchema: z.object({
         appId: z.string().min(1).describe("App ID to patch."),
@@ -26,7 +26,7 @@ export const registerAppPatchTool = (server: McpServer) => {
           .record(z.string(), z.unknown())
           .optional()
           .describe(
-            "Definition merge patch. Objects merge recursively; arrays and scalars replace; null deletes. Element and action entries replace atomically.",
+            "Definition merge patch. Objects merge recursively; arrays and scalars replace; null deletes. Element, action, column, and source entries replace atomically.",
           ),
       }),
       outputSchema: swarmToolOutputSchema({

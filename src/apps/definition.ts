@@ -9,6 +9,20 @@ export const AppNameSchema = z.string().regex(/^[a-z][a-zA-Z0-9_]{0,39}$/, {
 
 export const ColumnKindSchema = z.enum(["string", "number", "boolean", "date", "enum"]);
 
+const SourceTransformSchema = z.enum(["slug", "lower", "upper", "cents", "date-parse"]);
+
+const SourceBindingSchema = z.object({
+  of: AppNameSchema,
+  field: z.string().min(1, { message: "field must not be empty" }),
+  transform: SourceTransformSchema.optional(),
+});
+
+const SourceDefSchema = z.object({
+  connector: z.enum(["swarm-tasks", "github-issues"]),
+  joinKey: AppNameSchema,
+  config: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+});
+
 const ISO_8601_PREFIX = /^\d{4}-\d{2}-\d{2}(?:T.*)?$/;
 
 export function isIso8601Date(value: string): boolean {
@@ -22,6 +36,7 @@ const ColumnDefSchema = z
     enum: z.array(z.string()).optional(),
     index: z.boolean().optional(),
     default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+    source: SourceBindingSchema.optional(),
   })
   .superRefine((column, ctx) => {
     if (column.kind === "enum") {
@@ -61,20 +76,33 @@ const ColumnDefSchema = z
   });
 
 const ModelDefSchema = z
-  .object({ columns: z.record(AppNameSchema, ColumnDefSchema) })
+  .object({
+    columns: z.record(AppNameSchema, ColumnDefSchema),
+    sources: z.record(AppNameSchema, SourceDefSchema).optional(),
+  })
   .superRefine((model, ctx) => {
     const count = Object.keys(model.columns).length;
     if (count < 1 || count > 40) {
       ctx.addIssue({ code: "custom", path: ["columns"], message: "must define 1 to 40 columns" });
     }
     for (const name of Object.keys(model.columns)) {
-      if (name === "id" || name === "createdAt" || name === "updatedAt") {
+      if (
+        name === "id" ||
+        name === "createdAt" ||
+        name === "updatedAt" ||
+        name === "source" ||
+        name === "syncedAt" ||
+        name === "stale"
+      ) {
         ctx.addIssue({
           code: "custom",
           path: ["columns", name],
           message: "reserved column name",
         });
       }
+    }
+    if (Object.keys(model.sources ?? {}).length > 4) {
+      ctx.addIssue({ code: "custom", path: ["sources"], message: "must define at most 4 sources" });
     }
   });
 
@@ -100,6 +128,11 @@ const AppActionDefSchema = z.discriminatedUnion("kind", [
     kind: z.literal("task"),
     prompt: z.string().min(1),
     agentId: z.string().uuid().optional(),
+  }),
+  z.object({
+    kind: z.literal("sync"),
+    model: AppNameSchema.optional(),
+    source: AppNameSchema.optional(),
   }),
 ]);
 
@@ -168,6 +201,7 @@ export const AppDefinitionSchema = z
         sortColumn &&
         sortColumn !== "createdAt" &&
         sortColumn !== "updatedAt" &&
+        sortColumn !== "syncedAt" &&
         !Object.hasOwn(model.columns, sortColumn)
       ) {
         ctx.addIssue({
@@ -181,6 +215,7 @@ export const AppDefinitionSchema = z
 
 export type ColumnKind = z.infer<typeof ColumnKindSchema>;
 export type ColumnDef = z.infer<typeof ColumnDefSchema>;
+export type SourceDef = z.infer<typeof SourceDefSchema>;
 export type ModelDef = z.infer<typeof ModelDefSchema>;
 export type AppQueryDef = z.infer<typeof AppQueryDefSchema>;
 export type AppActionDef = z.infer<typeof AppActionDefSchema>;
@@ -207,13 +242,167 @@ export function appDefinitionIssues(error: z.ZodError): AppValidationIssue[] {
   return error.issues.flatMap((issue) => flattenIssue(issue));
 }
 
+const GITHUB_REPOSITORY_PATTERN = /^[\w.-]+\/[\w.-]+$/;
+
+function isValidGitHubRepository(value: unknown): value is string {
+  if (typeof value !== "string" || !GITHUB_REPOSITORY_PATTERN.test(value)) return false;
+  const [owner, name] = value.split("/");
+  return owner !== "." && owner !== ".." && name !== "." && name !== "..";
+}
+
+function sourceDefinitionIssues(definition: AppDefinition): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+
+  for (const [modelName, model] of Object.entries(definition.models)) {
+    const sources = model.sources ?? {};
+    for (const [sourceName, source] of Object.entries(sources)) {
+      const sourcePath = `models.${modelName}.sources.${sourceName}`;
+      const joinColumn = Object.hasOwn(model.columns, source.joinKey)
+        ? model.columns[source.joinKey]
+        : undefined;
+      if (!joinColumn) {
+        issues.push({
+          path: `${sourcePath}.joinKey`,
+          message: `unknown column "${source.joinKey}"`,
+        });
+      } else {
+        if (joinColumn.kind !== "string") {
+          issues.push({
+            path: `${sourcePath}.joinKey`,
+            message: "join key must reference a string column",
+          });
+        }
+        if (joinColumn.source !== undefined) {
+          issues.push({
+            path: `models.${modelName}.columns.${source.joinKey}.source`,
+            message: "sync join-key columns must not carry a source binding",
+          });
+        }
+        if (joinColumn.required === true) {
+          issues.push({
+            path: `models.${modelName}.columns.${source.joinKey}.required`,
+            message: "sync join-key columns must not be required",
+          });
+        }
+        if (joinColumn.default !== undefined) {
+          issues.push({
+            path: `models.${modelName}.columns.${source.joinKey}.default`,
+            message: "sync join-key columns must not carry a default",
+          });
+        }
+      }
+
+      if (source.connector === "github-issues" && !isValidGitHubRepository(source.config?.repo)) {
+        issues.push({
+          path: `${sourcePath}.config.repo`,
+          message: 'github-issues requires repo in "owner/name" form',
+        });
+      }
+    }
+
+    for (const [columnName, column] of Object.entries(model.columns)) {
+      const columnPath = `models.${modelName}.columns.${columnName}`;
+      if (column.source) {
+        if (!Object.hasOwn(sources, column.source.of)) {
+          issues.push({
+            path: `${columnPath}.source.of`,
+            message: `unknown source "${column.source.of}"`,
+          });
+        }
+        const transform = column.source.transform;
+        const compatible =
+          transform === undefined ||
+          ((transform === "slug" || transform === "lower" || transform === "upper") &&
+            column.kind === "string") ||
+          (transform === "cents" && column.kind === "number") ||
+          (transform === "date-parse" && column.kind === "date");
+        if (!compatible) {
+          issues.push({
+            path: `${columnPath}.source.transform`,
+            message: `transform "${transform}" is not compatible with ${column.kind} columns`,
+          });
+        }
+        if (column.required === true) {
+          issues.push({
+            path: `${columnPath}.required`,
+            message: "source-bound columns must not be required",
+          });
+        }
+        if (column.default !== undefined) {
+          issues.push({
+            path: `${columnPath}.default`,
+            message: "source-bound columns must not carry a default",
+          });
+        }
+      } else if (
+        Object.keys(sources).length > 0 &&
+        column.required === true &&
+        column.default === undefined
+      ) {
+        issues.push({
+          path: `${columnPath}.default`,
+          message: "required owned columns on a sourced model must carry a default",
+        });
+      }
+    }
+  }
+
+  for (const [actionName, action] of Object.entries(definition.actions ?? {})) {
+    if (action.kind !== "sync") continue;
+
+    const models = action.model
+      ? Object.hasOwn(definition.models, action.model)
+        ? [[action.model, definition.models[action.model]!] as const]
+        : []
+      : Object.entries(definition.models);
+    if (action.model) {
+      const model = Object.hasOwn(definition.models, action.model)
+        ? definition.models[action.model]
+        : undefined;
+      if (!model) {
+        issues.push({
+          path: `actions.${actionName}.model`,
+          message: `unknown model "${action.model}"`,
+        });
+      } else if (Object.keys(model.sources ?? {}).length === 0) {
+        issues.push({
+          path: `actions.${actionName}.model`,
+          message: `model "${action.model}" has no sources`,
+        });
+      }
+    }
+
+    const matches = models.flatMap(([, model]) =>
+      Object.keys(model.sources ?? {}).filter(
+        (sourceName) => action.source === undefined || sourceName === action.source,
+      ),
+    );
+    if (action.source !== undefined && matches.length === 0) {
+      issues.push({
+        path: `actions.${actionName}.source`,
+        message: action.model
+          ? `unknown source "${action.source}" on model "${action.model}"`
+          : `unknown source "${action.source}"`,
+      });
+    }
+    if (matches.length === 0) {
+      issues.push({
+        path: `actions.${actionName}`,
+        message: "sync action matches no model sources",
+      });
+    }
+  }
+
+  return issues;
+}
+
 export function parseAppDefinition(
   input: unknown,
 ): { success: true; definition: AppDefinition } | { success: false; issues: AppValidationIssue[] } {
   const parsed = AppDefinitionSchema.safeParse(input);
   if (!parsed.success) return { success: false, issues: appDefinitionIssues(parsed.error) };
 
-  const issues = validatePage(parsed.data, catalog);
+  const issues = [...validatePage(parsed.data, catalog), ...sourceDefinitionIssues(parsed.data)];
   for (const [name, action] of Object.entries(parsed.data.actions ?? {})) {
     if (action.kind === "script" && !getScriptById(action.scriptId)) {
       issues.push({
@@ -266,7 +455,8 @@ function applyMergePatch(target: unknown, patch: unknown, path: string[]): unkno
   const result: Record<string, unknown> = isMergePatchObject(target) ? { ...target } : {};
   const entriesAreAtomic =
     (path.length === 1 && path[0] === "actions") ||
-    (path.length === 2 && path[0] === "page" && path[1] === "elements");
+    (path.length === 2 && path[0] === "page" && path[1] === "elements") ||
+    (path.length === 3 && path[0] === "models" && (path[2] === "columns" || path[2] === "sources"));
 
   for (const [key, value] of Object.entries(patch)) {
     if (value === null) {
@@ -284,9 +474,9 @@ function applyMergePatch(target: unknown, patch: unknown, path: string[]): unkno
 
 /**
  * Apply RFC 7396 JSON Merge Patch semantics to an app definition without
- * mutating either input. Individual action and page-element entries are
- * intentionally atomic so callers cannot accidentally leave half of one
- * executable/renderable subtree behind.
+ * mutating either input. Individual action, page-element, model-column, and
+ * model-source entries are intentionally atomic so callers cannot accidentally
+ * leave half of one executable/renderable subtree behind.
  */
 export function applyAppDefinitionPatch(
   stored: AppDefinition,

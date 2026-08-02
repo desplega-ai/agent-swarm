@@ -23,6 +23,7 @@ import {
   purgeAppRows,
 } from "../apps/row-store";
 import { createApp, deleteApp, getApp, listApps, updateApp } from "../apps/store";
+import { runAppSync, SyncSelectionError } from "../apps/sync";
 import { getAgentById, getLeadAgent } from "../be/db";
 import {
   getScriptApiConnectionDescriptors,
@@ -122,7 +123,7 @@ const patchAppRoute = route({
   pattern: ["api", "apps", null],
   summary: "Patch an app",
   description:
-    "Applies an RFC 7396 merge patch to the definition, with app actions and page elements treated as atomic entries.",
+    "Applies an RFC 7396 merge patch to the definition, with app actions, page elements, model columns, and model sources treated as atomic entries.",
   tags: ["Apps"],
   params: appParamsSchema,
   body: z.object({
@@ -264,12 +265,31 @@ const runNamedQueryRoute = route({
   },
 });
 
+const syncAppRoute = route({
+  method: "post",
+  path: "/api/apps/{id}/sync",
+  pattern: ["api", "apps", null, "sync"],
+  summary: "Synchronize app source projections",
+  description: "Runs all matching model and source sync passes sequentially.",
+  tags: ["Apps"],
+  params: appParamsSchema,
+  body: z.object({ model: AppNameSchema.optional(), source: AppNameSchema.optional() }),
+  responses: {
+    200: { description: "Sync pass results" },
+    400: { description: "Unknown model, source, or empty sync selection" },
+    403: { description: "Permission denied" },
+    404: { description: "App not found" },
+  },
+  rbac: { permission: "app.manage" },
+});
+
 const runActionRoute = route({
   method: "post",
   path: "/api/apps/{id}/actions/{name}",
   pattern: ["api", "apps", null, "actions", null],
   summary: "Run a custom app action",
-  description: "Runs the saved script or creates the agent task named by the app definition.",
+  description:
+    "Runs the sync pass or saved script, or creates the agent task named by the app definition.",
   tags: ["Apps"],
   params: z.object({ id: z.string().min(1), name: AppNameSchema }),
   body: z.object({ input: z.record(z.string(), z.unknown()).optional() }),
@@ -410,7 +430,7 @@ function rowValue(row: AppRow, column: string): unknown {
   return Object.hasOwn(row, column) ? row[column] : undefined;
 }
 
-function applyQuery(rows: AppRow[], query: AppQueryDef, model: ModelDef): AppRow[] {
+export function applyQuery(rows: AppRow[], query: AppQueryDef, model: ModelDef): AppRow[] {
   let selected = rows.filter((row) =>
     Object.entries(query.filter ?? {}).every(([column, value]) => rowValue(row, column) === value),
   );
@@ -423,6 +443,7 @@ function applyQuery(rows: AppRow[], query: AppQueryDef, model: ModelDef): AppRow
         sort.dir,
         sort.column === "createdAt" ||
           sort.column === "updatedAt" ||
+          sort.column === "syncedAt" ||
           (Object.hasOwn(model.columns, sort.column) &&
             model.columns[sort.column]!.kind === "date"),
       );
@@ -533,6 +554,7 @@ export async function handleApps(
         (dir !== "asc" && dir !== "desc") ||
         (column !== "createdAt" &&
           column !== "updatedAt" &&
+          column !== "syncedAt" &&
           !Object.hasOwn(resolved.model.columns, column))
       ) {
         json(
@@ -552,6 +574,7 @@ export async function handleApps(
           dir,
           column === "createdAt" ||
             column === "updatedAt" ||
+            column === "syncedAt" ||
             (Object.hasOwn(resolved.model.columns, column) &&
               resolved.model.columns[column]!.kind === "date"),
         );
@@ -642,6 +665,25 @@ export async function handleApps(
     return true;
   }
 
+  if (syncAppRoute.match(req.method, pathSegments)) {
+    if (enforceContentLengthCap(req, res, MAX_APP_ROW_BODY_BYTES) === BODY_TOO_LARGE) return true;
+    const parsed = await syncAppRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!authorizeAppWrite(req, res, myAgentId)) return true;
+    const app = getApp(parsed.params.id);
+    if (!app) {
+      jsonError(res, "app not found", 404);
+      return true;
+    }
+    try {
+      json(res, await runAppSync(app, parsed.body));
+    } catch (error) {
+      if (!(error instanceof SyncSelectionError)) throw error;
+      json(res, { error: error.message, issues: error.issues }, 400);
+    }
+    return true;
+  }
+
   if (runActionRoute.match(req.method, pathSegments)) {
     if (enforceContentLengthCap(req, res, MAX_APP_ROW_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await runActionRoute.parse(req, res, pathSegments, queryParams);
@@ -661,6 +703,28 @@ export async function handleApps(
 
     const action = actions[parsed.params.name]!;
     const input = parsed.body.input ?? {};
+    if (action.kind === "sync") {
+      const startedAt = Date.now();
+      try {
+        const sync = await runAppSync(app, { model: action.model, source: action.source });
+        const error = sync.ok
+          ? undefined
+          : sync.passes
+              .filter((pass) => pass.error !== undefined)
+              .map((pass) => `${pass.model}.${pass.source}: ${pass.error}`)
+              .join("; ");
+        json(res, {
+          ok: sync.ok,
+          result: { passes: sync.passes },
+          ...(error ? { error } : {}),
+          durationMs: Date.now() - startedAt,
+        });
+      } catch (error) {
+        if (!(error instanceof SyncSelectionError)) throw error;
+        json(res, { error: "invalid app action", issues: error.issues }, 400);
+      }
+      return true;
+    }
     if (action.kind === "script") {
       const script = getScriptById(action.scriptId);
       if (!script) {

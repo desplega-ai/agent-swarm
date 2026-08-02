@@ -440,6 +440,8 @@ declare module "swarm-sdk" {
       description?: string | null;
       definition?: Record<string, unknown>;
     }): Promise<unknown>;
+    app_query(args: { appId: string; query: string }): Promise<unknown>;
+    app_sync(args: { appId: string; model?: string; source?: string }): Promise<unknown>;
     app_upsert(args: {
       name: string;
       description?: string;
