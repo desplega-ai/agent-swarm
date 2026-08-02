@@ -211,7 +211,74 @@ orchestrator) → commits → E2E.
   (missing element ids) and silently shifts positional indices — positional components must use
   the raw children array.
 
-## Spike 3 (2026-08-02, in progress — spec ./2026-08-02-swarm-apps-spike3-sync-spec.md)
+## Spike 3 results (2026-08-02/03, complete — spec ./2026-08-02-swarm-apps-spike3-sync-spec.md)
+
+Flow: recon workflow (6 Sonnet readers → /tmp/recon3-*.md) → task-0 action-loop browser
+proof → freeze spec (76d1a13b) → Codex sol server slice → two-lens review workflow (Opus
+core + Sonnet periphery + adversarial verify) → codex fix round → commit 9db67996 → E2E.
+NO UI slice — recon-confirmed zero apps/ui changes needed and E2E bore that out.
+
+- **Review headline (CONFIRMED blocker, empirically reproduced by the verifier):**
+  concurrent sync passes duplicated every row — reconcile read happened outside the
+  per-model mutex and all three entry doors (HTTP /sync, sync action, app-sync MCP) were
+  unserialized; a Refresh double-click sufficed. Fix: pull() outside the lock, entire
+  reconcile phase inside one withMutationLock span with unlocked row-writers + a
+  barrier-gated concurrency regression test. Plus: GH timeout now spans the body read;
+  repo "." / ".." segments rejected; app-query un-gated (read posture, registered in
+  app-get.ts's allowlisted module); syncedAt bumps on every confirmed-present row WITHOUT
+  bumping updatedAt (metadata-only patch option — otherwise freshness columns lie after
+  no-op syncs / updatedAt sorts reshuffle every pass).
+- **E2E (scratch app 12218dfe, all green):** read-only rejection with path-bearing issues
+  (source-bound + join-key cols; owned cols writable); dual-source sync (6 swarm tasks +
+  4 real GH issues from desplega-ai/agent-swarm); sync action returns script-kind shape
+  (no taskId) so the untouched app.action runtime shows running→ok + refetch; stale
+  round-trip via config narrowing (state all→open flags exactly the closed 2, widen
+  clears); schedule targetType:'script' → app-sync-cron script → ctx.swarm.app_sync →
+  rows refreshed, run-now endpoint fires immediately; app_query works from scripts.
+- **PM-app finale (zero-shot) PASSED:** worker task with NO format primer built
+  "PM Inbox" (6f93f0ce-755c-4b4d-afed-bbb11bb1eed2): issue model with TWO sources and
+  per-source join-key columns (taskId / githubNumber), 18 source-bound columns with
+  correct transforms (date-parse, lower), owned note + flag(enum) columns, scoped
+  refresh actions (all/tasks/github), Tackle task-action whose rowAction carries
+  {issue: {"$row": ""}} + a thoughtful prompt (incl. "if already completed, say so"),
+  inbox/urgent queries, 37-element page using the full 2.5 layout tier. 12 synced rows
+  from both sources, agent ran app-sync itself 3× to verify. **Exactly ONE validation
+  rejection** (missing rowId in a form's update chain) — the page validator caught it
+  and the agent self-corrected from issues[] in the next patch: the designed loop
+  working as intended. $3.74, 36 turns, ~8.5 min.
+- **Browser verify (PM Inbox): 6/6 PASS** (screenshots /tmp/spike3-pm-*.png): split
+  layout + 4 tabs render both sources; Last-synced relative times; Refresh badge
+  OK→RUNNING(+54ms)→OK(+377ms) with all rows flipping "just now"; search narrows to the
+  CODEOWNERS row, Select source-filter works; Tackle confirm-dialog → real task with the
+  full row JSON in the prompt, visible in the pool after refresh. Bonus: the stale flag
+  fired ORGANICALLY mid-test — a GH issue fell out of the 100-item pull window and its
+  Freshness badge flipped TRUE while others resynced. Catalog/runtime follow-ups logged:
+  idle action badges render literal "UNDEFINED" (recurring from task 0); boolean cells
+  render raw TRUE/FALSE (want badge labels); Select has no built-in reset option once
+  chosen; wide-table column-width distribution + row-action overflow clipping; AG Grid
+  #200 (CellStyleModule) seen once under HMR, clean after full reload; scripted E2E
+  can't drive SearchInput via native setter+input event (state store not updated).
+- **Stretch (autopilot) PASSED:** pm-nightly-digest workflow (swarm-script node) calls
+  the agent-built app's own queries via app_query and publishes an HTML digest page
+  (14ea4604, versioned on re-run); nightly cron schedule (0 6 * * *,
+  targetType:'workflow') wired. "Agents are end-users of the app they built" — proven.
+- **Env/ops incidents worth remembering:** (1) Codex's sandbox denies .env reads; its
+  first stray test boot fell through to the DEFAULT ./agent-swarm-db.sqlite and applied
+  migration 124 there — surgically undone (DROP apps + delete _migrations row; backup
+  /tmp/agent-swarm-db.backup-pre-124-undo.sqlite); a review verifier repeated the
+  pattern before its safety stop, end-state verified clean. Delegated prompts must
+  mandate isolated DATABASE_PATH + BUN_OPTIONS=--no-env-file. (2) Schedules accept only
+  GLOBAL-scope scripts and global script writes are lead-gated → e2e-probe promoted to
+  lead in the isolated DB (side effect: lead auto-assignment stole the first finale
+  task; recreate pinned to the worker). (3) page_create takes body/contentType, not
+  content/kind.
+- Isolated-stack state for pickup: apps incl. PM Inbox 6f93f0ce + scratch 12218dfe;
+  schedules spike3-pm-sync (hourly script) + spike3-nightly-digest (cron workflow);
+  global scripts app-sync-cron/pm-digest (sources committed in scripts/dev/); e2e-probe
+  21bc3294 is lead; GH source repo desplega-ai/agent-swarm at limit 100 (window-relative
+  staleness documented in the skill).
+
+## Spike 3 log (2026-08-02, superseded by results above — spec ./2026-08-02-swarm-apps-spike3-sync-spec.md)
 
 - **Task 0 (action-loop browser proof): PASS 3/3.** Saved script `notes-add-sample`
   (agent-scoped under e2e-probe 21bc3294) writes a note row via the app-model row
