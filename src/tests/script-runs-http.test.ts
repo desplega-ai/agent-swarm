@@ -6,7 +6,10 @@ import {
   closeDb,
   completeTask,
   createAgent,
+  createTaskExtended,
+  failTask,
   getDb,
+  getLatestScriptRunStepTaskByContextKey,
   getLatestTaskByContextKey,
   initDb,
   updateScriptRun,
@@ -359,7 +362,7 @@ describe("/api/script-runs HTTP", () => {
 
     await Bun.sleep(50);
     const contextKey = `script-run:${runId}:implement`;
-    const dispatched = getLatestTaskByContextKey(contextKey);
+    const dispatched = getLatestScriptRunStepTaskByContextKey(contextKey);
     expect(dispatched).not.toBeNull();
     completeTask((dispatched as { id: string }).id, JSON.stringify({ done: true }));
 
@@ -367,6 +370,15 @@ describe("/api/script-runs HTTP", () => {
     expect(first.status).toBe(200);
     const firstBody = (await first.json()) as { taskId: string; taskOutput: unknown };
     expect(firstBody.taskId).toBe((dispatched as { id: string }).id);
+
+    await Bun.sleep(2);
+    const followUp = createTaskExtended("review the completed step", {
+      taskType: "follow-up",
+      source: "system",
+      parentTaskId: dispatched?.id,
+    });
+    completeTask(followUp.id, "reviewed");
+    expect(getLatestTaskByContextKey(contextKey)?.id).toBe(followUp.id);
 
     // Replay: same stepKey again (what ctx.step.agentTask's poll loop does,
     // and what a resumed harness process does after a crash mid-wait). Must
@@ -377,13 +389,86 @@ describe("/api/script-runs HTTP", () => {
       body: JSON.stringify({ stepKey: "implement", task: "do the thing" }),
     });
     expect(second.status).toBe(200);
-    const secondBody = (await second.json()) as { taskId: string };
+    const secondBody = (await second.json()) as { taskId: string; taskOutput: unknown };
     expect(secondBody.taskId).toBe((dispatched as { id: string }).id);
+    expect(secondBody.taskOutput).toBe(JSON.stringify({ done: true }));
 
-    const count = getDb()
-      .query("SELECT COUNT(*) as c FROM agent_tasks WHERE contextKey = ?")
+    const stepCount = getDb()
+      .query(
+        "SELECT COUNT(*) as c FROM agent_tasks WHERE contextKey = ? AND taskType = 'script-run-step'",
+      )
       .get(contextKey) as { c: number };
-    expect(count.c).toBe(1);
+    expect(stepCount.c).toBe(1);
+  });
+
+  test("agent-task polling returns the step output when a newer completed follow-up shares its context key", async () => {
+    const created = await dispatch("/api/script-runs", {
+      method: "POST",
+      agentId,
+      body: createBody(),
+    });
+    const { id: runId } = (await created.json()) as { id: string };
+
+    const callPromise = dispatch(`/api/internal/script-runs/${runId}/agent-task`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({ stepKey: "plan", task: "write the plan" }),
+    });
+
+    await Bun.sleep(50);
+    const contextKey = `script-run:${runId}:plan`;
+    const step = getLatestScriptRunStepTaskByContextKey(contextKey);
+    expect(step).not.toBeNull();
+    const stepOutput = JSON.stringify({ plan: ["inspect", "implement", "verify"] });
+    completeTask((step as { id: string }).id, stepOutput);
+
+    await Bun.sleep(2);
+    const followUp = createTaskExtended("review the plan", {
+      taskType: "follow-up",
+      source: "system",
+      parentTaskId: step?.id,
+    });
+    completeTask(followUp.id, "Reviewed the plan; proceed.");
+    expect(getLatestTaskByContextKey(contextKey)?.id).toBe(followUp.id);
+
+    const response = await callPromise;
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ taskId: step?.id, taskOutput: stepOutput });
+  });
+
+  test("a failed follow-up sharing the context key does not fail a completed agent-task step", async () => {
+    const created = await dispatch("/api/script-runs", {
+      method: "POST",
+      agentId,
+      body: createBody(),
+    });
+    const { id: runId } = (await created.json()) as { id: string };
+
+    const callPromise = dispatch(`/api/internal/script-runs/${runId}/agent-task`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({ stepKey: "review", task: "review the plan" }),
+    });
+
+    await Bun.sleep(50);
+    const contextKey = `script-run:${runId}:review`;
+    const step = getLatestScriptRunStepTaskByContextKey(contextKey);
+    expect(step).not.toBeNull();
+    const stepOutput = JSON.stringify({ approved: true });
+    completeTask((step as { id: string }).id, stepOutput);
+
+    await Bun.sleep(2);
+    const followUp = createTaskExtended("review the review", {
+      taskType: "follow-up",
+      source: "system",
+      parentTaskId: step?.id,
+    });
+    failTask(followUp.id, "Lead follow-up failed");
+    expect(getLatestTaskByContextKey(contextKey)?.id).toBe(followUp.id);
+
+    const response = await callPromise;
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ taskId: step?.id, taskOutput: stepOutput });
   });
 
   test("cancel leaves terminal script runs unchanged", async () => {
