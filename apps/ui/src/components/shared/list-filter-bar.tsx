@@ -1,7 +1,7 @@
-import { Search, X } from "lucide-react";
+import { X } from "lucide-react";
 import type { ReactNode } from "react";
+import { SearchBox } from "@/components/shared/search-box";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 interface ListFilterBarProps {
@@ -31,16 +31,12 @@ export function ListFilterBar({
 }: ListFilterBarProps) {
   return (
     <div className={cn("flex shrink-0 flex-wrap items-center gap-3", className)}>
-      <div className="relative w-full min-w-0 sm:max-w-sm sm:flex-1">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          aria-label={searchPlaceholder}
-          placeholder={searchPlaceholder}
-          value={searchValue}
-          onChange={(event) => onSearchChange(event.target.value)}
-          className="pl-9"
-        />
-      </div>
+      <SearchBox
+        value={searchValue}
+        onChange={onSearchChange}
+        placeholder={searchPlaceholder}
+        className="w-full sm:max-w-sm sm:flex-1"
+      />
       {children}
       {hasActiveFilters && onClear ? (
         <Button

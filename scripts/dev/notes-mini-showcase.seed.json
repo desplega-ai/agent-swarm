@@ -1,0 +1,55 @@
+{
+  "rows": [
+    {
+      "values": {
+        "title": "Ship the apps spike report",
+        "content": "Summarize spike 1 + 2 findings for the team. Include the **zero-shot patch** result.",
+        "tag": "todo",
+        "pinned": true
+      }
+    },
+    {
+      "values": {
+        "title": "Convex function taxonomy",
+        "content": "queries = deterministic + cacheable, mutations = transactional, actions = escape hatch. Reactivity falls out of the read contract.",
+        "tag": "reference",
+        "pinned": true
+      }
+    },
+    {
+      "values": {
+        "title": "App marketplace idea",
+        "content": "Agents could publish app definitions as installable templates — one JSON doc per app makes this cheap.",
+        "tag": "idea"
+      }
+    },
+    {
+      "values": {
+        "title": "Layout tokens not pixels",
+        "content": "Spacing enums (`none…xl`) keep agent-authored layouts consistent — no 13px surprises.",
+        "tag": "journal"
+      }
+    },
+    {
+      "values": {
+        "title": "Wire rating filter into Bookmarks",
+        "content": "Follow-up: replace the 7-table workaround with `filters` bound to a Select now that `/ui/*` exists.",
+        "tag": "todo"
+      }
+    },
+    {
+      "values": {
+        "title": "DivKit ships a JSON Schema of its DSL",
+        "content": "Strongest validation story of the surveyed JSON-UI systems — mirrors our generated catalog artifact.",
+        "tag": "reference"
+      }
+    },
+    {
+      "values": {
+        "title": "Weekly review ritual",
+        "content": "Friday: sweep unpinned notes older than a month — archive or promote to tasks.",
+        "tag": "journal"
+      }
+    }
+  ]
+}

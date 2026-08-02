@@ -7,11 +7,16 @@ export {
   BADGE_TONES,
   type BadgeTone,
   type FormField,
+  type GridColumns,
+  type SelectOption,
+  type SpacingToken,
   swarmCallActionSchema,
   swarmCatalog,
   swarmSdkActionSchema,
   type TableColumn,
+  type TableFilters,
   type TableRowAction,
+  type TabsTab,
 } from "./catalog";
 export { swarmComponents } from "./components";
 export {

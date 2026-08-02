@@ -39,3 +39,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/*
+ * Quartz reserves `min-height: 150px` on the auto-height viewport, which leaves
+ * a slab of dead space under a table narrowed to one or two rows. Applied only
+ * when the grid actually has rows — the no-rows overlay still needs its box.
+ */
+.ag-theme-quartz.ag-grid-hug .ag-layout-auto-height .ag-center-cols-viewport {
+  min-height: 0;
+}

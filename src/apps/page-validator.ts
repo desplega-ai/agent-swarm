@@ -29,6 +29,7 @@ interface StateRef {
 }
 
 const ELEMENT_KEYS = new Set(["type", "props", "children", "on", "visible", "repeat", "watch"]);
+const UI_STATE_COMPONENTS = new Set(["SearchInput", "Select", "Tabs"]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -332,16 +333,25 @@ function validateStateRef(
   ref: StateRef,
   definition: AppDefinition,
   formIds: Set<string>,
+  uiIds: Set<string>,
 ): AppValidationIssue | null {
-  const match = /^\/(queries|forms|actions)\/([^/]+)(?:\/.*)?$/.exec(ref.value);
+  const match = /^\/(queries|forms|actions|ui)\/([^/]+)(?:\/.*)?$/.exec(ref.value);
   if (!match) return issue(ref.path, `invalid state reference "${ref.value}"`);
 
   const [, namespace, name] = match;
   const exists =
     (namespace === "queries" && Object.hasOwn(definition.queries ?? {}, name!)) ||
     (namespace === "forms" && formIds.has(name!)) ||
-    (namespace === "actions" && Object.hasOwn(definition.actions ?? {}, name!));
-  const targetKind = namespace === "queries" ? "query" : namespace === "forms" ? "form" : "action";
+    (namespace === "actions" && Object.hasOwn(definition.actions ?? {}, name!)) ||
+    (namespace === "ui" && uiIds.has(name!));
+  const targetKind =
+    namespace === "queries"
+      ? "query"
+      : namespace === "forms"
+        ? "form"
+        : namespace === "actions"
+          ? "action"
+          : "UI control";
   return exists ? null : issue(ref.path, `state reference targets unknown ${targetKind} "${name}"`);
 }
 
@@ -349,6 +359,7 @@ export function validatePage(definition: AppDefinition, catalog: AppCatalog): Ap
   const issues: AppValidationIssue[] = [];
   const stateRefs: StateRef[] = [];
   const formIds = new Set<string>();
+  const uiIds = new Set<string>();
   const page = definition.page;
   const root = page.root;
   const elements = page.elements;
@@ -406,6 +417,14 @@ export function validatePage(definition: AppDefinition, catalog: AppCatalog): Ap
         typeof rawElement.props.id === "string"
       ) {
         formIds.add(rawElement.props.id);
+      }
+      if (
+        typeof type === "string" &&
+        UI_STATE_COMPONENTS.has(type) &&
+        isPlainObject(rawElement.props) &&
+        typeof rawElement.props.id === "string"
+      ) {
+        uiIds.add(rawElement.props.id);
       }
     } else if (!Object.hasOwn(rawElement, "props")) {
       issues.push(issue(appendPath(elementPath, "props"), "is required"));
@@ -565,7 +584,7 @@ export function validatePage(definition: AppDefinition, catalog: AppCatalog): Ap
   }
 
   for (const ref of stateRefs) {
-    const stateIssue = validateStateRef(ref, definition, formIds);
+    const stateIssue = validateStateRef(ref, definition, formIds, uiIds);
     if (stateIssue) issues.push(stateIssue);
   }
   const seen = new Set<string>();

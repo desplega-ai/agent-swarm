@@ -328,6 +328,123 @@ describe("server page validation", () => {
     expect(parseAppDefinition(bookmarksDefinition).success).toBe(true);
   });
 
+  test("accepts layout components and Table UI search and filters", () => {
+    expect(
+      parseAppDefinition({
+        ...baseDefinition,
+        page: {
+          root: "root",
+          elements: {
+            root: {
+              type: "Stack",
+              props: { gap: "lg", padding: "md" },
+              children: ["split"],
+            },
+            split: {
+              type: "Split",
+              props: { ratio: "1-2" },
+              children: ["filters", "tabs"],
+            },
+            filters: {
+              type: "Stack",
+              props: { gap: "sm" },
+              children: ["search", "statusFilter"],
+            },
+            search: { type: "SearchInput", props: { id: "ideaSearch", label: "Search" } },
+            statusFilter: {
+              type: "Select",
+              props: { id: "status", options: ["open", "done"], label: "Status" },
+            },
+            tabs: {
+              type: "Tabs",
+              props: { id: "view", tabs: [{ key: "ideas" }, { key: "about" }] },
+              children: ["table", "about"],
+            },
+            table: {
+              type: "Table",
+              props: {
+                data: { $state: "/queries/allIdeas/data" },
+                columns: [{ key: "title" }, { key: "status" }],
+                search: { $state: "/ui/ideaSearch/value" },
+                filters: { status: { $state: "/ui/status/value" } },
+              },
+            },
+            about: { type: "Markdown", props: { content: "## About ideas" } },
+          },
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  test("validates UI control state roots", () => {
+    const unknown = parseAppDefinition({
+      ...baseDefinition,
+      page: {
+        root: "root",
+        elements: {
+          root: {
+            type: "Table",
+            props: {
+              columns: [{ key: "title" }],
+              search: { $state: "/ui/unknownId/value" },
+            },
+          },
+        },
+      },
+    });
+    expect(unknown.success).toBe(false);
+    if (!unknown.success) {
+      expect(unknown.issues).toContainEqual({
+        path: "page.elements.root.props.search",
+        message: 'state reference targets unknown UI control "unknownId"',
+      });
+    }
+
+    const formIdIsNotUi = parseAppDefinition({
+      ...baseDefinition,
+      page: {
+        root: "root",
+        elements: {
+          root: { type: "Stack", props: {}, children: ["form", "table"] },
+          form: { type: "Form", props: { id: "formOnly", fields: [], onSubmit: [] } },
+          table: {
+            type: "Table",
+            props: {
+              columns: [{ key: "title" }],
+              search: { $state: "/ui/formOnly/value" },
+            },
+          },
+        },
+      },
+    });
+    expect(formIdIsNotUi.success).toBe(false);
+    if (!formIdIsNotUi.success) {
+      expect(formIdIsNotUi.issues).toContainEqual({
+        path: "page.elements.table.props.search",
+        message: 'state reference targets unknown UI control "formOnly"',
+      });
+    }
+
+    expect(
+      parseAppDefinition({
+        ...baseDefinition,
+        page: {
+          root: "root",
+          elements: {
+            root: { type: "Stack", props: {}, children: ["tabs", "selectedTab"] },
+            tabs: {
+              type: "Tabs",
+              props: { id: "view", tabs: [{ key: "all" }] },
+              children: ["tabContent"],
+            },
+            tabContent: { type: "Text", props: { content: "All ideas" } },
+            selectedTab: { type: "Text", props: { content: { $state: "/ui/view/tab" } } },
+          },
+        },
+      }).success,
+    ).toBe(true);
+  });
+
   test("accepts omitted optional props and a single element action binding", () => {
     expect(
       parseAppDefinition({

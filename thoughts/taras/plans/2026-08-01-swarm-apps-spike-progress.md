@@ -183,6 +183,34 @@ orchestrator) → commits → E2E.
   --last` takes neither `-C` nor `-s` (only `-o`/`-c`/`-m`) — first two fix-round
   launches died instantly on that.
 
+## Spike 2.5 results (2026-08-02, complete — layout + search catalog, spec ./2026-08-02-swarm-apps-spike25-catalog-spec.md)
+
+- **Catalog grew the layout/interactivity tier** (frozen contract implemented exactly):
+  Stack (primary layout; Container = legacy), responsive Grid, Split (positional children,
+  collapse-below token), Divider, Tabs (positional children, inactive panels stay mounted →
+  polling stays warm; active key at `/ui/<id>/tab`), SearchInput (debounced → `/ui/<id>/value`),
+  Select (null-on-clear), Markdown (Streamdown); Table gained bindable `search` + `filters`
+  (client-side; null/empty disables) — the exact "$state-bindable filters" the spike-2 finale
+  worker asked for. Validator gained the `/ui/<id>` state root (ids from SearchInput/Select/Tabs).
+  Skill updated (18-component catalog + layout guidance).
+- **Notes Mini showcase built via `app-patch` over MCP** (dogfood): model rebuilt
+  (title/content/tag/pinned; old `text` column + old element merge-deleted), intro Grid,
+  Split (form + filters left, Tabs right: All/Pinned/About), live search + tag filter,
+  markdown About tab, 7 seeded rows. Repro artifacts committed:
+  `scripts/dev/notes-mini-showcase.{patch,seed}.json`. Browser QA: 8/8 PASS incl. 640px
+  responsive collapse.
+- **Real find during polish (shared DataGrid)**: `sizeColumnsToFit()` against a 0px-wide body
+  (default-visible tab inside Split, pre-layout) hits AG Grid's `availablePixels <= 0` branch
+  and pins every column to minWidth permanently. Fix: opt-in `columnSizing="flex"` on DataGrid
+  (native flex sizing, timing-proof); also `cellDataType: false` (AG Grid 33 was substituting
+  checkbox renderers for booleans over the documented yes/no), span-based `truncate` for real
+  ellipsis (`.ag-cell` is flex → text-overflow never applied), content-hugging autoHeight ≤12
+  rows, in-trigger Select clear. Dashboard grids unchanged (default preserved; /tasks
+  regression-screenshotted).
+- json-render gotcha for the platform version: `React.Children.toArray` DROPS null children
+  (missing element ids) and silently shifts positional indices — positional components must use
+  the raw children array.
+
 ## Gotchas learned
 
 - zsh `rm -f glob*` with no match aborts the whole command (broke a background boot once).

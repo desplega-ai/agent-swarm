@@ -6,15 +6,33 @@
  * pages renderer's behaviour is unchanged. Table / Form / Badge are the
  * swarm-apps additions and are built from existing dashboard primitives
  * (`DataGrid`, `Badge`, `Input`, `Textarea`, `Select`, `Switch`, `SettingsRow`).
+ * Stack / Grid / Split / Divider / Tabs / SearchInput / Select / Markdown are
+ * the layout + interactivity tier (spike 2.5).
+ *
+ * ── Positional children ────────────────────────────────────────────────────
+ * `Split` and `Tabs` address their children by index. Verified against
+ * `@json-render/react`'s `ElementRenderer`: `children` arrives as a plain JS
+ * array with exactly one entry per declared child key (`element.children.map`),
+ * so indices line up with the JSON. Two consequences drive `positionalChildren`
+ * below:
+ *   - `React.Children.toArray` DROPS nulls, and a child key that points at a
+ *     missing element renders as `null` — that would silently shift every later
+ *     pane by one. So the raw array is used as-is when it is one, and
+ *     `Children.toArray` is only the fallback (single child / repeat block).
+ *   - Not rendering a child simply never mounts it, which is why `Tabs` renders
+ *     every child and hides the inactive ones instead of slicing the array.
  */
 
 import { getByPath, type InferComponentProps } from "@json-render/core";
 import type { Components } from "@json-render/react";
 import { useActions, useStateStore } from "@json-render/react";
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
-import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle, Info } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle, Info, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { Children, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Streamdown } from "streamdown";
 import { DataGrid } from "@/components/shared/data-grid";
+import { SearchBox } from "@/components/shared/search-box";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import {
   AlertDialog,
@@ -36,6 +54,7 @@ import {
   Card as UiCard,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -43,19 +62,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { SettingsRow } from "@/components/ui/settings-row";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { formatSmartTime } from "@/lib/utils";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { cn, formatSmartTime } from "@/lib/utils";
 import { resolveScopedParams } from "./action-params";
 import type {
   ActionChain,
   BadgeTone,
   FormField,
+  GridColumns,
+  SelectOption,
+  SpacingToken,
   swarmCatalog,
   TableColumn,
+  TableFilters,
   TableRowAction,
   TableRowActionConfirm,
+  TabsTab,
 } from "./catalog";
 
 // ─── Style maps (moved verbatim from json-page-renderer.tsx) ────────────────
@@ -100,6 +127,436 @@ function StatusPill({ text, tone }: { text: string; tone: BadgeTone }) {
     <Badge variant="outline" size="tag" className={badgeToneClass[tone]}>
       {text}
     </Badge>
+  );
+}
+
+// ─── Layout primitives (Stack / Grid / Split / Divider) ─────────────────────
+
+/**
+ * The shared spacing scale. Written out as whole class names (never
+ * interpolated) so Tailwind's scanner emits them.
+ */
+const stackGapClass: Record<SpacingToken, string> = {
+  none: "gap-0",
+  xs: "gap-1",
+  sm: "gap-2",
+  md: "gap-4",
+  lg: "gap-6",
+  xl: "gap-8",
+};
+
+const paddingClass: Record<SpacingToken, string> = {
+  none: "p-0",
+  xs: "p-1",
+  sm: "p-2",
+  md: "p-4",
+  lg: "p-6",
+  xl: "p-8",
+};
+
+const alignClass = {
+  start: "items-start",
+  center: "items-center",
+  end: "items-end",
+  stretch: "items-stretch",
+} as const;
+
+const justifyClass = {
+  start: "justify-start",
+  center: "justify-center",
+  end: "justify-end",
+  between: "justify-between",
+} as const;
+
+/** `grid-cols-N` per breakpoint. Full class names for the same scanner reason. */
+const gridColsClass: Record<number, string> = {
+  1: "grid-cols-1",
+  2: "grid-cols-2",
+  3: "grid-cols-3",
+  4: "grid-cols-4",
+  5: "grid-cols-5",
+  6: "grid-cols-6",
+};
+
+const gridColsSmClass: Record<number, string> = {
+  1: "sm:grid-cols-1",
+  2: "sm:grid-cols-2",
+  3: "sm:grid-cols-3",
+  4: "sm:grid-cols-4",
+  5: "sm:grid-cols-5",
+  6: "sm:grid-cols-6",
+};
+
+const gridColsMdClass: Record<number, string> = {
+  1: "md:grid-cols-1",
+  2: "md:grid-cols-2",
+  3: "md:grid-cols-3",
+  4: "md:grid-cols-4",
+  5: "md:grid-cols-5",
+  6: "md:grid-cols-6",
+};
+
+const gridColsLgClass: Record<number, string> = {
+  1: "lg:grid-cols-1",
+  2: "lg:grid-cols-2",
+  3: "lg:grid-cols-3",
+  4: "lg:grid-cols-4",
+  5: "lg:grid-cols-5",
+  6: "lg:grid-cols-6",
+};
+
+/**
+ * `Split` ratios expressed as grid tracks + per-pane spans, keyed by the
+ * breakpoint the panes un-stack at. Below that breakpoint the layout is a
+ * single column.
+ */
+const SPLIT_RATIO_SPANS: Record<string, [number, number]> = {
+  "1-1": [1, 1],
+  "1-2": [1, 2],
+  "2-1": [2, 1],
+  "1-3": [1, 3],
+  "3-1": [3, 1],
+};
+
+const splitTrackClass: Record<"sm" | "md" | "lg", Record<number, string>> = {
+  sm: { 2: "sm:grid-cols-2", 3: "sm:grid-cols-3", 4: "sm:grid-cols-4" },
+  md: { 2: "md:grid-cols-2", 3: "md:grid-cols-3", 4: "md:grid-cols-4" },
+  lg: { 2: "lg:grid-cols-2", 3: "lg:grid-cols-3", 4: "lg:grid-cols-4" },
+};
+
+const splitSpanClass: Record<"sm" | "md" | "lg", Record<number, string>> = {
+  sm: { 1: "sm:col-span-1", 2: "sm:col-span-2", 3: "sm:col-span-3" },
+  md: { 1: "md:col-span-1", 2: "md:col-span-2", 3: "md:col-span-3" },
+  lg: { 1: "lg:col-span-1", 2: "lg:col-span-2", 3: "lg:col-span-3" },
+};
+
+const splitOrderResetClass: Record<"sm" | "md" | "lg", string> = {
+  sm: "sm:order-none",
+  md: "md:order-none",
+  lg: "lg:order-none",
+};
+
+/**
+ * Children of a positional container (`Split`, `Tabs`) as an index-addressable
+ * array.
+ *
+ * `@json-render/react` hands a component `element.children.map(...)` — already
+ * a plain array with one entry per declared child key, including `null` for a
+ * dangling key. `React.Children.toArray` would DROP those nulls and shift every
+ * later pane by one, so the raw array is preferred and `toArray` is only the
+ * fallback for the non-array shapes (single child, `repeat` block, undefined).
+ */
+function positionalChildren(children: ReactNode): ReactNode[] {
+  if (Array.isArray(children)) return children as ReactNode[];
+  if (children === null || children === undefined) return [];
+  return Children.toArray(children);
+}
+
+type StackProps = InferComponentProps<typeof swarmCatalog, "Stack">;
+type GridProps = InferComponentProps<typeof swarmCatalog, "Grid">;
+type SplitProps = InferComponentProps<typeof swarmCatalog, "Split">;
+type TabsComponentProps = InferComponentProps<typeof swarmCatalog, "Tabs">;
+type SearchInputProps = InferComponentProps<typeof swarmCatalog, "SearchInput">;
+type SelectFilterProps = InferComponentProps<typeof swarmCatalog, "Select">;
+
+function StackComponent({ props, children }: { props: StackProps; children: ReactNode }) {
+  const direction = props.direction ?? "column";
+  return (
+    <div
+      className={cn(
+        "flex min-w-0",
+        direction === "row" ? "flex-row" : "flex-col",
+        stackGapClass[props.gap ?? "md"],
+        props.align ? alignClass[props.align] : undefined,
+        props.justify ? justifyClass[props.justify] : undefined,
+        props.wrap ? "flex-wrap" : undefined,
+        props.padding ? paddingClass[props.padding] : undefined,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+function clampColumns(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.min(6, Math.max(1, Math.round(value)));
+}
+
+function GridComponent({ props, children }: { props: GridProps; children: ReactNode }) {
+  const columns = props.columns as GridColumns;
+  const single = clampColumns(columns);
+  // A bare count applies at every breakpoint; the object form falls back to the
+  // "cards reflow" default so a sparse `{ lg: 4 }` still stacks on a phone.
+  const perBreakpoint =
+    single !== undefined
+      ? { base: single, sm: undefined, md: undefined, lg: undefined }
+      : {
+          base: clampColumns((columns as { base?: number } | undefined)?.base) ?? 1,
+          sm: clampColumns((columns as { sm?: number } | undefined)?.sm),
+          md:
+            clampColumns((columns as { md?: number } | undefined)?.md) ?? (columns ? undefined : 2),
+          lg:
+            clampColumns((columns as { lg?: number } | undefined)?.lg) ?? (columns ? undefined : 3),
+        };
+
+  return (
+    <div
+      className={cn(
+        "grid min-w-0",
+        gridColsClass[perBreakpoint.base],
+        perBreakpoint.sm ? gridColsSmClass[perBreakpoint.sm] : undefined,
+        perBreakpoint.md ? gridColsMdClass[perBreakpoint.md] : undefined,
+        perBreakpoint.lg ? gridColsLgClass[perBreakpoint.lg] : undefined,
+        stackGapClass[props.gap ?? "md"],
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+function SplitComponent({ props, children }: { props: SplitProps; children: ReactNode }) {
+  const panes = positionalChildren(children);
+  const breakpoint = props.collapseBelow ?? "md";
+  const [firstSpan, secondSpan] = SPLIT_RATIO_SPANS[props.ratio ?? "2-1"] ?? [2, 1];
+  const tracks = firstSpan + secondSpan;
+  const gap = stackGapClass[props.gap ?? "md"];
+  const reverse = props.reverse === true;
+
+  return (
+    <div className={cn("grid min-w-0 grid-cols-1", splitTrackClass[breakpoint][tracks], gap)}>
+      <div
+        className={cn(
+          "flex min-w-0 flex-col",
+          gap,
+          splitSpanClass[breakpoint][firstSpan],
+          reverse ? cn("order-2", splitOrderResetClass[breakpoint]) : undefined,
+        )}
+      >
+        {panes[0] ?? null}
+      </div>
+      <div
+        className={cn(
+          "flex min-w-0 flex-col",
+          gap,
+          splitSpanClass[breakpoint][secondSpan],
+          reverse ? cn("order-1", splitOrderResetClass[breakpoint]) : undefined,
+        )}
+      >
+        {/* Everything past the first child belongs to the second pane. */}
+        {panes.slice(1)}
+      </div>
+    </div>
+  );
+}
+
+function DividerComponent({ props }: { props: { label?: string } }) {
+  if (!props.label) return <Separator className="my-1" />;
+  return (
+    <div className="flex items-center gap-3 py-1">
+      <Separator className="shrink flex-1" />
+      <span className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {props.label}
+      </span>
+      <Separator className="shrink flex-1" />
+    </div>
+  );
+}
+
+// ─── Tabs ───────────────────────────────────────────────────────────────────
+
+function TabsComponent({ props, children }: { props: TabsComponentProps; children: ReactNode }) {
+  const { state, set } = useStateStore();
+  const tabs = (props.tabs ?? []) as TabsTab[];
+  const panels = positionalChildren(children);
+  const path = `/ui/${props.id}/tab`;
+
+  const stored = getByPath(state, path);
+  const fallback =
+    props.defaultTab && tabs.some((tab) => tab.key === props.defaultTab)
+      ? props.defaultTab
+      : (tabs[0]?.key ?? "");
+  const active =
+    typeof stored === "string" && tabs.some((tab) => tab.key === stored) ? stored : fallback;
+
+  // Seed `/ui/<id>/tab` on mount (so `$state` bindings resolve immediately) and
+  // self-heal if a stored key disappears from `tabs` after an app edit.
+  useEffect(() => {
+    if (active && stored !== active) set(path, active);
+  }, [active, stored, path, set]);
+
+  if (tabs.length === 0) return null;
+
+  return (
+    <Tabs
+      value={active}
+      onValueChange={(next) => set(path, next)}
+      className="gap-3"
+      data-testid="json-render-tabs"
+    >
+      <TabsList>
+        {tabs.map((tab) => (
+          <TabsTrigger key={tab.key} value={tab.key}>
+            {tab.label ?? tab.key}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      {tabs.map((tab, index) => {
+        const isActive = tab.key === active;
+        // Extra children past the tab count join the last panel rather than
+        // vanishing silently.
+        const body = index === tabs.length - 1 ? panels.slice(index) : (panels[index] ?? null);
+        return (
+          // `forceMount` keeps every panel mounted (polled Tables in background
+          // tabs stay warm) — it also forces them VISIBLE, so `hidden` is set
+          // explicitly. Radix spreads caller props after its own `hidden`.
+          <TabsContent
+            key={tab.key}
+            value={tab.key}
+            forceMount
+            hidden={!isActive}
+            className={cn("flex min-w-0 flex-col gap-4", !isActive && "hidden")}
+          >
+            {body}
+          </TabsContent>
+        );
+      })}
+    </Tabs>
+  );
+}
+
+// ─── SearchInput / Select (the `/ui/<id>` interactivity root) ───────────────
+
+function SearchInputComponent({ props }: { props: SearchInputProps }) {
+  const { state, get, set } = useStateStore();
+  const path = `/ui/${props.id}/value`;
+  const inputId = `ui-${props.id}`;
+
+  // Local mirror keeps typing instant; the store only sees the settled value.
+  const [text, setText] = useState(() => {
+    const initial = get(path);
+    return typeof initial === "string" ? initial : "";
+  });
+  const debounced = useDebouncedValue(text, 200);
+
+  const setRef = useRef(set);
+  setRef.current = set;
+  // Last value THIS component pushed — anything else in the store is an
+  // external write and wins over the local mirror.
+  const pushedRef = useRef(text);
+  useEffect(() => {
+    pushedRef.current = debounced;
+    setRef.current(path, debounced);
+  }, [debounced, path]);
+
+  const stored = getByPath(state, path);
+  useEffect(() => {
+    const next = typeof stored === "string" ? stored : "";
+    // Ignore the echo of our own debounced write; adopt genuine external
+    // writes (e.g. a future "clear all filters" action) so the field can't
+    // show stale text while the bound Table already reflects the new value.
+    if (next === pushedRef.current) return;
+    pushedRef.current = next;
+    setText(next);
+  }, [stored]);
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      {props.label ? <Label htmlFor={inputId}>{props.label}</Label> : null}
+      <SearchBox
+        id={inputId}
+        value={text}
+        onChange={setText}
+        ariaLabel={props.label ?? props.placeholder ?? "Search"}
+        placeholder={props.placeholder ?? "Search…"}
+        clearable
+      />
+    </div>
+  );
+}
+
+function normalizeSelectOptions(options: SelectOption[]): { value: string; label: string }[] {
+  const seen = new Set<string>();
+  const normalized: { value: string; label: string }[] = [];
+  for (const option of options) {
+    const value = typeof option === "string" ? option : option.value;
+    // Radix reserves the empty string for "no selection".
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    normalized.push({
+      value,
+      label: (typeof option === "string" ? undefined : option.label) ?? value,
+    });
+  }
+  return normalized;
+}
+
+function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
+  const { state, get, set } = useStateStore();
+  const path = `/ui/${props.id}/value`;
+  const triggerId = `ui-${props.id}`;
+  const options = normalizeSelectOptions((props.options ?? []) as SelectOption[]);
+  const clearable = props.clearable ?? true;
+
+  const stored = getByPath(state, path);
+  const value = typeof stored === "string" ? stored : "";
+
+  // Seed `/ui/<id>/value` so a bound `filters` entry resolves to `null`
+  // (= filter disabled) instead of `undefined` before the first interaction.
+  const getRef = useRef(get);
+  getRef.current = get;
+  const setRef = useRef(set);
+  setRef.current = set;
+  useEffect(() => {
+    if (getRef.current(path) === undefined) setRef.current(path, null);
+  }, [path]);
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      {props.label ? <Label htmlFor={triggerId}>{props.label}</Label> : null}
+      {/*
+        The clear affordance is overlaid INSIDE the trigger (mirroring
+        `SearchBox`) rather than placed beside it: a sibling button would steal
+        width and break right-edge alignment with the SearchInput above, and it
+        would come and go as the value changes. It sits left of the chevron, and
+        the value slot reserves a matching right margin so a long option label
+        never runs underneath. A `<button>` cannot nest inside the trigger
+        button, hence the absolute overlay.
+      */}
+      <div className="relative min-w-0">
+        <Select value={value} onValueChange={(next) => set(path, next)}>
+          <SelectTrigger
+            id={triggerId}
+            className={cn(
+              "w-full min-w-0",
+              clearable && value ? "*:data-[slot=select-value]:mr-7" : undefined,
+            )}
+          >
+            <SelectValue placeholder={props.placeholder ?? "All"} />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {clearable && value ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={`Clear ${props.label ?? "selection"}`}
+            className="absolute right-7 top-1/2 size-7 -translate-y-1/2 text-muted-foreground"
+            onClick={() => set(path, null)}
+          >
+            <X className="size-3.5" />
+          </Button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -157,6 +614,107 @@ interface PendingRowAction {
   rowIndex: number;
 }
 
+/**
+ * Floor width for a stretch (`flex: 1`) column. Prose needs room to be readable
+ * before the ellipsis kicks in; a badge or a yes/no never does.
+ */
+function minWidthForKind(kind: TableColumn["kind"]): number {
+  switch (kind) {
+    case "boolean":
+      return 85;
+    case "number":
+      return 95;
+    case "badge":
+    case "enum":
+      return 105;
+    case "date":
+      return 110;
+    default:
+      return 130;
+  }
+}
+
+/**
+ * Stretch weight. Prose columns claim twice the leftover width of a badge /
+ * date / yes-no column, which is where the reading happens.
+ */
+function flexForKind(kind: TableColumn["kind"]): number {
+  return kind === undefined || kind === "text" || kind === "string" ? 2 : 1;
+}
+
+/** Roughly `sm` button metrics: 24px of label padding + ~7px per character. */
+function rowActionButtonWidth(label: string): number {
+  return Math.max(56, Math.round(label.trim().length * 7 + 24));
+}
+
+/** Cell padding + every button at its natural width + the 6px gaps between them. */
+function rowActionsColumnWidth(rowActions: TableRowAction[]): number {
+  const buttons = rowActions.reduce(
+    (total, rowAction) => total + rowActionButtonWidth(rowAction.label),
+    0,
+  );
+  return 28 + buttons + 6 * Math.max(0, rowActions.length - 1);
+}
+
+/**
+ * Row count at which the grid stops hugging its content and becomes a fixed-
+ * height scroll region — past this, `autoHeight` would render every row (no
+ * virtualization) and push the rest of the page off screen.
+ */
+const AUTO_HEIGHT_MAX_ROWS = 12;
+
+// ─── Client-side search / filtering ─────────────────────────────────────────
+//
+// Honest at spike scale: the runtime already polls the whole (capped) row set
+// every 5s, so narrowing it in the browser costs nothing and avoids a server
+// query-override machinery. `search` / `filters` are normal props, so they can
+// be bound to `/ui/<id>/value` or pinned to a constant.
+
+/** `null` / `""` / `undefined` mean "this filter is off". */
+function isFilterActive(value: unknown): boolean {
+  return value !== null && value !== undefined && value !== "";
+}
+
+function toFilterBoolean(cell: unknown): boolean {
+  if (typeof cell === "boolean") return cell;
+  if (typeof cell === "number") return cell !== 0;
+  if (typeof cell === "string") return cell === "true" || cell === "1";
+  return false;
+}
+
+/** Case-insensitive substring match over the string/number cells of the listed columns. */
+function rowMatchesSearch(
+  row: Record<string, unknown>,
+  columnKeys: string[],
+  needle: string,
+): boolean {
+  return columnKeys.some((key) => {
+    const cell = row[key];
+    if (typeof cell === "string") return cell.toLowerCase().includes(needle);
+    if (typeof cell === "number") return String(cell).includes(needle);
+    return false;
+  });
+}
+
+/** Per-column equality; strings compare case-insensitively (enum/tag columns). */
+function rowMatchesFilters(
+  row: Record<string, unknown>,
+  filters: NonNullable<TableFilters>,
+): boolean {
+  for (const [key, filter] of Object.entries(filters)) {
+    if (!isFilterActive(filter)) continue;
+    const cell = row[key];
+    if (typeof filter === "boolean") {
+      if (toFilterBoolean(cell) !== filter) return false;
+    } else if (typeof filter === "number") {
+      if (cell === null || cell === undefined || Number(cell) !== filter) return false;
+    } else if (String(cell ?? "").toLowerCase() !== String(filter).toLowerCase()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function TableComponent({ props }: { props: TableProps }) {
   const { execute } = useActions();
   const { getSnapshot } = useStateStore();
@@ -205,14 +763,50 @@ function TableComponent({ props }: { props: TableProps }) {
 
   const columns = (props.columns ?? []) as TableColumn[];
   const rowActions = (props.rowActions ?? []) as TableRowAction[];
-  const rows = Array.isArray(props.data) ? (props.data as Record<string, unknown>[]) : [];
+  const allRows = Array.isArray(props.data) ? (props.data as Record<string, unknown>[]) : [];
+
+  const search = typeof props.search === "string" ? props.search.trim().toLowerCase() : "";
+  // Held by signature, not identity: a bound `columns` / `filters` object is
+  // rebuilt by the binding resolver on every 5s poll.
+  const columnKeys = useStableBySignature(
+    columns.map((column) => column.key),
+    JSON.stringify(columns.map((column) => column.key)),
+  );
+  const filters = useStableBySignature(
+    (props.filters ?? {}) as NonNullable<TableFilters>,
+    JSON.stringify(props.filters ?? {}),
+  );
+  const narrowing = search !== "" || Object.values(filters).some(isFilterActive);
+
+  const rows = useMemo(() => {
+    if (!narrowing) return allRows;
+    return allRows.filter(
+      (row) =>
+        (search === "" || rowMatchesSearch(row, columnKeys, search)) &&
+        rowMatchesFilters(row, filters),
+    );
+  }, [allRows, narrowing, search, columnKeys, filters]);
+
+  // Distinguish "nothing here yet" from "your search hid everything".
+  const narrowedToEmpty = narrowing && rows.length === 0 && allRows.length > 0;
+  const emptyMessage = narrowedToEmpty
+    ? "No rows match the current search or filters"
+    : (props.emptyMessage ?? "No rows yet");
 
   const builtColumnDefs: ColDef<Record<string, unknown>>[] = columns.map((column) => ({
     headerName: column.label ?? column.key,
     field: column.key,
+    // Explicit `width` pins a column; everything else stretches (`flex: 1`) from
+    // a kind-appropriate floor. Never `sizeColumnsToFit` here — see the
+    // `columnSizing="flex"` note on `DataGrid`.
     width: column.width,
-    flex: column.width ? undefined : 1,
-    minWidth: 100,
+    flex: column.width ? undefined : flexForKind(column.kind),
+    minWidth: column.width ? undefined : minWidthForKind(column.kind),
+    // AG Grid's cell-data-type inference turns a boolean column into a disabled
+    // checkbox renderer, which contradicts the documented `formatCell` contract
+    // (yes / no text) and reads as a broken toggle. Opt every app column out of
+    // inference and let the value formatter own the rendering.
+    cellDataType: false,
     valueFormatter:
       column.kind === "badge" ? undefined : (params) => formatCell(column, params.value),
     cellRenderer:
@@ -223,7 +817,20 @@ function TableComponent({ props }: { props: TableProps }) {
             if (!raw) return null;
             return <StatusPill text={raw} tone={column.tones?.[raw] ?? "neutral"} />;
           }
-        : undefined,
+        : // AG Grid drops a plain value straight into the cell, which is a flex
+          // row — the text becomes an anonymous flex item, and `text-overflow`
+          // never applies to one, so long titles hard-clip mid-word. Wrapping
+          // the value in a real element gives the ellipsis something to bite on
+          // (and a native tooltip carrying the full text).
+          (params: ICellRendererParams<Record<string, unknown>>) => {
+            const text = params.valueFormatted ?? formatCell(column, params.value);
+            if (!text) return null;
+            return (
+              <span className="block w-full truncate" title={text}>
+                {text}
+              </span>
+            );
+          },
   }));
 
   if (rowActions.length > 0) {
@@ -232,7 +839,12 @@ function TableComponent({ props }: { props: TableProps }) {
       colId: "__rowActions",
       sortable: false,
       filter: false,
-      minWidth: 120 * rowActions.length,
+      // Fixed, content-derived width: the buttons must not stretch with the
+      // panel, and must not get squeezed below their labels either (a clipped
+      // action is an unreachable action).
+      width: rowActionsColumnWidth(rowActions),
+      minWidth: rowActionsColumnWidth(rowActions),
+      suppressSizeToFit: true,
       cellRenderer: (params: ICellRendererParams<Record<string, unknown>>) => (
         <div className="flex items-center gap-1.5">
           {rowActions.map((rowAction, rowActionIndex) => (
@@ -258,6 +870,7 @@ function TableComponent({ props }: { props: TableProps }) {
   }
 
   const columnDefs = useStableBySignature(builtColumnDefs, JSON.stringify([columns, rowActions]));
+  const hugsContent = rows.length <= AUTO_HEIGHT_MAX_ROWS;
 
   const confirmingAction = pendingRowAction
     ? rowActions[pendingRowAction.rowActionIndex]
@@ -266,7 +879,9 @@ function TableComponent({ props }: { props: TableProps }) {
   const confirmIsDestructive = DESTRUCTIVE_VARIANTS.has(confirmingAction?.variant ?? "outline");
 
   return (
-    <div className="flex flex-col gap-2" data-testid="json-render-table">
+    // `min-w-0` lets the grid shrink below its column total inside flex/grid
+    // parents so AG Grid owns the horizontal scroll instead of the card clipping it.
+    <div className="flex min-w-0 flex-col gap-2" data-testid="json-render-table">
       {props.error ? (
         <AlertCallout tone="error" icon={AlertCircle} title="Query failed">
           {props.error}
@@ -276,8 +891,16 @@ function TableComponent({ props }: { props: TableProps }) {
         rowData={rows}
         columnDefs={columnDefs}
         loading={props.loading ?? false}
-        emptyMessage={props.emptyMessage ?? "No rows yet"}
-        domLayout="autoHeight"
+        emptyMessage={emptyMessage}
+        // Hug the content while the table is short (a 1-row filtered result
+        // shouldn't sit on a slab of dead space), then cap into a scroll region.
+        domLayout={hugsContent ? "autoHeight" : "normal"}
+        className={cn(
+          "json-render-grid",
+          hugsContent && rows.length > 0 && "ag-grid-hug",
+          !hugsContent && "h-[520px] flex-none",
+        )}
+        columnSizing="flex"
         pagination={false}
       />
       <AlertDialog
@@ -449,6 +1072,18 @@ function FormComponent({ props }: { props: FormProps }) {
 // ─── Component registry ─────────────────────────────────────────────────────
 
 export const swarmComponents: Components<typeof swarmCatalog> = {
+  Stack: ({ props, children }) => <StackComponent props={props}>{children}</StackComponent>,
+  Grid: ({ props, children }) => <GridComponent props={props}>{children}</GridComponent>,
+  Split: ({ props, children }) => <SplitComponent props={props}>{children}</SplitComponent>,
+  Divider: ({ props }) => <DividerComponent props={props} />,
+  Tabs: ({ props, children }) => <TabsComponent props={props}>{children}</TabsComponent>,
+  SearchInput: ({ props }) => <SearchInputComponent props={props} />,
+  Select: ({ props }) => <SelectFilterComponent props={props} />,
+  Markdown: ({ props }) => (
+    <div className="prose-doc min-w-0 text-foreground">
+      <Streamdown>{props.content}</Streamdown>
+    </div>
+  ),
   Container: ({ props, children }) => {
     const direction = props.direction ?? "column";
     const gap = props.gap ?? "md";

@@ -1,0 +1,291 @@
+{
+  "appId": "bae5343b-119b-47e4-915f-ba3ced9073f1",
+  "description": "Markdown notes with tags, pinning, live search and tag filters — layout & interactivity showcase",
+  "definition": {
+    "models": {
+      "note": {
+        "columns": {
+          "text": null,
+          "title": { "kind": "string", "required": true },
+          "content": { "kind": "string" },
+          "tag": {
+            "kind": "enum",
+            "enum": ["idea", "todo", "reference", "journal"],
+            "default": "idea"
+          },
+          "pinned": { "kind": "boolean", "default": false }
+        }
+      }
+    },
+    "queries": {
+      "all": { "model": "note", "sort": { "column": "updatedAt", "dir": "desc" }, "limit": 200 },
+      "pinnedOnly": {
+        "model": "note",
+        "filter": { "pinned": true },
+        "sort": { "column": "updatedAt", "dir": "desc" },
+        "limit": 50
+      }
+    },
+    "page": {
+      "root": "root",
+      "elements": {
+        "r": null,
+        "root": {
+          "type": "Stack",
+          "props": { "direction": "column", "gap": "lg" },
+          "children": ["heading", "subtitle", "introGrid", "mainSplit"]
+        },
+        "heading": { "type": "Heading", "props": { "text": "Notes", "level": "h1" } },
+        "subtitle": {
+          "type": "Text",
+          "props": {
+            "content": "A tiny notes app showcasing the swarm-apps layout and interactivity catalog.",
+            "tone": "muted"
+          }
+        },
+        "introGrid": {
+          "type": "Grid",
+          "props": { "columns": { "base": 1, "md": 3 }, "gap": "md" },
+          "children": ["introCapture", "introOrganize", "introFind"]
+        },
+        "introCapture": {
+          "type": "Card",
+          "props": {
+            "title": "Capture",
+            "description": "Jot notes with markdown content and a tag."
+          }
+        },
+        "introOrganize": {
+          "type": "Card",
+          "props": { "title": "Organize", "description": "Pin what matters and browse by tab." }
+        },
+        "introFind": {
+          "type": "Card",
+          "props": {
+            "title": "Find",
+            "description": "Live search and tag filters narrow the list as you type."
+          }
+        },
+        "mainSplit": {
+          "type": "Split",
+          "props": { "ratio": "1-2", "gap": "lg", "collapseBelow": "lg" },
+          "children": ["leftPane", "rightPane"]
+        },
+        "leftPane": {
+          "type": "Stack",
+          "props": { "direction": "column", "gap": "md" },
+          "children": ["newNoteCard", "filterDivider", "filterCard"]
+        },
+        "newNoteCard": {
+          "type": "Card",
+          "props": { "title": "New note" },
+          "children": ["newNoteForm"]
+        },
+        "newNoteForm": {
+          "type": "Form",
+          "props": {
+            "id": "newNote",
+            "fields": [
+              {
+                "name": "title",
+                "label": "Title",
+                "kind": "string",
+                "required": true,
+                "placeholder": "What is this note about?"
+              },
+              {
+                "name": "content",
+                "label": "Content",
+                "kind": "text",
+                "placeholder": "Markdown welcome…"
+              },
+              {
+                "name": "tag",
+                "label": "Tag",
+                "kind": "enum",
+                "options": ["idea", "todo", "reference", "journal"]
+              },
+              { "name": "pinned", "label": "Pin this note", "kind": "boolean" }
+            ],
+            "submitLabel": "Add note",
+            "onSubmit": [
+              {
+                "action": "app.mutate",
+                "params": { "model": "note", "op": "create", "values": { "$form": "" } }
+              }
+            ]
+          }
+        },
+        "filterDivider": { "type": "Divider", "props": { "label": "Filters" } },
+        "filterCard": {
+          "type": "Card",
+          "props": { "title": "Filter notes" },
+          "children": ["filterStack"]
+        },
+        "filterStack": {
+          "type": "Stack",
+          "props": { "direction": "column", "gap": "sm" },
+          "children": ["noteSearch", "tagSelect"]
+        },
+        "noteSearch": {
+          "type": "SearchInput",
+          "props": { "id": "q", "label": "Search", "placeholder": "Search by title or tag…" }
+        },
+        "tagSelect": {
+          "type": "Select",
+          "props": {
+            "id": "tagFilter",
+            "label": "Tag",
+            "options": ["idea", "todo", "reference", "journal"],
+            "placeholder": "All tags"
+          }
+        },
+        "rightPane": {
+          "type": "Tabs",
+          "props": {
+            "id": "view",
+            "tabs": [
+              { "key": "all", "label": "All notes" },
+              { "key": "pinned", "label": "Pinned" },
+              { "key": "about", "label": "About" }
+            ]
+          },
+          "children": ["allCard", "pinnedCard", "aboutCard"]
+        },
+        "allCard": {
+          "type": "Card",
+          "props": { "title": "All notes" },
+          "children": ["allTable"]
+        },
+        "allTable": {
+          "type": "Table",
+          "props": {
+            "data": { "$state": "/queries/all/data" },
+            "loading": { "$state": "/queries/all/loading" },
+            "error": { "$state": "/queries/all/error" },
+            "search": { "$state": "/ui/q/value" },
+            "filters": { "tag": { "$state": "/ui/tagFilter/value" } },
+            "columns": [
+              { "key": "title", "label": "Title" },
+              {
+                "key": "tag",
+                "label": "Tag",
+                "kind": "badge",
+                "tones": {
+                  "idea": "info",
+                  "todo": "pending",
+                  "reference": "neutral",
+                  "journal": "success"
+                }
+              },
+              { "key": "pinned", "label": "Pinned", "kind": "boolean", "width": 90 },
+              { "key": "updatedAt", "label": "Updated", "kind": "date", "width": 140 }
+            ],
+            "rowActions": [
+              {
+                "label": "Pin",
+                "variant": "outline",
+                "actions": [
+                  {
+                    "action": "app.mutate",
+                    "params": {
+                      "model": "note",
+                      "op": "update",
+                      "rowId": { "$row": "id" },
+                      "values": { "pinned": true }
+                    }
+                  }
+                ]
+              },
+              {
+                "label": "Unpin",
+                "variant": "ghost",
+                "actions": [
+                  {
+                    "action": "app.mutate",
+                    "params": {
+                      "model": "note",
+                      "op": "update",
+                      "rowId": { "$row": "id" },
+                      "values": { "pinned": false }
+                    }
+                  }
+                ]
+              },
+              {
+                "label": "Delete",
+                "variant": "destructive-outline",
+                "confirm": "Delete this note? This cannot be undone.",
+                "actions": [
+                  {
+                    "action": "app.mutate",
+                    "params": { "model": "note", "op": "delete", "rowId": { "$row": "id" } }
+                  }
+                ]
+              }
+            ],
+            "emptyMessage": "No notes yet — add your first one on the left."
+          }
+        },
+        "pinnedCard": {
+          "type": "Card",
+          "props": { "title": "Pinned notes" },
+          "children": ["pinnedTable"]
+        },
+        "pinnedTable": {
+          "type": "Table",
+          "props": {
+            "data": { "$state": "/queries/pinnedOnly/data" },
+            "loading": { "$state": "/queries/pinnedOnly/loading" },
+            "error": { "$state": "/queries/pinnedOnly/error" },
+            "search": { "$state": "/ui/q/value" },
+            "columns": [
+              { "key": "title", "label": "Title" },
+              {
+                "key": "tag",
+                "label": "Tag",
+                "kind": "badge",
+                "tones": {
+                  "idea": "info",
+                  "todo": "pending",
+                  "reference": "neutral",
+                  "journal": "success"
+                }
+              },
+              { "key": "updatedAt", "label": "Updated", "kind": "date", "width": 140 }
+            ],
+            "rowActions": [
+              {
+                "label": "Unpin",
+                "variant": "outline",
+                "actions": [
+                  {
+                    "action": "app.mutate",
+                    "params": {
+                      "model": "note",
+                      "op": "update",
+                      "rowId": { "$row": "id" },
+                      "values": { "pinned": false }
+                    }
+                  }
+                ]
+              }
+            ],
+            "emptyMessage": "Nothing pinned yet — pin a note from All notes."
+          }
+        },
+        "aboutCard": {
+          "type": "Card",
+          "props": { "title": "About this app" },
+          "children": ["aboutMd"]
+        },
+        "aboutMd": {
+          "type": "Markdown",
+          "props": {
+            "content": "## Notes Mini\n\nThis app is a **layout & interactivity showcase** for the swarm-apps catalog:\n\n- `Stack`, `Grid`, `Split` and `Divider` build the page — responsive by token, no pixel values.\n- `SearchInput` and `Select` write to the `/ui/*` state root; the tables bind `search` and `filters` to them, so the list narrows **as you type**.\n- `Tabs` keeps every view mounted, so the 5-second query polling stays warm in the background.\n- The note form writes through `app.mutate`; row actions pin, unpin and delete with a confirmation dialog.\n\n*Built and iterated entirely through `app-upsert` / `app-patch` — the same tools swarm agents use.*"
+          }
+        }
+      }
+    }
+  }
+}

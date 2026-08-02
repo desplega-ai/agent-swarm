@@ -54,6 +54,19 @@ interface DataGridProps<TData> {
    * column can fit a richer two-line diff alongside the Time cell.
    */
   rowHeight?: number;
+  /**
+   * How columns claim horizontal space.
+   *
+   * - `"fit"` (default): imperative `sizeColumnsToFit()` on grid-ready and on
+   *   real container resizes — the dashboard-wide behaviour.
+   * - `"flex"`: hands sizing to AG Grid's native `flex` / `minWidth` and never
+   *   calls `sizeColumnsToFit()`. Use this whenever the grid can mount at zero
+   *   width (inside a hidden tab panel, a collapsed pane, a lazily revealed
+   *   card): `sizeColumnsToFit()` measured against a 0px body pins every column
+   *   to its `minWidth` permanently, whereas flex re-solves itself the moment
+   *   the body has a width.
+   */
+  columnSizing?: "fit" | "flex";
 }
 
 export function DataGrid<TData>({
@@ -72,6 +85,7 @@ export function DataGrid<TData>({
   enableCellTextSelection = false,
   getRowId,
   rowHeight,
+  columnSizing = "fit",
 }: DataGridProps<TData>) {
   // AG Grid's edit-on-click only works when the cell can take focus. The
   // wrapper defaults to `suppressCellFocus` for the read-only data tables
@@ -169,10 +183,10 @@ export function DataGrid<TData>({
       if (loading) {
         event.api.showLoadingOverlay();
       }
-      event.api.sizeColumnsToFit();
+      if (columnSizing === "fit") event.api.sizeColumnsToFit();
       syncGridPaginationFromUrl(event);
     },
-    [loading, syncGridPaginationFromUrl],
+    [columnSizing, loading, syncGridPaginationFromUrl],
   );
 
   const onPaginationChanged = useCallback(
@@ -196,6 +210,9 @@ export function DataGrid<TData>({
   const lastWidthRef = useRef<number>(0);
 
   useEffect(() => {
+    // `flex` columns are re-solved by AG Grid itself on body resize — refitting
+    // would only re-pin them to `minWidth` when the container is momentarily 0px.
+    if (columnSizing === "flex") return;
     const el = containerRef.current;
     if (!el) return;
     const observer = new ResizeObserver((entries) => {
@@ -207,13 +224,13 @@ export function DataGrid<TData>({
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [columnSizing]);
 
   return (
     <div
       ref={containerRef}
       className={cn(
-        "ag-theme-quartz w-full",
+        "ag-theme-quartz w-full min-w-0",
         domLayout === "normal" && "h-[500px] flex-1",
         onRowClicked && "[&_.ag-row]:cursor-pointer",
         className,

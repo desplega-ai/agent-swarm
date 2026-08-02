@@ -81,11 +81,11 @@ Actions are optional (maximum 20) and are invoked from the page with the `app.ac
 
 - `script`: `scriptId` must identify an existing script; optional `args` are defaults. Invocation input overrides same-named defaults, and the runtime also supplies `app: { id }`.
 - `task`: `prompt` must be non-empty; omit `agentId` to use default (lead) assignment. Only set `agentId` to a real agent UUID.
-- Invocation state lands at `/actions/<name>` as `{ status: "running"|"ok"|"error", result?, error?, taskId?, taskStatus? }`.
+- Invocation state lands at `/actions/<name>` as `{ status, result?, error?, taskId?, taskStatus? }`, where `status` is `"running"`, `"ok"`, or `"error"`.
 
 ### Page tree
 
-`page.root` names one entry in the non-empty `page.elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only `Container` and `Card` accept `children`. `watch` maps state paths to an action step or chain.
+`page.root` names one entry in the non-empty `page.elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Container, and Card). `watch` maps state paths to an action step or chain.
 
 ```json
 {
@@ -108,32 +108,67 @@ Actions are optional (maximum 20) and are invoked from the page with the `app.ac
 }
 ```
 
-## Component catalog (all 10)
+## Component catalog (all 18)
 
 Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal prop value at any depth.
 
 | Component | Required props | Optional props / values |
 |---|---|---|
-| `Container` | none | `direction: "row" or "column"`, `gap: "none", "sm", "md", or "lg"`; has the `default` child slot. |
+| `Stack` | none | Primary layout; `direction: "column", "row"`, `gap`, `padding: "none", "xs", "sm", "md", "lg", "xl"`; `align: "start", "center", "end", "stretch"`, `justify: "start", "center", "end", "between"`, `wrap`; has the `default` child slot. |
+| `Grid` | none | Responsive `columns`: integer 1 through 6, or `{ base, sm, md, lg }` counts 1 through 6; `gap` uses the Stack spacing values; has the `default` child slot. |
+| `Split` | none | `ratio: "1-1", "1-2", "2-1", "1-3", "3-1"`, `gap`, `collapseBelow: "sm", "md", "lg"`, `reverse`; has the positional `default` child slot. |
+| `Divider` | none | `label`; no children. |
+| `Tabs` | `id`, `tabs` | `tabs` entries are `{ key, label? }`; `defaultTab`; has the positional `default` child slot. |
+| `Container` | none | Legacy layout primitive; prefer Stack. `direction: "row", "column"`, `gap: "none", "sm", "md", "lg"`; has the `default` child slot. |
 | `Card` | none | `title`, `description`; has the `default` child slot. |
 | `Heading` | `text` | `level: "h1", "h2", or "h3"`. |
 | `Text` | `content` | `tone: "default" or "muted"`. |
+| `Markdown` | `content` | Rendered Markdown for help, instructions, and rich prose; no children. |
+| `SearchInput` | `id` | `placeholder`, `label`; writes debounced text to `/ui/<id>/value`; no children. |
+| `Select` | `id`, `options` | `options` are strings or `{ value, label? }`; `placeholder`, `label`, `clearable`; writes a string or null to `/ui/<id>/value`; no children. |
 | `Button` | `label` | `variant: "default", "secondary", "outline", "ghost", or "destructive"`; dispatch with element-level `on.press`. |
 | `Metric` | `label`, `value` | `value` is string or number. |
 | `Alert` | `message` | `title`, `tone: "info", "success", "warning", or "error"`. |
 | `Badge` | `text` | `text` is string or number; `tone: "neutral", "success", "active", "error", "info", "pending", "warning", or "paused"`. |
-| `Table` | `columns` | `data`, `loading`, `error`, `emptyMessage`, `rowActions`; see below. |
+| `Table` | `columns` | `data`, `loading`, `error`, `emptyMessage`, `rowActions`, `search`, `filters`; see below. |
 | `Form` | `id`, `fields`, `onSubmit` | `title`, `submitLabel`; see below. |
 
 Table details:
 
-- `columns[]`: `{ key, label?, kind?: "text"|"string"|"enum"|"number"|"boolean"|"date"|"badge", tones?: {value: badgeTone}, width?: number }`. `string` and `enum` render as text.
+- `columns[]`: `{ key, label?, kind?, tones?: {value: badgeTone}, width?: number }`. `kind` is `text`, `string`, `enum`, `number`, `boolean`, `date`, or `badge`; `string` and `enum` render as text.
 - `rowActions[]`: `{ label, variant?, confirm?, actions }`. Variants add `destructive-outline` to the Button variants. `destructive` and `destructive-outline` confirm by default; customize with `{ "title": ..., "description": ..., "confirmLabel": ... }`, or use a bare `confirm` string as the dialog description (use `confirm: false` only for a reversible action).
+- `search`: optional string; case-insensitive substring matching across the listed string and number columns. Bind a SearchInput value for client-side search.
+- `filters`: optional record of per-column string, number, boolean, or null values. Null, empty, or absent values disable one filter. Bind Select values for client-side equality filters.
 
 Form details:
 
-- `fields[]`: `{ name, label?, kind?: "string"|"text"|"number"|"boolean"|"date"|"enum", options?: string[], placeholder?, required? }`; enum fields need `options`.
+- `fields[]`: `{ name, label?, kind?, options?: string[], placeholder?, required? }`; `kind` is `string`, `text`, `number`, `boolean`, `date`, or `enum`, and enum fields need `options`.
 - Values live at `/forms/<formId>/<fieldName>`. `onSubmit` is an action chain.
+
+## Layout & interactivity
+
+Use `Stack` as the primary page and section layout; `Container` is the legacy two-prop primitive retained for existing pages. Stack supports vertical or horizontal flow, shared spacing, alignment, justification, wrapping, and padding. Use `Grid` for responsive card or metric strips: set one column count or breakpoint counts such as `{ "base": 1, "md": 2, "lg": 3 }`.
+
+`Split` and `Tabs` children are positional. For Split, `children[0]` is the first pane, `children[1]` is the second, and extra children append inside the second pane. Below `collapseBelow`, panes stack; `reverse` changes only that narrow-layout stacking order. For Tabs, `children[i]` is the body for `tabs[i]`; keep both arrays in the same order and with the same count. Inactive tab children stay mounted but hidden, so Tables keep polling. Use `Divider` to separate sections and `Markdown` for richer explanatory content.
+
+SearchInput and Select are client-side controls: each needs a literal `id` and writes state under `/ui/<id>/value`; Tabs writes its active key to `/ui/<id>/tab`. Bind those values into a Table's `search` and `filters` props. This filters already-polled rows locally; it does not alter or re-run the named query.
+
+```json
+{
+  "filters": { "type": "Stack", "props": { "gap": "sm" }, "children": ["query", "status"] },
+  "query": { "type": "SearchInput", "props": { "id": "ideaSearch", "placeholder": "Search ideas" } },
+  "status": { "type": "Select", "props": { "id": "ideaStatus", "options": ["open", "done"] } },
+  "ideas": {
+    "type": "Table",
+    "props": {
+      "data": { "$state": "/queries/allIdeas/data" },
+      "columns": [{ "key": "title" }, { "key": "status" }],
+      "search": { "$state": "/ui/ideaSearch/value" },
+      "filters": { "status": { "$state": "/ui/ideaStatus/value" } }
+    }
+  }
+}
+```
 
 ## Bindings, sentinels, and action chains
 
@@ -151,6 +186,7 @@ Valid `$state` roots are:
 
 - `/queries/<declaredQuery>/...`
 - `/forms/<formId>/...`, where a `Form` element has that literal `props.id`
+- `/ui/<id>/...`, where a SearchInput, Select, or Tabs element has that literal `props.id` (SearchInput and Select use `/value`; Tabs uses `/tab`)
 - `/actions/<declaredAction>/...`
 
 Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, or `Form.onSubmit`) these scoped sentinels are valid, recursively inside objects and arrays:
@@ -168,11 +204,11 @@ Each sentinel object must contain exactly the single key shown.
 
 An action-chain step is `{ "action": "<type>", "params": {...} }`. Available action types:
 
-- `app.mutate`: `{ model, op: "create"|"update"|"delete", rowId?, values?, formId? }`. `update`/`delete` require `rowId` (usually `{ "$row": "id" }`); literal `values` keys must be model columns. Successful mutation refetches all queries on that model.
+- `app.mutate`: `{ model, op, rowId?, values?, formId? }`, where `op` is `"create"`, `"update"`, or `"delete"`. `update`/`delete` require `rowId` (usually `{ "$row": "id" }`); literal `values` keys must be model columns. Successful mutation refetches all queries on that model.
 - `app.refresh`: `{ query? }`; omit `query` to refetch all, or name a declared query.
 - `app.action`: `{ name, input? }`; `name` must be declared in definition `actions`.
 - `swarm.sdk`: `{ sdk, args? }`; invokes a catalog-supported Swarm browser SDK method with the viewer's bearer.
-- `swarm.call`: `{ method: "GET"|"POST"|"PUT"|"DELETE"|"PATCH", endpoint: "/api/...", body? }`; raw authenticated API call.
+- `swarm.call`: `{ method, endpoint: "/api/...", body? }`, where `method` is `"GET"`, `"POST"`, `"PUT"`, `"DELETE"`, or `"PATCH"`; raw authenticated API call.
 
 ## Patch semantics
 

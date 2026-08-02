@@ -13,9 +13,16 @@
  *   - `action-params.ts` — row/form scoped param resolution
  *
  * Component set: Container, Card, Heading, Text, Button, Metric, Alert
- * (original pages set — unchanged) plus Table, Form, Badge (swarm-apps).
+ * (original pages set — unchanged), Table, Form, Badge (swarm-apps), plus the
+ * layout + interactivity tier: Stack, Grid, Split, Divider, Tabs, SearchInput,
+ * Select, Markdown.
  * Action set: `swarm.sdk`, `swarm.call` (original) plus `app.mutate`,
  * `app.refresh` (swarm-apps; the pages renderer registers inert stubs).
+ *
+ * State roots the catalog owns: `/queries/<name>` (runtime), `/forms/<id>`
+ * (Form), `/actions/<name>` (runtime) and `/ui/<id>` — the interactivity root
+ * written by `SearchInput` / `Select` (`/ui/<id>/value`) and `Tabs`
+ * (`/ui/<id>/tab`), which Table's `search` / `filters` bind back to.
  */
 
 import { defineCatalog } from "@json-render/core";
@@ -69,9 +76,93 @@ export const appActionActionSchema = z.object({
 
 // ─── Component prop schemas ─────────────────────────────────────────────────
 
+/**
+ * The one spacing scale every layout primitive shares (gap + padding).
+ * `Container`'s narrower legacy scale is deliberately left alone — it predates
+ * this token and app JSON in the wild binds to it.
+ */
+const spacing = z.enum(["none", "xs", "sm", "md", "lg", "xl"]);
+
+export type SpacingToken = z.infer<typeof spacing>;
+
 const containerProps = z.object({
   direction: z.enum(["row", "column"]).optional(),
   gap: z.enum(["none", "sm", "md", "lg"]).optional(),
+});
+
+const stackProps = z.object({
+  direction: z.enum(["column", "row"]).optional(),
+  gap: spacing.optional(),
+  align: z.enum(["start", "center", "end", "stretch"]).optional(),
+  justify: z.enum(["start", "center", "end", "between"]).optional(),
+  wrap: z.boolean().optional(),
+  padding: spacing.optional(),
+});
+
+/** Grid tracks are capped at 6 — beyond that a page is a table, not a layout. */
+const gridColumnCount = z.number().int().min(1).max(6);
+
+const gridProps = z.object({
+  columns: z
+    .union([
+      gridColumnCount,
+      z.object({
+        base: gridColumnCount.optional(),
+        sm: gridColumnCount.optional(),
+        md: gridColumnCount.optional(),
+        lg: gridColumnCount.optional(),
+      }),
+    ])
+    .optional(),
+  gap: spacing.optional(),
+});
+
+const splitProps = z.object({
+  ratio: z.enum(["1-1", "1-2", "2-1", "1-3", "3-1"]).optional(),
+  gap: spacing.optional(),
+  collapseBelow: z.enum(["sm", "md", "lg"]).optional(),
+  reverse: z.boolean().optional(),
+});
+
+const dividerProps = z.object({
+  label: z.string().optional(),
+});
+
+const tabsTabSchema = z.object({
+  key: z.string(),
+  label: z.string().optional(),
+});
+
+const tabsProps = z.object({
+  /** State id — the active tab key is mirrored to `/ui/<id>/tab`. */
+  id: z.string(),
+  tabs: z.array(tabsTabSchema).min(1),
+  defaultTab: z.string().optional(),
+});
+
+const searchInputProps = z.object({
+  /** State id — the debounced query lands at `/ui/<id>/value`. */
+  id: z.string(),
+  placeholder: z.string().optional(),
+  label: z.string().optional(),
+});
+
+const selectOptionSchema = z.union([
+  z.string(),
+  z.object({ value: z.string(), label: z.string().optional() }),
+]);
+
+const selectProps = z.object({
+  /** State id — the selected value lands at `/ui/<id>/value`. */
+  id: z.string(),
+  options: z.array(selectOptionSchema).min(1),
+  placeholder: z.string().optional(),
+  label: z.string().optional(),
+  clearable: z.boolean().optional(),
+});
+
+const markdownProps = z.object({
+  content: z.string(),
 });
 
 const cardProps = z.object({
@@ -193,6 +284,18 @@ const tableProps = z.object({
   /** Usually `{ "$state": "/queries/<name>/error" }`. */
   error: z.string().nullish(),
   emptyMessage: z.string().optional(),
+  /**
+   * Client-side free-text filter, applied to `data` before render.
+   * Usually `{ "$state": "/ui/<searchInputId>/value" }`.
+   */
+  search: z.string().optional(),
+  /**
+   * Client-side per-column equality filter, applied to `data` before render.
+   * Usually `{ "<column>": { "$state": "/ui/<selectId>/value" } }`.
+   */
+  filters: z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]).nullable())
+    .optional(),
 });
 
 const formFieldSchema = z.object({
@@ -221,6 +324,10 @@ export type TableRowAction = z.infer<typeof tableRowActionSchema>;
 export type TableRowActionConfirm = z.infer<typeof tableRowActionConfirmSchema>;
 export type FormField = z.infer<typeof formFieldSchema>;
 export type ActionChain = z.infer<typeof actionChainSchema>;
+export type TableFilters = z.infer<typeof tableProps>["filters"];
+export type GridColumns = z.infer<typeof gridProps>["columns"];
+export type TabsTab = z.infer<typeof tabsTabSchema>;
+export type SelectOption = z.infer<typeof selectOptionSchema>;
 
 // ─── Catalog ────────────────────────────────────────────────────────────────
 
@@ -234,10 +341,40 @@ export type ActionChain = z.infer<typeof actionChainSchema>;
  */
 export const swarmCatalogSpec = {
   components: {
+    Stack: {
+      props: stackProps,
+      slots: ["default"],
+      description:
+        "THE primary layout primitive — a flex column (default) or row of its children. `gap`/`padding` use the shared spacing scale (none|xs|sm|md|lg|xl, default gap md); `align` is the cross axis, `justify` the main axis, `wrap` lets a row reflow. Use this as the page root and for every section; `Container` is the legacy 2-prop alias kept for older pages.",
+    },
+    Grid: {
+      props: gridProps,
+      slots: ["default"],
+      description:
+        "Responsive grid of equal-width cells, one per child. `columns` is either a single count (1-6) or a per-breakpoint object `{ base, sm, md, lg }` (default `{ base: 1, md: 2, lg: 3 }`) so cards reflow on narrow viewports. Prefer this over a wrapping Stack for card strips and metric tiles.",
+    },
+    Split: {
+      props: splitProps,
+      slots: ["default"],
+      description:
+        "Two-pane layout. POSITIONAL children: the FIRST child is the left pane, the SECOND is the right pane, and any further children stack inside the right pane. `ratio` sizes them (1-1|1-2|2-1|1-3|3-1, default 2-1 = wide left). Below `collapseBelow` (sm|md|lg, default md) the panes stack vertically; `reverse` only flips that stacked order (right pane first on narrow screens).",
+    },
+    Divider: {
+      props: dividerProps,
+      description:
+        'Horizontal rule between sections, optionally with a centered `label` (e.g. `"Filters"`).',
+    },
+    Tabs: {
+      props: tabsProps,
+      slots: ["default"],
+      description:
+        'Tabbed sections. POSITIONAL children: children[i] is the body of tabs[i], so declare exactly as many children as tabs, in the same order. Only the active tab is visible but every child stays mounted, so polled Tables in background tabs keep their data warm. The active key is mirrored into state at `/ui/<id>/tab`, so other components can bind `{ "$state": "/ui/<id>/tab" }`. `defaultTab` picks the initial key (defaults to the first tab).',
+    },
     Container: {
       props: containerProps,
       slots: ["default"],
-      description: "Layout container (flex row or column with gap).",
+      description:
+        "Legacy flex container (row/column + gap). Prefer `Stack`, which supports the full spacing scale plus alignment, wrapping and padding.",
     },
     Card: {
       props: cardProps,
@@ -251,6 +388,21 @@ export const swarmCatalogSpec = {
     Text: {
       props: textProps,
       description: "Paragraph text.",
+    },
+    Markdown: {
+      props: markdownProps,
+      description:
+        "Rendered markdown block — headings, lists, links, tables, fenced code. Use it for prose (about/help sections, instructions); use `Text` for a single plain paragraph.",
+    },
+    SearchInput: {
+      props: searchInputProps,
+      description:
+        'Free-text search box. Writes the debounced (~200ms) query into state at `/ui/<id>/value`; bind it into a Table with `"search": { "$state": "/ui/<id>/value" }`. Purely client-side — it filters rows the page already polled, it does not re-run the query.',
+    },
+    Select: {
+      props: selectProps,
+      description:
+        'Dropdown filter/picker. `options` are plain strings or `{ value, label }` objects. Writes the chosen value into state at `/ui/<id>/value` (clearing writes `null`); bind it into a Table with `"filters": { "<column>": { "$state": "/ui/<id>/value" } }`. `clearable` (default true) shows a clear button.',
     },
     Button: {
       props: buttonProps,
@@ -271,7 +423,7 @@ export const swarmCatalogSpec = {
     Table: {
       props: tableProps,
       description:
-        'Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`). `rowActions` chains receive `{ "$row": "<col>" }` (or `{ "$row": "" }` for the whole row) and `{ "$rowIndex": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`.',
+        'Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`). `rowActions` chains receive `{ "$row": "<col>" }` (or `{ "$row": "" }` for the whole row) and `{ "$rowIndex": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`""` disables one) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `"filters": { "pinned": true }`).',
     },
     Form: {
       props: formProps,
