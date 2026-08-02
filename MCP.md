@@ -1578,6 +1578,7 @@ Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId
 | `inboxMessageId` | `uuid` | No | - | The inbox message ID to reply to (for leads responding to inbox). |
 | `taskId` | `uuid` | No | - | The task ID with Slack context (for task-related threads). |
 | `message` | `string` | Yes | - | The message to send to the Slack thread. |
+| `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 
 ### slack-read
 
@@ -1604,6 +1605,7 @@ Post a message to a Slack channel. By default creates a new top-level message; p
 |-----------|------|----------|---------|-------------|
 | `channelId` | `string` | Yes | - | The Slack channel ID to post to. |
 | `message` | `string` | Yes | - | The message content to post. |
+| `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 | `threadTs` | `string` | No | - | Optional parent message ts to thread under. Obtain via `slack-start-thread`. When omitted, posts as a new top-level message. |
 
 ### slack-start-thread
@@ -1616,6 +1618,7 @@ Post a new top-level message to a Slack channel and return its ts so the caller 
 |-----------|------|----------|---------|-------------|
 | `channelId` | `string` | Yes | - | The Slack channel ID to post to. |
 | `message` | `string` | Yes | - | The message content to post. |
+| `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 
 ### slack-list-channels
 

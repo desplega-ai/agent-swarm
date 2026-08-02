@@ -255,6 +255,7 @@ Reply to a Slack thread associated with a task.
 |-----------|------|----------|-------------|
 | `message` | string | Yes | Message to send |
 | `taskId` | uuid | No | Task context |
+| `blocks` | array | No | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 
 ### slack-read
 
@@ -274,6 +275,7 @@ Post a message to a Slack channel. Defaults to a new top-level message; pass `th
 |-----------|------|----------|-------------|
 | `channelId` | string | Yes | Channel ID |
 | `message` | string | Yes | Message content |
+| `blocks` | array | No | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 | `threadTs` | string | No | Parent message ts to thread under (obtain via `slack-start-thread`) |
 
 ### slack-start-thread
@@ -284,6 +286,7 @@ Post a new top-level message to a Slack channel and return its `ts` so the calle
 |-----------|------|----------|-------------|
 | `channelId` | string | Yes | Channel ID |
 | `message` | string | Yes | Message content |
+| `blocks` | array | No | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 
 ### slack-list-channels
 

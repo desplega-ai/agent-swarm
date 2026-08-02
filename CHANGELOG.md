@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.126.0] - 2026-08-02
+
+### Added
+- **Slack threads can opt in to one persistent task tree with streamed outcome cards** (#1056) — `SLACK_RENDER_V2=true` replaces automatic per-task relays with a restart-safe tree, complete Markdown outcomes, direct-ask reply links, and optional Block Kit payloads for explicit Slack tools.
+- **Durable script workflows now wait for agent tasks to finish by default** (#1059) — `ctx.step.agentTask` polls the same replay-safe task through terminal status, supports bounded timeouts and failure policies, and preserves concurrent `Promise.all` fan-out.
+- **Worker and lead containers now wait for control-plane readiness before bootstrapping** (#1060) — the entrypoint polls `/health` before provider setup and fails clearly after the configurable `WORKER_API_READY_TIMEOUT_SECONDS` deadline.
+
+### Changed
+- **Pull-request feedback now includes comparable CI timing data while root tests finish faster** (#1062, #1064) — Merge Gate shards the root suite across isolated runners and reports wall-clock and compute timings for PR and `main` actions.
+
+### Fixed
+- **Slack v2 activation and rendering avoid historical backfill and preserve complete outcomes** (#1063, #1065) — a durable activation watermark excludes old threads, runtime kill-switch checks stop in-flight rendering, and tree rows keep accurate progress, result, and trigger links.
+- **GitHub integration ignores reviews authored by the swarm bot itself** (#1058) — self-authored review webhooks are dropped before sender resolution and inline-comment fetching without weakening third-party fail-open delivery.
+
 ## [1.125.0] - 2026-07-31
 
 ### Added

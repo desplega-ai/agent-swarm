@@ -450,6 +450,7 @@ When a worker starts, it:
 | `AGENT_ROLE` | No | Role: `worker` (default) or `lead` |
 | `AGENT_NAME` | No | Display name for the agent (auto-generated if not set) |
 | `MCP_BASE_URL` | No | MCP server URL (default: `http://host.docker.internal:3013`) |
+| `WORKER_API_READY_TIMEOUT_SECONDS` | No | Positive-integer deadline for the entrypoint to reach `${MCP_BASE_URL}/health` before provider setup (default: `90`). This bootstrap-only setting must be present in the container environment. |
 | `SESSION_ID` | No | Log folder name (auto-generated if not provided) |
 | `YOLO` | No | Continue on errors (default: `false`) |
 | `SYSTEM_PROMPT` | No | Custom system prompt text |
@@ -562,6 +563,9 @@ SLACK_SIGNING_SECRET=...      # Signing Secret (optional for Socket Mode)
 
 # Disable Slack (if not using)
 SLACK_DISABLE=true
+
+# Optional: one persistent task tree plus streamed outcome cards (default: false)
+# SLACK_RENDER_V2=true
 
 # Optional: Filter allowed users
 SLACK_ALLOWED_EMAIL_DOMAINS=company.com,partner.com  # Comma-separated email domains
