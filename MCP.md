@@ -605,6 +605,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | `intent` | `string` | No | "" | Why this script exists. |
 | `scope` | `unknown` | No | "agent" | Persist under agent or global scope. |
 | `fsMode` | `unknown` | No | "none" | Filesystem mode. v1 supports none only. |
+| `expectedBaseHash` | `string` | No | - | Current stored source hash for an atomic compare-and-swap. A stale value returns a conflict without overwriting. |
 
 ### script-delete
 

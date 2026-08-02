@@ -356,6 +356,7 @@ declare module "swarm-sdk" {
       intent?: string;
       scope?: ScriptScope;
       fsMode?: ScriptFsMode;
+      expectedBaseHash?: string;
     }): Promise<unknown>;
     script_delete(args: { name: string; scope?: ScriptScope }): Promise<unknown>;
     script_queryTypes(args: { name: string; scope?: ScriptScope }): Promise<unknown>;

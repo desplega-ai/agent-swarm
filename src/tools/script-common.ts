@@ -60,6 +60,15 @@ function describeScriptFailure(
   if (!resOk) {
     const error = body && "error" in body ? String(body.error) : undefined;
 
+    if (
+      error === "script_base_conflict" &&
+      body &&
+      typeof body.message === "string" &&
+      body.message
+    ) {
+      return { message: body.message };
+    }
+
     // Typecheck rejection: fold real diagnostics instead of the literal "typecheck_failed".
     const diagnostics =
       body && Array.isArray(body.diagnostics)

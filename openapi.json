@@ -14017,6 +14017,11 @@
                       "workspace-rw"
                     ],
                     "default": "none"
+                  },
+                  "expectedBaseHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$",
+                    "description": "Current stored source hash required for an atomic compare-and-swap update."
                   }
                 },
                 "required": [
@@ -14036,6 +14041,9 @@
           },
           "403": {
             "description": "Global write requires lead agent"
+          },
+          "409": {
+            "description": "Expected base hash does not match the current stored source hash"
           }
         }
       }

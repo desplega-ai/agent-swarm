@@ -7,6 +7,7 @@ import {
   getScriptVersion,
   insertScript,
   listScripts,
+  ScriptBaseConflictError,
   upsertScriptByName,
 } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
@@ -161,6 +162,186 @@ describe("scripts DB helpers", () => {
       getScriptVersion({ scriptId: first.script.id, contentHash: second.script.contentHash })
         ?.version,
     ).toBe(2);
+  });
+
+  test("upsertScriptByName updates source when expected base hash matches", async () => {
+    const first = await upsertScriptByName({
+      name: "guarded-update",
+      scope: "global",
+      source: source(2),
+      description: "v1",
+      intent: "CAS success",
+      signatureJson,
+    });
+
+    const updated = await upsertScriptByName({
+      name: "guarded-update",
+      scope: "global",
+      source: source(3),
+      description: "v2",
+      intent: "CAS success",
+      signatureJson,
+      expectedBaseHash: first.script.contentHash,
+    });
+
+    expect(updated.script.version).toBe(2);
+    expect(updated.script.source).toBe(source(3));
+  });
+
+  test("upsertScriptByName rejects a stale base hash without overwriting source", async () => {
+    const first = await upsertScriptByName({
+      name: "guarded-conflict",
+      scope: "global",
+      source: source(2),
+      description: "v1",
+      intent: "CAS conflict",
+      signatureJson,
+    });
+    const current = await upsertScriptByName({
+      name: "guarded-conflict",
+      scope: "global",
+      source: source(3),
+      description: "v2",
+      intent: "CAS conflict",
+      signatureJson,
+      expectedBaseHash: first.script.contentHash,
+    });
+
+    try {
+      await upsertScriptByName({
+        name: "guarded-conflict",
+        scope: "global",
+        source: source(4),
+        description: "stale v3",
+        intent: "CAS conflict",
+        signatureJson,
+        expectedBaseHash: first.script.contentHash,
+      });
+      throw new Error("expected stale upsert to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ScriptBaseConflictError);
+      expect(error).toMatchObject({
+        code: "script_base_conflict",
+        expectedBaseHash: first.script.contentHash,
+        currentHash: current.script.contentHash,
+      });
+    }
+
+    expect(getScript({ name: "guarded-conflict", scope: "global" })).toMatchObject({
+      source: source(3),
+      description: "v2",
+      version: 2,
+      contentHash: current.script.contentHash,
+    });
+  });
+
+  test("upsertScriptByName lets only one writer advance the same base hash", async () => {
+    const base = await upsertScriptByName({
+      name: "competing-writers",
+      scope: "global",
+      source: source(2),
+      description: "base",
+      intent: "CAS race",
+      signatureJson,
+    });
+
+    const writes = await Promise.allSettled([
+      upsertScriptByName({
+        name: "competing-writers",
+        scope: "global",
+        source: source(3),
+        description: "writer one",
+        intent: "CAS race",
+        signatureJson,
+        expectedBaseHash: base.script.contentHash,
+      }),
+      upsertScriptByName({
+        name: "competing-writers",
+        scope: "global",
+        source: source(4),
+        description: "writer two",
+        intent: "CAS race",
+        signatureJson,
+        expectedBaseHash: base.script.contentHash,
+      }),
+    ]);
+
+    expect(writes.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = writes.find((result) => result.status === "rejected");
+    expect(rejected).toMatchObject({
+      status: "rejected",
+      reason: {
+        code: "script_base_conflict",
+      },
+    });
+    expect(getScript({ name: "competing-writers", scope: "global" })).toMatchObject({
+      version: 2,
+    });
+  });
+
+  test("upsertScriptByName applies the base guard before metadata dedupe", async () => {
+    const first = await upsertScriptByName({
+      name: "guarded-metadata",
+      scope: "global",
+      source: source(2),
+      description: "current metadata",
+      intent: "CAS metadata",
+      signatureJson,
+    });
+
+    await expect(
+      upsertScriptByName({
+        name: "guarded-metadata",
+        scope: "global",
+        source: source(2),
+        description: "stale metadata",
+        intent: "CAS metadata",
+        signatureJson,
+        expectedBaseHash: "0".repeat(64),
+      }),
+    ).rejects.toMatchObject({
+      code: "script_base_conflict",
+      currentHash: first.script.contentHash,
+    });
+
+    expect(getScript({ name: "guarded-metadata", scope: "global" })).toMatchObject({
+      description: "current metadata",
+      version: 1,
+      contentHash: first.script.contentHash,
+    });
+  });
+
+  test("upsertScriptByName preserves last-write-wins behavior when base hash is omitted", async () => {
+    const first = await upsertScriptByName({
+      name: "unguarded-update",
+      scope: "global",
+      source: source(2),
+      description: "v1",
+      intent: "Legacy behavior",
+      signatureJson,
+    });
+    const intervening = await upsertScriptByName({
+      name: "unguarded-update",
+      scope: "global",
+      source: source(3),
+      description: "v2",
+      intent: "Legacy behavior",
+      signatureJson,
+      expectedBaseHash: first.script.contentHash,
+    });
+
+    const legacy = await upsertScriptByName({
+      name: "unguarded-update",
+      scope: "global",
+      source: source(4),
+      description: "v3",
+      intent: "Legacy behavior",
+      signatureJson,
+    });
+
+    expect(intervening.script.version).toBe(2);
+    expect(legacy.script.version).toBe(3);
+    expect(legacy.script.source).toBe(source(4));
   });
 
   test("scope uniqueness treats global null scopeId as one scope and isolates agent scopes", () => {

@@ -380,6 +380,110 @@ describe("/api/scripts HTTP", () => {
     expect(getScript({ name: "global-lead-ok", scope: "global", scopeId: null })).toBeNull();
   });
 
+  test("global upsert compare-and-swap succeeds on a matching hash and rejects a stale hash", async () => {
+    const created = await upsert(
+      { name: "global-cas", scope: "global", source: validSource(2) },
+      leadId,
+    );
+    expect(created.status).toBe(200);
+    const base = getScript({ name: "global-cas", scope: "global" });
+    expect(base).toBeTruthy();
+
+    const matching = await upsert(
+      {
+        name: "global-cas",
+        scope: "global",
+        source: validSource(3),
+        expectedBaseHash: base!.contentHash,
+      },
+      leadId,
+    );
+    expect(matching.status).toBe(200);
+    expect(await matching.json()).toMatchObject({ version: 2, contentDeduped: false });
+    const current = getScript({ name: "global-cas", scope: "global" });
+
+    const stale = await upsert(
+      {
+        name: "global-cas",
+        scope: "global",
+        source: validSource(4),
+        expectedBaseHash: base!.contentHash,
+      },
+      leadId,
+    );
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({
+      error: "script_base_conflict",
+      expectedBaseHash: base!.contentHash,
+      currentHash: current!.contentHash,
+    });
+    expect(getScript({ name: "global-cas", scope: "global" })).toMatchObject({
+      source: validSource(3),
+      version: 2,
+      contentHash: current!.contentHash,
+    });
+
+    const legacy = await upsert(
+      { name: "global-cas", scope: "global", source: validSource(4) },
+      leadId,
+    );
+    expect(legacy.status).toBe(200);
+    expect(await legacy.json()).toMatchObject({ version: 3, contentDeduped: false });
+  });
+
+  test("global upsert rejects install-population policy violations without writing", async () => {
+    const policyInvalidSource = `
+      export default async () => {
+        const raw_events = [{ actor_anonymous_id: "install-1" }];
+        const query = "HAVING count() >= 5";
+        return { raw_events, query };
+      };
+    `;
+
+    const rejected = await upsert(
+      { name: "global-policy-invalid", scope: "global", source: policyInvalidSource },
+      leadId,
+    );
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toMatchObject({
+      error: "global_script_policy_failed",
+      message: "Global script promotion rejected by policy lint",
+      violations: [
+        {
+          name: "global-policy-invalid",
+          rule: "no-local-install-population-gate",
+        },
+      ],
+    });
+    expect(getScript({ name: "global-policy-invalid", scope: "global" })).toBeNull();
+
+    const agentScoped = await upsert(
+      { name: "agent-policy-candidate", source: policyInvalidSource },
+      workerId,
+    );
+    expect(agentScoped.status).toBe(200);
+    expect(
+      getScript({ name: "agent-policy-candidate", scope: "agent", scopeId: workerId }),
+    ).toBeTruthy();
+  });
+
+  test("global promotion policy exempts its own lint script", async () => {
+    const lintSource = `
+      export default async () => {
+        const raw_events = [{ actor_anonymous_id: "install-1" }];
+        const query = "HAVING count() >= 5";
+        return { raw_events, query };
+      };
+    `;
+
+    const allowed = await upsert(
+      { name: "install-population-gate-lint", scope: "global", source: lintSource },
+      leadId,
+    );
+    expect(allowed.status).toBe(200);
+    expect(getScript({ name: "install-population-gate-lint", scope: "global" })).toBeTruthy();
+  });
+
   test("non-lead agents can still upsert and delete agent-scoped scripts", async () => {
     const allowed = await upsert({ name: "agent-worker-ok", source: validSource(2) }, workerId);
     expect(allowed.status).toBe(200);

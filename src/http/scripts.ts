@@ -22,11 +22,13 @@ import {
   listScripts,
   listScriptVersions,
   rotateScriptApiSecret,
+  ScriptBaseConflictError,
   updateScriptApi,
   upsertScriptByName,
 } from "../be/scripts/db";
 import { searchScripts } from "../be/scripts/embeddings";
 import { extractArgsJsonSchema } from "../be/scripts/extract-schema";
+import { lintGlobalScriptPromotion } from "../be/scripts/promotion-policy";
 import {
   scriptSdkTypesWithGeneratedApis,
   scriptStdlibTypesWithGeneratedApis,
@@ -57,6 +59,11 @@ const upsertBodySchema = z.object({
   intent: z.string().default(""),
   scope: ScriptScopeSchema.default("agent"),
   fsMode: ScriptFsModeSchema.default("none"),
+  expectedBaseHash: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional()
+    .describe("Current stored source hash required for an atomic compare-and-swap update."),
 });
 
 const runBodySchema = z
@@ -101,6 +108,7 @@ const upsertRoute = route({
     200: { description: "Script upserted" },
     400: { description: "Validation or typecheck failure" },
     403: { description: "Global write requires lead agent" },
+    409: { description: "Expected base hash does not match the current stored source hash" },
   },
   rbac: { permission: "script.global.write" },
 });
@@ -437,6 +445,23 @@ export async function handleScripts(
         jsonError(res, "Global write requires lead agent", 403);
         return true;
       }
+
+      const policy = lintGlobalScriptPromotion({
+        name: parsed.body.name,
+        source: parsed.body.source,
+      });
+      if (!policy.ok) {
+        json(
+          res,
+          {
+            error: "global_script_policy_failed",
+            message: "Global script promotion rejected by policy lint",
+            violations: policy.findings,
+          },
+          400,
+        );
+        return true;
+      }
     }
 
     const typecheck = typecheckScript(parsed.body.source, { agentId: agent.id });
@@ -460,21 +485,40 @@ export async function handleScripts(
         ? getScript({ name: parsed.body.name, scope: "agent", scopeId: agent.id })
         : null;
     const argsJsonSchema = await extractArgsJsonSchema(parsed.body.source);
-    const result = await upsertScriptByName({
-      name: parsed.body.name,
-      scope: parsed.body.scope,
-      scopeId: parsed.body.scope === "agent" ? agent.id : null,
-      source: parsed.body.source,
-      description: parsed.body.description,
-      intent: parsed.body.intent,
-      signatureJson: signatureJsonFor(parsed.body.source),
-      argsJsonSchema,
-      fsMode: parsed.body.fsMode,
-      agentId: agent.id,
-      isScratch: false,
-      typeChecked: true,
-      createdBy,
-    });
+    let result: Awaited<ReturnType<typeof upsertScriptByName>>;
+    try {
+      result = await upsertScriptByName({
+        name: parsed.body.name,
+        scope: parsed.body.scope,
+        scopeId: parsed.body.scope === "agent" ? agent.id : null,
+        source: parsed.body.source,
+        description: parsed.body.description,
+        intent: parsed.body.intent,
+        signatureJson: signatureJsonFor(parsed.body.source),
+        argsJsonSchema,
+        fsMode: parsed.body.fsMode,
+        agentId: agent.id,
+        isScratch: false,
+        typeChecked: true,
+        createdBy,
+        expectedBaseHash: parsed.body.expectedBaseHash,
+      });
+    } catch (error) {
+      if (error instanceof ScriptBaseConflictError) {
+        json(
+          res,
+          {
+            error: error.code,
+            message: error.message,
+            expectedBaseHash: error.expectedBaseHash,
+            currentHash: error.currentHash,
+          },
+          409,
+        );
+        return true;
+      }
+      throw error;
+    }
 
     if (parsed.body.scope === "global" && !result.contentDeduped) {
       emitGlobalUpsertEvent({

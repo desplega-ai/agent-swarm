@@ -39,6 +39,7 @@ type ScriptWriteArgs = ScriptIdentity & {
   changeReason?: string | null;
   embeddingMode?: "sync" | "skip";
   createdBy?: string | null;
+  expectedBaseHash?: string;
 };
 
 export type UpsertScriptResult = {
@@ -46,6 +47,21 @@ export type UpsertScriptResult = {
   isNew: boolean;
   contentDeduped: boolean;
 };
+
+export class ScriptBaseConflictError extends Error {
+  readonly code = "script_base_conflict";
+
+  constructor(
+    readonly scriptName: string,
+    readonly expectedBaseHash: string,
+    readonly currentHash: string | null,
+  ) {
+    super(
+      `Script "${scriptName}" base hash conflict: expected ${expectedBaseHash}, current ${currentHash ?? "none"}`,
+    );
+    this.name = "ScriptBaseConflictError";
+  }
+}
 
 function normalizeScopeId(scope: ScriptScope, scopeId?: string | null): string | null {
   if (scope === "global") return null;
@@ -197,101 +213,112 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
  */
 export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertScriptResult> {
   const shouldEmbed = args.embeddingMode !== "skip";
-  const existing = getScript(args);
-  if (!existing) {
-    const script = insertScript(args);
-    if (!script.isScratch && shouldEmbed) {
-      await embedScript(script);
+  const txn = getDb().transaction((): { result: UpsertScriptResult; embed: boolean } => {
+    const existing = getScript(args);
+    if (args.expectedBaseHash !== undefined && existing?.contentHash !== args.expectedBaseHash) {
+      throw new ScriptBaseConflictError(
+        args.name,
+        args.expectedBaseHash,
+        existing?.contentHash ?? null,
+      );
     }
-    return {
-      script,
-      isNew: true,
-      contentDeduped: false,
-    };
-  }
 
-  const contentHash = computeContentHash(args.source);
-  if (existing.contentHash === contentHash) {
+    if (!existing) {
+      const script = insertScript(args);
+      return {
+        result: { script, isNew: true, contentDeduped: false },
+        embed: !script.isScratch && shouldEmbed,
+      };
+    }
+
+    const contentHash = computeContentHash(args.source);
+    const guardHash = args.expectedBaseHash ?? null;
+    if (existing.contentHash === contentHash) {
+      const fsMode = args.fsMode ?? existing.fsMode;
+      const isScratch = args.isScratch ?? existing.isScratch;
+      const typeChecked = args.typeChecked ?? existing.typeChecked;
+      const argsJsonSchema =
+        args.argsJsonSchema !== undefined ? args.argsJsonSchema : existing.argsJsonSchema;
+      const trackedMetadataChanged =
+        args.description !== existing.description ||
+        args.intent !== existing.intent ||
+        args.signatureJson !== existing.signatureJson ||
+        argsJsonSchema !== existing.argsJsonSchema;
+      const promotedFromScratch = existing.isScratch && !isScratch;
+      if (
+        fsMode !== existing.fsMode ||
+        isScratch !== existing.isScratch ||
+        typeChecked !== existing.typeChecked ||
+        trackedMetadataChanged
+      ) {
+        const row = getDb()
+          .prepare<
+            ScriptRow,
+            [
+              string,
+              string,
+              string,
+              string | null,
+              number,
+              number,
+              string,
+              string,
+              string | null,
+              string,
+              string | null,
+              string | null,
+            ]
+          >(
+            `UPDATE scripts
+            SET description = ?, intent = ?, signatureJson = ?, argsJsonSchema = ?,
+              isScratch = ?, typeChecked = ?, fsMode = ?, updatedAt = ?, updated_by = ?
+            WHERE id = ? AND (? IS NULL OR contentHash = ?)
+            RETURNING *`,
+          )
+          .get(
+            args.description,
+            args.intent,
+            args.signatureJson,
+            argsJsonSchema ?? null,
+            isScratch ? 1 : 0,
+            typeChecked ? 1 : 0,
+            fsMode,
+            new Date().toISOString(),
+            args.createdBy ?? null,
+            existing.id,
+            guardHash,
+            guardHash,
+          );
+
+        if (!row && args.expectedBaseHash !== undefined) {
+          throw new ScriptBaseConflictError(
+            args.name,
+            args.expectedBaseHash,
+            getScript(args)?.contentHash ?? null,
+          );
+        }
+        if (!row) throw new Error("Failed to update script metadata");
+        const script = rowToScript(row);
+        return {
+          result: { script, isNew: false, contentDeduped: true },
+          embed:
+            !script.isScratch && shouldEmbed && (trackedMetadataChanged || promotedFromScratch),
+        };
+      }
+
+      return {
+        result: { script: existing, isNew: false, contentDeduped: true },
+        embed: false,
+      };
+    }
+
+    const now = new Date().toISOString();
+    const newVersion = existing.version + 1;
     const fsMode = args.fsMode ?? existing.fsMode;
     const isScratch = args.isScratch ?? existing.isScratch;
     const typeChecked = args.typeChecked ?? existing.typeChecked;
     const argsJsonSchema =
       args.argsJsonSchema !== undefined ? args.argsJsonSchema : existing.argsJsonSchema;
-    const trackedMetadataChanged =
-      args.description !== existing.description ||
-      args.intent !== existing.intent ||
-      args.signatureJson !== existing.signatureJson ||
-      argsJsonSchema !== existing.argsJsonSchema;
-    const promotedFromScratch = existing.isScratch && !isScratch;
-    if (
-      fsMode !== existing.fsMode ||
-      isScratch !== existing.isScratch ||
-      typeChecked !== existing.typeChecked ||
-      trackedMetadataChanged
-    ) {
-      const row = getDb()
-        .prepare<
-          ScriptRow,
-          [
-            string,
-            string,
-            string,
-            string | null,
-            number,
-            number,
-            string,
-            string,
-            string | null,
-            string,
-          ]
-        >(
-          `UPDATE scripts
-          SET description = ?, intent = ?, signatureJson = ?, argsJsonSchema = ?,
-            isScratch = ?, typeChecked = ?, fsMode = ?, updatedAt = ?, updated_by = ?
-          WHERE id = ?
-          RETURNING *`,
-        )
-        .get(
-          args.description,
-          args.intent,
-          args.signatureJson,
-          argsJsonSchema ?? null,
-          isScratch ? 1 : 0,
-          typeChecked ? 1 : 0,
-          fsMode,
-          new Date().toISOString(),
-          args.createdBy ?? null,
-          existing.id,
-        );
-
-      if (!row) throw new Error("Failed to update script metadata");
-      const script = rowToScript(row);
-      if (!script.isScratch && shouldEmbed && (trackedMetadataChanged || promotedFromScratch)) {
-        await embedScript(script);
-      }
-      return {
-        script,
-        isNew: false,
-        contentDeduped: true,
-      };
-    }
-
-    return {
-      script: existing,
-      isNew: false,
-      contentDeduped: true,
-    };
-  }
-
-  const now = new Date().toISOString();
-  const newVersion = existing.version + 1;
-  const fsMode = args.fsMode ?? existing.fsMode;
-  const isScratch = args.isScratch ?? existing.isScratch;
-  const typeChecked = args.typeChecked ?? existing.typeChecked;
-  const argsJsonSchema =
-    args.argsJsonSchema !== undefined ? args.argsJsonSchema : existing.argsJsonSchema;
-
-  const txn = getDb().transaction(() => {
     const row = getDb()
       .prepare<
         ScriptRow,
@@ -309,12 +336,14 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
           string,
           string | null,
           string,
+          string | null,
+          string | null,
         ]
       >(
         `UPDATE scripts
         SET source = ?, description = ?, intent = ?, signatureJson = ?, argsJsonSchema = ?,
           contentHash = ?, version = ?, isScratch = ?, typeChecked = ?, fsMode = ?, updatedAt = ?, updated_by = ?
-        WHERE id = ?
+        WHERE id = ? AND (? IS NULL OR contentHash = ?)
         RETURNING *`,
       )
       .get(
@@ -331,8 +360,17 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
         now,
         args.createdBy ?? null,
         existing.id,
+        guardHash,
+        guardHash,
       );
 
+    if (!row && args.expectedBaseHash !== undefined) {
+      throw new ScriptBaseConflictError(
+        args.name,
+        args.expectedBaseHash,
+        getScript(args)?.contentHash ?? null,
+      );
+    }
     if (!row) throw new Error("Failed to update script");
 
     insertScriptVersion({
@@ -347,19 +385,19 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
       changeReason: args.changeReason ?? null,
     });
 
-    return rowToScript(row);
+    const script = rowToScript(row);
+    return {
+      result: { script, isNew: false, contentDeduped: false },
+      embed: !script.isScratch && shouldEmbed,
+    };
   });
 
-  const script = txn();
-  if (!script.isScratch && shouldEmbed) {
-    await embedScript(script);
-  }
-
-  return {
-    script,
-    isNew: false,
-    contentDeduped: false,
-  };
+  // Acquire the write lock before reading the current base. The guarded UPDATE
+  // still enforces the compare-and-swap at SQLite's write boundary, while the
+  // IMMEDIATE transaction keeps metadata/dedupe decisions on the same snapshot.
+  const { result, embed } = txn.immediate();
+  if (embed) await embedScript(result.script);
+  return result;
 }
 
 export function getScript(args: ScriptIdentity): ScriptRecord | null {

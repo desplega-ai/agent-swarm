@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, getDb, getKv, initDb } from "../be/db";
+import { getScript } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
@@ -281,6 +282,53 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(del.isError).toBeFalsy();
     expect(del.structuredContent.success).toBe(true);
     expect(del.structuredContent.data?.deleted).toBe(true);
+  });
+
+  test("script-upsert forwards expectedBaseHash and surfaces stale conflicts", async () => {
+    const tools = buildToolServer();
+    const initialSource = `export default async () => ({ version: 1 });`;
+    const updatedSource = `export default async () => ({ version: 2 });`;
+
+    const created = (await tools.upsert.handler(
+      { name: "mcp-cas", source: initialSource },
+      meta(workerId),
+    )) as StructuredResult<{ name: string; version: number }>;
+    expect(created.isError).toBeFalsy();
+    const base = getScript({ name: "mcp-cas", scope: "agent", scopeId: workerId });
+    expect(base).toBeTruthy();
+
+    const matching = (await tools.upsert.handler(
+      {
+        name: "mcp-cas",
+        source: updatedSource,
+        expectedBaseHash: base!.contentHash,
+      },
+      meta(workerId),
+    )) as StructuredResult<{ name: string; version: number }>;
+    expect(matching.isError).toBeFalsy();
+    const current = getScript({ name: "mcp-cas", scope: "agent", scopeId: workerId });
+
+    const stale = (await tools.upsert.handler(
+      {
+        name: "mcp-cas",
+        source: `export default async () => ({ version: 3 });`,
+        expectedBaseHash: base!.contentHash,
+      },
+      meta(workerId),
+    )) as StructuredResult<{
+      error: string;
+      currentHash: string;
+    }>;
+    expect(stale.isError).toBe(true);
+    expect(stale.structuredContent.status).toBe(409);
+    expect(stale.structuredContent.message).toContain(current!.contentHash);
+    expect(stale.structuredContent.data).toMatchObject({
+      error: "script_base_conflict",
+      currentHash: current!.contentHash,
+    });
+    expect(getScript({ name: "mcp-cas", scope: "agent", scopeId: workerId })?.source).toBe(
+      updatedSource,
+    );
   });
 
   test("oversized script result spills byte-completely and stays below the wire ceiling", async () => {

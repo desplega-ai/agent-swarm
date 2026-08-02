@@ -33,6 +33,13 @@ export const registerScriptUpsertTool = (server: McpServer) => {
         fsMode: scriptFsModeSchema
           .default("none")
           .describe("Filesystem mode. v1 supports none only."),
+        expectedBaseHash: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional()
+          .describe(
+            "Current stored source hash for an atomic compare-and-swap. A stale value returns a conflict without overwriting.",
+          ),
       }),
       outputSchema: scriptToolOutputSchema,
     },

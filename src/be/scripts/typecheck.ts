@@ -231,7 +231,7 @@ export interface SwarmSdk {
   prompt_preview(args: Record<string, unknown>): Promise<unknown>;
 
   // --- write: scripts ---
-  script_upsert(args: { name: string; source: string; description?: string; intent?: string; scope?: ScriptScope; fsMode?: ScriptFsMode }): Promise<unknown>;
+  script_upsert(args: { name: string; source: string; description?: string; intent?: string; scope?: ScriptScope; fsMode?: ScriptFsMode; expectedBaseHash?: string }): Promise<unknown>;
   script_delete(args: { name: string; scope?: ScriptScope }): Promise<unknown>;
   script_queryTypes(args: { name: string; scope?: ScriptScope }): Promise<unknown>;
   script_launchRun(args: { source: string; args?: unknown; idempotencyKey?: string; scriptName?: string; requestedByUserId?: string }): Promise<unknown>;
