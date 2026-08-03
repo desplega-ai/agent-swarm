@@ -16494,6 +16494,9 @@
                   },
                   "failureReason": {
                     "type": "string"
+                  },
+                  "force": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -16515,6 +16518,9 @@
           },
           "404": {
             "description": "Task not found"
+          },
+          "409": {
+            "description": "Differing terminal result text was discarded"
           }
         }
       }

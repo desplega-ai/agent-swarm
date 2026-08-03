@@ -119,6 +119,42 @@ describe("script SDK allowlist", () => {
     expect(mcpToolNameForSdkMethod("kv_del")).toBe("kv-delete");
   });
 
+  test("task_storeProgress forwards force to the finish endpoint", async () => {
+    let requestBody: Record<string, unknown> | undefined;
+    const httpServer = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        requestBody = (await req.json()) as Record<string, unknown>;
+        return Response.json({ success: true, alreadyFinished: true });
+      },
+    });
+    const config = new SwarmConfig({
+      system: {
+        apiKey: { value: "sdk-test-key", isSecret: true },
+        agentId: { value: "sdk-test-agent", isSecret: false },
+        mcpBaseUrl: { value: `http://127.0.0.1:${httpServer.port}`, isSecret: false },
+      },
+      user: {},
+    });
+    const sdk = createSwarmSdk(config);
+
+    try {
+      await sdk.task_storeProgress({
+        taskId: "task-1",
+        status: "completed",
+        output: "corrected",
+        force: true,
+      });
+      expect(requestBody).toEqual({
+        status: "completed",
+        output: "corrected",
+        force: true,
+      });
+    } finally {
+      httpServer.stop(true);
+    }
+  });
+
   test("isMcpToolAllowedForScripts rejects non-mapped MCP names", () => {
     // SDK method names (underscores) are not MCP names — must be rejected
     expect(isMcpToolAllowedForScripts("workflow_trigger")).toBe(false);

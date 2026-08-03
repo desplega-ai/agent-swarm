@@ -513,6 +513,83 @@ describe("Tasks", () => {
     expect(body.alreadyFinished).toBe(true);
   });
 
+  test("POST /api/tasks/:id/finish — terminal retries reject, no-op, or force text only", async () => {
+    const agentId = randomUUID();
+    const registered = await post("/api/agents", {
+      agentId,
+      body: { name: "TerminalFinishWorker" },
+    });
+    expect(registered.status).toBe(201);
+
+    const created = await post("/api/tasks", {
+      agentId: ids.leadAgent,
+      body: { task: "Terminal finish guard test", agentId },
+    });
+    expect(created.status).toBe(201);
+    const taskId = created.body.id as string;
+
+    const polled = await get("/api/poll", { agentId });
+    expect(polled.status).toBe(200);
+    expect(polled.body.trigger?.taskId).toBe(taskId);
+
+    const first = await post(`/api/tasks/${taskId}/finish`, {
+      agentId,
+      body: { status: "completed", output: "stable output" },
+    });
+    expect(first.status).toBe(200);
+    expect(first.body.success).toBe(true);
+    expect(first.body.alreadyFinished).toBe(false);
+
+    const before = await get(`/api/tasks/${taskId}`);
+    expect(before.status).toBe(200);
+    const terminalSnapshot = {
+      status: before.body.status,
+      output: before.body.output,
+      finishedAt: before.body.finishedAt,
+      lastUpdatedAt: before.body.lastUpdatedAt,
+      logs: before.body.logs.length,
+    };
+
+    const identical = await post(`/api/tasks/${taskId}/finish`, {
+      agentId,
+      body: { status: "completed", output: "stable output" },
+    });
+    expect(identical.status).toBe(200);
+    expect(identical.body.success).toBe(true);
+    expect(identical.body.alreadyFinished).toBe(true);
+    expect(identical.body.wasNoOp).toBe(true);
+
+    const differing = await post(`/api/tasks/${taskId}/finish`, {
+      agentId,
+      body: { status: "completed", output: "discard me" },
+    });
+    expect(differing.status).toBe(409);
+    expect(differing.body.success).toBe(false);
+    expect(differing.body.error).toContain("Discarded write");
+    expect(differing.body.error).toContain("force: true");
+
+    const afterRejected = await get(`/api/tasks/${taskId}`);
+    expect(afterRejected.body.output).toBe(terminalSnapshot.output);
+    expect(afterRejected.body.finishedAt).toBe(terminalSnapshot.finishedAt);
+    expect(afterRejected.body.logs).toHaveLength(terminalSnapshot.logs);
+
+    const forced = await post(`/api/tasks/${taskId}/finish`, {
+      agentId,
+      body: { status: "completed", output: "corrected output", force: true },
+    });
+    expect(forced.status).toBe(200);
+    expect(forced.body.success).toBe(true);
+    expect(forced.body.alreadyFinished).toBe(true);
+    expect(forced.body.wasForcedOverwrite).toBe(true);
+
+    const afterForced = await get(`/api/tasks/${taskId}`);
+    expect(afterForced.body.output).toBe("corrected output");
+    expect(afterForced.body.status).toBe(terminalSnapshot.status);
+    expect(afterForced.body.finishedAt).toBe(terminalSnapshot.finishedAt);
+    expect(afterForced.body.lastUpdatedAt).toBe(terminalSnapshot.lastUpdatedAt);
+    expect(afterForced.body.logs).toHaveLength(terminalSnapshot.logs);
+  });
+
   test("POST /api/tasks/:id/finish — wrong agent returns 403", async () => {
     // Create a task for worker, try to finish as worker2
     const createRes = await post("/api/tasks", {

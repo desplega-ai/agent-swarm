@@ -10,7 +10,6 @@ import {
   getSessionLogsByTaskId,
   getTaskById,
   insertTaskAttachment,
-  overwriteTerminalTaskResultText,
   updateAgentStatusFromCapacity,
   updateTaskProgress,
 } from "@/be/db";
@@ -18,34 +17,13 @@ import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { getRetrievalsForTask } from "@/be/memory/raters/retrieval";
 import { runServerRaters } from "@/be/memory/raters/run-server-raters";
 import { shouldPersistTaskCompletionMemory } from "@/memory/automatic-task-gate";
+import {
+  getTaskOutputValidationError,
+  guardTerminalTaskResultWrite,
+} from "@/tasks/terminal-result-guard";
 import { createWorkerTaskFollowUp } from "@/tasks/worker-follow-up";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AgentTaskStatusSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
-import { scrubSecrets } from "@/utils/secret-scrubber";
-import { validateJsonSchema } from "@/workflows/json-schema-validator";
-
-function getTaskOutputValidationError(outputSchema: unknown, output: string | undefined) {
-  if (!outputSchema || typeof outputSchema !== "object") return undefined;
-
-  const schema = outputSchema as Record<string, unknown>;
-  if (!output) {
-    return `Task has an outputSchema but no output was provided. You must call store-progress with a valid JSON output matching this schema:\n${JSON.stringify(schema, null, 2)}`;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(output);
-  } catch {
-    return `Task output must be valid JSON matching the outputSchema. Got invalid JSON. Schema:\n${JSON.stringify(schema, null, 2)}`;
-  }
-
-  const validationErrors = validateJsonSchema(schema, parsed);
-  if (validationErrors.length > 0) {
-    return `Task output does not match the outputSchema. Errors:\n${validationErrors.join("\n")}\n\nExpected schema:\n${JSON.stringify(schema, null, 2)}\n\nPlease fix your output and retry.`;
-  }
-
-  return undefined;
-}
 
 // Phase 11: the `cost` / `costData` field was removed from this tool's input
 // schema. Adapters (claude/codex/pi/opencode/devin/claude-managed) are the
@@ -237,64 +215,14 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // A caller may explicitly force a text-only correction; that path returns
         // before every terminal side effect and deliberately leaves all lifecycle
         // fields untouched.
-        if (isTerminal && (status || force)) {
-          const scrubbedOutput = output !== undefined ? scrubSecrets(output) : undefined;
-          const scrubbedFailureReason =
-            failureReason !== undefined ? scrubSecrets(failureReason) : undefined;
-          const hasDifferingOutput =
-            scrubbedOutput !== undefined && scrubbedOutput !== existingTask.output;
-          const hasDifferingFailureReason =
-            scrubbedFailureReason !== undefined &&
-            scrubbedFailureReason !== existingTask.failureReason;
-          const hasDifferingResultText = hasDifferingOutput || hasDifferingFailureReason;
-
-          if (hasDifferingResultText && force) {
-            const outputValidationError = hasDifferingOutput
-              ? getTaskOutputValidationError(existingTask.outputSchema, output)
-              : undefined;
-            if (outputValidationError) {
-              return { success: false, message: outputValidationError, task: existingTask };
-            }
-
-            const overwrittenTask = overwriteTerminalTaskResultText(taskId, {
-              ...(output !== undefined ? { output } : {}),
-              ...(failureReason !== undefined ? { failureReason } : {}),
-            });
-            if (!overwrittenTask) {
-              return {
-                success: false,
-                message: `Task "${taskId}" terminal result text could not be overwritten.`,
-              };
-            }
-            return {
-              success: true,
-              message:
-                `Task "${taskId}" is already ${existingTask.status}; force-overwrote terminal result text ` +
-                "without replaying completion side effects.",
-              task: overwrittenTask,
-              wasForcedOverwrite: true,
-            };
-          }
-
-          if (hasDifferingResultText) {
-            return {
-              success: false,
-              message:
-                `Discarded write for already-${existingTask.status} task "${taskId}"; ` +
-                "existing output/failureReason and finishedAt were preserved. Retry with force: true " +
-                "to overwrite terminal result text without replaying completion side effects.",
-              task: existingTask,
-            };
-          }
-
-          return {
-            success: true,
-            message:
-              `Task "${taskId}" is already ${existingTask.status}; treating as no-op. ` +
-              `Existing output preserved (first-call-wins).`,
-            task: existingTask,
-            wasNoOp: true,
-          };
+        const terminalResultGuard = guardTerminalTaskResultWrite(existingTask, {
+          status,
+          output,
+          failureReason,
+          force,
+        });
+        if (terminalResultGuard.handled) {
+          return terminalResultGuard;
         }
 
         // Update progress if provided (with deduplication)
