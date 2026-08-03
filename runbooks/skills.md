@@ -14,7 +14,7 @@ They are **not** interchangeable. Pick deliberately.
 
 **Prefer path 1.** Seeded skills are live-updatable without an image rebuild, listed by the skills API, editable in the UI, per-agent toggleable, and version-tracked with user-edit preservation. Baked skills have none of that.
 
-> Paths 1 and 3 can coexist in the same directory. A `SKILL.md` sitting beside a `content.md` is **not** a mistake — the seeder reads `content.md`, and remote-install reads `SKILL.md`. `attio-interaction`, `agentmail-sending`, `kapso-whatsapp` and `swarm-scripts` do exactly this. If you edit one, consider whether the other needs the same change.
+> Paths 1 and 3 can coexist in the same directory. In that case, `SKILL.md` is a **generated artifact** of `config.json` + `content.md`; never hand-edit it. Run `bun run build:skill-md` and commit the result. CI's `stale-skill-md` rule rejects drift.
 
 ## The rule that matters
 
@@ -39,8 +39,9 @@ templates/skills/<name>/
 1. Create the directory as above.
 2. Add **static** text-imports for `config.json` and `content.md` in `src/be/seed-skills/index.ts`, then an entry in `BUILT_IN_SKILL_SOURCES`.
    They must be static: the API runs from a `bun build --compile` binary and `templates/` only exists in the Dockerfile's builder stage, so nothing can be read from disk at runtime.
-3. Added anything under `files/`? Run `bun run build:seed-skill-files` and commit `src/be/seed-skills/bundled-files.generated.json`. Never hand-edit that file.
-4. Run `bun run check:skill-sources` and the skill tests.
+3. Does the directory already have a `SKILL.md`, or does an integrations-catalog entry point at it? Run `bun run build:skill-md` and commit the generated file. Never hand-edit it.
+4. Added anything under `files/`? Run `bun run build:seed-skill-files` and commit `src/be/seed-skills/bundled-files.generated.json`. Never hand-edit that file.
+5. Run `bun run check:skill-sources` and the skill tests.
 
 ### config.json flags
 
@@ -83,7 +84,7 @@ The seeder never clobbers a user's edits. Per skill, per run:
 | `not-wired` | A seeded template nobody imported — it would never reach an agent |
 | `missing-remote-skill` | An integrations-catalog `templatePath` with no `SKILL.md` — remote install would 404 |
 
-Also in that job: `bun run check:seed-skill-files` (manifest freshness) and the skill seeder tests.
+Also in that job: `bun run check:skill-md` (a generated `SKILL.md` that no longer matches `config.json` + `content.md`), `bun run check:seed-skill-files` (manifest freshness), and the skill seeder tests.
 
 > The job is gated on its **own** change flag, not `lint`/`test`. Neither of those matches `templates/`, so without a dedicated flag a bundled-file-only PR would run nothing but the Docker build and could merge a stale manifest — shipping a compiled API that seeds old or missing files.
 
@@ -91,6 +92,8 @@ Also in that job: `bun run check:seed-skill-files` (manifest freshness) and the 
 
 ```bash
 bun run check:skill-sources        # source-of-truth invariants
+bun run build:skill-md             # regenerate catalog-facing SKILL.md files
+bun run check:skill-md             # generated SKILL.md freshness (CI)
 bun run build:seed-skill-files     # regenerate the bundled-file manifest
 bun run check:seed-skill-files     # manifest freshness (CI)
 bun run test:root -- src/tests/seed-skills-bundled-files.test.ts \
@@ -108,6 +111,7 @@ Verify end to end against a fresh DB (`rm agent-swarm-db.sqlite && bun run start
 | `src/be/seed-skills/index.ts` | Catalog + seeder. `BUILT_IN_SKILL_SOURCES` is the wiring list |
 | `src/be/seed-skills/bundled-files.generated.json` | Generated — never hand-edit |
 | `scripts/build-seed-skill-files.ts` | Manifest generator + `--check` |
+| `scripts/build-skill-md.ts` | Generated `SKILL.md` renderer + `--check` |
 | `scripts/check-skill-sources.ts` | Invariant enforcement |
 | `src/be/seed/runner.ts` | Generic pristine-vs-user-modified harness |
 | `src/utils/skill-fs-writer.ts` | Writes to all five harness trees; owns `.swarm-managed` reconcile |

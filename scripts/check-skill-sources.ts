@@ -10,7 +10,7 @@
  *   3. **Remote-installed on demand** — a `SKILL.md` at a path the integrations
  *      catalog points at (`templatePath`), fetched from GitHub raw by
  *      `skill-install-remote`. Both `templates/skills/` and `plugin/skills/`
- *      host these, which is why a `SKILL.md` may legitimately sit next to a
+ *      host these. A sibling `SKILL.md` is generated from `config.json` and
  *      `content.md`.
  *
  * (1) and (2) both land at `~/.claude/skills/<name>/SKILL.md`. When the same name
@@ -28,6 +28,7 @@
  */
 
 import { join } from "node:path";
+import type { SkillTemplateConfig } from "../src/be/seed-skills/render";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 const TEMPLATES_DIR = join(REPO_ROOT, "templates", "skills");
@@ -95,11 +96,7 @@ for (const name of templateNames) {
   const dir = join(TEMPLATES_DIR, name);
   const configPath = join(dir, "config.json");
 
-  let config: {
-    name?: string;
-    runAllSeedersCandidate?: boolean;
-    systemDefault?: boolean;
-  };
+  let config: SkillTemplateConfig;
   try {
     config = await Bun.file(configPath).json();
   } catch (error) {

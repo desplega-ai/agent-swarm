@@ -143,8 +143,9 @@ templates/skills/<name>/
 
 - New skill → add **static** `config.json` + `content.md` text-imports to `BUILT_IN_SKILL_SOURCES` in `src/be/seed-skills/index.ts`. Static because the API runs from a compiled binary and `templates/` only exists in the Dockerfile builder stage.
 - Touched `files/`? → `bun run build:seed-skill-files`, commit `bundled-files.generated.json` (never hand-edit it).
-- A `SKILL.md` beside a `content.md` is **not** a mistake — the seeder reads `content.md`, while `skill-install-remote` serves `SKILL.md` to the integrations catalog.
-- Verify: `bun run check:skill-sources && bun run check:seed-skill-files` (both CI-enforced via the **Seeded Skills Check** job).
+- A `SKILL.md` beside a `content.md` is a generated artifact of `config.json` + `content.md`; never hand-edit it. `bun run build:skill-md` regenerates it and CI rejects drift via `check:skill-md`.
+- Edited `content.md` or `config.json` in a directory with a `SKILL.md`? → `bun run build:skill-md` and commit the generated file.
+- Verify: `bun run check:skill-sources && bun run check:skill-md && bun run check:seed-skill-files` (all CI-enforced via the **Seeded Skills Check** job).
 
 </important>
 
@@ -293,6 +294,7 @@ bun run check:dep-graph
 Drift checks — run only if you touched the trigger files, MUST commit any regenerated output:
 
 - Edited `plugin/commands/*.md`? → `bun run build:pi-skills`
+- Edited `content.md` or `config.json` under `templates/skills/` in a directory with a `SKILL.md`? → `bun run build:skill-md` and commit the generated file
 - Added/edited a file under `templates/skills/*/files/`? → `bun run build:seed-skill-files` and commit `src/be/seed-skills/bundled-files.generated.json` (NEVER hand-edit that JSON)
 - Edited `src/be/scripts/typecheck.ts` or `src/scripts-runtime/sdk-allowlist.ts`? → `bun run build:script-types` and commit `src/scripts-runtime/types/*.d.ts` (NEVER edit those `.d.ts` files directly — they're generated from `typecheck.ts`)
 - Edited an HTTP route OR bumped `package.json` `version`? → `bun run docs:openapi` (regenerates `openapi.json` AND `docs-site/content/docs/api-reference/**`)

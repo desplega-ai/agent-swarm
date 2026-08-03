@@ -71,6 +71,8 @@
   ],
   "scripts": {
     "build:pi-skills": "bun run plugin/build-pi-skills.ts",
+    "build:skill-md": "bun scripts/build-skill-md.ts",
+    "check:skill-md": "bun scripts/build-skill-md.ts --check",
     "build:seed-skill-files": "bun scripts/build-seed-skill-files.ts",
     "check:seed-skill-files": "bun scripts/build-seed-skill-files.ts --check",
     "check:skill-sources": "bun scripts/check-skill-sources.ts",

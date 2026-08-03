@@ -72,13 +72,7 @@ import {
 } from "../db";
 import type { Seeder, SeedItem } from "../seed/types";
 import bundledFilesManifest from "./bundled-files.generated.json";
-
-type SkillTemplateConfig = {
-  name: string;
-  description: string;
-  runAllSeedersCandidate?: boolean;
-  systemDefault?: boolean;
-};
+import { buildSkillContent, type SkillTemplateConfig } from "./render";
 
 /** One bundled file shipped alongside a skill's SKILL.md. */
 export type SeedSkillFile = {
@@ -92,6 +86,7 @@ export type SeedSkill = {
   description: string;
   content: string;
   systemDefault: boolean;
+  userInvocable: boolean;
   /** Bundled files. Empty for simple (single-SKILL.md) skills. */
   files: SeedSkillFile[];
 };
@@ -125,10 +120,6 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: workflowIterateConfig, body: workflowIterateContent },
   { config: workflowStructuredOutputConfig, body: workflowStructuredOutputContent },
 ];
-
-function buildSkillContent(config: SkillTemplateConfig, body: string): string {
-  return `---\nname: ${config.name}\ndescription: ${config.description}\n---\n\n${body.trim()}\n`;
-}
 
 /** Canonical, order-independent rendering of a bundled file set for hashing. */
 function canonicalFiles(files: SeedSkillFile[]): string {
@@ -176,6 +167,7 @@ function seedSkillFromSource(
     description: config.description,
     content: buildSkillContent(config, body),
     systemDefault: config.systemDefault === true,
+    userInvocable: config.userInvocable !== false,
     files: BUILT_IN_SKILL_FILES[config.name] ?? [],
   };
 }
@@ -246,6 +238,7 @@ export async function loadSeedSkills(templatesDir?: string): Promise<SeedSkill[]
       description: config.description,
       content: buildSkillContent(config, await contentFile.text()),
       systemDefault: config.systemDefault === true,
+      userInvocable: config.userInvocable !== false,
       files: await readSkillFilesDir(dir),
     });
   }
@@ -321,6 +314,7 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
           content: skill.content,
           scope: "swarm",
           systemDefault: skill.systemDefault,
+          userInvocable: skill.userInvocable,
           isComplex: skill.files.length > 0,
         });
         syncSeededSkillFiles(existing.id, skill.files);
@@ -335,6 +329,7 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
         scope: "swarm",
         ownerAgentId: undefined,
         systemDefault: skill.systemDefault,
+        userInvocable: skill.userInvocable,
         isComplex: skill.files.length > 0,
       });
       syncSeededSkillFiles(created.id, skill.files);

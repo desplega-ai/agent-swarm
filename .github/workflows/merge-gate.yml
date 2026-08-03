@@ -92,10 +92,10 @@ jobs:
           #   templates/skills/       seeded skills + bundled files
           #   plugin/skills/          baked skills (duplicate-delivery-path rule)
           #   integrations-catalog.ts templatePath entries (missing-remote-skill rule)
-          #   the two scripts         the checkers themselves
+          #   the three scripts       the checkers and generators themselves
           #   src/be/seed-skills/     seeder + generated manifest
           #   skill-fs-writer.ts      the FS reconcile the tests cover
-          SEED_SKILLS=$(match '^(templates/skills/|plugin/skills/|src/be/seed-skills/|src/utils/skill-fs-writer\.ts$|scripts/(build-seed-skill-files|check-skill-sources)\.ts$|apps/ui/src/lib/integrations-catalog\.ts$)')
+          SEED_SKILLS=$(match '^(templates/skills/|plugin/skills/|src/be/seed-skills/|src/utils/skill-fs-writer\.ts$|scripts/(build-seed-skill-files|build-skill-md|check-skill-sources)\.ts$|apps/ui/src/lib/integrations-catalog\.ts$)')
 
           # script SDK types freshness: source constants + generator + outputs +
           # allowlist/registry (generation validates SDK_ALLOWLIST against server.ts).
@@ -507,6 +507,9 @@ jobs:
 
       - name: Check skill source-of-truth invariants
         run: bun run check:skill-sources
+
+      - name: Check generated SKILL.md freshness
+        run: bun run check:skill-md
 
       - name: Check bundled-file manifest freshness
         run: bun run check:seed-skill-files
