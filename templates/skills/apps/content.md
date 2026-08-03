@@ -280,7 +280,7 @@ Saved scripts use the generated SDK names `ctx.swarm.app_sync({ appId, model?, s
 
 ### Pages, routes, and page trees
 
-`pages` is a map of independently validated page trees and `defaultPage` must name one entry. Each page may also declare a display `title` and typed route `params`. This complete pattern connects a table row to a typed detail route and its parameterized query:
+`pages` is a map of independently validated page trees and `defaultPage` must name one entry. Each page may also declare a display `title` and typed route `params`. On every non-default page the runtime automatically renders breadcrumbs (`<default page title> › <current page title>`, first crumb navigates back) — including in chromeless embeds — so a detail page does NOT need its own back button; give pages good `title`s instead. This complete pattern connects a table row to a typed detail route and its parameterized query:
 
 ```json
 {

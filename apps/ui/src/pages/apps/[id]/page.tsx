@@ -47,6 +47,7 @@ import {
 import {
   AlertCircle,
   Check,
+  ChevronRight,
   Copy,
   LayoutGrid,
   Maximize2,
@@ -698,8 +699,42 @@ function AppRuntime({
     }
   }
 
+  // Automatic in-app breadcrumbs: on any non-default page of a multi-page app
+  // the runtime renders "<default page> › <current page>" with the first crumb
+  // navigating back. Owned by the runtime (not the definition) so every app
+  // gets it for free — including `?mode=chromeless`, where the dashboard
+  // breadcrumb bar doesn't exist and this is the only way back.
+  const showPageCrumbs =
+    Boolean(activePage) && Object.keys(pages).length > 1 && activePageName !== defaultPage;
+  const pageCrumbs = showPageCrumbs ? (
+    <nav
+      aria-label="App pages"
+      className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
+      data-testid="app-page-crumbs"
+    >
+      <button
+        type="button"
+        className="truncate hover:text-foreground hover:underline"
+        // Same semantics as `app.navigate` to the default page: history PUSH
+        // (Back returns here), params dropped, only `?mode` carried over.
+        onClick={() =>
+          navigate(
+            `/apps/${encodeURIComponent(app.id)}${
+              modeParam ? `?${new URLSearchParams({ mode: modeParam })}` : ""
+            }`,
+          )
+        }
+      >
+        {pages[defaultPage]?.title ?? defaultPage}
+      </button>
+      <ChevronRight className="size-3 shrink-0" />
+      <span className="truncate text-foreground">{activePage?.title ?? activePageName}</span>
+    </nav>
+  ) : null;
+
   const surface = (
     <>
+      {pageCrumbs}
       {actionError && (
         <AlertCallout tone="error" icon={AlertCircle} title="Action failed">
           {actionError}
