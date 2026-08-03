@@ -11,7 +11,6 @@ import { SEED_SCRIPTS, scriptsSeeder } from "../be/seed-scripts";
 import bootTriage from "../be/seed-scripts/catalog/boot-triage";
 import { renderCatalogReportPage } from "../be/seed-scripts/catalog/catalog-report";
 import compoundInsights from "../be/seed-scripts/catalog/compound-insights";
-import githubIssuesPull from "../be/seed-scripts/catalog/github-issues-pull";
 import opsCatalogAudit, {
   renderPage as renderOpsCatalogAuditPage,
 } from "../be/seed-scripts/catalog/ops-catalog-audit";
@@ -97,82 +96,6 @@ describe("seed-scripts catalog", () => {
       const sig = extractScriptSignature(s.source);
       expect(sig.description.length, `${s.name} is missing a JSDoc summary`).toBeGreaterThan(0);
     }
-  });
-
-  test("github-issues-pull validates args and projects issues while excluding pull requests", async () => {
-    const calls: Array<{ input: string; init: Record<string, unknown> }> = [];
-    const longBody = "x".repeat(1200);
-    const ctx = {
-      stdlib: {
-        async fetch(input: string, init: Record<string, unknown>) {
-          calls.push({ input, init });
-          return new Response(
-            JSON.stringify([
-              {
-                number: 17,
-                id: 1700,
-                title: "Dynamic source",
-                state: "open",
-                body: longBody,
-                user: { login: "taras" },
-                labels: [{ name: "apps" }, "spike"],
-                comments: 3,
-                html_url: "https://github.com/owner/repo/issues/17",
-                created_at: "2026-08-03T10:00:00.000Z",
-                updated_at: "2026-08-03T11:00:00.000Z",
-              },
-              { number: 18, pull_request: { url: "https://api.github.com/pulls/18" } },
-            ]),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        },
-      },
-    };
-
-    const result = await githubIssuesPull({ repo: "owner/repo", state: "all", limit: 10 }, ctx);
-    expect(result).toEqual([
-      {
-        key: "17",
-        fields: expect.objectContaining({
-          number: 17,
-          title: "Dynamic source",
-          body: "x".repeat(1000),
-          userLogin: "taras",
-          labelsCsv: "apps,spike",
-          htmlUrl: "https://github.com/owner/repo/issues/17",
-        }),
-      },
-    ]);
-    expect(calls[0]?.input).toBe(
-      "https://api.github.com/repos/owner/repo/issues?state=all&per_page=10",
-    );
-    expect(new Headers(calls[0]?.init.headers as HeadersInit).get("Accept")).toBe(
-      "application/vnd.github+json",
-    );
-    expect(new Headers(calls[0]?.init.headers as HeadersInit).get("User-Agent")).toBe(
-      "agent-swarm-apps-sync",
-    );
-    expect(calls[0]?.init.signal).toBeInstanceOf(AbortSignal);
-    expect(calls[0]?.init.retries).toBe(1);
-    expect(calls[0]?.init.timeoutMs).toBe(10_000);
-
-    for (const repo of ["./repo", "../repo", "owner/.", "owner/..", "owner", "owner/repo/extra"]) {
-      await expect(githubIssuesPull({ repo }, ctx)).rejects.toThrow("repo must be");
-    }
-  });
-
-  test("github-issues-pull reports non-success GitHub responses", async () => {
-    const ctx = {
-      stdlib: {
-        async fetch() {
-          return new Response("{}", {
-            status: 503,
-            headers: { "Content-Type": "application/json" },
-          });
-        },
-      },
-    };
-    await expect(githubIssuesPull({ repo: "owner/repo" }, ctx)).rejects.toThrow("status 503");
   });
 
   test("task-context-gathering unwraps the direct REST task response", async () => {

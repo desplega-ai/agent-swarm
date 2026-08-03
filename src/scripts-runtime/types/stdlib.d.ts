@@ -445,7 +445,6 @@ declare module "swarm-sdk" {
       query: string;
       params?: Record<string, string | number | boolean>;
     }): Promise<unknown>;
-    app_sync(args: { appId: string; model?: string; source?: string }): Promise<unknown>;
     app_upsert(args: {
       name: string;
       description?: string;

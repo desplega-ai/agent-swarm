@@ -59,7 +59,7 @@ const baseDefinition = {
   queries: {
     allIdeas: { model: "idea", sort: { column: "createdAt", dir: "desc" } },
   },
-  page: {
+  pages: { main: {
     root: "root",
     elements: {
       root: {
@@ -69,7 +69,7 @@ const baseDefinition = {
       },
       title: { type: "Heading", props: { text: "Ideas", level: "h1" } },
     },
-  },
+  } }, defaultPage: "main",
 };
 
 function normalizedBaseDefinition() {
@@ -267,7 +267,7 @@ describe("app definition patches", () => {
     });
     expect(merge.body.app.definition.queries).not.toHaveProperty("allIdeas");
     expect(merge.body.app.definition).toMatchObject({
-      pages: { main: baseDefinition.page },
+      pages: baseDefinition.pages,
       defaultPage: "main",
     });
     expect(merge.body.app.definition).not.toHaveProperty("page");
@@ -358,7 +358,7 @@ describe("server page validation", () => {
     expect(
       parseAppDefinition({
         ...baseDefinition,
-        page: {
+        pages: { main: {
           root: "root",
           elements: {
             root: {
@@ -397,7 +397,7 @@ describe("server page validation", () => {
             },
             about: { type: "Markdown", props: { content: "## About ideas" } },
           },
-        },
+        } }, defaultPage: "main",
       }).success,
     ).toBe(true);
   });
@@ -405,7 +405,7 @@ describe("server page validation", () => {
   test("validates UI control state roots", () => {
     const unknown = parseAppDefinition({
       ...baseDefinition,
-      page: {
+      pages: { main: {
         root: "root",
         elements: {
           root: {
@@ -416,7 +416,7 @@ describe("server page validation", () => {
             },
           },
         },
-      },
+      } }, defaultPage: "main",
     });
     expect(unknown.success).toBe(false);
     if (!unknown.success) {
@@ -428,7 +428,7 @@ describe("server page validation", () => {
 
     const formIdIsNotUi = parseAppDefinition({
       ...baseDefinition,
-      page: {
+      pages: { main: {
         root: "root",
         elements: {
           root: { type: "Stack", props: {}, children: ["form", "table"] },
@@ -441,7 +441,7 @@ describe("server page validation", () => {
             },
           },
         },
-      },
+      } }, defaultPage: "main",
     });
     expect(formIdIsNotUi.success).toBe(false);
     if (!formIdIsNotUi.success) {
@@ -454,7 +454,7 @@ describe("server page validation", () => {
     expect(
       parseAppDefinition({
         ...baseDefinition,
-        page: {
+        pages: { main: {
           root: "root",
           elements: {
             root: { type: "Stack", props: {}, children: ["tabs", "selectedTab"] },
@@ -466,7 +466,7 @@ describe("server page validation", () => {
             tabContent: { type: "Text", props: { content: "All ideas" } },
             selectedTab: { type: "Text", props: { content: { $state: "/ui/view/tab" } } },
           },
-        },
+        } }, defaultPage: "main",
       }).success,
     ).toBe(true);
   });
@@ -475,7 +475,7 @@ describe("server page validation", () => {
     expect(
       parseAppDefinition({
         ...baseDefinition,
-        page: {
+        pages: { main: {
           root: "root",
           elements: {
             root: { type: "Container", children: ["button"] },
@@ -485,7 +485,7 @@ describe("server page validation", () => {
               on: { press: { action: "app.refresh", params: {} } },
             },
           },
-        },
+        } }, defaultPage: "main",
       }).success,
     ).toBe(true);
   });
@@ -493,7 +493,7 @@ describe("server page validation", () => {
   test("reports missing required props without an object-type error", () => {
     const parsed = parseAppDefinition({
       ...baseDefinition,
-      page: { root: "root", elements: { root: { type: "Heading" } } },
+      pages: { main: { root: "root", elements: { root: { type: "Heading" } } } }, defaultPage: "main",
     });
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
@@ -535,7 +535,7 @@ describe("server page validation", () => {
     for (const testCase of cases) {
       const parsed = parseAppDefinition({
         ...baseDefinition,
-        page: { root: "root", elements: { root: testCase.element } },
+        pages: { main: { root: "root", elements: { root: testCase.element } } }, defaultPage: "main",
       });
       expect(parsed.success).toBe(false);
       if (!parsed.success) {
@@ -571,30 +571,30 @@ describe("server page validation", () => {
         path: "pages.main.elements.root.extra",
         definition: {
           ...baseDefinition,
-          page: {
+          pages: { main: {
             root: "root",
             elements: { root: { type: "Container", props: {}, extra: true } },
-          },
+          } }, defaultPage: "main",
         },
       },
       {
         path: "pages.main.elements.root.children",
         definition: {
           ...baseDefinition,
-          page: {
+          pages: { main: {
             root: "root",
             elements: {
               root: { type: "Heading", props: { text: "No slot" }, children: ["child"] },
               child: { type: "Text", props: { content: "Child" } },
             },
-          },
+          } }, defaultPage: "main",
         },
       },
       {
         path: "pages.main.elements.right.children.0",
         definition: {
           ...baseDefinition,
-          page: {
+          pages: { main: {
             root: "root",
             elements: {
               root: { type: "Container", props: {}, children: ["left", "right"] },
@@ -602,81 +602,81 @@ describe("server page validation", () => {
               right: { type: "Card", props: {}, children: ["shared"] },
               shared: { type: "Text", props: { content: "Shared" } },
             },
-          },
+          } }, defaultPage: "main",
         },
       },
       {
         path: "pages.main.elements.orphan",
         definition: {
           ...baseDefinition,
-          page: {
+          pages: { main: {
             root: "root",
             elements: {
               root: { type: "Container", props: {} },
               orphan: { type: "Text", props: { content: "orphan" } },
             },
-          },
+          } }, defaultPage: "main",
         },
       },
       {
         path: "pages.main.elements.root.children.0",
         definition: {
           ...baseDefinition,
-          page: {
+          pages: { main: {
             root: "root",
             elements: {
               root: { type: "Container", props: {}, children: ["missing"] },
             },
-          },
+          } }, defaultPage: "main",
         },
       },
       {
         path: "pages.main.elements.card.children.0",
         definition: {
           ...baseDefinition,
-          page: {
+          pages: { main: {
             root: "root",
             elements: {
               root: { type: "Container", props: {}, children: ["card"] },
               card: { type: "Card", props: {}, children: ["root"] },
             },
-          },
+          } }, defaultPage: "main",
         },
       },
       {
         path: "pages.main.elements.root.type",
         definition: {
           ...baseDefinition,
-          page: { root: "root", elements: { root: { type: "Unknown", props: {} } } },
+          pages: { main: { root: "root", elements: { root: { type: "Unknown", props: {} } } } }, defaultPage: "main",
         },
       },
       {
         path: "pages.main.elements.root.props.direction",
         definition: {
           ...baseDefinition,
-          page: {
+          pages: { main: {
             root: "root",
             elements: { root: { type: "Container", props: { direction: "diagonal" } } },
-          },
+          } }, defaultPage: "main",
         },
       },
       {
         path: "pages.main.elements.root.props.content",
         definition: {
           ...baseDefinition,
-          page: {
+          pages: { main: {
             root: "root",
             elements: {
               root: { type: "Text", props: { content: { $state: "/queries/missing/data" } } },
             },
-          },
+          } }, defaultPage: "main",
         },
       },
       {
         path: "pages.main.elements.root.visible",
         definition: {
           ...baseDefinition,
-          page: {
+          pages: { main: {
             root: "root",
             elements: {
               root: {
@@ -685,14 +685,14 @@ describe("server page validation", () => {
                 visible: { $state: "/queries/missing/data" },
               },
             },
-          },
+          } }, defaultPage: "main",
         },
       },
       {
         path: "pages.main.elements.root.on.press.0.params.values",
         definition: {
           ...baseDefinition,
-          page: {
+          pages: { main: {
             root: "root",
             elements: {
               root: {
@@ -712,14 +712,14 @@ describe("server page validation", () => {
                 },
               },
             },
-          },
+          } }, defaultPage: "main",
         },
       },
       {
         path: "pages.main.elements.root.on.press.0.params.model",
         definition: {
           ...baseDefinition,
-          page: {
+          pages: { main: {
             root: "root",
             elements: {
               root: {
@@ -730,14 +730,14 @@ describe("server page validation", () => {
                 },
               },
             },
-          },
+          } }, defaultPage: "main",
         },
       },
       {
         path: "pages.main.elements.root.on.press.0.params.rowId",
         definition: {
           ...baseDefinition,
-          page: {
+          pages: { main: {
             root: "root",
             elements: {
               root: {
@@ -748,14 +748,14 @@ describe("server page validation", () => {
                 },
               },
             },
-          },
+          } }, defaultPage: "main",
         },
       },
       {
         path: "pages.main.elements.root.on.press.0.action",
         definition: {
           ...baseDefinition,
-          page: {
+          pages: { main: {
             root: "root",
             elements: {
               root: {
@@ -764,14 +764,14 @@ describe("server page validation", () => {
                 on: { press: [{ action: "missing.action", params: {} }] },
               },
             },
-          },
+          } }, defaultPage: "main",
         },
       },
       {
         path: "pages.main.elements.root.on.press.0.params.name",
         definition: {
           ...baseDefinition,
-          page: {
+          pages: { main: {
             root: "root",
             elements: {
               root: {
@@ -780,7 +780,7 @@ describe("server page validation", () => {
                 on: { press: [{ action: "app.action", params: { name: "missing" } }] },
               },
             },
-          },
+          } }, defaultPage: "main",
         },
       },
     ];
@@ -943,7 +943,7 @@ describe("app MCP iteration tools", () => {
     expect(fetched.structuredContent.app.id).toBe(appId);
     expect(fetched.structuredContent.app.definition).toEqual(normalizedBaseDefinition());
     expect(fetched.structuredContent.app.definition).toMatchObject({
-      pages: { main: baseDefinition.page },
+      pages: baseDefinition.pages,
       defaultPage: "main",
     });
     expect(fetched.structuredContent.app.definition).not.toHaveProperty("page");

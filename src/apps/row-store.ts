@@ -10,13 +10,9 @@ export type AppRow = {
   id: string;
   createdAt: string;
   updatedAt: string;
-  source?: string;
-  syncedAt?: string;
-  stale?: boolean;
 } & Record<string, unknown>;
 
 export interface AppRowWriteOptions {
-  allowSourceManaged?: boolean;
   skipUpdatedAt?: boolean;
 }
 
@@ -93,43 +89,13 @@ function prepareValues(
   definition: ModelDef,
   values: Record<string, unknown>,
   mode: "create" | "patch",
-  options: AppRowWriteOptions = {},
 ): Record<string, unknown> {
   const issues: AppValidationIssue[] = [];
   const prepared: Record<string, unknown> = { ...values };
-  const rejectedColumns = new Set<string>();
 
   for (const name of Object.keys(values)) {
     if (!Object.hasOwn(definition.columns, name)) {
-      if (
-        options.allowSourceManaged === true &&
-        (name === "source" || name === "syncedAt" || name === "stale")
-      ) {
-        continue;
-      }
       issues.push({ path: `values.${name}`, message: `unknown column "${name}"` });
-      continue;
-    }
-    if (options.allowSourceManaged === true) continue;
-
-    const column = definition.columns[name]!;
-    if (column.source) {
-      issues.push({
-        path: name,
-        message: `column is a read-only projection from source "${column.source.of}"; mutate it via the source or a sync-refresh`,
-      });
-      rejectedColumns.add(name);
-      continue;
-    }
-    const isJoinKey = Object.values(definition.sources ?? {}).some(
-      (source) => source.joinKey === name,
-    );
-    if (isJoinKey) {
-      issues.push({
-        path: name,
-        message: "column is the sync join key and is managed by the sync engine",
-      });
-      rejectedColumns.add(name);
     }
   }
 
@@ -139,7 +105,6 @@ function prepareValues(
         prepared[name] = column.default;
       if (
         column.required === true &&
-        !(options.allowSourceManaged === true && column.source !== undefined) &&
         (!Object.hasOwn(prepared, name) || prepared[name] === undefined || prepared[name] === null)
       ) {
         issues.push({ path: `values.${name}`, message: "required column is missing" });
@@ -148,25 +113,6 @@ function prepareValues(
   }
 
   for (const [name, value] of Object.entries(prepared)) {
-    if (rejectedColumns.has(name)) continue;
-    if (options.allowSourceManaged === true && name === "source") {
-      if (typeof value !== "string") {
-        issues.push({ path: "values.source", message: "must be a string" });
-      }
-      continue;
-    }
-    if (options.allowSourceManaged === true && name === "syncedAt") {
-      if (typeof value !== "string" || !isIso8601Date(value)) {
-        issues.push({ path: "values.syncedAt", message: "must be an ISO-8601 date string" });
-      }
-      continue;
-    }
-    if (options.allowSourceManaged === true && name === "stale") {
-      if (typeof value !== "boolean") {
-        issues.push({ path: "values.stale", message: "must be a boolean" });
-      }
-      continue;
-    }
     if (!Object.hasOwn(definition.columns, name)) continue;
     const column = definition.columns[name]!;
     if (!validValue(column, value)) {
@@ -232,9 +178,8 @@ export function createAppRowUnlocked(
   model: string,
   definition: ModelDef,
   values: Record<string, unknown>,
-  options: AppRowWriteOptions = {},
 ): AppRow {
-  const prepared = prepareValues(definition, values, "create", options);
+  const prepared = prepareValues(definition, values, "create");
   if (!appExists(appId)) throw new AppRowAppNotFoundError(appId);
   return createRowUnlocked(appId, model, definition, prepared);
 }
@@ -244,9 +189,8 @@ export function createAppRow(
   model: string,
   definition: ModelDef,
   values: Record<string, unknown>,
-  options: AppRowWriteOptions = {},
 ): Promise<AppRow> {
-  const prepared = prepareValues(definition, values, "create", options);
+  const prepared = prepareValues(definition, values, "create");
   return withMutationLock(appId, model, () => {
     if (!appExists(appId)) throw new AppRowAppNotFoundError(appId);
     return createRowUnlocked(appId, model, definition, prepared);
@@ -258,9 +202,8 @@ export function createAppRows(
   model: string,
   definition: ModelDef,
   rows: Array<Record<string, unknown>>,
-  options: AppRowWriteOptions = {},
 ): Promise<AppRow[]> {
-  const prepared = rows.map((values) => prepareValues(definition, values, "create", options));
+  const prepared = rows.map((values) => prepareValues(definition, values, "create"));
   return withMutationLock(appId, model, () => {
     if (!appExists(appId)) throw new AppRowAppNotFoundError(appId);
     return prepared.map((values) => createRowUnlocked(appId, model, definition, values));
@@ -297,7 +240,7 @@ export function patchAppRow(
   values: Record<string, unknown>,
   options: AppRowWriteOptions = {},
 ): Promise<AppRow | null> {
-  const prepared = prepareValues(definition, values, "patch", options);
+  const prepared = prepareValues(definition, values, "patch");
   return withMutationLock(appId, model, () =>
     patchPreparedRowUnlocked(appId, model, definition, rowId, prepared, options),
   );
@@ -322,12 +265,7 @@ function patchPreparedRowUnlocked(
       : new Date(Math.max(Date.now(), previousMs + 1)).toISOString();
   const updated: AppRow = { ...existing, id: existing.id, updatedAt };
   for (const [name, value] of Object.entries(prepared)) {
-    // Failed source projection/coercion is represented as an explicit null. Preserve the
-    // existing external null-as-delete patch contract for every other write.
-    if (
-      value === null &&
-      !(options.allowSourceManaged === true && definition.columns[name]?.source !== undefined)
-    ) {
+    if (value === null) {
       delete updated[name];
     } else {
       updated[name] = value;
@@ -352,7 +290,7 @@ export function patchAppRowUnlocked(
   values: Record<string, unknown>,
   options: AppRowWriteOptions = {},
 ): AppRow | null {
-  const prepared = prepareValues(definition, values, "patch", options);
+  const prepared = prepareValues(definition, values, "patch");
   return patchPreparedRowUnlocked(appId, model, definition, rowId, prepared, options);
 }
 

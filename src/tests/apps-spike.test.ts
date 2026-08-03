@@ -32,12 +32,12 @@ const ideasDefinition = {
   queries: {
     allIdeas: { model: "idea", sort: { column: "createdAt", dir: "desc" } },
   },
-  page: {
+  pages: { main: {
     root: "root",
     elements: {
       root: { type: "Container", props: {} },
     },
-  },
+  } }, defaultPage: "main",
 };
 
 function createTestServer(): Server {

@@ -19,7 +19,7 @@ const AGENT_ID = crypto.randomUUID();
 const nativeFetch = globalThis.fetch;
 
 const rootElement = { type: "Container", props: {} };
-const legacyDefinition = {
+const issueDefinition = {
   models: {
     issue: {
       columns: {
@@ -29,7 +29,7 @@ const legacyDefinition = {
     },
   },
   queries: { allIssues: { model: "issue" } },
-  page: { root: "root", elements: { root: rootElement } },
+  pages: { main: { root: "root", elements: { root: rootElement } } }, defaultPage: "main",
 };
 
 function page(
@@ -45,8 +45,8 @@ function page(
 
 function pagesDefinition() {
   return {
-    models: structuredClone(legacyDefinition.models),
-    queries: structuredClone(legacyDefinition.queries),
+    models: structuredClone(issueDefinition.models),
+    queries: structuredClone(issueDefinition.queries),
     pages: {
       main: page(),
       detail: page({ root: rootElement }, { issueId: { kind: "number", required: true } }),
@@ -154,46 +154,28 @@ afterAll(async () => {
 });
 
 describe("Spike 4 definition normalization", () => {
-  test("normalizes legacy page definitions on parse, write, and stored-definition read", async () => {
-    const parsed = parseAppDefinition(legacyDefinition);
-    expect(parsed.success).toBe(true);
-    if (!parsed.success) throw new Error(JSON.stringify(parsed.issues));
-    expect(parsed.definition).not.toHaveProperty("page");
-    expect(parsed.definition.pages).toEqual({ main: legacyDefinition.page });
-    expect(parsed.definition.defaultPage).toBe("main");
-
-    const appId = await createApp(legacyDefinition, "Legacy normalized");
-    const storedJson = getDb()
-      .prepare<{ definition: string }, [string]>("SELECT definition FROM apps WHERE id = ?")
-      .get(appId)?.definition;
-    expect(storedJson).toBeString();
-    expect(JSON.parse(storedJson!)).toMatchObject({
-      pages: { main: legacyDefinition.page },
-      defaultPage: "main",
-    });
-    expect(JSON.parse(storedJson!)).not.toHaveProperty("page");
-
-    getDb()
-      .prepare("UPDATE apps SET definition = ? WHERE id = ?")
-      .run(JSON.stringify(legacyDefinition), appId);
-    const legacyRead = getApp(appId);
-    expect(legacyRead?.definition.pages).toEqual({ main: legacyDefinition.page });
-    expect(legacyRead?.definition.defaultPage).toBe("main");
-
-    const titledLegacyDefinition = structuredClone(legacyDefinition) as any;
-    titledLegacyDefinition.page.title = "Issues";
-    const titled = parseAppDefinition(titledLegacyDefinition);
-    expect(titled.success).toBe(true);
-    if (!titled.success) throw new Error(JSON.stringify(titled.issues));
-    expect(titled.definition.pages.main.title).toBe("Issues");
+  test("rejects legacy singular page definitions", () => {
+    const legacy = {
+      models: structuredClone(issueDefinition.models),
+      queries: structuredClone(issueDefinition.queries),
+      page: structuredClone(issueDefinition.pages.main),
+    };
+    expectIssue(
+      legacy,
+      "page",
+      "legacy singular page is no longer supported — define pages plus defaultPage",
+    );
   });
 
-  test("requires exactly one of page or pages", () => {
-    expectIssue({ ...pagesDefinition(), page: structuredClone(legacyDefinition.page) }, "pages");
+  test("requires pages and defaultPage", () => {
+    expectIssue(
+      { ...pagesDefinition(), page: structuredClone(issueDefinition.pages.main) },
+      "page",
+    );
     const neither = pagesDefinition() as Record<string, unknown>;
     delete neither.pages;
     delete neither.defaultPage;
-    expectIssue(neither, "page");
+    expectIssue(neither, "pages");
   });
 
   test("rejects reserved page param names", () => {
@@ -438,7 +420,7 @@ describe("Spike 4 page validation", () => {
 
 describe("Spike 4 definition merge patches", () => {
   test("rejects legacy page patches with canonical guidance", () => {
-    const parsed = parseAppDefinition(legacyDefinition);
+    const parsed = parseAppDefinition(issueDefinition);
     if (!parsed.success) throw new Error(JSON.stringify(parsed.issues));
     expect(applyAppDefinitionPatch(parsed.definition, { page: { root: "other" } })).toEqual({
       success: false,
@@ -563,7 +545,6 @@ describe("Spike 4 parameterized named queries", () => {
         models: { record: { columns: { slug: { kind: "string" } } } },
         queries: {
           detail: { model: "record", filter: { id: { $param: "recordId" } }, limit: 1 },
-          fresh: { model: "record", filter: { stale: false } },
         },
         pages: { main: page() },
         defaultPage: "main",

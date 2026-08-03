@@ -1,1 +1,203 @@
-{"models":{"bookmark":{"columns":{"url":{"kind":"string","required":true},"title":{"kind":"string","required":true},"tags":{"kind":"string"},"read":{"kind":"boolean","default":false},"rating":{"kind":"number","default":0}}}},"queries":{"allBookmarks":{"model":"bookmark","sort":{"column":"createdAt","dir":"desc"},"limit":200}},"page":{"root":"root","elements":{"root":{"type":"Container","props":{},"children":["header","addCard","listCard"]},"header":{"type":"Heading","props":{"text":"Bookmarks"}},"addCard":{"type":"Card","props":{"title":"Add a bookmark"},"children":["addForm"]},"addForm":{"type":"Form","props":{"id":"addBookmark","fields":[{"name":"url","label":"URL","kind":"string","placeholder":"https://example.com","required":true},{"name":"title","label":"Title","kind":"string","placeholder":"Page title","required":true},{"name":"tags","label":"Tags","kind":"string","placeholder":"comma, separated, tags"}],"submitLabel":"Add bookmark","onSubmit":[{"action":"app.mutate","params":{"model":"bookmark","op":"create","values":{"$form":""}}}]}},"listCard":{"type":"Card","props":{"title":"All bookmarks"},"children":["bookmarksTable"]},"bookmarksTable":{"type":"Table","props":{"data":{"$state":"/queries/allBookmarks/data"},"loading":{"$state":"/queries/allBookmarks/loading"},"error":{"$state":"/queries/allBookmarks/error"},"emptyMessage":"No bookmarks yet — add your first one above.","columns":[{"key":"title","label":"Title","kind":"string"},{"key":"url","label":"URL","kind":"string"},{"key":"tags","label":"Tags","kind":"string"},{"key":"read","label":"Read","kind":"boolean"},{"key":"rating","label":"Rating","kind":"number"},{"key":"createdAt","label":"Added","kind":"date"}],"rowActions":[{"label":"Mark read","actions":[{"action":"app.mutate","params":{"model":"bookmark","op":"update","rowId":{"$row":"id"},"values":{"read":true}}}]},{"label":"Delete","variant":"destructive","confirm":"Delete this bookmark?","actions":[{"action":"app.mutate","params":{"model":"bookmark","op":"delete","rowId":{"$row":"id"}}}]}]}}}}}
+{
+  "models": {
+    "bookmark": {
+      "columns": {
+        "url": {
+          "kind": "string",
+          "required": true
+        },
+        "title": {
+          "kind": "string",
+          "required": true
+        },
+        "tags": {
+          "kind": "string"
+        },
+        "read": {
+          "kind": "boolean",
+          "default": false
+        },
+        "rating": {
+          "kind": "number",
+          "default": 0
+        }
+      }
+    }
+  },
+  "queries": {
+    "allBookmarks": {
+      "model": "bookmark",
+      "sort": {
+        "column": "createdAt",
+        "dir": "desc"
+      },
+      "limit": 200
+    }
+  },
+  "pages": {
+    "main": {
+      "root": "root",
+      "elements": {
+        "root": {
+          "type": "Container",
+          "props": {},
+          "children": [
+            "header",
+            "addCard",
+            "listCard"
+          ]
+        },
+        "header": {
+          "type": "Heading",
+          "props": {
+            "text": "Bookmarks"
+          }
+        },
+        "addCard": {
+          "type": "Card",
+          "props": {
+            "title": "Add a bookmark"
+          },
+          "children": [
+            "addForm"
+          ]
+        },
+        "addForm": {
+          "type": "Form",
+          "props": {
+            "id": "addBookmark",
+            "fields": [
+              {
+                "name": "url",
+                "label": "URL",
+                "kind": "string",
+                "placeholder": "https://example.com",
+                "required": true
+              },
+              {
+                "name": "title",
+                "label": "Title",
+                "kind": "string",
+                "placeholder": "Page title",
+                "required": true
+              },
+              {
+                "name": "tags",
+                "label": "Tags",
+                "kind": "string",
+                "placeholder": "comma, separated, tags"
+              }
+            ],
+            "submitLabel": "Add bookmark",
+            "onSubmit": [
+              {
+                "action": "app.mutate",
+                "params": {
+                  "model": "bookmark",
+                  "op": "create",
+                  "values": {
+                    "$form": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "listCard": {
+          "type": "Card",
+          "props": {
+            "title": "All bookmarks"
+          },
+          "children": [
+            "bookmarksTable"
+          ]
+        },
+        "bookmarksTable": {
+          "type": "Table",
+          "props": {
+            "data": {
+              "$state": "/queries/allBookmarks/data"
+            },
+            "loading": {
+              "$state": "/queries/allBookmarks/loading"
+            },
+            "error": {
+              "$state": "/queries/allBookmarks/error"
+            },
+            "emptyMessage": "No bookmarks yet \u2014 add your first one above.",
+            "columns": [
+              {
+                "key": "title",
+                "label": "Title",
+                "kind": "string"
+              },
+              {
+                "key": "url",
+                "label": "URL",
+                "kind": "string"
+              },
+              {
+                "key": "tags",
+                "label": "Tags",
+                "kind": "string"
+              },
+              {
+                "key": "read",
+                "label": "Read",
+                "kind": "boolean"
+              },
+              {
+                "key": "rating",
+                "label": "Rating",
+                "kind": "number"
+              },
+              {
+                "key": "createdAt",
+                "label": "Added",
+                "kind": "date"
+              }
+            ],
+            "rowActions": [
+              {
+                "label": "Mark read",
+                "actions": [
+                  {
+                    "action": "app.mutate",
+                    "params": {
+                      "model": "bookmark",
+                      "op": "update",
+                      "rowId": {
+                        "$row": "id"
+                      },
+                      "values": {
+                        "read": true
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "label": "Delete",
+                "variant": "destructive",
+                "confirm": "Delete this bookmark?",
+                "actions": [
+                  {
+                    "action": "app.mutate",
+                    "params": {
+                      "model": "bookmark",
+                      "op": "delete",
+                      "rowId": {
+                        "$row": "id"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "defaultPage": "main"
+}

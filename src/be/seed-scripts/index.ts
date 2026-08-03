@@ -32,7 +32,6 @@ import delegateSrc from "./catalog/delegate.ts" with { type: "text" };
 import fetchReadableSrc from "./catalog/fetch-readable.ts" with { type: "text" };
 import getChildOutputsSrc from "./catalog/get-child-outputs.ts" with { type: "text" };
 import ghPrSnapshotSrc from "./catalog/gh-pr-snapshot.ts" with { type: "text" };
-import githubIssuesPullSrc from "./catalog/github-issues-pull.ts" with { type: "text" };
 import groupCountSrc from "./catalog/group-count.ts" with { type: "text" };
 import jsonQuerySrc from "./catalog/json-query.ts" with { type: "text" };
 import linearIssueSrc from "./catalog/linear-issue.ts" with { type: "text" };
@@ -70,14 +69,6 @@ function bundleCatalogReport(source: string): string {
 }
 
 export const SEED_SCRIPTS: SeedScript[] = [
-  {
-    name: "github-issues-pull",
-    description:
-      "Pull a bounded window of public GitHub issues into normalized key-and-fields records for a script-backed Swarm App source.",
-    intent:
-      "Use as the batteries-included dynamic source for syncing GitHub issues into an app without hardcoding a server connector.",
-    source: asText(githubIssuesPullSrc),
-  },
   {
     name: "gh-pr-snapshot",
     description:

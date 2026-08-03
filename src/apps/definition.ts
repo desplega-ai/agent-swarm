@@ -9,28 +9,6 @@ export const AppNameSchema = z.string().regex(/^[a-z][a-zA-Z0-9_]{0,39}$/, {
 
 export const ColumnKindSchema = z.enum(["string", "number", "boolean", "date", "enum"]);
 
-const SourceTransformSchema = z.enum(["slug", "lower", "upper", "cents", "date-parse"]);
-
-const SourceBindingSchema = z.object({
-  of: AppNameSchema,
-  field: z.string().min(1, { message: "field must not be empty" }),
-  transform: SourceTransformSchema.optional(),
-});
-
-const SourceDefSchema = z.discriminatedUnion("connector", [
-  z.object({
-    connector: z.literal("swarm-tasks"),
-    joinKey: AppNameSchema,
-    config: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
-  }),
-  z.object({
-    connector: z.literal("script"),
-    joinKey: AppNameSchema,
-    scriptId: z.string().min(1),
-    args: z.record(z.string(), z.unknown()).optional(),
-  }),
-]);
-
 const ISO_8601_PREFIX = /^\d{4}-\d{2}-\d{2}(?:T.*)?$/;
 
 export function isIso8601Date(value: string): boolean {
@@ -44,7 +22,6 @@ const ColumnDefSchema = z
     enum: z.array(z.string()).optional(),
     index: z.boolean().optional(),
     default: z.union([z.string(), z.number(), z.boolean()]).optional(),
-    source: SourceBindingSchema.optional(),
   })
   .superRefine((column, ctx) => {
     if (column.kind === "enum") {
@@ -86,7 +63,6 @@ const ColumnDefSchema = z
 const ModelDefSchema = z
   .object({
     columns: z.record(AppNameSchema, ColumnDefSchema),
-    sources: z.record(AppNameSchema, SourceDefSchema).optional(),
   })
   .superRefine((model, ctx) => {
     const count = Object.keys(model.columns).length;
@@ -94,23 +70,13 @@ const ModelDefSchema = z
       ctx.addIssue({ code: "custom", path: ["columns"], message: "must define 1 to 40 columns" });
     }
     for (const name of Object.keys(model.columns)) {
-      if (
-        name === "id" ||
-        name === "createdAt" ||
-        name === "updatedAt" ||
-        name === "source" ||
-        name === "syncedAt" ||
-        name === "stale"
-      ) {
+      if (Object.hasOwn(SYSTEM_COLUMN_KINDS, name)) {
         ctx.addIssue({
           code: "custom",
           path: ["columns", name],
           message: "reserved column name",
         });
       }
-    }
-    if (Object.keys(model.sources ?? {}).length > 4) {
-      ctx.addIssue({ code: "custom", path: ["sources"], message: "must define at most 4 sources" });
     }
   });
 
@@ -129,9 +95,6 @@ export const SYSTEM_COLUMN_KINDS: Record<string, "string" | "date" | "boolean"> 
   id: "string",
   createdAt: "date",
   updatedAt: "date",
-  source: "string",
-  syncedAt: "date",
-  stale: "boolean",
 };
 
 const AppQueryDefSchema = z.object({
@@ -159,11 +122,6 @@ const AppActionDefSchema = z.discriminatedUnion("kind", [
     prompt: z.string().min(1),
     agentId: z.string().uuid().optional(),
   }),
-  z.object({
-    kind: z.literal("sync"),
-    model: AppNameSchema.optional(),
-    source: AppNameSchema.optional(),
-  }),
 ]);
 
 const AppPageParamSchema = z
@@ -189,55 +147,24 @@ export const AppDefinitionSchema = z
     models: z.record(AppNameSchema, ModelDefSchema),
     queries: z.record(AppNameSchema, AppQueryDefSchema).optional(),
     actions: z.record(AppNameSchema, AppActionDefSchema).optional(),
-    page: AppPageSchema.optional(),
-    pages: z.record(AppNameSchema, AppPageSchema).optional(),
-    defaultPage: AppNameSchema.optional(),
+    pages: z.record(AppNameSchema, AppPageSchema),
+    defaultPage: AppNameSchema,
   })
   .superRefine((definition, ctx) => {
-    const hasPage = definition.page !== undefined;
-    const hasPages = definition.pages !== undefined;
-    if (hasPage === hasPages) {
-      ctx.addIssue({
-        code: "custom",
-        path: [hasPage ? "pages" : "page"],
-        message: hasPage
-          ? "page and pages are mutually exclusive"
-          : "exactly one of page or pages is required",
-      });
-    }
-    if (hasPages) {
-      if (definition.defaultPage === undefined) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["defaultPage"],
-          message: "defaultPage is required when pages is defined",
-        });
-      } else if (!Object.hasOwn(definition.pages!, definition.defaultPage)) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["defaultPage"],
-          message: `unknown page "${definition.defaultPage}"`,
-        });
-      }
-    } else if (definition.defaultPage !== undefined) {
+    if (!Object.hasOwn(definition.pages, definition.defaultPage)) {
       ctx.addIssue({
         code: "custom",
         path: ["defaultPage"],
-        message: "defaultPage is only allowed when pages is defined",
+        message: `unknown page "${definition.defaultPage}"`,
       });
     }
 
-    const pages = definition.pages ?? (definition.page ? { main: definition.page } : {});
-    const pagesPath = definition.pages ? "pages" : "page";
-    for (const [pageName, page] of Object.entries(pages)) {
+    for (const [pageName, page] of Object.entries(definition.pages)) {
       for (const paramName of Object.keys(page.params ?? {})) {
         if (RESERVED_PAGE_PARAM_NAMES.has(paramName)) {
           ctx.addIssue({
             code: "custom",
-            path:
-              pagesPath === "pages"
-                ? [pagesPath, pageName, "params", paramName]
-                : [pagesPath, "params", paramName],
+            path: ["pages", pageName, "params", paramName],
             message: "reserved param name",
           });
         }
@@ -306,7 +233,6 @@ export const AppDefinitionSchema = z
         sortColumn &&
         sortColumn !== "createdAt" &&
         sortColumn !== "updatedAt" &&
-        sortColumn !== "syncedAt" &&
         !Object.hasOwn(model.columns, sortColumn)
       ) {
         ctx.addIssue({
@@ -316,18 +242,10 @@ export const AppDefinitionSchema = z
         });
       }
     }
-  })
-  .transform((definition) => {
-    const { page, pages, defaultPage, ...rest } = definition;
-    if (page !== undefined) {
-      return { ...rest, pages: { main: page }, defaultPage: "main" };
-    }
-    return { ...rest, pages: pages!, defaultPage: defaultPage! };
   });
 
 export type ColumnKind = z.infer<typeof ColumnKindSchema>;
 export type ColumnDef = z.infer<typeof ColumnDefSchema>;
-export type SourceDef = z.infer<typeof SourceDefSchema>;
 export type ModelDef = z.infer<typeof ModelDefSchema>;
 export type AppQueryDef = z.infer<typeof AppQueryDefSchema>;
 export type AppActionDef = z.infer<typeof AppActionDefSchema>;
@@ -356,155 +274,20 @@ export function appDefinitionIssues(error: z.ZodError): AppValidationIssue[] {
   return error.issues.flatMap((issue) => flattenIssue(issue));
 }
 
-function sourceDefinitionIssues(definition: AppDefinition): AppValidationIssue[] {
-  const issues: AppValidationIssue[] = [];
-
-  for (const [modelName, model] of Object.entries(definition.models)) {
-    const sources = model.sources ?? {};
-    for (const [sourceName, source] of Object.entries(sources)) {
-      const sourcePath = `models.${modelName}.sources.${sourceName}`;
-      const joinColumn = Object.hasOwn(model.columns, source.joinKey)
-        ? model.columns[source.joinKey]
-        : undefined;
-      if (!joinColumn) {
-        issues.push({
-          path: `${sourcePath}.joinKey`,
-          message: `unknown column "${source.joinKey}"`,
-        });
-      } else {
-        if (joinColumn.kind !== "string") {
-          issues.push({
-            path: `${sourcePath}.joinKey`,
-            message: "join key must reference a string column",
-          });
-        }
-        if (joinColumn.source !== undefined) {
-          issues.push({
-            path: `models.${modelName}.columns.${source.joinKey}.source`,
-            message: "sync join-key columns must not carry a source binding",
-          });
-        }
-        if (joinColumn.required === true) {
-          issues.push({
-            path: `models.${modelName}.columns.${source.joinKey}.required`,
-            message: "sync join-key columns must not be required",
-          });
-        }
-        if (joinColumn.default !== undefined) {
-          issues.push({
-            path: `models.${modelName}.columns.${source.joinKey}.default`,
-            message: "sync join-key columns must not carry a default",
-          });
-        }
-      }
-
-      if (source.connector === "script" && !getScriptById(source.scriptId)) {
-        issues.push({
-          path: `${sourcePath}.scriptId`,
-          message: `script "${source.scriptId}" not found`,
-        });
-      }
-    }
-
-    for (const [columnName, column] of Object.entries(model.columns)) {
-      const columnPath = `models.${modelName}.columns.${columnName}`;
-      if (column.source) {
-        if (!Object.hasOwn(sources, column.source.of)) {
-          issues.push({
-            path: `${columnPath}.source.of`,
-            message: `unknown source "${column.source.of}"`,
-          });
-        }
-        const transform = column.source.transform;
-        const compatible =
-          transform === undefined ||
-          ((transform === "slug" || transform === "lower" || transform === "upper") &&
-            column.kind === "string") ||
-          (transform === "cents" && column.kind === "number") ||
-          (transform === "date-parse" && column.kind === "date");
-        if (!compatible) {
-          issues.push({
-            path: `${columnPath}.source.transform`,
-            message: `transform "${transform}" is not compatible with ${column.kind} columns`,
-          });
-        }
-        if (column.required === true) {
-          issues.push({
-            path: `${columnPath}.required`,
-            message: "source-bound columns must not be required",
-          });
-        }
-        if (column.default !== undefined) {
-          issues.push({
-            path: `${columnPath}.default`,
-            message: "source-bound columns must not carry a default",
-          });
-        }
-      } else if (
-        Object.keys(sources).length > 0 &&
-        column.required === true &&
-        column.default === undefined
-      ) {
-        issues.push({
-          path: `${columnPath}.default`,
-          message: "required owned columns on a sourced model must carry a default",
-        });
-      }
-    }
-  }
-
-  for (const [actionName, action] of Object.entries(definition.actions ?? {})) {
-    if (action.kind !== "sync") continue;
-
-    const models = action.model
-      ? Object.hasOwn(definition.models, action.model)
-        ? [[action.model, definition.models[action.model]!] as const]
-        : []
-      : Object.entries(definition.models);
-    if (action.model) {
-      const model = Object.hasOwn(definition.models, action.model)
-        ? definition.models[action.model]
-        : undefined;
-      if (!model) {
-        issues.push({
-          path: `actions.${actionName}.model`,
-          message: `unknown model "${action.model}"`,
-        });
-      } else if (Object.keys(model.sources ?? {}).length === 0) {
-        issues.push({
-          path: `actions.${actionName}.model`,
-          message: `model "${action.model}" has no sources`,
-        });
-      }
-    }
-
-    const matches = models.flatMap(([, model]) =>
-      Object.keys(model.sources ?? {}).filter(
-        (sourceName) => action.source === undefined || sourceName === action.source,
-      ),
-    );
-    if (action.source !== undefined && matches.length === 0) {
-      issues.push({
-        path: `actions.${actionName}.source`,
-        message: action.model
-          ? `unknown source "${action.source}" on model "${action.model}"`
-          : `unknown source "${action.source}"`,
-      });
-    }
-    if (matches.length === 0) {
-      issues.push({
-        path: `actions.${actionName}`,
-        message: "sync action matches no model sources",
-      });
-    }
-  }
-
-  return issues;
-}
-
 export function parseAppDefinition(
   input: unknown,
 ): { success: true; definition: AppDefinition } | { success: false; issues: AppValidationIssue[] } {
+  if (isMergePatchObject(input) && Object.hasOwn(input, "page")) {
+    return {
+      success: false,
+      issues: [
+        {
+          path: "page",
+          message: "legacy singular page is no longer supported — define pages plus defaultPage",
+        },
+      ],
+    };
+  }
   const parsed = AppDefinitionSchema.safeParse(input);
   if (!parsed.success) return { success: false, issues: appDefinitionIssues(parsed.error) };
 
@@ -513,7 +296,6 @@ export function parseAppDefinition(
       validatePage(parsed.data, catalog, pageName),
     ),
     ...crossPageDefinitionIssues(parsed.data, catalog),
-    ...sourceDefinitionIssues(parsed.data),
   ];
   for (const [name, action] of Object.entries(parsed.data.actions ?? {})) {
     if (action.kind === "script" && !getScriptById(action.scriptId)) {
@@ -592,10 +374,7 @@ function applyMergePatch(target: unknown, patch: unknown, path: string[]): unkno
   const result: Record<string, unknown> = isMergePatchObject(target) ? { ...target } : {};
   const entriesAreAtomic =
     (path.length === 1 && path[0] === "actions") ||
-    (path.length === 2 && path[0] === "page" && path[1] === "elements") ||
-    (path.length === 3 &&
-      path[0] === "models" &&
-      (path[2] === "columns" || path[2] === "sources")) ||
+    (path.length === 3 && path[0] === "models" && path[2] === "columns") ||
     (path.length === 3 && path[0] === "pages" && (path[2] === "elements" || path[2] === "params"));
 
   for (const [key, value] of Object.entries(patch)) {
@@ -614,9 +393,9 @@ function applyMergePatch(target: unknown, patch: unknown, path: string[]): unkno
 
 /**
  * Apply RFC 7396 JSON Merge Patch semantics to an app definition without
- * mutating either input. Individual action, page-element, model-column, and
- * model-source entries are intentionally atomic so callers cannot accidentally
- * leave half of one executable/renderable subtree behind.
+ * mutating either input. Individual action, page-element, and model-column
+ * entries are intentionally atomic so callers cannot accidentally leave half
+ * of one executable/renderable subtree behind.
  */
 export function applyAppDefinitionPatch(
   stored: AppDefinition,

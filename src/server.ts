@@ -13,7 +13,6 @@ import { registerAppGetTool } from "./tools/app-get";
 import { registerAppListTool } from "./tools/app-list";
 import { registerAppPatchTool } from "./tools/app-patch";
 import { registerAppQueryTool } from "./tools/app-query";
-import { registerAppSyncTool } from "./tools/app-sync";
 import { registerAppUpsertTool } from "./tools/app-upsert";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
@@ -472,7 +471,6 @@ export function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolea
     registerAppListTool(server);
     registerAppPatchTool(server);
     registerAppQueryTool(server);
-    registerAppSyncTool(server);
     registerAppUpsertTool(server);
     registerCreatePageTool(server);
     registerDeletePageTool(server);

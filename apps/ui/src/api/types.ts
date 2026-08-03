@@ -2541,12 +2541,6 @@ export interface AppDefinition {
    */
   pages?: Record<string, AppPageDef>;
   defaultPage?: string;
-  /**
-   * Legacy single-page form. The server normalizes it into
-   * `pages: { main: … }` at read time, but the client still tolerates it so a
-   * definition served by an older API (or held in a stale cache) renders.
-   */
-  page?: Record<string, unknown>;
 }
 
 /**

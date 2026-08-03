@@ -169,9 +169,6 @@ function normalizeAppPages(definition: AppDefinition): {
       defaultPage: declared && pages[declared] ? declared : (names[0] as string),
     };
   }
-  if (definition.page) {
-    return { pages: { main: definition.page as unknown as AppPageDef }, defaultPage: "main" };
-  }
   return { pages: {}, defaultPage: "" };
 }
 
