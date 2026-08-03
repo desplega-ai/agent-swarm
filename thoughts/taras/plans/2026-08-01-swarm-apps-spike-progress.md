@@ -427,6 +427,16 @@ Deliberately ranked below this (machinery mostly proven or incremental): hooks
 growth, per-app ACL/sharing (pages precedent). After spike 5: stop spiking → /research
 → create-plan for the real referenced-rows implementation.
 
+**Research DONE + spec frozen (2026-08-03, research session):** research doc
+`../research/2026-08-03-swarm-apps-spike5-lifecycle-research.md` (Taras-reviewed; all
+open questions resolved in its "Resolved directions" section — headline: backward-compat
+by default, column delete = `hidden` flag, destruction always explicit via a `migration`
+directive riding as a sibling field on the patch; rollback = forward-migrate;
+schemaVersion + lazy upgrade fns for the format-brick class). Frozen contract:
+`./2026-08-03-swarm-apps-spike5-lifecycle-spec.md` — server-only slice, no UI.
+Execute in a NEW session: freeze commit → Codex sol server slice → two-lens review →
+E2E → flag→priority+status finale + rollback part 2.
+
 ## Spike 3 log (2026-08-02, superseded by results above — spec ./2026-08-02-swarm-apps-spike3-sync-spec.md)
 
 - **Task 0 (action-loop browser proof): PASS 3/3.** Saved script `notes-add-sample`
