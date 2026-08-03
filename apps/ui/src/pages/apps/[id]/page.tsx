@@ -788,17 +788,23 @@ function AppRuntime({
   }
 
   return (
-    <div
-      ref={scrollRef}
-      className="flex flex-col flex-1 min-h-0 overflow-y-auto gap-4"
-      data-testid="app-runtime"
-    >
+    <div className="flex flex-col flex-1 min-h-0 gap-4" data-testid="app-runtime">
+      {/* The header (title, open-full/chromeless actions) stays fixed; ONLY
+          the app canvas below scrolls. */}
       <PageHeader
         title={app.name}
         description={app.description ?? undefined}
         action={<AppHeaderActions app={app} />}
       />
-      {surface}
+      {/* Bordered, self-scrolling canvas so the app's limits are visible
+          against the dashboard chrome. Default view only — full/chromeless
+          own the whole viewport and need no frame. */}
+      <div
+        ref={scrollRef}
+        className="flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto rounded-lg border border-border bg-card p-4"
+      >
+        {surface}
+      </div>
       {lastResponse !== undefined && (
         <details className="rounded-md border border-border bg-muted/40 p-3 text-xs">
           <summary className="cursor-pointer text-muted-foreground">Last action response</summary>
