@@ -10,6 +10,7 @@ import {
   getSessionLogsByTaskId,
   getTaskById,
   insertTaskAttachment,
+  overwriteTerminalTaskResultText,
   updateAgentStatusFromCapacity,
   updateTaskProgress,
 } from "@/be/db";
@@ -20,7 +21,31 @@ import { shouldPersistTaskCompletionMemory } from "@/memory/automatic-task-gate"
 import { createWorkerTaskFollowUp } from "@/tasks/worker-follow-up";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AgentTaskStatusSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
+import { scrubSecrets } from "@/utils/secret-scrubber";
 import { validateJsonSchema } from "@/workflows/json-schema-validator";
+
+function getTaskOutputValidationError(outputSchema: unknown, output: string | undefined) {
+  if (!outputSchema || typeof outputSchema !== "object") return undefined;
+
+  const schema = outputSchema as Record<string, unknown>;
+  if (!output) {
+    return `Task has an outputSchema but no output was provided. You must call store-progress with a valid JSON output matching this schema:\n${JSON.stringify(schema, null, 2)}`;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return `Task output must be valid JSON matching the outputSchema. Got invalid JSON. Schema:\n${JSON.stringify(schema, null, 2)}`;
+  }
+
+  const validationErrors = validateJsonSchema(schema, parsed);
+  if (validationErrors.length > 0) {
+    return `Task output does not match the outputSchema. Errors:\n${validationErrors.join("\n")}\n\nExpected schema:\n${JSON.stringify(schema, null, 2)}\n\nPlease fix your output and retry.`;
+  }
+
+  return undefined;
+}
 
 // Phase 11: the `cost` / `costData` field was removed from this tool's input
 // schema. Adapters (claude/codex/pi/opencode/devin/claude-managed) are the
@@ -49,6 +74,12 @@ export const storeProgressOutputSchema = swarmToolOutputSchema({
     .optional()
     .describe(
       "True when the call was a no-op because the task was already in a terminal state (completed/failed/cancelled). First-call-wins.",
+    ),
+  wasForcedOverwrite: z
+    .boolean()
+    .optional()
+    .describe(
+      "True when force: true replaced output and/or failureReason on an already-terminal task without replaying completion side effects.",
     ),
 });
 
@@ -91,6 +122,12 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .describe(
             "Opt in to task_completion memory persistence for automatic/recurring tasks. Manual tasks are persisted by default; scheduled, system, heartbeat/boot-triage, monitor, and digest tasks are skipped unless this is true.",
           ),
+        force: z
+          .boolean()
+          .optional()
+          .describe(
+            "On an already-terminal task, overwrite explicitly provided output and/or failureReason text while preserving status and finishedAt and without replaying events, memory writes, follow-up creation, business-use ensure, or capacity updates. Differing terminal text is otherwise discarded and reported as a failure.",
+          ),
         // Phase 11: `costData` removed. The harness adapter is the sole
         // writer of `session_costs` (see POST /api/session-costs in the
         // runner). If a payload still includes the field, Zod's
@@ -99,7 +136,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
       outputSchema: storeProgressOutputSchema,
     },
     async (
-      { taskId, progress, status, output, failureReason, attachments, persistMemory },
+      { taskId, progress, status, output, failureReason, attachments, persistMemory, force },
       requestInfo,
       _meta,
     ) => {
@@ -196,8 +233,60 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // BEFORE any side-effects fire (event emission, memory write, follow-up task,
         // business-use ensure). Without this, a multi-session race causes duplicate
         // follow-up tasks to lead, vector index pollution, and spurious BU events.
-        // First-call-wins: existing output / finishedAt are preserved.
-        if (status && isTerminal) {
+        // First-call-wins by default: existing result text / finishedAt are preserved.
+        // A caller may explicitly force a text-only correction; that path returns
+        // before every terminal side effect and deliberately leaves all lifecycle
+        // fields untouched.
+        if (isTerminal && (status || force)) {
+          const scrubbedOutput = output !== undefined ? scrubSecrets(output) : undefined;
+          const scrubbedFailureReason =
+            failureReason !== undefined ? scrubSecrets(failureReason) : undefined;
+          const hasDifferingOutput =
+            scrubbedOutput !== undefined && scrubbedOutput !== existingTask.output;
+          const hasDifferingFailureReason =
+            scrubbedFailureReason !== undefined &&
+            scrubbedFailureReason !== existingTask.failureReason;
+          const hasDifferingResultText = hasDifferingOutput || hasDifferingFailureReason;
+
+          if (hasDifferingResultText && force) {
+            const outputValidationError = hasDifferingOutput
+              ? getTaskOutputValidationError(existingTask.outputSchema, output)
+              : undefined;
+            if (outputValidationError) {
+              return { success: false, message: outputValidationError, task: existingTask };
+            }
+
+            const overwrittenTask = overwriteTerminalTaskResultText(taskId, {
+              ...(output !== undefined ? { output } : {}),
+              ...(failureReason !== undefined ? { failureReason } : {}),
+            });
+            if (!overwrittenTask) {
+              return {
+                success: false,
+                message: `Task "${taskId}" terminal result text could not be overwritten.`,
+              };
+            }
+            return {
+              success: true,
+              message:
+                `Task "${taskId}" is already ${existingTask.status}; force-overwrote terminal result text ` +
+                "without replaying completion side effects.",
+              task: overwrittenTask,
+              wasForcedOverwrite: true,
+            };
+          }
+
+          if (hasDifferingResultText) {
+            return {
+              success: false,
+              message:
+                `Discarded write for already-${existingTask.status} task "${taskId}"; ` +
+                "existing output/failureReason and finishedAt were preserved. Retry with force: true " +
+                "to overwrite terminal result text without replaying completion side effects.",
+              task: existingTask,
+            };
+          }
+
           return {
             success: true,
             message:
@@ -224,35 +313,13 @@ export const registerStoreProgressTool = (server: McpServer) => {
         }
 
         // Validate structured output against outputSchema if present
-        if (
-          status === "completed" &&
-          existingTask.outputSchema &&
-          typeof existingTask.outputSchema === "object"
-        ) {
-          const schema = existingTask.outputSchema as Record<string, unknown>;
-          if (!output) {
-            return {
-              success: false,
-              message: `Task has an outputSchema but no output was provided. You must call store-progress with a valid JSON output matching this schema:\n${JSON.stringify(schema, null, 2)}`,
-            };
-          }
-
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(output);
-          } catch {
-            return {
-              success: false,
-              message: `Task output must be valid JSON matching the outputSchema. Got invalid JSON. Schema:\n${JSON.stringify(schema, null, 2)}`,
-            };
-          }
-
-          const validationErrors = validateJsonSchema(schema, parsed);
-          if (validationErrors.length > 0) {
-            return {
-              success: false,
-              message: `Task output does not match the outputSchema. Errors:\n${validationErrors.join("\n")}\n\nExpected schema:\n${JSON.stringify(schema, null, 2)}\n\nPlease fix your output and retry.`,
-            };
+        if (status === "completed") {
+          const outputValidationError = getTaskOutputValidationError(
+            existingTask.outputSchema,
+            output,
+          );
+          if (outputValidationError) {
+            return { success: false, message: outputValidationError };
           }
         }
 
@@ -339,7 +406,8 @@ export const registerStoreProgressTool = (server: McpServer) => {
         (status === "completed" || status === "failed") &&
         result.success &&
         result.task &&
-        !("wasNoOp" in result && result.wasNoOp);
+        !("wasNoOp" in result && result.wasNoOp) &&
+        !("wasForcedOverwrite" in result && result.wasForcedOverwrite);
 
       // Index completed and failed tasks as memory (async, non-blocking).
       // Skip on no-op (idempotent re-call on terminal task) to avoid duplicate
@@ -451,7 +519,8 @@ export const registerStoreProgressTool = (server: McpServer) => {
         result.success &&
         result.task &&
         !result.task.workflowRunId &&
-        !("wasNoOp" in result && result.wasNoOp)
+        !("wasNoOp" in result && result.wasNoOp) &&
+        !("wasForcedOverwrite" in result && result.wasForcedOverwrite)
       ) {
         try {
           const followUp = createWorkerTaskFollowUp({
@@ -483,6 +552,9 @@ export const registerStoreProgressTool = (server: McpServer) => {
         yourAgentId: requestInfo.agentId,
         ...(task ? { task } : {}),
         ...("wasNoOp" in result && result.wasNoOp ? { wasNoOp: true } : {}),
+        ...("wasForcedOverwrite" in result && result.wasForcedOverwrite
+          ? { wasForcedOverwrite: true }
+          : {}),
       };
       return success ? toolOk(message, { data }) : toolErr(message, { data });
     },
