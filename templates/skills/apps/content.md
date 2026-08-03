@@ -56,7 +56,7 @@ Each column is `{ "kind": ..., "required"?: boolean, "default"?: ..., "index"?: 
 | `date` | ISO-8601 string; never indexed. |
 | `enum` | String from the non-empty unique `enum` list; always indexed, without `index: true`. |
 
-`default` must match the column kind (and be one of the enum values). `required: true` rejects missing/null values unless a default supplies the value. `id`, `createdAt`, and `updatedAt` are system columns and reserved names; rows always expose them.
+`default` must match the column kind (and be one of the enum values). `required: true` rejects missing/null values unless a default supplies the value. `id`, `createdAt`, `updatedAt`, `createdBy`, and `updatedBy` are system columns and reserved names. Rows always expose `id`/`createdAt`/`updatedAt`; `createdBy`/`updatedBy` record the acting principal (`user:<id>`, `agent:<id>`, or `operator`) and are system-managed on every row write.
 
 ### Queries
 
@@ -71,7 +71,7 @@ A named query is:
 }
 ```
 
-`filter` is a strict AND of equality checks. A filter may target a declared model column or one of the system columns every row carries (`id`, `createdAt`, `updatedAt`) — filtering on `id` is the universal way to select one row for a detail view. A literal value must match the column's kind; date filters compare the stored raw ISO string, not parsed instants. Omit `limit` for the default 200 rows, or set an integer from 1 through 1000. `sort.column` is a model column, `createdAt`, or `updatedAt`; `dir` is `asc` or `desc`. Query runtime state is `{ data, loading, error }` under `/queries/<queryName>`.
+`filter` is a strict AND of equality checks. A filter may target a declared model column or a system column (`id`, `createdAt`, `updatedAt`, `createdBy`, `updatedBy`) — filtering on `id` is the universal way to select one row for a detail view. A literal value must match the column's kind; date filters compare the stored raw ISO string, not parsed instants. Omit `limit` for the default 200 rows, or set an integer from 1 through 1000. `sort.column` is a model column, `createdAt`, or `updatedAt`; `dir` is `asc` or `desc`. Query runtime state is `{ data, loading, error }` under `/queries/<queryName>`.
 
 A filter value may instead be exactly `{ "$param": "<name>" }`. At execution, the caller supplies that name and the server coerces its value to the filtered column's kind before equality matching:
 

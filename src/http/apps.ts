@@ -266,8 +266,7 @@ const runActionRoute = route({
   path: "/api/apps/{id}/actions/{name}",
   pattern: ["api", "apps", null, "actions", null],
   summary: "Run a custom app action",
-  description:
-    "Runs the saved script, or creates the agent task, named by the app definition.",
+  description: "Runs the saved script, or creates the agent task, named by the app definition.",
   tags: ["Apps"],
   params: z.object({ id: z.string().min(1), name: AppNameSchema }),
   body: z.object({ input: z.record(z.string(), z.unknown()).optional() }),
@@ -280,20 +279,29 @@ const runActionRoute = route({
   rbac: { permission: "app.manage" },
 });
 
+/**
+ * RBAC-gate an app write and resolve the acting principal's stable actor id
+ * (`user:<id>`, `agent:<id>`, or `operator`) for row provenance. Returns null
+ * (after writing the 403) when the write is denied.
+ */
 function authorizeAppWrite(
   req: IncomingMessage,
   res: ServerResponse,
   myAgentId: string | undefined,
-): boolean {
+): string | null {
   const auth = getRequestAuth(req);
   let principal: RbacPrincipal;
+  let actor: string;
   if (auth?.kind === "operator") {
     principal = { kind: "operator" };
+    actor = "operator";
   } else if (auth?.kind === "user") {
     principal = { kind: "user", userId: auth.userId };
+    actor = `user:${auth.userId}`;
   } else {
     const agent = myAgentId ? getAgentById(myAgentId) : null;
     principal = { kind: "agent", agentId: myAgentId ?? "", isLead: agent?.isLead ?? false };
+    actor = myAgentId ? `agent:${myAgentId}` : "agent";
   }
   const decision = can({
     principal,
@@ -301,9 +309,9 @@ function authorizeAppWrite(
     resource: { kind: "none" },
     source: "http",
   });
-  if (decision.allow) return true;
+  if (decision.allow) return actor;
   jsonError(res, decision.reason, 403);
-  return false;
+  return null;
 }
 
 function invalidDefinition(res: ServerResponse, issues: AppValidationIssue[]): void {
@@ -589,7 +597,8 @@ export async function handleApps(
       return true;
     const parsed = await bulkCreateRowsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppWrite(req, res, myAgentId)) return true;
+    const actor = authorizeAppWrite(req, res, myAgentId);
+    if (!actor) return true;
     const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
     try {
@@ -598,6 +607,7 @@ export async function handleApps(
         parsed.params.model,
         resolved.model,
         parsed.body.rows.map((row) => row.values),
+        { actor },
       );
       json(res, { rows });
     } catch (error) {
@@ -610,7 +620,8 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_ROW_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await createRowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppWrite(req, res, myAgentId)) return true;
+    const actor = authorizeAppWrite(req, res, myAgentId);
+    if (!actor) return true;
     const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
     try {
@@ -619,6 +630,7 @@ export async function handleApps(
         parsed.params.model,
         resolved.model,
         parsed.body.values,
+        { actor },
       );
       json(res, { row }, 201);
     } catch (error) {
@@ -696,7 +708,8 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_ROW_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await patchRowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppWrite(req, res, myAgentId)) return true;
+    const actor = authorizeAppWrite(req, res, myAgentId);
+    if (!actor) return true;
     const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
     try {
@@ -706,6 +719,7 @@ export async function handleApps(
         resolved.model,
         parsed.params.rowId,
         parsed.body.values,
+        { actor },
       );
       if (!row) {
         jsonError(res, "row not found", 404);

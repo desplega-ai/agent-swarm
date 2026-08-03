@@ -8,7 +8,6 @@ import {
 } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { applyAppDefinitionPatch, parseAppDefinition } from "../apps/definition";
-import { getApp } from "../apps/store";
 import { closeDb, createAgent, getDb, initDb } from "../be/db";
 import { handleApps } from "../http/apps";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -29,7 +28,8 @@ const issueDefinition = {
     },
   },
   queries: { allIssues: { model: "issue" } },
-  pages: { main: { root: "root", elements: { root: rootElement } } }, defaultPage: "main",
+  pages: { main: { root: "root", elements: { root: rootElement } } },
+  defaultPage: "main",
 };
 
 function page(
@@ -569,6 +569,52 @@ describe("Spike 4 parameterized named queries", () => {
     expect(result.body.rows).toEqual([
       expect.objectContaining({ id: first.body.row.id, slug: "one" }),
     ]);
+  });
+
+  test("stamps row provenance from the acting principal and filters on it", async () => {
+    const appId = await createApp(
+      {
+        models: { record: { columns: { slug: { kind: "string" } } } },
+        queries: { mine: { model: "record", filter: { createdBy: { $param: "actorId" } } } },
+        pages: { main: page() },
+        defaultPage: "main",
+      },
+      "Provenance",
+    );
+    const actor = `agent:${AGENT_ID}`;
+
+    const created = await request<{ row: Record<string, unknown> }>(
+      `/api/apps/${appId}/models/record/rows`,
+      { method: "POST", body: JSON.stringify({ values: { slug: "one" } }) },
+    );
+    expect(created.status).toBe(201);
+    expect(created.body.row.createdBy).toBe(actor);
+    expect(created.body.row.updatedBy).toBe(actor);
+
+    const patched = await request<{ row: Record<string, unknown> }>(
+      `/api/apps/${appId}/models/record/rows/${created.body.row.id}`,
+      { method: "PATCH", body: JSON.stringify({ values: { slug: "two" } }) },
+    );
+    expect(patched.status).toBe(200);
+    expect(patched.body.row.createdBy).toBe(actor);
+    expect(patched.body.row.updatedBy).toBe(actor);
+
+    const params = new URLSearchParams({ "param.actorId": actor });
+    const rows = await request<{ rows: Array<Record<string, unknown>> }>(
+      `/api/apps/${appId}/queries/mine?${params}`,
+    );
+    expect(rows.status).toBe(200);
+    expect(rows.body.rows).toEqual([expect.objectContaining({ slug: "two", createdBy: actor })]);
+
+    expectIssue(
+      {
+        models: { record: { columns: { createdBy: { kind: "string" } } } },
+        pages: { main: page() },
+        defaultPage: "main",
+      },
+      "models.record.columns.createdBy",
+      "reserved column name",
+    );
   });
 
   test("returns a structured 400 listing every missing query param", async () => {

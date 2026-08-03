@@ -10,10 +10,14 @@ export type AppRow = {
   id: string;
   createdAt: string;
   updatedAt: string;
+  createdBy?: string;
+  updatedBy?: string;
 } & Record<string, unknown>;
 
 export interface AppRowWriteOptions {
   skipUpdatedAt?: boolean;
+  /** Stable id of the acting principal (`user:<id>`, `agent:<id>`, `operator`) for row provenance. */
+  actor?: string;
 }
 
 export class AppRowValidationError extends Error {
@@ -160,6 +164,7 @@ function createRowUnlocked(
   model: string,
   definition: ModelDef,
   prepared: Record<string, unknown>,
+  actor?: string,
 ): AppRow {
   const issuedMs = Math.max(Date.now(), lastCreatedAtMs + 1);
   lastCreatedAtMs = issuedMs;
@@ -168,6 +173,7 @@ function createRowUnlocked(
     id: crypto.randomUUID(),
     createdAt: now,
     updatedAt: now,
+    ...(actor !== undefined ? { createdBy: actor, updatedBy: actor } : {}),
     ...prepared,
   });
 }
@@ -178,10 +184,11 @@ export function createAppRowUnlocked(
   model: string,
   definition: ModelDef,
   values: Record<string, unknown>,
+  options: AppRowWriteOptions = {},
 ): AppRow {
   const prepared = prepareValues(definition, values, "create");
   if (!appExists(appId)) throw new AppRowAppNotFoundError(appId);
-  return createRowUnlocked(appId, model, definition, prepared);
+  return createRowUnlocked(appId, model, definition, prepared, options.actor);
 }
 
 export function createAppRow(
@@ -189,11 +196,12 @@ export function createAppRow(
   model: string,
   definition: ModelDef,
   values: Record<string, unknown>,
+  options: AppRowWriteOptions = {},
 ): Promise<AppRow> {
   const prepared = prepareValues(definition, values, "create");
   return withMutationLock(appId, model, () => {
     if (!appExists(appId)) throw new AppRowAppNotFoundError(appId);
-    return createRowUnlocked(appId, model, definition, prepared);
+    return createRowUnlocked(appId, model, definition, prepared, options.actor);
   });
 }
 
@@ -202,11 +210,14 @@ export function createAppRows(
   model: string,
   definition: ModelDef,
   rows: Array<Record<string, unknown>>,
+  options: AppRowWriteOptions = {},
 ): Promise<AppRow[]> {
   const prepared = rows.map((values) => prepareValues(definition, values, "create"));
   return withMutationLock(appId, model, () => {
     if (!appExists(appId)) throw new AppRowAppNotFoundError(appId);
-    return prepared.map((values) => createRowUnlocked(appId, model, definition, values));
+    return prepared.map((values) =>
+      createRowUnlocked(appId, model, definition, values, options.actor),
+    );
   });
 }
 
@@ -264,6 +275,9 @@ function patchPreparedRowUnlocked(
       ? existing.updatedAt
       : new Date(Math.max(Date.now(), previousMs + 1)).toISOString();
   const updated: AppRow = { ...existing, id: existing.id, updatedAt };
+  if (options.actor !== undefined && options.skipUpdatedAt !== true) {
+    updated.updatedBy = options.actor;
+  }
   for (const [name, value] of Object.entries(prepared)) {
     if (value === null) {
       delete updated[name];

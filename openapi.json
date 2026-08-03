@@ -466,7 +466,7 @@
       },
       "patch": {
         "summary": "Patch an app",
-        "description": "Applies an RFC 7396 merge patch to the definition, with app actions, page elements, model columns, and model sources treated as atomic entries.",
+        "description": "Applies an RFC 7396 merge patch to the definition, with app actions, page elements, and model columns treated as atomic entries.",
         "tags": [
           "Apps"
         ],
@@ -979,68 +979,10 @@
         }
       }
     },
-    "/api/apps/{id}/sync": {
-      "post": {
-        "summary": "Synchronize app source projections",
-        "description": "Runs all matching model and source sync passes sequentially.",
-        "tags": [
-          "Apps"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "model": {
-                    "type": "string",
-                    "pattern": "^[a-z][a-zA-Z0-9_]{0,39}$"
-                  },
-                  "source": {
-                    "type": "string",
-                    "pattern": "^[a-z][a-zA-Z0-9_]{0,39}$"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Sync pass results"
-          },
-          "400": {
-            "description": "Unknown model, source, or empty sync selection"
-          },
-          "403": {
-            "description": "Permission denied"
-          },
-          "404": {
-            "description": "App not found"
-          }
-        }
-      }
-    },
     "/api/apps/{id}/actions/{name}": {
       "post": {
         "summary": "Run a custom app action",
-        "description": "Runs the sync pass or saved script, or creates the agent task named by the app definition.",
+        "description": "Runs the saved script, or creates the agent task, named by the app definition.",
         "tags": [
           "Apps"
         ],

@@ -95,6 +95,8 @@ export const SYSTEM_COLUMN_KINDS: Record<string, "string" | "date" | "boolean"> 
   id: "string",
   createdAt: "date",
   updatedAt: "date",
+  createdBy: "string",
+  updatedBy: "string",
 };
 
 const AppQueryDefSchema = z.object({
