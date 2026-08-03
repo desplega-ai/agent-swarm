@@ -1,6 +1,6 @@
 {
   "title": "API Reference v1.126.0",
-  "description": "REST API reference for Agent Swarm",
+  "description": "REST API reference for agent-swarm.dev",
   "root": true,
   "pages": [
     "index",

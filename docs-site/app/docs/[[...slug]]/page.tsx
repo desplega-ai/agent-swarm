@@ -7,7 +7,7 @@ import type { MDXContent } from "mdx/types";
 import type { TOCItemType } from "fumadocs-core/toc";
 
 const docsOgImage =
-  "https://www.agent-swarm.dev/api/og?title=Agent+Swarm+Documentation&subtitle=Reference+guides%2C+architecture%2C+and+operating+manuals+for+multi-agent+AI+coding+teams.";
+  "https://www.agent-swarm.dev/api/og?title=agent-swarm.dev+Documentation&subtitle=Reference+guides%2C+architecture%2C+and+operating+manuals+for+multi-agent+AI+coding+teams.";
 
 interface DocsPageData {
   title: string;
