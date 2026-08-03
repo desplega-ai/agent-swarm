@@ -3,6 +3,7 @@ import * as z from "zod";
 import { getKv } from "@/be/db";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "@/types";
+import { kvReadAuthError } from "./kv-read-auth";
 import { resolveNamespace } from "./resolve-namespace";
 
 // Loose, format-pin-free mirror of KvEntrySchema for MCP output validation.
@@ -53,7 +54,16 @@ export const registerKvGetTool = (server: McpServer) => {
       if ("error" in resolved) {
         return toolErr(resolved.error, { data: { yourAgentId: requestInfo.agentId } });
       }
+      const authErr = kvReadAuthError(resolved.namespace, { agentId: requestInfo.agentId });
+      if (authErr) {
+        return toolErr(authErr, {
+          data: { yourAgentId: requestInfo.agentId, namespace: resolved.namespace },
+        });
+      }
 
+      // kv-get is exempt from the ctx-control spill (see CTX_CONTROL_EXEMPT_TOOLS):
+      // it is the retrieval path for spilled values, so oversized entries go out
+      // whole and the harness applies its own truncation.
       const entry = getKv(resolved.namespace, key);
       return toolOk(
         entry

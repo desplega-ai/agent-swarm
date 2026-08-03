@@ -3,6 +3,7 @@ import * as z from "zod";
 import { countKv, listKv } from "@/be/db";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { KvNamespaceSchema, KvValueTypeSchema } from "@/types";
+import { kvReadAuthError } from "./kv-read-auth";
 import { resolveNamespace } from "./resolve-namespace";
 
 const MAX_KV_LIST_LIMIT = 1000;
@@ -62,6 +63,12 @@ export const registerKvListTool = (server: McpServer) => {
       const resolved = resolveNamespace(namespace, requestInfo);
       if ("error" in resolved) {
         return toolErr(resolved.error, { data: { yourAgentId: requestInfo.agentId } });
+      }
+      const authErr = kvReadAuthError(resolved.namespace, { agentId: requestInfo.agentId });
+      if (authErr) {
+        return toolErr(authErr, {
+          data: { yourAgentId: requestInfo.agentId, namespace: resolved.namespace },
+        });
       }
       const effectiveLimit = Math.min(limit ?? 100, MAX_KV_LIST_LIMIT);
       const effectivePrefix = prefix && prefix.length > 0 ? prefix : undefined;

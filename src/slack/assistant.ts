@@ -5,6 +5,7 @@ import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { resolveSlackUserId, rewriteSlackMentions } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
+import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { hasOtherUserMention } from "./router";
 import { bufferThreadMessage } from "./thread-buffer";
 // Side-effect import: registers all Slack event templates in the in-memory registry
@@ -23,8 +24,10 @@ export function createAssistant(): Assistant {
       try {
         await saveThreadContext();
 
-        const greetingResult = resolveTemplate("slack.assistant.greeting", {});
-        await say(greetingResult.text);
+        if (!isSlackRenderV2Enabled()) {
+          const greetingResult = resolveTemplate("slack.assistant.greeting", {});
+          await say(greetingResult.text);
+        }
 
         await setSuggestedPrompts({
           title: "Try these:",
@@ -129,16 +132,19 @@ export function createAssistant(): Assistant {
 
           // Otherwise, create a follow-up task for the working agent
           const latestTask = getMostRecentTaskInThread(channelId, threadTs);
-          createTaskWithSiblingAwareness(renderedMessageText, {
+          const task = createTaskWithSiblingAwareness(renderedMessageText, {
             agentId: workingAgent.id,
             source: "slack",
             slackChannelId: channelId,
             slackThreadTs: threadTs,
+            slackTriggerMessageTs: message.ts,
             slackUserId: userId,
             parentTaskId: latestTask?.id,
             requestedByUserId,
             contextKey: slackContextKey({ channelId, threadTs }),
           });
+
+          if (isSlackRenderV2Enabled()) await ensureSlackThreadTree([task.id]);
 
           await safeSetStatus("Processing follow-up...");
           return;
@@ -165,28 +171,35 @@ export function createAssistant(): Assistant {
         const lead = getLeadAgent();
         if (!lead) {
           // No lead — still queue the task
-          createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
+          const task = createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
             source: "slack",
             slackChannelId: channelId,
             slackThreadTs: threadTs,
+            slackTriggerMessageTs: message.ts,
             slackUserId: userId,
             requestedByUserId,
             contextKey: slackContextKey({ channelId, threadTs }),
           });
-          const offlineResult = resolveTemplate("slack.assistant.offline", {});
-          await say(offlineResult.text);
+          if (isSlackRenderV2Enabled()) {
+            await ensureSlackThreadTree([task.id]);
+          } else {
+            const offlineResult = resolveTemplate("slack.assistant.offline", {});
+            await say(offlineResult.text);
+          }
           return;
         }
 
-        createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
+        const task = createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
           agentId: lead.id,
           source: "slack",
           slackChannelId: channelId,
           slackThreadTs: threadTs,
+          slackTriggerMessageTs: message.ts,
           slackUserId: userId,
           requestedByUserId,
           contextKey: slackContextKey({ channelId, threadTs }),
         });
+        if (isSlackRenderV2Enabled()) await ensureSlackThreadTree([task.id]);
         // setStatus shows typing indicator — watcher will post final result when done
       } catch (error) {
         console.error("[Slack] Assistant userMessage error:", error);

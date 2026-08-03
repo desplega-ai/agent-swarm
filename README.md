@@ -40,17 +40,17 @@
   </a>
 </p>
 
-> **Agent Swarm is your Company's Compounding Intelligence Layer. A system of AI agents that remember, reason, act and get better with every task.**
+> **agent-swarm.dev is an open-source operating system for AI work: a lead agent breaks goals into tasks, routes them to specialized workers such as Claude Code or Codex, runs each worker in an isolated container, and preserves shared memory, tools, schedules, and review gates so delegated work compounds across sessions.**
 
 > AI-Native · Compounds · Presence · Harness & LLM-Agnostic · Your Infra · Your Memory · 
 
 ## What it does
 
-Agent Swarm runs a team of AI agents that coordinate autonomously. A **lead agent** receives tasks (from Slack, GitHub, GitLab, Linear, Jira, email, or the API), breaks them down, and delegates to **worker agents** running in isolated environments (Docker). Workers execute tasks, ship solutions, and write their learnings back to a shared memory so the whole swarm gets smarter every session.
+agent-swarm.dev runs a team of AI agents that coordinate autonomously. A **lead agent** receives tasks (from Slack, GitHub, GitLab, Linear, Jira, email, or the API), breaks them down, and delegates to **worker agents** running in isolated environments (Docker). Workers execute tasks, ship solutions, and write their learnings back to a shared memory so the whole swarm gets smarter every session.
 
 You can run agents for Marketing, Product, UX, Engineering, Support, Operations, HR, Finance, or any role you can think of. A centralized Lead coordinates them, and they share the learnings horizontally. That's the true difference between [*AI First*](https://www.pleasedontdeploy.com/i/197193364/ai-first) and [*AI Native*](https://www.pleasedontdeploy.com/i/197193364/third-the-ai-native-metamorphosis).
 
-Agent Swarm is the shared cloud brain and muscle that makes your whole company better every day.
+agent-swarm.dev is the shared cloud brain and muscle that makes your whole company better every day.
 
 Sometimes humans are the blocker. We can help you. Contact us [contact@desplega.sh](mailto:contact@desplega.sh).
 
@@ -125,6 +125,7 @@ Check [our templates](https://templates.agent-swarm.dev) for a quick start.
 - **Compounding memory & persistent identity** — agents remember past sessions and evolve their own persona, expertise, and notes. [Memory →](https://docs.agent-swarm.dev/docs/architecture/memory) · [Agents →](https://docs.agent-swarm.dev/docs/architecture/agents)
 - **Hybrid + graph-linked memory recall** — memory retrieval can blend vector and full-text ranking, expand through linked memories, surface usefulness readouts, and let agents correct an existing memory without losing its ID or history. [Memory →](https://docs.agent-swarm.dev/docs/architecture/memory) · [MCP tools →](https://docs.agent-swarm.dev/docs/reference/mcp-tools#memory-tools)
 - **Multi-channel inputs** — Slack, GitHub, GitLab, email, WhatsApp, Linear, Jira, and the HTTP API all create tasks. [Integrations](#integrations)
+- **Persistent Slack thread trees** — opt in to one editable task tree per conversation, complete streamed outcome cards, and explicit agent-authored Block Kit messages without routine relay spam. [Slack guide →](https://docs.agent-swarm.dev/docs/guides/slack-integration)
 - **Workflow engine with Human-in-the-Loop** — DAG-based automation with approval gates, retries, and structured I/O. [Workflows →](https://docs.agent-swarm.dev/docs/concepts/workflows)
 - **Scheduled & recurring tasks** — cron-based automation for standing work, with schedules that can target agent tasks, workflows, or catalog scripts. [Scheduling →](https://docs.agent-swarm.dev/docs/concepts/scheduling)
 - **Mid-run task steering** — add context at the next turn boundary, request an immediate interrupt where the harness supports it, or degrade safely to a follow-up task. [Task steering →](https://docs.agent-swarm.dev/docs/guides/task-steering)
@@ -136,7 +137,8 @@ Check [our templates](https://templates.agent-swarm.dev) for a quick start.
 - **Scripts as external APIs** — expose a saved script as a public `POST /api/x/script/<id>` endpoint with optional bearer auth, typed input validation, and per-endpoint usage tracking. [Guide →](https://docs.agent-swarm.dev/docs/guides/scripts-external-apis)
 - **Typed script API connections** — lead-managed OpenAPI, GraphQL, and MCP connections generate `ctx.api.*` / `ctx.mcp.*` clients for scripts, with credential bindings and OAuth-backed auth kept server-side. [Guide →](https://docs.agent-swarm.dev/docs/guides/script-connections)
 - **E2B-backed eval harness** — run a scenario × harness-config matrix against real swarm stacks, capture transcripts/artifacts, and grade outcomes with deterministic checks plus LLM or agentic judges. [Guide →](https://docs.agent-swarm.dev/docs/guides/evals-harness)
-- **Harness & LLM agnostic** — run with Claude Code, Claude Bridge, OpenAI Codex, pi-mono (Anthropic, OpenRouter, or Amazon Bedrock), Devin, Claude Managed Agents, raw LLMs, or opencode. Route every OpenRouter-backed harness, workflow, and summarizer through an OpenAI-compatible gateway with `OPENROUTER_BASE_URL`. Tasks, schedules, and workflow agent-task nodes can use portable `modelTier` intent (`smol`, `regular`, `smart`, `ultra`), and operators can set per-agent reasoning effort (`off` → `max`, where supported) without changing task payloads. [Harness config →](https://docs.agent-swarm.dev/docs/guides/harness-configuration) · [Add a new provider →](https://docs.agent-swarm.dev/docs/guides/harness-providers)
+- **Harness & LLM agnostic** — run with Claude Code, Claude Bridge, OpenAI Codex, pi-mono (Anthropic, OpenRouter, or Amazon Bedrock), Devin, Claude Managed Agents, raw LLMs, or opencode. The dashboard model picker follows a live models.dev catalog (with a bundled snapshot fallback), so newly released provider models appear without a redeploy. Route every OpenRouter-backed harness, workflow, and summarizer through an OpenAI-compatible gateway with `OPENROUTER_BASE_URL`. Tasks, schedules, and workflow agent-task nodes can use portable `modelTier` intent (`smol`, `regular`, `smart`, `ultra`), and operators can set per-agent reasoning effort (`off` → `max`, where supported) without changing task payloads. [Harness config →](https://docs.agent-swarm.dev/docs/guides/harness-configuration) · [Add a new provider →](https://docs.agent-swarm.dev/docs/guides/harness-providers)
+- **Published release artifacts** — every release publishes multi-architecture API, full-worker, and slim-worker images alongside versioned E2B templates, the npm CLI package, and the Helm chart. [Artifact inventory →](https://docs.agent-swarm.dev/docs/guides/published-artifacts)
 - **OpenTelemetry traces plus OTLP cost/token metrics** — export API + worker traces and finalized session cost/token counters through the same OTLP pipeline for dashboarding in SigNoz, Datadog, Tempo, or another compatible backend. [Observability →](https://docs.agent-swarm.dev/docs/guides/observability-opentelemetry)
 - **Follow-up continuity across all harnesses** — child tasks inherit a bounded prior-task context preamble built from the task chain, so continuity survives restarts and works the same across every provider. [Task lifecycle →](https://docs.agent-swarm.dev/docs/concepts/task-lifecycle)
 - **Skills & MCP servers** — reusable procedural knowledge, bundled skill reference files, and per-agent MCP servers with scope cascade. [MCP tools →](https://docs.agent-swarm.dev/docs/reference/mcp-tools)

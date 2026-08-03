@@ -10,6 +10,8 @@ import {
   initDb,
   KvTypeCollisionError,
   listKv,
+  sweepExpiredKv,
+  sweepExpiredKvPrefix,
   upsertKv,
 } from "../be/db";
 
@@ -71,6 +73,49 @@ describe("kv-storage helpers", () => {
     const got = getKv(NS, "s");
     expect(got?.value).toBe('hello "world"');
     expect(got?.valueType).toBe("string");
+  });
+
+  test("namespace sweep proactively removes only expired entries", () => {
+    const now = Date.now();
+    upsertKv({
+      namespace: NS,
+      key: "expired-spill",
+      value: "old",
+      valueType: "string",
+      expiresAt: now - 1,
+    });
+    upsertKv({
+      namespace: NS,
+      key: "live-spill",
+      value: "new",
+      valueType: "string",
+      expiresAt: now + 10_000,
+    });
+
+    expect(sweepExpiredKv(NS, now)).toBe(1);
+    expect(countKv(NS, {})).toBe(1);
+    expect(getKv(NS, "live-spill")?.value).toBe("new");
+  });
+
+  test("prefix sweep removes expired entries across per-agent overflow namespaces", () => {
+    const now = Date.now();
+    for (const [namespace, key, expiresAt] of [
+      ["mcp:overflow:agent-a", "expired-a", now - 1],
+      ["mcp:overflow:agent-b", "expired-b", now - 1],
+      ["mcp:overflow:agent-b", "live-b", now + 10_000],
+      ["mcp:other:agent-a", "unrelated", now - 1],
+    ] as const) {
+      upsertKv({ namespace, key, value: key, valueType: "string", expiresAt });
+    }
+
+    expect(sweepExpiredKvPrefix("mcp:overflow", now)).toBe(2);
+    expect(getKv("mcp:overflow:agent-b", "live-b")?.value).toBe("live-b");
+    const unrelated = getDb()
+      .prepare<{ count: number }, [string, string]>(
+        "SELECT COUNT(*) AS count FROM kv_entries WHERE namespace = ? AND key = ?",
+      )
+      .get("mcp:other:agent-a", "unrelated");
+    expect(unrelated?.count).toBe(1);
   });
 
   test("integer value type stores as number", () => {

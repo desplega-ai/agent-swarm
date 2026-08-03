@@ -12,7 +12,7 @@ npm version --no-git-tag-version patch   # or minor / major — edits package.js
 bun run prepare-release
 
 # 3. Run the normal pre-push checks (see runbooks/ci.md)
-bun run lint && bun run tsc:check && bun test
+bun run lint && bun run tsc:check && bun run test:root
 
 # 4. Commit the bump + ALL regenerated files together, open a PR, merge to main
 git add package.json charts/agent-swarm/Chart.yaml openapi.json docs-site/content/docs/api-reference

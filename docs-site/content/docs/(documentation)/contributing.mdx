@@ -38,6 +38,9 @@ bun run format
 
 # Type-check
 bun run tsc:check
+
+# Run the root test suite
+bun run test:root
 ```
 
 ### Pull Request Guidelines
@@ -45,7 +48,7 @@ bun run tsc:check
 - **One concern per PR** — keep changes focused and reviewable
 - **Write clear commit messages** — describe _why_, not just _what_
 - **Follow existing patterns** — match the codebase's style and conventions
-- **Test your changes** — run `bun run lint` and `bun run tsc:check` before submitting
+- **Test your changes** — run `bun run lint`, `bun run tsc:check`, and `bun run test:root` before submitting
 - **Keep PRs small** — large PRs are harder to review. Break big features into smaller incremental PRs when possible
 
 ### Code Style

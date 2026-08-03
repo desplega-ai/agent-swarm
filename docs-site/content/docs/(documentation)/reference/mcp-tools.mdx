@@ -27,6 +27,23 @@ All MCP tools have structured annotations (`readOnlyHint`, `destructiveHint`, `i
 
 This reduces context window overhead by ~85% compared to loading all tools upfront.
 
+## Large Result Handling
+
+Agent-facing MCP results are capped at 10,000 serialized UTF-8 bytes. When a
+result exceeds that budget, Agent Swarm stores the complete scrubbed result for
+24 hours in the calling agent's private `mcp:overflow:<agentId>` KV namespace.
+The bounded response keeps the largest fitting leading slice of an array, or a
+readable prose preview; scalar JSON is omitted as a complete unit rather than
+cut into invalid JSON. Both MCP result channels receive the same
+machine-readable `truncation` metadata and `kv-get` retrieval pointer.
+
+`kv-get` returns the complete stored value, although the active harness may
+still apply its own display limit. For filtering or aggregation, fetch the
+value inside a script with `ctx.swarm.kv_get` and return only the derived
+answer. Script-internal `ctx.swarm.*` responses are not subject to the 10 KB
+model-context ceiling; see [Scripts runtime](/docs/guides/scripts-runtime) for
+that separate boundary.
+
 ## Core Tools
 
 Always available tools for basic swarm operations.
@@ -132,7 +149,12 @@ Cancel a task that is pending or in progress. Only the lead or task creator can 
 
 Send additional instructions to a task that is already running. Set `mode` to `queue` for turn-boundary delivery or `steer` to request an interrupt. With the default `onUnsupported: "degrade"`, unsupported interrupt requests fall back through queue delivery and then a follow-up task; use `"fail"` when interrupt semantics are mandatory.
 
-pi-mono and Claude Managed advertise both modes. Claude Code, Devin, and opencode advertise queue only. Codex promotes the message to a follow-up task. See [Steer a Running Task](/docs/guides/task-steering) for the capability matrix and lifecycle.
+pi-mono and Claude Managed advertise both modes. Claude Code, Devin, opencode,
+and Codex advertise queue only. Codex delivers queued messages at the next
+`SessionStart`, `PostToolUse`, or `Stop` lifecycle hook; messages that are never
+picked up are promoted to follow-up tasks by the terminal sweep. See
+[Steer a Running Task](/docs/guides/task-steering) for the capability matrix
+and lifecycle.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -225,6 +247,8 @@ Manage the prompt-template registry (system-prompt and task-prompt sections) at 
 
 ## Slack Tools
 
+When the v2 Slack renderer adds provenance to explicit `slack-reply`, `slack-post`, or `slack-start-thread` messages, it keeps the footer to agent and task identity. It deliberately omits links between Slack messages so provenance does not create link-preview unfurls.
+
 ### slack-reply
 
 Reply to a Slack thread associated with a task.
@@ -233,6 +257,7 @@ Reply to a Slack thread associated with a task.
 |-----------|------|----------|-------------|
 | `message` | string | Yes | Message to send |
 | `taskId` | uuid | No | Task context |
+| `blocks` | array | No | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 
 ### slack-read
 
@@ -252,6 +277,7 @@ Post a message to a Slack channel. Defaults to a new top-level message; pass `th
 |-----------|------|----------|-------------|
 | `channelId` | string | Yes | Channel ID |
 | `message` | string | Yes | Message content |
+| `blocks` | array | No | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 | `threadTs` | string | No | Parent message ts to thread under (obtain via `slack-start-thread`) |
 
 ### slack-start-thread
@@ -262,6 +288,7 @@ Post a new top-level message to a Slack channel and return its `ts` so the calle
 |-----------|------|----------|-------------|
 | `channelId` | string | Yes | Channel ID |
 | `message` | string | Yes | Message content |
+| `blocks` | array | No | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 
 ### slack-list-channels
 
@@ -570,12 +597,19 @@ Get details of a specific workflow run including step statuses.
 
 ### list-workflow-runs
 
-List runs for a specific workflow.
+List a paginated page of runs for a workflow. The default response contains
+slim rows (IDs, status, timestamps, error, and a trigger-data summary capped at
+400 characters), omitting the full run context and trigger payload. Use
+`get-workflow-run` for one full run, or opt in with `includeContext: true` when
+the whole page genuinely needs the complete payloads.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `workflowId` | uuid | Yes | Workflow ID |
 | `status` | string | No | Filter by run status |
+| `limit` | number | No | Runs per page (default: 20, max: 100) |
+| `offset` | number | No | Zero-based page offset (default: 0) |
+| `includeContext` | boolean | No | Include full context and trigger data for every row (default: false) |
 
 ### retry-workflow-run
 
@@ -675,7 +709,7 @@ Read a key. Returns the entry or `null` if missing/expired. Namespace defaults t
 
 ### kv-set
 
-Write a key. Upserts atomically. 2 MiB body cap.
+Write a key. Each replacement is atomic but unconditional: there is no compare-and-swap, so concurrent read-modify-write callers can lose updates. Use per-writer keys and assemble on read for fan-in workloads. 2 MiB body cap.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -920,12 +954,16 @@ Search the swarm-shared scripts catalog.
 
 ### script-run
 
-Run a named reusable script, OR inline TypeScript source (auto-saved as scratch to the catalog).
+Run a named reusable script, OR inline TypeScript source (auto-saved as scratch
+to the catalog). Inline source executes without a compile-time typecheck. Its
+default export must receive `args` first and `ctx` second; import
+`ScriptContext` from `"swarm-sdk"` so the same source remains safe to promote
+with `script-upsert`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `name` | string | No | Name of a reusable script to run |
-| `source` | string | No | Inline TypeScript source to run |
+| `source` | string | No | Inline TypeScript source exporting `function (args, ctx)`; no compile-time typecheck |
 | `args` | unknown | No | JSON-serializable script arguments |
 | `intent` | string | No | Why this script is being run |
 | `scope` | string | No | Optional scope for named script resolution |
@@ -933,7 +971,10 @@ Run a named reusable script, OR inline TypeScript source (auto-saved as scratch 
 
 ### script-upsert
 
-Create or update a named script. Source must export a default function. Runs `tsc --noEmit` against the generated `.d.ts` and rejects on diagnostics.
+Create or update a named script. Source must export a default
+`function (args, ctx)` and should type `ctx` as `ScriptContext` from
+`"swarm-sdk"`. Unlike inline `script-run`, upsert runs `tsc --noEmit` against
+the generated `.d.ts` and rejects on diagnostics.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -942,6 +983,13 @@ Create or update a named script. Source must export a default function. Runs `ts
 | `intent` | string | No | Why this script exists |
 
 A script may also export a Zod schema named `argsSchema` describing its expected arguments. On upsert the runtime extracts it, converts it to JSON Schema via `zod`'s `toJSONSchema`, and stores it on the catalog entry as `argsJsonSchema` — so callers can discover a script's argument shape before running it. The export is optional; scripts without it simply have a `null` `argsJsonSchema`.
+
+There is no ambient task context: pass values such as `taskId` through `args`.
+Inline and named scripts receive `ctx.swarm`, registered `ctx.api` / `ctx.mcp`
+connection clients, `ctx.stdlib`, and `ctx.logger`. Durable
+`launch-script-run` workflows instead receive `ctx.run` and journaled
+`ctx.step.*` helpers, with no connection clients or `ctx.swarm.config`. See
+[Scripts runtime](/docs/guides/scripts-runtime) for the full authoring contract.
 
 ### script-delete
 

@@ -1,4 +1,5 @@
 import { getAgentById } from "@/be/db";
+import { mcpOverflowAuthError } from "@/kv-overflow";
 import { can } from "@/rbac";
 
 /**
@@ -15,6 +16,9 @@ export function kvWriteAuthError(
   namespace: string,
   info: { agentId: string | undefined },
 ): string | null {
+  const overflowAuthErr = mcpOverflowAuthError(namespace, info.agentId);
+  if (overflowAuthErr) return overflowAuthErr;
+
   if (namespace.startsWith("task:page:")) {
     return "task:page:* writes require a page-proxy request, not an MCP call";
   }

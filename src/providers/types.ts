@@ -138,6 +138,14 @@ export interface ProviderSession {
   abort(reason?: string): Promise<void>;
   /** Optional. Absent means the provider cannot accept mid-run input. */
   deliverSteering?(delivery: SteerDelivery): Promise<SteerDeliveryResult>;
+  /**
+   * True when steering delivery happens harness-side (lifecycle hooks polling
+   * the API and injecting the message themselves — codex). The runner's
+   * dispatch poll must then leave `pending` rows untouched instead of
+   * synthesizing an undeliverable report; the hook marks them `delivered`.
+   * Rows the hook never picks up are still promoted by the terminal sweep.
+   */
+  readonly steeringDeliveredExternally?: boolean;
 }
 
 /** Result returned when a provider session completes. */

@@ -73,7 +73,12 @@ function buildStructuredError(err: unknown, userModulePath: string): StructuredE
   };
 }
 
-const userModulePath = `${requiredEnv("SWARM_SCRIPT_TMPDIR")}/user-script.ts`;
+// The user module lives in a subdirectory created at runtime, NOT directly in
+// the tmpdir: the executor spawns this harness with cwd = tmpdir, and Bun
+// (>= 1.3.12) snapshots the cwd's directory listing at startup — a file
+// written into cwd after launch is invisible to the module resolver
+// ("Cannot find module ... from ''"). A fresh subdir is never in that snapshot.
+const userModulePath = `${requiredEnv("SWARM_SCRIPT_TMPDIR")}/user-module/user-script.ts`;
 const errorFile = process.env.SWARM_SCRIPT_ERROR_FILE;
 
 async function emitError(err: unknown): Promise<void> {
@@ -116,7 +121,11 @@ try {
   const sourceText = await Bun.file(requiredEnv("SWARM_SCRIPT_SOURCE_FILE")).text();
   await Bun.write(userModulePath, sourceText);
 
-  const mod = await import(userModulePath);
+  // Import via file:// URL, not the raw path: on macOS the tmpdir lives behind
+  // the /var -> /private/var symlink, and Bun >= 1.3.12 fails to resolve a
+  // dynamic absolute-path import through that symlink ("Cannot find module ...
+  // from ''"). The URL form resolves identically on all supported versions.
+  const mod = await import(Bun.pathToFileURL(userModulePath).href);
   if (typeof mod.default !== "function") {
     throw new Error(
       "Swarm script must export a default function. Script must export default async function (args, ctx) — args FIRST, ctx second.",

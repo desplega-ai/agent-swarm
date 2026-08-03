@@ -32,7 +32,7 @@ Typecheck: `script_upsert` runs `tsc --noEmit` against the generated `.d.ts`; re
 
 Boundaries: `src/scripts-runtime/` is on both `check-db-boundary.sh` (no `src/be/db` imports) and `check-api-key-boundary.sh` (must use `getApiKey()`) allowlists.
 
-Tests: `bun test src/tests/scripts-*.test.ts`. Sandbox + timeout + abort + stdin-config + env-hygiene paths are the highest-risk surfaces — keep coverage tight.
+Tests: `bun run test:root -- src/tests/scripts-*.test.ts`. Sandbox + timeout + abort + stdin-config + env-hygiene paths are the highest-risk surfaces — keep coverage tight.
 
 New MCP tools: when adding a tool, register it in `SDK_TOOL_NAME_MAP` (`src/scripts-runtime/sdk-allowlist.ts`) to expose it to scripts, or add it to `EXCLUDED_TOOLS` in `scripts/check-sdk-tool-registration.ts` with a reason. Enforced by CI.
 
@@ -49,7 +49,7 @@ New MCP tools: when adding a tool, register it in `SDK_TOOL_NAME_MAP` (`src/scri
 | `bun run dev:http` | Hot reload, portless: `https://api.swarm.localhost:1355` |
 | `bun run lint:fix` | Lint & format with Biome |
 | `bun run tsc:check` | Type check |
-| `bun test` | Run unit tests (`bun test src/tests/<file>.test.ts` for one) |
+| `bun run test:root` | Run root unit tests (`bun run test:root -- src/tests/<file>.test.ts` for one) |
 | `bun run pm2-{start,stop,restart,logs,status}` | All services (API 3013, UI 5274, lead 3201, worker 3202) |
 | `bun run docker:build:worker` | Build Docker worker image (full) |
 | `bun run docker:build:worker:slim` | Build slim worker image (`--target worker-slim`, for CI/E2E) |
@@ -57,6 +57,7 @@ New MCP tools: when adding a tool, register it in `SDK_TOOL_NAME_MAP` (`src/scri
 | `bun run docs:openapi` | Regenerate `openapi.json` |
 | `bun run docs:business-use` | Regenerate `BUSINESS_USE.md` (requires BU backend) |
 | `bun run build:pi-skills` | Regenerate `plugin/pi-skills/` from `plugin/commands/*.md` |
+| `bun run build:seed-skill-files` | Regenerate the seeded-skill bundled-file manifest from `templates/skills/*/files/` |
 | `docker compose -f docker-compose.local.yml up --build` | Local compose (API + lead + worker) |
 | `uvx business-use-core@latest server dev` | BU backend on :13370 |
 
@@ -125,6 +126,28 @@ Test against a fresh DB (`rm agent-swarm-db.sqlite && bun run start:http`) **and
 
 </important>
 
+<important if="you are adding or editing an agent skill (templates/skills/, plugin/skills/, or src/be/seed-skills/)">
+
+Full authoring guide, the three delivery paths, versioning semantics, and every enforced rule: [runbooks/skills.md](./runbooks/skills.md).
+
+**The rule that matters: one skill name must not be both seeded and baked.** `templates/skills/<name>/` (DB-seeded) and `plugin/skills/<name>/` (baked into the worker image) both write `~/.claude/skills/<name>/SKILL.md`. The DB copy wins, the baked content is silently discarded, and the FS writer then prunes any bundled file with no `skill_files` row. That truncated `artifacts` / `kv-storage` / `pages` and deleted their examples in production.
+
+**Prefer `templates/skills/`** — seeded skills are live-updatable (no image rebuild), listed by the skills API, editable in the UI, per-agent toggleable, and version-tracked with user-edit preservation.
+
+```
+templates/skills/<name>/
+  config.json          # name (= directory), description, runAllSeedersCandidate, systemDefault
+  content.md           # SKILL.md body — NO frontmatter (generated from config.json)
+  files/               # optional bundled files → skill_files rows
+```
+
+- New skill → add **static** `config.json` + `content.md` text-imports to `BUILT_IN_SKILL_SOURCES` in `src/be/seed-skills/index.ts`. Static because the API runs from a compiled binary and `templates/` only exists in the Dockerfile builder stage.
+- Touched `files/`? → `bun run build:seed-skill-files`, commit `bundled-files.generated.json` (never hand-edit it).
+- A `SKILL.md` beside a `content.md` is **not** a mistake — the seeder reads `content.md`, while `skill-install-remote` serves `SKILL.md` to the integrations catalog.
+- Verify: `bun run check:skill-sources && bun run check:seed-skill-files` (both CI-enforced via the **Seeded Skills Check** job).
+
+</important>
+
 <important if="you are adding or modifying CLI commands or CLI help text">
 
 CLI help lives in `src/cli.tsx` — plain `console.log`, not Ink. To add/modify: update `COMMAND_HELP`, add to the `commands` array in `printHelp()`, then route in the `App` switch (UI commands) or before `render()` (non-UI). Verify with `bun run src/cli.tsx help` and `bun run src/cli.tsx <command> --help`.
@@ -148,6 +171,7 @@ Tools return a `SwarmToolResult` (`toolOk(message, extras?)` / `toolErr(message,
 - `message` summarizes the outcome (required, non-empty); `details` carries the payload the model actually needs to act on (diagnostics, stderr, a rendered table) — not just a count.
 - Declare `outputSchema` via `swarmToolOutputSchema(dataShape?)` — loose (`z.looseObject`), every data field optional, no `.uuid()`/`.email()`/format pins on OUTPUT fields (double-validated by our SDK + opencode's client; a strict/pinned schema rejects an honest response after the side effect already landed). Input schemas may stay strict.
 - Conditional one-sentence steers go in the central `NUDGES` map in `src/tools/utils.ts`, not ad-hoc per-tool strings.
+- Do not hand-truncate `details` or move a large payload to only one channel. For agent-facing calls, the registrar measures the composed wire result, spills overflow to 24-hour `mcp:overflow:<agentId>` KV, and puts the same bounded pointer on both channels. Calls made through `ctx.swarm.*` are marked as script-internal and bypass the model-context ceiling; the script SDK instead streams responses through a separate 64 MiB hard guard that throws on overflow. `kv-get` is spill-exempt (it's the retrieval path — big values come back whole and the harness truncates natively); steer big-value processing toward scripts via nudges, not server-side chunking.
 
 Full contract, the per-harness verified matrix, and the validation gate: [runbooks/mcp-tool-results.md](./runbooks/mcp-tool-results.md).
 
@@ -261,7 +285,7 @@ Quick checklist (run from repo root):
 bun install --frozen-lockfile
 bun run lint           # NOT lint:fix — CI runs `lint` (read-only)
 bun run tsc:check
-bun test
+bun run test:root
 bash scripts/check-db-boundary.sh
 bun run check:dep-graph
 ```
@@ -269,6 +293,7 @@ bun run check:dep-graph
 Drift checks — run only if you touched the trigger files, MUST commit any regenerated output:
 
 - Edited `plugin/commands/*.md`? → `bun run build:pi-skills`
+- Added/edited a file under `templates/skills/*/files/`? → `bun run build:seed-skill-files` and commit `src/be/seed-skills/bundled-files.generated.json` (NEVER hand-edit that JSON)
 - Edited `src/be/scripts/typecheck.ts` or `src/scripts-runtime/sdk-allowlist.ts`? → `bun run build:script-types` and commit `src/scripts-runtime/types/*.d.ts` (NEVER edit those `.d.ts` files directly — they're generated from `typecheck.ts`)
 - Edited an HTTP route OR bumped `package.json` `version`? → `bun run docs:openapi` (regenerates `openapi.json` AND `docs-site/content/docs/api-reference/**`)
 - Touched `apps/ui/` — or root `bun.lock`/`package.json`/`bunfig.toml` (ui deps resolve from the root lock)? → `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b` (CI uses `tsc -b`, not `--noEmit`)
@@ -312,7 +337,7 @@ Full rulebook: [apps/evals/SCENARIO-AUTHORING.md](./apps/evals/SCENARIO-AUTHORIN
 
 ## Related
 
-- [runbooks/](./runbooks/) — ci, release, local-development, testing, workflows, memory-system, secret-scrubbing, harness-providers, seed-scripts, heartbeat-crash-recovery
+- [runbooks/](./runbooks/) — ci, release, local-development, testing, workflows, skills, memory-system, secret-scrubbing, harness-providers, seed-scripts, heartbeat-crash-recovery
 - [LOCAL_TESTING.md](./LOCAL_TESTING.md) — unit / E2E / entrypoint / MCP / UI testing recipes
 - [BUSINESS_USE.md](./BUSINESS_USE.md) — flow diagrams and instrumentation
 - [MCP.md](./MCP.md) — MCP tools reference

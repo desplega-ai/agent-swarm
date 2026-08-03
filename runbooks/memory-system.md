@@ -127,22 +127,22 @@ data flows here, not control flow.
 Run all four after any change to the memory subsystem:
 
 ```bash
-bun test src/tests/memory-reranker.test.ts
-bun test src/tests/memory-store.test.ts
-bun test src/tests/memory.test.ts
-bun test src/tests/memory-e2e.test.ts
+bun run test:root -- src/tests/memory-reranker.test.ts
+bun run test:root -- src/tests/memory-store.test.ts
+bun run test:root -- src/tests/memory.test.ts
+bun run test:root -- src/tests/memory-e2e.test.ts
 ```
 
 Plus the v1.5 rater suites:
 
 ```bash
-bun test src/tests/memory-rater-store.test.ts            # step-1: applyRating chokepoint
-bun test src/tests/memory-rater-implicit-citation.test.ts # step-2: ID-grep + retrieval bridge
-bun test src/tests/memory-rate-endpoint.test.ts          # step-3: POST /api/memory/rate
-bun test src/tests/memory-rater-llm.test.ts              # step-4: LlmRater piggyback
-bun test src/tests/memory-rate-tool.test.ts              # step-5: memory_rate MCP tool
-bun test src/tests/memory-edges.test.ts                  # step-6: references-source edges
-bun test src/tests/memory-rater-e2e.test.ts              # step-7: cross-cutting end-to-end
+bun run test:root -- src/tests/memory-rater-store.test.ts            # step-1: applyRating chokepoint
+bun run test:root -- src/tests/memory-rater-implicit-citation.test.ts # step-2: ID-grep + retrieval bridge
+bun run test:root -- src/tests/memory-rate-endpoint.test.ts           # step-3: POST /api/memory/rate
+bun run test:root -- src/tests/memory-rater-llm.test.ts               # step-4: LlmRater piggyback
+bun run test:root -- src/tests/memory-rate-tool.test.ts               # step-5: memory_rate MCP tool
+bun run test:root -- src/tests/memory-edges.test.ts                   # step-6: references-source edges
+bun run test:root -- src/tests/memory-rater-e2e.test.ts               # step-7: cross-cutting end-to-end
 ```
 
 ## Key files

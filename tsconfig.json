@@ -44,6 +44,10 @@
     "plugin",
     "docs-site",
     "assets/video-source",
-    "mockups"
+    "mockups",
+    // Bundled skill assets shipped verbatim to agents. Their imports describe
+    // what an agent writes in /workspace, not this repo's layout, so they are
+    // deliberately not typechecked here.
+    "templates/skills/*/files"
   ]
 }

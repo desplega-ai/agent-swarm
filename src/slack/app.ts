@@ -1,4 +1,5 @@
 import { App, LogLevel } from "@slack/bolt";
+import { ensureSlackRenderV2Activation } from "../be/db";
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
 
 let app: App | null = null;
@@ -60,6 +61,9 @@ export async function startSlackApp(): Promise<void> {
   }
 
   if (app) {
+    // Establish the durable cutoff before Socket Mode can deliver new asks.
+    const { isSlackRenderV2Enabled } = await import("./render-v2");
+    if (isSlackRenderV2Enabled()) ensureSlackRenderV2Activation();
     await app.start();
     console.log("[Slack] Bot connected via Socket Mode");
 

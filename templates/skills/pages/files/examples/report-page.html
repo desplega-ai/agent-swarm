@@ -1,0 +1,162 @@
+<!doctype html>
+<!--
+  Reference report page — minimalist taste baseline + report density layer.
+
+  Copy this as the starting point for any dense report/dashboard page, then
+  replace the content. The CSS already encodes the baseline documented in the
+  `pages` skill: warm monochrome canvas, single-column 1120px spine, 8/12/16/
+  24/32/48/72 spacing scale, tabular numerals, flat bordered cards, table
+  horizontal scroll on mobile, and no decorative gradients or nested cards.
+
+  Publish with:
+    create_page({
+      title: "Q2 SEO Performance",
+      slug: "q2-seo-performance",
+      description: "Human-readable SEO performance report.",
+      contentType: "text/html",
+      authMode: "authed",
+      body: <this file's contents>,
+    })
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Q2 SEO Performance</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f4f0;
+      --panel: #ffffff;
+      --ink: #18181b;
+      --muted: #62646a;
+      --line: #dedbd2;
+      --accent: #2563eb;
+      --danger: #b42318;
+      --warn: #b54708;
+      --ok: #067647;
+      --radius: 8px;
+      --shadow: 0 1px 2px rgba(24, 24, 27, 0.04);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "SF Pro Display", "Geist Sans", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.55;
+    }
+    main {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 48px 0 72px;
+    }
+    header { margin-bottom: 32px; }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      max-width: 780px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+    .lede {
+      max-width: 760px;
+      margin: 16px 0 0;
+      color: var(--muted);
+      font-size: 18px;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 32px 0;
+    }
+    .metric, .section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .metric { padding: 18px; }
+    .metric strong {
+      display: block;
+      font-size: 32px;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+    .metric span {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .section {
+      margin-top: 18px;
+      padding: 24px;
+    }
+    h2 { margin: 0 0 12px; font-size: 24px; line-height: 1.2; }
+    h3 { margin: 0 0 8px; font-size: 17px; line-height: 1.3; }
+    p { margin: 0 0 12px; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+    table { width: 100%; border-collapse: collapse; min-width: 640px; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+    td { font-size: 14px; font-variant-numeric: tabular-nums; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    details { margin-top: 24px; }
+    summary { cursor: pointer; font-weight: 700; }
+    pre { overflow: auto; padding: 16px; background: #111827; color: #f9fafb; border-radius: var(--radius); }
+    @media (max-width: 760px) {
+      main { width: min(100% - 24px, 1120px); padding-top: 32px; }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .section { padding: 18px; }
+    }
+    @media (max-width: 520px) {
+      .metrics { grid-template-columns: 1fr; }
+      .lede { font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">Generated 2026-06-04</p>
+      <h1>Q2 SEO Performance</h1>
+      <p class="lede">Organic traffic grew sharply, but the next gains depend on fixing thin page metadata and publishing three high-intent pillar pages.</p>
+    </header>
+
+    <section class="metrics" aria-label="Key metrics">
+      <div class="metric"><strong>18.6k</strong><span>Organic clicks</span></div>
+      <div class="metric"><strong>+50%</strong><span>Quarter over quarter</span></div>
+      <div class="metric"><strong>23</strong><span>Metadata fixes</span></div>
+      <div class="metric"><strong>3</strong><span>Priority pages</span></div>
+    </section>
+
+    <section class="section">
+      <h2>Summary</h2>
+      <p>Start with the conclusion. Add tables only after the reader understands what changed and what to do next.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Metric</th><th>Q1</th><th>Q2</th><th>Change</th></tr></thead>
+          <tbody><tr><td>Organic clicks</td><td>12,400</td><td>18,600</td><td>+50%</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <details>
+      <summary>Raw evidence</summary>
+      <pre>{ "source": "search-console", "range": "2026-04-01/2026-06-30" }</pre>
+    </details>
+  </main>
+</body>
+</html>

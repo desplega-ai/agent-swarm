@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
-import { closeDb, initDb } from "../be/db";
+import { closeDb, createAgent, createTask, initDb } from "../be/db";
 import { handleMcpBridge } from "../http/mcp-bridge";
 import {
   isMcpToolAllowedForScripts,
@@ -101,7 +101,7 @@ describe("script SDK allowlist", () => {
   test("bundled swarm-sdk.d.ts exposes only allowlisted methods", async () => {
     const types = await Bun.file("src/scripts-runtime/types/swarm-sdk.d.ts").text();
     for (const name of SDK_ALLOWLIST) {
-      expect(types).toContain(`${name}(args`);
+      expect(types).toMatch(new RegExp(`\\b${name}(?:<[^>]+>)?\\(\\s*args`));
     }
     expect(types).not.toContain("join_swarm(");
     expect(types).not.toContain("start_worker(");
@@ -112,6 +112,11 @@ describe("script SDK allowlist", () => {
       const mcpName = mcpToolNameForSdkMethod(sdkName);
       expect(isMcpToolAllowedForScripts(mcpName)).toBe(true);
     }
+  });
+
+  test("KV delete names share the existing delete tool mapping", () => {
+    expect(mcpToolNameForSdkMethod("kv_delete")).toBe("kv-delete");
+    expect(mcpToolNameForSdkMethod("kv_del")).toBe("kv-delete");
   });
 
   test("isMcpToolAllowedForScripts rejects non-mapped MCP names", () => {
@@ -134,6 +139,7 @@ describe("mcp-bridge allowlist gate", () => {
   const TEST_DB_PATH = "./test-sdk-allowlist-bridge.sqlite";
   const API_KEY = "test-mcp-bridge-key-1234567890";
   let prevApiKey: string | undefined;
+  let oversizedTaskId: string;
 
   async function removeDbFiles(path: string): Promise<void> {
     for (const suffix of ["", "-wal", "-shm"]) {
@@ -150,6 +156,16 @@ describe("mcp-bridge allowlist gate", () => {
     initDb(TEST_DB_PATH);
     prevApiKey = process.env.AGENT_SWARM_API_KEY;
     process.env.AGENT_SWARM_API_KEY = API_KEY;
+    createAgent({
+      id: "test-agent-bridge",
+      name: "test-agent-bridge",
+      isLead: false,
+      status: "idle",
+    });
+    oversizedTaskId = createTask(
+      "test-agent-bridge",
+      `large-script-sdk-task:${"x".repeat(20_000)}`,
+    ).id;
   });
 
   afterAll(async () => {
@@ -220,5 +236,20 @@ describe("mcp-bridge allowlist gate", () => {
     // Completely unknown tool names
     const unknownResult = await postBridge({ tool: "start-worker", args: {} });
     expect(unknownResult.status).toBe(403);
+  });
+
+  test("bridge-origin tool calls return complete oversized data to scripts", async () => {
+    const result = await postBridge({
+      tool: "get-task-details",
+      args: { taskId: oversizedTaskId },
+    });
+    const body = result.body as {
+      task?: { task?: string };
+      truncation?: unknown;
+    };
+
+    expect(result.status).toBe(200);
+    expect(body.task?.task).toBe(`large-script-sdk-task:${"x".repeat(20_000)}`);
+    expect(body).not.toHaveProperty("truncation");
   });
 });

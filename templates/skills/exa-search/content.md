@@ -95,7 +95,7 @@ These are the exact queries the Researcher used to map the agent-coordination la
 - `"humans at the edge AI org structure"`
 - `"agent capability gap registry knowledge graph"`
 
-Each surfaced 8–12 results; combined with WebFetch on company sites and WebSearch for funding numbers, the Researcher mapped 5 staked competitive slots + 1 open quadrant in ~30 min. See `agent-fs --org 648a5f3c-35c8-4f11-8673-b89de52cd6bd cat thoughts/d454d1a5-4df9-49bd-8a89-e58d6a657dc3/research/2026-05-04-swarm-competitive-analysis.md` for the full output.
+Each surfaced 8–12 results; combined with WebFetch on company sites and WebSearch for funding numbers, the Researcher mapped 5 staked competitive slots + 1 open quadrant in ~30 min. Store the full output in your swarm's research workspace so teammates can review it.
 
 ## Quick gotchas
 
@@ -103,4 +103,3 @@ Each surfaced 8–12 results; combined with WebFetch on company sites and WebSea
 - Free-tier rate limits are tight — batch your queries, don't fire dozens.
 - Neural search is non-deterministic across calls; same query can shuffle top-5 results.
 - `useAutoprompt: true` is almost always right; only disable if you've already hand-tuned the query.
-

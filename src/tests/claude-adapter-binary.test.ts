@@ -17,11 +17,11 @@
  *      `projects[cwd].hasTrustDialogAccepted: true` to `$HOME/.claude.json`
  *      before spawning. Idempotent. No-op for "claude".
  *
- * `Bun.spawn` is stubbed so the tests don't actually exec anything; we read
- * the argv off the call args. `Bun.which` is stubbed for the tmux gate so
- * the tests don't depend on the host having tmux installed. `$HOME` is
- * redirected to a tmp dir so the trust-preseed never touches the real
- * `~/.claude.json`.
+ * `Bun.spawn` and the synchronous binary-version probe are stubbed so the
+ * tests don't actually exec anything; we read the argv off the call args.
+ * `Bun.which` is stubbed for the tmux gate so the tests don't depend on the
+ * host having tmux installed. `$HOME` is redirected to a tmp dir so the
+ * trust-preseed never touches the real `~/.claude.json`.
  */
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -74,6 +74,23 @@ function makeFakeProc(): ReturnType<typeof Bun.spawn> {
     ref: () => {},
     unref: () => {},
   } as unknown as ReturnType<typeof Bun.spawn>;
+}
+
+/**
+ * The adapter probes `<binary> --version` synchronously before it spawns the
+ * session. Keep integration tests hermetic: a `bunx <package>` probe can do
+ * package resolution and outlive Bun's per-test timeout under CI load.
+ */
+function mockClaudeVersionProbe(): ReturnType<typeof spyOn> {
+  return spyOn(Bun, "spawnSync").mockImplementation((() => ({
+    success: false,
+  })) as typeof Bun.spawnSync);
+}
+
+async function createCompletedSession(adapter: ClaudeAdapter, config: ProviderSessionConfig) {
+  const session = await adapter.createSession(config);
+  await session.waitForCompletion();
+  return session;
 }
 
 // ─── Pure-function tests ──────────────────────────────────────────────────────
@@ -367,6 +384,7 @@ describe("CLAUDE_BINARY env override", () => {
   let originalHome: string | undefined;
   let homeDir: string;
   let spawnSpy: ReturnType<typeof spyOn>;
+  let spawnSyncSpy: ReturnType<typeof spyOn>;
   let whichSpy: ReturnType<typeof spyOn>;
   let spawnedArgs: Array<readonly string[]>;
   let spawnedEnvs: Array<Record<string, string> | undefined>;
@@ -391,6 +409,7 @@ describe("CLAUDE_BINARY env override", () => {
       spawnedEnvs.push((opts as { env?: Record<string, string> } | undefined)?.env);
       return makeFakeProc();
     }) as typeof Bun.spawn);
+    spawnSyncSpy = mockClaudeVersionProbe();
 
     // Default: pretend tmux IS on PATH so non-tmux-gate tests don't trip.
     whichSpy = spyOn(Bun, "which").mockImplementation((name: string) => {
@@ -401,6 +420,7 @@ describe("CLAUDE_BINARY env override", () => {
 
   afterEach(async () => {
     spawnSpy.mockRestore();
+    spawnSyncSpy.mockRestore();
     whichSpy.mockRestore();
     await rm(homeDir, { recursive: true, force: true });
     if (originalHome === undefined) {
@@ -427,7 +447,7 @@ describe("CLAUDE_BINARY env override", () => {
 
   test("default: argv[0] is 'claude' when CLAUDE_BINARY is unset", async () => {
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig());
+    await createCompletedSession(adapter, makeConfig());
 
     expect(spawnedArgs).toHaveLength(1);
     const argv = spawnedArgs[0];
@@ -438,7 +458,7 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_BINARY;
 
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig());
+    await createCompletedSession(adapter, makeConfig());
 
     const argv = spawnedArgs[0];
     expect(argv[0]).toBe(LEGACY_BRIDGE_COMPAT_BINARY);
@@ -448,7 +468,7 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.CLAUDE_BINARY = `/usr/local/bin/${LEGACY_BRIDGE_COMPAT_BINARY}`;
 
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig());
+    await createCompletedSession(adapter, makeConfig());
 
     expect(spawnedArgs[0][0]).toBe(`/usr/local/bin/${LEGACY_BRIDGE_COMPAT_BINARY}`);
   });
@@ -457,7 +477,7 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_COMMAND;
 
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig());
+    await createCompletedSession(adapter, makeConfig());
 
     const argv = spawnedArgs[0];
     expect(argv[0]).toBe("bunx");
@@ -471,7 +491,7 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.CLAUDE_BINARY = `${LEGACY_BRIDGE_COMPAT_COMMAND}@1.2.3`;
 
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig());
+    await createCompletedSession(adapter, makeConfig());
 
     const argv = spawnedArgs[0];
     expect(argv[0]).toBe("bunx");
@@ -482,7 +502,7 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.CLAUDE_BINARY = `  bunx  ${LEGACY_BRIDGE_COMPAT_BINARY}  `;
 
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig());
+    await createCompletedSession(adapter, makeConfig());
 
     const argv = spawnedArgs[0];
     expect(argv[0]).toBe("bunx");
@@ -497,13 +517,13 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.CLAUDE_QUEUE_STEERING = "0";
     process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_COMMAND;
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig());
+    await createCompletedSession(adapter, makeConfig());
     // Drop the 2-element prefix.
     const argvLegacyBridge = spawnedArgs[0].slice(2);
 
     spawnedArgs = [];
     delete process.env.CLAUDE_BINARY;
-    await adapter.createSession(makeConfig());
+    await createCompletedSession(adapter, makeConfig());
     // Drop the 1-element prefix.
     const argvClaude = spawnedArgs[0].slice(1);
 
@@ -517,7 +537,8 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.CLAUDE_BINARY = "claude";
 
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(
+    await createCompletedSession(
+      adapter,
       makeConfig({
         env: {
           CLAUDE_BINARY: LEGACY_BRIDGE_COMPAT_BINARY,
@@ -533,7 +554,8 @@ describe("CLAUDE_BINARY env override", () => {
     delete process.env.CLAUDE_BINARY;
 
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(
+    await createCompletedSession(
+      adapter,
       makeConfig({
         env: {
           CLAUDE_BINARY: LEGACY_BRIDGE_COMPAT_COMMAND,
@@ -550,7 +572,8 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_BINARY;
 
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(
+    await createCompletedSession(
+      adapter,
       makeConfig({
         // env has CLAUDE_CODE_OAUTH_TOKEN but no CLAUDE_BINARY → process.env wins.
         env: { CLAUDE_CODE_OAUTH_TOKEN: "test-token" } as Record<string, string>,
@@ -564,7 +587,7 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.SWARM_USE_CLAUDE_BRIDGE = "true";
 
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig());
+    await createCompletedSession(adapter, makeConfig());
 
     const argv = spawnedArgs[0];
     expect(argv[0]).toBe("claude-bridge");
@@ -576,7 +599,7 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.SWARM_USE_CLAUDE_BRIDGE = "true";
 
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig());
+    await createCompletedSession(adapter, makeConfig());
 
     expect(spawnedArgs[0][0]).toBe("claude-bridge");
     expect(spawnedEnvs[0]?.CLAUDE_CODE_OAUTH_TOKEN).toBe("test-token");
@@ -584,7 +607,8 @@ describe("CLAUDE_BINARY env override", () => {
 
   test("SWARM_USE_CLAUDE_BRIDGE=true forwards Anthropic local auth through bridge flag", async () => {
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(
+    await createCompletedSession(
+      adapter,
       makeConfig({
         env: {
           SWARM_USE_CLAUDE_BRIDGE: "true",
@@ -604,7 +628,7 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_BINARY;
 
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig());
+    await createCompletedSession(adapter, makeConfig());
 
     expect(spawnedArgs[0][0]).toBe("claude-bridge");
   });
@@ -613,7 +637,8 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.SWARM_USE_CLAUDE_BRIDGE = "false";
 
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(
+    await createCompletedSession(
+      adapter,
       makeConfig({
         env: {
           SWARM_USE_CLAUDE_BRIDGE: "true",
@@ -629,7 +654,8 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.SWARM_USE_CLAUDE_BRIDGE = "true";
 
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(
+    await createCompletedSession(
+      adapter,
       makeConfig({
         env: {
           SWARM_USE_CLAUDE_BRIDGE: "false",
@@ -648,7 +674,7 @@ describe("CLAUDE_BINARY env override", () => {
     process.env.SWARM_USE_CLAUDE_BRIDGE = "true";
     try {
       const adapter = new ClaudeAdapter();
-      await adapter.createSession(makeConfig());
+      await createCompletedSession(adapter, makeConfig());
       // No OAuth token → bridge is skipped, stock claude is used (Claude Code
       // authenticates fine from ANTHROPIC_API_KEY; the bridge can't).
       expect(spawnedArgs[0][0]).toBe("claude");
@@ -669,6 +695,7 @@ describe("Claude Bridge tmux fail-fast gate", () => {
   let originalHome: string | undefined;
   let homeDir: string;
   let spawnSpy: ReturnType<typeof spyOn>;
+  let spawnSyncSpy: ReturnType<typeof spyOn>;
   let whichSpy: ReturnType<typeof spyOn>;
 
   beforeEach(async () => {
@@ -682,11 +709,13 @@ describe("Claude Bridge tmux fail-fast gate", () => {
     delete process.env.SWARM_USE_CLAUDE_BRIDGE;
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-token";
     spawnSpy = spyOn(Bun, "spawn").mockImplementation((() => makeFakeProc()) as typeof Bun.spawn);
+    spawnSyncSpy = mockClaudeVersionProbe();
     whichSpy = spyOn(Bun, "which");
   });
 
   afterEach(async () => {
     spawnSpy.mockRestore();
+    spawnSyncSpy.mockRestore();
     whichSpy.mockRestore();
     await rm(homeDir, { recursive: true, force: true });
     if (originalHome === undefined) {
@@ -730,7 +759,7 @@ describe("Claude Bridge tmux fail-fast gate", () => {
     });
 
     const adapter = new ClaudeAdapter();
-    await expect(adapter.createSession(makeConfig())).resolves.toBeDefined();
+    await expect(createCompletedSession(adapter, makeConfig())).resolves.toBeDefined();
   });
 
   test("default binary skips the tmux check (no Bun.which call for tmux)", async () => {
@@ -742,7 +771,7 @@ describe("Claude Bridge tmux fail-fast gate", () => {
 
     const adapter = new ClaudeAdapter();
     // Should NOT throw even though tmux is "missing".
-    await expect(adapter.createSession(makeConfig())).resolves.toBeDefined();
+    await expect(createCompletedSession(adapter, makeConfig())).resolves.toBeDefined();
   });
 
   test("custom legacy bridge path still triggers the tmux check", async () => {
@@ -786,6 +815,7 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
   let originalHome: string | undefined;
   let homeDir: string;
   let spawnSpy: ReturnType<typeof spyOn>;
+  let spawnSyncSpy: ReturnType<typeof spyOn>;
   let whichSpy: ReturnType<typeof spyOn>;
 
   beforeEach(async () => {
@@ -799,6 +829,7 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
     delete process.env.SWARM_USE_CLAUDE_BRIDGE;
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-token";
     spawnSpy = spyOn(Bun, "spawn").mockImplementation((() => makeFakeProc()) as typeof Bun.spawn);
+    spawnSyncSpy = mockClaudeVersionProbe();
     whichSpy = spyOn(Bun, "which").mockImplementation((name: string) => {
       if (name === "tmux") return "/usr/bin/tmux";
       return null;
@@ -807,6 +838,7 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
 
   afterEach(async () => {
     spawnSpy.mockRestore();
+    spawnSyncSpy.mockRestore();
     whichSpy.mockRestore();
     await rm(homeDir, { recursive: true, force: true });
     if (originalHome === undefined) {
@@ -835,7 +867,7 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
     process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_BINARY;
     const cwd = "/some/abs/cwd";
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig({ cwd }));
+    await createCompletedSession(adapter, makeConfig({ cwd }));
 
     const data = JSON.parse(await readFile(join(homeDir, ".claude.json"), "utf-8"));
     expect(data.projects[cwd].hasTrustDialogAccepted).toBe(true);
@@ -846,7 +878,7 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
     process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_COMMAND;
     const cwd = "/some/other/cwd";
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig({ cwd }));
+    await createCompletedSession(adapter, makeConfig({ cwd }));
 
     const data = JSON.parse(await readFile(join(homeDir, ".claude.json"), "utf-8"));
     expect(data.projects[cwd].hasTrustDialogAccepted).toBe(true);
@@ -856,9 +888,9 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
     process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_BINARY;
     const cwd = "/some/abs/cwd";
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig({ cwd }));
+    await createCompletedSession(adapter, makeConfig({ cwd }));
     const first = await readFile(join(homeDir, ".claude.json"), "utf-8");
-    await adapter.createSession(makeConfig({ cwd }));
+    await createCompletedSession(adapter, makeConfig({ cwd }));
     const second = await readFile(join(homeDir, ".claude.json"), "utf-8");
     expect(second).toBe(first);
   });
@@ -874,7 +906,7 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
     );
     process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_BINARY;
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig({ cwd: "/new/cwd" }));
+    await createCompletedSession(adapter, makeConfig({ cwd: "/new/cwd" }));
 
     const data = JSON.parse(await readFile(join(homeDir, ".claude.json"), "utf-8"));
     expect(data.projects["/other/cwd"]).toEqual({ hasTrustDialogAccepted: true, custom: 1 });
@@ -884,7 +916,7 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
   test("default CLAUDE_BINARY=claude does NOT touch ~/.claude.json", async () => {
     delete process.env.CLAUDE_BINARY;
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig({ cwd: "/some/abs/cwd" }));
+    await createCompletedSession(adapter, makeConfig({ cwd: "/some/abs/cwd" }));
 
     // No .claude.json should have been written.
     const exists = await Bun.file(join(homeDir, ".claude.json")).exists();
@@ -895,7 +927,7 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
     process.env.SWARM_USE_CLAUDE_BRIDGE = "true";
     const cwd = "/some/bridge/cwd";
     const adapter = new ClaudeAdapter();
-    await adapter.createSession(makeConfig({ cwd }));
+    await createCompletedSession(adapter, makeConfig({ cwd }));
 
     const data = JSON.parse(await readFile(join(homeDir, ".claude.json"), "utf-8"));
     expect(data.projects[cwd].hasTrustDialogAccepted).toBe(true);

@@ -237,6 +237,8 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
           const result = await slackApp.client.chat.postMessage({
             channel: notification.target,
             text: `Approval Required: ${config.title} — ${approvalUrl}`,
+            unfurl_links: false,
+            unfurl_media: false,
             // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
             blocks: blocks as any,
           });

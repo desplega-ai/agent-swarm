@@ -10,10 +10,11 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, createTaskExtended, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, createTaskExtended, getDb, initDb, upsertKv } from "../be/db";
 import { handleCore } from "../http/core";
 import { handleKv } from "../http/kv";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { mcpOverflowNamespace } from "../kv-overflow";
 import { slackContextKey as buildSlackContextKey } from "../tasks/context-key";
 
 const TEST_DB_PATH = "./test-kv-http.sqlite";
@@ -298,6 +299,39 @@ describe("/api/kv REST — auth on writes", () => {
     const r = await authedFetch(`/api/kv/_/${encodeURIComponent(ns)}/k`, { agentId });
     expect(r.status).toBe(200);
     expect((await r.json()).value).toBe("hi");
+  });
+
+  test("MCP overflow namespace allows only its owning agent to read, list, or write", async () => {
+    const namespace = mcpOverflowNamespace(otherAgentId);
+    upsertKv({
+      namespace,
+      key: "v1/private-tool/hash",
+      value: "private business content",
+      valueType: "string",
+    });
+    const encodedNamespace = encodeURIComponent(namespace);
+    const encodedKey = encodeURIComponent("v1/private-tool/hash");
+
+    const ownerRead = await authedFetch(`/api/kv/_/${encodedNamespace}/${encodedKey}`, {
+      agentId: otherAgentId,
+    });
+    expect(ownerRead.status).toBe(200);
+    expect((await ownerRead.json()).value).toBe("private business content");
+
+    const intruderRead = await authedFetch(`/api/kv/_/${encodedNamespace}/${encodedKey}`, {
+      agentId,
+    });
+    expect(intruderRead.status).toBe(403);
+
+    const intruderList = await authedFetch(`/api/kv/_/${encodedNamespace}`, { agentId });
+    expect(intruderList.status).toBe(403);
+
+    const intruderWrite = await authedFetch(`/api/kv/_/${encodedNamespace}/${encodedKey}`, {
+      method: "PUT",
+      body: JSON.stringify({ value: "overwrite", valueType: "string" }),
+      agentId,
+    });
+    expect(intruderWrite.status).toBe(403);
   });
 
   test("403 when writing to task:page:* without an X-Page-Id header", async () => {

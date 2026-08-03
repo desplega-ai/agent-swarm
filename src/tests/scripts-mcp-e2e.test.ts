@@ -3,7 +3,7 @@ import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDb, getKv, initDb } from "../be/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
@@ -15,6 +15,7 @@ import { registerScriptRunTool } from "../tools/script-run";
 import { registerScriptRunsTools } from "../tools/script-runs";
 import { registerScriptSearchTool } from "../tools/script-search";
 import { registerScriptUpsertTool } from "../tools/script-upsert";
+import { mcpOverflowNamespace } from "../tools/utils";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 
 import "../prompts/session-templates";
@@ -61,6 +62,13 @@ type StructuredResult<T> = {
     message: string;
     details?: string;
     nudge?: string;
+    truncation?: {
+      truncated: true;
+      fullValueAt: string;
+      originalBytes: number;
+      limitBytes: number;
+      retrieval: string;
+    };
     status?: number;
     data?: T;
   };
@@ -273,6 +281,102 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(del.isError).toBeFalsy();
     expect(del.structuredContent.success).toBe(true);
     expect(del.structuredContent.data?.deleted).toBe(true);
+  });
+
+  test("oversized script result spills byte-completely and stays below the wire ceiling", async () => {
+    const tools = buildToolServer();
+    const blob = "x".repeat(11_800);
+    const source = `export default async () => ({ blob: "${blob}" });`;
+
+    const run = (await tools.run.handler(
+      { source, intent: "oversized payload regression" },
+      meta(workerId),
+    )) as StructuredResult<{ result: { blob: string } }>;
+
+    const text = run.content[0]?.text ?? "";
+    expect(run.isError).toBeFalsy();
+    expect(run.structuredContent.success).toBe(true);
+    expect(run.structuredContent.data).toBeUndefined();
+    const fullValueAt = run.structuredContent.truncation?.fullValueAt ?? "";
+    const overflowNamespace = mcpOverflowNamespace(workerId);
+    expect(fullValueAt.startsWith(`kv://${overflowNamespace}/v1/script-run/`)).toBe(true);
+    expect(run.structuredContent.truncation).toMatchObject({
+      truncated: true,
+      limitBytes: 10_000,
+      retrieval: expect.stringContaining("ctx.swarm.kv_get"),
+    });
+    expect(run.structuredContent.truncation?.originalBytes).toBeGreaterThan(blob.length);
+    const afterBytes = Buffer.byteLength(JSON.stringify(run), "utf8");
+    expect(afterBytes).toBeLessThanOrEqual(10_000);
+    expect(text).toContain('result:\n{\n  "blob": "');
+    expect(text).toContain("[truncated");
+    expect(text).toContain(`kv://${overflowNamespace}/`);
+
+    const key = fullValueAt.replace(`kv://${overflowNamespace}/`, "");
+    const stored = getKv(overflowNamespace, key);
+    const canonical = JSON.parse(String(stored?.value)) as {
+      outcome: {
+        ok: boolean;
+        message: string;
+        details?: string;
+        data: { status: number; data: { result: { blob: string } } };
+      };
+    };
+    expect(canonical.outcome.data.data.result.blob).toBe(blob);
+
+    const fallback = JSON.stringify(canonical.outcome.data, null, 2);
+    const rendered = canonical.outcome.details ?? fallback;
+    const beforeWire = {
+      content: [{ type: "text", text: `${canonical.outcome.message}\n\n${rendered}` }],
+      structuredContent: {
+        ...canonical.outcome.data,
+        success: canonical.outcome.ok,
+        message: canonical.outcome.message,
+        ...(canonical.outcome.details ? { details: canonical.outcome.details } : {}),
+      },
+      isError: !canonical.outcome.ok,
+    };
+    const beforeBytes = Buffer.byteLength(JSON.stringify(beforeWire), "utf8");
+    expect(beforeBytes).toBeGreaterThan(10_000);
+  });
+
+  test("oversized script-return arrays keep a shortened non-empty prefix", async () => {
+    const tools = buildToolServer();
+    const source = `
+      export default async () =>
+        Array.from({ length: 20 }, (_, index) => ({
+          index,
+          text: "x".repeat(900),
+        }));
+    `;
+
+    const run = (await tools.run.handler(
+      { source, intent: "oversized array boundary-three regression" },
+      meta(workerId),
+    )) as StructuredResult<{ result: Array<{ index: number; text: string }> }>;
+
+    const kept = run.structuredContent.data?.result ?? [];
+    expect(run.isError).toBeFalsy();
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept.length).toBeLessThan(20);
+    expect(kept.map((item) => item.index)).toEqual(
+      Array.from({ length: kept.length }, (_, index) => index),
+    );
+    expect(run.structuredContent.message).toContain(`Script run completed`);
+    expect(run.structuredContent.message).toContain(`${kept.length} of 20`);
+    expect(run.structuredContent.truncation).toBeDefined();
+    expect(Buffer.byteLength(JSON.stringify(run), "utf8")).toBeLessThanOrEqual(10_000);
+
+    const overflowNamespace = mcpOverflowNamespace(workerId);
+    const fullValueAt = run.structuredContent.truncation?.fullValueAt ?? "";
+    const key = fullValueAt.replace(`kv://${overflowNamespace}/`, "");
+    const stored = getKv(overflowNamespace, key);
+    const canonical = JSON.parse(String(stored?.value)) as {
+      outcome: {
+        data: { data: { result: Array<{ index: number; text: string }> } };
+      };
+    };
+    expect(canonical.outcome.data.data.result).toHaveLength(20);
   });
 
   test("persists a successful inline run with kind 'inline' and no journal", async () => {

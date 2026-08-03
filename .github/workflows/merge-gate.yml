@@ -18,6 +18,7 @@ jobs:
       lint: ${{ steps.check.outputs.lint }}
       test: ${{ steps.check.outputs.test }}
       pi_skills: ${{ steps.check.outputs.pi_skills }}
+      seed_skills: ${{ steps.check.outputs.seed_skills }}
       script_types: ${{ steps.check.outputs.script_types }}
       openapi: ${{ steps.check.outputs.openapi }}
       vendored_openapi: ${{ steps.check.outputs.vendored_openapi }}
@@ -26,7 +27,7 @@ jobs:
       templates_workflows: ${{ steps.check.outputs.templates_workflows }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -80,6 +81,22 @@ jobs:
           # pi-skills freshness: generator inputs + outputs.
           PI_SKILLS=$(match '^(plugin/commands/|plugin/pi-skills/|plugin/build-pi-skills\.ts$)')
 
+          # seeded-skill invariants + manifest freshness + the skill seeder tests.
+          # NOTE: neither LINT nor TEST matches templates/ or plugin/skills/, so
+          # without this flag a PR touching only those would run nothing but the
+          # Docker build and could merge a stale bundled-files.generated.json — or a
+          # baked skill colliding with a seeded one, which is the exact bug
+          # check-skill-sources.ts exists to prevent.
+          #
+          # This must list every INPUT the checks read, not just the seeded content:
+          #   templates/skills/       seeded skills + bundled files
+          #   plugin/skills/          baked skills (duplicate-delivery-path rule)
+          #   integrations-catalog.ts templatePath entries (missing-remote-skill rule)
+          #   the two scripts         the checkers themselves
+          #   src/be/seed-skills/     seeder + generated manifest
+          #   skill-fs-writer.ts      the FS reconcile the tests cover
+          SEED_SKILLS=$(match '^(templates/skills/|plugin/skills/|src/be/seed-skills/|src/utils/skill-fs-writer\.ts$|scripts/(build-seed-skill-files|check-skill-sources)\.ts$|apps/ui/src/lib/integrations-catalog\.ts$)')
+
           # script SDK types freshness: source constants + generator + outputs +
           # allowlist/registry (generation validates SDK_ALLOWLIST against server.ts).
           SCRIPT_TYPES=$(match '^(src/be/scripts/typecheck\.ts$|src/scripts-runtime/types/|src/scripts-runtime/sdk-allowlist\.ts$|scripts/bundle-script-types\.ts$|src/server\.ts$)')
@@ -101,7 +118,7 @@ jobs:
           # workflow template validation: content.md changes in templates/workflows/.
           TEMPLATES_WORKFLOWS=$(match '^(templates/workflows/|scripts/validate-template-workflows\.ts$|src/workflows/definition\.ts$|src/types\.ts$)')
 
-          for k in LINT TEST PI_SKILLS SCRIPT_TYPES OPENAPI VENDORED_OPENAPI DOCKER UI TEMPLATES_WORKFLOWS; do
+          for k in LINT TEST PI_SKILLS SEED_SKILLS SCRIPT_TYPES OPENAPI VENDORED_OPENAPI DOCKER UI TEMPLATES_WORKFLOWS; do
             v=$(eval echo \$$k)
             key=$(echo "$k" | tr '[:upper:]' '[:lower:]')
             echo "${key}=${v}" >> $GITHUB_OUTPUT
@@ -116,10 +133,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
@@ -127,67 +144,264 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run Biome linter
-        run: bun run lint
+        id: lint
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run lint
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
 
       - name: Run TypeScript type check
-        run: bun run tsc:check
+        id: tsc
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run tsc:check
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
 
       - name: Run structural consistency lint
+        id: structural-lint
         continue-on-error: true
         env:
           KONSISTENT_NO_UPDATE_CHECK: "true"
-        run: bun run lint:structure
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run lint:structure
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
 
       # evals is now a Bun workspace member, so the root `bun install --frozen-lockfile`
       # above already installs its deps into the shared hoisted node_modules. No separate
       # `cd apps/evals && bun install` is needed.
       - name: Type check evals
-        run: bun run tsc:check
+        id: evals-tsc
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run tsc:check
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
         working-directory: apps/evals
 
       - name: Test evals
+        id: evals-test
         # evals is its own bun package; these are pure unit tests (scoring,
         # registry, normalize, scenario structure) — no E2B/network, ~0.5s.
-        run: bun test
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun test
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
         working-directory: apps/evals
 
       - name: Build evals UI
-        run: bun run ui:build
+        id: evals-ui-build
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run ui:build
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
         working-directory: apps/evals
 
       - name: Check worker/API DB boundary
-        run: bash scripts/check-db-boundary.sh
+        id: db-boundary
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bash scripts/check-db-boundary.sh
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
 
       - name: Check API_KEY env-access boundary
-        run: bash scripts/check-api-key-boundary.sh
+        id: api-key-boundary
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bash scripts/check-api-key-boundary.sh
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
 
       - name: Check RBAC authorization boundary
-        run: bash scripts/check-rbac-boundary.sh
+        id: rbac-boundary
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bash scripts/check-rbac-boundary.sh
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
 
       - name: Check dependency graph (worker/API boundary)
-        run: bun run check:dep-graph
+        id: dependency-graph
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run check:dep-graph
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
 
       - name: Check DB audit columns
-        run: bash scripts/check-audit-columns.sh
+        id: audit-columns
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bash scripts/check-audit-columns.sh
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
 
       - name: Check SDK tool registration
-        run: bun scripts/check-sdk-tool-registration.ts
+        id: sdk-tool-registration
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun scripts/check-sdk-tool-registration.ts
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
 
       - name: Check RBAC coverage (tools, verbs, routes)
-        run: bun scripts/check-rbac-coverage.ts
+        id: rbac-coverage
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun scripts/check-rbac-coverage.ts
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      # Same-run calls merge server-side. See agent-fs docs/ci-timings.md.
+      # Skipped on merge_group events and forks (no secret); never blocks the gate.
+      - name: Report check timings to ci-timings
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.SWARM_CI_TIMINGS_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || 'null' }}
+          LINT_DURATION: ${{ steps.lint.outputs.duration_ms || '0' }}
+          LINT_STATUS: ${{ steps.lint.outputs.status || 'skipped' }}
+          TSC_DURATION: ${{ steps.tsc.outputs.duration_ms || '0' }}
+          TSC_STATUS: ${{ steps.tsc.outputs.status || 'skipped' }}
+          EVALS_TSC_DURATION: ${{ steps.evals-tsc.outputs.duration_ms || '0' }}
+          EVALS_TSC_STATUS: ${{ steps.evals-tsc.outputs.status || 'skipped' }}
+          EVALS_TEST_DURATION: ${{ steps.evals-test.outputs.duration_ms || '0' }}
+          EVALS_TEST_STATUS: ${{ steps.evals-test.outputs.status || 'skipped' }}
+          EVALS_UI_BUILD_DURATION: ${{ steps.evals-ui-build.outputs.duration_ms || '0' }}
+          EVALS_UI_BUILD_STATUS: ${{ steps.evals-ui-build.outputs.status || 'skipped' }}
+          STRUCTURAL_LINT_DURATION: ${{ steps.structural-lint.outputs.duration_ms || '0' }}
+          STRUCTURAL_LINT_STATUS: ${{ steps.structural-lint.outputs.status || 'skipped' }}
+          DB_BOUNDARY_DURATION: ${{ steps.db-boundary.outputs.duration_ms || '0' }}
+          DB_BOUNDARY_STATUS: ${{ steps.db-boundary.outputs.status || 'skipped' }}
+          API_KEY_BOUNDARY_DURATION: ${{ steps.api-key-boundary.outputs.duration_ms || '0' }}
+          API_KEY_BOUNDARY_STATUS: ${{ steps.api-key-boundary.outputs.status || 'skipped' }}
+          RBAC_BOUNDARY_DURATION: ${{ steps.rbac-boundary.outputs.duration_ms || '0' }}
+          RBAC_BOUNDARY_STATUS: ${{ steps.rbac-boundary.outputs.status || 'skipped' }}
+          DEPENDENCY_GRAPH_DURATION: ${{ steps.dependency-graph.outputs.duration_ms || '0' }}
+          DEPENDENCY_GRAPH_STATUS: ${{ steps.dependency-graph.outputs.status || 'skipped' }}
+          AUDIT_COLUMNS_DURATION: ${{ steps.audit-columns.outputs.duration_ms || '0' }}
+          AUDIT_COLUMNS_STATUS: ${{ steps.audit-columns.outputs.status || 'skipped' }}
+          SDK_TOOL_REGISTRATION_DURATION: ${{ steps.sdk-tool-registration.outputs.duration_ms || '0' }}
+          SDK_TOOL_REGISTRATION_STATUS: ${{ steps.sdk-tool-registration.outputs.status || 'skipped' }}
+          RBAC_COVERAGE_DURATION: ${{ steps.rbac-coverage.outputs.duration_ms || '0' }}
+          RBAC_COVERAGE_STATUS: ${{ steps.rbac-coverage.outputs.status || 'skipped' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then echo "SWARM_CI_TIMINGS_TOKEN not available; skipping"; exit 0; fi
+          BOUNDARIES_DURATION=$((STRUCTURAL_LINT_DURATION + DB_BOUNDARY_DURATION + API_KEY_BOUNDARY_DURATION + RBAC_BOUNDARY_DURATION + DEPENDENCY_GRAPH_DURATION + AUDIT_COLUMNS_DURATION + SDK_TOOL_REGISTRATION_DURATION + RBAC_COVERAGE_DURATION))
+          BOUNDARIES_STATUS=success
+          for status in "$STRUCTURAL_LINT_STATUS" "$DB_BOUNDARY_STATUS" "$API_KEY_BOUNDARY_STATUS" "$RBAC_BOUNDARY_STATUS" "$DEPENDENCY_GRAPH_STATUS" "$AUDIT_COLUMNS_STATUS" "$SDK_TOOL_REGISTRATION_STATUS" "$RBAC_COVERAGE_STATUS"; do
+            if [ "$status" = failure ]; then BOUNDARIES_STATUS=failure; break; fi
+            if [ "$status" = skipped ]; then BOUNDARIES_STATUS=skipped; fi
+          done
+          BODY=$(jq -n \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg branch "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" \
+            --arg sha "$HEAD_SHA" \
+            --arg base "$GITHUB_BASE_REF" \
+            --argjson pr "$PR_NUMBER" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg wf "$GITHUB_WORKFLOW" \
+            --arg event "$GITHUB_EVENT_NAME" \
+            --arg actor "$GITHUB_ACTOR" \
+            --argjson lintDur "$LINT_DURATION" --arg lintStatus "$LINT_STATUS" \
+            --argjson tscDur "$TSC_DURATION" --arg tscStatus "$TSC_STATUS" \
+            --argjson evalsTscDur "$EVALS_TSC_DURATION" --arg evalsTscStatus "$EVALS_TSC_STATUS" \
+            --argjson evalsTestDur "$EVALS_TEST_DURATION" --arg evalsTestStatus "$EVALS_TEST_STATUS" \
+            --argjson evalsUiBuildDur "$EVALS_UI_BUILD_DURATION" --arg evalsUiBuildStatus "$EVALS_UI_BUILD_STATUS" \
+            --argjson boundariesDur "$BOUNDARIES_DURATION" --arg boundariesStatus "$BOUNDARIES_STATUS" \
+            '{repo:$repo, branch:$branch, sha:$sha, baseBranch:$base, prNumber:$pr,
+              runId:$runId, runAttempt:$attempt, runUrl:$url, workflow:$wf,
+              event:$event, actor:$actor,
+              actions:[
+                {name:"lint", group:"checks", durationMs:$lintDur, status:$lintStatus},
+                {name:"tsc:check", group:"checks", durationMs:$tscDur, status:$tscStatus},
+                {name:"evals:tsc", group:"checks", durationMs:$evalsTscDur, status:$evalsTscStatus},
+                {name:"evals:test", group:"checks", durationMs:$evalsTestDur, status:$evalsTestStatus},
+                {name:"evals:ui-build", group:"checks", durationMs:$evalsUiBuildDur, status:$evalsUiBuildStatus},
+                {name:"checks:boundaries", group:"checks", durationMs:$boundariesDur, status:$boundariesStatus}
+              ]}')
+          curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
   test:
-    name: Run Tests
+    name: Run Tests (${{ matrix.shard }}/4)
     needs: detect-changes
     if: needs.detect-changes.outputs.test == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
@@ -195,10 +409,55 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run tests
+        id: tests
         # apps/evals/ is excluded from the root run via bunfig.toml pathIgnorePatterns
         # (it's a separate bun package with its own deps + its own CI test step in
-        # the lint-and-typecheck job).
-        run: bun test
+        # the lint-and-typecheck job). Each shard gets its own runner because these
+        # tests start servers, subprocesses, and SQLite workers.
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run test:root -- --shard=${{ matrix.shard }}/4
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      # Each shard reports independently. See agent-fs docs/ci-timings.md.
+      # Skipped on merge_group events and forks (no secret); never blocks the gate.
+      - name: Report test timing to ci-timings
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.SWARM_CI_TIMINGS_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || 'null' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then echo "SWARM_CI_TIMINGS_TOKEN not available; skipping"; exit 0; fi
+          BODY=$(jq -n \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg branch "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" \
+            --arg sha "$HEAD_SHA" \
+            --arg base "$GITHUB_BASE_REF" \
+            --argjson pr "$PR_NUMBER" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg wf "$GITHUB_WORKFLOW" \
+            --arg event "$GITHUB_EVENT_NAME" \
+            --arg actor "$GITHUB_ACTOR" \
+            --argjson dur "${{ steps.tests.outputs.duration_ms || '0' }}" \
+            --arg status "${{ steps.tests.outputs.status || 'skipped' }}" \
+            --argjson idx "${{ matrix.shard }}" \
+            '{repo:$repo, branch:$branch, sha:$sha, baseBranch:$base, prNumber:$pr,
+              runId:$runId, runAttempt:$attempt, runUrl:$url, workflow:$wf,
+              event:$event, actor:$actor,
+              actions:[{name:"test:root", group:"tests", durationMs:$dur, status:$status,
+                        shard:{index:$idx, total:4}, job:("test (\($idx)/4)")}]}')
+          curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
   pi-skills-freshness:
     name: Pi-Skills Freshness Check
@@ -208,10 +467,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
@@ -228,6 +487,35 @@ jobs:
           fi
           echo "pi-skills are up to date."
 
+  seed-skills:
+    name: Seeded Skills Check
+    needs: detect-changes
+    if: needs.detect-changes.outputs.seed_skills == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check skill source-of-truth invariants
+        run: bun run check:skill-sources
+
+      - name: Check bundled-file manifest freshness
+        run: bun run check:seed-skill-files
+
+      - name: Run skill seeder tests
+        # LINT/TEST do not match templates/, so these would not otherwise run for
+        # a templates/skills-only change.
+        run: bun run test:root -- src/tests/seed-skills-bundled-files.test.ts src/tests/system-default-skills.test.ts src/tests/skill-fs-writer.test.ts src/tests/skill-sync.test.ts
+
   script-types-freshness:
     name: Script SDK Types Freshness Check
     needs: detect-changes
@@ -236,10 +524,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
@@ -256,9 +544,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
       - name: Install dependencies
@@ -297,9 +585,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
       - name: Install dependencies
@@ -328,22 +616,29 @@ jobs:
           - dockerfile: Dockerfile
             target: ""
             metric: image.api
+            timing: docker.api
           - dockerfile: Dockerfile.worker
             target: worker-slim
             metric: image.worker-slim
+            timing: docker.worker-slim
           - dockerfile: apps/evals/Dockerfile
             target: ""
             metric: ""
+            timing: docker.evals
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Start Docker build timer
+        id: docker-timer
+        run: echo "started_at=$(date +%s%3N)" >> "$GITHUB_OUTPUT"
 
       - name: Build Docker image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: ./${{ matrix.dockerfile }}
@@ -351,6 +646,43 @@ jobs:
           push: false
           load: ${{ matrix.metric != '' }}
           tags: test-image:latest
+
+      # Each matrix leg reports independently. See agent-fs docs/ci-timings.md.
+      # Skipped on merge_group events and forks (no secret); never blocks the gate.
+      - name: Report Docker build timing to ci-timings
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.SWARM_CI_TIMINGS_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || 'null' }}
+          STARTED_AT: ${{ steps.docker-timer.outputs.started_at || '0' }}
+          BUILD_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then echo "SWARM_CI_TIMINGS_TOKEN not available; skipping"; exit 0; fi
+          if [ "$STARTED_AT" -eq 0 ]; then DURATION=0; BUILD_STATUS=skipped; else DURATION=$(( $(date +%s%3N) - STARTED_AT )); fi
+          BODY=$(jq -n \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg branch "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" \
+            --arg sha "$HEAD_SHA" \
+            --arg base "$GITHUB_BASE_REF" \
+            --argjson pr "$PR_NUMBER" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg wf "$GITHUB_WORKFLOW" \
+            --arg event "$GITHUB_EVENT_NAME" \
+            --arg actor "$GITHUB_ACTOR" \
+            --arg name "${{ matrix.timing }}" \
+            --argjson dur "$DURATION" \
+            --arg status "$BUILD_STATUS" \
+            '{repo:$repo, branch:$branch, sha:$sha, baseBranch:$base, prNumber:$pr,
+              runId:$runId, runAttempt:$attempt, runUrl:$url, workflow:$wf,
+              event:$event, actor:$actor,
+              actions:[{name:$name, group:"build", durationMs:$dur, status:$status}]}')
+          curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
       # Same-sha calls merge server-side, so each matrix leg posts its own metric
       # and they all land in ONE sticky "Docker image sizes" PR comment.
@@ -389,10 +721,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
@@ -402,16 +734,84 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Check design tokens (no raw color literals)
-        run: bun run check:tokens
+        id: ui-tokens
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run check:tokens
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
         working-directory: apps/ui
 
       - name: Run Biome linter
-        run: bun run lint
+        id: ui-lint
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run lint
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
         working-directory: apps/ui
 
       - name: Run TypeScript type check
-        run: bunx tsc -b
+        id: ui-tsc
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bunx tsc -b
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
         working-directory: apps/ui
+
+      # See agent-fs docs/ci-timings.md. Skipped on merge_group events and forks
+      # (no secret); reporting is best-effort and never blocks the gate.
+      - name: Report UI check timings to ci-timings
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.SWARM_CI_TIMINGS_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || 'null' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then echo "SWARM_CI_TIMINGS_TOKEN not available; skipping"; exit 0; fi
+          BODY=$(jq -n \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg branch "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" \
+            --arg sha "$HEAD_SHA" \
+            --arg base "$GITHUB_BASE_REF" \
+            --argjson pr "$PR_NUMBER" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg wf "$GITHUB_WORKFLOW" \
+            --arg event "$GITHUB_EVENT_NAME" \
+            --arg actor "$GITHUB_ACTOR" \
+            --argjson lintDur "${{ steps.ui-lint.outputs.duration_ms || '0' }}" \
+            --arg lintStatus "${{ steps.ui-lint.outputs.status || 'skipped' }}" \
+            --argjson tscDur "${{ steps.ui-tsc.outputs.duration_ms || '0' }}" \
+            --arg tscStatus "${{ steps.ui-tsc.outputs.status || 'skipped' }}" \
+            --argjson tokensDur "${{ steps.ui-tokens.outputs.duration_ms || '0' }}" \
+            --arg tokensStatus "${{ steps.ui-tokens.outputs.status || 'skipped' }}" \
+            '{repo:$repo, branch:$branch, sha:$sha, baseBranch:$base, prNumber:$pr,
+              runId:$runId, runAttempt:$attempt, runUrl:$url, workflow:$wf,
+              event:$event, actor:$actor,
+              actions:[
+                {name:"ui:lint", group:"checks", durationMs:$lintDur, status:$lintStatus},
+                {name:"ui:tsc", group:"checks", durationMs:$tscDur, status:$tscStatus},
+                {name:"ui:tokens", group:"checks", durationMs:$tokensDur, status:$tokensStatus}
+              ]}')
+          curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
   template-workflow-validation:
     name: Validate Workflow Templates
@@ -421,10 +821,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
@@ -436,7 +836,7 @@ jobs:
 
   gate:
     name: Merge Gate
-    needs: [detect-changes, lint-and-typecheck, test, pi-skills-freshness, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation]
+    needs: [detect-changes, lint-and-typecheck, test, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation]
     if: always()
     runs-on: ubuntu-latest
 

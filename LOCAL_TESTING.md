@@ -13,12 +13,12 @@ Quick index:
 
 ## Unit tests
 
-Runner: `bun test` (workspace root).
+Runner: `bun run test:root` (workspace root).
 
 ```bash
-bun test                              # all unit tests
-bun test src/tests/<file>.test.ts     # one file
-bun test --watch src/tests/<file>.test.ts
+bun run test:root                                      # all unit tests
+bun run test:root -- src/tests/<file>.test.ts          # one file
+bun run test:root -- --watch src/tests/<file>.test.ts
 ```
 
 Conventions:
@@ -32,8 +32,8 @@ Memory-system tests have their own required suite (see `src/be/memory/` changes 
 
 Two RBAC suites spawn the **real** server as a subprocess (exception to the minimal-handler convention — the wire path IS what's under test):
 
-- `bun test src/tests/rbac-wire-e2e.test.ts` — gate matrix over a real MCP handshake + HTTP, plus audit-trail fidelity. Runs in the default `bun test` (CI).
-- `RBAC_LIFECYCLE_E2E=1 bun test src/tests/rbac-lifecycle-e2e.test.ts` — audit lifecycle (burst flush, SIGTERM drain, kill-switch, retention purge, boot-race, stdio). Env-gated, ~20s, multiple server boots; run on demand / pre-release. Skipped without the flag.
+- `bun run test:root -- src/tests/rbac-wire-e2e.test.ts` — gate matrix over a real MCP handshake + HTTP, plus audit-trail fidelity. Runs in the default root test command (CI).
+- `RBAC_LIFECYCLE_E2E=1 bun run test:root -- src/tests/rbac-lifecycle-e2e.test.ts` — audit lifecycle (burst flush, SIGTERM drain, kill-switch, retention purge, boot-race, stdio). Env-gated, ~20s, multiple server boots; run on demand / pre-release. Skipped without the flag.
 
 ## E2E with Docker
 
@@ -86,7 +86,9 @@ kill $(lsof -ti :3013)
 
 1. **Verify HTTP methods/paths** in entrypoint `curl` calls against route defs in `src/http/`. Common gotcha: config API is `PUT /api/config`, not `POST`.
 2. **Test idempotency**: second boot with same `AGENT_ID` should skip re-registration (check via `GET /api/agents`).
-3. **Test failure mode**: stop an external dependency (e.g. `curl` target), boot the container, verify it continues via `|| true` guards rather than crashing.
+3. **Test failure mode — two different contracts**:
+   - *Optional external dependencies* (integrations, ecosystem restore, setup-script fetch, etc.) are best-effort: stop the dependency, boot the container, verify it continues via `|| true` guards rather than crashing.
+   - *The control-plane API itself* is not best-effort. `wait_for_api_ready` in `docker-entrypoint.sh` polls `${MCP_URL}/health` once per second with bounded per-attempt `curl` timeouts before any provider-specific setup runs. Point `MCP_BASE_URL` at an unreachable host, set a short `WORKER_API_READY_TIMEOUT_SECONDS` (e.g. `5`), boot the container, and verify it exits non-zero with the stable `[entrypoint] FATAL: API readiness timed out after Ns waiting for <url>; exiting.` line — never a silent `|| true` continuation. See `src/tests/entrypoint-api-readiness.test.ts` for the extracted-helper regression coverage (immediate success, transient-then-success, unreachable/timeout, invalid timeout values, trailing-slash normalization, no leaked secrets).
 4. **Test lead and worker paths separately**:
    - Lead: `--env-file .env.docker-lead -e AGENT_ROLE=lead`
    - Worker: `--env-file .env.docker`

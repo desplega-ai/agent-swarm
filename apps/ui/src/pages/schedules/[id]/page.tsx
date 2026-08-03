@@ -20,6 +20,7 @@ import {
   type ScheduleTargetFormValue,
 } from "@/components/schedules/schedule-target-fields";
 import { FavoriteButton } from "@/components/shared/favorite-button";
+import { MarkdownView } from "@/components/shared/markdown-view";
 import {
   ignoreRowClickFromInteractives,
   TasksColumnsMenu,
@@ -434,9 +435,13 @@ export default function ScheduleDetailPage() {
                     <CardTitle className="text-sm text-muted-foreground">Task Template</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed rounded-md bg-muted p-3 text-muted-foreground">
-                      {schedule.taskTemplate}
-                    </pre>
+                    {schedule.taskTemplate ? (
+                      <div className="prose-doc max-h-[60vh] overflow-auto rounded-md border bg-background px-4 py-3">
+                        <MarkdownView text={schedule.taskTemplate} normalizeSoftBreaks={false} />
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No task template.</p>
+                    )}
                   </CardContent>
                 </Card>
               )}

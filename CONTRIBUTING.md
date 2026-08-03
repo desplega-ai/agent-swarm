@@ -172,7 +172,7 @@ bun run lint && bun run tsc:check
 ### Running Tests
 
 ```bash
-bun test
+bun run test:root
 ```
 
 No extra environment variables are required. `src/tests/preload.ts` seeds a fixture `SECRETS_ENCRYPTION_KEY` into the process so that the `swarm_config` encryption layer boots cleanly under test.

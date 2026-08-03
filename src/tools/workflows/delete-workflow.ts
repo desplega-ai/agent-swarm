@@ -17,7 +17,7 @@ export const registerDeleteWorkflowTool = (server: McpServer) => {
     },
     async ({ id }) => {
       try {
-        const deleted = deleteWorkflow(id);
+        const deleted = deleteWorkflow(id, "mcp");
         if (!deleted) {
           return toolErr(`Workflow not found: ${id}`);
         }

@@ -1117,6 +1117,13 @@ export async function handlePullRequestReview(
 ): Promise<{ created: boolean; taskId?: string }> {
   const { action, review, pull_request: pr, repository, sender, installation } = event;
 
+  // Ignore reviews authored by this bot before recording sender identity, deduplicating,
+  // or fetching inline comments. GitHub wraps inline review-comment replies in submitted
+  // reviews, so handling our own reviews would create a self-notification loop.
+  if (isBotAssignee(sender.login)) {
+    return { created: false };
+  }
+
   // Resolve canonical user from GitHub sender
   const requestedByUserId = resolveGitHubSender(
     sender.login,

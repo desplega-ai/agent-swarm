@@ -1,9 +1,16 @@
 import type { App } from "@slack/bolt";
+import type { ChatUpdateArguments } from "@slack/web-api";
 import { cancelTask, getAgentById, getLeadAgent, getTaskById } from "../be/db";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";
 import { resolveSlackUserId } from "./enrich";
+import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
+
+type ChatUpdatePayload = ChatUpdateArguments & {
+  unfurl_links: false;
+  unfurl_media: false;
+};
 
 export function registerActionHandlers(app: App): void {
   // "View Full Logs" — URL button, just ack (Slack opens the link automatically)
@@ -90,15 +97,20 @@ export function registerActionHandlers(app: App): void {
         : undefined,
     });
 
+    if (isSlackRenderV2Enabled()) {
+      await ensureSlackThreadTree([followUpTask.id]);
+      return;
+    }
+
     const taskLink = getTaskLink(followUpTask.id);
     const agentName = lead ? lead.name : "queue";
-    const threadTs = originalTask.slackThreadTs;
-
     try {
       await client.chat.postMessage({
         channel: originalTask.slackChannelId,
-        thread_ts: threadTs,
+        thread_ts: originalTask.slackThreadTs,
         text: `💬 Follow-up sent to *${agentName}* (${taskLink})`,
+        unfurl_links: false,
+        unfurl_media: false,
       });
     } catch (error) {
       console.error("[Slack] Failed to post follow-up confirmation:", error);
@@ -133,13 +145,16 @@ export function registerActionHandlers(app: App): void {
         // body.message?.ts is the message where the button was clicked
         const messageTs = "message" in body && body.message?.ts;
         if (messageTs && typeof messageTs === "string") {
-          await client.chat.update({
+          const updatePayload = {
             channel: task.slackChannelId,
             ts: messageTs,
             text: "Task cancelled",
+            unfurl_links: false,
+            unfurl_media: false,
             // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
             blocks: blocks as any,
-          });
+          } satisfies ChatUpdatePayload;
+          await client.chat.update(updatePayload);
         }
       } catch (error) {
         console.error("[Slack] Failed to update cancelled message:", error);

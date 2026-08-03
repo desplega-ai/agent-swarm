@@ -6,7 +6,7 @@ Hub for everything test-shaped in this repo. The canonical, up-to-date testing r
 
 | You're … | Read |
 |---|---|
-| Writing or running unit tests, the Docker smoke-test, the entrypoint round-trip checklist, the MCP handshake sequence | [LOCAL_TESTING.md](../LOCAL_TESTING.md) |
+| Writing or running unit tests (`bun run test:root` from the workspace root), the Docker smoke-test, the entrypoint round-trip checklist, the MCP handshake sequence | [LOCAL_TESTING.md](../LOCAL_TESTING.md) |
 | Running the **full guided E2E flow** (tasks, session logs, UI verification) | Invoke the `swarm-local-e2e` skill |
 | Drafting a plan with verification / E2E / QA steps | [LOCAL_TESTING.md](../LOCAL_TESTING.md) — copy command forms verbatim, don't paraphrase |
 | Preparing a frontend PR (`apps/ui/`, `apps/templates-ui/`) | qa-use session + screenshots required (merge gate). Per-package conventions in `apps/ui/CLAUDE.md` |

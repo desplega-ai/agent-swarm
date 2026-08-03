@@ -11,6 +11,7 @@ import {
   listKv,
   upsertKv,
 } from "../be/db";
+import { mcpOverflowAuthError } from "../kv-overflow";
 import { can } from "../rbac";
 import { agentContextKey, pageContextKey } from "../tasks/context-key";
 import { KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "../types";
@@ -321,6 +322,10 @@ function authorizeWrite(
   namespace: string,
   ctx: AuthCtx,
 ): { status: number; message: string } | null {
+  const overflowAuthErr = mcpOverflowAuthError(namespace, ctx.callerAgentId);
+  if (overflowAuthErr) {
+    return { status: 403, message: overflowAuthErr };
+  }
   if (namespace.startsWith("task:page:")) {
     if (!ctx.hasPageHeader) {
       return { status: 403, message: "task:page:* writes require a page-proxy request" };
@@ -347,6 +352,14 @@ function authorizeWrite(
     return null;
   }
   return null;
+}
+
+function authorizeRead(
+  namespace: string,
+  ctx: AuthCtx,
+): { status: number; message: string } | null {
+  const overflowAuthErr = mcpOverflowAuthError(namespace, ctx.callerAgentId);
+  return overflowAuthErr ? { status: 403, message: overflowAuthErr } : null;
 }
 
 function encodeValueOrError(
@@ -435,7 +448,7 @@ export async function handleKv(
     if (!ns) return true;
     const key = decodeKvSegment(res, parsed.params.key, "key");
     if (!key) return true;
-    return sendGet(res, ns, key);
+    return sendGet(req, res, ns, key);
   }
   if (putKvExplicit.match(req.method, pathSegments)) {
     if (enforceContentLengthCap(req, res, MAX_KV_BODY_BYTES) === BODY_TOO_LARGE) return true;
@@ -461,7 +474,7 @@ export async function handleKv(
     if (!parsed) return true;
     const ns = decodeKvSegment(res, parsed.params.namespace, "namespace");
     if (!ns) return true;
-    return sendList(res, ns, parsed.query);
+    return sendList(req, res, ns, parsed.query);
   }
 
   // ── Header-resolved variants ──────────────────────────────────────────────
@@ -475,7 +488,7 @@ export async function handleKv(
     }
     const key = decodeKvSegment(res, parsed.params.key, "key");
     if (!key) return true;
-    return sendGet(res, ns, key);
+    return sendGet(req, res, ns, key);
   }
   if (putKvHeader.match(req.method, pathSegments)) {
     if (enforceContentLengthCap(req, res, MAX_KV_BODY_BYTES) === BODY_TOO_LARGE) return true;
@@ -510,16 +523,16 @@ export async function handleKv(
       jsonError(res, "namespace is required (pass X-Source-Task-Id or X-Agent-ID)", 400);
       return true;
     }
-    return sendList(res, ns, parsed.query);
+    return sendList(req, res, ns, parsed.query);
   }
 
   return false;
 }
 
 /**
- * Reads only ever resolve from headers — there's no auth distinction between
- * reading your own ns and someone else's (any authenticated caller may read
- * any namespace).
+ * Reads resolve from headers. Ordinary KV namespaces remain cross-agent
+ * readable by design; `sendGet`/`sendList` separately enforce private
+ * ownership for the internal `mcp:overflow:<agentId>` namespace family.
  */
 function resolveNamespaceForRead(req: IncomingMessage): string | null {
   return resolveNamespaceFromHeaders(req);
@@ -591,7 +604,17 @@ async function handleIncr(
   return true;
 }
 
-function sendGet(res: ServerResponse, namespace: string, key: string): boolean {
+function sendGet(
+  req: IncomingMessage,
+  res: ServerResponse,
+  namespace: string,
+  key: string,
+): boolean {
+  const authErr = authorizeRead(namespace, buildAuthCtx(req));
+  if (authErr) {
+    jsonError(res, authErr.message, authErr.status);
+    return true;
+  }
   const entry = getKv(namespace, key);
   if (!entry) {
     jsonError(res, "not found", 404);
@@ -661,10 +684,16 @@ function sendDelete(
 }
 
 function sendList(
+  req: IncomingMessage,
   res: ServerResponse,
   namespace: string,
   query: z.infer<typeof kvListQuerySchema>,
 ): boolean {
+  const authErr = authorizeRead(namespace, buildAuthCtx(req));
+  if (authErr) {
+    jsonError(res, authErr.message, authErr.status);
+    return true;
+  }
   const limit = Math.min(query.limit ?? 100, MAX_KV_LIST_LIMIT);
   const offset = query.offset ?? 0;
   const prefix = query.prefix && query.prefix.length > 0 ? query.prefix : undefined;

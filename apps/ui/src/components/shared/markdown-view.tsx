@@ -132,8 +132,27 @@ const STREAMDOWN_COMPONENTS = {
  *   - Code blocks rendered with a read-only Monaco editor (theme-aware, word-wrapped).
  *   - Inline code styled as a small `bg-muted` chip.
  */
-export function MarkdownView({ text }: { text: string }) {
+export function MarkdownView({
+  text,
+  normalizeSoftBreaks = true,
+}: {
+  text: string;
+  /**
+   * Whether single newlines are promoted to paragraph breaks (`normalizeNewlines`).
+   * Correct for LLM/agent output, which routinely separates paragraphs with one
+   * newline. WRONG for hand-authored documents (SKILL.md, schedule task
+   * templates) that hard-wrap prose at ~80 columns — there, promoting every
+   * wrap point shatters each paragraph into one-line fragments. Pass `false`
+   * for authored documents so standard markdown paragraph rules apply.
+   */
+  normalizeSoftBreaks?: boolean;
+}) {
   const pretty = tryPrettyJson(text);
-  const body = pretty != null ? `\`\`\`json\n${pretty}\n\`\`\`` : normalizeNewlines(text);
+  const body =
+    pretty != null
+      ? `\`\`\`json\n${pretty}\n\`\`\``
+      : normalizeSoftBreaks
+        ? normalizeNewlines(text)
+        : text;
   return <Streamdown components={STREAMDOWN_COMPONENTS}>{body}</Streamdown>;
 }

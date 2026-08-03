@@ -41,9 +41,15 @@ type RegisteredTool = {
 };
 
 type StoreProgressResult = {
+  content: Array<{ type: string; text: string }>;
   structuredContent: {
     success: boolean;
     message: string;
+    task?: {
+      id: string;
+      status: string;
+      finishedAt?: string;
+    };
     wasNoOp?: boolean;
     yourAgentId?: string;
   };
@@ -106,7 +112,7 @@ describe("store-progress handler — attachments insert path", () => {
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
+    startTask(task.id);
 
     const tool = buildServer();
     const result = (await tool.handler(
@@ -131,7 +137,7 @@ describe("store-progress handler — attachments insert path", () => {
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
+    startTask(task.id);
     const completed = completeTask(task.id, "done");
     expect(completed?.status).toBe("completed");
 
@@ -160,7 +166,7 @@ describe("store-progress handler — attachments insert path", () => {
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
+    startTask(task.id);
 
     const tool = buildServer();
     const result = (await tool.handler(
@@ -195,7 +201,7 @@ describe("store-progress handler — attachments insert path", () => {
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
+    startTask(task.id);
 
     const tool = buildServer();
     const result = (await tool.handler(
@@ -245,7 +251,7 @@ describe("store-progress handler — attachments insert path", () => {
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id, agentId);
+      startTask(task.id);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -300,7 +306,7 @@ describe("store-progress handler — attachments insert path", () => {
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id, agentId);
+      startTask(task.id);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -332,7 +338,7 @@ describe("store-progress handler — attachments insert path", () => {
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id, agentId);
+      startTask(task.id);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -374,7 +380,7 @@ describe("store-progress handler — attachments insert path", () => {
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id, agentId);
+      startTask(task.id);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -418,7 +424,7 @@ describe("store-progress handler — attachments insert path", () => {
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id, agentId);
+      startTask(task.id);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -455,7 +461,7 @@ describe("store-progress handler — attachments insert path", () => {
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id, agentId);
+    startTask(task.id);
     completeTask(task.id, "first");
 
     const tool = buildServer();
@@ -476,5 +482,34 @@ describe("store-progress handler — attachments insert path", () => {
     const rows = getTaskAttachments(task.id);
     expect(rows.length).toBe(1);
     expect(rows[0].url).toBe("https://example.com/retry");
+  });
+
+  test("successful completion returns a bounded confirmation for an oversized task", async () => {
+    const oversizedTaskText = "H".repeat(58_661);
+    const task = createTaskExtended(oversizedTaskText, {
+      agentId,
+      source: "mcp",
+      priority: 50,
+    });
+    startTask(task.id);
+
+    const tool = buildServer();
+    const result = (await tool.handler(
+      {
+        taskId: task.id,
+        status: "completed",
+        output: "O".repeat(4_023),
+      },
+      buildMeta(),
+    )) as StoreProgressResult;
+
+    const wireChars = JSON.stringify(result).length;
+    expect(wireChars).toBeLessThan(1_000);
+    expect(result.structuredContent.task).toEqual({
+      id: task.id,
+      status: "completed",
+      finishedAt: expect.any(String),
+    });
+    expect(JSON.stringify(result)).not.toContain(oversizedTaskText);
   });
 });

@@ -1,5 +1,6 @@
 import { scrubObject } from "../utils/secret-scrubber";
 import { Redacted } from "./redacted";
+import { readScriptSdkJsonResponse } from "./response-limit";
 import { isSdkToolAllowed, mcpToolNameForSdkMethod } from "./sdk-allowlist";
 import type { SwarmConfig } from "./swarm-config";
 
@@ -118,6 +119,7 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
 
     // ── kv ──
     case "kv_get":
+    case "kv_getOrNull":
       return { method: "GET", path: kvPath(body) };
     case "kv_set":
       return {
@@ -129,6 +131,7 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
           expiresInSec: body.expiresInSec ?? body.ttlSeconds,
         },
       };
+    case "kv_delete":
     case "kv_del":
       return { method: "DELETE", path: kvPath(body) };
     case "kv_incr":
@@ -443,8 +446,7 @@ async function callBridgeApi(
       headers: headers(config),
       body: JSON.stringify({ tool: mcpToolName, args: args ?? {} }),
     });
-    const text = await res.text();
-    const data = text ? JSON.parse(text) : {};
+    const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);
     if (!res.ok && options.throwOnError) {
       const message =
         data && typeof data === "object" && "error" in data
@@ -460,8 +462,7 @@ async function callBridgeApi(
     headers: headers(config),
     body: request.body === undefined ? undefined : JSON.stringify(request.body),
   });
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : {};
+  const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);
   if (!res.ok && options.throwOnError) {
     const message =
       data && typeof data === "object" && "error" in data
@@ -481,6 +482,23 @@ async function callTool(name: string, args: unknown, config: SwarmConfig): Promi
 
   if (name === "script_search" || name === "script_run") {
     return callBridgeApi(name, args, config, { throwOnError: true });
+  }
+
+  if (name === "kv_getOrNull") {
+    const result = (await callBridgeApi(name, args, config)) as {
+      success: boolean;
+      status: number;
+      data: unknown;
+    };
+    if (result.status === 404) return null;
+    if (!result.success) {
+      const message =
+        result.data && typeof result.data === "object" && "error" in result.data
+          ? String((result.data as { error: unknown }).error)
+          : "api failed";
+      throw new Error(`swarm-sdk: ${name} failed with ${result.status}: ${message}`);
+    }
+    return result.data;
   }
 
   return callBridgeApi(name, args, config);

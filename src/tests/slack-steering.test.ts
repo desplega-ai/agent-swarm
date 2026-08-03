@@ -11,6 +11,9 @@ import {
   initDb,
   startTask,
 } from "../be/db";
+
+process.env.SLACK_RENDER_V2 = "false";
+
 import { buildTreeBlocks } from "../slack/blocks";
 import { routeMessage } from "../slack/router";
 import { requestSlackThreadSteering } from "../slack/steering";

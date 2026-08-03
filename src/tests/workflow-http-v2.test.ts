@@ -616,12 +616,19 @@ describe("Workflow HTTP API v2", () => {
       expect(invalidRes.status).toBe(400);
     });
 
-    test("MCP run listing defaults to a bounded page and exposes page metadata", async () => {
+    test("MCP run listing defaults to bounded slim rows and preserves an explicit full-row opt-in", async () => {
       const workflow = await createTestWorkflow();
-      const run = createWorkflowRun({ id: crypto.randomUUID(), workflowId: workflow.id });
+      const largeValue = "x".repeat(100_000);
+      const run = createWorkflowRun({
+        id: crypto.randomUUID(),
+        workflowId: workflow.id,
+        triggerData: { largeValue },
+      });
+      updateWorkflowRun(run.id, { context: { nodeOutput: largeValue } });
       const parsed = listWorkflowRunsInputSchema.parse({ workflowId: workflow.id });
       expect(parsed.limit).toBe(20);
       expect(parsed.offset).toBe(0);
+      expect(parsed.includeContext).toBe(false);
       expect(() =>
         listWorkflowRunsInputSchema.parse({ workflowId: workflow.id, limit: 101 }),
       ).toThrow();
@@ -629,16 +636,34 @@ describe("Workflow HTTP API v2", () => {
       const result = listWorkflowRunsHandler(parsed);
       expect(result.ok).toBe(true);
       const data = result.data as {
-        runs: WorkflowRun[];
+        runs: Array<{
+          id: string;
+          context?: unknown;
+          triggerData?: unknown;
+          triggerDataSummary?: string;
+        }>;
         page: { limit: number; offset: number; total: number; hasMore: boolean };
       };
       expect(data.runs.map((row) => row.id)).toEqual([run.id]);
+      expect(data.runs[0]!.context).toBeUndefined();
+      expect(data.runs[0]!.triggerData).toBeUndefined();
+      expect(data.runs[0]!.triggerDataSummary).toEndWith("…");
+      expect(data.runs[0]!.triggerDataSummary!.length).toBe(401);
       expect(data.page).toEqual({
         limit: 20,
         offset: 0,
         total: 1,
         hasMore: false,
       });
+      expect(JSON.stringify(result).length).toBeLessThan(20_000);
+
+      const fullResult = listWorkflowRunsHandler({
+        ...parsed,
+        includeContext: true,
+      });
+      const fullData = fullResult.data as { runs: WorkflowRun[] };
+      expect(fullData.runs[0]!.context).toEqual({ nodeOutput: largeValue });
+      expect(fullData.runs[0]!.triggerData).toEqual({ largeValue });
     });
   });
 

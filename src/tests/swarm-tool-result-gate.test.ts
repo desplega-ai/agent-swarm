@@ -1,15 +1,21 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, initDb } from "../be/db";
+import { closeDb, getKv, initDb } from "../be/db";
 import { createServer } from "../server";
 import {
   finalizeSwarmToolResult,
+  MCP_OVERFLOW_TTL_MS,
+  MCP_RESULT_WIRE_LIMIT_BYTES,
+  mcpOverflowNamespace,
   SCRIPT_AUTHORING_NUDGE,
   type SwarmToolResult,
+  type SwarmToolTruncation,
 } from "../tools/utils";
 import { clearVolatileSecretsForTesting, registerVolatileSecret } from "../utils/secret-scrubber";
 
 const TEST_DB_PATH = "./test-swarm-tool-result-gate.sqlite";
+const TEST_AGENT_ID = "tool-result-test-agent";
+const TEST_OVERFLOW_NAMESPACE = mcpOverflowNamespace(TEST_AGENT_ID);
 
 // ── Part 1: finalize pipeline contract ────────────────────────────────────────
 // Both channels must be independently self-sufficient and semantically
@@ -17,6 +23,24 @@ const TEST_DB_PATH = "./test-swarm-tool-result-gate.sqlite";
 // transform every converted tool relies on.
 
 describe("finalizeSwarmToolResult", () => {
+  beforeAll(async () => {
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        await unlink(TEST_DB_PATH + suffix);
+      } catch {}
+    }
+    initDb(TEST_DB_PATH);
+  });
+
+  afterAll(async () => {
+    closeDb();
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        await unlink(TEST_DB_PATH + suffix);
+      } catch {}
+    }
+  });
+
   test("ok result: text = message, structuredContent has success + message, isError false", () => {
     const result = finalizeSwarmToolResult("some-tool", { ok: true, message: "All good." });
     expect(result.isError).toBe(false);
@@ -38,7 +62,9 @@ describe("finalizeSwarmToolResult", () => {
       nudge: "Try the other thing.",
     });
     const text = (result.content?.[0] as { text: string }).text;
-    expect(text).toBe("It broke.\n\nline 1: kaboom\n\nTry the other thing.");
+    // Nudge BEFORE the payload: harnesses truncate long text from the tail,
+    // so the steer must not sit behind a potentially-cut rendering.
+    expect(text).toBe("It broke.\n\nTry the other thing.\n\nline 1: kaboom");
     expect(result.structuredContent).toMatchObject({
       success: false,
       message: "It broke.",
@@ -203,37 +229,290 @@ describe("finalizeSwarmToolResult", () => {
     expect(curatedText).not.toContain('"taskId"');
   });
 
-  test("auto-rendered data fallback is capped for the tightest harness budget", () => {
-    const result = finalizeSwarmToolResult("some-tool", {
-      ok: true,
-      message: "Big payload.",
-      data: { blob: "x".repeat(50_000) },
-    });
-    const text = (result.content?.[0] as { text: string }).text;
-    expect(text.length).toBeLessThan(10_000);
-    expect(text).toContain("[truncated");
-  });
-
-  test("explicit details are normalized and capped identically in both channels", () => {
+  test("oversized JSON spills the full payload and emits a bounded omission on BOTH channels", () => {
     const blob = "x".repeat(50_000);
-    const result = finalizeSwarmToolResult("some-tool", {
-      ok: true,
-      message: "Big rendered payload.",
-      details: `  ${blob}  `,
-      data: { blob },
-    });
+    const result = finalizeSwarmToolResult(
+      "some-tool",
+      {
+        ok: true,
+        message: "Big payload.",
+        data: { blob },
+      },
+      { agentId: TEST_AGENT_ID },
+    );
     const text = (result.content?.[0] as { text: string }).text;
     const structured = result.structuredContent as {
       details?: string;
-      blob?: string;
+      truncation?: {
+        truncated: true;
+        fullValueAt: string;
+        originalBytes: number;
+        limitBytes: number;
+        retrieval: string;
+      };
     };
 
+    expect(text).toContain("JSON payload omitted");
+    expect(text).toContain('"truncated":true');
+    expect(text).not.toContain(`"blob": "${blob.slice(0, 100)}`);
+    expect(structured).not.toHaveProperty("blob");
+    expect(structured.details).toContain("JSON payload omitted");
+    const fullValueAt = structured.truncation!.fullValueAt;
+    const retrieval = structured.truncation!.retrieval;
+    expect(fullValueAt).toMatch(/^kv:\/\/mcp:overflow:tool-result-test-agent\/v1\/some-tool\//);
+    expect(structured.truncation).toMatchObject({
+      truncated: true,
+      originalBytes: expect.any(Number),
+      limitBytes: MCP_RESULT_WIRE_LIMIT_BYTES,
+      retrieval: expect.stringContaining("ctx.swarm.kv_get"),
+    });
+    const key = fullValueAt.replace(`kv://${TEST_OVERFLOW_NAMESPACE}/`, "");
+    expect(retrieval).toContain(
+      `kv-get({"namespace":"${TEST_OVERFLOW_NAMESPACE}","key":"${key}"})`,
+    );
+    expect(text).toContain(fullValueAt);
+    expect(text).toContain(`"key":"${key}"`);
+    expect(structured.details).toContain(fullValueAt);
+    expect(structured.details).toContain(`"key":"${key}"`);
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(
+      MCP_RESULT_WIRE_LIMIT_BYTES,
+    );
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(MCP_RESULT_WIRE_LIMIT_BYTES);
+    expect(Buffer.byteLength(JSON.stringify(result.structuredContent), "utf8")).toBeLessThanOrEqual(
+      MCP_RESULT_WIRE_LIMIT_BYTES,
+    );
+
+    const stored = getKv(TEST_OVERFLOW_NAMESPACE, key);
+    expect(stored?.valueType).toBe("string");
+    expect(JSON.parse(String(stored?.value)).outcome.data.blob).toBe(blob);
+    expect((stored?.expiresAt ?? 0) - Date.now()).toBeGreaterThan(MCP_OVERFLOW_TTL_MS - 60_000);
+  });
+
+  test("script-SDK origin receives the full payload without the model-context ceiling", () => {
+    const blob = "x".repeat(50_000);
+    const result = finalizeSwarmToolResult(
+      "some-tool",
+      {
+        ok: true,
+        message: "Big in-sandbox payload.",
+        data: { blob },
+      },
+      { agentId: TEST_AGENT_ID, callOrigin: "script-sdk" },
+    );
+
+    expect((result.structuredContent as { blob?: string }).blob).toBe(blob);
+    expect(result.structuredContent).not.toHaveProperty("truncation");
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeGreaterThan(
+      MCP_RESULT_WIRE_LIMIT_BYTES,
+    );
+  });
+
+  test("oversized arrays keep a non-empty prefix and a truthful surviving count", () => {
+    const messages = Array.from({ length: 20 }, (_, index) => ({
+      ts: String(index),
+      text: `message-${index}:${"x".repeat(900)}`,
+    }));
+    const details = messages.map((message) => message.text).join("\n\n");
+    const result = finalizeSwarmToolResult(
+      "slack-read",
+      {
+        ok: true,
+        message: "Retrieved 20 message(s).",
+        details,
+        data: { channelId: "C123", messages },
+      },
+      { agentId: TEST_AGENT_ID },
+    );
+    const structured = result.structuredContent as {
+      messages: typeof messages;
+      message: string;
+      truncation: SwarmToolTruncation;
+    };
+
+    expect(structured.messages.length).toBeGreaterThan(0);
+    expect(structured.messages.length).toBeLessThan(messages.length);
+    expect(structured.messages).toEqual(messages.slice(0, structured.messages.length));
+    expect(structured.message).toContain(`Retrieved ${structured.messages.length} message(s)`);
+    expect(structured.message).toContain("truncated from 20");
+    expect(structured.truncation).toMatchObject({
+      truncated: true,
+      limitBytes: MCP_RESULT_WIRE_LIMIT_BYTES,
+    });
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(
+      MCP_RESULT_WIRE_LIMIT_BYTES,
+    );
+
+    const key = structured.truncation.fullValueAt.replace(`kv://${TEST_OVERFLOW_NAMESPACE}/`, "");
+    const stored = getKv(TEST_OVERFLOW_NAMESPACE, key);
+    const canonical = JSON.parse(String(stored?.value)) as {
+      outcome: { data: { messages: typeof messages } };
+    };
+    expect(canonical.outcome.data.messages).toEqual(messages);
+  });
+
+  test("an oversized scalar sibling cannot make ctx-control drop an array key", () => {
+    const result = finalizeSwarmToolResult(
+      "some-tool",
+      {
+        ok: true,
+        message: "Retrieved 2 item(s).",
+        data: {
+          blob: "x".repeat(50_000),
+          items: [{ id: 1 }, { id: 2 }],
+        },
+      },
+      { agentId: TEST_AGENT_ID },
+    );
+    const structured = result.structuredContent as {
+      items?: Array<{ id: number }>;
+      blob?: string;
+      truncation: SwarmToolTruncation;
+    };
+
+    expect(structured).toHaveProperty("items");
+    expect(structured.items).toEqual([{ id: 1 }, { id: 2 }]);
+    expect(structured).not.toHaveProperty("blob");
+    expect(structured.truncation.truncated).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(
+      MCP_RESULT_WIRE_LIMIT_BYTES,
+    );
+  });
+
+  test("oversized prose keeps a readable prefix + marker + resolvable pointer on both channels", () => {
+    const blob = "x".repeat(50_000);
+    const result = finalizeSwarmToolResult(
+      "some-tool",
+      {
+        ok: true,
+        message: "Big rendered payload.",
+        details: `  ${blob}  `,
+        data: { blob },
+      },
+      { agentId: TEST_AGENT_ID },
+    );
+    const text = (result.content?.[0] as { text: string }).text;
+    const structured = result.structuredContent as {
+      details?: string;
+      truncation?: {
+        truncated: true;
+        fullValueAt: string;
+        originalBytes: number;
+        limitBytes: number;
+        retrieval: string;
+      };
+    };
+
+    expect(structured.details).toContain(blob.slice(0, 100));
     expect(structured.details).toContain("[truncated");
-    expect(structured.details!.length).toBeLessThan(10_000);
+    expect(structured.details).toContain(`kv://${TEST_OVERFLOW_NAMESPACE}/`);
+    expect(structured.details!.length).toBeLessThan(2_500);
     expect(text).toBe(`Big rendered payload.\n\n${structured.details}`);
-    // Only the rendered details are bounded; callers using structured data
-    // still receive the complete payload.
-    expect(structured.blob).toBe(blob);
+    expect(structured).not.toHaveProperty("blob");
+    const fullValueAt = structured.truncation!.fullValueAt;
+    const retrieval = structured.truncation!.retrieval;
+    expect(structured.truncation).toMatchObject({
+      truncated: true,
+      fullValueAt: expect.stringMatching(/^kv:\/\/mcp:overflow:tool-result-test-agent\//),
+      originalBytes: expect.any(Number),
+      limitBytes: MCP_RESULT_WIRE_LIMIT_BYTES,
+      retrieval: expect.stringContaining("kv-get("),
+    });
+    expect(text).toContain(fullValueAt);
+    expect(text).toContain(retrieval);
+    expect(structured.details).toContain(fullValueAt);
+    expect(structured.details).toContain(retrieval);
+  });
+
+  test("oversized results without an agent identity never spill to the flat namespace", () => {
+    const result = finalizeSwarmToolResult("anonymous-tool", {
+      ok: true,
+      message: "Large anonymous result.",
+      data: { blob: "x".repeat(30_000) },
+    });
+    const text = (result.content?.[0] as { text: string }).text;
+    const truncation = (
+      result.structuredContent as {
+        truncation: { fullValueAt: string; retrieval: string };
+      }
+    ).truncation;
+
+    expect(truncation.fullValueAt).toBe("unavailable: authenticated agent identity required");
+    expect(truncation.retrieval).toContain("authenticated X-Agent-ID");
+    expect(text).not.toContain("kv://mcp:overflow/");
+  });
+
+  test("details-only overflow is retained in KV and never points at 'not retained'", () => {
+    const details = `details-only:${"z".repeat(30_000)}`;
+    const result = finalizeSwarmToolResult(
+      "details-only-tool",
+      {
+        ok: true,
+        message: "Large prose.",
+        details,
+      },
+      { agentId: TEST_AGENT_ID },
+    );
+    const structured = result.structuredContent as {
+      truncation: { fullValueAt: string; retrieval: string };
+    };
+    expect(structured.truncation.fullValueAt).not.toContain("not retained");
+    const key = structured.truncation.fullValueAt.replace(`kv://${TEST_OVERFLOW_NAMESPACE}/`, "");
+    const stored = getKv(TEST_OVERFLOW_NAMESPACE, key);
+    expect(JSON.parse(String(stored?.value)).outcome.details).toBe(details);
+    expect((result.content?.[0] as { text: string }).text).toContain(
+      structured.truncation.retrieval,
+    );
+  });
+
+  test("spilled non-ASCII payload survives the KV round trip byte-completely", () => {
+    const details = `prefix-${"🙂é漢".repeat(5_000)}-suffix`;
+    const result = finalizeSwarmToolResult(
+      "unicode-tool",
+      {
+        ok: true,
+        message: "Unicode payload.",
+        details,
+      },
+      { agentId: TEST_AGENT_ID },
+    );
+    const truncation = (
+      result.structuredContent as {
+        truncation: { fullValueAt: string; retrieval: string };
+      }
+    ).truncation;
+    expect(truncation.retrieval).toMatch(
+      /^kv-get\(\{"namespace":"mcp:overflow:tool-result-test-agent","key":"[^"]+"\}\) returns the full value/,
+    );
+    expect(truncation.retrieval).toContain("ctx.swarm.kv_get");
+    const key = truncation.fullValueAt.replace(`kv://${TEST_OVERFLOW_NAMESPACE}/`, "");
+    const stored = getKv(TEST_OVERFLOW_NAMESPACE, key);
+    expect(JSON.parse(String(stored?.value)).outcome.details).toBe(details);
+  });
+
+  test("ctx-control persists only scrubbed overflow content", () => {
+    registerVolatileSecret("sk-overflow-secret-789", "OVERFLOW_TEST");
+    try {
+      const result = finalizeSwarmToolResult(
+        "secret-overflow",
+        {
+          ok: true,
+          message: "Large result.",
+          data: { blob: `sk-overflow-secret-789:${"x".repeat(30_000)}` },
+        },
+        { agentId: TEST_AGENT_ID },
+      );
+      const fullValueAt = (
+        result.structuredContent as {
+          truncation: { fullValueAt: string };
+        }
+      ).truncation.fullValueAt;
+      const key = fullValueAt.replace(`kv://${TEST_OVERFLOW_NAMESPACE}/`, "");
+      const stored = getKv(TEST_OVERFLOW_NAMESPACE, key);
+      expect(String(stored?.value)).not.toContain("sk-overflow-secret-789");
+      expect(String(stored?.value)).toContain("[REDACTED:OVERFLOW_TEST]");
+    } finally {
+      clearVolatileSecretsForTesting();
+    }
   });
 
   test("whitespace-only details fall back to a rendered data preview", () => {

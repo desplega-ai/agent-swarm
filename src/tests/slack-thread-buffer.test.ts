@@ -16,6 +16,8 @@ import {
   isThreadBuffered,
 } from "../slack/thread-buffer";
 
+process.env.SLACK_RENDER_V2 = "false";
+
 const SYSTEM_ACTOR: IdentityActor = { kind: "system", id: "test" };
 
 const TEST_DB_PATH = "./test-slack-thread-buffer.sqlite";
@@ -128,6 +130,7 @@ describe("Slack thread buffer", () => {
       expect(task!.source).toBe("slack");
       expect(task!.slackChannelId).toBe(channelId);
       expect(task!.slackThreadTs).toBe(threadTs);
+      expect(task!.slackTriggerMessageTs).toBe("6000.0020");
     });
 
     test("in-body <@U…> mentions are rewritten via the identity primitive — resolved and unknown", async () => {

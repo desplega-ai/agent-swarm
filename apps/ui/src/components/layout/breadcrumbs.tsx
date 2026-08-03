@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, CornerDownRight, Home } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useAgent } from "@/api/hooks/use-agents";
 import { useApprovalRequest } from "@/api/hooks/use-approval-requests";
@@ -14,8 +14,14 @@ import { useSkill } from "@/api/hooks/use-skills";
 import { useTask } from "@/api/hooks/use-tasks";
 import { useUser } from "@/api/hooks/use-users";
 import { useWorkflow } from "@/api/hooks/use-workflows";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
-import { sessionDisplayTitle } from "@/lib/utils";
+import { cn, sessionDisplayTitle } from "@/lib/utils";
 
 const routeLabels: Record<string, string> = {
   dashboard: "Dashboard",
@@ -181,23 +187,79 @@ export function Breadcrumbs() {
     return { path, label, isLast };
   });
 
+  const leaf = crumbs[crumbs.length - 1];
+
   return (
-    <nav className="flex items-center gap-1 text-sm text-muted-foreground min-w-0">
-      <Link to="/" className="hover:text-foreground transition-colors shrink-0">
-        Home
-      </Link>
-      {crumbs.map((crumb) => (
-        <span key={crumb.path} className="flex items-center gap-1 min-w-0">
-          <ChevronRight className="size-3 shrink-0" />
-          {crumb.isLast ? (
-            <span className="text-foreground font-medium truncate">{crumb.label}</span>
-          ) : (
-            <Link to={crumb.path} className="hover:text-foreground transition-colors truncate">
-              {crumb.label}
-            </Link>
-          )}
-        </span>
-      ))}
-    </nav>
+    <>
+      {/* Mobile: the trail collapses into a dropdown. The trigger shows only
+          the deepest level (truncated); the menu stacks every level
+          top-to-bottom so the hierarchy is still readable on a narrow screen. */}
+      <nav className="flex min-w-0 items-center md:hidden" aria-label="Breadcrumb">
+        <DropdownMenu>
+          <DropdownMenuTrigger className="flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-sm text-foreground font-medium transition-colors hover:bg-accent">
+            <span className="truncate">{leaf.label}</span>
+            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="max-w-[min(20rem,calc(100vw-2rem))]">
+            <DropdownMenuItem asChild>
+              <Link to="/" className="flex items-center gap-2">
+                <Home className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate">Home</span>
+              </Link>
+            </DropdownMenuItem>
+            {crumbs.map((crumb, index) => {
+              const content = (
+                <>
+                  <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{crumb.label}</span>
+                </>
+              );
+              return (
+                <DropdownMenuItem
+                  key={crumb.path}
+                  asChild={!crumb.isLast}
+                  // Indent one step per level so the depth reads at a glance.
+                  style={{ paddingLeft: `${0.5 + (index + 1) * 0.75}rem` }}
+                  // The leaf is the current page: shown for context, not
+                  // navigable (Radix `disabled` would grey it out, so it's
+                  // just a non-link row that closes the menu).
+                  className={cn(crumb.isLast && "font-medium text-foreground")}
+                >
+                  {crumb.isLast ? (
+                    <span className="flex items-center gap-2">{content}</span>
+                  ) : (
+                    <Link to={crumb.path} className="flex items-center gap-2">
+                      {content}
+                    </Link>
+                  )}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </nav>
+
+      {/* Desktop: the full inline trail. */}
+      <nav
+        className="hidden md:flex items-center gap-1 text-sm text-muted-foreground min-w-0"
+        aria-label="Breadcrumb"
+      >
+        <Link to="/" className="hover:text-foreground transition-colors shrink-0">
+          Home
+        </Link>
+        {crumbs.map((crumb) => (
+          <span key={crumb.path} className="flex items-center gap-1 min-w-0">
+            <ChevronRight className="size-3 shrink-0" />
+            {crumb.isLast ? (
+              <span className="text-foreground font-medium truncate">{crumb.label}</span>
+            ) : (
+              <Link to={crumb.path} className="hover:text-foreground transition-colors truncate">
+                {crumb.label}
+              </Link>
+            )}
+          </span>
+        ))}
+      </nav>
+    </>
   );
 }

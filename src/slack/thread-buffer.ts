@@ -6,6 +6,7 @@ import { getSlackApp } from "./app";
 import { buildBufferFlushBlocks } from "./blocks";
 import { rewriteSlackMentions } from "./enrich";
 import { extractSlackMessageText } from "./message-text";
+import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { registerTreeMessage } from "./watcher";
 
@@ -178,14 +179,18 @@ async function slackFlush(
         );
       }
 
-      try {
-        await app.client.chat.postMessage({
-          channel: channelId,
-          thread_ts: threadTs,
-          text: formatSlackSteeringAck(steering.result),
-        });
-      } catch (error) {
-        console.error("[Slack] Failed to post steering feedback:", error);
+      if (!isSlackRenderV2Enabled()) {
+        try {
+          await app.client.chat.postMessage({
+            channel: channelId,
+            thread_ts: threadTs,
+            text: formatSlackSteeringAck(steering.result),
+            unfurl_links: false,
+            unfurl_media: false,
+          });
+        } catch (error) {
+          console.error("[Slack] Failed to post steering feedback:", error);
+        }
       }
     }
     return;
@@ -209,6 +214,7 @@ async function slackFlush(
     source: "slack",
     slackChannelId: channelId,
     slackThreadTs: threadTs,
+    slackTriggerMessageTs: items.at(-1)!.ts,
     slackUserId: originalRequesterId,
     dependsOn,
     parentTaskId: mostRecentTask?.id,
@@ -218,6 +224,11 @@ async function slackFlush(
   console.log(
     `[Slack] Buffer flushed → task ${task.id} (dependsOn: ${dependsOn ? dependsOn.join(", ") : "none"})`,
   );
+
+  if (isSlackRenderV2Enabled()) {
+    await ensureSlackThreadTree([task.id]);
+    return;
+  }
 
   // Slack feedback with Block Kit
   const app = getSlackApp();
@@ -237,6 +248,8 @@ async function slackFlush(
         channel: channelId,
         thread_ts: threadTs,
         text: fallbackText,
+        unfurl_links: false,
+        unfurl_media: false,
         // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
         blocks: blocks as any,
       });

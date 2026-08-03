@@ -391,7 +391,7 @@ Acknowledge a live steering message after you have incorporated it into your cur
 
 **Steer Task**
 
-Send a message to a task that is already running. `mode:"steer"` is honored on pi and claude-managed; claude, devin and opencode support queue only; codex always promotes the message to a follow-up task. Pass `onUnsupported:"fail"` to get an error instead of a downgrade.
+Send a message to a task that is already running. `mode:"steer"` is honored on pi and claude-managed; claude, devin, opencode and codex support queue only (codex delivery lands at the next tool-call boundary via its lifecycle hooks). Pass `onUnsupported:"fail"` to get an error instead of a downgrade.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1244,7 +1244,7 @@ Manually trigger a workflow execution, optionally passing trigger data as contex
 
 **List Workflow Runs**
 
-List execution runs for a workflow with offset pagination (default 20, max 100), optionally filtered by status.
+List execution runs for a workflow with offset pagination (default 20, max 100), optionally filtered by status. Returns SLIM rows WITHOUT the full `context` or trigger data — each row carries a bounded `triggerDataSummary` instead. To inspect a run's context and steps, call `get-workflow-run` by id, or pass `includeContext: true` here.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1252,6 +1252,7 @@ List execution runs for a workflow with offset pagination (default 20, max 100),
 | `status` | `running \| waiting \| completed \| failed \| skipped \| cancelled` | No | - | Filter by run status (running, waiting, completed, failed, skipped, cancelled) |
 | `limit` | `number` | No | 20 | Runs per page (default: 20, max: 100) |
 | `offset` | `number` | No | 0 | Zero-based page offset |
+| `includeContext` | `boolean` | No | false | Return the full run `context` + trigger data instead of slim rows. Default false — prefer `get-workflow-run` to fetch a single run in full. |
 
 ### get-workflow-run
 
@@ -1514,7 +1515,7 @@ Read a key from the swarm KV store. Returns the entry or null if missing/expired
 
 **KV Set**
 
-Write a key in the swarm KV store. Upserts atomically. Namespace defaults to your current context. Use `expiresInSec` for opt-in TTL (default: never expires). 2 MiB body cap.
+Write a key in the swarm KV store. Each replacement is atomic but unconditional: there is no compare-and-swap, so concurrent read-modify-write callers can lose updates. Namespace defaults to your current context. Use `expiresInSec` for opt-in TTL (default: never expires). 2 MiB body cap.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1577,6 +1578,7 @@ Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId
 | `inboxMessageId` | `uuid` | No | - | The inbox message ID to reply to (for leads responding to inbox). |
 | `taskId` | `uuid` | No | - | The task ID with Slack context (for task-related threads). |
 | `message` | `string` | Yes | - | The message to send to the Slack thread. |
+| `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 
 ### slack-read
 
@@ -1603,6 +1605,7 @@ Post a message to a Slack channel. By default creates a new top-level message; p
 |-----------|------|----------|---------|-------------|
 | `channelId` | `string` | Yes | - | The Slack channel ID to post to. |
 | `message` | `string` | Yes | - | The message content to post. |
+| `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 | `threadTs` | `string` | No | - | Optional parent message ts to thread under. Obtain via `slack-start-thread`. When omitted, posts as a new top-level message. |
 
 ### slack-start-thread
@@ -1615,6 +1618,7 @@ Post a new top-level message to a Slack channel and return its ts so the caller 
 |-----------|------|----------|---------|-------------|
 | `channelId` | `string` | Yes | - | The Slack channel ID to post to. |
 | `message` | `string` | Yes | - | The message content to post. |
+| `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 
 ### slack-list-channels
 
