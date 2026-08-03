@@ -48,7 +48,7 @@ describe("completeTask idempotency", () => {
     });
 
     const task = createTaskExtended("Task A", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
 
     const first = completeTask(task.id, "first output");
     expect(first).not.toBeNull();
@@ -77,7 +77,7 @@ describe("completeTask idempotency", () => {
     });
 
     const task = createTaskExtended("Task B", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
 
     completeTask(task.id, "done");
     const logsAfterFirst = getLogsByTaskId(task.id);
@@ -104,7 +104,7 @@ describe("completeTask idempotency", () => {
     });
 
     const task = createTaskExtended("Task C", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     failTask(task.id, "boom");
 
     const result = completeTask(task.id, "trying to complete a failed task");
@@ -125,7 +125,7 @@ describe("completeTask idempotency", () => {
     });
 
     const task = createTaskExtended("Task D", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     cancelTask(task.id, "user cancelled");
 
     const result = completeTask(task.id, "trying to complete a cancelled task");
@@ -151,7 +151,7 @@ describe("failTask idempotency", () => {
     });
 
     const task = createTaskExtended("Fail Task A", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
 
     const first = failTask(task.id, "original reason");
     expect(first).not.toBeNull();
@@ -178,7 +178,7 @@ describe("failTask idempotency", () => {
     });
 
     const task = createTaskExtended("Fail Task B", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
 
     failTask(task.id, "boom");
     const logsAfterFirst = getLogsByTaskId(task.id);
@@ -204,7 +204,7 @@ describe("failTask idempotency", () => {
     });
 
     const task = createTaskExtended("Fail Task C", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     completeTask(task.id, "all good");
 
     const result = failTask(task.id, "now fail it");
@@ -224,7 +224,7 @@ describe("failTask idempotency", () => {
     });
 
     const task = createTaskExtended("Fail Task D", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     cancelTask(task.id, "user cancelled");
 
     const result = failTask(task.id, "now fail it");
@@ -256,7 +256,7 @@ describe("store-progress idempotency on terminal status (integration via DB laye
     });
 
     const task = createTaskExtended("SP Task A", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     completeTask(task.id, "first output");
 
     // Snapshot the row state
@@ -286,7 +286,7 @@ describe("store-progress idempotency on terminal status (integration via DB laye
     });
 
     const task = createTaskExtended("SP Task B", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     failTask(task.id, "first reason");
 
     const snapshot = getTaskById(task.id);
@@ -396,7 +396,7 @@ describe("store-progress terminal result reporting", () => {
       capabilities: [],
     });
     const task = createTaskExtended("terminal identical retry", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     const completed = completeTask(task.id, "stable output");
     const handler = buildStoreProgressHandler();
 
@@ -426,7 +426,7 @@ describe("store-progress terminal result reporting", () => {
       capabilities: [],
     });
     const task = createTaskExtended("terminal differing retry", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     const completed = completeTask(task.id, "first output")!;
     const before = getTaskById(task.id)!;
 
@@ -461,7 +461,7 @@ describe("store-progress terminal result reporting", () => {
       capabilities: [],
     });
     const task = createTaskExtended("terminal forced overwrite", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     completeTask(task.id, "first output");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -539,7 +539,7 @@ describe("store-progress terminal result reporting", () => {
         additionalProperties: false,
       },
     });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     const originalOutput = JSON.stringify({ value: "first" });
     const completed = completeTask(task.id, originalOutput)!;
     const handler = buildStoreProgressHandler();
@@ -582,7 +582,7 @@ describe("store-progress terminal result reporting", () => {
       agentId: agent.id,
       taskType: "heartbeat",
     });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     let completedEvents = 0;
     const onCompleted = () => {
       completedEvents += 1;
