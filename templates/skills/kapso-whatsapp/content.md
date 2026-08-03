@@ -1,11 +1,11 @@
 
 # Kapso WhatsApp
 
-Kapso (https://kapso.ai) is a WhatsApp platform vendor that fronts the Meta Cloud API. A swarm provisions one or more WhatsApp phone numbers and wires each one to either a native inbound handler (PR #560) or a workflow that dispatches a task per inbound message.
+Kapso (https://kapso.ai) is a WhatsApp platform vendor that fronts the Meta Cloud API. A swarm provisions one or more WhatsApp phone numbers and wires each one to either the native inbound handler or a workflow that dispatches a task per inbound message.
 
 ## When to use MCP tools vs this skill's REST recipes
 
-PR #560 ships **thin MCP-tool wrappers for the common case only**:
+The integration ships **thin MCP-tool wrappers for the common case only**:
 
 | Tool | Use for |
 |---|---|
@@ -334,7 +334,7 @@ List approved templates first: `GET $API_BASE/platform/v1/whatsapp/templates?pho
 
 ## Webhook signature verification
 
-Every Kapso webhook delivery includes `X-Webhook-Signature: <hex>` (HMAC-SHA256 of the raw body using `KAPSO_WEBHOOK_HMAC_SECRET`). The native handler (`/api/integrations/kapso/webhook`, PR #560) and the workflow webhook trigger both verify automatically — the trigger's `hmacHeader` is `X-Webhook-Signature` and `hmacSecret` resolves from swarm config.
+Every Kapso webhook delivery includes `X-Webhook-Signature: <hex>` (HMAC-SHA256 of the raw body using `KAPSO_WEBHOOK_HMAC_SECRET`). The native handler (`/api/integrations/kapso/webhook`) and the workflow webhook trigger both verify automatically — the trigger's `hmacHeader` is `X-Webhook-Signature` and `hmacSecret` resolves from swarm config.
 
 To verify manually:
 
@@ -354,9 +354,9 @@ echo -n "$RAW_BODY" | openssl dgst -sha256 -hmac "$HMAC_SECRET" -hex | awk '{pri
 
 ## Where this fits in the swarm
 
-Two inbound paths can exist (PR #560 adds the native one; a workflow path is the alternative):
+Two inbound paths can exist (the native handler, or a workflow path as the alternative):
 
-- **Native handler** (`/api/integrations/kapso/webhook`, PR #560) — fires for any phone number registered via `register-kapso-number`. Verifies HMAC, dedupes by message id (KV `integrations:kapso:dedupe`, 24h TTL), reads the routing mapping from KV (`integrations:kapso:numbers`), and either dispatches a `kapso-inbound` task or delegates to a workflow trigger (advanced override). Also emits a `kapso.message.received` event on the workflow event bus.
+- **Native handler** (`/api/integrations/kapso/webhook`) — fires for any phone number registered via `register-kapso-number`. Verifies HMAC, dedupes by message id (KV `integrations:kapso:dedupe`, 24h TTL), reads the routing mapping from KV (`integrations:kapso:numbers`), and either dispatches a `kapso-inbound` task or delegates to a workflow trigger (advanced override). Also emits a `kapso.message.received` event on the workflow event bus.
 - **Workflow path** — fires for unregistered numbers (or numbers whose mapping points at a workflow). A typical inbound-handling workflow chains: a react-eyes step (mark read + typing + 👀) → a debounce step (collapse rapid-fire bursts) → a gate → an agent-task triage step → a finalize step (✅/❌ reaction).
 
 **Debounce / batching:** a debounce step waits a few seconds after each message and only the LAST message of a burst proceeds to the agent task — so a user firing 3 quick messages produces ONE task, not three. The agent is told the `batchSize` and should read trailing history and answer the whole burst in one reply. When >1 messages are collapsed, the user can be shown a "🧵 Got your N messages" note.

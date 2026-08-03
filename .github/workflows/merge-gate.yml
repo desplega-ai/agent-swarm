@@ -96,7 +96,7 @@ jobs:
           #   the four scripts        the checkers, generators, and vendor sync
           #   src/be/seed-skills/     seeder + generated manifest
           #   skill-fs-writer.ts      the FS reconcile the tests cover
-          SEED_SKILLS=$(match '^(templates/skills/|templates/ai-toolbox\.manifest\.json$|plugin/skills/|Dockerfile\.worker$|src/be/seed-skills/|src/utils/skill-fs-writer\.ts$|scripts/(build-seed-skill-files|build-skill-md|check-skill-sources|sync-ai-toolbox-skills)\.ts$|apps/ui/src/lib/integrations-catalog\.ts$)')
+          SEED_SKILLS=$(match '^(templates/skills/|templates/ai-toolbox\.manifest\.json$|plugin/skills/|plugin/pi-skills/|plugin/commands/|Dockerfile\.worker$|src/be/seed-skills/|src/utils/skill-fs-writer\.ts$|scripts/(build-seed-skill-files|build-skill-md|check-skill-sources|sync-ai-toolbox-skills)\.ts$|apps/ui/src/lib/integrations-catalog\.ts$)')
 
           # script SDK types freshness: source constants + generator + outputs +
           # allowlist/registry (generation validates SDK_ALLOWLIST against server.ts).
@@ -521,7 +521,7 @@ jobs:
       - name: Run skill seeder tests
         # LINT/TEST do not match templates/, so these would not otherwise run for
         # a templates/skills-only change.
-        run: bun run test:root -- src/tests/seed-skills-bundled-files.test.ts src/tests/system-default-skills.test.ts src/tests/skill-fs-writer.test.ts src/tests/skill-sync.test.ts
+        run: bun run test:root -- src/tests/seed-skills-bundled-files.test.ts src/tests/system-default-skills.test.ts src/tests/skill-fs-writer.test.ts src/tests/skill-sync.test.ts src/tests/sync-ai-toolbox-skills.test.ts src/tests/skill-parser.test.ts
 
   script-types-freshness:
     name: Script SDK Types Freshness Check

@@ -33,6 +33,7 @@ async function catalogTemplateDirs(): Promise<Set<string>> {
 
 const catalogDirs = await catalogTemplateDirs();
 const stale: string[] = [];
+const written: string[] = [];
 const generatedPaths: string[] = [];
 
 for await (const configRelative of new Bun.Glob("*/config.json").scan({ cwd: TEMPLATES_DIR })) {
@@ -64,6 +65,7 @@ for await (const configRelative of new Bun.Glob("*/config.json").scan({ cwd: TEM
   }
 
   await Bun.write(skillPath, generated);
+  written.push(relativePath);
 }
 
 if (stale.length > 0) {
@@ -78,5 +80,8 @@ if (stale.length > 0) {
 if (process.argv.includes("--check")) {
   console.log(`[build-skill-md] up to date (${generatedPaths.length} SKILL.md file(s))`);
 } else {
-  console.log(`[build-skill-md] wrote ${generatedPaths.length} SKILL.md file(s)`);
+  console.log(
+    `[build-skill-md] wrote ${written.length} SKILL.md file(s) ` +
+      `(${generatedPaths.length - written.length} already up to date)`,
+  );
 }

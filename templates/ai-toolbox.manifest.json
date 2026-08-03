@@ -97,7 +97,6 @@
     "wts-expert"
   ],
   "source": "https://github.com/desplega-ai/ai-toolbox.git",
-  "syncedVia": "/Users/taras/Documents/code/ai-toolbox",
   "transforms": {
     "executableBitsDowngraded": [
       {

@@ -237,6 +237,12 @@ describe("ai-toolbox skill sync pure transforms", () => {
         "https://git-user:secret@example.com/desplega-ai/ai-toolbox.git?token=secret#branch",
       ),
     ).toBe("https://example.com/desplega-ai/ai-toolbox.git");
+    expect(sanitizeSyncedVia("git@github.com:org/repo.git?token=plain-secret#frag")).toBe(
+      "git@github.com:org/repo.git",
+    );
+    expect(sanitizeSyncedVia("git@github.com:desplega-ai/ai-toolbox.git")).toBe(
+      "git@github.com:desplega-ai/ai-toolbox.git",
+    );
     expect(sanitizeSyncedVia(tempRoot)).toBe(tempRoot);
   });
 

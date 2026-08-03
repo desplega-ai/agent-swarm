@@ -39,7 +39,6 @@
     "tsconfig.json",
     "plugin/commands/",
     "plugin/agents/",
-    "plugin/skills/",
     "plugin/pi-skills/",
     "templates/",
     "vendored-openapi/",

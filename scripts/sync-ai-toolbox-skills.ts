@@ -34,7 +34,6 @@ const ALLOWED_FRONTMATTER_KEYS = new Set(["name", "description", "hooks", "user-
 const MAX_FILE_COUNT = 100;
 const MAX_FILE_BYTES = 500 * 1024;
 const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
-const YAML_PLAIN_LEADING_INDICATORS = new Set("-?:,[]{}#&*!|>'\"%@`");
 
 const DISPLAY_NAME_OVERRIDES: Readonly<Record<string, string>> = {
   "improve-agents-md": "Improve AGENTS.md",
@@ -134,6 +133,13 @@ function parseArgs(): { check: boolean; repo: string; ref: string } {
     fail(`Unknown argument: ${arg}`);
   }
 
+  // Mirror assertSafeRepoTransport's posture for the ref: it reaches
+  // `git fetch <repo> <ref>` as a positional, so reject anything that isn't a
+  // plain revision (branch, tag, sha, HEAD~n, v1^{}) before git parses it.
+  if (!/^[\w./@^{}~-]+$/.test(ref)) {
+    fail(`--ref must be a plain git revision; got ${JSON.stringify(ref)}.`);
+  }
+
   return { check, repo, ref };
 }
 
@@ -207,7 +213,13 @@ export function stableJson(value: unknown): string {
  * Filesystem paths are intentionally byte-preserved as operator diagnostics.
  */
 export function sanitizeSyncedVia(repoArg: string): string {
-  if (!/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(repoArg)) return repoArg;
+  if (!/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(repoArg)) {
+    // scp-style remotes (user@host:path) have no credential slot beyond the
+    // username, but strip query/fragment suffixes so nothing appended to the
+    // path can smuggle a token into the manifest.
+    if (/^[\w.-]+@[\w.-]+:/.test(repoArg)) return repoArg.replace(/[?#].*$/s, "");
+    return repoArg;
+  }
 
   let url: URL;
   try {
@@ -321,14 +333,12 @@ function assertManifestOutputPath(path: string, skillNames: Set<string>): string
   return absolute;
 }
 
-export function assertYamlPlainDescription(skill: string, description: string): void {
+// YAML-hostile descriptions (leading indicators, `: `, ` #`, …) need no gate here:
+// buildSkillContent emits them as quoted scalars and assertSkillRoundTrip proves
+// the rendered file parses back verbatim.
+export function assertSingleLineDescription(skill: string, description: string): void {
   if (!description || description !== description.trim() || /[\r\n]/.test(description)) {
     fail(`${skill}: description must be a non-empty single line with no surrounding whitespace.`);
-  }
-  if (YAML_PLAIN_LEADING_INDICATORS.has(description[0] ?? "")) {
-    fail(
-      `${skill}: description is not safe for raw YAML plain-scalar interpolation: ${description}`,
-    );
   }
 }
 
@@ -379,7 +389,7 @@ export function parseSkillMd(
   const name = values.get("name") ?? "";
   const description = values.get("description") ?? "";
   if (name !== skill) fail(`${skill}: frontmatter name is ${JSON.stringify(name)}.`);
-  assertYamlPlainDescription(skill, description);
+  assertSingleLineDescription(skill, description);
 
   const userInvocable = values.get("user-invocable");
   if (userInvocable !== undefined && !["true", "false"].includes(userInvocable)) {
@@ -948,6 +958,9 @@ async function sync(repoArg: string, ref: string): Promise<void> {
       files,
       transforms,
     };
+    // Validate before persisting so a bad manifest fails the sync that produced
+    // it, not the next --check far from the cause.
+    validateManifest(manifest, stableJson(manifest));
     await Bun.write(MANIFEST_PATH, stableJson(manifest));
 
     console.log(
