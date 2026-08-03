@@ -320,8 +320,19 @@ function canonicalFiles(files: SeedSkillFile[]): string {
  * state (pristine) — while the source, which now carries files, hashes
  * differently and is therefore correctly seen as a changed source.
  */
-function skillSeedHash(content: string, systemDefault: boolean, files: SeedSkillFile[]): string {
-  const base = `${content}\n\n# seed:systemDefault=${systemDefault ? "1" : "0"}\n`;
+function skillSeedHash(
+  content: string,
+  systemDefault: boolean,
+  files: SeedSkillFile[],
+  userInvocable = true,
+): string {
+  // Same back-compat rule as the file section: the userInvocable segment is
+  // appended ONLY when the flag is false, so every skill with the default
+  // (true) keeps hashing byte-identically to the pre-flag scheme. Without the
+  // segment, a user flipping the column via the API would still hash as
+  // pristine and the next source update would silently revert their edit.
+  let base = `${content}\n\n# seed:systemDefault=${systemDefault ? "1" : "0"}\n`;
+  if (userInvocable === false) base += "# seed:userInvocable=0\n";
   if (files.length === 0) return computeContentHash(base);
   return computeContentHash(`${base}# seed:files\n${canonicalFiles(files)}\n`);
 }
@@ -443,7 +454,12 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
     const skills = await loadSeedSkills();
     return skills.map((skill) => ({
       key: skill.name,
-      contentHash: skillSeedHash(skill.content, skill.systemDefault, skill.files),
+      contentHash: skillSeedHash(
+        skill.content,
+        skill.systemDefault,
+        skill.files,
+        skill.userInvocable,
+      ),
       skill,
     }));
   },
@@ -457,7 +473,12 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
       path: file.path,
       content: file.content,
     }));
-    return skillSeedHash(existing.content, existing.systemDefault, liveFiles);
+    return skillSeedHash(
+      existing.content,
+      existing.systemDefault,
+      liveFiles,
+      existing.userInvocable,
+    );
   },
 
   /**

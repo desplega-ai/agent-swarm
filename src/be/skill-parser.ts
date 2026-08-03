@@ -40,7 +40,17 @@ export function parseSkillContent(content: string): ParsedSkill {
     const colonIdx = line.indexOf(":");
     if (colonIdx === -1) continue;
     const key = line.slice(0, colonIdx).trim();
-    const value = line.slice(colonIdx + 1).trim();
+    let value = line.slice(colonIdx + 1).trim();
+    // YAML double-quoted scalars (emitted by buildSkillContent for values a
+    // plain scalar can't carry, and common in hand-written frontmatter): strip
+    // the quotes and JSON escapes. Malformed quoting falls back to the raw text.
+    if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+      try {
+        value = JSON.parse(value) as string;
+      } catch {
+        // keep raw
+      }
+    }
     if (key && value) {
       metadata[key] = value;
     }

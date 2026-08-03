@@ -16,7 +16,19 @@ export type SkillTemplateConfig = {
   userInvocable?: boolean;
 };
 
+/**
+ * Render a frontmatter value as a YAML scalar. Values that would break a plain
+ * scalar (`: `, ` #`, leading indicator chars, tabs/newlines, edge whitespace)
+ * are emitted as JSON-style double-quoted scalars — valid YAML that strict
+ * parsers (harness frontmatter readers use js-yaml) accept. Plain-safe values
+ * stay raw so existing seeded-skill hashes remain byte-stable.
+ */
+function yamlScalar(value: string): string {
+  const unsafe = /(: )|(:$)|( #)|[\n\t]|^[\s\-?:,[\]{}#&*!|>'"%@`]|\s$/.test(value);
+  return unsafe ? JSON.stringify(value) : value;
+}
+
 export function buildSkillContent(config: SkillTemplateConfig, body: string): string {
   const userInvocable = config.userInvocable === false ? "\nuser-invocable: false" : "";
-  return `---\nname: ${config.name}\ndescription: ${config.description}${userInvocable}\n---\n\n${body.trim()}\n`;
+  return `---\nname: ${config.name}\ndescription: ${yamlScalar(config.description)}${userInvocable}\n---\n\n${body.trim()}\n`;
 }
