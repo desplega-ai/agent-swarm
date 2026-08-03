@@ -5,8 +5,8 @@ export const baseOptions: BaseLayoutProps = {
   nav: {
     title: (
       <>
-        <Image src="/logo.png" alt="Agent Swarm" width={28} height={28} />
-        Agent Swarm
+        <Image src="/logo.png" alt="agent-swarm.dev" width={28} height={28} />
+        agent-swarm.dev
       </>
     ),
   },
