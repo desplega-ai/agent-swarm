@@ -36,12 +36,13 @@ Swarm config keys (resolve with `get-config key:<NAME> includeSecrets:true` — 
 | `KAPSO_PHONE_NUMBER_ID` | The swarm's provisioned number's Meta phone-number ID |
 | `KAPSO_WEBHOOK_HMAC_SECRET` | Shared HMAC secret. Kapso signs every webhook request with `X-Webhook-Signature: <hex>` |
 
-The curl recipes below assume `$KAPSO_API_KEY`, `$KAPSO_API_BASE_URL`, and `$KAPSO_PHONE_NUMBER_ID` are resolved into your shell, e.g.:
+The curl recipes below assume `$API_BASE`, `$API_KEY`, and `$PHONE_NUMBER_ID` are set in your shell. `get-config` is an MCP tool, not a shell command — call it as a tool first, then export the values it returns:
 
 ```bash
-API_BASE=$(get-config KAPSO_API_BASE_URL)        # https://api.kapso.ai
-API_KEY=$(get-config KAPSO_API_KEY)
-PHONE_NUMBER_ID=$(get-config KAPSO_PHONE_NUMBER_ID)
+# Values from the `get-config` MCP tool (key:<NAME> includeSecrets:true):
+API_BASE=https://api.kapso.ai        # KAPSO_API_BASE_URL
+API_KEY=<value of KAPSO_API_KEY>
+PHONE_NUMBER_ID=<value of KAPSO_PHONE_NUMBER_ID>
 ```
 
 The Kapso CLI is NOT installed in worker containers. Use direct HTTP or clone the `gokapso/agent-skills` repo for fallback scripts.
@@ -162,9 +163,8 @@ Always quote the phone number in `manage-user notes` so future lookups by phone 
 Use the Kapso platform endpoints via curl (no CLI needed):
 
 ```bash
-API_BASE=$(get-config KAPSO_API_BASE_URL)        # https://api.kapso.ai
-API_KEY=$(get-config KAPSO_API_KEY)
-PHONE_NUMBER_ID=$(get-config KAPSO_PHONE_NUMBER_ID)
+# Values from the `get-config` MCP tool, exported as in Setup above:
+# API_BASE, API_KEY, PHONE_NUMBER_ID
 
 # List conversations for the swarm's number
 curl -s -H "X-API-Key: $API_KEY" \
