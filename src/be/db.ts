@@ -1417,6 +1417,13 @@ export const taskQueries = {
        WHERE id = ? RETURNING *`,
     ),
 
+  setTerminalResultText: () =>
+    getDb().prepare<AgentTaskRow, [string | null, string | null, string]>(
+      `UPDATE agent_tasks SET output = ?, failureReason = ?
+       WHERE id = ? AND status IN ('completed', 'failed', 'cancelled', 'superseded')
+       RETURNING *`,
+    ),
+
   setCancelled: () =>
     getDb().prepare<AgentTaskRow, [string, string, string]>(
       `UPDATE agent_tasks SET status = 'cancelled', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -2217,6 +2224,8 @@ export interface TaskFilters {
   createdBefore?: string;
   /** Only return tasks requested by this canonical user. NULL rows are excluded. */
   requestedByUserId?: string;
+  /** When set, restrict to rows where `requestedByUserId` IS NULL. Takes priority over `requestedByUserId`. */
+  requestedByUserIdIsNull?: boolean;
   /** Sort list rows for either table freshness or timeline paging. */
   orderBy?: "lastUpdatedAt" | "createdAt";
   limit?: number;
@@ -2315,7 +2324,9 @@ export function getAllTasks(
     params.push(filters.createdBefore);
   }
 
-  if (filters?.requestedByUserId) {
+  if (filters?.requestedByUserIdIsNull) {
+    conditions.push("requestedByUserId IS NULL");
+  } else if (filters?.requestedByUserId) {
     conditions.push("requestedByUserId = ?");
     params.push(filters.requestedByUserId);
   }
@@ -2449,7 +2460,9 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
     params.push(filters.createdBefore);
   }
 
-  if (filters?.requestedByUserId) {
+  if (filters?.requestedByUserIdIsNull) {
+    conditions.push("requestedByUserId IS NULL");
+  } else if (filters?.requestedByUserId) {
     conditions.push("requestedByUserId = ?");
     params.push(filters.requestedByUserId);
   }
@@ -3036,6 +3049,28 @@ export function failTask(id: string, reason: string): AgentTask | null {
     }
   }
   return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Replace result text on an already-terminal task without replaying terminal
+ * side effects or moving any lifecycle timestamps. Callers must opt in to
+ * this narrow escape hatch; ordinary completion remains first-call-wins.
+ */
+export function overwriteTerminalTaskResultText(
+  id: string,
+  patch: { output?: string; failureReason?: string },
+): AgentTask | null {
+  const task = getTaskById(id);
+  if (!task || !isTerminalTaskStatus(task.status)) return null;
+
+  const output = patch.output !== undefined ? scrubSecrets(patch.output) : (task.output ?? null);
+  const failureReason =
+    patch.failureReason !== undefined
+      ? scrubSecrets(patch.failureReason)
+      : (task.failureReason ?? null);
+  const row = taskQueries.setTerminalResultText().get(output, failureReason, id) ?? null;
+
+  return row ? rowToAgentTask(row) : task;
 }
 
 export function cancelTask(id: string, reason?: string): AgentTask | null {

@@ -186,7 +186,7 @@ describe("Task Cancellation", () => {
       });
 
       // Start the task
-      startTask(task.id, workerAgent.id);
+      startTask(task.id);
       const startedTask = getTaskById(task.id);
       expect(startedTask?.status).toBe("in_progress");
 
@@ -358,7 +358,7 @@ describe("Task Cancellation", () => {
       });
 
       // Start the task - agent should be busy
-      startTask(task.id, agentId);
+      startTask(task.id);
       let agent = getAgentById(agentId);
       expect(agent?.status).toBe("busy");
 

@@ -317,6 +317,8 @@ class ApiClient {
     orderBy?: "lastUpdatedAt" | "createdAt";
     /** Filter to tasks whose `source` is in this list. Empty/undefined → all. */
     source?: string[];
+    /** Exact requester user id, or the sentinel `none` for unattributed (NULL) rows. */
+    requestedByUserId?: string;
   }): Promise<TasksResponse> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
@@ -333,6 +335,7 @@ class ApiClient {
     if (filters?.orderBy) params.set("orderBy", filters.orderBy);
     if (filters?.source && filters.source.length > 0)
       params.set("source", filters.source.join(","));
+    if (filters?.requestedByUserId) params.set("requestedByUserId", filters.requestedByUserId);
     const queryString = params.toString();
     const url = `${this.getBaseUrl()}/api/tasks${queryString ? `?${queryString}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });

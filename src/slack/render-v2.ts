@@ -566,12 +566,16 @@ function outcomeText(value: string | null | undefined, fallback: string): string
   return value?.trim() ? value : fallback;
 }
 
-function outcomeContent(task: AgentTask): string {
+function outcomeContent(task: AgentTask, slackReplySent: boolean): string {
   if (task.status === "failed") {
     return `❌ **Failed**\n\n${outcomeText(task.failureReason, "Task failed.")}`;
   }
   if (task.status === "cancelled") {
     return `🚫 **Cancelled**\n\n${outcomeText(task.failureReason, "Task was cancelled.")}`;
+  }
+  if (slackReplySent && task.status === "completed") {
+    const agentName = task.agentId ? (getAgentById(task.agentId)?.name ?? "Agent") : "Agent";
+    return `✅ ${agentName} completed`;
   }
   return `✅\n\n${outcomeText(task.output, "Task completed.")}`;
 }
@@ -705,7 +709,12 @@ export async function streamOutcomeCard(
   const tasks = getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
   const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
   const attachment = attachmentLine(getTaskAttachments(task.id));
-  const content = outcomeContent(task);
+  // Re-read slackReplySent rather than trusting the caller's snapshot: it can flip
+  // (via the slack-reply tool) between processSlackRenderV2's task fetch and the
+  // Slack round trips in the outer render loop that run before this function is
+  // called for the task.
+  const slackReplySent = getTaskById(task.id)?.slackReplySent ?? task.slackReplySent;
+  const content = outcomeContent(task, slackReplySent);
   const presentation = outcomePresentation(task, content, attachment);
   if (!presentation) throw new Error(`Outcome presentation is empty for task ${task.id}`);
 
@@ -734,10 +743,12 @@ export async function streamOutcomeCard(
     outcome = reserved.record;
     reservationWasCreated = reserved.created;
   }
+  let streamedFreshContent = false;
   if (isPendingSlackMessage(outcome)) {
     const reconciled = reservationWasCreated
       ? undefined
       : await findReservedSlackMessage(app.client, outcome, presentation);
+    streamedFreshContent = !reconciled;
     const started =
       reconciled ?? (await callSlackWithRetry(app.client, "chat.startStream", startPayload));
     if (typeof started.ts !== "string" || !started.ts) {
@@ -748,6 +759,17 @@ export async function streamOutcomeCard(
     });
     if (!persisted) throw new Error("Failed to persist the outcome stream timestamp");
     outcome = persisted;
+  }
+  if (!streamedFreshContent) {
+    // The stream backing this message was started (or reconciled from) an earlier
+    // pass, whose slackReplySent snapshot may have since changed. Overwrite its
+    // content with the freshly computed presentation before finalizing, so a
+    // completed-then-collapsed reply doesn't finalize with stale full output.
+    await callSlackWithRetry(app.client, "chat.update", {
+      channel: task.slackChannelId,
+      ts: outcome.ts,
+      text: presentation,
+    });
   }
   try {
     await callSlackWithRetry(app.client, "chat.stopStream", {

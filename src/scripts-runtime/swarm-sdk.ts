@@ -102,6 +102,7 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
             status: body.status,
             output: body.output,
             failureReason: body.failureReason,
+            force: body.force,
           },
         };
       }
