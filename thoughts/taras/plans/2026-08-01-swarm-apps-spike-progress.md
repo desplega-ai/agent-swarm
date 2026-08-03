@@ -394,6 +394,39 @@ normalization), 0bd60198 (spike-2 test modernization), 8413e1cd (visible shapes)
   validator/runtime contract needs a single source of truth for `visible` shapes
   (we now hand-mirror library semantics).
 
+## Spike 5 candidate (Taras + Claude, 2026-08-03): the lifecycle tier — RESEARCH FIRST (new session)
+
+Agreed direction: schema evolution + versioning + rollback — "apps live long enough to
+change". Research in a NEW session (`/desplega:research` over this doc + the brainstorm +
+the spike specs) before freezing a spike-5 contract. Rationale: spikes 1-4 validated all
+FEATURE clusters; the unproven dimension is an agent changing a model that already holds
+real data — the risk class the spikes kept brushing against:
+- "PUT schema change leaves stale rows / orphaned idx keys" logged since spike 1;
+  both PATCH routes carry an explicit "does not migrate rows" comment.
+- AMENDMENT v2 bricked stored definitions at READ time (enum removal); recovery was a
+  hand-edit of sqlite — no migration path for anything stored.
+- No versioning/snapshot before patch (flagged since spike 2) — one bad agent patch
+  destroys the only copy of the definition.
+
+Research questions / sketch to validate:
+1. Schema-change contract: model/column patches against an app WITH rows — add column
+   (default/backfill), remove column, kind change, enum narrowing; destructive changes
+   fail loudly via issues[] unless the patch carries an explicit migration directive;
+   index rebuild + row backfill server-side under the model mutex (sync machinery
+   precedent). How do source-bound columns + join keys interact with migrations?
+2. Versioning: snapshot on every definition write (app_versions, mirror the workflows
+   pattern), agent-legible app-history/app-diff/app-rollback tools; rollback restores
+   the definition and the schema engine handles the row side.
+3. Stored-definition format migration (the read-time-brick class, generalized) — the
+   platform must be able to evolve its own definition schema without sqlite surgery.
+4. Finale shape: "restructure PM Inbox's flag column into priority + status, keeping
+   all existing annotations" zero-shot, data intact, then app-rollback restores.
+
+Deliberately ranked below this (machinery mostly proven or incremental): hooks
+(after-write automation — actions/schedules/sync precedents), repeat/$item + catalog
+growth, per-app ACL/sharing (pages precedent). After spike 5: stop spiking → /research
+→ create-plan for the real referenced-rows implementation.
+
 ## Spike 3 log (2026-08-02, superseded by results above — spec ./2026-08-02-swarm-apps-spike3-sync-spec.md)
 
 - **Task 0 (action-loop browser proof): PASS 3/3.** Saved script `notes-add-sample`
