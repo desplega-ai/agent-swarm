@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "TDD-focused implementation planning. Creates plans with strict Red-Green-Commit/Rollback cycles for each step.",
+  "displayName": "TDD Planning",
+  "kind": "skill",
+  "name": "tdd-planning",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "tdd-planning",
+  "systemDefault": true,
+  "tags": [
+    "tdd",
+    "planning",
+    "testing"
+  ],
+  "title": "TDD Planning",
+  "version": "1.0.0"
+}

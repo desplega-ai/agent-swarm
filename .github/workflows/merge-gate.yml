@@ -92,10 +92,11 @@ jobs:
           #   templates/skills/       seeded skills + bundled files
           #   plugin/skills/          baked skills (duplicate-delivery-path rule)
           #   integrations-catalog.ts templatePath entries (missing-remote-skill rule)
-          #   the three scripts       the checkers and generators themselves
+          #   Dockerfile.worker       npx --skill entries (duplicate-delivery-path rule)
+          #   the four scripts        the checkers, generators, and vendor sync
           #   src/be/seed-skills/     seeder + generated manifest
           #   skill-fs-writer.ts      the FS reconcile the tests cover
-          SEED_SKILLS=$(match '^(templates/skills/|plugin/skills/|src/be/seed-skills/|src/utils/skill-fs-writer\.ts$|scripts/(build-seed-skill-files|build-skill-md|check-skill-sources)\.ts$|apps/ui/src/lib/integrations-catalog\.ts$)')
+          SEED_SKILLS=$(match '^(templates/skills/|templates/ai-toolbox\.manifest\.json$|plugin/skills/|Dockerfile\.worker$|src/be/seed-skills/|src/utils/skill-fs-writer\.ts$|scripts/(build-seed-skill-files|build-skill-md|check-skill-sources|sync-ai-toolbox-skills)\.ts$|apps/ui/src/lib/integrations-catalog\.ts$)')
 
           # script SDK types freshness: source constants + generator + outputs +
           # allowlist/registry (generation validates SDK_ALLOWLIST against server.ts).
@@ -507,6 +508,9 @@ jobs:
 
       - name: Check skill source-of-truth invariants
         run: bun run check:skill-sources
+
+      - name: Check vendored ai-toolbox skills
+        run: bun run check:ai-toolbox-skills
 
       - name: Check generated SKILL.md freshness
         run: bun run check:skill-md

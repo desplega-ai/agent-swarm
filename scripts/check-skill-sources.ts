@@ -6,7 +6,8 @@
  *   1. **Seeded** — `templates/skills/<name>/{config.json,content.md,files/}`
  *      with `runAllSeedersCandidate: true`. Embedded into the API binary at build
  *      time, written to the DB at boot, synced to every harness skill tree.
- *   2. **Baked** — `plugin/skills/<name>/SKILL.md`, COPYed into the worker image.
+ *   2. **Baked** — `plugin/skills/<name>/SKILL.md` or a pinned `npx skills add`
+ *      in `Dockerfile.worker`, copied or installed into the worker image.
  *   3. **Remote-installed on demand** — a `SKILL.md` at a path the integrations
  *      catalog points at (`templatePath`), fetched from GitHub raw by
  *      `skill-install-remote`. Both `templates/skills/` and `plugin/skills/`
@@ -33,15 +34,9 @@ import type { SkillTemplateConfig } from "../src/be/seed-skills/render";
 const REPO_ROOT = join(import.meta.dir, "..");
 const TEMPLATES_DIR = join(REPO_ROOT, "templates", "skills");
 const PLUGIN_DIR = join(REPO_ROOT, "plugin", "skills");
+const WORKER_DOCKERFILE = join(REPO_ROOT, "Dockerfile.worker");
 const SEEDER_INDEX = join(REPO_ROOT, "src", "be", "seed-skills", "index.ts");
-const INTEGRATIONS_CATALOG = join(
-  REPO_ROOT,
-  "apps",
-  "ui",
-  "src",
-  "lib",
-  "integrations-catalog.ts",
-);
+const INTEGRATIONS_CATALOG = join(REPO_ROOT, "apps", "ui", "src", "lib", "integrations-catalog.ts");
 
 type Problem = { rule: string; detail: string };
 const problems: Problem[] = [];
@@ -63,6 +58,30 @@ async function skillDirs(root: string, marker: string): Promise<string[]> {
 const templateNames = await skillDirs(TEMPLATES_DIR, "config.json").catch(() => []);
 const pluginNames = await skillDirs(PLUGIN_DIR, "SKILL.md").catch(() => []);
 const seederSource = await Bun.file(SEEDER_INDEX).text();
+
+/** Skill names passed to pinned `npx skills add` commands in Dockerfile.worker. */
+async function dockerfileSkillNames(): Promise<string[]> {
+  const source = (await Bun.file(WORKER_DOCKERFILE).text())
+    .split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n")
+    .replace(/\\\r?\n/g, " ");
+  const names = new Set<string>();
+
+  for (const command of source.matchAll(/\bnpx\s+.*?\bskills(?:@\S+)?\s+add\s+([^&\n]+)/g)) {
+    const args = command[1] ?? "";
+    for (const flag of args.matchAll(
+      /--skill(?:=|\s+)(?:"([a-z0-9][a-z0-9-]*)"|'([a-z0-9][a-z0-9-]*)'|([a-z0-9][a-z0-9-]*))/g,
+    )) {
+      const name = flag[1] ?? flag[2] ?? flag[3];
+      if (name) names.add(name);
+    }
+  }
+
+  return [...names].sort();
+}
+
+const dockerfileNames = await dockerfileSkillNames();
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -88,6 +107,15 @@ for (const name of templateNames) {
       `"${name}" exists in BOTH templates/skills/ and plugin/skills/. ` +
         `Both write ~/.claude/skills/${name}/SKILL.md and the DB copy wins, so the ` +
         `baked one is dead content. Pick one — prefer templates/skills/.`,
+    );
+  }
+  if (dockerfileNames.includes(name)) {
+    fail(
+      "duplicate-delivery-path",
+      `"${name}" exists in templates/skills/ AND is installed by an npx skills add ` +
+        `--skill flag in Dockerfile.worker. Both write ` +
+        `~/.claude/skills/${name}/SKILL.md and the DB copy wins, so the baked one is ` +
+        `dead content. Pick one — prefer templates/skills/.`,
     );
   }
 }
@@ -210,5 +238,6 @@ if (problems.length > 0) {
 
 console.log(
   `Skill source-of-truth check passed ` +
-    `(${templateNames.length} seeded template(s), ${pluginNames.length} baked skill(s), no overlap).`,
+    `(${templateNames.length} seeded template(s), ${pluginNames.length} plugin-baked skill(s), ` +
+    `${dockerfileNames.length} Docker-installed skill(s), no overlap).`,
 );

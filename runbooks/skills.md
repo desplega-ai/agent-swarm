@@ -60,8 +60,44 @@ templates/skills/<name>/
 
 - **Text only.** `skill_files.content` is `TEXT` and the FS writer skips binaries.
 - **Executable bits are not preserved** — a bundled `.sh` arrives non-executable.
+- Invoke executable-text helpers with their interpreter (for example,
+  `bash scripts/codex-exec.sh`), never by relying on a source executable bit.
 - Limits (`SKILL_FILE_LIMITS`): 100 files, 500 KB per file, 10 MB total.
 - `SKILL.md` is rejected as a bundled path — the body lives on the skill row.
+
+## Vendored ai-toolbox skills
+
+The source of truth for these seeded skills is
+[`desplega-ai/ai-toolbox`](https://github.com/desplega-ai/ai-toolbox), not the
+generated directories under `templates/skills/`. The pinned commit, explicit
+exclude-list, transform report, and per-output-file SHA-256 hashes live in
+`templates/ai-toolbox.manifest.json`. `feedback` is deliberately excluded; all
+other `cc-plugin/base/skills/*` directories plus
+`cc-plugin/wts/skills/wts-expert` are discovered on each sync, so new upstream
+base skills are included by default.
+
+Re-pin and regenerate with:
+
+```bash
+bun run sync:ai-toolbox-skills --ref <sha>
+bun run check:ai-toolbox-skills
+```
+
+Use `--repo <path-or-url>` to source a fetched local clone or a different
+transport. Manifest `source` remains the canonical upstream identity; when the
+transport differs, `syncedVia` records the local path or sanitized URL identity
+used for that sync (URL credentials, query, and fragment data are omitted). The
+commit SHA is the immutable content pin in both cases. The sync reads
+Git objects at that commit, strips supported frontmatter, drops inert hooks,
+rewrites prose references to skill-relative paths, rewrites executable and
+`${CLAUDE_PLUGIN_ROOT}` references to `~/.claude/skills/<name>/...`, and vendors
+sibling text files under `files/`. Executable text is retained but its
+executable bit is intentionally downgraded and reported; invoke such helpers
+with their interpreter, for example
+`bash ~/.claude/skills/delegate-work/scripts/codex-exec.sh`. Binaries and
+unsupported frontmatter keys fail the sync. Never hand-edit vendored
+`config.json`, `content.md`, or `files/**`; update upstream, re-run the sync, and
+commit the manifest and output together.
 
 ## How versioning works
 
@@ -118,8 +154,9 @@ Verify end to end against a fresh DB (`rm agent-swarm-db.sqlite && bun run start
 | `src/be/seed-skills/bundled-files.generated.json` | Generated — never hand-edit |
 | `scripts/build-seed-skill-files.ts` | Manifest generator + `--check` |
 | `scripts/build-skill-md.ts` | Generated `SKILL.md` renderer + `--check` |
+| `scripts/sync-ai-toolbox-skills.ts` | SHA-pinned ai-toolbox vendor sync + network-free `--check` |
 | `scripts/check-skill-sources.ts` | Invariant enforcement |
 | `src/be/seed/runner.ts` | Generic pristine-vs-user-modified harness |
 | `src/utils/skill-fs-writer.ts` | Writes to all five harness trees; owns `.swarm-managed` reconcile |
 | `src/utils/skills-refresh.ts` | Worker-side live refresh (mid-session, no restart) |
-| `docker-entrypoint.sh` | Boot-time skill sync |
+| `docker-entrypoint.sh` | Legacy boot sync for simple skills into three trees; the runner owns authoritative five-tree refresh |

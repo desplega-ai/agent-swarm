@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Git worktree management expert for @desplega.ai/wts. Use when the user asks about git worktrees, wts commands, worktree workflows, or wants help managing multiple branches simultaneously.",
+  "displayName": "WTS Expert",
+  "kind": "skill",
+  "name": "wts-expert",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "wts-expert",
+  "systemDefault": true,
+  "tags": [
+    "git",
+    "worktrees",
+    "wts"
+  ],
+  "title": "WTS Expert",
+  "version": "1.0.0"
+}

@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Improve (or bootstrap) an AGENTS.md / CLAUDE.md file using `<important if>` conditional blocks so the agent actually attends to the right guidance at the right time. Use this skill whenever the user mentions AGENTS.md, CLAUDE.md, agent instructions, project rules for AI, \"my claude config\", onboarding docs for agents, or asks to tighten / shorten / audit / rewrite an existing one — even if they don't explicitly say the filename. Also use when the user complains that an agent keeps ignoring their project rules.",
+  "displayName": "Improve AGENTS.md",
+  "kind": "skill",
+  "name": "improve-agents-md",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "improve-agents-md",
+  "systemDefault": true,
+  "tags": [
+    "agent-instructions",
+    "documentation",
+    "configuration"
+  ],
+  "title": "Improve AGENTS.md",
+  "version": "1.0.0"
+}

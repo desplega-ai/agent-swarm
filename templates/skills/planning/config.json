@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Implementation planning skill. Creates detailed technical plans through interactive research and iteration.",
+  "displayName": "Planning",
+  "kind": "skill",
+  "name": "planning",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "planning",
+  "systemDefault": true,
+  "tags": [
+    "planning",
+    "implementation",
+    "workflow"
+  ],
+  "title": "Planning",
+  "version": "1.0.0"
+}

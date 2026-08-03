@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Comprehensive codebase research skill. Documents codebase as-is by spawning parallel sub-agents and synthesizing findings into research documents.",
+  "displayName": "Researching",
+  "kind": "skill",
+  "name": "researching",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "researching",
+  "systemDefault": true,
+  "tags": [
+    "research",
+    "codebase",
+    "documentation"
+  ],
+  "title": "Researching",
+  "version": "1.0.0"
+}

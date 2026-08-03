@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Work through every review comment on a GitHub PR — fetch the threads, verify each claim against the code, fix what is real, then reply and mark each thread resolved before pushing. Use when the user says \"tackle the PR comments\", \"address the review\", \"handle the bot comments\", \"check the comments on the PR\", \"resolve the review threads\", or invokes /tackle-gh-comments. Project-agnostic; works in any repo with a GitHub remote.",
+  "displayName": "Tackle GH Comments",
+  "kind": "skill",
+  "name": "tackle-gh-comments",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "tackle-gh-comments",
+  "systemDefault": true,
+  "tags": [
+    "github",
+    "code-review",
+    "pull-requests"
+  ],
+  "title": "Tackle GH Comments",
+  "version": "1.0.0"
+}

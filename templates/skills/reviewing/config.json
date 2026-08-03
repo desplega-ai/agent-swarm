@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Structured critique of research, plan, and brainstorm documents for completeness, gaps, and quality.",
+  "displayName": "Reviewing",
+  "kind": "skill",
+  "name": "reviewing",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "reviewing",
+  "systemDefault": true,
+  "tags": [
+    "review",
+    "documents",
+    "quality"
+  ],
+  "title": "Reviewing",
+  "version": "1.0.0"
+}

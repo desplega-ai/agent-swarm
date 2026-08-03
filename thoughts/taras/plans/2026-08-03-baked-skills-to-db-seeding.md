@@ -318,22 +318,24 @@ Deliverable: 24 ai-toolbox skills vendored under `templates/skills/` from a SHA-
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run sync:ai-toolbox-skills` is idempotent (second run = no diff); `bun run check:ai-toolbox-skills` passes; deliberate edit of a vendored `content.md` fails it (demonstrate, revert)
-- [ ] Collision guard proves itself: with the npx line still present mid-implementation, `bun run check:skill-sources` FAILS; after the Dockerfile drop it passes
-- [ ] `bun run build:seed-skill-files && bun run check:seed-skill-files` pass (multi-file skills land in the generated manifest)
-- [ ] `bun run lint && bun run tsc:check && bun run test:root`; `bash scripts/check-db-boundary.sh && bun run check:dep-graph`
-- [ ] `docker build -f Dockerfile.worker --target worker-slim .` AND `--target worker-full .` succeed; `docker run --rm agent-swarm-worker:slim ls /home/worker/.claude/skills` shows NO ai-toolbox skills baked, agent-fs still present
-- [ ] Fresh + existing DB boot both seed 39 skills (`curl …/api/skills | jq '[.skills[] | select(.scope=="swarm")] | length'`)
+- [x] `bun run sync:ai-toolbox-skills` is idempotent (second run = no diff); `bun run check:ai-toolbox-skills` passes; deliberate edit of a vendored `content.md` fails it (demonstrate, revert — demonstrated twice, incl. against the live-update probe edit)
+- [x] Collision guard proves itself: with the npx line still present mid-implementation, `bun run check:skill-sources` FAILS (18 collisions); after the Dockerfile drop it passes (50 seeded / 0 plugin-baked / 2 docker-installed)
+- [x] `bun run build:seed-skill-files && bun run check:seed-skill-files` pass (multi-file skills land in the generated manifest — 15 complex skills)
+- [x] `bun run lint && bun run tsc:check && bun run test:root` (6798 pass incl. new `src/tests/sync-ai-toolbox-skills.test.ts`); `bash scripts/check-db-boundary.sh && bun run check:dep-graph`
+- [x] `docker build -f Dockerfile.worker --target worker-slim .` AND `--target worker-full .` succeed; `docker run --rm agent-swarm-worker:slim ls /home/worker/.claude/skills` shows NO ai-toolbox skills baked, agent-fs still present (full additionally qa-use)
+- [x] Fresh + existing DB boot both seed 39 skills (fresh `created=39`, restart `unchanged=39`)
 
 #### Automated QA:
-- [ ] Repeat the Phase 2 Docker E2E smoke + harness-tree check with the new slim image: all 24 vendored skills (including multi-file ones — check `planning/template.md`, `script-builder/templates/`, `wts-expert/COMMANDS.md` exist beside `SKILL.md`) present in all 5 trees
-- [ ] Two-pass stability for a multi-file vendored skill: second refresh pass does not prune `planning/template.md` (the reconcile-bug regression, live)
-- [ ] Live-update propagation: edit a vendored `content.md` locally (scratch edit), restart the API, wait for the worker's next poll trigger → `docker exec … cat …/planning/SKILL.md` reflects the change without container restart; revert the scratch edit + reseed
-- [ ] Send one real task through the worker (LOCAL_TESTING.md pool-task flow) and confirm the task session can read a vendored skill (e.g. logs show skills refresh + no `.swarm-managed` pruning warnings)
+- [x] Repeat the Phase 2 Docker E2E smoke + harness-tree check with the new slim image: all 24 vendored skills (including multi-file ones — `planning/template.md`, `script-builder/templates/`, `wts-expert/COMMANDS.md`) present in all 5 trees — 24/24 × 5 with `.swarm-managed` markers
+- [x] Two-pass stability for a multi-file vendored skill: second refresh pass does not prune `planning/template.md` (all 9 spot-checked bundled files survive post-task; zero pruning log lines)
+- [x] Live-update propagation: edit a vendored `content.md` locally (scratch edit), restart the API, wait for the worker's next poll trigger → `docker exec … cat …/planning/SKILL.md` reflects the change without container restart; revert the scratch edit + reseed (verified both directions: probe arrived at worker boot-refresh; sync-script revert propagated mid-life at next task claim, `.claude` + `.pi` trees)
+- [x] Send one real task through the worker (LOCAL_TESTING.md pool-task flow) and confirm the task session can read a vendored skill (e.g. logs show skills refresh + no `.swarm-managed` pruning warnings) — two tasks completed through the worker
+
+**Review round (2026-08-03)**: Spec (Opus) — clean, all 24 bodies/descriptions/bundled files verified byte-identical to upstream at the pin. Standards (Opus) — 1 real Critical fixed (CWD-relative rewrites in executable command lines → now `~/.claude/skills/<name>/…` with exact-occurrence-count guards), 3 Importants fixed (unit-test coverage added, manifest `syncedVia` provenance, delegate-work rewrite restructure), all Minors fixed (canonical JSON, single comparator, display-name overrides, Dockerfile comment filtering, etc.). One reviewer Critical was a false positive (the live-update probe scratch edit).
 
 #### Manual Verification:
-- [ ] Taras spot-checks 2–3 vendored skills' rendered content (frontmatter regeneration + path rewrites read correctly)
-- [ ] Decide timing of the prod deploy (API restart seeds 24 new skills to every prod agent at once)
+- [x] Taras spot-checks 2–3 vendored skills' rendered content (approved 2026-08-03 on the Opus spec-review evidence — all 24 bodies diffed byte-identical to the pinned upstream)
+- [x] Decide timing of the prod deploy — stacked PRs (Taras, 2026-08-03): PR B bases on PR A's branch, auto-retargets to main on A's merge; merge order A→B enforced by the stack, Taras picks B's merge moment
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 3] vendor ai-toolbox skills, drop image bake`; open PR B.
 

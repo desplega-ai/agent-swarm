@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Execute individual plan phases as background sub-agents for context-efficient implementation.",
+  "displayName": "Phase Running",
+  "kind": "skill",
+  "name": "phase-running",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "phase-running",
+  "systemDefault": true,
+  "tags": [
+    "implementation",
+    "phases",
+    "agents"
+  ],
+  "title": "Phase Running",
+  "version": "1.0.0"
+}

@@ -38,7 +38,14 @@ Placement rules:
 
 ## Skills: `npx skills`, not plugin marketplaces
 
-Skills are installed by pinned `npx skills add <owner/repo>@<tag> --skill <name> -g -a claude-code -y` runs (worker-base; qa-use skill in worker-full-base), then mirrored into the pi/codex/opencode/.agents trees by the leaf block. The ONLY remaining marketplace plugins are context-mode for Claude + Codex (they ship the ctx_* hooks, which a skills-only installer can't provide).
+Only the CLI-coupled `agent-fs` skill (worker-base) and `qa-use` skill
+(worker-full-base) are installed by pinned
+`npx skills add <owner/repo>@<tag> --skill <name> -g -a claude-code -y` runs,
+then mirrored into the pi/codex/opencode/.agents trees by the leaf block. The
+general skill catalog, including vendored ai-toolbox skills, is DB-seeded from
+`templates/skills/`. The ONLY remaining marketplace plugins are context-mode
+for Claude + Codex (they ship the ctx_* hooks, which a skills-only installer
+can't provide).
 
 - Pin every source to a tag/SHA — unpinned `npx skills add` resolves the default branch at build time.
 - Don't `|| true`-guard the skills RUN; keep the `test -e .../SKILL.md` asserts (upstream bug: global installs occasionally skip the `~/.claude/skills` link — vercel-labs/skills#851).

@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Code-shape policy for ALL code that gets written or reviewed — the senior-engineer bar for minimal complexity. Use whenever you are about to write code, design a module or abstraction, draft a plan phase that shapes code, or review a diff; also when the user asks \"is this over-engineered\", \"can this be simpler\", or pushes back on complexity. Sibling of desplega:delegate-work (which picks WHO executes; this skill defines WHAT good output looks like).",
+  "displayName": "Engineering Standards",
+  "kind": "skill",
+  "name": "engineering-standards",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "engineering-standards",
+  "systemDefault": true,
+  "tags": [
+    "engineering",
+    "standards",
+    "code-quality"
+  ],
+  "title": "Engineering Standards",
+  "version": "1.0.0"
+}
