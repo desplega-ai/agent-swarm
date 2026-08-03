@@ -72,6 +72,12 @@ const baseDefinition = {
   },
 };
 
+function normalizedBaseDefinition() {
+  const parsed = parseAppDefinition(baseDefinition);
+  if (!parsed.success) throw new Error(JSON.stringify(parsed.issues));
+  return parsed.definition;
+}
+
 type RegisteredTool = {
   handler: (args: unknown, extra: unknown) => Promise<unknown>;
 };
@@ -184,32 +190,40 @@ afterAll(async () => {
 
 describe("app definition patches", () => {
   test("does not alias stored or patch values and rejects unsafe keys", () => {
-    const stored = structuredClone(baseDefinition);
+    const stored = structuredClone(normalizedBaseDefinition());
     const patch = {
-      page: {
-        elements: {
-          title: { type: "Heading", props: { text: "Patched" } },
+      pages: {
+        main: {
+          elements: {
+            title: { type: "Heading", props: { text: "Patched" } },
+          },
         },
       },
     };
     const result = applyAppDefinitionPatch(stored, patch);
     expect(result.success).toBe(true);
     if (result.success) {
-      (stored.page.elements.title.props as { text: string }).text = "Stored changed";
-      (patch.page.elements.title.props as { text: string }).text = "Patch changed";
-      expect((result.definition as typeof baseDefinition).page.elements.title.props.text).toBe(
-        "Patched",
-      );
+      const storedTitle = stored.pages.main.elements.title as { props: { text: string } };
+      storedTitle.props.text = "Stored changed";
+      patch.pages.main.elements.title.props.text = "Patch changed";
+      const resultTitle = result.definition.pages.main.elements.title as {
+        props: { text: string };
+      };
+      expect(resultTitle.props.text).toBe("Patched");
+      expect(result.definition.defaultPage).toBe("main");
+      expect(result.definition).not.toHaveProperty("page");
     }
 
     const unsafe = applyAppDefinitionPatch(
-      baseDefinition,
-      JSON.parse('{"page":{"elements":{"__proto__":{"type":"Heading","props":{"text":"Nope"}}}}}'),
+      normalizedBaseDefinition(),
+      JSON.parse(
+        '{"pages":{"main":{"elements":{"__proto__":{"type":"Heading","props":{"text":"Nope"}}}}}}',
+      ),
     );
     expect(unsafe.success).toBe(false);
     if (!unsafe.success) {
       expect(unsafe.issues).toContainEqual({
-        path: "page.elements.__proto__",
+        path: "pages.main.elements.__proto__",
         message: 'unsafe merge patch key "__proto__" is not allowed',
       });
     }
@@ -252,11 +266,17 @@ describe("app definition patches", () => {
       rating: { kind: "number" },
     });
     expect(merge.body.app.definition.queries).not.toHaveProperty("allIdeas");
+    expect(merge.body.app.definition).toMatchObject({
+      pages: { main: baseDefinition.page },
+      defaultPage: "main",
+    });
+    expect(merge.body.app.definition).not.toHaveProperty("page");
 
     const replace = await request<{
       app: {
         definition: {
-          page: { elements: Record<string, unknown> };
+          pages: { main: { elements: Record<string, unknown> } };
+          defaultPage: string;
           actions: Record<string, unknown>;
         };
       };
@@ -264,9 +284,11 @@ describe("app definition patches", () => {
       method: "PATCH",
       body: JSON.stringify({
         definition: {
-          page: {
-            elements: {
-              title: { type: "Heading", props: { text: "Changed" } },
+          pages: {
+            main: {
+              elements: {
+                title: { type: "Heading", props: { text: "Changed" } },
+              },
             },
           },
           actions: { notify: { kind: "task", prompt: "New prompt" } },
@@ -274,32 +296,36 @@ describe("app definition patches", () => {
       }),
     });
     expect(replace.status).toBe(200);
-    expect(replace.body.app.definition.page.elements.title).toEqual({
+    expect(replace.body.app.definition.pages.main.elements.title).toEqual({
       type: "Heading",
       props: { text: "Changed" },
     });
+    expect(replace.body.app.definition.defaultPage).toBe("main");
+    expect(replace.body.app.definition).not.toHaveProperty("page");
     expect(replace.body.app.definition.actions.notify).toEqual({
       kind: "task",
       prompt: "New prompt",
     });
 
     const removeElement = await request<{
-      app: { definition: { page: { elements: Record<string, unknown> } } };
+      app: { definition: { pages: { main: { elements: Record<string, unknown> } } } };
     }>(`/api/apps/${appId}`, {
       method: "PATCH",
       body: JSON.stringify({
         definition: {
-          page: {
-            elements: {
-              root: { type: "Container", props: { direction: "column" } },
-              title: null,
+          pages: {
+            main: {
+              elements: {
+                root: { type: "Container", props: { direction: "column" } },
+                title: null,
+              },
             },
           },
         },
       }),
     });
     expect(removeElement.status).toBe(200);
-    expect(removeElement.body.app.definition.page.elements).not.toHaveProperty("title");
+    expect(removeElement.body.app.definition.pages.main.elements).not.toHaveProperty("title");
   });
 
   test("rejects an invalid patched result without writing", async () => {
@@ -309,12 +335,12 @@ describe("app definition patches", () => {
       `/api/apps/${appId}`,
       {
         method: "PATCH",
-        body: JSON.stringify({ definition: { page: { root: "missing" } } }),
+        body: JSON.stringify({ definition: { pages: { main: { root: "missing" } } } }),
       },
     );
     expect(result.status).toBe(400);
     expect(result.body.error).toBe("invalid app definition");
-    expect(result.body.issues.some((issue) => issue.path.startsWith("page."))).toBe(true);
+    expect(result.body.issues.some((issue) => issue.path.startsWith("pages.main."))).toBe(true);
     expect(getApp(appId)).toEqual(before);
   });
 });
@@ -395,7 +421,7 @@ describe("server page validation", () => {
     expect(unknown.success).toBe(false);
     if (!unknown.success) {
       expect(unknown.issues).toContainEqual({
-        path: "page.elements.root.props.search",
+        path: "pages.main.elements.root.props.search",
         message: 'state reference targets unknown UI control "unknownId"',
       });
     }
@@ -420,7 +446,7 @@ describe("server page validation", () => {
     expect(formIdIsNotUi.success).toBe(false);
     if (!formIdIsNotUi.success) {
       expect(formIdIsNotUi.issues).toContainEqual({
-        path: "page.elements.table.props.search",
+        path: "pages.main.elements.table.props.search",
         message: 'state reference targets unknown UI control "formOnly"',
       });
     }
@@ -472,17 +498,19 @@ describe("server page validation", () => {
     expect(parsed.success).toBe(false);
     if (!parsed.success) {
       expect(parsed.issues).toContainEqual({
-        path: "page.elements.root.props.text",
+        path: "pages.main.elements.root.props.text",
         message: "is required",
       });
-      expect(parsed.issues.some((item) => item.path === "page.elements.root.props")).toBe(false);
+      expect(parsed.issues.some((item) => item.path === "pages.main.elements.root.props")).toBe(
+        false,
+      );
     }
   });
 
   test("reports action-chain mistakes once", () => {
     const cases = [
       {
-        path: "page.elements.root.props.onSubmit.0.action",
+        path: "pages.main.elements.root.props.onSubmit.0.action",
         element: {
           type: "Form",
           props: {
@@ -493,7 +521,7 @@ describe("server page validation", () => {
         },
       },
       {
-        path: "page.elements.root.props.rowActions.0.actions.0.action",
+        path: "pages.main.elements.root.props.rowActions.0.actions.0.action",
         element: {
           type: "Table",
           props: {
@@ -540,7 +568,7 @@ describe("server page validation", () => {
   test("reports every required structural, binding, and action-chain rejection class", () => {
     const cases: Array<{ path: string; definition: unknown }> = [
       {
-        path: "page.elements.root.extra",
+        path: "pages.main.elements.root.extra",
         definition: {
           ...baseDefinition,
           page: {
@@ -550,7 +578,7 @@ describe("server page validation", () => {
         },
       },
       {
-        path: "page.elements.root.children",
+        path: "pages.main.elements.root.children",
         definition: {
           ...baseDefinition,
           page: {
@@ -563,7 +591,7 @@ describe("server page validation", () => {
         },
       },
       {
-        path: "page.elements.right.children.0",
+        path: "pages.main.elements.right.children.0",
         definition: {
           ...baseDefinition,
           page: {
@@ -578,7 +606,7 @@ describe("server page validation", () => {
         },
       },
       {
-        path: "page.elements.orphan",
+        path: "pages.main.elements.orphan",
         definition: {
           ...baseDefinition,
           page: {
@@ -591,7 +619,7 @@ describe("server page validation", () => {
         },
       },
       {
-        path: "page.elements.root.children.0",
+        path: "pages.main.elements.root.children.0",
         definition: {
           ...baseDefinition,
           page: {
@@ -603,7 +631,7 @@ describe("server page validation", () => {
         },
       },
       {
-        path: "page.elements.card.children.0",
+        path: "pages.main.elements.card.children.0",
         definition: {
           ...baseDefinition,
           page: {
@@ -616,14 +644,14 @@ describe("server page validation", () => {
         },
       },
       {
-        path: "page.elements.root.type",
+        path: "pages.main.elements.root.type",
         definition: {
           ...baseDefinition,
           page: { root: "root", elements: { root: { type: "Unknown", props: {} } } },
         },
       },
       {
-        path: "page.elements.root.props.direction",
+        path: "pages.main.elements.root.props.direction",
         definition: {
           ...baseDefinition,
           page: {
@@ -633,7 +661,7 @@ describe("server page validation", () => {
         },
       },
       {
-        path: "page.elements.root.props.content",
+        path: "pages.main.elements.root.props.content",
         definition: {
           ...baseDefinition,
           page: {
@@ -645,7 +673,7 @@ describe("server page validation", () => {
         },
       },
       {
-        path: "page.elements.root.visible",
+        path: "pages.main.elements.root.visible",
         definition: {
           ...baseDefinition,
           page: {
@@ -661,7 +689,7 @@ describe("server page validation", () => {
         },
       },
       {
-        path: "page.elements.root.on.press.0.params.values",
+        path: "pages.main.elements.root.on.press.0.params.values",
         definition: {
           ...baseDefinition,
           page: {
@@ -688,7 +716,7 @@ describe("server page validation", () => {
         },
       },
       {
-        path: "page.elements.root.on.press.0.params.model",
+        path: "pages.main.elements.root.on.press.0.params.model",
         definition: {
           ...baseDefinition,
           page: {
@@ -706,7 +734,7 @@ describe("server page validation", () => {
         },
       },
       {
-        path: "page.elements.root.on.press.0.params.rowId",
+        path: "pages.main.elements.root.on.press.0.params.rowId",
         definition: {
           ...baseDefinition,
           page: {
@@ -724,7 +752,7 @@ describe("server page validation", () => {
         },
       },
       {
-        path: "page.elements.root.on.press.0.action",
+        path: "pages.main.elements.root.on.press.0.action",
         definition: {
           ...baseDefinition,
           page: {
@@ -740,7 +768,7 @@ describe("server page validation", () => {
         },
       },
       {
-        path: "page.elements.root.on.press.0.params.name",
+        path: "pages.main.elements.root.on.press.0.params.name",
         definition: {
           ...baseDefinition,
           page: {
@@ -913,7 +941,12 @@ describe("app MCP iteration tools", () => {
     }>;
     expect(fetched.structuredContent.success).toBe(true);
     expect(fetched.structuredContent.app.id).toBe(appId);
-    expect(fetched.structuredContent.app.definition).toEqual(baseDefinition);
+    expect(fetched.structuredContent.app.definition).toEqual(normalizedBaseDefinition());
+    expect(fetched.structuredContent.app.definition).toMatchObject({
+      pages: { main: baseDefinition.page },
+      defaultPage: "main",
+    });
+    expect(fetched.structuredContent.app.definition).not.toHaveProperty("page");
 
     const listed = (await tools["app-list"]!.handler({}, toolMeta())) as StructuredResult<{
       success: boolean;
@@ -933,7 +966,7 @@ describe("app MCP iteration tools", () => {
     expect(patched.structuredContent).toMatchObject({ appId, url: `/apps/${appId}` });
 
     const invalid = (await tools["app-patch"]!.handler(
-      { appId, definition: { page: { root: "missing" } } },
+      { appId, definition: { pages: { main: { root: "missing" } } } },
       toolMeta(),
     )) as StructuredResult<{
       success: boolean;
@@ -941,8 +974,8 @@ describe("app MCP iteration tools", () => {
     }>;
     expect(invalid.isError).toBe(true);
     expect(invalid.structuredContent.success).toBe(false);
-    expect(invalid.structuredContent.issues.some((issue) => issue.path.startsWith("page."))).toBe(
-      true,
-    );
+    expect(
+      invalid.structuredContent.issues.some((issue) => issue.path.startsWith("pages.main.")),
+    ).toBe(true);
   });
 });

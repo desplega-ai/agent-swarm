@@ -14,7 +14,7 @@ import { handleApps } from "../http/apps";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { registerAppQueryTool } from "../tools/app-query";
 
-const TEST_DB_PATH = process.env.DATABASE_PATH ?? "/tmp/spike4-codex-test.sqlite";
+const TEST_DB_PATH = "./test-apps-spike4.sqlite";
 const AGENT_ID = crypto.randomUUID();
 const nativeFetch = globalThis.fetch;
 
