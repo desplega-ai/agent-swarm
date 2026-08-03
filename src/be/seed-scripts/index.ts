@@ -29,6 +29,9 @@ import completeTaskSrc from "./catalog/complete-task.ts" with { type: "text" };
 import compoundInsightsSrc from "./catalog/compound-insights.inline.ts" with { type: "text" };
 import dateResolveSrc from "./catalog/date-resolve.ts" with { type: "text" };
 import delegateSrc from "./catalog/delegate.ts" with { type: "text" };
+import dreamAgentSliceSrc from "./catalog/dream-agent-slice.ts" with { type: "text" };
+import dreamApplySrc from "./catalog/dream-apply.ts" with { type: "text" };
+import dreamReceiptSrc from "./catalog/dream-receipt.ts" with { type: "text" };
 import fetchReadableSrc from "./catalog/fetch-readable.ts" with { type: "text" };
 import getChildOutputsSrc from "./catalog/get-child-outputs.ts" with { type: "text" };
 import ghPrSnapshotSrc from "./catalog/gh-pr-snapshot.ts" with { type: "text" };
@@ -48,6 +51,8 @@ import taskFailureAuditSrc from "./catalog/task-failure-audit.ts" with { type: "
 import textDiffSrc from "./catalog/text-diff.ts" with { type: "text" };
 import toolUsageSrc from "./catalog/tool-usage.ts" with { type: "text" };
 import waitForTaskSrc from "./catalog/wait-for-task.ts" with { type: "text" };
+// @ts-expect-error Bun text imports synthesize a default string for this helper.
+import dreamSchemasSrc from "./dream-schemas.ts" with { type: "text" };
 
 export type SeedScript = {
   name: string;
@@ -61,11 +66,18 @@ export type SeedScript = {
 const asText = (s: unknown): string => s as string;
 
 const CATALOG_REPORT_IMPORT_RE = /^import\s+\{[^}]*\}\s+from "\.\/catalog-report";\n\n?/m;
+const DREAM_SCHEMAS_IMPORT_RE = /^import\s+\{[^}]*\}\s+from "\.\.\/dream-schemas";\n\n?/m;
 
 function bundleCatalogReport(source: string): string {
   const helper = asText(catalogReportSrc);
   if (!CATALOG_REPORT_IMPORT_RE.test(source)) return source;
   return `${helper}\n\n${source.replace(CATALOG_REPORT_IMPORT_RE, "")}`;
+}
+
+function bundleDreamSchemas(source: string): string {
+  const schemas = asText(dreamSchemasSrc);
+  if (!DREAM_SCHEMAS_IMPORT_RE.test(source)) return source;
+  return `${schemas}\n\n${source.replace(DREAM_SCHEMAS_IMPORT_RE, "")}`;
 }
 
 export const SEED_SCRIPTS: SeedScript[] = [
@@ -185,6 +197,30 @@ export const SEED_SCRIPTS: SeedScript[] = [
     intent:
       "Single-call daily compounding Phase 0 helper — replaces ~25 raw tool roundtrips with one compressed JSON result covering every agent. For daily evolution, self-scripting candidates, ops reviews, or heartbeat context.",
     source: bundleCatalogReport(asText(compoundInsightsSrc)),
+  },
+  {
+    name: "dream-agent-slice",
+    description:
+      "Compact per-agent Dreaming reflection slice: task outcomes and failures, tools, memory usefulness, cost/context, editable profile anchors, and installed-versus-invoked skills.",
+    intent:
+      "Gather one agent's evidence for a short daily Dreaming or compounding reflection without broad swarm-wide data.",
+    source: bundleDreamSchemas(asText(dreamAgentSliceSrc)),
+  },
+  {
+    name: "dream-apply",
+    description:
+      "Mechanical Dreaming delta applier: validates approved deltas, safely splices unique H2-anchored profile sections, and records applied, held, or deferred results.",
+    intent:
+      "Apply an approved Dreaming delta set safely; hold ambiguous profile edits instead of overwriting agent context.",
+    source: bundleDreamSchemas(asText(dreamApplySrc)),
+  },
+  {
+    name: "dream-receipt",
+    description:
+      "Write a durable Dreaming receipt memory with applied, held, and deferred deltas, optionally posting the same concise report to configured Slack.",
+    intent:
+      "Record and optionally announce the result of a Dreaming run without hardcoding a Slack channel.",
+    source: asText(dreamReceiptSrc),
   },
   {
     name: "memory-eval",

@@ -601,19 +601,28 @@ validator rejects wrong-kind fields, receipt renders HELD lines.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check` (includes catalog scripts via seed-script typecheck)
-- [ ] Lint passes: `bun run lint`
-- [ ] New suite passes: `bun run test:root -- src/tests/dream-scripts.test.ts`
-- [ ] Seed-script manifest sync tests pass: `bun run test:root -- src/tests/seed-scripts.test.ts`
-- [ ] SDK tool registration check passes: `bun run check:sdk-tool-registration` (or the CI-invoked
-      equivalent per `scripts/check-sdk-tool-registration.ts`)
+- [x] Type check passes: `bun run tsc:check` (includes catalog scripts via seed-script typecheck)
+- [x] Lint passes: `bun run lint`
+- [x] New suite passes: `bun run test:root -- src/tests/dream-scripts.test.ts` (17 tests
+      post-review-fixes; batch-level dream-apply coverage included)
+- [x] Seed-script manifest sync tests pass: `bun run test:root -- src/tests/seed-scripts.test.ts`
+      (17), plus all 12 `scripts-*.test.ts` suites + `sdk-allowlist.test.ts` (SDK touched); full
+      suite 6830 pass / 0 fail
+- [x] SDK tool registration check passes: `bun run scripts/check-sdk-tool-registration.ts` (no
+      `check:sdk-tool-registration` package alias exists — run the script directly)
 
 #### Automated QA:
-- [ ] Standalone walkthrough on a live server: seed a fresh DB, run `dream-agent-slice` via the
-      `script-run` MCP tool against a real agent id and confirm the slice JSON shape; run
-      `dream-apply` with a fixture delta set containing one valid profile-op and one
-      ambiguous-anchor op against a scratch agent; assert the valid op landed in the profile and
-      the ambiguous one came back in `held`.
+- [x] Standalone walkthrough on a live server (via REST `POST /api/scripts/run` — same eval
+      harness as MCP `script-run`): slice shape + H2 anchor inventory verified incl. duplicated
+      heading; dream-apply 1 valid + 1 ambiguous + 1 zero-match → applied/held with distinct
+      reasons, byte-exact splice; schema-invalid payload fails loud; last-section remove clean.
+      **QA found + review round fixed**: `config_get` key filtering was dead at the
+      `/api/config/resolved` boundary (fixed in `swarm-sdk.ts` client-side filter — benefits all
+      scripts); receipt no longer aborts on Slack failure; fence-masked heading scan; per-delta
+      held instead of whole-batch throw; append-under now appends at section END.
+      **Deferred to Phase 4 wiring**: `inject_learning` is unconditionally lead-gated (dream
+      apply/receipt must run under lead identity) and prefixes receipt memory titles with
+      `Lead feedback: <category> — `.
 
 #### Manual Verification:
 - [ ] None (fully automatable).

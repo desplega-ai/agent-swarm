@@ -32,6 +32,26 @@ function appendQuery(path: string, query: Record<string, unknown>): string {
   return encoded ? `${path}?${encoded}` : path;
 }
 
+function filterConfigGetResponse(name: string, args: unknown, data: unknown): unknown {
+  if (name !== "config_get") return data;
+  const key = argsRecord(args).key;
+  if (typeof key !== "string" || !data || typeof data !== "object" || Array.isArray(data)) {
+    return data;
+  }
+  const configs = (data as Record<string, unknown>).configs;
+  if (!Array.isArray(configs)) return data;
+  return {
+    ...data,
+    configs: configs.filter(
+      (config) =>
+        config !== null &&
+        typeof config === "object" &&
+        !Array.isArray(config) &&
+        (config as Record<string, unknown>).key === key,
+    ),
+  };
+}
+
 function kvPath(args: Record<string, unknown>, keyRequired = true): string {
   const key = typeof args.key === "string" ? args.key : undefined;
   if (keyRequired && !key) throw new Error("kv tool requires string `key`");
@@ -463,7 +483,11 @@ async function callBridgeApi(
     headers: headers(config),
     body: request.body === undefined ? undefined : JSON.stringify(request.body),
   });
-  const data = await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`);
+  const data = filterConfigGetResponse(
+    name,
+    args,
+    await readScriptSdkJsonResponse(res, `ctx.swarm.${name}`),
+  );
   if (!res.ok && options.throwOnError) {
     const message =
       data && typeof data === "object" && "error" in data
