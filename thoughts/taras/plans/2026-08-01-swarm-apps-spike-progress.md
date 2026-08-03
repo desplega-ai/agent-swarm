@@ -321,6 +321,79 @@ the state machinery carries view-switching):
    `$param` declared on target, param-bound filters resolve) — same issues[] contract,
    iteration loop unchanged.
 
+## Spike 4 results (2026-08-03, complete — spec ./2026-08-03-swarm-apps-spike4-router-spec.md)
+
+Flow: recon workflow (6 Sonnet readers → /tmp/recon4-*.md) → freeze 9dc4d3cd (spec +
+catalog additions + typecheck stubs, spike-2 precedent) → Codex sol server slice ∥ Opus
+workflow UI slice (disjoint fences, same tree) → two-lens review workflow (2 Opus core +
+2 Sonnet periphery lenses, adversarial verify per finding) → fixes → commits e1555fe8 +
+9c146046 → E2E → finale. Commits after: 03b6bcd1 (system columns), 0af70e18 (props
+normalization), 0bd60198 (spike-2 test modernization), 8413e1cd (visible shapes).
+
+- **Everything in scope shipped**: pages map + defaultPage + typed per-page params with
+  legacy-`page` normalization (zod transform; read path normalizes in-memory — the
+  AMENDMENT-v2 lesson applied); URL router /apps/:id/p/:page with /route state mirror
+  (pre-paint, declared params only, kind-coerced); app.navigate (ctxRef, params replace,
+  mode-only carry, push); $param query filters (column-kind coercion, fail-loud missing
+  AND unknown params, HTTP ?param.<name>= + app-query params + script SDK types);
+  Drawer (Sheet, open ⟺ route param, close = history replace, mount-on-open);
+  DetailList (DefinitionList/InfoRow, shared formatValue, code kind); per-page +
+  cross-page validator (route state root, navigate targets, $param declared-on-page,
+  Drawer literal param, strict page schemas); skill rewritten (visible one-comparison-key
+  rule + negation flag, row→detail worked example).
+- **Recon headline that reshaped the freeze**: `visible` equality/comparison already
+  existed in @json-render/core 0.19.0 (document + close validator capture gap, don't
+  build); `{"$param"}` server-side only — UI binds `/route` via plain $state.
+- **Review (15 findings, 15/15 CONFIRMED by adversarial verify, 0 refuted)**: 2 majors
+  both on the agent-contract surface (skill claimed multi-comparison keys combine —
+  library is first-match-wins; generated script SDK types missed app_query params).
+  13 fixed, 2 accepted with rationale (silent drop of empty navigate params — the
+  target page's parked-query error is the fail-loud signal; drawer-close blanking got a
+  retain-last-rows fix instead).
+- **E2E found 3 real gaps the review missed** (all fixed + regression-tested):
+  (1) query filters rejected system columns — but `id` is the only universal detail-row
+  identity (SYSTEM_COLUMN_KINDS amendment); (2) the renderer crashes the whole page on
+  a propless container element — validator-accepted shape, runtime now normalizes
+  props:{} per element; (3) post-finale: validator accepted `{"not": {$state}}` wrapper
+  the renderer silently ignores (alert never hides) — now rejected with guidance, skill
+  documents `not: true` negation flag + absent-record recipe.
+- **HTTP/MCP battery green**: 6/6 stored apps normalize on read; negative battery (6
+  rejection classes, path-bearing issues); $param coercion + missing/unknown 400s;
+  patch atomicity at pages.<n>.elements/params entries; app-query MCP 3/3.
+- **Browser E2E 10/10 PASS** (after props fix; screenshots /tmp/spike4-e2e-*-retry.png):
+  SPA row→detail without reload, cold deep link, Back across pages, ?panel drawer
+  surviving F5, close-is-replace (Back does not reopen), unknown-page card, PM Inbox
+  legacy regression clean. Zero console errors.
+- **Finale PASSED, zero-shot, ZERO validation rejections** (beats the ≤1 bar; spike-3's
+  finale had 1): worker task with NO primer built the PM Inbox detail view — new
+  `detail` page (37 elements, required typed issueId param), `issueDetail` query
+  filtering on system `id` (the exact pattern the E2E amendment enabled hours earlier),
+  2-1 Split with source-conditional sections (visible eq on source), sync-provenance
+  card (syncedAt/stale/join keys + pull-window hint), share-URL card, Tackle from
+  header (app.action with full row from $state) AND row action, Open row actions on
+  all 4 inbox tables. Honest caveat: the worker leaned on its own persistent agent
+  memory from spike-3 sessions (REST-vs-MCP tradeoffs, error formats) — no primer in
+  the task, but not an amnesiac agent.
+- **Finale browser verify 7/8 → 8/8 after the visible fix + live patch** (screenshots
+  /tmp/spike4-finale-*.png): both source-conditional directions, deep link, Back,
+  Tackle → real task created (a4763f25) with RUNNING badge, graceful bogus-id state.
+  Remaining defect is the KNOWN wide-table issue (11-column GitHub tab drops the
+  row-actions column — same class as the spike-2/3 "row-action overflow clipping"
+  follow-up; not a spike-4 regression, still unfixed).
+- **Ops notes**: a review verifier polluted the protected dev DB AGAIN (initDb() with
+  no path; third occurrence) — surgically restored (backup
+  /tmp/agent-swarm-db.backup-pre-124-undo-2.sqlite, verified 119 migrations); delegated
+  prompts now also need the mandate for REVIEW/verify agents, not just implementers.
+  Pre-push hook runs the FULL suite — apps-spike2.test.ts asserted the old contract and
+  blocked the push until modernized; running the full suite with a shared DATABASE_PATH
+  file breaks 200+ tests (isolation artifact, not real).
+- Productization flags (new this spike): all queries poll regardless of active page;
+  no CI freshness gate for catalog.generated.json; renderer's propless-element crash
+  belongs upstream in @json-render (we normalize as a shim); wide-table row-action
+  overflow now bites agent-built apps (11 columns) — promote from cosmetic to real;
+  validator/runtime contract needs a single source of truth for `visible` shapes
+  (we now hand-mirror library semantics).
+
 ## Spike 3 log (2026-08-02, superseded by results above — spec ./2026-08-02-swarm-apps-spike3-sync-spec.md)
 
 - **Task 0 (action-loop browser proof): PASS 3/3.** Saved script `notes-add-sample`
