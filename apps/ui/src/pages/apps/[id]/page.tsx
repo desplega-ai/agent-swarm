@@ -389,12 +389,23 @@ function AppRuntime({
   const routeSignature = JSON.stringify({ page: activePageName, params: routeParams });
 
   // The json-render spec of the active page — `title` / `params` are runtime
-  // metadata, not part of it. Memoized so the `Renderer` keeps hitting its own
-  // spec-identity memo across the 5s poll re-renders.
-  const activeSpec = useMemo(
-    () => (activePage ? { root: activePage.root, elements: activePage.elements } : null),
-    [activePage],
-  );
+  // metadata, not part of it. Every element gets `props` normalized to `{}`:
+  // the bundled renderer's `resolveBindings` calls `Object.entries(props)`
+  // without a null guard, so one propless container (a bare
+  // `{"type":"Stack","children":[…]}` — a shape the validator accepts and
+  // agents naturally write) would crash the whole page. Memoized so the
+  // `Renderer` keeps hitting its own spec-identity memo across the 5s poll
+  // re-renders.
+  const activeSpec = useMemo(() => {
+    if (!activePage) return null;
+    const elements = Object.fromEntries(
+      Object.entries(activePage.elements).map(([id, element]) => {
+        const el = element as Record<string, unknown>;
+        return [id, el.props === undefined || el.props === null ? { ...el, props: {} } : el];
+      }),
+    );
+    return { root: activePage.root, elements };
+  }, [activePage]);
 
   // Named queries, each with the route params its `$param` filters need. A
   // query missing one is parked (not executed) and gets an explicit error slot.
