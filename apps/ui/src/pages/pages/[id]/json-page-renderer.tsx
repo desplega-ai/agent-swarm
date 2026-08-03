@@ -105,6 +105,7 @@ export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
         "app.mutate": unsupported("app.mutate"),
         "app.refresh": unsupported("app.refresh"),
         "app.action": unsupported("app.action"),
+        "app.navigate": unsupported("app.navigate"),
       },
     });
     // handlers factory: pass setState/state getters that the registered

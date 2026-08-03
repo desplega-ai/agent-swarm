@@ -274,6 +274,9 @@ function AppRuntime({ app, mode }: { app: AppDetail; mode: ViewMode }) {
       components: swarmComponents,
       actions: {
         ...swarmActions,
+        // Contract-freeze stub — the spike 4 UI slice replaces this with the
+        // real router navigation (push `/apps/:id/p/<page>?<params>` via ctxRef).
+        "app.navigate": async () => {},
         "app.mutate": async (params) => {
           setActionError(null);
           if (!params) return;

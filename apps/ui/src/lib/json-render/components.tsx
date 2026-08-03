@@ -1072,6 +1072,10 @@ function FormComponent({ props }: { props: FormProps }) {
 // ─── Component registry ─────────────────────────────────────────────────────
 
 export const swarmComponents: Components<typeof swarmCatalog> = {
+  // Contract-freeze stubs — the spike 4 UI slice replaces these with the real
+  // Sheet-backed Drawer and InfoRow/DefinitionList-backed DetailList.
+  Drawer: () => null,
+  DetailList: () => null,
   Stack: ({ props, children }) => <StackComponent props={props}>{children}</StackComponent>,
   Grid: ({ props, children }) => <GridComponent props={props}>{children}</GridComponent>,
   Split: ({ props, children }) => <SplitComponent props={props}>{children}</SplitComponent>,

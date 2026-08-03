@@ -18,9 +18,18 @@
     "Alert",
     "Badge",
     "Table",
-    "Form"
+    "Form",
+    "Drawer",
+    "DetailList"
   ],
-  "actionTypes": ["swarm.sdk", "swarm.call", "app.mutate", "app.refresh", "app.action"],
+  "actionTypes": [
+    "swarm.sdk",
+    "swarm.call",
+    "app.mutate",
+    "app.refresh",
+    "app.action",
+    "app.navigate"
+  ],
   "components": {
     "Stack": {
       "description": "THE primary layout primitive — a flex column (default) or row of its children. `gap`/`padding` use the shared spacing scale (none|xs|sm|md|lg|xl, default gap md); `align` is the cross axis, `justify` the main axis, `wrap` lets a row reflow. Use this as the page root and for every section; `Container` is the legacy 2-prop alias kept for older pages.",
@@ -678,6 +687,115 @@
         "required": ["id", "fields", "onSubmit"],
         "additionalProperties": false
       }
+    },
+    "Drawer": {
+      "description": "Route-driven slide-in side panel (sheet). Open exactly when the route param named by `param` is set — open it with `app.navigate` (e.g. a rowAction setting `{ \"panel\": { \"$row\": \"id\" } }`), and the URL stays shareable: a deep link with the param renders the drawer open, and closing it clears the param. Children mount only while open (a Table inside does NOT stay warm when closed — unlike Tabs). `side` right (default) or left; `size` sm|md|lg|xl width.",
+      "slots": ["default"],
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "param": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "side": {
+            "type": "string",
+            "enum": ["right", "left"]
+          },
+          "size": {
+            "type": "string",
+            "enum": ["sm", "md", "lg", "xl"]
+          }
+        },
+        "required": ["param"],
+        "additionalProperties": false
+      }
+    },
+    "DetailList": {
+      "description": "Read-only label/value detail view for ONE record. Bind `data` to a single row — usually `{ \"$state\": \"/queries/<name>/data/0\" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `code` for raw/JSON values. Shows `emptyMessage` while the record is loading or missing.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fields": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["text", "string", "number", "boolean", "date", "badge", "enum", "code"]
+                },
+                "tones": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string",
+                    "enum": [
+                      "neutral",
+                      "success",
+                      "active",
+                      "error",
+                      "info",
+                      "pending",
+                      "warning",
+                      "paused"
+                    ]
+                  }
+                }
+              },
+              "required": ["key"],
+              "additionalProperties": false
+            }
+          },
+          "emptyMessage": {
+            "type": "string"
+          },
+          "columns": {
+            "anyOf": [
+              {
+                "type": "number",
+                "const": 1
+              },
+              {
+                "type": "number",
+                "const": 2
+              }
+            ]
+          }
+        },
+        "required": ["fields"],
+        "additionalProperties": false
+      }
     }
   },
   "actions": {
@@ -824,6 +942,39 @@
           }
         },
         "required": ["name"],
+        "additionalProperties": false
+      }
+    },
+    "app.navigate": {
+      "description": "Navigate to another page of this app (`/apps/:id/p/<page>?<params>`). `params` replace the current route params wholesale and may use `$row` / `$form` sentinels. Pushes a history entry (browser Back returns). The current route is mirrored into state at `/route` as `{ page, params }`.",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            }
+          }
+        },
+        "required": ["page"],
         "additionalProperties": false
       }
     }

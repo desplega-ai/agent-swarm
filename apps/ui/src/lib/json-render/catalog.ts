@@ -13,16 +13,18 @@
  *   - `action-params.ts` — row/form scoped param resolution
  *
  * Component set: Container, Card, Heading, Text, Button, Metric, Alert
- * (original pages set — unchanged), Table, Form, Badge (swarm-apps), plus the
+ * (original pages set — unchanged), Table, Form, Badge (swarm-apps), the
  * layout + interactivity tier: Stack, Grid, Split, Divider, Tabs, SearchInput,
- * Select, Markdown.
+ * Select, Markdown, plus the router tier: Drawer, DetailList.
  * Action set: `swarm.sdk`, `swarm.call` (original) plus `app.mutate`,
- * `app.refresh` (swarm-apps; the pages renderer registers inert stubs).
+ * `app.refresh`, `app.action`, `app.navigate` (swarm-apps; the pages renderer
+ * registers inert stubs).
  *
  * State roots the catalog owns: `/queries/<name>` (runtime), `/forms/<id>`
- * (Form), `/actions/<name>` (runtime) and `/ui/<id>` — the interactivity root
+ * (Form), `/actions/<name>` (runtime), `/ui/<id>` — the interactivity root
  * written by `SearchInput` / `Select` (`/ui/<id>/value`) and `Tabs`
- * (`/ui/<id>/tab`), which Table's `search` / `filters` bind back to.
+ * (`/ui/<id>/tab`), which Table's `search` / `filters` bind back to — and
+ * `/route` (runtime): the current router state `{ page, params }`.
  */
 
 import { defineCatalog } from "@json-render/core";
@@ -72,6 +74,18 @@ export const appRefreshActionSchema = z.object({
 export const appActionActionSchema = z.object({
   name: z.string(),
   input: z.record(z.string(), z.unknown()).optional(),
+});
+
+/**
+ * `app.navigate` — client-side router navigation to another page of the same
+ * app (`/apps/:id/p/<page>?<params>`). `params` REPLACE the current route
+ * params wholesale (no merging); values may be `$row` / `$form` sentinels when
+ * dispatched from a Table rowAction / Form onSubmit chain. Pushes a history
+ * entry, so the browser Back button returns to the previous view.
+ */
+export const appNavigateActionSchema = z.object({
+  page: z.string(),
+  params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
 });
 
 // ─── Component prop schemas ─────────────────────────────────────────────────
@@ -319,6 +333,45 @@ const formProps = z.object({
   onSubmit: actionChainSchema,
 });
 
+const drawerProps = z.object({
+  /**
+   * Route param driving the open state: the drawer is open exactly when
+   * `/route/params/<param>` is set. Opening = an `app.navigate` that sets the
+   * param; the built-in close button navigates with the param removed
+   * (history REPLACE, so Back never returns to a dismissed drawer).
+   */
+  param: z.string(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  side: z.enum(["right", "left"]).optional(),
+  size: z.enum(["sm", "md", "lg", "xl"]).optional(),
+});
+
+const detailListFieldSchema = z.object({
+  /** Property key in the bound `data` object (usually a model column name). */
+  key: z.string(),
+  /** Display label; defaults to the key. */
+  label: z.string().optional(),
+  /**
+   * Same rendering kinds as Table columns (`badge` → status pill, `date` →
+   * smart relative time; `string`/`enum` are aliases of `text`), plus `code`
+   * for a monospace block (raw JSON / provenance values).
+   */
+  kind: z.enum(["text", "string", "number", "boolean", "date", "badge", "enum", "code"]).optional(),
+  /** For `kind: "badge"` — value → badge tone. Falls back to `neutral`. */
+  tones: z.record(z.string(), z.enum(BADGE_TONES)).optional(),
+});
+
+const detailListProps = z.object({
+  /** Usually `{ "$state": "/queries/<name>/data/0" }` — one record object. */
+  data: z.record(z.string(), z.unknown()).nullish(),
+  fields: z.array(detailListFieldSchema).min(1),
+  /** Shown while `data` is null/undefined (query loading or no match). */
+  emptyMessage: z.string().optional(),
+  /** Label/value pairs flow into 1 (default) or 2 columns. */
+  columns: z.union([z.literal(1), z.literal(2)]).optional(),
+});
+
 export type TableColumn = z.infer<typeof tableColumnSchema>;
 export type TableRowAction = z.infer<typeof tableRowActionSchema>;
 export type TableRowActionConfirm = z.infer<typeof tableRowActionConfirmSchema>;
@@ -328,6 +381,8 @@ export type TableFilters = z.infer<typeof tableProps>["filters"];
 export type GridColumns = z.infer<typeof gridProps>["columns"];
 export type TabsTab = z.infer<typeof tabsTabSchema>;
 export type SelectOption = z.infer<typeof selectOptionSchema>;
+export type DetailListField = z.infer<typeof detailListFieldSchema>;
+export type DrawerProps = z.infer<typeof drawerProps>;
 
 // ─── Catalog ────────────────────────────────────────────────────────────────
 
@@ -430,6 +485,17 @@ export const swarmCatalogSpec = {
       description:
         'Field form. Values live in state under `/forms/<id>/<field>`; `onSubmit` chains receive `$form` (all collected values) and `$form: "<field>"` for one.',
     },
+    Drawer: {
+      props: drawerProps,
+      slots: ["default"],
+      description:
+        'Route-driven slide-in side panel (sheet). Open exactly when the route param named by `param` is set — open it with `app.navigate` (e.g. a rowAction setting `{ "panel": { "$row": "id" } }`), and the URL stays shareable: a deep link with the param renders the drawer open, and closing it clears the param. Children mount only while open (a Table inside does NOT stay warm when closed — unlike Tabs). `side` right (default) or left; `size` sm|md|lg|xl width.',
+    },
+    DetailList: {
+      props: detailListProps,
+      description:
+        'Read-only label/value detail view for ONE record. Bind `data` to a single row — usually `{ "$state": "/queries/<name>/data/0" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `code` for raw/JSON values. Shows `emptyMessage` while the record is loading or missing.',
+    },
   },
   actions: {
     "swarm.sdk": {
@@ -453,6 +519,11 @@ export const swarmCatalogSpec = {
       params: appActionActionSchema,
       description:
         "Invoke a named custom action from the app definition's `actions` map (script- or task-backed). Result lands in state at `/actions/<name>`.",
+    },
+    "app.navigate": {
+      params: appNavigateActionSchema,
+      description:
+        "Navigate to another page of this app (`/apps/:id/p/<page>?<params>`). `params` replace the current route params wholesale and may use `$row` / `$form` sentinels. Pushes a history entry (browser Back returns). The current route is mirrored into state at `/route` as `{ page, params }`.",
     },
   },
 };
