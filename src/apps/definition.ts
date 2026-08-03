@@ -17,11 +17,19 @@ const SourceBindingSchema = z.object({
   transform: SourceTransformSchema.optional(),
 });
 
-const SourceDefSchema = z.object({
-  connector: z.enum(["swarm-tasks", "github-issues"]),
-  joinKey: AppNameSchema,
-  config: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
-});
+const SourceDefSchema = z.discriminatedUnion("connector", [
+  z.object({
+    connector: z.literal("swarm-tasks"),
+    joinKey: AppNameSchema,
+    config: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+  }),
+  z.object({
+    connector: z.literal("script"),
+    joinKey: AppNameSchema,
+    scriptId: z.string().min(1),
+    args: z.record(z.string(), z.unknown()).optional(),
+  }),
+]);
 
 const ISO_8601_PREFIX = /^\d{4}-\d{2}-\d{2}(?:T.*)?$/;
 
@@ -242,14 +250,6 @@ export function appDefinitionIssues(error: z.ZodError): AppValidationIssue[] {
   return error.issues.flatMap((issue) => flattenIssue(issue));
 }
 
-const GITHUB_REPOSITORY_PATTERN = /^[\w.-]+\/[\w.-]+$/;
-
-function isValidGitHubRepository(value: unknown): value is string {
-  if (typeof value !== "string" || !GITHUB_REPOSITORY_PATTERN.test(value)) return false;
-  const [owner, name] = value.split("/");
-  return owner !== "." && owner !== ".." && name !== "." && name !== "..";
-}
-
 function sourceDefinitionIssues(definition: AppDefinition): AppValidationIssue[] {
   const issues: AppValidationIssue[] = [];
 
@@ -292,10 +292,10 @@ function sourceDefinitionIssues(definition: AppDefinition): AppValidationIssue[]
         }
       }
 
-      if (source.connector === "github-issues" && !isValidGitHubRepository(source.config?.repo)) {
+      if (source.connector === "script" && !getScriptById(source.scriptId)) {
         issues.push({
-          path: `${sourcePath}.config.repo`,
-          message: 'github-issues requires repo in "owner/name" form',
+          path: `${sourcePath}.scriptId`,
+          message: `script "${source.scriptId}" not found`,
         });
       }
     }

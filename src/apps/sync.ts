@@ -1,4 +1,7 @@
+import * as z from "zod";
 import { getAllTasks } from "../be/db";
+import { getScriptById } from "../be/scripts/db";
+import { getSavedScriptOwnerAgentId, runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import type { AgentTaskStatus } from "../types";
 import { AgentTaskStatusSchema } from "../types";
 import type { ColumnDef, ModelDef, SourceDef } from "./definition";
@@ -57,8 +60,19 @@ export class SyncSelectionError extends Error {
 }
 
 const MAX_WARNINGS = 20;
+const MAX_SOURCE_RECORDS = 500;
+const GLOBAL_SCRIPT_SYNC_AGENT_ID = "app-sync";
 // listAppRows is the existing full-model scan and is capped at 100,000 rows.
 const MAX_ROWS_PER_MODEL = 100_000;
+
+const ScriptSourceRecordsSchema = z
+  .array(
+    z.object({
+      key: z.union([z.string(), z.number(), z.boolean()]).transform(String),
+      fields: z.record(z.string(), z.unknown()),
+    }),
+  )
+  .max(MAX_SOURCE_RECORDS);
 
 function positiveLimit(value: unknown, fallback: number, maximum: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0
@@ -106,87 +120,61 @@ const swarmTasksConnector: Connector = {
   },
 };
 
-interface GitHubIssue {
-  number?: unknown;
-  id?: unknown;
-  title?: unknown;
-  state?: unknown;
-  body?: unknown;
-  user?: { login?: unknown } | null;
-  labels?: Array<{ name?: unknown } | string>;
-  comments?: unknown;
-  html_url?: unknown;
-  created_at?: unknown;
-  updated_at?: unknown;
-  pull_request?: unknown;
+export const CONNECTORS: Record<"swarm-tasks", Connector> = {
+  "swarm-tasks": swarmTasksConnector,
+};
+
+function scriptFailure(
+  output: Awaited<ReturnType<typeof runSavedScriptAsAgent>>,
+): string | undefined {
+  if (output.exitCode === 0 && !output.error && !output.runtimeError) return undefined;
+  if (output.runtimeError) return `${output.runtimeError.name}: ${output.runtimeError.message}`;
+  return output.error ?? `Script exited with code ${output.exitCode}`;
 }
 
-const githubIssuesConnector: Connector = {
-  async pull(config) {
-    if (typeof config.repo !== "string") throw new Error("github-issues requires config.repo");
-    const [owner, name] = config.repo.split("/");
-    if (!owner || !name) throw new Error('github-issues repo must use "owner/name" form');
-    const state = config.state ?? "open";
-    if (state !== "open" && state !== "closed" && state !== "all") {
-      throw new Error('github-issues state must be "open", "closed", or "all"');
-    }
-    const limit = positiveLimit(config.limit, 50, 100);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
-    let payload: unknown;
-    try {
-      const response = await fetch(
-        `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues?state=${state}&per_page=${limit}`,
-        {
-          headers: {
-            Accept: "application/vnd.github+json",
-            "User-Agent": "agent-swarm-apps-sync",
-          },
-          signal: controller.signal,
-        },
-      );
-      if (!response.ok) throw new Error(`GitHub issues pull failed with status ${response.status}`);
-      payload = await response.json();
-    } finally {
-      clearTimeout(timeout);
-    }
-    if (!Array.isArray(payload))
-      throw new Error("GitHub issues pull returned a non-array response");
-    return (payload as GitHubIssue[])
-      .filter((issue) => !Object.hasOwn(issue, "pull_request"))
-      .map((issue) => {
-        if (typeof issue.number !== "number") {
-          throw new Error("GitHub issue is missing a numeric number");
-        }
-        return {
-          key: String(issue.number),
-          fields: {
-            number: issue.number,
-            id: issue.id,
-            title: issue.title,
-            state: issue.state,
-            body: typeof issue.body === "string" ? issue.body.slice(0, 1000) : issue.body,
-            userLogin: issue.user?.login,
-            labelsCsv: Array.isArray(issue.labels)
-              ? issue.labels
-                  .map((label) => (typeof label === "string" ? label : label.name))
-                  .filter((label): label is string => typeof label === "string")
-                  .join(",")
-              : "",
-            comments: issue.comments,
-            htmlUrl: issue.html_url,
-            createdAt: issue.created_at,
-            updatedAt: issue.updated_at,
-          },
-        };
-      });
-  },
-};
+async function pullScriptSource(
+  app: AppRecord,
+  modelName: string,
+  sourceName: string,
+  source: Extract<SourceDef, { connector: "script" }>,
+): Promise<SourceRecord[]> {
+  const script = getScriptById(source.scriptId);
+  if (!script) throw new Error(`script "${source.scriptId}" no longer exists`);
 
-export const CONNECTORS: Record<SourceDef["connector"], Connector> = {
-  "swarm-tasks": swarmTasksConnector,
-  "github-issues": githubIssuesConnector,
-};
+  // Agent-owned sources match script actions exactly. Built-in global scripts have no owner;
+  // run them under an isolated principal so they cannot inherit an arbitrary agent's bindings.
+  const runAsAgentId = getSavedScriptOwnerAgentId(script) ?? GLOBAL_SCRIPT_SYNC_AGENT_ID;
+  const output = await runSavedScriptAsAgent({
+    script,
+    input: {
+      ...source.args,
+      app: { id: app.id },
+      model: modelName,
+      source: sourceName,
+    },
+    agentId: runAsAgentId,
+  });
+  const failure = scriptFailure(output);
+  if (failure) throw new Error(failure);
+
+  const parsed = ScriptSourceRecordsSchema.safeParse(output.result);
+  if (!parsed.success) {
+    throw new Error(`script source returned invalid records: ${z.prettifyError(parsed.error)}`);
+  }
+  return parsed.data;
+}
+
+async function pullSource(
+  app: AppRecord,
+  modelName: string,
+  sourceName: string,
+  source: SourceDef,
+): Promise<SourceRecord[]> {
+  if (source.connector === "script") {
+    return pullScriptSource(app, modelName, sourceName, source);
+  }
+  return CONNECTORS["swarm-tasks"].pull(source.config ?? {});
+}
 
 function getByDottedPath(record: Record<string, unknown>, path: string): unknown {
   let value: unknown = record;
@@ -283,7 +271,8 @@ export async function runSyncPass(
   };
 
   try {
-    const records = await CONNECTORS[source.connector].pull(source.config ?? {});
+    // External/script work must finish before taking the per-model reconciliation lock.
+    const records = await pullSource(app, modelName, sourceName, source);
     result.pulled = records.length;
     await withMutationLock(app.id, modelName, () => {
       const existing = listAppRows(app.id, modelName);

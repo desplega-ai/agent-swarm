@@ -106,5 +106,6 @@ export async function runScript(input: RunScriptInput): Promise<RunScriptOutput>
     result: scrubObject(output.result),
     stdout: scrubSecrets(output.stdout),
     stderr: scrubSecrets(output.stderr),
+    ...(output.runtimeError ? { runtimeError: scrubObject(output.runtimeError) } : {}),
   };
 }

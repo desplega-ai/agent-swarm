@@ -278,6 +278,49 @@ NO UI slice — recon-confirmed zero apps/ui changes needed and E2E bore that ou
   21bc3294 is lead; GH source repo desplega-ai/agent-swarm at limit 100 (window-relative
   staleness documented in the skill).
 
+## AMENDMENT v2 shipped (2026-08-03): sources are dynamic / script-backed
+
+- `SourceDef` is now a discriminated union: `swarm-tasks` (native) | `script`
+  (`scriptId` + `args`, THE default kind). `github-issues` enum + hardcoded pull
+  removed from sync.ts; logic moved to seed script `github-issues-pull`
+  (src/be/seed-scripts/catalog/, global). Engine calls `runScript` outside the
+  reconcile lock, validates `Array<{key, fields}>` (cap 500), zero row churn on
+  script error. All gates green (tsc, lint, 37 tests across the two touched files,
+  db-boundary, skill-sources).
+- **Live-app migration (spec item 7) done by direct DB edit, not app-patch**: with
+  the enum removed, stored `github-issues` definitions fail zod at READ time —
+  GET/PATCH /api/apps/:id both 500 before any patch can apply. Platform lesson:
+  connector-enum changes need a definition migration path; for the spike the two
+  live apps (PM Inbox, scratch) were rewritten in sqlite to
+  `{connector: "script", scriptId: <github-issues-pull>, args: <old config>}`.
+- Post-migration sync verified identical: PM Inbox `github` + scratch `gh` pull 3
+  real GH issues via the script source, all `unchanged` (projection byte-identical
+  to the v1 connector); swarm-tasks passes untouched.
+
+## Spike 4 candidate (Taras, 2026-08-03): router-like flows — the SPA tier
+
+Vision: apps define router-like flows — detail pages, additional pages, sidepanels.
+Today's runtime is a reactive single-page app (live state store, Tabs view-switching
+with warm polling, instant client search/filter, truthy-only `visible`) but has NO
+internal navigation: one page per app, no routes, no detail views, no drawers.
+
+Sketch agreed in-session (all additive, no architecture change — Tabs + `/ui` proved
+the state machinery carries view-switching):
+1. `page` → `pages` map (same `{root, elements}` shape per entry; `defaultPage`;
+   optional declared `params` per page; back-compat single `page` = one entry;
+   `pages.<name>` atomic in merge patch like elements).
+2. URL-synced router: `/apps/:id/p/:page?<params>` — shareable + chromeless-embeddable,
+   browser back works; current route mirrored to state at `/route`.
+3. New action kind `app.navigate {page, params}` — `$row` sentinels already resolve in
+   action params, so row→detail is one rowAction chain.
+4. Parameterized query filters `{"$param": "<name>"}` resolved from route params — the
+   one query-language growth that's earned (detail pages need it).
+5. Route-driven `Drawer`/`Modal` (`?panel=…` — deep-linkable, declarative) + `DetailList`
+   component; equality semantics for `visible` (spike-2 worker's request).
+6. Validator generalizes per pages-entry + cross-page checks (navigate targets exist,
+   `$param` declared on target, param-bound filters resolve) — same issues[] contract,
+   iteration loop unchanged.
+
 ## Spike 3 log (2026-08-02, superseded by results above — spec ./2026-08-02-swarm-apps-spike3-sync-spec.md)
 
 - **Task 0 (action-loop browser proof): PASS 3/3.** Saved script `notes-add-sample`

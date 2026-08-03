@@ -13,6 +13,7 @@ import { listAppRows } from "../apps/row-store";
 import { getApp } from "../apps/store";
 import { CONNECTORS, runAppSync } from "../apps/sync";
 import { closeDb, createAgent, createTaskExtended, getDb, initDb } from "../be/db";
+import { insertScript } from "../be/scripts/db";
 import { applyQuery, handleApps } from "../http/apps";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { registerAppQueryTool } from "../tools/app-query";
@@ -21,7 +22,7 @@ import { registerAppSyncTool } from "../tools/app-sync";
 const TEST_DB_PATH = "./test-apps-spike3.sqlite";
 const AGENT_ID = crypto.randomUUID();
 const nativeFetch = globalThis.fetch;
-const nativeGithubConnector = CONNECTORS["github-issues"];
+const nativeSwarmTasksConnector = CONNECTORS["swarm-tasks"];
 const bookmarksDefinition = await Bun.file(
   new URL("./fixtures/bookmarks-definition.json.txt", import.meta.url),
 ).json();
@@ -46,6 +47,30 @@ const page = {
     root: { type: "Container", props: {} },
   },
 };
+
+const SOURCE_ERROR_TOKEN = "ghp_1234567890abcdefABCDEF1234567890ABCD";
+const SCRIPT_SOURCE = `
+export default function pull(args, ctx) {
+  if (args.throwError) throw new Error("planned source failure");
+  if (args.throwSecretError) throw new Error("planned ${SOURCE_ERROR_TOKEN}");
+  if (args.captureContext) {
+    return [{
+      key: args.key,
+      fields: {
+        appId: args.app.id,
+        model: args.model,
+        source: args.source,
+        custom: args.custom,
+        runAsAgentId: ctx.stdlib.Redacted.value(ctx.swarm.config.agentId),
+        state: "open",
+      },
+    }];
+  }
+  return args.records;
+}
+`;
+
+let scriptSourceId = "00000000-0000-4000-8000-000000000000";
 
 const githubDefinition = {
   models: {
@@ -75,9 +100,10 @@ const githubDefinition = {
       },
       sources: {
         gh: {
-          connector: "github-issues",
+          connector: "script",
           joinKey: "externalId",
-          config: { repo: "owner/repo", state: "all", limit: 10, futureFlag: true },
+          scriptId: scriptSourceId,
+          args: { records: [] },
         },
       },
     },
@@ -199,45 +225,45 @@ function issueDefinition(mutator: (definition: any) => void): unknown {
   return definition;
 }
 
-interface GithubFetchPlan {
-  body?: unknown;
-  status?: number;
-}
-
-function githubIssue(
+function sourceRecord(
   number: number,
   overrides: Record<string, unknown> = {},
-): Record<string, unknown> {
+): { key: string; fields: Record<string, unknown> } {
   return {
-    number,
-    id: 1000 + number,
-    title: `Issue ${number}`,
-    state: "open",
-    body: `Body ${number}`,
-    user: { login: `User${number}` },
-    labels: [{ name: "bug" }, { name: `p${number}` }],
-    comments: number,
-    html_url: `https://github.com/owner/repo/issues/${number}`,
-    created_at: `2026-08-0${number}T10:00:00.000Z`,
-    updated_at: `2026-08-0${number}T11:00:00.000Z`,
-    ...overrides,
+    key: String(number),
+    fields: {
+      number,
+      id: 1000 + number,
+      title: `Issue ${number}`,
+      state: "open",
+      body: `Body ${number}`,
+      userLogin: `User${number}`,
+      labelsCsv: `bug,p${number}`,
+      comments: number,
+      htmlUrl: `https://github.com/owner/repo/issues/${number}`,
+      createdAt: `2026-08-0${number}T10:00:00.000Z`,
+      updatedAt: `2026-08-0${number}T11:00:00.000Z`,
+      ...overrides,
+    },
   };
 }
 
-function stubGithubFetch(...plans: GithubFetchPlan[]): Array<{ url: string; init?: RequestInit }> {
-  let index = 0;
-  const calls: Array<{ url: string; init?: RequestInit }> = [];
-  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = input instanceof Request ? input.url : String(input);
-    calls.push({ url, init });
-    const plan = plans[index++];
-    if (!plan) throw new Error(`unexpected GitHub fetch ${url}`);
-    return new Response(JSON.stringify(plan.body ?? { message: "planned failure" }), {
-      status: plan.status ?? 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }) as typeof globalThis.fetch;
-  return calls;
+async function setScriptSourceArgs(appId: string, args: Record<string, unknown>): Promise<void> {
+  const patched = await request<{ app?: unknown; issues?: unknown }>(`/api/apps/${appId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      definition: {
+        models: {
+          issue: {
+            sources: {
+              gh: { connector: "script", joinKey: "externalId", scriptId: scriptSourceId, args },
+            },
+          },
+        },
+      },
+    }),
+  });
+  expect(patched.status).toBe(200);
 }
 
 function sortedByExternalId(rows: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
@@ -263,6 +289,18 @@ beforeAll(async () => {
   }
   initDb(TEST_DB_PATH);
   createAgent({ id: AGENT_ID, name: "apps-spike3-worker", isLead: false, status: "idle" });
+  scriptSourceId = insertScript({
+    name: `apps_spike3_source_${crypto.randomUUID().replaceAll("-", "")}`,
+    scope: "agent",
+    scopeId: AGENT_ID,
+    source: SCRIPT_SOURCE,
+    description: "Apps Spike 3 dynamic source fixture",
+    intent: "Exercise script-backed app source sync",
+    signatureJson: JSON.stringify({ args: { type: "object" }, result: { type: "array" } }),
+    agentId: AGENT_ID,
+    typeChecked: true,
+  }).id;
+  githubDefinition.models.issue.sources.gh.scriptId = scriptSourceId;
   server = createTestServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const address = server.address();
@@ -277,12 +315,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  globalThis.fetch = nativeFetch;
-  CONNECTORS["github-issues"] = nativeGithubConnector;
+  CONNECTORS["swarm-tasks"] = nativeSwarmTasksConnector;
 });
 
 afterAll(async () => {
-  globalThis.fetch = nativeFetch;
   await new Promise<void>((resolve) => server.close(() => resolve()));
   closeDb();
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -298,9 +334,10 @@ describe("spike 3 app definition schema", () => {
     expect(parsed.success).toBe(true);
     if (!parsed.success) throw new Error(JSON.stringify(parsed.issues));
     expect(parsed.definition.models.issue?.sources?.gh).toMatchObject({
-      connector: "github-issues",
+      connector: "script",
       joinKey: "externalId",
-      config: { repo: "owner/repo", futureFlag: true },
+      scriptId: scriptSourceId,
+      args: { records: [] },
     });
     expect(parsed.definition.actions?.refresh).toEqual({
       kind: "sync",
@@ -325,39 +362,9 @@ describe("spike 3 app definition schema", () => {
         }),
       },
       {
-        path: "models.issue.sources.gh.config.repo",
+        path: "models.issue.sources.gh.scriptId",
         definition: issueDefinition((definition) => {
-          delete definition.models.issue.sources.gh.config.repo;
-        }),
-      },
-      {
-        path: "models.issue.sources.gh.config.repo",
-        definition: issueDefinition((definition) => {
-          definition.models.issue.sources.gh.config.repo = "not-a-repository";
-        }),
-      },
-      {
-        path: "models.issue.sources.gh.config.repo",
-        definition: issueDefinition((definition) => {
-          definition.models.issue.sources.gh.config.repo = "./repo";
-        }),
-      },
-      {
-        path: "models.issue.sources.gh.config.repo",
-        definition: issueDefinition((definition) => {
-          definition.models.issue.sources.gh.config.repo = "../repo";
-        }),
-      },
-      {
-        path: "models.issue.sources.gh.config.repo",
-        definition: issueDefinition((definition) => {
-          definition.models.issue.sources.gh.config.repo = "owner/.";
-        }),
-      },
-      {
-        path: "models.issue.sources.gh.config.repo",
-        definition: issueDefinition((definition) => {
-          definition.models.issue.sources.gh.config.repo = "owner/..";
+          definition.models.issue.sources.gh.scriptId = crypto.randomUUID();
         }),
       },
       {
@@ -444,6 +451,17 @@ describe("spike 3 app definition schema", () => {
     ];
 
     for (const item of cases) expectIssue(item.definition, item.path);
+  });
+
+  test("rejects the removed github-issues connector", () => {
+    const definition = issueDefinition((candidate) => {
+      candidate.models.issue.sources.gh = {
+        connector: "github-issues",
+        joinKey: "externalId",
+        config: { repo: "owner/repo" },
+      };
+    });
+    expectIssue(definition, "models.issue.sources.gh.connector");
   });
 
   test("rejects every reserved sync envelope name as a column", () => {
@@ -594,22 +612,18 @@ describe("source-managed row write enforcement", () => {
   });
 });
 
-describe("GitHub issue sync lifecycle", () => {
+describe("script source sync lifecycle", () => {
   test("creates, transforms, updates projections only, avoids unchanged churn, stales, revives, warns with nulls, and fails atomically", async () => {
-    const issue1 = githubIssue(1, { title: "First ISSUE", comments: 2 });
-    const issue2 = githubIssue(2, { title: "Second issue", comments: 3 });
-    const pullRequest = githubIssue(99, { pull_request: { url: "https://api.github.com/pr/99" } });
-    const changed1 = githubIssue(1, { title: "Changed title", comments: 4 });
-    const invalid1 = githubIssue(1, { title: "Changed title", state: "archived", comments: "NaN" });
-    const calls = stubGithubFetch(
-      { body: [issue1, issue2, pullRequest] },
-      { body: [changed1, issue2] },
-      { body: [changed1] },
-      { body: [changed1, issue2] },
-      { body: [invalid1, issue2] },
-      { status: 503 },
-    );
+    const issue1 = sourceRecord(1, { title: "First ISSUE", comments: 2 });
+    const issue2 = sourceRecord(2, { title: "Second issue", comments: 3 });
+    const changed1 = sourceRecord(1, { title: "Changed title", comments: 4 });
+    const invalid1 = sourceRecord(1, {
+      title: "Changed title",
+      state: "archived",
+      comments: "NaN",
+    });
     const appId = await createApp(githubDefinition);
+    await setScriptSourceArgs(appId, { records: [issue1, issue2] });
 
     const first = await syncApp(appId, { model: "issue", source: "gh" });
     expect(first.ok).toBe(true);
@@ -617,19 +631,13 @@ describe("GitHub issue sync lifecycle", () => {
     expect(first.passes[0]).toMatchObject({
       model: "issue",
       source: "gh",
-      connector: "github-issues",
+      connector: "script",
       pulled: 2,
       created: 2,
       updated: 0,
       unchanged: 0,
       markedStale: 0,
     });
-    expect(calls[0]?.url).toBe(
-      "https://api.github.com/repos/owner/repo/issues?state=all&per_page=10",
-    );
-    expect(new Headers(calls[0]?.init?.headers).get("Accept")).toBe("application/vnd.github+json");
-    expect(new Headers(calls[0]?.init?.headers).get("User-Agent")).toBe("agent-swarm-apps-sync");
-
     const firstRows = sortedByExternalId(listAppRows(appId, "issue"));
     expect(firstRows).toHaveLength(2);
     expect(firstRows[0]).toMatchObject({
@@ -645,7 +653,6 @@ describe("GitHub issue sync lifecycle", () => {
       stale: false,
     });
     expect(firstRows[0]?.syncedAt).toBeString();
-    expect(firstRows.some((row) => row.externalId === "99")).toBe(false);
     const issue2SyncedAt = firstRows[1]?.syncedAt;
     const issue2UpdatedAt = firstRows[1]?.updatedAt;
 
@@ -656,6 +663,7 @@ describe("GitHub issue sync lifecycle", () => {
     expect(ownedPatch.status).toBe(200);
     await Bun.sleep(2);
 
+    await setScriptSourceArgs(appId, { records: [changed1, issue2] });
     const second = await syncApp(appId);
     expect(second.passes[0]).toMatchObject({
       created: 0,
@@ -676,6 +684,7 @@ describe("GitHub issue sync lifecycle", () => {
     const issue2SecondSyncedAt = secondRows[1]?.syncedAt;
     const issue2SecondUpdatedAt = secondRows[1]?.updatedAt;
 
+    await setScriptSourceArgs(appId, { records: [changed1] });
     const disappeared = await syncApp(appId);
     expect(disappeared.passes[0]).toMatchObject({
       created: 0,
@@ -688,12 +697,14 @@ describe("GitHub issue sync lifecycle", () => {
     expect(staleRows[1]?.syncedAt).toBe(issue2SecondSyncedAt);
     expect(staleRows[1]?.updatedAt).not.toBe(issue2SecondUpdatedAt);
 
+    await setScriptSourceArgs(appId, { records: [changed1, issue2] });
     const reappeared = await syncApp(appId);
     expect(reappeared.passes[0]).toMatchObject({ updated: 1, unchanged: 1, markedStale: 0 });
     const revivedRows = sortedByExternalId(listAppRows(appId, "issue"));
     expect(revivedRows[1]?.stale).toBe(false);
     expect(revivedRows[1]?.syncedAt).not.toBe(issue2SyncedAt);
 
+    await setScriptSourceArgs(appId, { records: [invalid1, issue2] });
     const invalid = await syncApp(appId);
     expect(invalid.ok).toBe(true);
     expect(invalid.passes[0]?.warnings.length).toBeGreaterThanOrEqual(2);
@@ -701,10 +712,106 @@ describe("GitHub issue sync lifecycle", () => {
     expect(invalidRows[0]).toMatchObject({ state: null, commentsCents: null, note: "manual note" });
 
     const beforeFailure = structuredClone(listAppRows(appId, "issue"));
+    await setScriptSourceArgs(appId, { throwError: true });
     const failed = await syncApp(appId);
     expect(failed.ok).toBe(false);
-    expect(failed.passes[0]?.error).toContain("503");
+    expect(failed.passes[0]?.error).toContain("planned source failure");
     expect(listAppRows(appId, "issue")).toEqual(beforeFailure);
+
+    await setScriptSourceArgs(appId, { throwSecretError: true });
+    const secretFailure = await syncApp(appId);
+    expect(secretFailure.ok).toBe(false);
+    expect(secretFailure.passes[0]?.error).toContain("[REDACTED:github_token]");
+    expect(secretFailure.passes[0]?.error).not.toContain(SOURCE_ERROR_TOKEN);
+    expect(listAppRows(appId, "issue")).toEqual(beforeFailure);
+  });
+
+  test("rejects invalid script result shapes and the record cap with zero row churn", async () => {
+    const appId = await createApp(githubDefinition, "Invalid script result");
+    await setScriptSourceArgs(appId, { records: [sourceRecord(9)] });
+    expect((await syncApp(appId)).ok).toBe(true);
+    const beforeInvalid = structuredClone(listAppRows(appId, "issue"));
+
+    await setScriptSourceArgs(appId, { records: { key: "not-an-array", fields: {} } });
+    const invalidShape = await syncApp(appId);
+    expect(invalidShape.ok).toBe(false);
+    expect(invalidShape.passes[0]?.error).toContain("script source returned invalid records");
+    expect(listAppRows(appId, "issue")).toEqual(beforeInvalid);
+
+    await setScriptSourceArgs(appId, { records: [{ fields: {} }] });
+    const missingKey = await syncApp(appId);
+    expect(missingKey.ok).toBe(false);
+    expect(missingKey.passes[0]?.error).toContain("script source returned invalid records");
+    expect(listAppRows(appId, "issue")).toEqual(beforeInvalid);
+
+    await setScriptSourceArgs(appId, {
+      records: Array.from({ length: 501 }, (_, index) => ({ key: index, fields: {} })),
+    });
+    const overCap = await syncApp(appId);
+    expect(overCap.ok).toBe(false);
+    expect(overCap.passes[0]?.error).toContain("script source returned invalid records");
+    expect(listAppRows(appId, "issue")).toEqual(beforeInvalid);
+  });
+
+  test("runs as the owning agent and injects source args plus app, model, and source context", async () => {
+    const definition = structuredClone(githubDefinition);
+    Object.assign(definition.models.issue.columns, {
+      appContext: { kind: "string", source: { of: "gh", field: "appId" } },
+      modelContext: { kind: "string", source: { of: "gh", field: "model" } },
+      sourceContext: { kind: "string", source: { of: "gh", field: "source" } },
+      customContext: { kind: "string", source: { of: "gh", field: "custom" } },
+      runAsContext: { kind: "string", source: { of: "gh", field: "runAsAgentId" } },
+    });
+    definition.models.issue.sources.gh.args = {
+      captureContext: true,
+      key: 42,
+      custom: "from-source-args",
+      app: { id: "must-be-overridden" },
+      model: "must-be-overridden",
+      source: "must-be-overridden",
+    };
+    const appId = await createApp(definition, "Script context injection");
+
+    const result = await syncApp(appId);
+    expect(result).toMatchObject({ ok: true, passes: [{ connector: "script", created: 1 }] });
+    expect(listAppRows(appId, "issue")).toEqual([
+      expect.objectContaining({
+        externalId: "42",
+        appContext: appId,
+        modelContext: "issue",
+        sourceContext: "gh",
+        customContext: "from-source-args",
+        runAsContext: AGENT_ID,
+      }),
+    ]);
+  });
+
+  test("runs an ownerless global catalog-style script under the isolated app-sync identity", async () => {
+    const globalScript = insertScript({
+      name: `apps_spike3_global_source_${crypto.randomUUID().replaceAll("-", "")}`,
+      scope: "global",
+      scopeId: null,
+      source: SCRIPT_SOURCE,
+      description: "Ownerless global Apps source fixture",
+      intent: "Prove global catalog sources can run without inheriting agent credentials",
+      signatureJson: JSON.stringify({ args: { type: "object" }, result: { type: "array" } }),
+      agentId: null,
+      typeChecked: true,
+    });
+    const definition = structuredClone(githubDefinition);
+    definition.models.issue.columns.runAsContext = {
+      kind: "string",
+      source: { of: "gh", field: "runAsAgentId" },
+    };
+    definition.models.issue.sources.gh.scriptId = globalScript.id;
+    definition.models.issue.sources.gh.args = { captureContext: true, key: "global" };
+    const appId = await createApp(definition, "Global script source");
+
+    const result = await syncApp(appId);
+    expect(result).toMatchObject({ ok: true, passes: [{ connector: "script", created: 1 }] });
+    expect(listAppRows(appId, "issue")).toEqual([
+      expect.objectContaining({ externalId: "global", runAsContext: "app-sync" }),
+    ]);
   });
 
   test("serializes concurrent reconciliation after barrier-gated connector pulls", async () => {
@@ -713,7 +820,7 @@ describe("GitHub issue sync lifecycle", () => {
     const barrier = new Promise<void>((resolve) => {
       release = resolve;
     });
-    CONNECTORS["github-issues"] = {
+    CONNECTORS["swarm-tasks"] = {
       async pull() {
         arrived += 1;
         if (arrived === 2) release();
@@ -721,24 +828,21 @@ describe("GitHub issue sync lifecycle", () => {
         return [
           {
             key: "1",
-            fields: {
-              ...githubIssue(1),
-              userLogin: "User1",
-              createdAt: "2026-08-01T10:00:00.000Z",
-            },
+            fields: sourceRecord(1).fields,
           },
           {
             key: "2",
-            fields: {
-              ...githubIssue(2),
-              userLogin: "User2",
-              createdAt: "2026-08-02T10:00:00.000Z",
-            },
+            fields: sourceRecord(2).fields,
           },
         ];
       },
     };
-    const appId = await createApp(githubDefinition, "Concurrent sync");
+    const concurrentDefinition = structuredClone(githubDefinition);
+    concurrentDefinition.models.issue.sources.gh = {
+      connector: "swarm-tasks",
+      joinKey: "externalId",
+    } as any;
+    const appId = await createApp(concurrentDefinition, "Concurrent sync");
     const app = getApp(appId);
     if (!app) throw new Error("test app disappeared");
 
@@ -820,8 +924,8 @@ describe("swarm task connector", () => {
 
 describe("sync HTTP and action endpoints", () => {
   test("returns happy, not-found, unknown-selection, and no-pair response shapes", async () => {
-    stubGithubFetch({ body: [githubIssue(1)] });
     const appId = await createApp(githubDefinition);
+    await setScriptSourceArgs(appId, { records: [sourceRecord(1)] });
     const happy = await request<SyncResponse>(`/api/apps/${appId}/sync`, {
       method: "POST",
       body: JSON.stringify({ model: "issue", source: "gh" }),
@@ -857,8 +961,8 @@ describe("sync HTTP and action endpoints", () => {
   });
 
   test("runs a sync action with the script-kind inline result shape", async () => {
-    stubGithubFetch({ body: [githubIssue(7)] });
     const appId = await createApp(githubDefinition);
+    await setScriptSourceArgs(appId, { records: [sourceRecord(7)] });
     const result = await request<{
       ok: boolean;
       result: { passes: SyncPass[] };
@@ -879,8 +983,8 @@ describe("sync HTTP and action endpoints", () => {
 
 describe("sync and query MCP tools", () => {
   test("round-trips through registered tools with a registered UUID agent", async () => {
-    stubGithubFetch({ body: [githubIssue(11, { title: "MCP row" })] });
     const appId = await createApp(githubDefinition, "MCP sync");
+    await setScriptSourceArgs(appId, { records: [sourceRecord(11, { title: "MCP row" })] });
     const tools = registeredTools([registerAppSyncTool, registerAppQueryTool]);
 
     const synced = (await tools["app-sync"]!.handler(

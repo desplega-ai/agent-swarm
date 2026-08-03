@@ -35,6 +35,48 @@ Recon-driven calls baked into this spec:
 - **No new schedule targetType** — schedules use the existing `targetType:'script'`
   (migration 103) with a tiny saved script calling `ctx.swarm.app_sync(...)`.
 
+## AMENDMENT v2 (2026-08-03, Taras): sources are DYNAMIC — script-backed by default
+
+The frozen v1 shipped a closed connector enum (`swarm-tasks` | `github-issues`) with both
+pull functions hardcoded in `src/apps/sync.ts`. That contradicts the design: **sources
+must never be hardcoded** — an agent must be able to add a new source without a server
+deploy. Only an internal connector like the swarm task pool may stay native.
+
+Contract changes (everything not listed here — reconciliation, join keys, provenance,
+stale semantics, read-only enforcement, entry points, freshness — is UNCHANGED):
+
+1. `SourceDef` becomes a discriminated union on `connector`:
+   ```ts
+   | { connector: "swarm-tasks"; joinKey: string; config?: Record<string, scalar> }   // native, unchanged
+   | { connector: "script"; joinKey: string; scriptId: string;                        // THE default kind
+       args?: Record<string, unknown> }
+   ```
+   `github-issues` is REMOVED from the enum and from sync.ts. Its pull logic moves to a
+   catalog seed script `github-issues-pull` (src/be/seed-scripts/catalog/, mirroring the
+   existing gh scripts) so it stays batteries-included but lives in user-space.
+2. Script-source contract: the engine calls `runScript` (same run-as resolution +
+   credential wiring as the script action kind in src/http/apps.ts) with
+   `args = { ...source.args, app: { id }, model, source: <name> }`. The script's return
+   value MUST be `Array<{ key: string, fields: Record<string, unknown> }>` (validated
+   with zod; `key` coerced via String(); record cap 500; invalid shape or
+   runScript error/timeout → pass error, zero row churn). Pull still happens OUTSIDE
+   the reconcile lock.
+3. Validation: `scriptId` must exist (`getScriptById`, same pattern + issue wording as
+   script actions); the connector-specific `config.repo` check is deleted with the enum.
+4. `github-issues-pull` seed script: args `{ repo: "owner/name", state?: "open"|"closed"|"all",
+   limit?: <=100 }`, validates repo shape itself (reject "."/".." segments), fetches with
+   the same headers/timeout/PR-filtering/projection as the v1 connector, returns the
+   record array. Seed-script registration per runbooks/seed-scripts.md.
+5. Skill: source section rewritten — script sources are THE way; worked example uses
+   `github-issues-pull` (find its scriptId via script tools); swarm-tasks documented as
+   the one native connector; the pull-window/staleness caveat stays.
+6. Tests: script-source pass (stub script via the scripts DB layer), return-shape
+   rejection, missing-script validation issue, run-as + args injection; github connector
+   unit tests convert to seed-script tests where sensible; swarm-tasks tests unchanged.
+7. E2E migration: the two live apps (PM Inbox 6f93f0ce, scratch 12218dfe) get their
+   `gh`/`github` sources patched to `{connector: "script", scriptId: <github-issues-pull>}`
+   and must sync identically afterwards.
+
 ## Non-goals
 
 No webhooks; no two-way sync / write-back; no cross-source entity resolution (union

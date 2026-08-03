@@ -26,7 +26,7 @@ For every edit: `app-get` -> modify the smallest coherent subtree -> `app-patch`
   "models": {
     "modelName": {
       "sources": {
-        "sourceName": { "connector": "github-issues", "joinKey": "externalId", "config": { "repo": "owner/name" } }
+        "sourceName": { "connector": "script", "joinKey": "externalId", "scriptId": "00000000-0000-4000-8000-000000000000", "args": { "repo": "owner/name" } }
       },
       "columns": {
         "externalId": { "kind": "string" },
@@ -60,7 +60,7 @@ Each column is `{ "kind": ..., "required"?: boolean, "default"?: ..., "index"?: 
 
 ## Synced sources
 
-Synced sources are one-way inbound projections. A row belongs to at most one source, and a sync refresh updates only that source's bound columns and provenance fields; owned columns remain untouched. Connectors are configured directly on a model for this spike and do not use the connections primitive.
+Synced sources are one-way inbound projections. A row belongs to at most one source, and a sync refresh updates only that source's bound columns and provenance fields; owned columns remain untouched. Script-backed sources are the default: adding a new upstream needs a saved script, not a server deploy. The internal `swarm-tasks` source is the sole native connector in this spike. Sources do not yet use the connections primitive.
 
 Declare up to four named sources on a model. Source names follow the same lowercase-letter-first, letters/numbers/underscores-only rule as model and query names. Each source declares one string join-key column on that model:
 
@@ -73,20 +73,34 @@ Declare up to four named sources on a model. Source names follow the same lowerc
       "config": { "status": "pending,in_progress", "limit": 100, "includeHeartbeat": false }
     },
     "github": {
-      "connector": "github-issues",
+      "connector": "script",
       "joinKey": "githubNumber",
-      "config": { "repo": "owner/name", "state": "open", "limit": 50 }
+      "scriptId": "<github-issues-pull-script-id>",
+      "args": { "repo": "owner/name", "state": "open", "limit": 50 }
     }
   }
 }
 ```
 
-| Connector | Configuration | Exact projected `fields` |
+Script sources use `{ "connector": "script", "joinKey": "...", "scriptId": "...", "args"?: {...} }`. Find a source script with `script-search` and use the exact stored script ID; `scriptId` must exist when the app definition is saved. On every pull the engine runs an agent-owned script with its saved owner's identity and credential bindings. An ownerless global catalog script runs under the isolated `app-sync` identity with no agent credential bindings. The engine supplies `{ ...args, app: { id }, model, source }`, with the engine-owned context keys overriding same-named values in `args`.
+
+A source script must return at most 500 records with this exact shape:
+
+```ts
+Array<{ key: string; fields: Record<string, unknown> }>
+```
+
+Numeric and other scalar `key` values are converted to strings. An invalid return value, script error, or timeout fails that pass before reconciliation, so it causes no row churn.
+
+The built-in catalog includes `github-issues-pull`. Search for that exact name, use its script ID, and pass `args: { "repo": "owner/name", "state"?: "open" | "closed" | "all", "limit"?: 1..100 }`. It returns public issues and excludes pull requests. Its exact projected `fields` are `number`, `id`, `title`, `state`, `body` (truncated to 1000 characters), `userLogin`, `labelsCsv`, `comments`, `htmlUrl`, `createdAt`, and `updatedAt`.
+
+The one native source uses `{ "connector": "swarm-tasks", "joinKey": "...", "config"?: {...} }`:
+
+| Native connector | Configuration | Exact projected `fields` |
 |---|---|---|
 | `swarm-tasks` | `status?`: comma-separated filter; `limit?`: at most 200, default 100; `includeHeartbeat?`: default `false`. | `id`, `status`, `prompt` (truncated to 1000 characters), `source`, `agentId`, `tags`, `priority`, `createdAt`, `updatedAt`, `vcsProvider`, `vcsNumber`, `vcsUrl`, `vcsAuthor` |
-| `github-issues` | `repo`: required `owner/name`; `state?`: `open` \| `closed` \| `all`, default `open`; `limit?`: at most 100, default 50. Public issues only; pull requests returned by GitHub's issues endpoint are excluded. | `number`, `id`, `title`, `state`, `body` (truncated to 1000 characters), `userLogin`, `labelsCsv`, `comments`, `htmlUrl`, `createdAt`, `updatedAt` |
 
-Connector config is a flat map of string, number, or boolean scalars. Unknown config keys are preserved, but `github-issues.config.repo` is required and must match `^[\w.-]+\/[\w.-]+$` (`owner/name` using letters, numbers, underscores, dots, or hyphens); neither segment may be `.` or `..`.
+`swarm-tasks.config` is a flat map of string, number, or boolean scalars. Script-source `args` may contain arbitrary JSON values; each script owns their validation. For example, `github-issues-pull` requires `repo` in `owner/name` form and rejects `.` or `..` as either segment.
 
 The join-key column must exist on the same model with `kind: "string"`. It is implicitly managed by sync, so it cannot have a `source` binding, be required, or carry a default.
 
@@ -119,7 +133,7 @@ Source-bound columns and join-key columns are read-only on direct row create, up
 
 Synced rows add three flat system fields: `source` is the model source name, `syncedAt` is the ISO timestamp when the row was last confirmed present, and `stale` is `true` when a later pass no longer finds it. Every seen row gets a fresh `syncedAt`; when projected values and `stale` are unchanged, that metadata-only refresh does not change `updatedAt`. Sync keeps vanished rows and flags them stale; reappearance clears the flag. Owned rows do not carry these fields.
 
-Staleness is relative to the connector's configured bounded pull window: a record that falls outside the selected `limit` may be marked stale even when it still exists upstream, so choose connector filters and limits to cover the records whose freshness the app must track.
+Staleness is relative to the source's configured bounded pull window: a record that falls outside the selected `limit` may be marked stale even when it still exists upstream, so choose script args or native connector filters and limits to cover the records whose freshness the app must track.
 
 Surface freshness with existing Table column kinds:
 
@@ -378,7 +392,7 @@ An action-chain step is `{ "action": "<type>", "params": {...} }`. Available act
 - `null` deletes a key;
 - exception: every supplied `page.elements.<id>`, `actions.<name>`, `models.<name>.columns.<col>`, and `models.<name>.sources.<src>` value is atomic and replaces that complete stored element/action/column/source; `null` deletes it.
 
-Because elements, actions, columns, and sources are atomic, include the complete desired object when changing one. For example, changing only a Table's `emptyMessage` requires sending its full `{ "type": "Table", "props": ... }` element; changing a source's `config.state` requires sending its complete `{ "connector", "joinKey", "config" }` source definition. The merged result is validated as a whole; on failure, read `issues[]`, correct the paths, and retry without assuming anything was written.
+Because elements, actions, columns, and sources are atomic, include the complete desired object when changing one. For example, changing only a Table's `emptyMessage` requires sending its full `{ "type": "Table", "props": ... }` element; changing a script source's `args.state` requires sending its complete `{ "connector", "joinKey", "scriptId", "args" }` source definition. The merged result is validated as a whole; on failure, read `issues[]`, correct the paths, and retry without assuming anything was written.
 
 ```json
 {

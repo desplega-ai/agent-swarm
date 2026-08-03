@@ -25,16 +25,11 @@ import {
 import { createApp, deleteApp, getApp, listApps, updateApp } from "../apps/store";
 import { runAppSync, SyncSelectionError } from "../apps/sync";
 import { getAgentById, getLeadAgent } from "../be/db";
-import {
-  getScriptApiConnectionDescriptors,
-  getScriptMcpConnectionDescriptors,
-} from "../be/script-connections";
-import { buildScriptCredentialBindingsWithFailures } from "../be/script-credential-broker";
 import { getScriptById } from "../be/scripts/db";
+import { getSavedScriptOwnerAgentId, runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import { resolveTemplate } from "../prompts/resolver";
 import type { RbacPrincipal } from "../rbac";
 import { can } from "../rbac";
-import { runScript } from "../scripts-runtime/loader";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubObject } from "../utils/secret-scrubber";
@@ -746,24 +741,16 @@ export async function handleApps(
 
       // Spike tradeoff: app managers currently run saved scripts with the owner's bindings; revisit
       // with invoker-rights checks or invoker-brokered credentials before productization.
-      const runAsAgentId = script.scopeId ?? script.createdByAgentId;
+      const runAsAgentId = getSavedScriptOwnerAgentId(script);
       if (!runAsAgentId) {
         jsonError(res, "agentId is required: this script has no owning agent to run as", 400);
         return true;
       }
 
-      const credentials = await buildScriptCredentialBindingsWithFailures({
+      const output = await runSavedScriptAsAgent({
+        script,
+        input: { ...action.args, ...input, app: { id: app.id } },
         agentId: runAsAgentId,
-      });
-      const output = await runScript({
-        source: script.source,
-        args: { ...action.args, ...input, app: { id: app.id } },
-        fsMode: script.fsMode,
-        agentId: runAsAgentId,
-        egressSecrets: credentials.egressSecrets,
-        failedBindings: credentials.failedBindings,
-        apiConnections: getScriptApiConnectionDescriptors({ agentId: runAsAgentId }),
-        mcpConnections: getScriptMcpConnectionDescriptors({ agentId: runAsAgentId }),
       });
       const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
       const error = ok
