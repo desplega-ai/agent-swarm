@@ -1393,4 +1393,52 @@ describe("Slack renderer v2", () => {
     expect(started?.payload.markdown_text).not.toContain("PRIVATE OUTPUT");
     expect(outcome?.finalizedAt).toBeDefined();
   });
+
+  test("refreshes a stream started with stale content before finalizing it", async () => {
+    const lead = createAgent({ name: "Refresh Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REFRESH_STALE");
+    const ask = createTaskExtended("ask whose reply lands mid-stream", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    completeTask(ask.id, "PRIVATE OUTPUT THAT MUST NOT SURVIVE A LATE SLACK-REPLY");
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+    // The stream starts with the full (pre-reply) output, then the process fails
+    // before chat.stopStream — leaving an unfinalized stream with stale content.
+    stopCallsUntilFailure = 0;
+
+    await processSlackRenderV2();
+
+    const interrupted = getSlackOutcomeMessage(ask.id);
+    expect(interrupted?.finalizedAt).toBeUndefined();
+    const startedFirst = calls.find((call) => call.method === "chat.startStream");
+    expect(startedFirst?.payload.markdown_text).toContain("PRIVATE OUTPUT");
+    expect(remoteMessages.get(remoteKey(channelId, interrupted!.ts))?.text).toContain(
+      "PRIVATE OUTPUT",
+    );
+
+    // The agent's slack-reply lands after the stream started but before the retry.
+    markTaskSlackReplySent(ask.id);
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    expect(calls.some((call) => call.method === "chat.startStream")).toBe(false);
+    const refreshed = calls.find(
+      (call) => call.method === "chat.update" && call.payload.ts === interrupted?.ts,
+    );
+    expect(refreshed?.payload.text).toBe(`✅ ${lead.name} completed`);
+    expect(refreshed?.payload.text).not.toContain("PRIVATE OUTPUT");
+    expect(remoteMessages.get(remoteKey(channelId, interrupted!.ts))?.text).not.toContain(
+      "PRIVATE OUTPUT",
+    );
+    expect(getSlackOutcomeMessage(ask.id)?.finalizedAt).toBeDefined();
+  });
 });
