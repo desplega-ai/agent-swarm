@@ -22,6 +22,32 @@ import attioInteractionConfig from "../../../templates/skills/attio-interaction/
 import attioInteractionContent from "../../../templates/skills/attio-interaction/content.md" with {
   type: "text",
 };
+import composioConfig from "../../../templates/skills/composio/config.json" with { type: "text" };
+import composioContent from "../../../templates/skills/composio/content.md" with { type: "text" };
+import composioGmailConfig from "../../../templates/skills/composio-gmail/config.json" with {
+  type: "text",
+};
+import composioGmailContent from "../../../templates/skills/composio-gmail/content.md" with {
+  type: "text",
+};
+import composioGoogleCalendarConfig from "../../../templates/skills/composio-google-calendar/config.json" with {
+  type: "text",
+};
+import composioGoogleCalendarContent from "../../../templates/skills/composio-google-calendar/content.md" with {
+  type: "text",
+};
+import composioGoogleDocsConfig from "../../../templates/skills/composio-google-docs/config.json" with {
+  type: "text",
+};
+import composioGoogleDocsContent from "../../../templates/skills/composio-google-docs/content.md" with {
+  type: "text",
+};
+import downloadTaskAttachmentConfig from "../../../templates/skills/download-task-attachment/config.json" with {
+  type: "text",
+};
+import downloadTaskAttachmentContent from "../../../templates/skills/download-task-attachment/content.md" with {
+  type: "text",
+};
 import kvStorageConfig from "../../../templates/skills/kv-storage/config.json" with {
   type: "text",
 };
@@ -112,6 +138,11 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: assetNamespacesConfig, body: assetNamespacesContent },
   { config: attioInteractionConfig, body: attioInteractionContent },
   { config: artifactsConfig, body: artifactsContent },
+  { config: composioConfig, body: composioContent },
+  { config: composioGmailConfig, body: composioGmailContent },
+  { config: composioGoogleCalendarConfig, body: composioGoogleCalendarContent },
+  { config: composioGoogleDocsConfig, body: composioGoogleDocsContent },
+  { config: downloadTaskAttachmentConfig, body: downloadTaskAttachmentContent },
   { config: kvStorageConfig, body: kvStorageContent },
   { config: pagesConfig, body: pagesContent },
   { config: scriptWorkflowsConfig, body: scriptWorkflowsContent },

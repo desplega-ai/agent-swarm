@@ -9,18 +9,24 @@ They are **not** interchangeable. Pick deliberately.
 | # | Path | Source | Reaches agents by | Use when |
 |---|---|---|---|---|
 | 1 | **Seeded** ⭐ | `templates/skills/<name>/{config.json,content.md,files/}` | Embedded into the API binary at build time → written to the DB at boot → synced to every harness skill tree | Default for anything the swarm owns |
-| 2 | **Baked** | `plugin/skills/<name>/SKILL.md` | `COPY` into the worker image | Only when the skill must exist before the API is reachable, or is version-locked to a CLI in the image |
+| 2 | **Baked** | `plugin/{commands,agents,pi-skills}/` or pinned `npx skills` installs in `Dockerfile.worker` (`plugin/skills/` is retired) | Copied or installed into the worker image | Only for harness-specific commands/agents, Pi-only skills, or third-party skills version-locked to a CLI in the image (currently `agent-fs` and `qa-use`) |
 | 3 | **Remote-installed** | a `SKILL.md` at a path the integrations catalog points at | `skill-install-remote` fetches `<templatePath>/SKILL.md` from GitHub raw, on demand | Optional per-integration skills the operator opts into |
 
 **Prefer path 1.** Seeded skills are live-updatable without an image rebuild, listed by the skills API, editable in the UI, per-agent toggleable, and version-tracked with user-edit preservation. Baked skills have none of that.
 
-> Paths 1 and 3 can coexist in the same directory. In that case, `SKILL.md` is a **generated artifact** of `config.json` + `content.md`; never hand-edit it. Run `bun run build:skill-md` and commit the result. CI's `stale-skill-md` rule rejects drift.
+> Paths 1 and 3 can coexist in the same directory. In that case, `SKILL.md` is a **generated artifact** of `config.json` + `content.md`; never hand-edit it. Run `bun run build:skill-md` and commit the result. CI (`bun run check:skill-md`) rejects drift.
 
 ## The rule that matters
 
-**One skill name must not be both seeded (1) and baked (2).**
+**One skill name must not be both seeded (1) and baked as a skill.**
+`plugin/skills/` is retired for skills; `plugin/commands/`, `plugin/agents/`,
+and `plugin/pi-skills/` remain baked image assets.
 
-Both write `~/.claude/skills/<name>/SKILL.md`. The DB copy wins at runtime, so the baked content is silently discarded — and then `writeSkillsToFilesystem` drops a `.swarm-managed` marker, after which `reconcileManagedSkillFiles` deletes any file in that directory with no `skill_files` row.
+When both delivery paths write `~/.claude/skills/<name>/SKILL.md`, the DB copy
+wins at runtime, so the baked content is silently discarded — and then
+`writeSkillsToFilesystem` drops a `.swarm-managed` marker, after which
+`reconcileManagedSkillFiles` deletes any file in that directory with no
+`skill_files` row.
 
 This is not hypothetical. `artifacts`, `kv-storage` and `pages` each existed in both paths with different content. Agents were served the smaller version and lost the bundled examples. Enforced by `bun run check:skill-sources`.
 

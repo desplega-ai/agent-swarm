@@ -687,7 +687,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         name: "composio",
         source: "template",
         templateRepo: "desplega-ai/agent-swarm",
-        templatePath: "plugin/skills/composio",
+        templatePath: "templates/skills/composio",
         roles: ["lead", "worker"],
         reason:
           "Operational recipes for creating Tool Router sessions, checking connected accounts, and executing Composio actions through `agent-swarm x composio` or `swarm_x`.",

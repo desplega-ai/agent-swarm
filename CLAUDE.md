@@ -126,11 +126,11 @@ Test against a fresh DB (`rm agent-swarm-db.sqlite && bun run start:http`) **and
 
 </important>
 
-<important if="you are adding or editing an agent skill (templates/skills/, plugin/skills/, or src/be/seed-skills/)">
+<important if="you are adding or editing an agent skill (templates/skills/ or src/be/seed-skills/)">
 
 Full authoring guide, the three delivery paths, versioning semantics, and every enforced rule: [runbooks/skills.md](./runbooks/skills.md).
 
-**The rule that matters: one skill name must not be both seeded and baked.** `templates/skills/<name>/` (DB-seeded) and `plugin/skills/<name>/` (baked into the worker image) both write `~/.claude/skills/<name>/SKILL.md`. The DB copy wins, the baked content is silently discarded, and the FS writer then prunes any bundled file with no `skill_files` row. That truncated `artifacts` / `kv-storage` / `pages` and deleted their examples in production.
+**The rule that matters: one skill name must not be both seeded and baked.** `templates/skills/<name>/` (DB-seeded) and an image-baked skill (such as a pinned `npx skills` install) both write `~/.claude/skills/<name>/SKILL.md`. The DB copy wins, the baked content is silently discarded, and the FS writer then prunes any bundled file with no `skill_files` row. That truncated `artifacts` / `kv-storage` / `pages` and deleted their examples in production. `plugin/skills/` is retired for skills; `plugin/commands/`, `plugin/agents/`, and `plugin/pi-skills/` remain baked.
 
 **Prefer `templates/skills/`** — seeded skills are live-updatable (no image rebuild), listed by the skills API, editable in the UI, per-agent toggleable, and version-tracked with user-edit preservation.
 

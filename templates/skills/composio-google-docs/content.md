@@ -1,8 +1,3 @@
----
-name: composio-google-docs
-description: Per-app playbook for driving Google Docs through Composio (toolkit slug `googledocs`). Verified GOOGLEDOCS_* tool slugs and argument shapes for searching, reading plaintext, creating (incl. from markdown), and editing documents. Use alongside the `composio` hub skill whenever a task reads or writes Google Docs for a connected user.
----
-
 # Composio · Google Docs
 
 Toolkit slug: **`googledocs`**. Read the [[composio]] hub first for the call model.

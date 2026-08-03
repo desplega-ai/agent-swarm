@@ -386,10 +386,9 @@ COPY --chmod=755 scripts/init-local-postgres.sh /usr/local/bin/init-local-postgr
 COPY --chmod=755 scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
 COPY --chmod=755 scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
 
-# Copy commands / agents / skills
+# Copy commands / agents
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
 COPY --chown=worker:worker plugin/agents/* /home/worker/.claude/agents/
-COPY --chown=worker:worker plugin/skills/ /home/worker/.claude/skills/
 
 # Copy pi-mono skills (used when HARNESS_PROVIDER=pi)
 COPY --chown=worker:worker plugin/pi-skills/ /home/worker/.pi/agent/skills/
@@ -604,10 +603,9 @@ COPY --chmod=755 scripts/init-local-postgres.sh /usr/local/bin/init-local-postgr
 COPY --chmod=755 scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
 COPY --chmod=755 scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
 
-# Copy commands / agents / skills
+# Copy commands / agents
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
 COPY --chown=worker:worker plugin/agents/* /home/worker/.claude/agents/
-COPY --chown=worker:worker plugin/skills/ /home/worker/.claude/skills/
 
 # Copy pi-mono skills (used when HARNESS_PROVIDER=pi)
 COPY --chown=worker:worker plugin/pi-skills/ /home/worker/.pi/agent/skills/

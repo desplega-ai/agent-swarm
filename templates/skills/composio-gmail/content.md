@@ -1,8 +1,3 @@
----
-name: composio-gmail
-description: Per-app playbook for driving Gmail through Composio (toolkit slug `gmail`). Verified GMAIL_* tool slugs and argument shapes for reading, searching, sending, drafts, labels, and threads. Use alongside the `composio` hub skill whenever a task reads or sends Gmail for a connected user. Covers the metadata-first reads, the GMAIL_SEND_EMAIL HTML flag, and reply-to-thread.
----
-
 # Composio · Gmail
 
 Toolkit slug: **`gmail`**. Read the [[composio]] hub first for the call model

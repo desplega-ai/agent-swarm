@@ -1,8 +1,3 @@
----
-name: composio-google-calendar
-description: Per-app playbook for driving Google Calendar through Composio (toolkit slug `googlecalendar`). Verified GOOGLECALENDAR_* tool slugs and argument shapes for listing, finding, creating, and updating events plus free/busy. Use alongside the `composio` hub skill. CRITICAL — covers the "events from a year ago" trap: GOOGLECALENDAR_EVENTS_LIST has no default timeMin, so you MUST pass timeMin/orderBy/singleEvents to get upcoming events.
----
-
 # Composio · Google Calendar
 
 Toolkit slug: **`googlecalendar`**. Read the [[composio]] hub first for the call

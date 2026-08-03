@@ -1,8 +1,3 @@
----
-name: download-task-attachment
-description: Fetch a file attached to your current task in ONE call. Use whenever a task carries an attachment (an image, PDF, or other file the requester uploaded) and you need its bytes on disk — the dispatch prompt lists attachments with a ready-to-run curl command, but if you're improvising (resumed session, follow-up task, or the recipe scrolled out of context) use this skill instead of reaching for the `agent-fs` CLI directly.
----
-
 # Download a Task Attachment
 
 Task attachments (files uploaded via the UI or API onto a task) are served

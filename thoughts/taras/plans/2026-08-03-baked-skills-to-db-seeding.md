@@ -245,15 +245,15 @@ Deliverable: `composio`, `composio-gmail`, `composio-google-calendar`, `composio
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run check:skill-sources` passes (rule 1 proves no duplicate path; rule 5 passes with the moved templatePath; new-skill wiring satisfies rule 4)
-- [ ] `bun run build:seed-skill-files && bun run check:seed-skill-files` pass (no-op)
-- [ ] `bun run lint && bun run tsc:check && bun run test:root` pass; `bash scripts/check-db-boundary.sh`
-- [ ] `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b` (integrations-catalog touched)
-- [ ] `docker build -f Dockerfile.worker --target worker-slim .` succeeds; `docker build -f Dockerfile.worker --target worker-full .` locally (merge gate only builds slim)
-- [ ] Fresh AND existing DB boot: `rm -f agent-swarm-db.sqlite* && bun run start:http` then restart over the same DB — seeder creates then no-ops (`skippedUpToDate`)
+- [x] `bun run check:skill-sources` passes (rule 1 proves no duplicate path; rule 5 passes with the moved templatePath; new-skill wiring satisfies rule 4)
+- [x] `bun run build:seed-skill-files && bun run check:seed-skill-files` pass (no-op)
+- [x] `bun run lint && bun run tsc:check && bun run test:root` pass; `bash scripts/check-db-boundary.sh`
+- [x] `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b` (integrations-catalog touched)
+- [x] `docker build -f Dockerfile.worker --target worker-slim .` succeeds; `docker build -f Dockerfile.worker --target worker-full .` locally (merge gate only builds slim)
+- [x] Fresh AND existing DB boot: `rm -f agent-swarm-db.sqlite* && bun run start:http` then restart over the same DB — seeder creates then no-ops (`skippedUpToDate` — observed `unchanged=15`)
 
 #### Automated QA:
-- [ ] Docker E2E smoke (copy from `LOCAL_TESTING.md:57-81`):
+- [x] Docker E2E smoke (copy from `LOCAL_TESTING.md:57-81`):
   ```bash
   rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm
   bun run start:http &
@@ -267,16 +267,18 @@ Deliverable: `composio`, `composio-gmail`, `composio-google-calendar`, `composio
   curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/agents \
     | jq '.agents[] | {name, isLead, status}'
   ```
-- [ ] Harness-tree check (new, not in LOCAL_TESTING.md): after the worker's runner boots (give it ~30 s), `for t in .claude/skills .pi/agent/skills .codex/skills .opencode/skills .agents/skills; do docker exec e2e-worker-$SUFFIX ls /home/worker/$t; done` — all 5 migrated skills present in all 5 trees, each dir containing a `.swarm-managed` marker
-- [ ] Two-pass stability: trigger a second refresh (send any pool task via `curl -X POST …/api/tasks` per LOCAL_TESTING.md, or restart the worker container) — the 5 skill dirs survive unchanged
-- [ ] `curl -s -H "Authorization: Bearer 123123" "http://localhost:3013/api/agents/<workerId>/skills" | jq '[.skills[].name]'` includes all 5 with `isActive: true`
-- [ ] Cleanup: `docker stop e2e-lead-$SUFFIX e2e-worker-$SUFFIX; kill $(lsof -ti :3013)`
+- [x] Harness-tree check (new, not in LOCAL_TESTING.md): after the worker's runner boots (give it ~30 s), `for t in .claude/skills .pi/agent/skills .codex/skills .opencode/skills .agents/skills; do docker exec e2e-worker-$SUFFIX ls /home/worker/$t; done` — all 5 migrated skills present in all 5 trees, each dir containing a `.swarm-managed` marker (25/25 verified)
+- [x] Two-pass stability: trigger a second refresh (send any pool task via `curl -X POST …/api/tasks` per LOCAL_TESTING.md, or restart the worker container) — the 5 skill dirs survive unchanged (real pool task completed through the worker; dirs + markers intact, timestamps unchanged)
+- [x] `curl -s -H "Authorization: Bearer 123123" "http://localhost:3013/api/agents/<workerId>/skills" | jq '[.skills[].name]'` includes all 5 with `isActive: true` (15 total)
+- [x] Cleanup: `docker stop e2e-lead-$SUFFIX e2e-worker-$SUFFIX; kill $(lsof -ti :3013)` (ran on ports 3999/3211/3213 to leave the dev stack on 3013 untouched)
 
 #### Manual Verification:
-- [ ] Dashboard `/skills` page: the 5 appear with scope `swarm`, System Default badge, a version; detail page shows the edit-lock (qa-use session with screenshots — merge-gate requirement for the `apps/ui/` change in this PR)
-- [ ] Composio integration setup flow still resolves the skill from the new templatePath
+- [x] Dashboard `/skills` page: the 5 appear with scope `swarm`, System Default badge, a version; detail page shows the edit-lock (verified by Claude via agent-browser on the worktree stack per Taras's delegation; screenshots at /tmp/qa-skills-final.png, /tmp/qa-composio-detail.png)
+- [x] Composio integration setup flow still resolves the skill from the new templatePath (Settings → Integrations → Composio shows the recommended `composio` template skill with install actions; note: actual remote fetch resolves against GitHub raw `main`, so it 404s until PR A merges — and the skill is seeded+systemDefault now anyway, so remote install is redundant for it)
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 2] migrate plugin/skills into seeder`; open PR A (Phases 1+2).
+
+**Post-review amendment (2026-08-03)**: the 5 new `config.json` files were extended from the minimal seeder shape to the full `AgentAssetConfig` shape (`templates/schema.ts`) — `apps/templates-ui` reads `templates/skills/*/config.json` directly and `asset-detail.tsx` dereferences `config.placeholders.length`, so the minimal shape would crash the templates registry pages. Placeholders: `COMPOSIO_API_KEY` on the hub skill only; runtime-injected env (`AGENT_SWARM_*`, `MCP_BASE_URL`) is not a placeholder.
 
 ---
 
