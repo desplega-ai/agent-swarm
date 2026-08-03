@@ -17,8 +17,10 @@ import { shouldSkipCooldown } from "./cooldown";
 import { findEntryNodes, getNextTargets, getSuccessors } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
+import { FOREACH_TERMINAL_STEP_STATUSES, resolveForeachParent } from "./foreach-join";
 import { getSecretInputKeys, redactSecretsForStorage, resolveInputs } from "./input";
 import { validateJsonSchema } from "./json-schema-validator";
+import { getMaxWorkflowStepsPerRun } from "./limits";
 import { deepInterpolate } from "./template";
 import { runStepValidation, type ValidationRunResult } from "./validation";
 
@@ -29,9 +31,6 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 // limits. Functions let a config reload take effect without a restart.
 function maxIterations(): number {
   return Number(process.env.WORKFLOW_MAX_ITERATIONS) || 100;
-}
-function maxStepsPerRun(): number {
-  return Number(process.env.WORKFLOW_MAX_STEPS_PER_RUN) || 500;
 }
 
 export interface WorkflowExecutionOptions {
@@ -174,6 +173,10 @@ export async function walkGraph(
   // multiple completed steps from different iterations).
   if (completedNodeIds.size > 0) {
     for (const nodeId of completedNodeIds) {
+      // Synthetic foreach children persist their own step output for the join,
+      // but only the parent aggregate belongs in workflow context or routing.
+      if (resolveForeachParent(def, nodeId)) continue;
+
       const step = getLatestStepForNode(runId, nodeId);
       if (step?.output !== undefined) {
         // Bug 5 fix: Validate stored output against executor schema on recovery
@@ -207,10 +210,10 @@ export async function walkGraph(
   // unbounded resources. Checked here so it covers initial walks AND async
   // resumes (resumeFromTaskCompletion, handleTaskFailure, retry-poller).
   const allSteps = getWorkflowRunStepsByRunId(runId);
-  if (allSteps.length >= maxStepsPerRun()) {
+  if (allSteps.length >= getMaxWorkflowStepsPerRun()) {
     updateWorkflowRun(runId, {
       status: "failed",
-      error: `Circuit breaker: run exceeded ${maxStepsPerRun()} total steps (WORKFLOW_MAX_STEPS_PER_RUN)`,
+      error: `Circuit breaker: run exceeded ${getMaxWorkflowStepsPerRun()} total steps (WORKFLOW_MAX_STEPS_PER_RUN)`,
       finishedAt: new Date().toISOString(),
     });
     return;
@@ -449,17 +452,25 @@ async function executeStep(
   // references) don't leak through `get-workflow-run` or any other reader of
   // the `workflow_run_steps` table. The live `ctx` is untouched — executors
   // still see real values.
-  const stepId = crypto.randomUUID();
-  createWorkflowRunStep({
-    id: stepId,
-    runId,
-    nodeId: node.id,
-    nodeType: node.type,
-    input: redactSecretsForStorage(ctx, secretKeys),
-  });
+  const latestForeachStep =
+    node.type === "foreach" ? getLatestStepForNode(runId, node.id) : undefined;
+  const reusableForeachStep =
+    latestForeachStep && !FOREACH_TERMINAL_STEP_STATUSES.has(latestForeachStep.status)
+      ? latestForeachStep
+      : undefined;
+  const stepId = reusableForeachStep?.id ?? crypto.randomUUID();
+  if (!reusableForeachStep) {
+    createWorkflowRunStep({
+      id: stepId,
+      runId,
+      nodeId: node.id,
+      nodeType: node.type,
+      input: redactSecretsForStorage(ctx, secretKeys),
+    });
 
-  // Set idempotency key
-  updateWorkflowRunStep(stepId, { idempotencyKey });
+    // Set idempotency key
+    updateWorkflowRunStep(stepId, { idempotencyKey });
+  }
 
   // 3. Get executor
   const executor = registry.get(node.type);
@@ -738,6 +749,23 @@ export function interpolateNodeConfig(
   node: Pick<WorkflowNode, "type" | "config">,
   interpolationCtx: Record<string, unknown>,
 ): { value: unknown; unresolved: string[] } {
+  if (node.type === "foreach" && Object.hasOwn(node.config, "over")) {
+    const { over, body, ...configWithoutOverAndBody } = node.config;
+    const configResult = deepInterpolate(configWithoutOverAndBody, interpolationCtx);
+    const overResult = deepInterpolate(over, interpolationCtx, { preserveRawTokens: true });
+
+    return {
+      value: {
+        ...(configResult.value as Record<string, unknown>),
+        over: overResult.value,
+        // {{item.*}} and {{index}} do not exist until the foreach executor
+        // materializes a child, so preserve the body for that per-item pass.
+        body,
+      },
+      unresolved: [...configResult.unresolved, ...overResult.unresolved],
+    };
+  }
+
   if (node.type !== "swarm-script" || !Object.hasOwn(node.config, "args")) {
     return deepInterpolate(node.config, interpolationCtx);
   }

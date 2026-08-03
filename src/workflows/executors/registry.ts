@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AgentTaskExecutor } from "./agent-task";
 import type { BaseExecutor, ExecutorDependencies } from "./base";
 import { CodeMatchExecutor } from "./code-match";
+import { ForeachExecutor } from "./foreach";
 import { HumanInTheLoopExecutor } from "./human-in-the-loop";
 import { NotifyExecutor } from "./notify";
 import { PropertyMatchExecutor } from "./property-match";
@@ -75,6 +76,7 @@ export function createExecutorRegistry(deps: ExecutorDependencies): ExecutorRegi
 
   // Async executors (Phase 4)
   registry.register(new AgentTaskExecutor(deps));
+  registry.register(new ForeachExecutor(deps));
   registry.register(new HumanInTheLoopExecutor(deps));
   registry.register(new WaitExecutor(deps));
 

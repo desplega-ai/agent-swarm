@@ -1061,6 +1061,7 @@ export type WorkflowRunStepStatus =
   | "waiting"
   | "completed"
   | "failed"
+  | "cancelled"
   | "skipped";
 
 export interface WorkflowRunStep {

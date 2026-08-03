@@ -9139,7 +9139,7 @@ export function updateWorkflowRun(
   data: {
     status?: WorkflowRunStatus;
     context?: Record<string, unknown>;
-    error?: string;
+    error?: string | null;
     finishedAt?: string;
   },
 ): WorkflowRun | null {
@@ -9345,7 +9345,7 @@ export function updateWorkflowRunStep(
   data: {
     status?: WorkflowRunStepStatus;
     output?: unknown;
-    error?: string;
+    error?: string | null;
     finishedAt?: string;
     retryCount?: number;
     maxRetries?: number;
@@ -9422,6 +9422,7 @@ export interface StuckWorkflowRun {
   runId: string;
   stepId: string;
   nodeId: string;
+  taskId: string;
   taskStatus: string;
   taskOutput: string | null;
   workflowId: string;
@@ -9434,6 +9435,7 @@ export function getStuckWorkflowRuns(): StuckWorkflowRun[] {
         wr.id as runId,
         wrs.id as stepId,
         wrs.nodeId,
+        at.id as taskId,
         at.status as taskStatus,
         at.output as taskOutput,
         wr.workflowId
@@ -9441,7 +9443,8 @@ export function getStuckWorkflowRuns(): StuckWorkflowRun[] {
       JOIN workflow_run_steps wrs ON wrs.runId = wr.id AND wrs.status = 'waiting'
       JOIN agent_tasks at ON at.workflowRunStepId = wrs.id
       WHERE wr.status = 'waiting'
-        AND at.status IN ('completed', 'failed', 'cancelled')`,
+        AND at.status IN ('completed', 'failed', 'cancelled')
+      ORDER BY at.createdAt ASC, at.rowid ASC`,
     )
     .all();
 }
@@ -9501,6 +9504,10 @@ export function getTaskByWorkflowRunStepId(stepId: string): AgentTask | null {
     )
     .get(stepId);
   return row ? rowToAgentTask(row) : null;
+}
+
+export function detachTaskFromWorkflowRunStep(taskId: string): void {
+  getDb().run("UPDATE agent_tasks SET workflowRunStepId = NULL WHERE id = ?", [taskId]);
 }
 
 export function getStepByIdempotencyKey(key: string): WorkflowRunStep | null {

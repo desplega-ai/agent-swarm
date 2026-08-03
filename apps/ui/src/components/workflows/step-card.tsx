@@ -15,6 +15,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { JsonTree } from "@/components/workflows/json-tree";
+import { parseSyntheticStepId } from "@/lib/synthetic-step-id";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 export interface StepCardProps {
@@ -54,8 +55,11 @@ function parseDiagnostics(raw: string | undefined): { unresolvedTokens?: string[
 
 export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
   ({ step, workflowNodes, isSelected, isExpanded, onClick, onToggleExpand }, ref) => {
-    const node = workflowNodes?.find((n) => n.id === step.nodeId);
-    const label = node?.label || step.nodeId;
+    // `foreach` children carry synthetic `<parentNodeId>#<itemKey>` ids — the definition only holds
+    // the parent node, so label and config always resolve against the parent.
+    const { parentNodeId, itemKey } = parseSyntheticStepId(step.nodeId);
+    const node = workflowNodes?.find((n) => n.id === parentNodeId);
+    const label = node?.label || parentNodeId;
     const duration =
       step.startedAt && step.finishedAt ? formatElapsed(step.startedAt, step.finishedAt) : null;
 
@@ -74,6 +78,12 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
         {/* Header row - always visible */}
         <div className="w-full flex items-center gap-2 px-3 py-2">
           <span className="text-sm font-medium truncate">{label}</span>
+
+          {itemKey && (
+            <span className="text-xs text-muted-foreground font-mono truncate">
+              &middot; {itemKey}
+            </span>
+          )}
 
           <Badge variant="outline" size="tag" className="shrink-0">
             {step.nodeType}

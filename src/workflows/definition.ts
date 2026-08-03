@@ -156,6 +156,18 @@ export function validateDefinition(
   const errors: string[] = [];
   const nodeIds = new Set(def.nodes.map((n) => n.id));
 
+  for (const node of def.nodes) {
+    if (node.id.includes("#")) {
+      errors.push(`Node "${node.id}" contains reserved character "#"`);
+    }
+    if (node.type === "foreach") {
+      validateForeachNode(node, errors);
+      if (isUpstream(def, node.id, node.id)) {
+        errors.push("foreach inside a loop is not supported in v1");
+      }
+    }
+  }
+
   // 1. Check all next refs point to existing nodes
   for (const node of def.nodes) {
     if (!node.next) continue;
@@ -272,6 +284,47 @@ export function validateDefinition(
   }
 
   return { valid: errors.length === 0, errors };
+}
+
+function validateForeachNode(node: WorkflowNode, errors: string[]): void {
+  const config = node.config;
+  if (Object.hasOwn(config, "concurrency")) {
+    errors.push(`Node "${node.id}" foreach concurrency is not supported in v1`);
+  }
+
+  const over = config.over;
+  const isInterpolatedArray = typeof over === "string" && /^\{\{[^}]+\}\}$/.test(over.trim());
+  if (!Array.isArray(over) && !isInterpolatedArray) {
+    errors.push(
+      `Node "${node.id}" foreach config.over must be an array or one exact {{interpolation}} token`,
+    );
+  }
+
+  if (typeof config.itemKey !== "string" || config.itemKey.length === 0) {
+    errors.push(`Node "${node.id}" foreach config.itemKey must be a non-empty string`);
+  }
+
+  const body = config.body;
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    errors.push(`Node "${node.id}" foreach config.body must be an object`);
+    return;
+  }
+  const bodyRecord = body as Record<string, unknown>;
+  if (bodyRecord.type !== "agent-task") {
+    errors.push(`Node "${node.id}" foreach config.body.type must be "agent-task" in v1`);
+  }
+  if (
+    typeof bodyRecord.config !== "object" ||
+    bodyRecord.config === null ||
+    Array.isArray(bodyRecord.config)
+  ) {
+    errors.push(`Node "${node.id}" foreach config.body.config must be an object`);
+    return;
+  }
+  const bodyConfig = bodyRecord.config as Record<string, unknown>;
+  if (typeof bodyConfig.template !== "string") {
+    errors.push(`Node "${node.id}" foreach agent-task body.config.template must be a string`);
+  }
 }
 
 /**

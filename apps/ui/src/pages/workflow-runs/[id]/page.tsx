@@ -14,6 +14,7 @@ import { JsonTree } from "@/components/workflows/json-tree";
 import { StepCard } from "@/components/workflows/step-card";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { parseSyntheticStepId } from "@/lib/synthetic-step-id";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 export default function WorkflowRunDetailPage() {
@@ -31,6 +32,7 @@ export default function WorkflowRunDetailPage() {
     [expandedStepsParam],
   );
   const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const steps = useMemo(() => run?.steps ?? [], [run?.steps]);
 
   const setSelectedNodeId = useCallback(
     (nodeId: string | null) => setParam("node", nodeId),
@@ -61,20 +63,26 @@ export default function WorkflowRunDetailPage() {
     [expandedStepIds, setExpandedSteps],
   );
 
-  // When a graph node is clicked, expand and scroll to that step
+  // When a graph node is clicked, expand and scroll to that step. A `foreach` node owns several
+  // synthetic child steps (`<nodeId>#<itemKey>`) — expand all of them and scroll to the first.
   const handleGraphNodeClick = useCallback(
     (nodeId: string) => {
       setSelectedNodeId(nodeId);
+      const ownStepIds = steps
+        .map((step) => step.nodeId)
+        .filter((stepNodeId) => parseSyntheticStepId(stepNodeId).parentNodeId === nodeId);
       const next = new Set(expandedStepIds);
-      next.add(nodeId);
+      for (const stepNodeId of ownStepIds.length > 0 ? ownStepIds : [nodeId]) {
+        next.add(stepNodeId);
+      }
       setExpandedSteps(next);
       // Scroll to the step card after a tick (to allow expansion to render)
       requestAnimationFrame(() => {
-        const el = stepRefs.current.get(nodeId);
+        const el = stepRefs.current.get(ownStepIds[0] ?? nodeId);
         el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       });
     },
-    [expandedStepIds, setExpandedSteps, setSelectedNodeId],
+    [expandedStepIds, setExpandedSteps, setSelectedNodeId, steps],
   );
 
   // When a step card is clicked, highlight the node in the graph (don't toggle expand)
@@ -84,8 +92,6 @@ export default function WorkflowRunDetailPage() {
     },
     [setSelectedNodeId],
   );
-
-  const steps = run?.steps ?? [];
 
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -97,8 +103,17 @@ export default function WorkflowRunDetailPage() {
 
   // Clear selection when clicking graph background (deselect)
   useEffect(() => {
-    // If selectedNodeId doesn't match any step, clear it
-    if (selectedNodeId && run?.steps && !run.steps.find((s) => s.nodeId === selectedNodeId)) {
+    // If selectedNodeId doesn't match any step, clear it. A `foreach` parent node id is matched by
+    // its synthetic child steps even though no step carries that exact id.
+    if (
+      selectedNodeId &&
+      run?.steps &&
+      !run.steps.some(
+        (s) =>
+          s.nodeId === selectedNodeId ||
+          parseSyntheticStepId(s.nodeId).parentNodeId === selectedNodeId,
+      )
+    ) {
       setSelectedNodeId(null);
     }
   }, [selectedNodeId, run?.steps, setSelectedNodeId]);
@@ -269,7 +284,10 @@ export default function WorkflowRunDetailPage() {
                   key={step.id}
                   step={step}
                   workflowNodes={workflow?.definition.nodes}
-                  isSelected={selectedNodeId === step.nodeId}
+                  isSelected={
+                    selectedNodeId === step.nodeId ||
+                    selectedNodeId === parseSyntheticStepId(step.nodeId).parentNodeId
+                  }
                   isExpanded={expandedStepIds.has(step.nodeId)}
                   onClick={() => handleStepClick(step.nodeId)}
                   onToggleExpand={() => toggleStep(step.nodeId)}
