@@ -165,6 +165,29 @@ describe("seeded skills with bundled files", () => {
     upsertSkillFile(artifacts.id, { path: original.path, content: original.content });
   });
 
+  test("a userInvocable flip registers as drift and is preserved", async () => {
+    const item = (await skillsSeeder.items()).find((candidate) => candidate.key === "kv-storage");
+    expect(item).toBeDefined();
+    if (!item) return;
+
+    expect(await skillsSeeder.upstreamHash(item)).toBe(item.contentHash);
+
+    const skill = getSkillByName("kv-storage", "swarm");
+    if (!skill) throw new Error("kv-storage skill missing");
+    expect(skill.userInvocable).toBe(true);
+
+    // Simulate a user turning off slash-invocation through the skills API.
+    updateSkill(skill.id, { userInvocable: false });
+
+    // The flip must move the upstream hash — otherwise the next source update
+    // would classify the row as pristine and silently restore userInvocable.
+    expect(await skillsSeeder.upstreamHash(item)).not.toBe(item.contentHash);
+
+    // Restore so later tests see a pristine skill.
+    updateSkill(skill.id, { userInvocable: true });
+    expect(await skillsSeeder.upstreamHash(item)).toBe(item.contentHash);
+  });
+
   test("upgrades a DB seeded by the previous (file-less) release", async () => {
     // Reproduce the real deployment shape: a skill row that an older release
     // seeded as a SIMPLE skill, with a seed_state hash written in the old
