@@ -444,6 +444,60 @@ function validateStateRef(
   return exists ? null : issue(ref.path, `state reference targets unknown ${targetKind} "${name}"`);
 }
 
+const COMPARISON_KEYS = ["eq", "neq", "gt", "gte", "lt", "lte"] as const;
+
+/**
+ * Shape-check a `visible` value against what the renderer actually evaluates:
+ * a boolean, a `{ $state }` binding, a `{ $state, <one comparison>, not?: true }`
+ * condition, or `$and` / `$or` arrays of those. Anything else — notably the
+ * plausible-looking wrapper `{"not": {"$state": …}}` — is silently ignored at
+ * runtime (the element just stays visible), so the write must fail loudly
+ * instead.
+ */
+function visibleConditionIssues(value: unknown, path: string): AppValidationIssue[] {
+  if (typeof value === "boolean") return [];
+  if (!isPlainObject(value)) {
+    return [issue(path, "visible must be a boolean, a { $state } binding, or a condition object")];
+  }
+  for (const logical of ["$and", "$or"] as const) {
+    if (!Object.hasOwn(value, logical)) continue;
+    const children = value[logical];
+    if (!Array.isArray(children)) {
+      return [issue(appendPath(path, logical), "must be an array of conditions")];
+    }
+    return children.flatMap((child, index) =>
+      visibleConditionIssues(child, appendPath(appendPath(path, logical), index)),
+    );
+  }
+  if (typeof value.$state !== "string") {
+    return [
+      issue(
+        path,
+        'a visible condition must bind "$state" (or combine conditions with "$and"/"$or") — a wrapper like {"not": {…}} is not evaluated by the renderer',
+      ),
+    ];
+  }
+  const found: AppValidationIssue[] = [];
+  const comparisons = COMPARISON_KEYS.filter((key) => value[key] !== undefined);
+  if (comparisons.length > 1) {
+    found.push(
+      issue(
+        path,
+        `use exactly one comparison key per condition (found ${comparisons.join(", ")}); combine conditions with "$and"/"$or"`,
+      ),
+    );
+  }
+  if (Object.hasOwn(value, "not") && value.not !== true) {
+    found.push(
+      issue(
+        appendPath(path, "not"),
+        '"not" is a negation flag and must be exactly true (e.g. { "$state": "/queries/q/data/0/id", "not": true } shows the element when the value is absent/falsy)',
+      ),
+    );
+  }
+  return found;
+}
+
 function collectStateRefs(value: unknown, path: string, refs: StateRef[]): void {
   if (isStateBinding(value) || isStateCondition(value)) {
     refs.push({ path, value: value.$state });
@@ -707,7 +761,10 @@ export function validatePage(
       const bindingResult = validateSchema(rawElement[key], {}, bindingPath, false);
       issues.push(...bindingResult.issues);
       stateRefs.push(...bindingResult.stateRefs);
-      if (key === "visible") collectStateRefs(rawElement[key], bindingPath, stateRefs);
+      if (key === "visible") {
+        collectStateRefs(rawElement[key], bindingPath, stateRefs);
+        issues.push(...visibleConditionIssues(rawElement[key], bindingPath));
+      }
     }
 
     if (

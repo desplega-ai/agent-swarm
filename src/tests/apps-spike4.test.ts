@@ -312,6 +312,41 @@ describe("Spike 4 page validation", () => {
     expectIssue(definition, "pages.main.elements.root.visible.$and.1.$or.0");
   });
 
+  test("rejects visible shapes the renderer silently ignores", () => {
+    const wrapperNot = pagesDefinition() as any;
+    wrapperNot.pages.main.elements.root = {
+      ...rootElement,
+      visible: { not: { $state: "/queries/allIssues/data/0/id" } },
+    };
+    expectIssue(wrapperNot, "pages.main.elements.root.visible");
+
+    const multiComparison = pagesDefinition() as any;
+    multiComparison.pages.main.elements.root = {
+      ...rootElement,
+      visible: { $state: "/queries/allIssues/loading", eq: true, neq: false },
+    };
+    expectIssue(multiComparison, "pages.main.elements.root.visible");
+
+    const nonBooleanNot = pagesDefinition() as any;
+    nonBooleanNot.pages.main.elements.root = {
+      ...rootElement,
+      visible: { $state: "/queries/allIssues/loading", not: "yes" },
+    };
+    expectIssue(nonBooleanNot, "pages.main.elements.root.visible.not");
+
+    const negationFlag = pagesDefinition() as any;
+    negationFlag.pages.main.elements.root = {
+      ...rootElement,
+      visible: {
+        $and: [
+          { $state: "/queries/allIssues/data/0/id", not: true },
+          { $state: "/queries/allIssues/loading", eq: false },
+        ],
+      },
+    };
+    expect(parseAppDefinition(negationFlag).success).toBe(true);
+  });
+
   test("validates app.navigate targets, supplied params, and required params", () => {
     const definition = pagesDefinition();
     definition.pages.main.elements.root = {

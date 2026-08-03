@@ -426,7 +426,7 @@ SearchInput and Select are client-side controls: each needs a literal `id` and w
 }
 ```
 
-`visible` accepts a boolean, a `$state` truthiness binding, comparisons, and logical groups. Put exactly one comparison key in each condition object. The renderer evaluates the first matching key in fixed priority order (`eq`, `neq`, `gt`, `gte`, `lt`, `lte`; otherwise truthiness), so additional comparison keys in the same object are ignored. Use `$and` / `$or` arrays to combine conditions; `not` negates one condition:
+`visible` accepts a boolean, a `$state` truthiness binding, comparisons, and logical groups. Put exactly one comparison key in each condition object. The renderer evaluates the first matching key in fixed priority order (`eq`, `neq`, `gt`, `gte`, `lt`, `lte`; otherwise truthiness), so additional comparison keys in the same object are ignored. Use `$and` / `$or` arrays to combine conditions. `not` is a negation FLAG inside a condition object (`"not": true`), never a wrapper around one — `{ "not": { "$state": … } }` is invalid and the validator rejects it. The absent-record pattern (e.g. an alert when a detail query matched nothing) is `{ "$state": "/queries/<q>/data/0/id", "not": true }`:
 
 ```json
 [
