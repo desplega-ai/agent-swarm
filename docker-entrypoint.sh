@@ -818,6 +818,17 @@ echo ""
 # into .local would otherwise block worker-side mkdir into .local/share.
 chown -R worker:worker /home/worker/.local 2>/dev/null || true
 
+# Reclaim /home/worker/.claude for worker before dropping privileges.
+# The harness runs `mkdir /home/worker/.claude/session-env/<session-id>` as the
+# worker user before spawning each shell. If root wrote into .claude earlier in
+# this entrypoint (settings.json, skills/) and left the tree root-owned, that
+# mkdir fails with EACCES and NO shell ever starts — every task in the container
+# dies at harness setup. Reclaiming the whole tree keeps session-env (and
+# anything else the harness writes under .claude) writable by worker. The
+# narrower .claude/skills chown above is now subsumed by this but is kept for
+# documentation of the skill-fs-writer intent.
+chown -R worker:worker /home/worker/.claude 2>/dev/null || true
+
 # Optional: initialize a local PostgreSQL 16 cluster before dropping privileges.
 # command -v guard: postgres/redis servers only ship in the full image — on the
 # slim image these flags log a warning instead of killing the boot (set -e).
