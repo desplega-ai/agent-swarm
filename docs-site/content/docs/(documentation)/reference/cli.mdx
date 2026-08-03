@@ -246,6 +246,16 @@ Handle Claude Code hook events from stdin. Used internally by the agent-swarm ho
 agent-swarm hook
 ```
 
+### codex-hook
+
+Handle Codex CLI lifecycle hook events from stdin for queued steering delivery.
+This internal command is registered by the worker image's managed Codex
+requirements and is not normally invoked by operators.
+
+```bash
+agent-swarm codex-hook
+```
+
 ### artifact
 
 Manage agent artifacts — serve static files or Hono apps via localtunnel.

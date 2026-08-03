@@ -126,7 +126,7 @@ export const registerSteerTaskTool = (server: McpServer) => {
     {
       title: "Steer Task",
       description:
-        'Send a message to a task that is already running. `mode:"steer"` is honored on pi and claude-managed; claude, devin and opencode support queue only; codex always promotes the message to a follow-up task. Pass `onUnsupported:"fail"` to get an error instead of a downgrade.',
+        'Send a message to a task that is already running. `mode:"steer"` is honored on pi and claude-managed; claude, devin, opencode and codex support queue only (codex delivery lands at the next tool-call boundary via its lifecycle hooks). Pass `onUnsupported:"fail"` to get an error instead of a downgrade.',
       annotations: { destructiveHint: true },
       inputSchema: steerTaskInputSchema,
       outputSchema: steerTaskOutputSchema,

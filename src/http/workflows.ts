@@ -464,20 +464,23 @@ export async function handleWorkflows(
       throw error;
     }
 
-    const workflow = createWorkflow({
-      key,
-      name: parsed.body.name,
-      description: parsed.body.description,
-      definition: parsed.body.definition,
-      triggers: parsed.body.triggers,
-      cooldown: parsed.body.cooldown,
-      input: parsed.body.input,
-      triggerSchema: parsed.body.triggerSchema,
-      dir: parsed.body.dir,
-      vcsRepo: parsed.body.vcsRepo,
-      createdByAgentId: myAgentId ?? undefined,
-      createdBy: resolveHttpAuditUserId(req, myAgentId) ?? undefined,
-    });
+    const workflow = createWorkflow(
+      {
+        key,
+        name: parsed.body.name,
+        description: parsed.body.description,
+        definition: parsed.body.definition,
+        triggers: parsed.body.triggers,
+        cooldown: parsed.body.cooldown,
+        input: parsed.body.input,
+        triggerSchema: parsed.body.triggerSchema,
+        dir: parsed.body.dir,
+        vcsRepo: parsed.body.vcsRepo,
+        createdByAgentId: myAgentId ?? undefined,
+        createdBy: resolveHttpAuditUserId(req, myAgentId) ?? undefined,
+      },
+      "api",
+    );
     json(res, workflow, 201);
     return true;
   }
@@ -678,7 +681,7 @@ export async function handleWorkflows(
     const parsed = await deleteWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {
-      const deleted = deleteWorkflow(parsed.params.id);
+      const deleted = deleteWorkflow(parsed.params.id, "api");
       res.writeHead(deleted ? 204 : 404);
     } catch (err) {
       jsonError(res, String(err), 500);

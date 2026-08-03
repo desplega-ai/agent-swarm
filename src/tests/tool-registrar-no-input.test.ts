@@ -45,6 +45,7 @@ describe("createToolRegistrar with no inputSchema", () => {
         headers: {
           "x-agent-id": "agent-abc",
           "x-source-task-id": "task-xyz",
+          "x-swarm-call-origin": "script-sdk",
         },
       },
     };
@@ -57,6 +58,9 @@ describe("createToolRegistrar with no inputSchema", () => {
       sessionId: "test-session-123",
       agentId: "agent-abc",
       sourceTaskId: "task-xyz",
+      contextKey: undefined,
+      // External headers cannot forge the server-private script origin.
+      callOrigin: "mcp",
     });
     expect(receivedMeta).toBe(fakeExtra);
     expect(result).toBeDefined();
@@ -108,6 +112,8 @@ describe("createToolRegistrar with no inputSchema", () => {
       sessionId: "test-session-456",
       agentId: "agent-def",
       sourceTaskId: undefined,
+      contextKey: undefined,
+      callOrigin: "mcp",
     });
     expect(result).toBeDefined();
   });

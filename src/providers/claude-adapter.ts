@@ -559,6 +559,8 @@ class ClaudeSession implements ProviderSession {
   private systemPromptFile: string | null;
   /** Reasoning/effort level actually applied (Phase 4) — null when `applyReasoningEffort()` returned noop. */
   private appliedReasoningEffort: ReasoningEffort | null;
+  /** Last non-empty assistant text seen; surfaced as ProviderResult.output — same pattern as pi-mono/claude-managed. */
+  private lastAssistantText = "";
   readonly deliverSteering?: (delivery: SteerDelivery) => Promise<SteerDeliveryResult>;
 
   constructor(
@@ -876,6 +878,7 @@ class ClaudeSession implements ProviderSession {
       exitCode: exitCode ?? 1,
       sessionId: this._sessionId,
       cost: lastCost,
+      output: this.lastAssistantText || undefined,
       isError: (exitCode ?? 1) !== 0,
       failureReason,
       rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
@@ -1000,6 +1003,11 @@ class ClaudeSession implements ProviderSession {
               .join("")
           : "";
         this.emit({ type: "message", role: "assistant", content: text });
+        // Subagent (sidechain) frames carry `parent_tool_use_id`; only the
+        // main thread's text should win the `ProviderResult.output` fallback.
+        if (text && !json.parent_tool_use_id) {
+          this.lastAssistantText = text;
+        }
 
         if (message.content) {
           for (const block of message.content) {

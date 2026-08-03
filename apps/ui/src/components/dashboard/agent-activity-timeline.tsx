@@ -20,6 +20,7 @@ import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { formatCost } from "@/lib/cost-format";
 import { formatDurationMs } from "@/lib/format-duration-ms";
 import { formatTokens } from "@/lib/format-tokens";
@@ -28,6 +29,13 @@ import { cn } from "@/lib/utils";
 const PAGE_SIZE = 300;
 const MIN_BAR_WIDTH = 10;
 const LABEL_WIDTH = 208;
+/**
+ * Narrow phones (< 768px) get a much tighter lane gutter. At 320px the 208px
+ * desktop gutter leaves ~90px of actual chart — the timeline becomes a sliver
+ * and the whole surface is unreadable. 124px keeps the avatar + agent name
+ * legible while handing the rest of the viewport to the bars.
+ */
+const LABEL_WIDTH_MOBILE = 124;
 const ROW_HEIGHT = 36;
 const BAR_HEIGHT = 24;
 /** Zoom level the view opens at, and returns to on "reset zoom" (8h). */
@@ -203,8 +211,9 @@ function taskEndMs(task: TimelineTask, nowMs: number): number {
   return new Date(task.lastUpdatedAt || task.createdAt).getTime();
 }
 
+/** Prefer the task's short authored title; fall back to the collapsed prompt. */
 function taskTitle(task: TimelineTask): string {
-  return task.task.replace(/\s+/g, " ").trim() || task.id;
+  return task.title?.trim() || task.task.replace(/\s+/g, " ").trim() || task.id;
 }
 
 function shortId(id: string): string {
@@ -510,9 +519,22 @@ function connectorPath(from: TaskGeometry, to: TaskGeometry): string {
   return `M ${sx} ${sy} C ${sx + handle} ${sy}, ${tx - handle} ${ty}, ${tx} ${ty}`;
 }
 
-function LaneLabel({ lane, height }: { lane: Lane; height: number }) {
+function LaneLabel({
+  lane,
+  height,
+  compact,
+}: {
+  lane: Lane;
+  height: number;
+  /** Phone gutter: tighter padding, and the role subtitle is dropped so the
+      agent name gets the whole (much narrower) line. */
+  compact?: boolean;
+}) {
   return (
-    <div className="flex min-w-0 items-center gap-2 border-b px-3" style={{ height }}>
+    <div
+      className={cn("flex min-w-0 items-center gap-2 border-b", compact ? "px-2" : "px-3")}
+      style={{ height }}
+    >
       <AgentAvatar
         agentId={lane.isAgent ? lane.id : null}
         agentName={lane.name}
@@ -530,9 +552,11 @@ function LaneLabel({ lane, height }: { lane: Lane; height: number }) {
         ) : (
           <div className="truncate text-xs font-medium">{lane.name}</div>
         )}
-        <div className="truncate text-[10px] text-muted-foreground">
-          {lane.isLead ? "Lead" : lane.role || `${lane.tasks.length} tasks`}
-        </div>
+        {!compact && (
+          <div className="truncate text-[10px] text-muted-foreground">
+            {lane.isLead ? "Lead" : lane.role || `${lane.tasks.length} tasks`}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -575,6 +599,8 @@ function TimelineIconButton({
 
 export function AgentActivityTimeline() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
+  const labelWidth = isMobile ? LABEL_WIDTH_MOBILE : LABEL_WIDTH;
   const [nowMs, setNowMs] = useState(Date.now());
   // Continuous zoom: the window is any ms value in [30s, 7d], not an index into
   // presets — trackpad zoom glides through it, buttons jump between presets.
@@ -1016,22 +1042,31 @@ export function AgentActivityTimeline() {
 
   return (
     <section className="flex h-full flex-col overflow-hidden rounded-lg border bg-card">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2">
+        {/* Phones get an abbreviated title — at 320px the full one truncates to
+            "Swarm a…", which reads worse than a short honest label. */}
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold">Swarm activity timeline</h2>
-          <p className="text-xs text-muted-foreground">
-            {visibleTasks.length.toLocaleString()} tasks · visible window{" "}
-            {formatWindowLabel(windowMs)}
+          <h2 className="truncate text-sm font-semibold">
+            {isMobile ? "Activity" : "Swarm activity timeline"}
+          </h2>
+          <p className="truncate text-xs text-muted-foreground">
+            {visibleTasks.length.toLocaleString()} tasks ·{" "}
+            {isMobile
+              ? formatWindowLabel(windowMs)
+              : `visible window ${formatWindowLabel(windowMs)}`}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
+        {/* Controls stay on a single row: below `sm` the live toggle collapses
+            to its icon so all five buttons fit next to the title. */}
+        <div className="flex shrink-0 items-center gap-1.5">
           <Button
             type="button"
             variant={live ? "secondary" : "outline"}
             size="sm"
             onClick={live ? () => setLive(false) : backToLive}
-            className="h-8"
+            className="h-8 w-8 px-0 sm:w-auto sm:px-3"
             title={live ? "Pause live updates" : "Follow live activity"}
+            aria-label={live ? "Pause live updates" : "Back to live"}
           >
             {live ? (
               <span className="relative flex h-2 w-2">
@@ -1041,7 +1076,7 @@ export function AgentActivityTimeline() {
             ) : (
               <Radio className="h-3.5 w-3.5" />
             )}
-            {live ? "Live" : "Back to live"}
+            <span className="hidden sm:inline">{live ? "Live" : "Back to live"}</span>
           </Button>
           <TimelineIconButton
             label={nextPresetIn ? `Zoom in (${nextPresetIn.label} window)` : "Zoom in"}
@@ -1087,7 +1122,7 @@ export function AgentActivityTimeline() {
       <div className="flex min-h-0 flex-1">
         <div
           className="shrink-0 overflow-hidden border-r bg-muted/35"
-          style={{ width: LABEL_WIDTH, paddingTop: HEADER_HEIGHT }}
+          style={{ width: labelWidth, paddingTop: HEADER_HEIGHT }}
         >
           <div ref={laneLabelsRef}>
             {laneLayouts.slice(0, activeLaneCount).map((laneLayout) => (
@@ -1095,6 +1130,7 @@ export function AgentActivityTimeline() {
                 key={laneLayout.lane.id}
                 lane={laneLayout.lane}
                 height={laneLayout.height}
+                compact={isMobile}
               />
             ))}
             {idleLanes.length > 0 ? (

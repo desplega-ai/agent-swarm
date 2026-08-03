@@ -180,16 +180,23 @@ function StatusCell({ task }: { task: AgentTask }) {
   );
 }
 
-function DescriptionCell({ value }: { value: string | undefined }) {
-  const text = value ?? "";
-  if (!text) return DASH;
+/**
+ * Description cell. A task's `title` is the short human-authored label; `task`
+ * is the full prompt. Show the title when there is one — a row of truncated
+ * prompt text is much harder to scan — and keep the full prompt in the tooltip
+ * so nothing is hidden behind the shorter label.
+ */
+function DescriptionCell({ title, prompt }: { title?: string; prompt?: string }) {
+  const label = title?.trim() || prompt || "";
+  if (!label) return DASH;
+  const tooltipText = prompt?.trim() || label;
   return (
     <Tooltip delayDuration={400}>
       <TooltipTrigger asChild>
-        <span className="block truncate">{text}</span>
+        <span className="block truncate">{label}</span>
       </TooltipTrigger>
       <TooltipContent side="right" align="start" className={MARKDOWN_TOOLTIP_CLASS}>
-        <TooltipMarkdown text={text} />
+        <TooltipMarkdown text={tooltipText} />
       </TooltipContent>
     </Tooltip>
   );
@@ -588,7 +595,12 @@ export function TasksTable({
         headerName: "Description",
         flex: 1,
         minWidth: 240,
-        cellRenderer: (p: { value: string }) => <DescriptionCell value={p.value} />,
+        // Sort / filter / quick-search on the same string the cell displays,
+        // otherwise a titled row sorts by a prompt the user can't see.
+        valueGetter: (p) => p.data?.title?.trim() || p.data?.task || "",
+        cellRenderer: (p: { data?: AgentTask }) => (
+          <DescriptionCell title={p.data?.title} prompt={p.data?.task} />
+        ),
       },
       {
         _id: "status",

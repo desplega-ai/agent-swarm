@@ -196,10 +196,10 @@ docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent
 Current worker-image defaults in `Dockerfile.worker`:
 
 - `CLAUDE_CODE_VERSION=2.1.220`
-- `PI_CODING_AGENT_VERSION=0.82.1`
-- `CODEX_VERSION=0.145.0`
-- `OPENCODE_VERSION=1.18.5`
-- `OPENCODE_SDK_VERSION=1.18.5`
+- `PI_CODING_AGENT_VERSION=0.83.0`
+- `CODEX_VERSION=0.146.0`
+- `OPENCODE_VERSION=1.18.11`
+- `OPENCODE_SDK_VERSION=1.18.11`
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
@@ -450,6 +450,7 @@ When a worker starts, it:
 | `AGENT_ROLE` | No | Role: `worker` (default) or `lead` |
 | `AGENT_NAME` | No | Display name for the agent (auto-generated if not set) |
 | `MCP_BASE_URL` | No | MCP server URL (default: `http://host.docker.internal:3013`) |
+| `WORKER_API_READY_TIMEOUT_SECONDS` | No | Positive-integer deadline for the entrypoint to reach `${MCP_BASE_URL}/health` before provider setup (default: `90`). This bootstrap-only setting must be present in the container environment. |
 | `SESSION_ID` | No | Log folder name (auto-generated if not provided) |
 | `YOLO` | No | Continue on errors (default: `false`) |
 | `SYSTEM_PROMPT` | No | Custom system prompt text |
@@ -515,6 +516,28 @@ Worker requirements for this path:
 
 Your laptop can use a public API URL while containers use an internal one, as long as both point to the same swarm API and database.
 
+#### Managed Codex steering hooks
+
+Queued steering for Codex depends on lifecycle hooks installed at image build
+time. The official worker image writes a root-owned
+`/etc/codex/requirements.toml` that enables hooks and registers
+`agent-swarm codex-hook` for `SessionStart`, `PostToolUse`, and `Stop`.
+Requirements-managed hooks are trusted by policy, which avoids an interactive
+hook-trust prompt in headless workers. `PreToolUse` is deliberately omitted
+because Codex does not apply its `additionalContext`.
+
+The hook requires the same `API_KEY`, `MCP_BASE_URL`, and stable `AGENT_ID` as
+the worker, and it is active only when `STEERING_ENABLED=true` (or `1`). It
+polls pending messages, marks each one delivered before injecting it, and
+silently leaves messages pending for a later lifecycle event if the API cannot
+be reached.
+
+If you build your own worker image, rebuild it from the current
+`Dockerfile.worker` or reproduce this managed requirements file. Restarting an
+older container alone does not add the build-time hook configuration; without
+it, Codex queue messages remain pending until the terminal sweep promotes them
+to follow-up tasks.
+
 ---
 
 ## Slack Integration
@@ -540,6 +563,9 @@ SLACK_SIGNING_SECRET=...      # Signing Secret (optional for Socket Mode)
 
 # Disable Slack (if not using)
 SLACK_DISABLE=true
+
+# Optional: one persistent task tree plus streamed outcome cards (default: false)
+# SLACK_RENDER_V2=true
 
 # Optional: Filter allowed users
 SLACK_ALLOWED_EMAIL_DOMAINS=company.com,partner.com  # Comma-separated email domains

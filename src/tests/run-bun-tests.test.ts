@@ -168,4 +168,98 @@ exit 0
       "test\nsrc/tests/example.test.ts\n--timeout\n1234\n",
     );
   });
+
+  test("runs one Bun process when no shard is passed", async () => {
+    fixtureDir = await mkdtemp(join(tmpdir(), "bun-test-wrapper-"));
+    const fakeBinDir = join(fixtureDir, "bin");
+    const fakeBun = join(fakeBinDir, "bun");
+    const argsFile = join(fixtureDir, "args.txt");
+
+    await mkdir(fakeBinDir);
+    await writeFile(
+      fakeBun,
+      `#!/usr/bin/env bash
+printf '%s\\n' "$*" >>"$BUN_ARGS_FILE"
+exit 0
+`,
+    );
+    await chmod(fakeBun, 0o755);
+
+    const result = Bun.spawnSync(["bash", "scripts/run-bun-tests.sh"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        PATH: `${fakeBinDir}:${process.env.PATH ?? ""}`,
+        BUN_ARGS_FILE: argsFile,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(await readFile(argsFile, "utf-8")).toBe("test\n");
+  });
+
+  test("forwards an explicit CI shard without spawning sibling shards", async () => {
+    fixtureDir = await mkdtemp(join(tmpdir(), "bun-test-wrapper-"));
+    const fakeBinDir = join(fixtureDir, "bin");
+    const fakeBun = join(fakeBinDir, "bun");
+    const argsFile = join(fixtureDir, "args.txt");
+
+    await mkdir(fakeBinDir);
+    await writeFile(
+      fakeBun,
+      `#!/usr/bin/env bash
+printf '%s\\n' "$@" >"$BUN_ARGS_FILE"
+exit 0
+`,
+    );
+    await chmod(fakeBun, 0o755);
+
+    const result = Bun.spawnSync(["bash", "scripts/run-bun-tests.sh", "--shard=2/4"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        PATH: `${fakeBinDir}:${process.env.PATH ?? ""}`,
+        BUN_ARGS_FILE: argsFile,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(await readFile(argsFile, "utf-8")).toBe("test\n--shard=2/4\n");
+  });
+
+  test("preserves a failing explicit shard's exit status", async () => {
+    fixtureDir = await mkdtemp(join(tmpdir(), "bun-test-wrapper-"));
+    const fakeBinDir = join(fixtureDir, "bin");
+    const fakeBun = join(fakeBinDir, "bun");
+    const argsFile = join(fixtureDir, "args.txt");
+
+    await mkdir(fakeBinDir);
+    await writeFile(
+      fakeBun,
+      `#!/usr/bin/env bash
+printf '%s\\n' "$@" >"$BUN_ARGS_FILE"
+echo " 1 fail"
+exit 7
+`,
+    );
+    await chmod(fakeBun, 0o755);
+
+    const result = Bun.spawnSync(["bash", "scripts/run-bun-tests.sh", "--shard=3/4"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        PATH: `${fakeBinDir}:${process.env.PATH ?? ""}`,
+        BUN_ARGS_FILE: argsFile,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(result.exitCode).toBe(7);
+    expect(await readFile(argsFile, "utf-8")).toBe("test\n--shard=3/4\n");
+  });
 });

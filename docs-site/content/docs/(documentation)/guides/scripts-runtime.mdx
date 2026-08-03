@@ -137,6 +137,19 @@ Most SDK results are wrapper objects; read `response.data ?? response` before
 narrowing the payload. Prefer registered connections for authenticated calls:
 credentials are attached server-side and do not enter script source or args.
 
+`ctx.swarm.*` receives the complete scrubbed SDK response instead of the
+10,000-byte model-facing MCP replacement. Both inline/named scripts and durable
+workflow scripts stream these responses through a separate 64 MiB hard limit.
+Crossing that limit cancels the response and throws an error asking you to
+narrow or paginate the query; the runtime never silently truncates a field.
+
+The wider boundary applies only inside the script sandbox. When a script
+returns its result through `script-run`, that result crosses the agent-facing
+MCP boundary again: responses over 10,000 serialized UTF-8 bytes are replaced
+with a bounded preview or omission plus the per-agent KV spill pointer. Process
+large collections inside the script and return only the compact derived value
+the model needs.
+
 ### Durable workflow context
 
 Scripts launched through `launch-script-run` receive a different context:

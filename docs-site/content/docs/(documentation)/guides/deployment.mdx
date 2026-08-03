@@ -38,6 +38,17 @@ API_KEY=your-secret-api-key
 CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Run `claude setup-token` to get this
 SECRETS_ENCRYPTION_KEY=                     # Run `openssl rand -base64 32` and paste here. See "Encryption Key" below.
 
+# Stable agent IDs — run `uuidgen` once for each value and paste it here.
+# Keep every value unique and stable across restarts.
+LEAD_AGENT_ID=
+WORKER_1_AGENT_ID=
+WORKER_2_AGENT_ID=
+CONTENT_WRITER_AGENT_ID=
+CONTENT_REVIEWER_AGENT_ID=
+CONTENT_STRATEGIST_AGENT_ID=
+UX_PRINCIPLES_AGENT_ID=
+DISCOVERABILITY_AGENT_ID=
+
 # ---- Optional ----
 GITHUB_TOKEN=ghp_xxxx                      # For git operations inside agents
 GITHUB_EMAIL=you@example.com
@@ -57,16 +68,14 @@ If you leave `SECRETS_ENCRYPTION_KEY` blank on a brand-new deploy, the API will 
 
 Each agent needs a stable UUID that persists across restarts. This is critical for task resume — if an agent restarts, it uses its `AGENT_ID` to pick up paused tasks.
 
-The example compose file has placeholder UUIDs. Replace them with your own:
+The example compose file reads the named values from `.env` and stops with a clear error if one is missing. Generate one unique UUID per agent and paste the output into the corresponding variable above:
 
 ```bash
-# Generate one UUID per agent
-uuidgen  # → paste into lead AGENT_ID
-uuidgen  # → paste into worker-1 AGENT_ID
-uuidgen  # → paste into worker-2 AGENT_ID
+# Generate all required `*_AGENT_ID=value` lines, then paste them into .env.
+for name in LEAD_AGENT_ID WORKER_1_AGENT_ID WORKER_2_AGENT_ID CONTENT_WRITER_AGENT_ID CONTENT_REVIEWER_AGENT_ID CONTENT_STRATEGIST_AGENT_ID UX_PRINCIPLES_AGENT_ID DISCOVERABILITY_AGENT_ID; do
+  printf '%s=%s\n' "$name" "$(uuidgen)"
+done
 ```
-
-Edit `docker-compose.yml` and replace each service's `AGENT_ID` value.
 
 ### Step 4: Start the Swarm
 
@@ -418,10 +427,10 @@ docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent
 Current worker-image defaults in `Dockerfile.worker`:
 
 - `CLAUDE_CODE_VERSION=2.1.220`
-- `PI_CODING_AGENT_VERSION=0.82.1`
-- `CODEX_VERSION=0.145.0`
-- `OPENCODE_VERSION=1.18.5`
-- `OPENCODE_SDK_VERSION=1.18.5`
+- `PI_CODING_AGENT_VERSION=0.83.0`
+- `CODEX_VERSION=0.146.0`
+- `OPENCODE_VERSION=1.18.11`
+- `OPENCODE_SDK_VERSION=1.18.11`
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 

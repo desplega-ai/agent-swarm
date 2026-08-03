@@ -3,6 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { createServer } from "@/server";
 import { isMcpToolAllowedForScripts } from "../scripts-runtime/sdk-allowlist";
+import { markScriptSdkRequestOrigin } from "../tools/utils";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -83,7 +84,7 @@ export async function handleMcpBridge(
     ? req.headers["x-source-task-id"][0]
     : (req.headers["x-source-task-id"] as string | undefined);
 
-  const extra = {
+  const extra = markScriptSdkRequestOrigin({
     sessionId: "mcp-bridge",
     requestInfo: {
       headers: {
@@ -91,7 +92,7 @@ export async function handleMcpBridge(
         ...(sourceTaskId ? { "x-source-task-id": sourceTaskId } : {}),
       },
     },
-  };
+  });
 
   try {
     const result = tool.inputSchema

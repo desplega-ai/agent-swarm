@@ -184,6 +184,130 @@ describe("Claude stream-json event parsing", () => {
   });
 });
 
+// ─── ProviderResult.output: last-assistant-text capture (PR #78 review) ────
+//
+// claude-adapter.ts:1005-1008 decides the ONE piece of data that ends up as
+// `task.output` in the swarm UI session view for every Claude task. These
+// tests drive the real `processStreams()`/stream-json parsing path (via a
+// mocked `Bun.spawn` whose fake child process streams real NDJSON lines on
+// stdout) rather than asserting on hand-built fixtures, so a message-shape
+// regression here is caught instead of silently shipping the wrong text.
+describe("ClaudeSession processStreams — ProviderResult.output capture", () => {
+  let spawnSpy: ReturnType<typeof spyOn>;
+  const CLEAN_ENV: Record<string, string> = { CLAUDE_CODE_OAUTH_TOKEN: "test-oauth-token" };
+
+  /** Fake Bun.Subprocess whose stdout streams the given NDJSON lines, then closes. */
+  function makeStreamingFakeProc(lines: string[]): ReturnType<typeof Bun.spawn> {
+    const stdout = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const line of lines) {
+          controller.enqueue(new TextEncoder().encode(`${line}\n`));
+        }
+        controller.close();
+      },
+    });
+    const stderr = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    });
+    return {
+      stdout,
+      stderr,
+      stdin: null,
+      exited: Promise.resolve(0),
+      exitCode: 0,
+      kill: () => {},
+      pid: 0,
+      killed: false,
+      ref: () => {},
+      unref: () => {},
+    } as unknown as ReturnType<typeof Bun.spawn>;
+  }
+
+  /** Builds an `assistant` stream-json line with the given content blocks. */
+  function assistantLine(content: Array<Record<string, unknown>>): string {
+    return JSON.stringify({ type: "assistant", message: { content } });
+  }
+
+  beforeEach(() => {
+    spawnSpy = spyOn(Bun, "spawn");
+  });
+
+  afterEach(() => {
+    spawnSpy.mockRestore();
+  });
+
+  test("multiple assistant turns: the last non-empty text wins", async () => {
+    const lines = [
+      assistantLine([{ type: "text", text: "Hello" }]),
+      assistantLine([{ type: "tool_use", id: "t1", name: "Bash", input: {} }]),
+      assistantLine([{ type: "text", text: "Final answer" }]),
+    ];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter();
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const result = await session.waitForCompletion();
+
+    expect(result.output).toBe("Final answer");
+  });
+
+  test("tool_use-only, thinking-only, and empty-text turns are skipped, not captured", async () => {
+    const lines = [
+      assistantLine([{ type: "text", text: "Real answer" }]),
+      assistantLine([{ type: "tool_use", id: "t1", name: "Bash", input: {} }]),
+      assistantLine([{ type: "thinking", thinking: "pondering..." }]),
+      assistantLine([{ type: "text", text: "" }]),
+    ];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter();
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const result = await session.waitForCompletion();
+
+    // None of the trailing turns had non-empty text, so the last real
+    // answer must survive untouched.
+    expect(result.output).toBe("Real answer");
+  });
+
+  test("subagent sidechain frames (parent_tool_use_id) do not overwrite the captured output", async () => {
+    const lines = [
+      assistantLine([{ type: "text", text: "Main thread final answer" }]),
+      // A subagent (sidechain) frame carries a truthy `parent_tool_use_id` at
+      // the top level of the raw stream-json frame — only the main thread's
+      // text should win the `ProviderResult.output` fallback.
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "text", text: "Subagent chatter" }] },
+        parent_tool_use_id: "tool-call-1",
+      }),
+    ];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter();
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const result = await session.waitForCompletion();
+
+    expect(result.output).toBe("Main thread final answer");
+  });
+
+  test("a stream with no assistant text at all leaves output undefined", async () => {
+    const lines = [
+      JSON.stringify({ type: "system", subtype: "init", session_id: "sess-1" }),
+      assistantLine([{ type: "tool_use", id: "t1", name: "Bash", input: {} }]),
+      JSON.stringify({ type: "result", total_cost_usd: 0.01, duration_ms: 100, num_turns: 1 }),
+    ];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter();
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const result = await session.waitForCompletion();
+
+    expect(result.output).toBeUndefined();
+  });
+});
+
 describe("mergeMcpConfig (issue #369)", () => {
   const TASK_ID = "task-abc-123";
 

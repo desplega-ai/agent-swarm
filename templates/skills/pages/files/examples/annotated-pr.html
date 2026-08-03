@@ -1,0 +1,49 @@
+<!doctype html>
+<!--
+  Annotated-PR page using the auto-injected <swarm-diff> web component.
+
+  No <script> import and no bundling: <swarm-diff>, <swarm-diff-jumps> and
+  window.swarmUi.renderDiff are injected into every HTML page automatically.
+  Each hunk gets id="swarm-diff-<file-slug>-<old_start>" so <swarm-diff-jumps>
+  can build the jump list and external links can deep-link a specific hunk.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PR #1234 — console.log cleanup</title>
+</head>
+<body>
+  <h1>PR #1234 — cleanup raw <code>console.log</code> calls</h1>
+  <p>Replaces ad-hoc logging with the project logger.</p>
+
+  <swarm-diff-jumps></swarm-diff-jumps>
+
+  <swarm-diff file="src/foo.ts" base-sha="abc123" head-sha="def456">
+    { "hunks": [
+        { "old_start": 10, "old_lines": 3, "new_start": 10, "new_lines": 4,
+          "lines": [
+            { "type": "context", "text": "  const x = 1;" },
+            { "type": "del",     "text": "- console.log(x);" },
+            { "type": "add",     "text": "+ logger.info({ x });" },
+            { "type": "add",     "text": "+ return x;" }
+          ],
+          "annotations": [
+            { "line": 12, "severity": "warn", "text": "Avoid raw console.log" }
+          ]
+        }
+    ] }
+  </swarm-diff>
+
+  <swarm-diff file="src/bar.ts" base-sha="abc123" head-sha="def456">
+    { "hunks": [
+        { "old_start": 5, "old_lines": 1, "new_start": 5, "new_lines": 1,
+          "lines": [
+            { "type": "del", "text": "- console.error('boom');" },
+            { "type": "add", "text": "+ logger.error('boom');" }
+          ]
+        }
+    ] }
+  </swarm-diff>
+</body>
+</html>

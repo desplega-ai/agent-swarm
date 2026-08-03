@@ -31,6 +31,8 @@ import {
   stopTaskWatcher,
 } from "../slack/watcher";
 
+process.env.SLACK_RENDER_V2 = "false";
+
 const TEST_DB_PATH = "./test-slack-watcher.sqlite";
 
 beforeAll(() => {

@@ -400,7 +400,13 @@ export const PROVIDER_STEER_CAPABILITIES: Record<ProviderName, SteerMode[]> = {
   // only what we can honor; revisit if the abort+prompt path is fixed.
   opencode: ["queue"],
   claude: ["queue"],
-  codex: [],
+  // Codex has no in-process delivery primitive (`@openai/codex-sdk` drives
+  // `codex exec` with stdin closed; `turn/steer` is app-server-only, see
+  // issue #1034). Delivery happens harness-side instead: the codex-hook
+  // (SessionStart/PostToolUse/Stop) polls pending rows and injects them as
+  // hook `additionalContext`, so the runner must leave codex rows `pending`
+  // (`ProviderSession.steeringDeliveredExternally`).
+  codex: ["queue"],
 };
 
 export type DevinProviderMeta = {
@@ -482,6 +488,7 @@ export const AgentTaskSchema = z.object({
   // Slack-specific metadata (optional)
   slackChannelId: z.string().optional(),
   slackThreadTs: z.string().optional(),
+  slackTriggerMessageTs: z.string().optional(),
   slackUserId: z.string().optional(),
   slackReplySent: z.boolean().default(false),
   slackProgressMessageTs: z.string().optional(),

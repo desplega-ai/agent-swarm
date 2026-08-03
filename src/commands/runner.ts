@@ -21,6 +21,7 @@ import {
 } from "../prompts/defaults.ts";
 import { renderMemoriesPrompt } from "../prompts/memories.ts";
 import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver.ts";
+import { renderSteeringDelivery } from "../prompts/steering-delivery.ts";
 import { authJsonToCredentialSelection } from "../providers/codex-oauth/auth-json.js";
 import { materializeCodexAuthJson } from "../providers/codex-oauth/auth-json-fs.js";
 import { loadAllCodexOAuthSlots } from "../providers/codex-oauth/storage.js";
@@ -89,6 +90,13 @@ import "./templates.ts";
 
 /** Throttle interval for progress updates (3 seconds). */
 const PROGRESS_THROTTLE_MS = 3000;
+
+/**
+ * Cap on the runner-buffered last-assistant-text fallback (see
+ * `trackAssistantText`), aligned with the ~30K output-size budget documented
+ * in the `/workflow-output-size-budget` skill.
+ */
+const ASSISTANT_TEXT_OUTPUT_CAP = 30_000;
 
 /** Minimum spacing for explicit runner GC sweeps. */
 const RUNNER_GC_MIN_INTERVAL_MS = 5 * 60 * 1000;
@@ -486,29 +494,10 @@ export function createSteeringDispatchState(): SteeringDispatchState {
   };
 }
 
-/**
- * Wrap a steering body in the registered delivery envelope so the injected
- * message carries its own ID. `accept-steer` takes that ID, and it is the only
- * route to `handled` — without the envelope the agent obeys the message but
- * can never acknowledge it, and the row sits at `delivered` forever.
- *
- * Falls back to the bare body if template resolution fails: delivering an
- * un-acknowledgeable message beats not delivering one at all.
- */
-export async function renderSteeringDelivery(
-  steeringMessageId: string,
-  body: string,
-): Promise<string> {
-  try {
-    const result = await resolveTemplateAsync("system.agent.steering.delivery", {
-      steeringMessageId,
-      body,
-    });
-    return result.skipped || !result.text.trim() ? body : result.text;
-  } catch {
-    return body;
-  }
-}
+// Moved to src/prompts/steering-delivery.ts so the codex-hook can render the
+// same envelope without importing the whole runner. Re-exported for existing
+// consumers (steering-transport tests).
+export { renderSteeringDelivery };
 
 export async function pollAndDispatchSteering(
   config: ApiConfig,
@@ -518,6 +507,12 @@ export async function pollAndDispatchSteering(
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   if (!isSteeringEnabled()) return;
+  // Harness-side delivery (codex hooks): the hook polls pending rows and
+  // injects them itself. Dispatching here would race it into a false
+  // "Provider session does not support live steering" undeliverable →
+  // premature promotion. Leave the rows pending; the terminal sweep still
+  // promotes anything the hook never delivered.
+  if (session.steeringDeliveredExternally) return;
 
   const headers = {
     Authorization: `Bearer ${config.apiKey}`,
@@ -1051,6 +1046,34 @@ export function toolCallToProgress(toolName: string, args: unknown): string | nu
 }
 
 /**
+ * Capture the last non-empty assistant message text from the provider event
+ * stream, so adapters that never populate `ProviderResult.output` (Codex
+ * today, any future adapter) still surface the agent's real final message
+ * instead of tool narration. Tool-use-only / thinking-only frames emit empty
+ * `content` and must not clear a previously captured message.
+ */
+export function trackAssistantText(holder: { value?: string }, event: ProviderEvent): void {
+  if (event.type !== "message" || event.role !== "assistant") return;
+  const text = scrubSecrets(event.content);
+  if (!text || !text.trim()) return;
+  holder.value =
+    text.length > ASSISTANT_TEXT_OUTPUT_CAP
+      ? `${text.slice(0, ASSISTANT_TEXT_OUTPUT_CAP)}… [truncated]`
+      : text;
+}
+
+/**
+ * Prefer a non-empty adapter result, falling back to the runner's captured
+ * assistant text for adapters (currently Codex) that do not return one.
+ */
+export function resolveProviderOutput(
+  result: Pick<ProviderResult, "output">,
+  assistantText?: { value?: string },
+): string | undefined {
+  return result.output || assistantText?.value;
+}
+
+/**
  * Report task progress via the API (fire-and-forget).
  */
 async function updateProgressViaAPI(
@@ -1099,6 +1122,14 @@ export async function handleStructuredOutputFallback(
   config: ApiConfig,
   taskId: string,
   adapterType: string,
+  /**
+   * The provider's captured free-form final message, when one exists (e.g.
+   * it failed outputSchema validation in `ensureTaskFinished`). Threaded
+   * into the extraction prompt ahead of progress history — it's the agent's
+   * own stated conclusion, and a strictly richer extraction source than the
+   * chronological progress narration, which may be sparse or tool-labeled.
+   */
+  providerOutput?: string,
 ): Promise<FallbackResult> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -1155,14 +1186,21 @@ export async function handleStructuredOutputFallback(
 
 ## Task Description
 ${taskData.task || "(no description)"}
-
+${
+  providerOutput
+    ? `
+## Final Agent Message
+${providerOutput}
+`
+    : ""
+}
 ## Progress Updates (chronological)
 ${progressEntries || "(no progress recorded)"}
 
 ## Required Output Schema
 ${JSON.stringify(taskData.outputSchema, null, 2)}
 
-Extract the structured data from the progress updates above. Return ONLY valid JSON matching the schema.`;
+Extract the structured data from the progress updates above${providerOutput ? " and the agent's final message" : ""}. Return ONLY valid JSON matching the schema.`;
 
     const schemaJson = JSON.stringify(taskData.outputSchema);
     const result =
@@ -1262,6 +1300,37 @@ export async function ensureTaskFinished(
   let status = exitCode === 0 ? "completed" : "failed";
   const body: Record<string, string> = { status };
 
+  // Applies a structured-output fallback result to `body`/`status`. Shared by
+  // the no-providerOutput path and the providerOutput-failed-schema-validation
+  // path below, so a schema'd task ending in free-form prose falls through to
+  // the same extraction fallback instead of hard-failing.
+  const applyFallback = (fallback: FallbackResult) => {
+    console.log(`[${role}] Task ${taskId.slice(0, 8)} fallback result: ${fallback.kind}`);
+    switch (fallback.kind) {
+      case "extracted":
+        body.output = fallback.output;
+        break;
+      case "already-has-output":
+        body.output = "Process completed successfully";
+        break;
+      case "no-schema":
+        // No structured output required, and no real final message was
+        // captured either. Never back-fill a tool-narration progress line
+        // into output here — a misleading tool label (e.g. "📋 Checking task
+        // list") is worse than an honest "no output" sentinel.
+        body.output = "Process completed successfully (no output captured)";
+        break;
+      case "schema-fail":
+        status = "failed";
+        body.status = "failed";
+        body.failureReason = fallback.failReason;
+        break;
+      case "fetch-error":
+        body.output = `Process completed (could not verify task state: ${fallback.error})`;
+        break;
+    }
+  };
+
   if (status === "failed") {
     body.failureReason = failureReason || `Claude process exited with code ${exitCode}`;
     if (failureDiagnostics) {
@@ -1272,41 +1341,25 @@ export async function ensureTaskFinished(
     if (validation.ok) {
       body.output = providerOutput;
     } else {
-      status = "failed";
-      body.status = "failed";
-      body.failureReason = validation.failReason;
+      // The task declared an outputSchema but the provider's final message
+      // is free-form prose that doesn't satisfy it. Don't convert this into
+      // a hard failure — fall through to the existing structured-output
+      // fallback (claude -p --json-schema extraction) so the task still
+      // succeeds via extraction.
+      const adapterType = provider ?? process.env.HARNESS_PROVIDER ?? "claude";
+      const fallback = await handleStructuredOutputFallback(
+        config,
+        taskId,
+        adapterType,
+        providerOutput,
+      );
+      applyFallback(fallback);
     }
   } else {
     // Try structured output fallback if the task has an outputSchema
     const adapterType = provider ?? process.env.HARNESS_PROVIDER ?? "claude";
     const fallback = await handleStructuredOutputFallback(config, taskId, adapterType);
-
-    console.log(`[${role}] Task ${taskId.slice(0, 8)} fallback result: ${fallback.kind}`);
-
-    switch (fallback.kind) {
-      case "extracted":
-        body.output = fallback.output;
-        break;
-      case "already-has-output":
-        body.output = "Process completed successfully";
-        break;
-      case "no-schema": {
-        if (fallback.lastProgress) {
-          body.output = fallback.lastProgress.slice(0, 2000);
-        } else {
-          body.output = "Process completed successfully (no output captured)";
-        }
-        break;
-      }
-      case "schema-fail":
-        status = "failed";
-        body.status = "failed";
-        body.failureReason = fallback.failReason;
-        break;
-      case "fetch-error":
-        body.output = `Process completed (could not verify task state: ${fallback.error})`;
-        break;
-    }
+    applyFallback(fallback);
   }
 
   try {
@@ -1930,6 +1983,12 @@ interface RunningTask {
   harnessVariantMeta?: Record<string, unknown>;
   /** Resolved model used for the provider session, when configured */
   model?: string;
+  /**
+   * Last non-empty assistant text captured from `message` events, shared by
+   * reference with the `onEvent` closure. Fallback `providerOutput` when the
+   * adapter's `ProviderResult.output` is empty (see `trackAssistantText`).
+   */
+  assistantText?: { value?: string };
 }
 
 /** Runner state for tracking concurrent tasks */
@@ -3276,6 +3335,10 @@ async function spawnProviderProcess(
   // Auto-progress throttle: don't update more than once per 3 seconds
   let lastProgressTime = 0;
 
+  // Shared holder mutated by `onEvent`'s "message" case, read back after the
+  // session promise resolves (see `trackAssistantText`).
+  const assistantTextHolder: { value?: string } = {};
+
   // Context usage throttle: max 1 snapshot per 30 seconds
   let lastContextPostTime = 0;
   const CONTEXT_THROTTLE_MS = 30_000;
@@ -3376,6 +3439,7 @@ async function spawnProviderProcess(
           if (event.role === "assistant") {
             implicitCloseActiveToolSpans(activeToolSpans);
           }
+          trackAssistantText(assistantTextHolder, event);
           break;
         }
         case "tool_start": {
@@ -3829,6 +3893,7 @@ async function spawnProviderProcess(
     harnessProvider: opts.harnessProvider,
     hasLocalEnvironment: adapter.traits.hasLocalEnvironment,
     model: model || undefined,
+    assistantText: assistantTextHolder,
   };
   runningTaskForSessionInit = runningTask;
   if (pendingHarnessVariant !== undefined) {
@@ -3870,6 +3935,7 @@ async function checkCompletedProcesses(
     harnessVariantMeta?: Record<string, unknown>;
     model?: string;
     durationMs: number;
+    assistantText?: RunningTask["assistantText"];
   }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
@@ -3891,6 +3957,7 @@ async function checkCompletedProcesses(
         harnessVariantMeta: task.harnessVariantMeta,
         model: task.model,
         durationMs: Date.now() - task.startTime.getTime(),
+        assistantText: task.assistantText,
       });
     }
   }
@@ -3907,6 +3974,7 @@ async function checkCompletedProcesses(
     harnessVariantMeta,
     model,
     durationMs,
+    assistantText,
   } of completedTasks) {
     state.activeTasks.delete(taskId);
     vcsDetectedTasks.delete(taskId);
@@ -4022,7 +4090,11 @@ async function checkCompletedProcesses(
         taskId,
         result.exitCode,
         failureReason,
-        result.output,
+        // Runner-buffered last assistant text is a harness-agnostic fallback
+        // for adapters that never populate `ProviderResult.output` (Codex
+        // today, any future adapter). Empty buffer -> `undefined`, byte
+        // identical to pre-fix behavior.
+        resolveProviderOutput(result, assistantText),
         harnessProvider,
         bridgeFailureDiagnostics,
       );

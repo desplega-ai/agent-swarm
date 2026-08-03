@@ -9,6 +9,7 @@ import {
   mcpOverflowNamespace,
   SCRIPT_AUTHORING_NUDGE,
   type SwarmToolResult,
+  type SwarmToolTruncation,
 } from "../tools/utils";
 import { clearVolatileSecretsForTesting, registerVolatileSecret } from "../utils/secret-scrubber";
 
@@ -285,6 +286,96 @@ describe("finalizeSwarmToolResult", () => {
     expect(stored?.valueType).toBe("string");
     expect(JSON.parse(String(stored?.value)).outcome.data.blob).toBe(blob);
     expect((stored?.expiresAt ?? 0) - Date.now()).toBeGreaterThan(MCP_OVERFLOW_TTL_MS - 60_000);
+  });
+
+  test("script-SDK origin receives the full payload without the model-context ceiling", () => {
+    const blob = "x".repeat(50_000);
+    const result = finalizeSwarmToolResult(
+      "some-tool",
+      {
+        ok: true,
+        message: "Big in-sandbox payload.",
+        data: { blob },
+      },
+      { agentId: TEST_AGENT_ID, callOrigin: "script-sdk" },
+    );
+
+    expect((result.structuredContent as { blob?: string }).blob).toBe(blob);
+    expect(result.structuredContent).not.toHaveProperty("truncation");
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeGreaterThan(
+      MCP_RESULT_WIRE_LIMIT_BYTES,
+    );
+  });
+
+  test("oversized arrays keep a non-empty prefix and a truthful surviving count", () => {
+    const messages = Array.from({ length: 20 }, (_, index) => ({
+      ts: String(index),
+      text: `message-${index}:${"x".repeat(900)}`,
+    }));
+    const details = messages.map((message) => message.text).join("\n\n");
+    const result = finalizeSwarmToolResult(
+      "slack-read",
+      {
+        ok: true,
+        message: "Retrieved 20 message(s).",
+        details,
+        data: { channelId: "C123", messages },
+      },
+      { agentId: TEST_AGENT_ID },
+    );
+    const structured = result.structuredContent as {
+      messages: typeof messages;
+      message: string;
+      truncation: SwarmToolTruncation;
+    };
+
+    expect(structured.messages.length).toBeGreaterThan(0);
+    expect(structured.messages.length).toBeLessThan(messages.length);
+    expect(structured.messages).toEqual(messages.slice(0, structured.messages.length));
+    expect(structured.message).toContain(`Retrieved ${structured.messages.length} message(s)`);
+    expect(structured.message).toContain("truncated from 20");
+    expect(structured.truncation).toMatchObject({
+      truncated: true,
+      limitBytes: MCP_RESULT_WIRE_LIMIT_BYTES,
+    });
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(
+      MCP_RESULT_WIRE_LIMIT_BYTES,
+    );
+
+    const key = structured.truncation.fullValueAt.replace(`kv://${TEST_OVERFLOW_NAMESPACE}/`, "");
+    const stored = getKv(TEST_OVERFLOW_NAMESPACE, key);
+    const canonical = JSON.parse(String(stored?.value)) as {
+      outcome: { data: { messages: typeof messages } };
+    };
+    expect(canonical.outcome.data.messages).toEqual(messages);
+  });
+
+  test("an oversized scalar sibling cannot make ctx-control drop an array key", () => {
+    const result = finalizeSwarmToolResult(
+      "some-tool",
+      {
+        ok: true,
+        message: "Retrieved 2 item(s).",
+        data: {
+          blob: "x".repeat(50_000),
+          items: [{ id: 1 }, { id: 2 }],
+        },
+      },
+      { agentId: TEST_AGENT_ID },
+    );
+    const structured = result.structuredContent as {
+      items?: Array<{ id: number }>;
+      blob?: string;
+      truncation: SwarmToolTruncation;
+    };
+
+    expect(structured).toHaveProperty("items");
+    expect(structured.items).toEqual([{ id: 1 }, { id: 2 }]);
+    expect(structured).not.toHaveProperty("blob");
+    expect(structured.truncation.truncated).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(
+      MCP_RESULT_WIRE_LIMIT_BYTES,
+    );
   });
 
   test("oversized prose keeps a readable prefix + marker + resolvable pointer on both channels", () => {

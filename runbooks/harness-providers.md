@@ -51,7 +51,7 @@ MCP tools return `isError` on the wire `CallToolResult` (see [runbooks/mcp-tool-
 | `opencode` | Lossy: SDK abort, then `promptAsync` | Native `promptAsync` | Interrupt discards the in-flight turn before re-prompting; queue is the zero-loss path. |
 | `devin` | No | Yes | `sendMessage` accepts a working session but does not guarantee interruption, so the adapter always reports `mode: "queue"`. |
 | `claude` | No | Conditional | Raw CLI stream-json queues input at a turn boundary; it does not interrupt. See the gate below. |
-| `codex` | No | No | No live stdin remains after session startup; steering is promoted to a follow-up task. |
+| `codex` | No | Yes (harness-side) | No in-process channel exists (`@openai/codex-sdk` drives `codex exec` with stdin closed; native `turn/steer` is app-server-only — issue #1034). The codex-hook delivers instead. See below. |
 
 The server-side `PROVIDER_STEER_CAPABILITIES` map in `src/types.ts` must deep-equal each adapter's `traits.steerModes ?? []`. `src/tests/provider-steering-capabilities.test.ts` iterates the canonical `ProviderNameSchema` list through `createProviderAdapter()` and names the offending provider on drift. Adding a provider requires updating the schema, factory, adapter traits, and capability map together.
 
@@ -70,6 +70,15 @@ With `CLAUDE_QUEUE_STEERING` unset, the adapter enables stream-json input only w
 
 When disabled, the adapter keeps `-p <prompt>` and the live session exposes no `deliverSteering`; an undeliverable message is promoted to a follow-up task. The provider trait remains queue-capable because the stock, supported Claude runtime implements that mode; the per-session gate is an operational availability check.
 
+### Codex harness-side delivery (codex-hook)
+
+Codex sessions have no in-process delivery seam, so `CodexSession`/`CodexSubprocessSession` set `steeringDeliveredExternally: true` and the runner's dispatch poll (`pollAndDispatchSteering`) leaves their rows `pending` instead of synthesizing an undeliverable report. Delivery happens inside the codex lifecycle:
+
+- The worker image bakes `/etc/codex/requirements.toml` (Dockerfile.worker, worker-base) registering `agent-swarm codex-hook` for `SessionStart`, `PostToolUse`, and `Stop`. Requirements-managed hooks are "trusted by policy" — user-level `hooks.json` would be silently skipped without a per-hook `trusted_hash` review, which never happens in a headless worker.
+- `src/hooks/codex-hook.ts` polls `GET /api/steering-messages` (agent-scoped), POSTs `/delivered` per row, and only then injects the rendered envelope (`src/prompts/steering-delivery.ts`) as `hookSpecificOutput.additionalContext` (SessionStart/PostToolUse) or a one-shot `{"decision":"block","reason":...}` on Stop. Delivered-before-inject is the one-shot guarantee; a failed POST leaves the row pending for the next event.
+- `PreToolUse` is deliberately not registered: codex drops its `additionalContext` (openai/codex#19385). Empirical per-event matrix at codex-cli 0.146.0: `thoughts/taras/research/2026-07-30-steering-transport-hooks-and-artificial-steering.md` §4a-bis.
+- Rows a dying session never picks up are promoted by the terminal sweep, same as every other provider. Local dev outside Docker has no `/etc/codex/requirements.toml`, so steers on local codex tasks sit pending until terminal promotion unless you install the hooks yourself.
+
 ## Per-task `outputSchema` support
 
 Tasks may carry an optional JSON Schema on `outputSchema` (see `CreateTaskOptions` in `src/be/db.ts`). Enforcement depends on the harness:
@@ -85,7 +94,18 @@ Tasks may carry an optional JSON Schema on `outputSchema` (see `CreateTaskOption
 
 When supported, validation happens in the `store-progress` MCP tool (see `src/tools/store-progress.ts:159-190`). When the schema is missing or violated, the tool call fails and the agent is asked to retry.
 
-**Caveat for default-mode Devin:** `ensureTaskFinished` in `src/commands/runner.ts` writes Devin's `providerOutput` directly into `task.output` without schema validation. Callers consuming a schema'd task's output should not assume `JSON.parse(task.output)` will succeed when the task ran on default-mode Devin.
+### `task.output` fallback order on clean session end
+
+When a session ends without an explicit `store-progress` call, `ensureTaskFinished` (`src/commands/runner.ts`) fills `task.output` from the first of:
+
+1. Adapter-owned `ProviderResult.output` (`claude`, `pi`/`pi-mono`, `claude-managed`, `devin`).
+2. **Runner-buffered last assistant text** — the runner's provider-event loop buffers the last non-empty assistant `message` event (`trackAssistantText`), capped at 30,000 characters (`… [truncated]` marker beyond that). Used only when the adapter didn't populate `output` itself (`codex` today; any future adapter that emits `message` events but no `ProviderResult.output`). Empty buffer (for example `opencode`, which never emits `message` events) is a no-op — behavior is byte-identical to having no `providerOutput` at all.
+3. `claude -p --json-schema` extraction fallback (`handleStructuredOutputFallback`), when the task has an `outputSchema` and neither #1 nor #2 produced text that validates against it. The extraction prompt includes the captured text (from #1 or #2) as a "Final Agent Message" section ahead of progress-log history.
+4. Sentinel `"Process completed successfully (no output captured)"` when no schema and no text of any kind was captured.
+
+A schema'd task whose captured text is free-form prose (not valid against `outputSchema`) no longer hard-fails — it falls through to step 3's extraction instead. Buffered/adapter text is never truncated *after* it passes schema validation; only the pre-validation capture (step 2) is capped. Failure paths (non-zero exit) never consult the buffer — `failureReason` is the only signal.
+
+**Devin caveat, corrected:** `providerOutput` from any adapter — including default-mode Devin, where `HAS_MCP=false` and the schema isn't enforced in `store-progress` — goes through the same `validateProviderOutputIfNeeded` gate in `ensureTaskFinished` before landing in `task.output`. A schema'd task is not written unvalidated; a violation falls through to step 3 above like any other harness. Callers can rely on `JSON.parse(task.output)` succeeding for a schema'd, `completed` task regardless of harness.
 
 ## Reasoning / effort control
 

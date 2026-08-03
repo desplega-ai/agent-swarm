@@ -288,6 +288,17 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "string",
         placeholder: "core,tasks,scripts,memory,workflows",
       },
+      {
+        key: "WORKER_API_READY_TIMEOUT_SECONDS",
+        label: "API readiness timeout (s)",
+        description:
+          "How long docker-entrypoint.sh waits for the control-plane API's /health endpoint before exiting the worker/lead container non-zero. This is a bootstrap-only setting read from the container's environment before the API is reachable — saving a value here documents and validates the intended deployment env var, it cannot affect a container that is already waiting.",
+        kind: "number",
+        defaultValue: "90",
+        placeholder: "90",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration`,
+      },
     ],
   },
   {
@@ -302,6 +313,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         label: "Disable Slack",
         description:
           "Stop the Slack handler from starting. Credentials stay untouched — manage them on the Integrations page.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
+        key: "SLACK_RENDER_V2",
+        label: "Slack thread renderer v2",
+        description:
+          "Opt in to preview one editable task tree per thread and immutable streamed outcome cards. Leave off to use the legacy per-task message renderer.",
         kind: "boolean",
         defaultValue: "false",
         docsUrl: `${DOCS}guides/slack-integration`,

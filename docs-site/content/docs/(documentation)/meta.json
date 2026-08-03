@@ -1,6 +1,6 @@
 {
   "title": "Documentation",
-  "description": "Guides, concepts, and reference for Agent Swarm",
+  "description": "Guides, concepts, and reference for agent-swarm.dev",
   "root": true,
   "pages": [
     "index",

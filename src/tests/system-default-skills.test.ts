@@ -33,7 +33,7 @@ describe("system-default skills", () => {
   });
 
   test("seed catalog includes swarm-scripts and marks built-in defaults", async () => {
-    const skills = loadSeedSkills();
+    const skills = await loadSeedSkills();
     const names = skills.map((skill) => skill.name);
 
     expect(names).toContain("asset-namespaces");
@@ -56,7 +56,16 @@ describe("system-default skills", () => {
     expect(skills.find((skill) => skill.name === "kv-storage")?.systemDefault).toBe(true);
     const pagesSkill = skills.find((skill) => skill.name === "pages");
     expect(pagesSkill?.systemDefault).toBe(true);
-    expect(pagesSkill?.description).toContain("minimalist taste-skill style");
+    // The merged `pages` skill must keep advertising the taste baseline in its
+    // description (that's what makes the model reach for it) and must still
+    // carry the actual design guidance in the body. Assert on both halves
+    // rather than one exact marketing phrase.
+    expect(pagesSkill?.description).toMatch(/taste/i);
+    expect(pagesSkill?.content).toContain("taste-minimalist-skill");
+    expect(pagesSkill?.content).toContain("Report density layer");
+    // ...and the mechanics half that used to live only in the baked copy.
+    expect(pagesSkill?.content).toContain("create_page");
+    expect(pagesSkill?.content).toContain("swarm-diff");
     expect(skills.find((skill) => skill.name === "taste-minimalist-skill")?.systemDefault).toBe(
       false,
     );

@@ -4,15 +4,15 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 const docsOgImage =
-  "https://www.agent-swarm.dev/api/og?title=Agent+Swarm+Documentation&subtitle=Reference+guides%2C+architecture%2C+and+operating+manuals+for+multi-agent+AI+coding+agent+swarms.";
+  "https://www.agent-swarm.dev/api/og?title=agent-swarm.dev+Documentation&subtitle=Reference+guides%2C+architecture%2C+and+operating+manuals+for+multi-agent+AI+coding+agent+swarms.";
 
 export const metadata: Metadata = {
   title: {
-    default: "Agent Swarm Documentation",
-    template: "%s | Agent Swarm",
+    default: "agent-swarm.dev Documentation",
+    template: "%s | agent-swarm.dev",
   },
   description:
-    "Agent Swarm documentation for multi-agent orchestration, Claude Code, Codex, Gemini CLI, MCP tools, workflows, memory, and AI coding agent teams.",
+    "agent-swarm.dev documentation for multi-agent orchestration, Claude Code, Codex, Gemini CLI, MCP tools, workflows, memory, and AI coding agent teams.",
   keywords: [
     "agent swarm",
     "documentation",
@@ -43,11 +43,11 @@ export const metadata: Metadata = {
     },
   },
   openGraph: {
-    title: "Agent Swarm Documentation",
+    title: "agent-swarm.dev Documentation",
     description:
-      "Agent Swarm docs for multi-agent orchestration, harness configuration, workflows, memory, MCP tools, and AI coding agent teams.",
+      "agent-swarm.dev docs for multi-agent orchestration, harness configuration, workflows, memory, MCP tools, and AI coding agent teams.",
     url: "https://docs.agent-swarm.dev/docs",
-    siteName: "Agent Swarm Docs",
+    siteName: "agent-swarm.dev Docs",
     type: "website",
     locale: "en_US",
     images: [
@@ -55,7 +55,7 @@ export const metadata: Metadata = {
         url: docsOgImage,
         width: 1200,
         height: 630,
-        alt: "Agent Swarm Documentation",
+        alt: "agent-swarm.dev Documentation",
       },
     ],
   },
@@ -63,9 +63,9 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     site: "@desplegalabs",
     creator: "@desplegalabs",
-    title: "Agent Swarm Documentation",
+    title: "agent-swarm.dev Documentation",
     description:
-      "Agent Swarm docs for multi-agent orchestration, harness configuration, workflows, memory, MCP tools, and AI coding agent teams.",
+      "agent-swarm.dev docs for multi-agent orchestration, harness configuration, workflows, memory, MCP tools, and AI coding agent teams.",
     images: [docsOgImage],
   },
 };
@@ -82,9 +82,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               "@graph": [
                 {
                   "@type": "Organization",
-                  "@id": "https://agent-swarm.dev/#organization",
-                  name: "Agent Swarm",
-                  url: "https://agent-swarm.dev",
+                  "@id": "https://www.agent-swarm.dev/#organization",
+                  name: "Desplega Labs",
+                  alternateName: "agent-swarm.dev",
+                  url: "https://www.agent-swarm.dev",
                   logo: {
                     "@type": "ImageObject",
                     url: "https://agent-swarm.dev/logo.png",
@@ -94,21 +95,22 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                   "@type": "WebSite",
                   "@id": "https://docs.agent-swarm.dev/#website",
                   url: "https://docs.agent-swarm.dev/docs",
-                  name: "Agent Swarm Documentation",
+                  name: "agent-swarm.dev Documentation",
                   publisher: {
-                    "@id": "https://agent-swarm.dev/#organization",
+                    "@id": "https://www.agent-swarm.dev/#organization",
                   },
                 },
                 {
                   "@type": "TechArticle",
-                  name: "Agent Swarm Documentation",
+                  name: "agent-swarm.dev Documentation",
                   description:
-                    "Agent Swarm documentation for multi-agent orchestration, harness configuration, workflows, memory, MCP tools, and AI coding agent teams.",
+                    "agent-swarm.dev documentation for multi-agent orchestration, harness configuration, workflows, memory, MCP tools, and AI coding agent teams.",
                   url: "https://docs.agent-swarm.dev",
                   image: docsOgImage,
                   mainEntity: {
                     "@type": "SoftwareApplication",
-                    name: "Agent Swarm",
+                    "@id": "https://www.agent-swarm.dev/#software",
+                    name: "agent-swarm.dev",
                     applicationCategory: "DeveloperApplication",
                     operatingSystem: "Linux, macOS",
                   },

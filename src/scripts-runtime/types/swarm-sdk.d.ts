@@ -39,6 +39,47 @@ declare module "swarm-sdk" {
     get<T = string>(key: string): Redacted<T> | undefined;
   }
 
+  export interface KvEntry<T = unknown> {
+    namespace: string;
+    key: string;
+    value: T;
+    valueType: "json" | "string" | "integer";
+    expiresAt: number | null;
+    createdAt: number;
+    updatedAt: number;
+  }
+
+  export interface KvSdkSuccess<T, TStatus extends number = 200> {
+    success: true;
+    status: TStatus;
+    data: T;
+  }
+
+  export interface KvSdkError {
+    success: false;
+    status: number;
+    data: { error: string };
+  }
+
+  export type KvSdkResponse<T, TStatus extends number = 200> =
+    | KvSdkSuccess<T, TStatus>
+    | KvSdkError;
+
+  export interface KvSetArgsBase {
+    key: string;
+    namespace?: string;
+    ttlSeconds?: number;
+    expiresInSec?: number;
+  }
+
+  export type KvEmptyData = Record<string, never>;
+
+  export interface KvListData<T = unknown> {
+    entries: KvEntry<T>[];
+    total: number;
+    namespace: string;
+  }
+
   export interface SwarmSdk {
     // --- memory ---
     memory_search(args: {
@@ -56,17 +97,36 @@ declare module "swarm-sdk" {
     task_storeProgress(args: Record<string, unknown>): Promise<unknown>;
     task_poll(args?: Record<string, unknown>): Promise<unknown>;
     // --- kv ---
-    kv_get(args: { key: string; namespace?: string }): Promise<unknown>;
-    kv_set(args: {
+    kv_get<T = unknown>(args: {
       key: string;
-      value: unknown;
       namespace?: string;
-      ttlSeconds?: number;
-      valueType?: "string" | "json" | "integer";
-    }): Promise<unknown>;
-    kv_del(args: { key: string; namespace?: string }): Promise<unknown>;
-    kv_incr(args: { key: string; by?: number; namespace?: string }): Promise<unknown>;
-    kv_list(args?: { prefix?: string; namespace?: string; limit?: number }): Promise<unknown>;
+    }): Promise<KvSdkResponse<KvEntry<T>>>;
+    kv_getOrNull<T = unknown>(args: {
+      key: string;
+      namespace?: string;
+    }): Promise<KvEntry<T> | null>;
+    kv_set<T>(
+      args: KvSetArgsBase & { value: T; valueType?: "json" },
+    ): Promise<KvSdkResponse<KvEntry<T>>>;
+    kv_set(
+      args: KvSetArgsBase & { value: string; valueType: "string" },
+    ): Promise<KvSdkResponse<KvEntry<string>>>;
+    kv_set(
+      args: KvSetArgsBase & { value: number | string; valueType: "integer" },
+    ): Promise<KvSdkResponse<KvEntry<number>>>;
+    kv_delete(args: { key: string; namespace?: string }): Promise<KvSdkResponse<KvEmptyData, 204>>;
+    kv_del(args: { key: string; namespace?: string }): Promise<KvSdkResponse<KvEmptyData, 204>>;
+    kv_incr(args: {
+      key: string;
+      by?: number;
+      namespace?: string;
+    }): Promise<KvSdkResponse<KvEntry<number>>>;
+    kv_list<T = unknown>(args?: {
+      prefix?: string;
+      namespace?: string;
+      limit?: number;
+      offset?: number;
+    }): Promise<KvSdkResponse<KvListData<T>>>;
     // --- repos ---
     repo_list(args?: Record<string, unknown>): Promise<unknown>;
     // --- schedules ---
@@ -240,8 +300,13 @@ declare module "swarm-sdk" {
       threadTs?: string;
       message: string;
       taskId?: string;
+      blocks?: unknown;
     }): Promise<unknown>;
-    slack_startThread(args: { channelId: string; message: string }): Promise<unknown>;
+    slack_startThread(args: {
+      channelId: string;
+      message: string;
+      blocks?: unknown;
+    }): Promise<unknown>;
     slack_uploadFile(args: Record<string, unknown>): Promise<unknown>;
     slack_downloadFile(args: { url: string }): Promise<unknown>;
     slack_delete(args: { channelId: string; messageTs: string }): Promise<unknown>;
@@ -394,6 +459,12 @@ declare module "swarm-sdk" {
         parentTaskId?: string;
         requestedByUserId?: string;
         outputSchema?: Record<string, unknown>;
+        /** Wait for the dispatched task to reach a terminal status before resolving. Default: true. */
+        waitForCompletion?: boolean;
+        /** Max ms to wait for a terminal status before throwing. Default: 2h. Only used when waitForCompletion is true. */
+        timeoutMs?: number;
+        /** Throw when the task ends failed/cancelled/superseded (default), or resolve with {taskId,status,error} when false. */
+        failOnTaskFailure?: boolean;
       },
     ): Promise<unknown>;
     swarmScript(

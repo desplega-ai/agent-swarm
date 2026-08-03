@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.126.1] - 2026-08-03
+
+### Changed
+- **Bundled KV guidance now documents concurrency-safe state layouts** (#1068) — `kv_set` is an unconditional overwrite without compare-and-swap, so the guide recommends per-writer keys, assemble-on-read fan-in, and concurrent testing.
+- **Worker harness pins now track Pi 0.83.0 and OpenCode 1.18.11** (#1071) — the worker image and runtime dependencies move to the latest compatible weekly releases.
+
+### Fixed
+- **Durable script-workflow agent steps cannot resolve an unrelated same-context task** (#1072) — replay lookup only accepts `script-run-step` tasks and polling stays pinned to the selected task ID.
+- **Slack v2 task trees and outcome cards no longer create permalink unfurls** (#1070) — cross-message links were removed while task links and compact agent/task provenance remain available.
+- **Script-workflow label linting follows TypeScript syntax scope** (#1073) — repeated literal labels are rejected inside real loops and iteration callbacks without false positives from nearby or text-like loop syntax.
+
+## [1.126.0] - 2026-08-02
+
+### Added
+- **Slack threads can opt in to one persistent task tree with streamed outcome cards** (#1056) — `SLACK_RENDER_V2=true` replaces automatic per-task relays with a restart-safe tree, complete Markdown outcomes, direct-ask reply links, and optional Block Kit payloads for explicit Slack tools.
+- **Durable script workflows now wait for agent tasks to finish by default** (#1059) — `ctx.step.agentTask` polls the same replay-safe task through terminal status, supports bounded timeouts and failure policies, and preserves concurrent `Promise.all` fan-out.
+- **Worker and lead containers now wait for control-plane readiness before bootstrapping** (#1060) — the entrypoint polls `/health` before provider setup and fails clearly after the configurable `WORKER_API_READY_TIMEOUT_SECONDS` deadline.
+
+### Changed
+- **Pull-request feedback now includes comparable CI timing data while root tests finish faster** (#1062, #1064) — Merge Gate shards the root suite across isolated runners and reports wall-clock and compute timings for PR and `main` actions.
+
+### Fixed
+- **Slack v2 activation and rendering avoid historical backfill and preserve complete outcomes** (#1063, #1065) — a durable activation watermark excludes old threads, runtime kill-switch checks stop in-flight rendering, and tree rows keep accurate progress, result, and trigger links.
+- **GitHub integration ignores reviews authored by the swarm bot itself** (#1058) — self-authored review webhooks are dropped before sender resolution and inline-comment fetching without weakening third-party fail-open delivery.
+
+## [1.125.0] - 2026-07-31
+
+### Added
+- **Codex tasks now receive queued steering through managed lifecycle hooks** (#1036) — worker images install trusted `SessionStart`, `PostToolUse`, and `Stop` hooks that deliver pending messages at tool-call boundaries instead of immediately promoting them to follow-up tasks.
+
+### Changed
+- **The root test command now reports the file responsible for timeout failures** (#1033) — `bun run test:root` runs test files through an attributable wrapper while preserving the suite's existing timeout budget.
+
+### Fixed
+- **Oversized MCP results stay bounded for agents without starving scripts of data** (#1032, #1037) — model-facing responses spill recoverable full values to private, expiring KV pointers, while `ctx.swarm.*` receives complete scrubbed SDK responses up to a loud 64 MiB safety limit.
+
 ## [1.124.0] - 2026-07-30
 
 ### Added

@@ -12,6 +12,7 @@ import type { AgentTask } from "../types";
 import { getSlackApp } from "./app";
 import type { TreeNode } from "./blocks";
 import { buildTreeBlocks, formatDuration } from "./blocks";
+import { isSlackRenderV2Enabled, processSlackRenderV2 } from "./render-v2";
 import {
   sendInlineTaskOutput,
   sendProgressUpdate,
@@ -466,6 +467,8 @@ async function postInitialDMTreeMessage(task: AgentTask): Promise<string | undef
       channel: task.slackChannelId,
       thread_ts: task.slackThreadTs,
       text: fallbackText,
+      unfurl_links: false,
+      unfurl_media: false,
       // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
       blocks: blocks as any,
     });
@@ -550,6 +553,11 @@ export function startTaskWatcher(intervalMs = 3000): void {
     isProcessing = true;
 
     try {
+      if (isSlackRenderV2Enabled()) {
+        await processSlackRenderV2();
+        return;
+      }
+
       // Process tree messages first (renders all tracked trees via chat.update)
       await processTreeMessages();
 

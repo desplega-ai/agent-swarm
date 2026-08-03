@@ -175,6 +175,61 @@ describe("typecheckScript", () => {
     expect(result.ok).toBe(false);
   });
 
+  test("types KV SDK envelopes and entry values without changing their runtime shapes", () => {
+    const source = `
+      import type { ScriptContext } from "swarm-sdk";
+
+      export default async (_args: unknown, ctx: ScriptContext) => {
+        const get = await ctx.swarm.kv_get<{ ok: boolean }>({ key: "get" });
+        if (get.success) {
+          const ok: boolean = get.data.value.ok;
+        } else {
+          const error: string = get.data.error;
+        }
+
+        const nullable = await ctx.swarm.kv_getOrNull<{ count: number }>({ key: "nullable" });
+        const nullableCount: number | undefined = nullable?.value.count;
+
+        const json = await ctx.swarm.kv_set({ key: "json", value: { count: 1 }, expiresInSec: 60 });
+        if (json.success) {
+          const count: number = json.data.value.count;
+        }
+
+        const string = await ctx.swarm.kv_set({ key: "string", value: "value", valueType: "string" });
+        if (string.success) {
+          const value: string = string.data.value;
+        }
+
+        const integer = await ctx.swarm.kv_set({ key: "integer", value: "42", valueType: "integer" });
+        if (integer.success) {
+          const value: number = integer.data.value;
+        }
+
+        const incremented = await ctx.swarm.kv_incr({ key: "counter" });
+        if (incremented.success) {
+          const value: number = incremented.data.value;
+        }
+
+        const list = await ctx.swarm.kv_list<{ label: string }>({ prefix: "item:", offset: 10 });
+        if (list.success) {
+          const label: string | undefined = list.data.entries[0]?.value.label;
+          const total: number = list.data.total;
+          const namespace: string = list.data.namespace;
+        }
+
+        const deleted = await ctx.swarm.kv_delete({ key: "delete" });
+        const legacyDeleted = await ctx.swarm.kv_del({ key: "legacy-delete" });
+        if (deleted.success && legacyDeleted.success) {
+          const canonicalStatus: 204 = deleted.status;
+          const legacyStatus: 204 = legacyDeleted.status;
+        }
+
+        return { nullableCount };
+      };
+    `;
+    expect(typecheckScript(source).ok).toBe(true);
+  });
+
   test("does NOT include lib.dom.d.ts wholesale — DOM-only globals stay rejected", () => {
     // window/document/localStorage are intentionally NOT exposed by the runtime
     // and must NOT typecheck. This prevents authors from writing browser code

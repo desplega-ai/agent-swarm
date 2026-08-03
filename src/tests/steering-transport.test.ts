@@ -204,7 +204,11 @@ describe("steering worker transport", () => {
     ]);
   });
 
-  test("codex steering is promoted before the runner can poll it", () => {
+  test("codex rows stay pending: the runner skips externally-delivered sessions", async () => {
+    // Codex delivery is harness-side (codex-hook). The row must queue at
+    // request time, and the runner's dispatch poll must leave it untouched —
+    // dispatching would synthesize a false undeliverable and promote it out
+    // from under the hook.
     const agent = createAgent({
       name: "codex steering worker",
       isLead: false,
@@ -226,8 +230,22 @@ describe("steering worker transport", () => {
       createdByKind: "system",
     });
 
-    expect(requested.outcome).toBe("promoted");
-    expect(getPendingSteeringForTask(task.id)).toEqual([]);
+    expect(requested).toMatchObject({ outcome: "queued", degradedFrom: "steer" });
+
+    // Session without deliverSteering — would normally be reported
+    // undeliverable — but the external-delivery flag short-circuits the poll.
+    const codexLikeSession = { ...session(), steeringDeliveredExternally: true };
+    await pollAndDispatchSteering(
+      { apiUrl: baseUrl, apiKey: "test-key", agentId: agent.id },
+      task.id,
+      codexLikeSession,
+      createSteeringDispatchState(),
+    );
+
+    expect(getPendingSteeringForTask(task.id)).toEqual([
+      expect.objectContaining({ id: requested.steeringMessageId, status: "pending" }),
+    ]);
+    expect(getChildTasks(task.id)).toEqual([]);
   });
 
   test("accept-steer marks a delivered row handled and is idempotent", async () => {
