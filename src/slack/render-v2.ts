@@ -566,12 +566,16 @@ function outcomeText(value: string | null | undefined, fallback: string): string
   return value?.trim() ? value : fallback;
 }
 
-function outcomeContent(task: AgentTask): string {
+function outcomeContent(task: AgentTask, slackReplySent: boolean): string {
   if (task.status === "failed") {
     return `❌ **Failed**\n\n${outcomeText(task.failureReason, "Task failed.")}`;
   }
   if (task.status === "cancelled") {
     return `🚫 **Cancelled**\n\n${outcomeText(task.failureReason, "Task was cancelled.")}`;
+  }
+  if (slackReplySent) {
+    const agentName = task.agentId ? (getAgentById(task.agentId)?.name ?? "Agent") : "Agent";
+    return `✅ ${agentName} completed`;
   }
   return `✅\n\n${outcomeText(task.output, "Task completed.")}`;
 }
@@ -705,7 +709,11 @@ export async function streamOutcomeCard(
   const tasks = getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
   const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
   const attachment = attachmentLine(getTaskAttachments(task.id));
-  const content = outcomeContent(task);
+  // Re-read slackReplySent rather than trusting the caller's snapshot: it can flip
+  // (via the slack-reply tool) between processSlackRenderV2's task fetch and this
+  // function's earlier Slack round trips.
+  const slackReplySent = getTaskById(task.id)?.slackReplySent ?? task.slackReplySent;
+  const content = outcomeContent(task, slackReplySent);
   const presentation = outcomePresentation(task, content, attachment);
   if (!presentation) throw new Error(`Outcome presentation is empty for task ${task.id}`);
 
