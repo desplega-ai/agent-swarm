@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   assertBundledFileCount,
   assertSafeRelativePath,
+  assertSafeRepoTransport,
   assertSkillRoundTrip,
   type Manifest,
   type PathRewrite,
@@ -237,5 +238,19 @@ describe("ai-toolbox skill sync pure transforms", () => {
       ),
     ).toBe("https://example.com/desplega-ai/ai-toolbox.git");
     expect(sanitizeSyncedVia(tempRoot)).toBe(tempRoot);
+  });
+
+  test("rejects remote-helper and option-shaped --repo transports", () => {
+    expect(() => assertSafeRepoTransport("ext::sh -c whoami")).toThrow("https/ssh/git/file");
+    expect(() => assertSafeRepoTransport("--upload-pack=evil")).toThrow("https/ssh/git/file");
+    expect(() => assertSafeRepoTransport("transport::payload")).toThrow("https/ssh/git/file");
+    expect(() =>
+      assertSafeRepoTransport("https://github.com/desplega-ai/ai-toolbox.git"),
+    ).not.toThrow();
+    expect(() =>
+      assertSafeRepoTransport("git@github.com:desplega-ai/ai-toolbox.git"),
+    ).not.toThrow();
+    expect(() => assertSafeRepoTransport("file:///tmp/repo")).not.toThrow();
+    expect(() => assertSafeRepoTransport("ssh://git@host/repo.git")).not.toThrow();
   });
 });

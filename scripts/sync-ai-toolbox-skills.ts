@@ -139,13 +139,34 @@ function parseArgs(): { check: boolean; repo: string; ref: string } {
 
 function git(repo: string | null, args: string[]): Uint8Array {
   const command = ["git", ...(repo ? ["-C", repo] : []), ...args];
-  const result = Bun.spawnSync(command, { stdout: "pipe", stderr: "pipe" });
+  const result = Bun.spawnSync(command, {
+    stdout: "pipe",
+    stderr: "pipe",
+    // `git fetch` interprets exotic transports (ext::, remote helpers) that can
+    // execute arbitrary commands from a crafted URL. Pin the allowed protocols
+    // for every git we spawn — defense in depth behind assertSafeRepoTransport.
+    env: { ...process.env, GIT_ALLOW_PROTOCOL: "file:https:http:ssh:git" },
+  });
   if (result.exitCode !== 0) {
     fail(
       `git operation failed with exit code ${result.exitCode}:\n${result.stderr.toString().trim()}`,
     );
   }
   return result.stdout;
+}
+
+/**
+ * Accept only an existing local repository (probed by the caller) or a standard
+ * git transport URL. Everything else — notably `ext::` and other remote-helper
+ * schemes, which git would happily execute — is rejected before git sees it.
+ */
+export function assertSafeRepoTransport(repoArg: string): void {
+  const allowed = /^(?:(?:https?|ssh|git|file):\/\/|[\w.-]+@[\w.-]+:)/;
+  if (!allowed.test(repoArg)) {
+    fail(
+      `--repo must be an existing local repository or an https/ssh/git/file URL; got ${JSON.stringify(repoArg)}.`,
+    );
+  }
 }
 
 function gitText(repo: string | null, args: string[]): string {
@@ -720,6 +741,8 @@ function prepareRepository(
     const commit = gitText(repoArg, ["rev-parse", `${ref}^{commit}`]).trim();
     return { repo: repoArg, commit, cleanup: () => undefined };
   }
+
+  assertSafeRepoTransport(repoArg);
 
   const repo = mkdtempSync(join(tmpdir(), "ai-toolbox-skills-"));
   try {
