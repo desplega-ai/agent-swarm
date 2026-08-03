@@ -252,7 +252,7 @@ export type SeedSkill = {
  */
 const BUILT_IN_SKILL_FILES = bundledFilesManifest as Record<string, SeedSkillFile[]>;
 
-const BUILT_IN_SKILL_SOURCES = [
+export const BUILT_IN_SKILL_SOURCES = [
   { config: appsConfig, body: appsContent },
   { config: artifactsConfig, body: artifactsContent },
   { config: askUserConfig, body: askUserContent },

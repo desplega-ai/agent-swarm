@@ -8950,6 +8950,14 @@ export function getWorkflow(id: string): Workflow | null {
   return row ? rowToWorkflow(row) : null;
 }
 
+/** Look up a workflow by its unique human-readable name. */
+export function getWorkflowByName(name: string): Workflow | null {
+  const row = getDb()
+    .prepare<WorkflowRow, [string]>("SELECT * FROM workflows WHERE name = ?")
+    .get(name);
+  return row ? rowToWorkflow(row) : null;
+}
+
 /**
  * Slim list-row mapper — drops the heavy `definition` (avg ~18 KB/row) and the
  * trigger config, keeping a derived `nodeCount` so the list view can still

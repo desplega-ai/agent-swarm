@@ -508,19 +508,25 @@ required for 'workflow', taskTemplate for 'agent-task'). Register **after** `wor
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] New suites pass: `bun run test:root -- src/tests/seed-workflows.test.ts` and
-      `bun run test:root -- src/tests/seed-schedules.test.ts`
-- [ ] Existing seed suites still pass: `bun run test:root -- src/tests/seed.test.ts` and
-      `bun run test:root -- src/tests/seed-scripts.test.ts`
-- [ ] Full suite: `bun run test:root`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] New suites pass: `bun run test:root -- src/tests/seed-workflows.test.ts` and
+      `bun run test:root -- src/tests/seed-schedules.test.ts` (7 + 7 after review fixes)
+- [x] Existing seed suites still pass: `bun run test:root -- src/tests/seed.test.ts` and
+      `bun run test:root -- src/tests/seed-scripts.test.ts` (8 + 17)
+- [x] Full suite: `bun run test:root` (6812 pass / 0 fail)
 
 #### Automated QA:
-- [ ] Fresh-DB boot walkthrough: `rm -f agent-swarm-db.sqlite*`, `bun run start:http`, then
-      `curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/workflows` and
-      `.../api/schedules` show the toy-fixture entities seeded exactly once; restart the server and
-      confirm no duplicates and no re-enable of a manually disabled row.
+- [x] Fresh-DB boot walkthrough (run in an isolated copy with a toy addon wired in): seeded
+      exactly once; restart → no duplicates; manual disable + source cron change → still disabled,
+      old cron, `preserved=1`; DB-edited definition survives a source change; dangling
+      `workflowName` fails loud at boot with the add-on error. **Open decision surfaced**: a
+      seeding failure at boot is only `console.error`'d (pre-existing try/catch in
+      `src/http/index.ts`) and one bad add-on reference skips ALL seeders for that boot while the
+      server keeps serving — on a fresh DB that means a healthy-looking install with nothing
+      seeded. Review-round fixes applied: schedule `description` added to the content hash (was
+      silently unsyncable), cross-addon workflow/schedule name-collision check in
+      `assertAddonReferences`, pristine-update regression tests for both kinds.
 
 #### Manual Verification:
 - [ ] None (fully automatable).
