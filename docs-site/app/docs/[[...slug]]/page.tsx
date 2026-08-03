@@ -59,23 +59,23 @@ export async function generateMetadata(props: {
       canonical: url,
     },
     openGraph: {
-      title: `${title} | Agent Swarm`,
+      title: `${title} | agent-swarm.dev`,
       description,
       url,
-      siteName: "Agent Swarm Docs",
+      siteName: "agent-swarm.dev Docs",
       type: "article",
       images: [
         {
           url: docsOgImage,
           width: 1200,
           height: 630,
-          alt: `${title} — Agent Swarm Documentation`,
+          alt: `${title} — agent-swarm.dev Documentation`,
         },
       ],
     },
     twitter: {
       card: "summary_large_image",
-      title: `${title} | Agent Swarm`,
+      title: `${title} | agent-swarm.dev`,
       description,
       images: [docsOgImage],
     },

@@ -40,17 +40,17 @@
   </a>
 </p>
 
-> **Agent Swarm is your Company's Compounding Intelligence Layer. A system of AI agents that remember, reason, act and get better with every task.**
+> **agent-swarm.dev is an open-source operating system for AI work: a lead agent breaks goals into tasks, routes them to specialized workers such as Claude Code or Codex, runs each worker in an isolated container, and preserves shared memory, tools, schedules, and review gates so delegated work compounds across sessions.**
 
 > AI-Native · Compounds · Presence · Harness & LLM-Agnostic · Your Infra · Your Memory · 
 
 ## What it does
 
-Agent Swarm runs a team of AI agents that coordinate autonomously. A **lead agent** receives tasks (from Slack, GitHub, GitLab, Linear, Jira, email, or the API), breaks them down, and delegates to **worker agents** running in isolated environments (Docker). Workers execute tasks, ship solutions, and write their learnings back to a shared memory so the whole swarm gets smarter every session.
+agent-swarm.dev runs a team of AI agents that coordinate autonomously. A **lead agent** receives tasks (from Slack, GitHub, GitLab, Linear, Jira, email, or the API), breaks them down, and delegates to **worker agents** running in isolated environments (Docker). Workers execute tasks, ship solutions, and write their learnings back to a shared memory so the whole swarm gets smarter every session.
 
 You can run agents for Marketing, Product, UX, Engineering, Support, Operations, HR, Finance, or any role you can think of. A centralized Lead coordinates them, and they share the learnings horizontally. That's the true difference between [*AI First*](https://www.pleasedontdeploy.com/i/197193364/ai-first) and [*AI Native*](https://www.pleasedontdeploy.com/i/197193364/third-the-ai-native-metamorphosis).
 
-Agent Swarm is the shared cloud brain and muscle that makes your whole company better every day.
+agent-swarm.dev is the shared cloud brain and muscle that makes your whole company better every day.
 
 Sometimes humans are the blocker. We can help you. Contact us [contact@desplega.sh](mailto:contact@desplega.sh).
 
