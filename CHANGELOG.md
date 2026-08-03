@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.126.1] - 2026-08-03
+
+### Changed
+- **Bundled KV guidance now documents concurrency-safe state layouts** (#1068) — `kv_set` is an unconditional overwrite without compare-and-swap, so the guide recommends per-writer keys, assemble-on-read fan-in, and concurrent testing.
+- **Worker harness pins now track Pi 0.83.0 and OpenCode 1.18.11** (#1071) — the worker image and runtime dependencies move to the latest compatible weekly releases.
+
+### Fixed
+- **Durable script-workflow agent steps cannot resolve an unrelated same-context task** (#1072) — replay lookup only accepts `script-run-step` tasks and polling stays pinned to the selected task ID.
+- **Slack v2 task trees and outcome cards no longer create permalink unfurls** (#1070) — cross-message links were removed while task links and compact agent/task provenance remain available.
+- **Script-workflow label linting follows TypeScript syntax scope** (#1073) — repeated literal labels are rejected inside real loops and iteration callbacks without false positives from nearby or text-like loop syntax.
+
 ## [1.126.0] - 2026-08-02
 
 ### Added

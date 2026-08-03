@@ -354,7 +354,7 @@ await ctx.step.swarmScript("normalize-records", {
 
 `ctx.step.agentTask(label, config)` dispatches a swarm task and **blocks until it reaches a terminal status**, journaling its real output as the step result. This is the natural semantic for a durable step — a sequential `plan → review → implement` chain will not fan out or pass a placeholder downstream.
 
-Dispatch and wait are journal-separable: the server looks up an existing task by a `(runId, label)` context key before creating one, so if the harness process restarts mid-wait (crash, supervisor reconciliation, `SCRIPT_RUN_MAX_WALL_MS` eviction), replay resumes polling the same task instead of dispatching a duplicate. The step is only journaled once the task reaches a terminal status.
+Dispatch and wait are journal-separable: the server looks up an existing `script-run-step` task by a `(runId, label)` context key before creating one. Once selected, the wait stays pinned to that task ID, so an unrelated task that later reuses the same context key cannot hijack the result. If the harness process restarts mid-wait (crash, supervisor reconciliation, `SCRIPT_RUN_MAX_WALL_MS` eviction), replay resumes polling the same task instead of dispatching a duplicate. The step is only journaled once the task reaches a terminal status.
 
 Config options beyond the task-dispatch fields (`template`/`task`/`agentId`/`tags`/…):
 
@@ -436,7 +436,7 @@ Persisted statuses:
 
 Terminal statuses are `completed`, `failed`, `cancelled`, and `aborted_limit`.
 
-`label_lint_violation` is not a persisted run status. It is a launch-time rejection from `POST /api/script-runs` when the source contains an obvious repeated literal step label inside a loop.
+`label_lint_violation` is not a persisted run status. It is a launch-time rejection from `POST /api/script-runs` when the TypeScript syntax tree places a repeated literal step label inside a loop or an iteration callback such as `map`, `forEach`, or `reduce`. Similar-looking text in comments, strings, or unrelated code does not trigger the lint.
 
 ## Durability and replay
 

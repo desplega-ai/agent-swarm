@@ -247,6 +247,8 @@ Manage the prompt-template registry (system-prompt and task-prompt sections) at 
 
 ## Slack Tools
 
+When the v2 Slack renderer adds provenance to explicit `slack-reply`, `slack-post`, or `slack-start-thread` messages, it keeps the footer to agent and task identity. It deliberately omits links between Slack messages so provenance does not create link-preview unfurls.
+
 ### slack-reply
 
 Reply to a Slack thread associated with a task.
@@ -707,7 +709,7 @@ Read a key. Returns the entry or `null` if missing/expired. Namespace defaults t
 
 ### kv-set
 
-Write a key. Upserts atomically. 2 MiB body cap.
+Write a key. Each replacement is atomic but unconditional: there is no compare-and-swap, so concurrent read-modify-write callers can lose updates. Use per-writer keys and assemble on read for fan-in workloads. 2 MiB body cap.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

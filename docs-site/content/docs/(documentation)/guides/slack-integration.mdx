@@ -106,21 +106,21 @@ The legacy per-task renderer remains the default. Set `SLACK_RENDER_V2=true` to 
 
 ```
 🧵 worked for 44m
- ├─ ✅ First ask · 7m51s · task-id ↵
- ├─ ⏳ Current ask · 8m05s · task-id ↵ · latest progress
+ ├─ ✅ First ask · 7m51s · task-id
+ ├─ ⏳ Current ask · 8m05s · task-id · latest progress
  │  └─ ✅ Researcher · 8m24s · task-id
- └─ ✅ Completed ask · 12m · task-id ↵ → result
+ └─ ✅ Completed ask · 12m · task-id
 ```
 
-The tree is rendered as footer-weight context blocks and contains status, elapsed time, hierarchy, task links, the latest bounded progress for active tasks, links to completed results, and `↵` permalinks for messages that directly triggered a task. It does not repeat worker output. Updates are debounced, link/media unfurls are disabled, and rate-limit retries honor Slack backoff.
+The tree is rendered as footer-weight context blocks and contains status, elapsed time, hierarchy, task links, and the latest bounded progress for active tasks. It does not repeat worker output or cross-link Slack messages: keeping message permalinks out of the tree prevents Slack from producing noisy link previews. Updates are debounced, link/media unfurls are disabled, and rate-limit retries honor Slack backoff.
 
 ### Outcome Cards and Message Provenance
 
-Each completed Slack ask gets one outcome card containing the full multi-paragraph Markdown result, bounded only by Slack's presentation limit with a link to the full task when truncation is required. The renderer writes it once with `chat.startStream`, about three `chat.appendStream` calls, and `chat.stopStream`; it is never passed to `chat.update`, so Slack does not stamp it as edited. The card links back to the tree, and the tree links to the card.
+Each completed Slack ask gets one outcome card containing the full multi-paragraph Markdown result, bounded only by Slack's presentation limit with a link to the full task when truncation is required. The renderer writes it once with `chat.startStream`, about three `chat.appendStream` calls, and `chat.stopStream`; it is never passed to `chat.update`, so Slack does not stamp it as edited. Outcome cards do not link back to the tree, which avoids an otherwise redundant Slack permalink unfurl.
 
-Raw worker output is not automatically relayed into Slack. Additional messages only appear when an agent explicitly calls `slack-reply`, `slack-post`, or `slack-start-thread`. Those tools accept optional Block Kit `blocks`; when omitted they generate a mrkdwn section. Their compact context footer contains only useful provenance: agent, task, and a link back to the tree when available.
+Raw worker output is not automatically relayed into Slack. Additional messages only appear when an agent explicitly calls `slack-reply`, `slack-post`, or `slack-start-thread`. Those tools accept optional Block Kit `blocks`; when omitted they generate a mrkdwn section. Their compact context footer contains the originating agent and task without a Slack-message permalink.
 
-Tree, outcome, and explicit agent message timestamps are persisted in `slack_messages`, so the renderer can reuse and cross-link messages after a restart.
+Tree, outcome, and explicit agent message timestamps are persisted in `slack_messages`, so the renderer can reuse messages after a restart.
 
 ### Opt In to the Renderer
 
