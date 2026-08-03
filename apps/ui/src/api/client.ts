@@ -2775,10 +2775,25 @@ class ApiClient {
     return this.appRequest(`/api/apps/${encodeURIComponent(id)}`, undefined, "Failed to load app");
   }
 
-  /** Resolve a named query from the app definition. */
-  async runAppQuery(appId: string, queryName: string): Promise<{ rows: AppRow[] }> {
+  /**
+   * Resolve a named query from the app definition. `params` feed the query's
+   * `{ "$param": "<name>" }` filters and ride as repeatable `param.<name>=`
+   * keys (same idiom as the row-list `filter.<col>=`).
+   */
+  async runAppQuery(
+    appId: string,
+    queryName: string,
+    params?: Record<string, string | number | boolean>,
+  ): Promise<{ rows: AppRow[] }> {
+    const search = new URLSearchParams();
+    for (const [name, value] of Object.entries(params ?? {})) {
+      search.set(`param.${name}`, String(value));
+    }
+    const query = search.toString();
     return this.appRequest(
-      `/api/apps/${encodeURIComponent(appId)}/queries/${encodeURIComponent(queryName)}`,
+      `/api/apps/${encodeURIComponent(appId)}/queries/${encodeURIComponent(queryName)}${
+        query ? `?${query}` : ""
+      }`,
       undefined,
       `Failed to run query ${queryName}`,
     );

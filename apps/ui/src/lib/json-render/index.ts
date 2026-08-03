@@ -3,9 +3,12 @@ export { type ParamScope, resolveScopedParams, resolveScopedValue } from "./acti
 export {
   type ActionChain,
   appMutateActionSchema,
+  appNavigateActionSchema,
   appRefreshActionSchema,
   BADGE_TONES,
   type BadgeTone,
+  type DetailListField,
+  type DrawerProps,
   type FormField,
   type GridColumns,
   type SelectOption,

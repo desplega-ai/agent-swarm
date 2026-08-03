@@ -1,13 +1,16 @@
 /**
- * `/apps/:id` — the swarm-apps runtime (spike).
+ * `/apps/:id` (+ `/apps/:id/p/:page`) — the swarm-apps runtime (spike).
  *
- * 1. `GET /api/apps/:id` → the app definition (models + queries + actions + page).
+ * 1. `GET /api/apps/:id` → the app definition (models + queries + actions +
+ *    pages).
  * 2. Every named query runs via `GET /api/apps/:id/queries/<name>` on the
  *    standard 5s react-query poll, and is mirrored into json-render state at
  *    `/queries/<name>` as `{ data, loading, error }` — which is what the
- *    catalog's `Table` binds to.
- * 3. `definition.page` renders through the shared json-render stack
- *    (`@/lib/json-render`) with three extra actions:
+ *    catalog's `Table` binds to. A query with `{ "$param": … }` filters is run
+ *    with the current route params (and parked, with an explicit error in its
+ *    slot, while any of them is missing from the URL).
+ * 3. The active page of `definition.pages` renders through the shared
+ *    json-render stack (`@/lib/json-render`) with four extra actions:
  *      - `app.mutate`  — row CRUD, then refetch every query on that model
  *                        (and clear the originating form on create).
  *      - `app.refresh` — refetch one named query, or all of them.
@@ -17,6 +20,15 @@
  *                        into state at `/actions/<name>`. Task-backed actions
  *                        keep polling `GET /api/tasks/<taskId>` until the task
  *                        reaches a terminal status.
+ *      - `app.navigate`— push `/apps/:id/p/<page>?<params>` (params REPLACE the
+ *                        current ones; only `?mode` survives).
+ *
+ * Router tier: `/apps/:id` renders `defaultPage`, `/apps/:id/p/<name>` renders
+ * that page — both URLs are valid and neither redirects. The route is mirrored
+ * into state at `/route` as `{ page, params }` (declared params only, coerced
+ * to their declared kind) so bindings, `visible` conditions and the `Drawer`
+ * can read it. The runtime stays keyed by `app.id` alone, so navigating
+ * between pages keeps the store and the polled query data warm.
  *
  * View modes (query string, mirrors the pages/:id `?mode=full` pattern):
  *   - default      → normal SPA chrome (PageHeader + action cluster).
@@ -41,11 +53,19 @@ import {
   Minimize2,
   RefreshCw,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Link,
+  type NavigateFunction,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { api } from "@/api/client";
+import type { AppQueryPlan } from "@/api/hooks/use-apps";
 import { useApp, useAppQueries, useAppQueryRefetch, useAppRefresh } from "@/api/hooks/use-apps";
-import type { AgentTaskStatus, AppDetail, AppRow } from "@/api/types";
+import type { AgentTaskStatus, AppDefinition, AppDetail, AppPageDef, AppRow } from "@/api/types";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
@@ -104,6 +124,147 @@ interface RuntimeCtx {
   refetchQuery: (queryName?: string) => Promise<void>;
   store: StateStore;
   poll: PollRegistry;
+  /** Router push, read live: `ActionProvider` snapshots handlers at mount. */
+  navigate: NavigateFunction;
+  /** Raw `?mode=` value — the only search param `app.navigate` carries over. */
+  modeParam: string | null;
+}
+
+/** The route mirrored into json-render state at `/route`. */
+interface RouteSlot {
+  page: string;
+  params: Record<string, string | number | boolean>;
+}
+
+/**
+ * A named query plus how the runtime should run it right now. `missing` names
+ * the route params a `$param` query is waiting on — non-empty means the query
+ * is parked (`enabled: false`) and its state slot carries that as an error.
+ */
+interface QueryPlan extends AppQueryPlan {
+  missing: string[];
+}
+
+// ─── Pages map ──────────────────────────────────────────────────────────────
+
+/**
+ * The canonical `{ pages, defaultPage }` view of a definition.
+ *
+ * The server normalizes the legacy single `page` into `pages: { main: … }` on
+ * every write and at read time, but the client tolerates the legacy shape too
+ * (an older API, or a definition still sitting in the react-query cache) —
+ * neither shape may crash the runtime.
+ */
+function normalizeAppPages(definition: AppDefinition): {
+  pages: Record<string, AppPageDef>;
+  defaultPage: string;
+} {
+  const pages = definition.pages;
+  if (pages && Object.keys(pages).length > 0) {
+    const names = Object.keys(pages);
+    const declared = definition.defaultPage;
+    return {
+      pages,
+      defaultPage: declared && pages[declared] ? declared : (names[0] as string),
+    };
+  }
+  if (definition.page) {
+    return { pages: { main: definition.page as unknown as AppPageDef }, defaultPage: "main" };
+  }
+  return { pages: {}, defaultPage: "" };
+}
+
+/**
+ * URL strings → the param's declared kind. Coercion is what makes
+ * `visible: { "$state": "/route/params/x", "eq": 2 }` work: the renderer
+ * compares with `===`, and a URL only ever yields strings. A value that does
+ * not parse stays the raw string rather than becoming `NaN` / a silent `false`.
+ */
+function coerceRouteParam(
+  raw: string,
+  kind: "string" | "number" | "boolean" | undefined,
+): string | number | boolean {
+  if (kind === "number") {
+    const parsed = Number(raw);
+    return raw.trim() !== "" && !Number.isNaN(parsed) ? parsed : raw;
+  }
+  if (kind === "boolean") {
+    if (raw === "true" || raw === "1") return true;
+    if (raw === "false" || raw === "0") return false;
+    return raw;
+  }
+  return raw;
+}
+
+/** Declared params of the active page, read out of the query string. */
+function readRouteParams(
+  page: AppPageDef | undefined,
+  searchParams: URLSearchParams,
+): Record<string, string | number | boolean> {
+  // Null prototype: param names come from user JSON, and an inherited key
+  // ("constructor") must read back `undefined`, not a function.
+  const params: Record<string, string | number | boolean> = Object.create(null);
+  for (const [name, def] of Object.entries(page?.params ?? {})) {
+    const raw = searchParams.get(name);
+    if (raw === null || raw === "") continue;
+    params[name] = coerceRouteParam(raw, def?.kind);
+  }
+  return params;
+}
+
+/** `{ "$param": "<name>" }` filter names of one named query, in filter order. */
+function queryParamNames(definition: AppDefinition, queryName: string): string[] {
+  const filter = definition.queries?.[queryName]?.filter ?? {};
+  const names: string[] = [];
+  for (const value of Object.values(filter)) {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "$param" in value &&
+      typeof value.$param === "string"
+    ) {
+      names.push(value.$param);
+    }
+  }
+  return names;
+}
+
+/** `app.navigate` target. Only `?mode` survives; params replace wholesale. */
+function appPagePath(
+  appId: string,
+  page: string,
+  params: Record<string, unknown> | undefined,
+  modeParam: string | null,
+): string {
+  const search = new URLSearchParams();
+  if (modeParam) search.set("mode", modeParam);
+  for (const [name, value] of Object.entries(params ?? {})) {
+    if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+      continue;
+    }
+    if (value === "") continue;
+    search.set(name, String(value));
+  }
+  const query = search.toString();
+  return `/apps/${encodeURIComponent(appId)}/p/${encodeURIComponent(page)}${
+    query ? `?${query}` : ""
+  }`;
+}
+
+/**
+ * The current URL with `?mode` set (or dropped) — so "Open full" / the
+ * chromeless embed link / "Exit full" all stay on the page the viewer is on
+ * instead of bouncing back to `defaultPage`.
+ */
+function urlWithMode(
+  location: { pathname: string; search: string },
+  mode: "full" | "chromeless" | null,
+): string {
+  const search = new URLSearchParams(location.search);
+  if (mode) search.set("mode", mode);
+  else search.delete("mode");
+  const query = search.toString();
+  return `${location.pathname}${query ? `?${query}` : ""}`;
 }
 
 function errorMessage(error: unknown): string | null {
@@ -199,10 +360,59 @@ async function pollActionTask(
   }
 }
 
-function AppRuntime({ app, mode }: { app: AppDetail; mode: ViewMode }) {
+function AppRuntime({
+  app,
+  mode,
+  pageName,
+}: {
+  app: AppDetail;
+  mode: ViewMode;
+  pageName: string | undefined;
+}) {
   const definition = app.definition;
-  const queryNames = useMemo(() => Object.keys(definition.queries ?? {}), [definition.queries]);
-  const results = useAppQueries(app.id, queryNames);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+
+  // ── Route → active page + declared params ────────────────────────────────
+  const { pages, defaultPage } = useMemo(() => normalizeAppPages(definition), [definition]);
+  const activePageName = pageName ?? defaultPage;
+  // Own-property lookup: page names come from the URL, and `pages["constructor"]`
+  // must be "unknown page", not Object.prototype's.
+  const activePage = Object.hasOwn(pages, activePageName) ? pages[activePageName] : undefined;
+  const routeParams = useMemo(
+    () => readRouteParams(activePage, searchParams),
+    [activePage, searchParams],
+  );
+  // Signature, not identity: `searchParams` is a fresh object every location
+  // change, so the mirror below would otherwise churn the store on every render.
+  const routeSignature = JSON.stringify({ page: activePageName, params: routeParams });
+
+  // The json-render spec of the active page — `title` / `params` are runtime
+  // metadata, not part of it. Memoized so the `Renderer` keeps hitting its own
+  // spec-identity memo across the 5s poll re-renders.
+  const activeSpec = useMemo(
+    () => (activePage ? { root: activePage.root, elements: activePage.elements } : null),
+    [activePage],
+  );
+
+  // Named queries, each with the route params its `$param` filters need. A
+  // query missing one is parked (not executed) and gets an explicit error slot.
+  const queryPlans = useMemo<QueryPlan[]>(() => {
+    return Object.keys(definition.queries ?? {}).map((name) => {
+      const paramNames = queryParamNames(definition, name);
+      if (paramNames.length === 0) return { name, missing: [] };
+      const missing = paramNames.filter((param) => routeParams[param] === undefined);
+      if (missing.length > 0) return { name, enabled: false, missing };
+      const params: Record<string, string | number | boolean> = {};
+      for (const param of paramNames) {
+        params[param] = routeParams[param] as string | number | boolean;
+      }
+      return { name, params, missing: [] };
+    });
+  }, [definition, routeParams]);
+
+  const results = useAppQueries(app.id, queryPlans);
   const { refetchModel, refetchQuery } = useAppQueryRefetch(app.id, definition);
 
   const [actionError, setActionError] = useState<string | null>(null);
@@ -210,9 +420,15 @@ function AppRuntime({ app, mode }: { app: AppDetail; mode: ViewMode }) {
 
   // One json-render store per mounted app. Owned here (rather than letting
   // StateProvider create it) so the polling effect and the action handlers can
-  // write into it from outside the provider subtree.
+  // write into it from outside the provider subtree. Seeded with the initial
+  // `/route` so a deep-linked page renders its route-driven bits (a Drawer, a
+  // `visible` condition) on the FIRST paint rather than a frame later.
   const storeRef = useRef<StateStore | null>(null);
-  if (!storeRef.current) storeRef.current = createStateStore({});
+  if (!storeRef.current) {
+    storeRef.current = createStateStore({
+      route: { page: activePageName, params: routeParams } satisfies RouteSlot,
+    });
+  }
   const store = storeRef.current;
 
   // Timers owned by in-flight task watchers, cancelled on unmount.
@@ -230,28 +446,76 @@ function AppRuntime({ app, mode }: { app: AppDetail; mode: ViewMode }) {
   // Mutable context for the action handlers — `ActionProvider` snapshots its
   // `handlers` prop on mount, so the handlers themselves must be identity
   // stable and read everything fresh through this ref.
+  const modeParam = searchParams.get("mode");
   const ctxRef = useRef<RuntimeCtx>({
     app,
     refetchModel,
     refetchQuery,
     store,
     poll: pollRef.current,
+    navigate,
+    modeParam,
   });
-  ctxRef.current = { app, refetchModel, refetchQuery, store, poll: pollRef.current };
+  ctxRef.current = {
+    app,
+    refetchModel,
+    refetchQuery,
+    store,
+    poll: pollRef.current,
+    navigate,
+    modeParam,
+  };
+
+  // Mirror the route into `/route`. Same shape as the query mirror below: a
+  // signature guard keeps an unchanged URL from churning the store, and the
+  // ref carries the live slot so the effect needs no unstable deps. Seeded
+  // with the mount signature — the store already holds that value.
+  const routeSlotRef = useRef<RouteSlot>({ page: activePageName, params: routeParams });
+  routeSlotRef.current = { page: activePageName, params: routeParams };
+  const routeSyncedRef = useRef(routeSignature);
+  // Layout effect, not passive: a client-side navigation must land in the
+  // store before paint, or the first frame of the new page renders against the
+  // PREVIOUS page's `/route` (store seeding only covers the initial mount).
+  useLayoutEffect(() => {
+    if (routeSyncedRef.current === routeSignature) return;
+    routeSyncedRef.current = routeSignature;
+    store.set("/route", routeSlotRef.current);
+  }, [routeSignature, store]);
+
+  // Page switches start at the top — no `ScrollRestoration` is mounted in this
+  // SPA, and the runtime's own wrapper is the scroll container.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrolledPageRef = useRef(activePageName);
+  useEffect(() => {
+    if (scrolledPageRef.current === activePageName) return;
+    scrolledPageRef.current = activePageName;
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [activePageName]);
 
   // Mirror query results into `/queries/<name>`. Guarded by a per-name
   // snapshot so a poll that returns identical data (react-query keeps the same
   // object reference) does not churn the store.
   const syncedRef = useRef<Record<string, QuerySlot>>({});
   useEffect(() => {
-    queryNames.forEach((name, index) => {
+    queryPlans.forEach((plan, index) => {
       const result = results[index];
-      const next: QuerySlot = {
-        data: result?.data?.rows ?? EMPTY_ROWS,
-        loading: result?.isLoading ?? true,
-        error: errorMessage(result?.error),
-      };
-      const prev = syncedRef.current[name];
+      // A `$param` query whose params aren't all in the route never ran —
+      // say so in the slot instead of leaving it on a permanent spinner. The
+      // previous rows are RETAINED (not blanked) so content driven by the
+      // param — a closing Drawer mid slide-out — doesn't flash empty; a fresh
+      // deep link has no previous rows and still shows the empty state.
+      const next: QuerySlot = plan.missing.length
+        ? {
+            data: syncedRef.current[plan.name]?.data ?? EMPTY_ROWS,
+            loading: false,
+            error: `missing route param(s): ${plan.missing.join(", ")}`,
+          }
+        : {
+            data: result?.data?.rows ?? EMPTY_ROWS,
+            loading: result?.isLoading ?? true,
+            error: errorMessage(result?.error),
+          };
+      const prev = syncedRef.current[plan.name];
       if (
         prev &&
         prev.data === next.data &&
@@ -260,10 +524,10 @@ function AppRuntime({ app, mode }: { app: AppDetail; mode: ViewMode }) {
       ) {
         return;
       }
-      syncedRef.current[name] = next;
-      store.set(`/queries/${name}`, next);
+      syncedRef.current[plan.name] = next;
+      store.set(`/queries/${plan.name}`, next);
     });
-  }, [queryNames, results, store]);
+  }, [queryPlans, results, store]);
 
   const compiled = useMemo(() => {
     const swarmActions = createSwarmActionHandlers({
@@ -274,9 +538,20 @@ function AppRuntime({ app, mode }: { app: AppDetail; mode: ViewMode }) {
       components: swarmComponents,
       actions: {
         ...swarmActions,
-        // Contract-freeze stub — the spike 4 UI slice replaces this with the
-        // real router navigation (push `/apps/:id/p/<page>?<params>` via ctxRef).
-        "app.navigate": async () => {},
+        // Client-side navigation to another page of this app. Reads the
+        // router through `ctxRef` — a closure over `useNavigate()` would be
+        // frozen at mount, since `ActionProvider` snapshots its handlers once.
+        // Params replace the current ones wholesale; `?mode` is carried over.
+        "app.navigate": async (params) => {
+          setActionError(null);
+          const page = typeof params?.page === "string" ? params.page.trim() : "";
+          if (!page) {
+            setActionError("app.navigate requires a `page`");
+            return;
+          }
+          const ctx = ctxRef.current;
+          ctx.navigate(appPagePath(ctx.app.id, page, params?.params, ctx.modeParam));
+        },
         "app.mutate": async (params) => {
           setActionError(null);
           if (!params) return;
@@ -375,14 +650,41 @@ function AppRuntime({ app, mode }: { app: AppDetail; mode: ViewMode }) {
   }, []);
 
   let renderedSpec: React.ReactNode;
-  try {
-    renderedSpec = <Renderer spec={definition.page as never} registry={compiled.registry} />;
-  } catch (e) {
+  if (!activePage) {
+    // Unknown `/p/<page>` (or a definition with no pages at all). Component-
+    // side by necessity: this route table has no loaders.
     renderedSpec = (
-      <AlertCallout tone="error" icon={AlertCircle} title="Failed to render app page">
-        <p>{e instanceof Error ? e.message : String(e)}</p>
+      <AlertCallout
+        tone="error"
+        icon={AlertCircle}
+        title={defaultPage ? `Unknown page "${activePageName}"` : "This app has no pages"}
+      >
+        {defaultPage ? (
+          <p>
+            <Link
+              className="underline"
+              // Keep `?mode` — recovering inside an embed/full-screen surface
+              // must not bounce the viewer out of it.
+              to={`/apps/${app.id}${modeParam ? `?${new URLSearchParams({ mode: modeParam })}` : ""}`}
+            >
+              Go to the default page ({defaultPage})
+            </Link>
+          </p>
+        ) : (
+          <p>Its definition declares neither `pages` nor a legacy `page`.</p>
+        )}
       </AlertCallout>
     );
+  } else {
+    try {
+      renderedSpec = <Renderer spec={activeSpec as never} registry={compiled.registry} />;
+    } catch (e) {
+      renderedSpec = (
+        <AlertCallout tone="error" icon={AlertCircle} title="Failed to render app page">
+          <p>{e instanceof Error ? e.message : String(e)}</p>
+        </AlertCallout>
+      );
+    }
   }
 
   const surface = (
@@ -406,6 +708,7 @@ function AppRuntime({ app, mode }: { app: AppDetail; mode: ViewMode }) {
   if (mode === "chromeless") {
     return (
       <div
+        ref={scrollRef}
         className="fixed inset-0 z-50 flex flex-col gap-4 overflow-y-auto bg-background p-4"
         data-testid="app-runtime"
       >
@@ -424,19 +727,26 @@ function AppRuntime({ app, mode }: { app: AppDetail; mode: ViewMode }) {
             <span className="truncate text-sm font-medium">{app.name}</span>
           </div>
           <Button asChild variant="outline" size="sm">
-            <Link to={`/apps/${app.id}`}>
+            {/* Exits full mode on the CURRENT page, not back to defaultPage. */}
+            <Link to={urlWithMode(location, null)}>
               <Minimize2 className="size-3.5" />
               Exit full
             </Link>
           </Button>
         </div>
-        <div className="flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto p-4">{surface}</div>
+        <div ref={scrollRef} className="flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto p-4">
+          {surface}
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-y-auto gap-4" data-testid="app-runtime">
+    <div
+      ref={scrollRef}
+      className="flex flex-col flex-1 min-h-0 overflow-y-auto gap-4"
+      data-testid="app-runtime"
+    >
       <PageHeader
         title={app.name}
         description={app.description ?? undefined}
@@ -462,6 +772,7 @@ function AppRuntime({ app, mode }: { app: AppDetail; mode: ViewMode }) {
  */
 function AppHeaderActions({ app }: { app: AppDetail }) {
   const refresh = useAppRefresh(app.id);
+  const location = useLocation();
   const { copied, copy } = useCopyToClipboard();
   const [refreshing, setRefreshing] = useState(false);
 
@@ -474,7 +785,10 @@ function AppHeaderActions({ app }: { app: AppDetail }) {
     }
   }, [refresh]);
 
-  const chromelessUrl = `${window.location.origin}/apps/${app.id}?mode=chromeless`;
+  // Both links keep the viewer on the page (and route params) they are on —
+  // a detail view is exactly what someone wants to embed or maximize.
+  const fullUrl = urlWithMode(location, "full");
+  const chromelessUrl = `${window.location.origin}${urlWithMode(location, "chromeless")}`;
 
   return (
     <div className="flex items-center gap-2">
@@ -482,7 +796,7 @@ function AppHeaderActions({ app }: { app: AppDetail }) {
         All apps
       </Link>
       <Button asChild variant="outline" size="sm" title="Maximize within the dashboard">
-        <Link to={`/apps/${app.id}?mode=full`}>
+        <Link to={fullUrl}>
           <Maximize2 className="size-3.5" />
           Open full
         </Link>
@@ -515,7 +829,7 @@ function AppHeaderActions({ app }: { app: AppDetail }) {
 }
 
 export default function AppDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id, page } = useParams<{ id: string; page?: string }>();
   const [searchParams] = useSearchParams();
   const mode = viewModeFromParam(searchParams.get("mode"));
   const { data, isLoading, error } = useApp(id);
@@ -533,6 +847,8 @@ export default function AppDetailPage() {
     );
   }
 
-  // Keyed so switching apps remounts the runtime with a fresh json-render store.
-  return <AppRuntime key={data.app.id} app={data.app} mode={mode} />;
+  // Keyed by app id ONLY: switching apps remounts the runtime with a fresh
+  // json-render store, while navigating between pages of the SAME app keeps
+  // the store and the polled query data warm.
+  return <AppRuntime key={data.app.id} app={data.app} mode={mode} pageName={page} />;
 }

@@ -32,15 +32,34 @@ export function useApp(id: string | undefined) {
 }
 
 /**
- * Runs every named query of an app definition in parallel on the standard 5s
- * poll. Returns the react-query results in the same order as `queryNames`.
+ * One named query as the runtime wants it run: the query name plus, for a
+ * query with `{ "$param": … }` filters, the route params to resolve them with.
+ * `enabled: false` parks a query whose params aren't all in the route yet — the
+ * runtime fills that slot with an explicit "missing route param(s)" error.
  */
-export function useAppQueries(appId: string, queryNames: string[]) {
+export interface AppQueryPlan {
+  name: string;
+  params?: Record<string, string | number | boolean>;
+  enabled?: boolean;
+}
+
+/**
+ * Runs every named query of an app definition in parallel on the standard 5s
+ * poll. Returns the react-query results in the same order as `plans`.
+ *
+ * Parameterized queries carry their params in the query key (so two routes
+ * cache separately) — `appQueryKey` stays the shared PREFIX, which is what the
+ * `refetchQuery` / `refetchModel` invalidations match on.
+ */
+export function useAppQueries(appId: string, plans: AppQueryPlan[]) {
   return useQueries({
-    queries: queryNames.map((name) => ({
-      queryKey: appQueryKey(appId, name),
-      queryFn: () => api.runAppQuery(appId, name),
+    queries: plans.map((plan) => ({
+      queryKey: plan.params
+        ? ([...appQueryKey(appId, plan.name), plan.params] as const)
+        : appQueryKey(appId, plan.name),
+      queryFn: () => api.runAppQuery(appId, plan.name, plan.params),
       refetchInterval: 5000,
+      enabled: plan.enabled ?? true,
     })),
   });
 }

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 // InfoRow — a key-above-value pair used in detail pages, modals, and config
@@ -35,11 +35,14 @@ export function InfoRow({ label, className, children }: InfoRowProps) {
 // DefinitionList — vertical-spaced container for InfoRows. Saves the
 // `space-y-3` (or whatever local spacing) wrapper at the call site.
 
-export interface DefinitionListProps {
-  className?: string;
+export interface DefinitionListProps extends Omit<ComponentProps<"div">, "children"> {
   children: ReactNode;
 }
 
-export function DefinitionList({ className, children }: DefinitionListProps) {
-  return <div className={cn("space-y-3", className)}>{children}</div>;
+export function DefinitionList({ className, children, ...rest }: DefinitionListProps) {
+  return (
+    <div className={cn("space-y-3", className)} {...rest}>
+      {children}
+    </div>
+  );
 }

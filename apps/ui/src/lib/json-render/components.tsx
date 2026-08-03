@@ -7,7 +7,9 @@
  * swarm-apps additions and are built from existing dashboard primitives
  * (`DataGrid`, `Badge`, `Input`, `Textarea`, `Select`, `Switch`, `SettingsRow`).
  * Stack / Grid / Split / Divider / Tabs / SearchInput / Select / Markdown are
- * the layout + interactivity tier (spike 2.5).
+ * the layout + interactivity tier (spike 2.5). Drawer / DetailList are the
+ * router tier (spike 4): both read the runtime's `/route` state root, so they
+ * are inert outside `/apps/:id` (the DB-backed pages renderer never writes it).
  *
  * ── Positional children ────────────────────────────────────────────────────
  * `Split` and `Tabs` address their children by index. Verified against
@@ -30,6 +32,7 @@ import type { ColDef, ICellRendererParams } from "ag-grid-community";
 import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle, Info, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { Children, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Streamdown } from "streamdown";
 import { DataGrid } from "@/components/shared/data-grid";
 import { SearchBox } from "@/components/shared/search-box";
@@ -53,6 +56,7 @@ import {
   CardTitle,
   Card as UiCard,
 } from "@/components/ui/card";
+import { DefinitionList, InfoRow } from "@/components/ui/info-row";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -64,6 +68,13 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { SettingsRow } from "@/components/ui/settings-row";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -73,6 +84,7 @@ import { resolveScopedParams } from "./action-params";
 import type {
   ActionChain,
   BadgeTone,
+  DetailListField,
   FormField,
   GridColumns,
   SelectOption,
@@ -128,6 +140,32 @@ function StatusPill({ text, tone }: { text: string; tone: BadgeTone }) {
       {text}
     </Badge>
   );
+}
+
+// ─── Shared value formatting (Table cells + DetailList fields) ──────────────
+
+/** Every rendering kind a `Table` column or a `DetailList` field can declare. */
+type ValueKind = NonNullable<TableColumn["kind"] | DetailListField["kind"]>;
+
+/**
+ * One value → its display text, by declared kind. Shared by `Table`'s cell
+ * renderer and `DetailList` so the two surfaces never drift on dates
+ * (relative time) or booleans (yes / no).
+ */
+function formatValue(kind: ValueKind | undefined, value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (kind === "date") {
+    const text = String(value);
+    return Number.isNaN(Date.parse(text)) ? text : formatSmartTime(text);
+  }
+  if (kind === "boolean") return value ? "yes" : "no";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+/** `kind: "badge"` tone lookup — an unmapped value is neutral, never missing. */
+function badgeToneFor(tones: Record<string, BadgeTone> | undefined, value: string): BadgeTone {
+  return tones?.[value] ?? "neutral";
 }
 
 // ─── Layout primitives (Stack / Grid / Split / Divider) ─────────────────────
@@ -565,17 +603,6 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
 type TableProps = InferComponentProps<typeof swarmCatalog, "Table">;
 type FormProps = InferComponentProps<typeof swarmCatalog, "Form">;
 
-function formatCell(column: TableColumn, value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (column.kind === "date") {
-    const text = String(value);
-    const parsed = Date.parse(text);
-    return Number.isNaN(parsed) ? text : formatSmartTime(text);
-  }
-  if (column.kind === "boolean") return value ? "yes" : "no";
-  return String(value);
-}
-
 /**
  * Keeps an object identity stable while its JSON signature is unchanged.
  * AG Grid re-creates columns whenever `columnDefs` changes identity, and the
@@ -808,14 +835,14 @@ function TableComponent({ props }: { props: TableProps }) {
     // inference and let the value formatter own the rendering.
     cellDataType: false,
     valueFormatter:
-      column.kind === "badge" ? undefined : (params) => formatCell(column, params.value),
+      column.kind === "badge" ? undefined : (params) => formatValue(column.kind, params.value),
     cellRenderer:
       column.kind === "badge"
         ? (params: ICellRendererParams<Record<string, unknown>>) => {
             const raw =
               params.value === null || params.value === undefined ? "" : String(params.value);
             if (!raw) return null;
-            return <StatusPill text={raw} tone={column.tones?.[raw] ?? "neutral"} />;
+            return <StatusPill text={raw} tone={badgeToneFor(column.tones, raw)} />;
           }
         : // AG Grid drops a plain value straight into the cell, which is a flex
           // row — the text becomes an anonymous flex item, and `text-overflow`
@@ -823,7 +850,7 @@ function TableComponent({ props }: { props: TableProps }) {
           // the value in a real element gives the ellipsis something to bite on
           // (and a native tooltip carrying the full text).
           (params: ICellRendererParams<Record<string, unknown>>) => {
-            const text = params.valueFormatted ?? formatCell(column, params.value);
+            const text = params.valueFormatted ?? formatValue(column.kind, params.value);
             if (!text) return null;
             return (
               <span className="block w-full truncate" title={text}>
@@ -1069,13 +1096,150 @@ function FormComponent({ props }: { props: FormProps }) {
   );
 }
 
+// ─── Drawer ─────────────────────────────────────────────────────────────────
+
+type DrawerComponentProps = InferComponentProps<typeof swarmCatalog, "Drawer">;
+type DetailListComponentProps = InferComponentProps<typeof swarmCatalog, "DetailList">;
+
+/** Panel width per `size`, on top of `SheetContent`'s `w-3/4` base. */
+const drawerSizeClass: Record<"sm" | "md" | "lg" | "xl", string> = {
+  sm: "sm:max-w-sm",
+  md: "sm:max-w-md",
+  lg: "sm:max-w-2xl",
+  xl: "sm:max-w-4xl",
+};
+
+/**
+ * Route-driven side panel. The URL is the single source of truth: the drawer
+ * is open exactly while its declared route param is set (mirrored by the app
+ * runtime into `/route/params/<param>`), so a deep link renders it open and a
+ * refresh keeps it open.
+ *
+ * Closing REPLACES the history entry — Back never re-opens a dismissed drawer,
+ * and Back from an open drawer returns to whatever pushed it (the row click).
+ *
+ * Children mount only while open, deliberately unlike `Tabs`' warm panels: a
+ * drawer is transient, and a `Table` inside it is safe to re-mount because
+ * every catalog Table sizes with `columnSizing="flex"`.
+ */
+function DrawerComponent({
+  props,
+  children,
+}: {
+  props: DrawerComponentProps;
+  children: ReactNode;
+}) {
+  const { state } = useStateStore();
+  const [, setSearchParams] = useSearchParams();
+
+  const value = getByPath(state, `/route/params/${props.param}`);
+  const open = value !== undefined && value !== null && value !== "";
+
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={(next) => {
+        if (next) return;
+        setSearchParams(
+          (prev) => {
+            const params = new URLSearchParams(prev);
+            params.delete(props.param);
+            return params;
+          },
+          { replace: true },
+        );
+      }}
+    >
+      <SheetContent
+        side={props.side ?? "right"}
+        // Same shell as the dashboard's own detail sheets: a fixed header
+        // (`pr-12` clears Radix's close button) over a scrolling body.
+        className={cn(
+          "flex w-full flex-col gap-0 overflow-hidden p-0",
+          drawerSizeClass[props.size ?? "md"],
+        )}
+        data-testid="json-render-drawer"
+      >
+        <SheetHeader className="shrink-0 border-b border-border py-3 pl-4 pr-12">
+          <SheetTitle className="min-w-0 truncate text-sm font-medium">
+            {props.title ?? "Details"}
+          </SheetTitle>
+          {props.description ? (
+            <SheetDescription className="text-xs">{props.description}</SheetDescription>
+          ) : null}
+        </SheetHeader>
+        <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4">{children}</div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// ─── DetailList ─────────────────────────────────────────────────────────────
+
+/** One field value, rendered by kind. `code` gets a monospace block. */
+function DetailFieldValue({ field, value }: { field: DetailListField; value: unknown }) {
+  if (field.kind === "badge") {
+    const raw = value === null || value === undefined ? "" : String(value);
+    if (!raw) return <span className="text-muted-foreground">—</span>;
+    return <StatusPill text={raw} tone={badgeToneFor(field.tones, raw)} />;
+  }
+  if (field.kind === "code") {
+    const text =
+      typeof value === "string"
+        ? value
+        : value === undefined || value === null
+          ? ""
+          : JSON.stringify(value, null, 2);
+    if (!text) return <span className="text-muted-foreground">—</span>;
+    return (
+      <pre className="max-h-64 overflow-auto rounded-md border border-border bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap break-words">
+        {text}
+      </pre>
+    );
+  }
+  const text = formatValue(field.kind, value);
+  if (!text) return <span className="text-muted-foreground">—</span>;
+  return <span className="break-words">{text}</span>;
+}
+
+/**
+ * Read-only label/value view of ONE record — the detail-page counterpart to
+ * `Table`, built on the dashboard's `DefinitionList` / `InfoRow` primitives and
+ * sharing Table's kind formatting (`formatValue` / badge tones).
+ */
+function DetailListComponent({ props }: { props: DetailListComponentProps }) {
+  const fields = (props.fields ?? []) as DetailListField[];
+  const data = props.data as Record<string, unknown> | null | undefined;
+
+  // An array means the binding forgot the trailing `/0` (a whole query result
+  // instead of one record) — treat it as "no record", not as a field source.
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return (
+      <p className="text-sm text-muted-foreground" data-testid="json-render-detail-list">
+        {props.emptyMessage ?? "No record to show yet"}
+      </p>
+    );
+  }
+
+  return (
+    <DefinitionList
+      className={cn(props.columns === 2 && "grid grid-cols-1 gap-3 space-y-0 sm:grid-cols-2")}
+      data-testid="json-render-detail-list"
+    >
+      {fields.map((field) => (
+        <InfoRow key={field.key} label={field.label ?? field.key}>
+          <DetailFieldValue field={field} value={data[field.key]} />
+        </InfoRow>
+      ))}
+    </DefinitionList>
+  );
+}
+
 // ─── Component registry ─────────────────────────────────────────────────────
 
 export const swarmComponents: Components<typeof swarmCatalog> = {
-  // Contract-freeze stubs — the spike 4 UI slice replaces these with the real
-  // Sheet-backed Drawer and InfoRow/DefinitionList-backed DetailList.
-  Drawer: () => null,
-  DetailList: () => null,
+  Drawer: ({ props, children }) => <DrawerComponent props={props}>{children}</DrawerComponent>,
+  DetailList: ({ props }) => <DetailListComponent props={props} />,
   Stack: ({ props, children }) => <StackComponent props={props}>{children}</StackComponent>,
   Grid: ({ props, children }) => <GridComponent props={props}>{children}</GridComponent>,
   Split: ({ props, children }) => <SplitComponent props={props}>{children}</SplitComponent>,

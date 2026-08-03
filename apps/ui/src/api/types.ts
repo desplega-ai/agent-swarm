@@ -2492,9 +2492,15 @@ export interface AppModelDef {
   columns: Record<string, AppColumnDef>;
 }
 
+/**
+ * A named query filter value: a literal, or `{ "$param": "<name>" }` — a route
+ * param resolved server-side at query time (see `AppPageDef.params`).
+ */
+export type AppQueryFilterValue = string | number | boolean | { $param: string };
+
 export interface AppQueryDef {
   model: string;
-  filter?: Record<string, string | number | boolean>;
+  filter?: Record<string, AppQueryFilterValue>;
   sort?: { column: string; dir: "asc" | "desc" };
   limit?: number;
 }
@@ -2507,12 +2513,40 @@ export type AppActionDef =
   | { kind: "script"; scriptId: string; args?: Record<string, unknown> }
   | { kind: "task"; prompt: string; agentId?: string };
 
+/** Route param declared by a page; URL strings are coerced to `kind`. */
+export interface AppPageParamDef {
+  kind?: "string" | "number" | "boolean";
+  required?: boolean;
+}
+
+/**
+ * One page of an app — a json-render spec (`root` + `elements`) plus the route
+ * params it reads. Rendered at `/apps/:id/p/<name>`.
+ */
+export interface AppPageDef {
+  root: string;
+  elements: Record<string, unknown>;
+  /** Display title (breadcrumb / header); defaults to the page name. */
+  title?: string;
+  params?: Record<string, AppPageParamDef>;
+}
+
 export interface AppDefinition {
   models: Record<string, AppModelDef>;
   queries?: Record<string, AppQueryDef>;
   actions?: Record<string, AppActionDef>;
-  /** json-render spec — validated against the shared catalog server-side. */
-  page: Record<string, unknown>;
+  /**
+   * The canonical multi-page form (server-normalized on every write): named
+   * json-render specs plus the page a bare `/apps/:id` renders.
+   */
+  pages?: Record<string, AppPageDef>;
+  defaultPage?: string;
+  /**
+   * Legacy single-page form. The server normalizes it into
+   * `pages: { main: … }` at read time, but the client still tolerates it so a
+   * definition served by an older API (or held in a stale cache) renders.
+   */
+  page?: Record<string, unknown>;
 }
 
 /**

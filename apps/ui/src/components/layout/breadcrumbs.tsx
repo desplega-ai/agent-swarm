@@ -177,20 +177,34 @@ export function Breadcrumbs() {
                                   : undefined
     : undefined;
 
-  const crumbs = segments.map((segment, index) => {
-    const defaultPath = `/${segments.slice(0, index + 1).join("/")}`;
-    const path = routeRedirects[segment] ?? defaultPath;
-    let label = formatSegment(segment, segments[index - 1]);
-    // Pretty-print the detail-id leaf with the resolved entity name. Only the
-    // id segment at index 1 is replaced — other path segments keep their
-    // routeLabels behavior.
-    if (index === 1 && segment === detailId && contextualName) {
-      label = capContextualName(contextualName);
-    }
-    const isLast = index === segments.length - 1;
+  // `/apps/:id/p/<page>` — one app page. The literal `p` segment is not a
+  // route, so it is dropped from the trail and the page segment renders the
+  // page's declared title (falling back to its name).
+  const appPageName =
+    parent === "apps" && segments[2] === "p" && segments[3] ? segments[3] : undefined;
+  const appPageTitle = appPageName
+    ? (appMeta?.app.definition.pages?.[appPageName]?.title ?? appPageName)
+    : undefined;
 
-    return { path, label, isLast };
-  });
+  const crumbs = segments
+    .map((segment, index) => {
+      const defaultPath = `/${segments.slice(0, index + 1).join("/")}`;
+      const path = routeRedirects[segment] ?? defaultPath;
+      let label = formatSegment(segment, segments[index - 1]);
+      // Pretty-print the detail-id leaf with the resolved entity name. Only the
+      // id segment at index 1 is replaced — other path segments keep their
+      // routeLabels behavior.
+      if (index === 1 && segment === detailId && contextualName) {
+        label = capContextualName(contextualName);
+      }
+      if (index === 3 && appPageTitle) {
+        label = capContextualName(appPageTitle);
+      }
+      const isLast = index === segments.length - 1;
+
+      return { path, label, isLast };
+    })
+    .filter((_, index) => !(appPageName && index === 2));
 
   const leaf = crumbs[crumbs.length - 1];
 

@@ -161,6 +161,9 @@ export const router = createBrowserRouter([
       { path: "pages/:id", element: <PageDetailPage /> },
       { path: "apps", element: <AppsListingPage /> },
       { path: "apps/:id", element: <AppDetailPage /> },
+      // A named page of a multi-page app. Same component as `apps/:id` (which
+      // renders the app's `defaultPage`) — both URLs stay valid, no redirect.
+      { path: "apps/:id/p/:page", element: <AppDetailPage /> },
       ...redirectRoutes,
       { path: "*", element: <NotFoundPage /> },
     ],
