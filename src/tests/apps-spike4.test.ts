@@ -522,6 +522,39 @@ describe("Spike 4 parameterized named queries", () => {
     ]);
   });
 
+  test("filters on system columns — a $param on id selects one row", async () => {
+    const appId = await createApp(
+      {
+        models: { record: { columns: { slug: { kind: "string" } } } },
+        queries: {
+          detail: { model: "record", filter: { id: { $param: "recordId" } }, limit: 1 },
+          fresh: { model: "record", filter: { stale: false } },
+        },
+        pages: { main: page() },
+        defaultPage: "main",
+      },
+      "System column filter",
+    );
+    const first = await request<{ row: { id: string } }>(`/api/apps/${appId}/models/record/rows`, {
+      method: "POST",
+      body: JSON.stringify({ values: { slug: "one" } }),
+    });
+    expect(first.status).toBe(201);
+    const second = await request(`/api/apps/${appId}/models/record/rows`, {
+      method: "POST",
+      body: JSON.stringify({ values: { slug: "two" } }),
+    });
+    expect(second.status).toBe(201);
+
+    const result = await request<{ rows: Array<Record<string, unknown>> }>(
+      `/api/apps/${appId}/queries/detail?param.recordId=${first.body.row.id}`,
+    );
+    expect(result.status).toBe(200);
+    expect(result.body.rows).toEqual([
+      expect.objectContaining({ id: first.body.row.id, slug: "one" }),
+    ]);
+  });
+
   test("returns a structured 400 listing every missing query param", async () => {
     const appId = await createParameterizedApp();
     const result = await request<{

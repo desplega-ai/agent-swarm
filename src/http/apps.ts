@@ -9,6 +9,7 @@ import {
   isIso8601Date,
   type ModelDef,
   parseAppDefinition,
+  SYSTEM_COLUMN_KINDS,
 } from "../apps/definition";
 import {
   type AppRow,
@@ -447,7 +448,10 @@ function resolveQueryFilters(
   const resolved = filters.map(([columnName, value]): [string, unknown] => {
     if (!isQueryParamRef(value)) return [columnName, value];
     try {
-      return [columnName, coerceQueryParamValue(params[value.$param]!, model.columns[columnName]!)];
+      return [
+        columnName,
+        coerceQueryParamValue(params[value.$param]!, filterColumn(model, columnName)),
+      ];
     } catch (error) {
       issues.push({
         path: `param.${value.$param}`,
@@ -458,6 +462,16 @@ function resolveQueryFilters(
   });
   if (issues.length > 0) throw new AppQueryParamsError(issues);
   return resolved;
+}
+
+/**
+ * The column definition a query filter targets: a declared model column, or a
+ * synthetic def for the reserved system fields (`id`, `createdAt`, …) every
+ * row carries — parse-time validation admits both.
+ */
+function filterColumn(model: ModelDef, columnName: string): ModelDef["columns"][string] {
+  if (Object.hasOwn(model.columns, columnName)) return model.columns[columnName]!;
+  return { kind: SYSTEM_COLUMN_KINDS[columnName] ?? "string" };
 }
 
 function appQueryParamsFromRequest(queryParams: URLSearchParams): AppQueryParams {

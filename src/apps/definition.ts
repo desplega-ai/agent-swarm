@@ -120,6 +120,20 @@ const AppQueryParamRefSchema = z
   })
   .strict();
 
+/**
+ * Column kinds of the reserved system fields every stored row carries — query
+ * filters may target these alongside declared model columns (a detail query's
+ * only universal row identity is `id`).
+ */
+export const SYSTEM_COLUMN_KINDS: Record<string, "string" | "date" | "boolean"> = {
+  id: "string",
+  createdAt: "date",
+  updatedAt: "date",
+  source: "string",
+  syncedAt: "date",
+  stale: "boolean",
+};
+
 const AppQueryDefSchema = z.object({
   model: AppNameSchema,
   filter: z
@@ -255,7 +269,12 @@ export const AppDefinitionSchema = z
       }
       const model = definition.models[query.model]!;
       for (const [column, value] of Object.entries(query.filter ?? {})) {
-        if (!Object.hasOwn(model.columns, column)) {
+        const columnDefinition = Object.hasOwn(model.columns, column)
+          ? model.columns[column]!
+          : Object.hasOwn(SYSTEM_COLUMN_KINDS, column)
+            ? { kind: SYSTEM_COLUMN_KINDS[column]! }
+            : undefined;
+        if (!columnDefinition) {
           ctx.addIssue({
             code: "custom",
             path: ["queries", queryName, "filter", column],
@@ -263,7 +282,6 @@ export const AppDefinitionSchema = z
           });
           continue;
         }
-        const columnDefinition = model.columns[column]!;
         if (typeof value === "object") continue;
         const valid =
           (columnDefinition.kind === "string" && typeof value === "string") ||

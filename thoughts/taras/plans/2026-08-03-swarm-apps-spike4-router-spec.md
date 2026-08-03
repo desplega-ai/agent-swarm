@@ -178,6 +178,17 @@ Update the patch-semantics atomic list (`pages.<name>.elements.<id>`,
 two doc gaps recon found: named-query default limit 200; date filters compare raw ISO
 strings.
 
+## AMENDMENT (2026-08-03, during E2E): filters may target system columns
+
+E2E step 2 exposed a gap the review missed: named-query filters rejected the
+reserved system columns, but a detail query's only UNIVERSAL row identity is
+`id` (CRUD apps declare no join-key column, and the finale agent will reach for
+it). Amended: filter values — literal and `$param` — may target `id`,
+`createdAt`, `updatedAt`, `source`, `syncedAt`, `stale`, with kinds
+string/date/date/string/date/boolean (`SYSTEM_COLUMN_KINDS` in definition.ts;
+coercion + validation reuse the same kind branches). Sort stays as it was
+(createdAt/updatedAt/syncedAt + model columns). Skill updated in place.
+
 ## Out of scope (unchanged from the task)
 
 repeat/$item lists; app versioning; per-app ACL; server-side query overrides beyond
