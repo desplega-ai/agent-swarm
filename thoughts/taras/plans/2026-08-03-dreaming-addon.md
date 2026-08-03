@@ -418,23 +418,38 @@ export interface AddonWorkflowDef {
                                    // run through validateDefinition() in apply()
 }
 
-/** A schedule shipped by an add-on. References its workflow by NAME — never a generated id. */
-export interface AddonScheduleDef {
+interface AddonScheduleBase {
   name: string;                    // scheduled_tasks.name (UNIQUE) — the seed key
   description: string;
   cronExpression: string;          // validated with the same cron check create-schedule uses
   timezone: string;                // 'UTC' for dream
   enabled: boolean;                // INSIDE the content hash (disable must survive re-seed)
-  workflowName: string;            // resolved → workflowId at apply(); hashed as the name
-  // v1 is workflow-target only (targetType='workflow' implied); no modelTier/model — agent defaults
+  // no modelTier/model — agent defaults
 }
+
+/** A schedule shipped by an add-on: workflow-target (references its workflow by NAME — never a
+ *  generated id) or task-target (classic taskTemplate schedule). Mirrors the scheduled_tasks
+ *  CHECK: workflowId required for 'workflow', taskTemplate required for 'agent-task'. */
+export type AddonScheduleDef =
+  | (AddonScheduleBase & {
+      targetType: "workflow";
+      workflowName: string;        // resolved → workflowId at apply(); hashed as the name
+    })
+  | (AddonScheduleBase & {
+      targetType: "agent-task";
+      taskTemplate: string;        // hashed; prompt text goes through the template registry rules
+      taskType?: string;
+      targetAgentId?: string;      // omit ⇒ pool
+      tags?: string[];
+    });
 
 export interface Addon {
   name: string;                    // add-on slug, e.g. 'dreaming'
   description: string;
-  docsUrl: string;                 // docs-site Add-ons page
+  docsPath: string;                // path to the docs page, e.g.
+                                   // "docs-site/content/docs/(documentation)/addons/dreaming.mdx"
   workflows: AddonWorkflowDef[];
-  schedules: AddonScheduleDef[];   // schedules[].workflowName must match a workflows[].name here
+  schedules: AddonScheduleDef[];   // workflow-target schedules' workflowName must match a workflows[].name here
   skillNames: string[];            // must exist in BUILT_IN_SKILL_SOURCES — asserted at boot
   scriptNames: string[];           // must exist in SEED_SCRIPTS — asserted at boot
   configKeys: string[];            // configuration-catalog keys; provenance/docs only, not seeded rows
@@ -460,14 +475,17 @@ the DAG is preserved. `apply()` runs `validateDefinition` (`createWorkflow` does
 
 #### 4. schedulesSeeder
 **File**: `src/be/seed/schedules-seeder.ts` (new)
-**Changes**: `kind: 'schedule'`, `key = schedule.name`. `contentHash` over
-`{name, cronExpression, timezone, enabled, targetType, workflowName}` — the workflow **name**, never
-the generated `workflowId` (stable across fresh DBs), and **`enabled` + cron are inside the hash**
-(the brainstorm's ⚠️ trap: otherwise a later source edit re-enables a deliberately disabled
+**Changes**: `kind: 'schedule'`, `key = schedule.name`. Supports both `AddonScheduleDef` variants.
+`contentHash` over `{name, cronExpression, timezone, enabled, targetType}` **plus the
+target fields per variant** — `workflowName` for workflow-target (the workflow **name**, never the
+generated `workflowId`, so the hash is stable across fresh DBs) or
+`{taskTemplate, taskType, targetAgentId, tags}` for task-target. **`enabled` + cron are inside the
+hash** (the brainstorm's ⚠️ trap: otherwise a later source edit re-enables a deliberately disabled
 schedule). `upstreamHash()` recomputes the same shape from the live row, mapping `workflowId` →
-name via `getWorkflow`. `apply()` resolves `workflowId` by name (workflowsSeeder ran first —
-registry order), then create/update honoring the `targetType='workflow'` CHECK
-(`103_schedule_target_type.sql:12-53`). Register **after** `workflowsSeeder`.
+name via `getWorkflow` for workflow-target rows. `apply()` resolves `workflowId` by name for the
+workflow variant (workflowsSeeder ran first — registry order) and passes `taskTemplate` through for
+the task variant, honoring the cross-field CHECK (`103_schedule_target_type.sql:12-53`: workflowId
+required for 'workflow', taskTemplate for 'agent-task'). Register **after** `workflowsSeeder`.
 
 #### 5. Regression tests
 **Files**: `src/tests/seed-workflows.test.ts`, `src/tests/seed-schedules.test.ts` (new; mirror
@@ -481,6 +499,8 @@ registry order), then create/update honoring the `targetType='workflow'` CHECK
 - Pristine schedule + changed source → updated.
 - UI-edited workflow definition (mutate `definition` JSON) survives a source change.
 - `contentHash` is identical across two fresh DBs (no `workflowId` leakage into the hash).
+- Task-target variant: an `agent-task` schedule fixture seeds correctly (taskTemplate honored) and
+  its disable equally survives a source change.
 
 ### Success Criteria:
 
