@@ -68,7 +68,12 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .enum(["completed", "failed"])
           .optional()
           .describe("Set to 'completed' or 'failed' to finish the task."),
-        output: z.string().optional().describe("The output of the task (used when completing)."),
+        output: z
+          .string()
+          .optional()
+          .describe(
+            "The task result (used when completing). For Slack-originated tasks, this is published verbatim in the thread's outcome card: provide a concrete summary scaled to what was asked, including only the outcome and any links or IDs the human needs—not process narration, a transcript, or a restatement of the brief.",
+          ),
         failureReason: z
           .string()
           .optional()

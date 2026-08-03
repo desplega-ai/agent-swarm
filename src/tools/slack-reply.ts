@@ -21,7 +21,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
     {
       title: "Reply to Slack thread",
       description:
-        "Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads.",
+        "Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads. The engine already publishes the task tree and outcome card, so send only a distinct agent-authored message. Prefer one reply per task over several, do not post progress, receipt, or acknowledgment messages, and match its length to what the user asked for.",
       annotations: { openWorldHint: true },
 
       inputSchema: z.object({
