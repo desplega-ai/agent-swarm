@@ -3,7 +3,7 @@ date: 2026-08-03T00:00:00+0200
 author: Taras (planned by Claude)
 topic: "Dreaming add-on — foreach executor, seeders, dream workflow, cutover"
 tags: [plan, workflows, foreach, seeding, addons, dreaming]
-status: draft
+status: in-progress
 brainstorm: thoughts/taras/brainstorms/2026-07-31-compounding-engine-workflow.md
 autonomy: critical
 ---
@@ -362,22 +362,25 @@ clean up `.sqlite`/`-wal`/`-shm`). Scenarios:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] New suite passes: `bun run test:root -- src/tests/workflow-foreach.test.ts`
-- [ ] Full root suite passes (no regressions in existing workflow tests): `bun run test:root`
-- [ ] UI builds: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
-- [ ] Boundary checks: `bash scripts/check-db-boundary.sh && bun run check:dep-graph`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] New suite passes: `bun run test:root -- src/tests/workflow-foreach.test.ts` (12 tests post-review-fixes)
+- [x] Full root suite passes (no regressions in existing workflow tests): `bun run test:root` (6798 pass / 0 fail)
+- [x] UI builds: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
+- [x] Boundary checks: `bash scripts/check-db-boundary.sh && bun run check:dep-graph`
 
 #### Automated QA:
-- [ ] Wire-level walkthrough: clean DB (`rm -f agent-swarm-db.sqlite*`), `bun run start:http`,
-      create a 3-item foreach workflow via the `create-workflow` MCP tool, trigger it, complete the
-      three child tasks via `PATCH /api/tasks/:id`, then assert via
-      `curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/workflow-runs/<runId>`
-      that the successor step ran and the run completed with the aggregate in context.
-- [ ] Dashboard check with screenshots (merge-gate requires a qa-use session for `apps/ui`
-      changes): workflow-run page shows child lanes labeled `reflect · <itemKey>`, parent graph
-      node aggregates status, clicking the parent node expands its child steps.
+- [x] Wire-level walkthrough: PASS (out-of-order completions held the join; aggregate in item
+      order; successor consumed real data). **Surface corrections vs. this plan**: task completion
+      is `POST /api/tasks/:id/finish` with an `X-Agent-ID` header after claiming via `GET
+      /api/poll` (no `PATCH /api/tasks/:id` route; tasks must be `in_progress`); create/trigger
+      used REST `POST /api/workflows` + `POST /api/workflows/{id}/trigger`; run status reads at
+      `run.run.status`. The worktree has no `.env`, so `AGENT_SWARM_API_KEY` must be set
+      explicitly when starting the server.
+- [x] Dashboard check with screenshots (`/tmp/dreaming-phase1-qa/`, via agent-browser): child
+      lanes `fan · <itemKey>`, parent node aggregates status (amber while children waiting, green
+      when complete), clicking the parent expands + scrolls to its child steps. Pre-existing nit
+      (not foreach-related): graph-node click drops the `node=` URL param.
 
 #### Manual Verification:
 - [ ] Taras eyeballs the run-detail waterfall + graph for a foreach run (visual judgment on the
