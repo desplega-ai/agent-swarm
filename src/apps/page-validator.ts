@@ -30,6 +30,7 @@ interface StateRef {
 
 const ELEMENT_KEYS = new Set(["type", "props", "children", "on", "visible", "repeat", "watch"]);
 const UI_STATE_COMPONENTS = new Set(["SearchInput", "Select", "Tabs"]);
+const CONDITION_KEYS = new Set(["eq", "neq", "gt", "gte", "lt", "lte", "not"]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -40,6 +41,20 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function isStateBinding(value: unknown): value is { $state: string } {
   return (
     isPlainObject(value) && Object.keys(value).length === 1 && typeof value.$state === "string"
+  );
+}
+
+function isStateCondition(value: unknown): value is { $state: string } {
+  return (
+    isPlainObject(value) &&
+    typeof value.$state === "string" &&
+    Object.keys(value).some((key) => CONDITION_KEYS.has(key))
+  );
+}
+
+function isParamBinding(value: unknown): value is { $param: string } {
+  return (
+    isPlainObject(value) && Object.keys(value).length === 1 && typeof value.$param === "string"
   );
 }
 
@@ -56,6 +71,16 @@ function appendPath(path: string, part: string | number): string {
 
 function issue(path: string, message: string): AppValidationIssue {
   return { path, message };
+}
+
+function dedupeIssues(issues: AppValidationIssue[]): AppValidationIssue[] {
+  const seen = new Set<string>();
+  return issues.filter(({ path, message }) => {
+    const key = `${path}\0${message}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function typeMatches(value: unknown, type: string): boolean {
@@ -201,10 +226,64 @@ function actionParams(
   path: string,
   definition: AppDefinition,
   catalog: AppCatalog,
+  validateNavigation = false,
 ): SchemaValidationResult {
   const result: SchemaValidationResult = { issues: [], stateRefs: [] };
   if (typeof step.action !== "string") {
     result.issues.push(issue(appendPath(path, "action"), "must be a string"));
+    return result;
+  }
+
+  if (validateNavigation) {
+    if (step.action !== "app.navigate") return result;
+
+    const paramsPath = appendPath(path, "params");
+    const params = step.params ?? {};
+    if (!isPlainObject(params)) return result;
+
+    const targetPage = params.page;
+    if (typeof targetPage !== "string") {
+      if (isActionSentinel(targetPage) || isStateBinding(targetPage)) {
+        result.issues.push(issue(appendPath(paramsPath, "page"), "must be a literal page name"));
+      }
+      return result;
+    }
+
+    const target = Object.hasOwn(definition.pages, targetPage)
+      ? definition.pages[targetPage]
+      : undefined;
+    if (!target) {
+      result.issues.push(issue(appendPath(paramsPath, "page"), `unknown page "${targetPage}"`));
+      return result;
+    }
+
+    const suppliedParams =
+      isPlainObject(params.params) &&
+      !isActionSentinel(params.params) &&
+      !isStateBinding(params.params)
+        ? params.params
+        : {};
+    const declaredParams = target.params ?? {};
+    for (const name of Object.keys(suppliedParams)) {
+      if (!Object.hasOwn(declaredParams, name)) {
+        result.issues.push(
+          issue(
+            appendPath(appendPath(paramsPath, "params"), name),
+            `param "${name}" is not declared by target page "${targetPage}"`,
+          ),
+        );
+      }
+    }
+    for (const [name, parameter] of Object.entries(declaredParams)) {
+      if (parameter.required === true && !Object.hasOwn(suppliedParams, name)) {
+        result.issues.push(
+          issue(
+            appendPath(appendPath(paramsPath, "params"), name),
+            `required param "${name}" is missing for target page "${targetPage}"`,
+          ),
+        );
+      }
+    }
     return result;
   }
 
@@ -334,7 +413,17 @@ function validateStateRef(
   definition: AppDefinition,
   formIds: Set<string>,
   uiIds: Set<string>,
+  pageParams: Record<string, unknown>,
 ): AppValidationIssue | null {
+  if (ref.value === "/route/page") return null;
+  const routeParam = /^\/route\/params\/([^/]+)$/.exec(ref.value);
+  if (routeParam) {
+    const name = routeParam[1]!;
+    return Object.hasOwn(pageParams, name)
+      ? null
+      : issue(ref.path, `state reference targets unknown route param "${name}"`);
+  }
+
   const match = /^\/(queries|forms|actions|ui)\/([^/]+)(?:\/.*)?$/.exec(ref.value);
   if (!match) return issue(ref.path, `invalid state reference "${ref.value}"`);
 
@@ -355,31 +444,169 @@ function validateStateRef(
   return exists ? null : issue(ref.path, `state reference targets unknown ${targetKind} "${name}"`);
 }
 
-export function validatePage(definition: AppDefinition, catalog: AppCatalog): AppValidationIssue[] {
+function collectStateRefs(value: unknown, path: string, refs: StateRef[]): void {
+  if (isStateBinding(value) || isStateCondition(value)) {
+    refs.push({ path, value: value.$state });
+  }
+  if (Array.isArray(value)) {
+    for (const [index, child] of value.entries()) {
+      collectStateRefs(child, appendPath(path, index), refs);
+    }
+    return;
+  }
+  if (!isPlainObject(value)) return;
+  for (const [key, child] of Object.entries(value)) {
+    if (key !== "$state") collectStateRefs(child, appendPath(path, key), refs);
+  }
+}
+
+function visitActionChain(
+  chain: unknown,
+  path: string,
+  visit: (step: Record<string, unknown>, path: string) => void,
+  allowSingle: boolean,
+): void {
+  const normalized = allowSingle && isPlainObject(chain) ? [chain] : chain;
+  if (!Array.isArray(normalized)) return;
+  for (const [index, step] of normalized.entries()) {
+    if (isPlainObject(step)) visit(step, appendPath(path, index));
+  }
+}
+
+function visitPageActionSteps(
+  page: AppDefinition["pages"][string],
+  pagePath: string,
+  visit: (step: Record<string, unknown>, path: string) => void,
+): void {
+  if (!isPlainObject(page.elements)) return;
+  for (const [elementId, rawElement] of Object.entries(page.elements)) {
+    if (!isPlainObject(rawElement)) continue;
+    const elementPath = `${pagePath}.elements.${elementId}`;
+
+    for (const key of ["on", "watch"] as const) {
+      const actionMap = rawElement[key];
+      if (!isPlainObject(actionMap)) continue;
+      for (const [event, chain] of Object.entries(actionMap)) {
+        visitActionChain(chain, `${elementPath}.${key}.${event}`, visit, true);
+      }
+    }
+
+    if (!isPlainObject(rawElement.props)) continue;
+    if (rawElement.type === "Table" && Array.isArray(rawElement.props.rowActions)) {
+      for (const [index, rowAction] of rawElement.props.rowActions.entries()) {
+        if (!isPlainObject(rowAction)) continue;
+        visitActionChain(
+          rowAction.actions,
+          `${elementPath}.props.rowActions.${index}.actions`,
+          visit,
+          false,
+        );
+      }
+    }
+    if (rawElement.type === "Form") {
+      visitActionChain(rawElement.props.onSubmit, `${elementPath}.props.onSubmit`, visit, false);
+    }
+  }
+}
+
+export function crossPageDefinitionIssues(
+  definition: AppDefinition,
+  catalog: AppCatalog,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+
+  if (!Object.hasOwn(definition.pages, definition.defaultPage)) {
+    issues.push(issue("defaultPage", `default page "${definition.defaultPage}" not found`));
+  }
+
+  for (const [pageName, page] of Object.entries(definition.pages)) {
+    const pagePath = appendPath("pages", pageName);
+    const declaredParams = page.params ?? {};
+
+    visitPageActionSteps(page, pagePath, (step, path) => {
+      const result = actionParams(step, path, definition, catalog, true);
+      issues.push(...result.issues);
+    });
+
+    if (!isPlainObject(page.elements)) continue;
+    for (const [elementId, rawElement] of Object.entries(page.elements)) {
+      if (!isPlainObject(rawElement)) continue;
+      const elementPath = `${pagePath}.elements.${elementId}`;
+      if (rawElement.type === "Drawer" && isPlainObject(rawElement.props)) {
+        const paramPath = `${elementPath}.props.param`;
+        if (
+          Object.hasOwn(rawElement.props, "param") &&
+          typeof rawElement.props.param !== "string"
+        ) {
+          issues.push(
+            issue(paramPath, "Drawer param must be a literal route param name (not a binding)"),
+          );
+        } else if (
+          typeof rawElement.props.param === "string" &&
+          !Object.hasOwn(declaredParams, rawElement.props.param)
+        ) {
+          issues.push(
+            issue(
+              paramPath,
+              `param "${rawElement.props.param}" is not declared on page "${pageName}"`,
+            ),
+          );
+        }
+      }
+    }
+
+    const refs: StateRef[] = [];
+    collectStateRefs(page, pagePath, refs);
+    for (const ref of refs) {
+      const queryMatch = /^\/queries\/([^/]+)(?:\/.*)?$/.exec(ref.value);
+      if (!queryMatch) continue;
+      const queryName = queryMatch[1]!;
+      const query = definition.queries?.[queryName];
+      if (!query) continue;
+      for (const value of Object.values(query.filter ?? {})) {
+        if (!isParamBinding(value) || Object.hasOwn(declaredParams, value.$param)) continue;
+        issues.push(
+          issue(ref.path, `query "${queryName}" requires undeclared page param "${value.$param}"`),
+        );
+      }
+    }
+  }
+
+  return dedupeIssues(issues);
+}
+
+export function validatePage(
+  definition: AppDefinition,
+  catalog: AppCatalog,
+  pageName: string,
+): AppValidationIssue[] {
   const issues: AppValidationIssue[] = [];
   const stateRefs: StateRef[] = [];
   const formIds = new Set<string>();
   const uiIds = new Set<string>();
-  const page = definition.page;
+  const page = definition.pages[pageName]!;
+  const pagePath = appendPath("pages", pageName);
+  const elementsPath = appendPath(pagePath, "elements");
   const root = page.root;
   const elements = page.elements;
 
-  if (typeof root !== "string") issues.push(issue("page.root", "must be a string"));
+  if (typeof root !== "string")
+    issues.push(issue(appendPath(pagePath, "root"), "must be a string"));
   if (!isPlainObject(elements)) {
-    issues.push(issue("page.elements", "must be a non-empty object"));
+    issues.push(issue(elementsPath, "must be a non-empty object"));
     return issues;
   }
   const elementEntries = Object.entries(elements);
   if (elementEntries.length === 0) {
-    issues.push(issue("page.elements", "must be a non-empty object"));
+    issues.push(issue(elementsPath, "must be a non-empty object"));
     return issues;
   }
   if (typeof root === "string" && !Object.hasOwn(elements, root)) {
-    issues.push(issue("page.root", `root element "${root}" not found`));
+    issues.push(issue(appendPath(pagePath, "root"), `root element "${root}" not found`));
   }
 
   for (const [elementId, rawElement] of elementEntries) {
-    const elementPath = appendPath("page.elements", elementId);
+    const elementPath = appendPath(elementsPath, elementId);
     if (!isPlainObject(rawElement)) {
       issues.push(issue(elementPath, "must be an element object"));
       continue;
@@ -476,14 +703,11 @@ export function validatePage(definition: AppDefinition, catalog: AppCatalog): Ap
     }
     for (const key of ["visible", "repeat"] as const) {
       if (!Object.hasOwn(rawElement, key)) continue;
-      const bindingResult = validateSchema(
-        rawElement[key],
-        {},
-        appendPath(elementPath, key),
-        false,
-      );
+      const bindingPath = appendPath(elementPath, key);
+      const bindingResult = validateSchema(rawElement[key], {}, bindingPath, false);
       issues.push(...bindingResult.issues);
       stateRefs.push(...bindingResult.stateRefs);
+      if (key === "visible") collectStateRefs(rawElement[key], bindingPath, stateRefs);
     }
 
     if (
@@ -524,7 +748,7 @@ export function validatePage(definition: AppDefinition, catalog: AppCatalog): Ap
     if (!isPlainObject(rawElement) || !Array.isArray(rawElement.children)) continue;
     for (const [index, child] of rawElement.children.entries()) {
       if (typeof child !== "string") continue;
-      const childPath = `page.elements.${elementId}.children.${index}`;
+      const childPath = `${elementsPath}.${elementId}.children.${index}`;
       if (!Object.hasOwn(elements, child)) {
         issues.push(issue(childPath, `child element "${child}" not found`));
         continue;
@@ -552,7 +776,7 @@ export function validatePage(definition: AppDefinition, catalog: AppCatalog): Ap
         if (visiting.has(child)) {
           issues.push(
             issue(
-              `page.elements.${elementId}.children.${index}`,
+              `${elementsPath}.${elementId}.children.${index}`,
               `cycle references element "${child}"`,
             ),
           );
@@ -579,19 +803,13 @@ export function validatePage(definition: AppDefinition, catalog: AppCatalog): Ap
   if (typeof root === "string") markReachable(root);
   for (const elementId of Object.keys(elements)) {
     if (!reachable.has(elementId)) {
-      issues.push(issue(`page.elements.${elementId}`, "element is not reachable from root"));
+      issues.push(issue(`${elementsPath}.${elementId}`, "element is not reachable from root"));
     }
   }
 
   for (const ref of stateRefs) {
-    const stateIssue = validateStateRef(ref, definition, formIds, uiIds);
+    const stateIssue = validateStateRef(ref, definition, formIds, uiIds, page.params ?? {});
     if (stateIssue) issues.push(stateIssue);
   }
-  const seen = new Set<string>();
-  return issues.filter(({ path, message }) => {
-    const key = `${path}\0${message}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return dedupeIssues(issues);
 }

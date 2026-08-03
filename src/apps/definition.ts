@@ -1,7 +1,7 @@
 import * as z from "zod";
 import { getScriptById } from "../be/scripts/db";
 import catalog from "./catalog.generated.json";
-import { validatePage } from "./page-validator";
+import { crossPageDefinitionIssues, validatePage } from "./page-validator";
 
 export const AppNameSchema = z.string().regex(/^[a-z][a-zA-Z0-9_]{0,39}$/, {
   message: "must start with a lowercase letter and contain only letters, numbers, or underscores",
@@ -114,9 +114,17 @@ const ModelDefSchema = z
     }
   });
 
+const AppQueryParamRefSchema = z
+  .object({
+    $param: AppNameSchema,
+  })
+  .strict();
+
 const AppQueryDefSchema = z.object({
   model: AppNameSchema,
-  filter: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+  filter: z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean(), AppQueryParamRefSchema]))
+    .optional(),
   sort: z
     .object({
       column: z.string(),
@@ -144,14 +152,84 @@ const AppActionDefSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+const AppPageParamSchema = z
+  .object({
+    kind: z.enum(["string", "number", "boolean"]).optional(),
+    required: z.boolean().optional(),
+  })
+  .strict();
+
+const RESERVED_PAGE_PARAM_NAMES = new Set(["mode", "apiUrl", "apiKey", "email", "name"]);
+
+const AppPageSchema = z
+  .object({
+    root: z.string(),
+    elements: z.record(z.string(), z.unknown()),
+    title: z.string().optional(),
+    params: z.record(AppNameSchema, AppPageParamSchema).optional(),
+  })
+  .strict();
+
 export const AppDefinitionSchema = z
   .object({
     models: z.record(AppNameSchema, ModelDefSchema),
     queries: z.record(AppNameSchema, AppQueryDefSchema).optional(),
     actions: z.record(AppNameSchema, AppActionDefSchema).optional(),
-    page: z.record(z.string(), z.unknown()),
+    page: AppPageSchema.optional(),
+    pages: z.record(AppNameSchema, AppPageSchema).optional(),
+    defaultPage: AppNameSchema.optional(),
   })
   .superRefine((definition, ctx) => {
+    const hasPage = definition.page !== undefined;
+    const hasPages = definition.pages !== undefined;
+    if (hasPage === hasPages) {
+      ctx.addIssue({
+        code: "custom",
+        path: [hasPage ? "pages" : "page"],
+        message: hasPage
+          ? "page and pages are mutually exclusive"
+          : "exactly one of page or pages is required",
+      });
+    }
+    if (hasPages) {
+      if (definition.defaultPage === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["defaultPage"],
+          message: "defaultPage is required when pages is defined",
+        });
+      } else if (!Object.hasOwn(definition.pages!, definition.defaultPage)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["defaultPage"],
+          message: `unknown page "${definition.defaultPage}"`,
+        });
+      }
+    } else if (definition.defaultPage !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["defaultPage"],
+        message: "defaultPage is only allowed when pages is defined",
+      });
+    }
+
+    const pages = definition.pages ?? (definition.page ? { main: definition.page } : {});
+    const pagesPath = definition.pages ? "pages" : "page";
+    for (const [pageName, page] of Object.entries(pages)) {
+      for (const paramName of Object.keys(page.params ?? {})) {
+        if (RESERVED_PAGE_PARAM_NAMES.has(paramName)) {
+          ctx.addIssue({
+            code: "custom",
+            path:
+              pagesPath === "pages"
+                ? [pagesPath, pageName, "params", paramName]
+                : [pagesPath, "params", paramName],
+            message: "reserved param name",
+          });
+        }
+      }
+    }
+
     const modelCount = Object.keys(definition.models).length;
     if (modelCount < 1 || modelCount > 10) {
       ctx.addIssue({ code: "custom", path: ["models"], message: "must define 1 to 10 models" });
@@ -186,6 +264,7 @@ export const AppDefinitionSchema = z
           continue;
         }
         const columnDefinition = model.columns[column]!;
+        if (typeof value === "object") continue;
         const valid =
           (columnDefinition.kind === "string" && typeof value === "string") ||
           (columnDefinition.kind === "number" &&
@@ -219,6 +298,13 @@ export const AppDefinitionSchema = z
         });
       }
     }
+  })
+  .transform((definition) => {
+    const { page, pages, defaultPage, ...rest } = definition;
+    if (page !== undefined) {
+      return { ...rest, pages: { main: page }, defaultPage: "main" };
+    }
+    return { ...rest, pages: pages!, defaultPage: defaultPage! };
   });
 
 export type ColumnKind = z.infer<typeof ColumnKindSchema>;
@@ -227,6 +313,8 @@ export type SourceDef = z.infer<typeof SourceDefSchema>;
 export type ModelDef = z.infer<typeof ModelDefSchema>;
 export type AppQueryDef = z.infer<typeof AppQueryDefSchema>;
 export type AppActionDef = z.infer<typeof AppActionDefSchema>;
+export type AppPageParam = z.infer<typeof AppPageParamSchema>;
+export type AppPage = z.infer<typeof AppPageSchema>;
 export type AppDefinition = z.infer<typeof AppDefinitionSchema>;
 
 export interface AppValidationIssue {
@@ -402,7 +490,13 @@ export function parseAppDefinition(
   const parsed = AppDefinitionSchema.safeParse(input);
   if (!parsed.success) return { success: false, issues: appDefinitionIssues(parsed.error) };
 
-  const issues = [...validatePage(parsed.data, catalog), ...sourceDefinitionIssues(parsed.data)];
+  const issues = [
+    ...Object.keys(parsed.data.pages).flatMap((pageName) =>
+      validatePage(parsed.data, catalog, pageName),
+    ),
+    ...crossPageDefinitionIssues(parsed.data, catalog),
+    ...sourceDefinitionIssues(parsed.data),
+  ];
   for (const [name, action] of Object.entries(parsed.data.actions ?? {})) {
     if (action.kind === "script" && !getScriptById(action.scriptId)) {
       issues.push({
@@ -449,6 +543,31 @@ function dangerousPatchKeyIssues(value: unknown, path: string[] = []): AppValida
   return issues;
 }
 
+function definitionPatchIssues(stored: AppDefinition, patch: unknown): AppValidationIssue[] {
+  if (!isMergePatchObject(patch)) return [];
+
+  const issues = dangerousPatchKeyIssues(patch);
+  if (Object.hasOwn(patch, "page")) {
+    issues.push({
+      path: "page",
+      message: "definitions are normalized to the pages map — patch pages.<name> instead",
+    });
+  }
+
+  if (isMergePatchObject(patch.pages)) {
+    const effectiveDefaultPage =
+      typeof patch.defaultPage === "string" ? patch.defaultPage : stored.defaultPage;
+    if (patch.pages[effectiveDefaultPage] === null) {
+      issues.push({
+        path: `pages.${effectiveDefaultPage}`,
+        message: "cannot delete the default page",
+      });
+    }
+  }
+
+  return issues;
+}
+
 function applyMergePatch(target: unknown, patch: unknown, path: string[]): unknown {
   if (!isMergePatchObject(patch)) return patch;
 
@@ -456,7 +575,10 @@ function applyMergePatch(target: unknown, patch: unknown, path: string[]): unkno
   const entriesAreAtomic =
     (path.length === 1 && path[0] === "actions") ||
     (path.length === 2 && path[0] === "page" && path[1] === "elements") ||
-    (path.length === 3 && path[0] === "models" && (path[2] === "columns" || path[2] === "sources"));
+    (path.length === 3 &&
+      path[0] === "models" &&
+      (path[2] === "columns" || path[2] === "sources")) ||
+    (path.length === 3 && path[0] === "pages" && (path[2] === "elements" || path[2] === "params"));
 
   for (const [key, value] of Object.entries(patch)) {
     if (value === null) {
@@ -482,7 +604,7 @@ export function applyAppDefinitionPatch(
   stored: AppDefinition,
   patch: unknown,
 ): AppDefinitionPatchResult {
-  const issues = dangerousPatchKeyIssues(patch);
+  const issues = definitionPatchIssues(stored, patch);
   if (issues.length > 0) return { success: false, issues };
 
   const merged = applyMergePatch(structuredClone(stored), patch, []);

@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { type AppRow, listAppRows } from "@/apps/row-store";
 import { getApp } from "@/apps/store";
-import { applyQuery } from "@/http/apps";
+import { AppQueryParamsError, applyQuery } from "@/http/apps";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 function escapeTableCell(value: unknown): string {
@@ -30,7 +30,7 @@ export const registerAppGetTool = (server: McpServer) => {
     {
       title: "Get an app",
       description:
-        "Get an app by ID, including its models, named queries, actions, and json-render page definition.",
+        "Get an app by ID, including its models, named queries, actions, and json-render pages definition.",
       annotations: { readOnlyHint: true },
       inputSchema: z.object({
         appId: z.string().min(1).describe("App ID to retrieve."),
@@ -58,25 +58,43 @@ export const registerAppQueryTool = (server: McpServer) => {
     "app-query",
     {
       title: "Run an app query",
-      description: "Run one declared named app query and return its rows.",
+      description:
+        "Run one declared named app query with optional $param values and return its rows.",
       annotations: { readOnlyHint: true },
       rbac: { ungated: "read-only app query mirrors the ungated HTTP app query route" },
       inputSchema: z.object({
         appId: z.string().min(1).describe("App ID containing the named query."),
         query: z.string().min(1).describe("Declared query name."),
+        params: z
+          .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+          .optional()
+          .describe("Values for any $param filters declared by the named query."),
       }),
       outputSchema: swarmToolOutputSchema({
         rows: z.array(z.looseObject({})).optional(),
         count: z.number().optional(),
+        issues: z
+          .array(z.looseObject({ path: z.string().optional(), message: z.string().optional() }))
+          .optional(),
+        missingParams: z.array(z.string()).optional(),
       }),
     },
-    async ({ appId, query: queryName }) => {
+    async ({ appId, query: queryName, params }) => {
       const app = getApp(appId);
       const query = app?.definition.queries?.[queryName];
       if (!app || !query) return toolErr(`App ${appId} or query "${queryName}" not found.`);
       const model = app.definition.models[query.model];
       if (!model) return toolErr(`Model "${query.model}" not found.`);
-      const rows = applyQuery(listAppRows(app.id, query.model), query, model);
+      let rows: AppRow[];
+      try {
+        rows = applyQuery(listAppRows(app.id, query.model), query, model, params, queryName);
+      } catch (error) {
+        if (!(error instanceof AppQueryParamsError)) throw error;
+        return toolErr(error.message, {
+          details: error.issues.map((issue) => `${issue.path}: ${issue.message}`).join("\n"),
+          data: { issues: error.issues, missingParams: error.missingNames },
+        });
+      }
       return toolOk(`Query "${queryName}" returned ${rows.length} row(s).`, {
         details: renderRows(rows),
         data: { rows, count: rows.length },

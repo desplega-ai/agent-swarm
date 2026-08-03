@@ -970,6 +970,9 @@
           "200": {
             "description": "Named query rows"
           },
+          "400": {
+            "description": "Missing or invalid named query parameters"
+          },
           "404": {
             "description": "App or query not found"
           }

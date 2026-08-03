@@ -256,6 +256,7 @@ const runNamedQueryRoute = route({
   params: z.object({ id: z.string().min(1), name: AppNameSchema }),
   responses: {
     200: { description: "Named query rows" },
+    400: { description: "Missing or invalid named query parameters" },
     404: { description: "App or query not found" },
   },
 });
@@ -371,6 +372,104 @@ function parseFilterValue(raw: string, column: ModelDef["columns"][string]): unk
   return raw;
 }
 
+type AppQueryParamValue = string | number | boolean;
+export type AppQueryParams = Record<string, AppQueryParamValue>;
+
+export class AppQueryParamsError extends Error {
+  constructor(
+    readonly issues: AppValidationIssue[],
+    readonly missingNames: string[] = [],
+  ) {
+    super(
+      missingNames.length > 0
+        ? `missing query parameter(s): ${missingNames.join(", ")}`
+        : "invalid query parameters",
+    );
+    this.name = "AppQueryParamsError";
+  }
+}
+
+function isQueryParamRef(value: unknown): value is { $param: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 1 &&
+    typeof (value as { $param?: unknown }).$param === "string"
+  );
+}
+
+function coerceQueryParamValue(
+  raw: AppQueryParamValue,
+  column: ModelDef["columns"][string],
+): unknown {
+  if (column.kind === "number" && typeof raw === "number") {
+    if (!Number.isFinite(raw)) throw new Error("must be a finite decimal number");
+    return raw;
+  }
+  if (column.kind === "boolean" && typeof raw === "boolean") return raw;
+  return parseFilterValue(String(raw), column);
+}
+
+function resolveQueryFilters(
+  query: AppQueryDef,
+  model: ModelDef,
+  params: AppQueryParams,
+  queryName: string,
+): Array<[string, unknown]> {
+  const filters = Object.entries(query.filter ?? {});
+  const declaredNames = new Set(
+    filters.flatMap(([, value]) => (isQueryParamRef(value) ? [value.$param] : [])),
+  );
+  const missingNames = [
+    ...new Set([...declaredNames].filter((name) => !Object.hasOwn(params, name))),
+  ].sort();
+  const unknownNames = Object.keys(params)
+    .filter((name) => !declaredNames.has(name))
+    .sort();
+  if (missingNames.length > 0 || unknownNames.length > 0) {
+    throw new AppQueryParamsError(
+      [
+        ...missingNames.map((name) => ({
+          path: `param.${name}`,
+          message: "is required by a named query filter",
+        })),
+        ...unknownNames.map((name) => ({
+          path: `param.${name}`,
+          message: `not a declared $param of query "${queryName}"`,
+        })),
+      ],
+      missingNames,
+    );
+  }
+
+  const issues: AppValidationIssue[] = [];
+  const resolved = filters.map(([columnName, value]): [string, unknown] => {
+    if (!isQueryParamRef(value)) return [columnName, value];
+    try {
+      return [columnName, coerceQueryParamValue(params[value.$param]!, model.columns[columnName]!)];
+    } catch (error) {
+      issues.push({
+        path: `param.${value.$param}`,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return [columnName, undefined];
+    }
+  });
+  if (issues.length > 0) throw new AppQueryParamsError(issues);
+  return resolved;
+}
+
+function appQueryParamsFromRequest(queryParams: URLSearchParams): AppQueryParams {
+  const params: AppQueryParams = {};
+  for (const [key, value] of queryParams.entries()) {
+    if (key.startsWith("param.") && key.length > "param.".length) {
+      params[key.slice("param.".length)] = value;
+    }
+  }
+  return params;
+}
+
 interface RowFilter {
   column: string;
   value: unknown;
@@ -425,9 +524,16 @@ function rowValue(row: AppRow, column: string): unknown {
   return Object.hasOwn(row, column) ? row[column] : undefined;
 }
 
-export function applyQuery(rows: AppRow[], query: AppQueryDef, model: ModelDef): AppRow[] {
+export function applyQuery(
+  rows: AppRow[],
+  query: AppQueryDef,
+  model: ModelDef,
+  params: AppQueryParams = {},
+  queryName = "<unnamed>",
+): AppRow[] {
+  const filters = resolveQueryFilters(query, model, params, queryName);
   let selected = rows.filter((row) =>
-    Object.entries(query.filter ?? {}).every(([column, value]) => rowValue(row, column) === value),
+    filters.every(([column, value]) => rowValue(row, column) === value),
   );
   const sort = query.sort;
   if (sort) {
@@ -656,7 +762,24 @@ export async function handleApps(
       return true;
     }
     const model = app.definition.models[query.model]!;
-    json(res, { rows: applyQuery(listAppRows(app.id, query.model), query, model) });
+    try {
+      json(res, {
+        rows: applyQuery(
+          listAppRows(app.id, query.model),
+          query,
+          model,
+          appQueryParamsFromRequest(queryParams),
+          parsed.params.name,
+        ),
+      });
+    } catch (error) {
+      if (!(error instanceof AppQueryParamsError)) throw error;
+      json(
+        res,
+        { error: error.message, issues: error.issues, missingParams: error.missingNames },
+        400,
+      );
+    }
     return true;
   }
 

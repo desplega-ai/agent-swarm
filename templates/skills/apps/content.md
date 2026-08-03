@@ -36,11 +36,17 @@ For every edit: `app-get` -> modify the smallest coherent subtree -> `app-patch`
   },
   "queries": { "queryName": { "model": "modelName" } },
   "actions": { "actionName": { "kind": "sync", "model": "modelName", "source": "sourceName" } },
-  "page": { "root": "root", "elements": { "root": { "type": "Container", "props": {} } } }
+  "pages": {
+    "main": {
+      "root": "root",
+      "elements": { "root": { "type": "Container", "props": {} } }
+    }
+  },
+  "defaultPage": "main"
 }
 ```
 
-Model, query, action, and column names start with a lowercase letter, contain only letters, numbers, or underscores, and are at most 40 characters. A definition has 1-10 models; each model has 1-40 columns.
+Model, query, action, column, page, and page-param names start with a lowercase letter, contain only letters, numbers, or underscores, and are at most 40 characters. A definition has 1-10 models; each model has 1-40 columns.
 
 ### Models
 
@@ -161,7 +167,19 @@ A named query is:
 }
 ```
 
-`filter` is equality-only and each value must match its model column. `sort.column` is a model column, `createdAt`, `updatedAt`, or `syncedAt`; `dir` is `asc` or `desc`. `limit` is an integer from 1 through 1000. Query runtime state is `{ data, loading, error }` under `/queries/<queryName>`.
+`filter` is a strict AND of equality checks. A literal value must match its model column; date filters compare the stored raw ISO string, not parsed instants. Omit `limit` for the default 200 rows, or set an integer from 1 through 1000. `sort.column` is a model column, `createdAt`, `updatedAt`, or `syncedAt`; `dir` is `asc` or `desc`. Query runtime state is `{ data, loading, error }` under `/queries/<queryName>`.
+
+A filter value may instead be exactly `{ "$param": "<name>" }`. At execution, the caller supplies that name and the server coerces its value to the filtered column's kind before equality matching:
+
+```json
+{
+  "queries": {
+    "issueDetail": { "model": "issue", "filter": { "issueId": { "$param": "issueId" } }, "limit": 1 }
+  }
+}
+```
+
+The placeholder object must contain only `$param`. Missing caller values fail loudly rather than returning unfiltered rows: HTTP reports 400 and `app-query` returns a tool error listing every missing name. Supplying a param name the query does not reference is also an error. The app UI supplies current declared route params automatically. Direct calls use `app-query({ appId, query: "issueDetail", params: { issueId: 42 } })` or `ctx.swarm.app_query({ appId, query: "issueDetail", params: { issueId: 42 } })`.
 
 ### Custom actions
 
@@ -203,21 +221,24 @@ Use a sync action for an observable Refresh button. Bind a Badge to its status s
   "actions": {
     "refreshIssues": { "kind": "sync", "model": "issue", "source": "github" }
   },
-  "page": {
-    "root": "toolbar",
-    "elements": {
-      "toolbar": { "type": "Stack", "props": { "direction": "row", "gap": "sm", "align": "center" }, "children": ["refresh", "refreshStatus"] },
-      "refresh": {
-        "type": "Button",
-        "props": { "label": "Refresh", "variant": "outline" },
-        "on": { "press": [{ "action": "app.action", "params": { "name": "refreshIssues" } }] }
-      },
-      "refreshStatus": {
-        "type": "Badge",
-        "props": { "text": { "$state": "/actions/refreshIssues/status" }, "tone": "neutral" }
+  "pages": {
+    "main": {
+      "root": "toolbar",
+      "elements": {
+        "toolbar": { "type": "Stack", "props": { "direction": "row", "gap": "sm", "align": "center" }, "children": ["refresh", "refreshStatus"] },
+        "refresh": {
+          "type": "Button",
+          "props": { "label": "Refresh", "variant": "outline" },
+          "on": { "press": [{ "action": "app.action", "params": { "name": "refreshIssues" } }] }
+        },
+        "refreshStatus": {
+          "type": "Badge",
+          "props": { "text": { "$state": "/actions/refreshIssues/status" }, "tone": "neutral" }
+        }
       }
     }
-  }
+  },
+  "defaultPage": "main"
 }
 ```
 
@@ -228,58 +249,111 @@ Use a task action named Tackle when a person should hand one synced issue to the
   "actions": {
     "tackle": { "kind": "task", "prompt": "Tackle this issue. Inspect the supplied issue context, do the work, and report the outcome." }
   },
-  "page": {
-    "root": "issuesTable",
-    "elements": {
-      "issuesTable": {
-        "type": "Table",
-        "props": {
-          "data": { "$state": "/queries/allIssues/data" },
-          "columns": [{ "key": "title", "label": "Issue" }],
-          "rowActions": [{
-            "label": "Tackle",
-            "actions": [{
-              "action": "app.action",
-              "params": { "name": "tackle", "input": { "issue": { "$row": "" } } }
+  "pages": {
+    "main": {
+      "root": "issuesTable",
+      "elements": {
+        "issuesTable": {
+          "type": "Table",
+          "props": {
+            "data": { "$state": "/queries/allIssues/data" },
+            "columns": [{ "key": "title", "label": "Issue" }],
+            "rowActions": [{
+              "label": "Tackle",
+              "actions": [{
+                "action": "app.action",
+                "params": { "name": "tackle", "input": { "issue": { "$row": "" } } }
+              }]
             }]
-          }]
+          }
         }
       }
     }
-  }
+  },
+  "defaultPage": "main"
 }
 ```
 
-For direct MCP calls, `app-sync` accepts `{ appId, model?, source? }` and returns per-pass pull/create/update/stale counts; use it for an agent-triggered refresh. `app-query` accepts `{ appId, query }` and returns rows from that declared named query; use it when an agent needs to read app state without scraping the UI.
+For direct MCP calls, `app-sync` accepts `{ appId, model?, source? }` and returns per-pass pull/create/update/stale counts; use it for an agent-triggered refresh. `app-query` accepts `{ appId, query, params? }` and returns rows from that declared named query; every supplied param must be referenced by a `$param` filter in that query. Use it when an agent needs to read app state without scraping the UI.
 
-Saved scripts use the generated SDK names `ctx.swarm.app_sync({ appId, model?, source? })` and `ctx.swarm.app_query({ appId, query })`. A schedule can target a saved script that calls `app_sync`; do not invent a schedule target type for apps. Use `app_query` in scripts or workflows that turn current app rows into reports, digests, or follow-up work.
+Saved scripts use the generated SDK names `ctx.swarm.app_sync({ appId, model?, source? })` and `ctx.swarm.app_query({ appId, query, params? })`. A schedule can target a saved script that calls `app_sync`; do not invent a schedule target type for apps. Use `app_query` in scripts or workflows that turn current app rows into reports, digests, or follow-up work.
 
-### Page tree
+### Pages, routes, and page trees
 
-`page.root` names one entry in the non-empty `page.elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Container, and Card). `watch` maps state paths to an action step or chain.
+`pages` is a map of independently validated page trees and `defaultPage` must name one entry. Each page may also declare a display `title` and typed route `params`. This complete pattern connects a table row to a typed detail route and its parameterized query:
 
 ```json
 {
-  "page": {
-    "root": "root",
-    "elements": {
-      "root": {
-        "type": "Container",
-        "props": { "direction": "column", "gap": "md" },
-        "children": ["title", "refresh"]
-      },
-      "title": { "type": "Heading", "props": { "text": "Ideas", "level": "h1" } },
-      "refresh": {
-        "type": "Button",
-        "props": { "label": "Refresh", "variant": "outline" },
-        "on": { "press": [{ "action": "app.refresh", "params": {} }] }
+  "models": {
+    "issue": {
+      "columns": {
+        "issueId": { "kind": "number" },
+        "title": { "kind": "string" },
+        "status": { "kind": "string" }
       }
     }
-  }
+  },
+  "queries": {
+    "allIssues": { "model": "issue" },
+    "issueDetail": {
+      "model": "issue",
+      "filter": { "issueId": { "$param": "issueId" } },
+      "limit": 1
+    }
+  },
+  "pages": {
+    "issues": {
+      "title": "Issues",
+      "root": "issuesTable",
+      "elements": {
+        "issuesTable": {
+          "type": "Table",
+          "props": {
+            "data": { "$state": "/queries/allIssues/data" },
+            "columns": [
+              { "key": "title", "label": "Issue" },
+              { "key": "status", "label": "Status", "kind": "badge" }
+            ],
+            "rowActions": [{
+              "label": "Open",
+              "actions": [{
+                "action": "app.navigate",
+                "params": {
+                  "page": "detail",
+                  "params": { "issueId": { "$row": "issueId" } }
+                }
+              }]
+            }]
+          }
+        }
+      }
+    },
+    "detail": {
+      "title": "Issue detail",
+      "params": { "issueId": { "kind": "number", "required": true } },
+      "root": "detail",
+      "elements": {
+        "detail": {
+          "type": "DetailList",
+          "props": {
+            "data": { "$state": "/queries/issueDetail/data/0" },
+            "fields": [{ "key": "title", "label": "Issue" }]
+          }
+        }
+      }
+    }
+  },
+  "defaultPage": "issues"
 }
 ```
 
-## Component catalog (all 18)
+Drawer variant: declare a route param on the containing page, set the Drawer `props.param` to that literal param name, and use the same `app.navigate` shape targeting that page with the row id assigned to the Drawer's param. The Drawer then opens from route state without a separate action contract.
+
+Param `kind` is `string` by default, or `number` / `boolean`; `required` defaults to false. The names `mode`, `apiUrl`, `apiKey`, `email`, and `name` are reserved. `/apps/<id>` renders `defaultPage`; `/apps/<id>/p/<page>?issueId=42` is the shareable deep link for another page. Browser navigation is client-side, so app state and polled data stay warm across page changes. A legacy definition containing singular `page` is accepted on read or write and normalized in memory to `pages.main` plus `defaultPage: "main"`; new writes and patches must use canonical `pages`.
+
+Within each page, `root` names one entry in its non-empty `elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element and Form/UI ids are page-local. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Container, Card, and Drawer). `watch` maps state paths to an action step or chain.
+
+## Component catalog (all 20)
 
 Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal prop value at any depth.
 
@@ -303,6 +377,8 @@ Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal pr
 | `Badge` | `text` | `text` is string or number; `tone: "neutral", "success", "active", "error", "info", "pending", "warning", or "paused"`. |
 | `Table` | `columns` | `data`, `loading`, `error`, `emptyMessage`, `rowActions`, `search`, `filters`; synced freshness uses ordinary date/badge columns; see below. |
 | `Form` | `id`, `fields`, `onSubmit` | `title`, `submitLabel`; see below. |
+| `Drawer` | `param` | `title`, `description`, `side: "right" or "left"`, `size: "sm", "md", "lg", or "xl"`; has the `default` child slot. |
+| `DetailList` | `fields` | `data`, `emptyMessage`, `columns: 1 or 2`; renders one record without edit controls. |
 
 Table details:
 
@@ -316,6 +392,14 @@ Form details:
 
 - `fields[]`: `{ name, label?, kind?, options?: string[], placeholder?, required? }`; `kind` is `string`, `text`, `number`, `boolean`, `date`, or `enum`, and enum fields need `options`.
 - Values live at `/forms/<formId>/<fieldName>`. `onSubmit` is an action chain.
+
+Drawer details:
+
+- `param` must name a param declared on the containing page. The drawer is open exactly when `/route/params/<param>` has a non-empty value, so its open state survives refresh and is shareable. Its children mount only while open; closing it clears that param with history replacement.
+
+DetailList details:
+
+- `fields[]`: `{ key, label?, kind?, tones? }`. Kinds reuse Table formatting (`text`, `string`, `number`, `boolean`, `date`, `badge`, `enum`) and add `code` for monospace raw or JSON values. Bind `data` to one record, commonly `/queries/<detailQuery>/data/0`.
 
 ## Layout & interactivity
 
@@ -342,6 +426,20 @@ SearchInput and Select are client-side controls: each needs a literal `id` and w
 }
 ```
 
+`visible` accepts a boolean, a `$state` truthiness binding, comparisons, and logical groups. Put exactly one comparison key in each condition object. The renderer evaluates the first matching key in fixed priority order (`eq`, `neq`, `gt`, `gte`, `lt`, `lte`; otherwise truthiness), so additional comparison keys in the same object are ignored. Use `$and` / `$or` arrays to combine conditions; `not` negates one condition:
+
+```json
+[
+  { "$state": "/route/params/issueId", "gt": 0 },
+  {
+    "$and": [
+      { "$state": "/route/page", "eq": "detail" },
+      { "$state": "/route/params/panel", "neq": "hidden" }
+    ]
+  }
+]
+```
+
 ## Bindings, sentinels, and action chains
 
 Use this exact query binding shape; do not invent `$query`, `$item`, or template strings:
@@ -360,6 +458,10 @@ Valid `$state` roots are:
 - `/forms/<formId>/...`, where a `Form` element has that literal `props.id`
 - `/ui/<id>/...`, where a SearchInput, Select, or Tabs element has that literal `props.id` (SearchInput and Select use `/value`; Tabs uses `/tab`)
 - `/actions/<declaredAction>/...`
+- `/route/page` for the active page name
+- `/route/params/<declaredParam>` for a param declared on the current page
+
+`/route` is mirrored as `{ page, params }`. Only declared params appear. Values are coerced by their declared kind: `number` becomes a number when possible; boolean strings `true`/`1` become true; failed number coercion remains the raw string.
 
 Only inside action-chain `params` (`on.<event>`, `Table.rowActions[].actions`, or `Form.onSubmit`) these scoped sentinels are valid, recursively inside objects and arrays:
 
@@ -379,6 +481,7 @@ An action-chain step is `{ "action": "<type>", "params": {...} }`. Available act
 - `app.mutate`: `{ model, op, rowId?, values?, formId? }`, where `op` is `"create"`, `"update"`, or `"delete"`. `update`/`delete` require `rowId` (usually `{ "$row": "id" }`); literal `values` keys must be model columns. Successful mutation refetches all queries on that model.
 - `app.refresh`: `{ query? }`; omit `query` to refetch all, or name a declared query.
 - `app.action`: `{ name, input? }`; `name` must be declared in definition `actions`. Use a sync-kind action for a Refresh control. For a task-kind row action, pass whole-row context with `input: { issue: { "$row": "" } }`.
+- `app.navigate`: `{ page, params? }`; `page` must be declared, supplied keys must be params of the target page, and every required target param must be supplied. `params` replace the current route params wholesale and may contain action sentinels. Navigation pushes history, so browser Back returns to the previous page/params; only `mode` is preserved automatically.
 - `swarm.sdk`: `{ sdk, args? }`; invokes a catalog-supported Swarm browser SDK method with the viewer's bearer.
 - `swarm.call`: `{ method, endpoint: "/api/...", body? }`, where `method` is `"GET"`, `"POST"`, `"PUT"`, `"DELETE"`, or `"PATCH"`; raw authenticated API call.
 
@@ -390,9 +493,11 @@ An action-chain step is `{ "action": "<type>", "params": {...} }`. Available act
 - object keys merge recursively;
 - arrays and scalar values replace;
 - `null` deletes a key;
-- exception: every supplied `page.elements.<id>`, `actions.<name>`, `models.<name>.columns.<col>`, and `models.<name>.sources.<src>` value is atomic and replaces that complete stored element/action/column/source; `null` deletes it.
+- exception: every supplied `pages.<page>.elements.<id>`, `pages.<page>.params.<param>`, `actions.<name>`, `models.<name>.columns.<col>`, and `models.<name>.sources.<src>` value is atomic and replaces that complete stored element/action/column/source/param declaration; `null` deletes it.
 
-Because elements, actions, columns, and sources are atomic, include the complete desired object when changing one. For example, changing only a Table's `emptyMessage` requires sending its full `{ "type": "Table", "props": ... }` element; changing a script source's `args.state` requires sending its complete `{ "connector", "joinKey", "scriptId", "args" }` source definition. The merged result is validated as a whole; on failure, read `issues[]`, correct the paths, and retry without assuming anything was written.
+`pages.<page>: null` deletes a page, except the current `defaultPage` cannot be deleted. `root`, `title`, and top-level `defaultPage` use ordinary merge semantics. A top-level `page` patch is rejected with guidance to patch `pages.<name>` instead.
+
+Because elements, param declarations, actions, columns, and sources are atomic, include the complete desired object when changing one. For example, changing only a Table's `emptyMessage` requires sending its full `{ "type": "Table", "props": ... }` element; changing a script source's `args.state` requires sending its complete `{ "connector", "joinKey", "scriptId", "args" }` source definition. The merged result is validated as a whole; on failure, read `issues[]`, correct the paths, and retry without assuming anything was written.
 
 ```json
 {
@@ -407,9 +512,11 @@ Because elements, actions, columns, and sources are atomic, include the complete
       }
     },
     "queries": { "openIdeas": null },
-    "page": {
-      "elements": {
-        "title": { "type": "Heading", "props": { "text": "Prioritized ideas", "level": "h1" } }
+    "pages": {
+      "main": {
+        "elements": {
+          "title": { "type": "Heading", "props": { "text": "Prioritized ideas", "level": "h1" } }
+        }
       }
     }
   }
@@ -439,61 +546,64 @@ Create this with `app-upsert`:
     "actions": {
       "triage": { "kind": "task", "prompt": "Review current ideas and recommend the next one to pursue" }
     },
-    "page": {
-      "root": "root",
-      "elements": {
-        "root": {
-          "type": "Container",
-          "props": { "direction": "column", "gap": "lg" },
-          "children": ["heading", "formCard", "ideasCard", "triage"]
-        },
-        "heading": { "type": "Heading", "props": { "text": "Ideas", "level": "h1" } },
-        "formCard": {
-          "type": "Card",
-          "props": { "title": "Add an idea" },
-          "children": ["ideaForm"]
-        },
-        "ideaForm": {
-          "type": "Form",
-          "props": {
-            "id": "newIdea",
-            "fields": [{ "name": "title", "label": "Title", "required": true }],
-            "submitLabel": "Add",
-            "onSubmit": [{
-              "action": "app.mutate",
-              "params": { "model": "idea", "op": "create", "values": { "$form": "" } }
-            }]
+    "pages": {
+      "main": {
+        "root": "root",
+        "elements": {
+          "root": {
+            "type": "Container",
+            "props": { "direction": "column", "gap": "lg" },
+            "children": ["heading", "formCard", "ideasCard", "triage"]
+          },
+          "heading": { "type": "Heading", "props": { "text": "Ideas", "level": "h1" } },
+          "formCard": {
+            "type": "Card",
+            "props": { "title": "Add an idea" },
+            "children": ["ideaForm"]
+          },
+          "ideaForm": {
+            "type": "Form",
+            "props": {
+              "id": "newIdea",
+              "fields": [{ "name": "title", "label": "Title", "required": true }],
+              "submitLabel": "Add",
+              "onSubmit": [{
+                "action": "app.mutate",
+                "params": { "model": "idea", "op": "create", "values": { "$form": "" } }
+              }]
+            }
+          },
+          "ideasCard": {
+            "type": "Card",
+            "props": { "title": "All ideas" },
+            "children": ["ideasTable"]
+          },
+          "ideasTable": {
+            "type": "Table",
+            "props": {
+              "data": { "$state": "/queries/allIdeas/data" },
+              "loading": { "$state": "/queries/allIdeas/loading" },
+              "error": { "$state": "/queries/allIdeas/error" },
+              "columns": [
+                { "key": "title", "label": "Title" },
+                { "key": "status", "label": "Status", "kind": "badge", "tones": { "open": "info", "done": "success" } }
+              ],
+              "rowActions": [{
+                "label": "Delete",
+                "variant": "destructive-outline",
+                "actions": [{ "action": "app.mutate", "params": { "model": "idea", "op": "delete", "rowId": { "$row": "id" } } }]
+              }]
+            }
+          },
+          "triage": {
+            "type": "Button",
+            "props": { "label": "Ask swarm to triage", "variant": "secondary" },
+            "on": { "press": [{ "action": "app.action", "params": { "name": "triage" } }] }
           }
-        },
-        "ideasCard": {
-          "type": "Card",
-          "props": { "title": "All ideas" },
-          "children": ["ideasTable"]
-        },
-        "ideasTable": {
-          "type": "Table",
-          "props": {
-            "data": { "$state": "/queries/allIdeas/data" },
-            "loading": { "$state": "/queries/allIdeas/loading" },
-            "error": { "$state": "/queries/allIdeas/error" },
-            "columns": [
-              { "key": "title", "label": "Title" },
-              { "key": "status", "label": "Status", "kind": "badge", "tones": { "open": "info", "done": "success" } }
-            ],
-            "rowActions": [{
-              "label": "Delete",
-              "variant": "destructive-outline",
-              "actions": [{ "action": "app.mutate", "params": { "model": "idea", "op": "delete", "rowId": { "$row": "id" } } }]
-            }]
-          }
-        },
-        "triage": {
-          "type": "Button",
-          "props": { "label": "Ask swarm to triage", "variant": "secondary" },
-          "on": { "press": [{ "action": "app.action", "params": { "name": "triage" } }] }
         }
       }
-    }
+    },
+    "defaultPage": "main"
   }
 }
 ```
