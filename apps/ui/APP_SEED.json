@@ -8,11 +8,7 @@
         },
         "status": {
           "kind": "enum",
-          "enum": [
-            "open",
-            "in_progress",
-            "done"
-          ],
+          "enum": ["open", "in_progress", "done"],
           "default": "open"
         },
         "votes": {
@@ -44,11 +40,7 @@
             "direction": "column",
             "gap": "lg"
           },
-          "children": [
-            "title",
-            "newIdeaCard",
-            "ideasCard"
-          ]
+          "children": ["title", "newIdeaCard", "ideasCard"]
         },
         "title": {
           "type": "Heading",
@@ -63,9 +55,7 @@
             "title": "Add an idea",
             "description": "New ideas land in the tracker as open."
           },
-          "children": [
-            "newIdeaForm"
-          ]
+          "children": ["newIdeaForm"]
         },
         "newIdeaForm": {
           "type": "Form",
@@ -106,9 +96,7 @@
           "props": {
             "title": "All ideas"
           },
-          "children": [
-            "ideasTable"
-          ]
+          "children": ["ideasTable"]
         },
         "ideasTable": {
           "type": "Table",
