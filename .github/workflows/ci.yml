@@ -37,16 +37,242 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run Biome linter
-        run: bun run lint
+        id: lint
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run lint
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
 
       - name: Run TypeScript type check
-        run: bun run tsc:check
+        id: tsc
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run tsc:check
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
 
       - name: Run structural consistency lint
+        id: structural-lint
         continue-on-error: true
         env:
           KONSISTENT_NO_UPDATE_CHECK: "true"
-        run: bun run lint:structure
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run lint:structure
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Type check evals
+        id: evals-tsc
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run tsc:check
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+        working-directory: apps/evals
+
+      - name: Test evals
+        id: evals-test
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun test
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+        working-directory: apps/evals
+
+      - name: Build evals UI
+        id: evals-ui-build
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run ui:build
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+        working-directory: apps/evals
+
+      - name: Check worker/API DB boundary
+        id: db-boundary
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bash scripts/check-db-boundary.sh
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Check API_KEY env-access boundary
+        id: api-key-boundary
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bash scripts/check-api-key-boundary.sh
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Check RBAC authorization boundary
+        id: rbac-boundary
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bash scripts/check-rbac-boundary.sh
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Check dependency graph (worker/API boundary)
+        id: dependency-graph
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run check:dep-graph
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Check DB audit columns
+        id: audit-columns
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bash scripts/check-audit-columns.sh
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Check SDK tool registration
+        id: sdk-tool-registration
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun scripts/check-sdk-tool-registration.ts
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Check RBAC coverage (tools, verbs, routes)
+        id: rbac-coverage
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun scripts/check-rbac-coverage.ts
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      # Main must report the same series used as PR baselines.
+      # See agent-fs docs/ci-timings.md; reporting is best-effort and never blocks CI.
+      - name: Report check timings to ci-timings
+        if: always() && github.event_name == 'push'
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.SWARM_CI_TIMINGS_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || 'null' }}
+          LINT_DURATION: ${{ steps.lint.outputs.duration_ms || '0' }}
+          LINT_STATUS: ${{ steps.lint.outputs.status || 'skipped' }}
+          TSC_DURATION: ${{ steps.tsc.outputs.duration_ms || '0' }}
+          TSC_STATUS: ${{ steps.tsc.outputs.status || 'skipped' }}
+          EVALS_TSC_DURATION: ${{ steps.evals-tsc.outputs.duration_ms || '0' }}
+          EVALS_TSC_STATUS: ${{ steps.evals-tsc.outputs.status || 'skipped' }}
+          EVALS_TEST_DURATION: ${{ steps.evals-test.outputs.duration_ms || '0' }}
+          EVALS_TEST_STATUS: ${{ steps.evals-test.outputs.status || 'skipped' }}
+          EVALS_UI_BUILD_DURATION: ${{ steps.evals-ui-build.outputs.duration_ms || '0' }}
+          EVALS_UI_BUILD_STATUS: ${{ steps.evals-ui-build.outputs.status || 'skipped' }}
+          STRUCTURAL_LINT_DURATION: ${{ steps.structural-lint.outputs.duration_ms || '0' }}
+          STRUCTURAL_LINT_STATUS: ${{ steps.structural-lint.outputs.status || 'skipped' }}
+          DB_BOUNDARY_DURATION: ${{ steps.db-boundary.outputs.duration_ms || '0' }}
+          DB_BOUNDARY_STATUS: ${{ steps.db-boundary.outputs.status || 'skipped' }}
+          API_KEY_BOUNDARY_DURATION: ${{ steps.api-key-boundary.outputs.duration_ms || '0' }}
+          API_KEY_BOUNDARY_STATUS: ${{ steps.api-key-boundary.outputs.status || 'skipped' }}
+          RBAC_BOUNDARY_DURATION: ${{ steps.rbac-boundary.outputs.duration_ms || '0' }}
+          RBAC_BOUNDARY_STATUS: ${{ steps.rbac-boundary.outputs.status || 'skipped' }}
+          DEPENDENCY_GRAPH_DURATION: ${{ steps.dependency-graph.outputs.duration_ms || '0' }}
+          DEPENDENCY_GRAPH_STATUS: ${{ steps.dependency-graph.outputs.status || 'skipped' }}
+          AUDIT_COLUMNS_DURATION: ${{ steps.audit-columns.outputs.duration_ms || '0' }}
+          AUDIT_COLUMNS_STATUS: ${{ steps.audit-columns.outputs.status || 'skipped' }}
+          SDK_TOOL_REGISTRATION_DURATION: ${{ steps.sdk-tool-registration.outputs.duration_ms || '0' }}
+          SDK_TOOL_REGISTRATION_STATUS: ${{ steps.sdk-tool-registration.outputs.status || 'skipped' }}
+          RBAC_COVERAGE_DURATION: ${{ steps.rbac-coverage.outputs.duration_ms || '0' }}
+          RBAC_COVERAGE_STATUS: ${{ steps.rbac-coverage.outputs.status || 'skipped' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then echo "SWARM_CI_TIMINGS_TOKEN not available; skipping"; exit 0; fi
+          BOUNDARIES_DURATION=$((STRUCTURAL_LINT_DURATION + DB_BOUNDARY_DURATION + API_KEY_BOUNDARY_DURATION + RBAC_BOUNDARY_DURATION + DEPENDENCY_GRAPH_DURATION + AUDIT_COLUMNS_DURATION + SDK_TOOL_REGISTRATION_DURATION + RBAC_COVERAGE_DURATION))
+          BOUNDARIES_STATUS=success
+          for status in "$STRUCTURAL_LINT_STATUS" "$DB_BOUNDARY_STATUS" "$API_KEY_BOUNDARY_STATUS" "$RBAC_BOUNDARY_STATUS" "$DEPENDENCY_GRAPH_STATUS" "$AUDIT_COLUMNS_STATUS" "$SDK_TOOL_REGISTRATION_STATUS" "$RBAC_COVERAGE_STATUS"; do
+            if [ "$status" = failure ]; then BOUNDARIES_STATUS=failure; break; fi
+            if [ "$status" = skipped ]; then BOUNDARIES_STATUS=skipped; fi
+          done
+          BODY=$(jq -n \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg branch "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" \
+            --arg sha "$HEAD_SHA" \
+            --arg base "$GITHUB_BASE_REF" \
+            --argjson pr "$PR_NUMBER" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg wf "$GITHUB_WORKFLOW" \
+            --arg event "$GITHUB_EVENT_NAME" \
+            --arg actor "$GITHUB_ACTOR" \
+            --argjson lintDur "$LINT_DURATION" --arg lintStatus "$LINT_STATUS" \
+            --argjson tscDur "$TSC_DURATION" --arg tscStatus "$TSC_STATUS" \
+            --argjson evalsTscDur "$EVALS_TSC_DURATION" --arg evalsTscStatus "$EVALS_TSC_STATUS" \
+            --argjson evalsTestDur "$EVALS_TEST_DURATION" --arg evalsTestStatus "$EVALS_TEST_STATUS" \
+            --argjson evalsUiBuildDur "$EVALS_UI_BUILD_DURATION" --arg evalsUiBuildStatus "$EVALS_UI_BUILD_STATUS" \
+            --argjson boundariesDur "$BOUNDARIES_DURATION" --arg boundariesStatus "$BOUNDARIES_STATUS" \
+            '{repo:$repo, branch:$branch, sha:$sha, baseBranch:$base, prNumber:$pr,
+              runId:$runId, runAttempt:$attempt, runUrl:$url, workflow:$wf,
+              event:$event, actor:$actor,
+              actions:[
+                {name:"lint", group:"checks", durationMs:$lintDur, status:$lintStatus},
+                {name:"tsc:check", group:"checks", durationMs:$tscDur, status:$tscStatus},
+                {name:"evals:tsc", group:"checks", durationMs:$evalsTscDur, status:$evalsTscStatus},
+                {name:"evals:test", group:"checks", durationMs:$evalsTestDur, status:$evalsTestStatus},
+                {name:"evals:ui-build", group:"checks", durationMs:$evalsUiBuildDur, status:$evalsUiBuildStatus},
+                {name:"checks:boundaries", group:"checks", durationMs:$boundariesDur, status:$boundariesStatus}
+              ]}')
+          curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
   test:
     name: Run Tests
@@ -65,6 +291,47 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run tests
+        id: tests
         # apps/evals/ excluded from the root run via bunfig.toml pathIgnorePatterns
         # (separate bun package with its own deps + CI test step).
-        run: bun run test:root -- --timeout 10000
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun run test:root -- --timeout 10000
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      # Main provides the baseline for PR comparisons. See agent-fs docs/ci-timings.md.
+      - name: Report test timing to ci-timings
+        if: always() && github.event_name == 'push'
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.SWARM_CI_TIMINGS_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || 'null' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then echo "SWARM_CI_TIMINGS_TOKEN not available; skipping"; exit 0; fi
+          BODY=$(jq -n \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg branch "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" \
+            --arg sha "$HEAD_SHA" \
+            --arg base "$GITHUB_BASE_REF" \
+            --argjson pr "$PR_NUMBER" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg wf "$GITHUB_WORKFLOW" \
+            --arg event "$GITHUB_EVENT_NAME" \
+            --arg actor "$GITHUB_ACTOR" \
+            --argjson dur "${{ steps.tests.outputs.duration_ms || '0' }}" \
+            --arg status "${{ steps.tests.outputs.status || 'skipped' }}" \
+            '{repo:$repo, branch:$branch, sha:$sha, baseBranch:$base, prNumber:$pr,
+              runId:$runId, runAttempt:$attempt, runUrl:$url, workflow:$wf,
+              event:$event, actor:$actor,
+              actions:[{name:"test:root", group:"tests", durationMs:$dur, status:$status}]}')
+          curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"

@@ -105,22 +105,22 @@ When enabled via `ADDITIVE_SLACK=true`, thread replies that do NOT @mention the 
 The legacy per-task renderer remains the default. Set `SLACK_RENDER_V2=true` to opt in to the v2 preview, where each Slack thread owns exactly one engine message: a task tree that is updated in place with `chat.update`. Later asks append to the same tree, delegated tasks stay nested under their parent, and task IDs remain clickable:
 
 ```
-🧵 Thread title · 44m
-├─ ✅ First ask · 7m51s · task-id
-├─ ⏳ Current ask · 8m05s · task-id
-│  └─ ✅ Researcher · 8m24s · task-id
-└─ ✅ Completed ask · 12m · task-id → result
+🧵 worked for 44m
+ ├─ ✅ First ask · 7m51s · task-id
+ ├─ ⏳ Current ask · 8m05s · task-id · latest progress
+ │  └─ ✅ Researcher · 8m24s · task-id
+ └─ ✅ Completed ask · 12m · task-id
 ```
 
-The tree contains status, elapsed time, hierarchy, task links, and links to completed results. It does not contain worker output or a footer. Updates are debounced and rate-limit retries honor Slack backoff.
+The tree is rendered as footer-weight context blocks and contains status, elapsed time, hierarchy, task links, and the latest bounded progress for active tasks. It does not repeat worker output or cross-link Slack messages: keeping message permalinks out of the tree prevents Slack from producing noisy link previews. Updates are debounced, link/media unfurls are disabled, and rate-limit retries honor Slack backoff.
 
 ### Outcome Cards and Message Provenance
 
-Each completed Slack ask gets one compact outcome card. The renderer writes it once with `chat.startStream`, about three `chat.appendStream` calls, and `chat.stopStream`; it is never passed to `chat.update`, so Slack does not stamp it as edited. The card links back to the tree, and the tree links to the card.
+Each completed Slack ask gets one outcome card containing the full multi-paragraph Markdown result, bounded only by Slack's presentation limit with a link to the full task when truncation is required. If the agent already delivered the result with `slack-reply`, the outcome card collapses to a compact completion instead of repeating that message. The renderer re-reads this delivery marker before finalizing, so a retry cannot preserve stale duplicate content. Outcome cards do not link back to the tree, which avoids an otherwise redundant Slack permalink unfurl.
 
-Raw worker output is not automatically relayed into Slack. Additional messages only appear when an agent explicitly calls `slack-reply`, `slack-post`, or `slack-start-thread`. Those tools accept optional Block Kit `blocks`; when omitted they generate a mrkdwn section. Their compact context footer contains only useful provenance: agent, task, and a link back to the tree when available.
+Terminal task output is automatically delivered through the thread's outcome card. No additional relay message is created: extra messages only appear when an agent explicitly calls `slack-reply`, `slack-post`, or `slack-start-thread`. When `slack-reply` is used, the outcome card is compacted instead of duplicating that explicit reply. These tools accept optional Block Kit `blocks`; when omitted they generate a mrkdwn section. Their compact context footer contains the originating agent and task without a Slack-message permalink.
 
-Tree, outcome, and explicit agent message timestamps are persisted in `slack_messages`, so the renderer can reuse and cross-link messages after a restart.
+Tree, outcome, and explicit agent message timestamps are persisted in `slack_messages`, so the renderer can reuse messages after a restart.
 
 ### Opt In to the Renderer
 
@@ -128,7 +128,7 @@ Leave `SLACK_RENDER_V2` unset or set it to `false` to use the default legacy per
 
 ### Rich Block Kit Messages
 
-The v2 tree is plain `mrkdwn`, which keeps every task ID clickable. Outcome and explicit agent messages use [Block Kit](https://api.slack.com/block-kit) only where it adds structure:
+The v2 tree uses `mrkdwn` inside footer-weight context blocks, which keeps every task ID clickable. Outcome and explicit agent messages use [Block Kit](https://api.slack.com/block-kit) where it adds structure:
 
 - **Context blocks** for the compact provenance footer
 - **Section blocks** for explicitly supplied agent content

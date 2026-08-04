@@ -41,6 +41,7 @@ import {
 import { findUserById } from "../be/users";
 import { can, type RbacPrincipal, type RbacResource } from "../rbac";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
 import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import {
   type AgentTask,
@@ -89,6 +90,12 @@ const listTasks = route({
     createdBefore: z.string().datetime().optional(),
     /** Comma-separated source filter (e.g. `ui,slack`). Omit to include all. */
     source: z.string().optional(),
+    /**
+     * When present, restrict results to tasks where `agent_tasks.requestedByUserId`
+     * equals this value. The sentinel `none` matches rows where it IS NULL
+     * instead. Omit to return every task regardless of requester.
+     */
+    requestedByUserId: z.string().min(1).optional(),
     /** `createdAt` enables stable time-axis paging; default preserves table freshness ordering. */
     orderBy: z.enum(["lastUpdatedAt", "createdAt"]).optional(),
     limit: z.coerce.number().int().optional(),
@@ -345,6 +352,7 @@ const finishTask = route({
     status: z.enum(["completed", "failed"]),
     output: z.string().optional(),
     failureReason: z.string().optional(),
+    force: z.boolean().optional(),
   }),
   auth: { apiKey: true, agentId: true },
   responses: {
@@ -352,6 +360,7 @@ const finishTask = route({
     400: { description: "Invalid status" },
     403: { description: "Not assigned to this agent" },
     404: { description: "Task not found" },
+    409: { description: "Differing terminal result text was discarded" },
   },
 });
 
@@ -553,6 +562,11 @@ export async function handleTasks(
       createdAfter: parsed.query.createdAfter || undefined,
       createdBefore: parsed.query.createdBefore || undefined,
       source,
+      requestedByUserId:
+        parsed.query.requestedByUserId && parsed.query.requestedByUserId !== "none"
+          ? parsed.query.requestedByUserId
+          : undefined,
+      requestedByUserIdIsNull: parsed.query.requestedByUserId === "none" || undefined,
       orderBy: parsed.query.orderBy,
       limit: parsed.query.limit,
       offset: parsed.query.offset,
@@ -1045,8 +1059,14 @@ export async function handleTasks(
         return { error: "Task is assigned to another agent", status: 403 };
       }
 
+      const terminalResultGuard = guardTerminalTaskResultWrite(task, parsed.body);
+      if (terminalResultGuard.handled) {
+        const { handled: _handled, ...guardResult } = terminalResultGuard;
+        return { ...guardResult, alreadyFinished: true };
+      }
+
       if (task.status !== "in_progress") {
-        return { task, alreadyFinished: true };
+        return { success: true, task, alreadyFinished: true };
       }
 
       const wasPaused = task.wasPaused;
@@ -1081,6 +1101,18 @@ export async function handleTasks(
 
     if ("error" in result && result.error) {
       jsonError(res, result.error, (result as { status?: number }).status ?? 500);
+      return true;
+    }
+
+    if ("success" in result && result.success === false) {
+      json(
+        res,
+        {
+          ...result,
+          error: "message" in result ? result.message : "Terminal result write was discarded",
+        },
+        409,
+      );
       return true;
     }
 
@@ -1127,6 +1159,11 @@ export async function handleTasks(
       success: true,
       alreadyFinished: "alreadyFinished" in result ? result.alreadyFinished : false,
       task: result.task,
+      ...("message" in result ? { message: result.message } : {}),
+      ...("wasNoOp" in result && result.wasNoOp ? { wasNoOp: true } : {}),
+      ...("wasForcedOverwrite" in result && result.wasForcedOverwrite
+        ? { wasForcedOverwrite: true }
+        : {}),
     });
     return true;
   }

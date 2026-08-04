@@ -32,6 +32,7 @@ let createAssistantFn: typeof import("../slack/assistant").createAssistant;
 let registerMessageHandlerFn: typeof import("../slack/handlers").registerMessageHandler;
 
 let createTaskWithSiblingAwarenessSpy: any;
+let getAllAgentsSpy: any;
 let getAgentWorkingOnThreadSpy: any;
 let getLeadAgentSpy: any;
 let getMostRecentTaskInThreadSpy: any;
@@ -58,6 +59,7 @@ function restoreEnvValue(key: keyof typeof originalEnv): void {
 
 function installSpyImplementations(): void {
   createTaskWithSiblingAwarenessSpy.mockImplementation(() => ({ id: "mock-task-id-prod-path" }));
+  getAllAgentsSpy.mockImplementation(() => []);
   getAgentWorkingOnThreadSpy.mockImplementation(() => null);
   getLeadAgentSpy.mockImplementation(() => ({
     id: "lead-prod-test-1",
@@ -81,6 +83,7 @@ beforeAll(async () => {
     siblingAwarenessModule,
     "createTaskWithSiblingAwareness",
   );
+  getAllAgentsSpy = spyOn(dbModule, "getAllAgents");
   getAgentWorkingOnThreadSpy = spyOn(dbModule, "getAgentWorkingOnThread");
   getLeadAgentSpy = spyOn(dbModule, "getLeadAgent");
   getMostRecentTaskInThreadSpy = spyOn(dbModule, "getMostRecentTaskInThread");
@@ -98,6 +101,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   createTaskWithSiblingAwarenessSpy.mockClear();
+  getAllAgentsSpy.mockClear();
   getAgentWorkingOnThreadSpy.mockClear();
   getLeadAgentSpy.mockClear();
   getMostRecentTaskInThreadSpy.mockClear();
@@ -194,6 +198,9 @@ describe("assistant.ts — userMessage production-path co-mention guard", () => 
     });
 
     expect(createTaskWithSiblingAwarenessSpy).toHaveBeenCalledTimes(1);
+    expect(createTaskWithSiblingAwarenessSpy.mock.calls[0]?.[1]).toMatchObject({
+      slackTriggerMessageTs: "1000000001.000002",
+    });
   });
 
   test("does NOT spawn a task when message @-mentions a human user but not our bot", async () => {
@@ -297,6 +304,9 @@ describe("registerMessageHandler — assistant_thread co-mention guard (producti
     });
 
     expect(createTaskWithSiblingAwarenessSpy).toHaveBeenCalledTimes(1);
+    expect(createTaskWithSiblingAwarenessSpy.mock.calls[0]?.[1]).toMatchObject({
+      slackTriggerMessageTs: delivery.ts,
+    });
   });
 
   test("does NOT spawn a task when assistant_thread message @-mentions a human (not our bot)", async () => {

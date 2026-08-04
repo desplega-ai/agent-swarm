@@ -26,7 +26,7 @@ export const registerKvSetTool = (server: McpServer) => {
     {
       title: "KV Set",
       description:
-        "Write a key in the swarm KV store. Upserts atomically. Namespace defaults to your current context. Use `expiresInSec` for opt-in TTL (default: never expires). 2 MiB body cap.",
+        "Write a key in the swarm KV store. Each replacement is atomic but unconditional: there is no compare-and-swap, so concurrent read-modify-write callers can lose updates. Namespace defaults to your current context. Use `expiresInSec` for opt-in TTL (default: never expires). 2 MiB body cap.",
       annotations: { idempotentHint: true },
 
       inputSchema: z.object({

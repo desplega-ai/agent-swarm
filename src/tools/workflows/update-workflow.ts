@@ -3,7 +3,13 @@ import { z } from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getWorkflow, updateWorkflow } from "@/be/db";
-import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import {
+  createToolRegistrar,
+  findLongScriptTimeoutHint,
+  swarmToolOutputSchema,
+  toolErr,
+  toolOk,
+} from "@/tools/utils";
 import {
   AssetKeySchema,
   CooldownConfigSchema,
@@ -11,6 +17,7 @@ import {
   TriggerConfigSchema,
   WorkflowDefinitionSchema,
 } from "@/types";
+import { getExecutorRegistry } from "@/workflows";
 import { validateDefinition } from "@/workflows/definition";
 import { snapshotWorkflow } from "@/workflows/version";
 
@@ -105,7 +112,7 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
 
         // Validate new definition if provided
         if (definition) {
-          const validation = validateDefinition(definition);
+          const validation = validateDefinition(definition, getExecutorRegistry());
           if (!validation.valid) {
             return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
           }
@@ -134,9 +141,16 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
         if (!workflow) {
           return toolErr(`Workflow not found: ${id}`);
         }
+        const longScriptTimeoutHint = definition
+          ? findLongScriptTimeoutHint(definition.nodes)
+          : undefined;
         return toolOk(`Updated workflow "${workflow.name}".`, {
           details: `Updated workflow "${workflow.name}" (${id}). Version ${version.version} snapshot created.`,
-          data: { workflow, versionCreated: version.version },
+          data: {
+            workflow,
+            versionCreated: version.version,
+            ...(longScriptTimeoutHint ? { longScriptTimeoutHint } : {}),
+          },
         });
       } catch (err) {
         return toolErr(String(err));

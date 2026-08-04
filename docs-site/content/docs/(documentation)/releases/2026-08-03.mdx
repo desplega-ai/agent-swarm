@@ -1,0 +1,98 @@
+---
+title: "Release Notes — Week of July 27 to August 3, 2026"
+description: "Mid-run task steering across all providers, a single OpenRouter gateway, an operator configuration page, honest MCP tool results, and 61 commits across 4 themes."
+---
+
+## Highlights
+
+**61 commits** across **4 themes** landed this week (v1.121.0 → v1.126.0). The headline: you can now steer a running task mid-flight, every OpenRouter consumer routes through one configurable gateway, and the operator surface gets its own configuration page.
+
+### Steer a running agent task mid-flight
+
+Long-running agent tasks are no longer fire-and-forget. You can now redirect, correct, or queue instructions to a running task across every harness provider — pi, claude, opencode, and codex — without killing and restarting it. Codex queue steering delivers guidance at the next tool-call boundary via harness-side lifecycle hooks, and the runner now reliably returns the agent's true final message as task output.
+
+What this means in practice: a task that takes a wrong turn can be corrected in real time rather than discarded. Tasks are now a collaborative conversation, not a commit-and-pray.
+
+See [#1014](https://github.com/desplega-ai/agent-swarm/pull/1014), [#1036](https://github.com/desplega-ai/agent-swarm/pull/1036), [#1039](https://github.com/desplega-ai/agent-swarm/pull/1039), [#1042](https://github.com/desplega-ai/agent-swarm/pull/1042), and [#1054](https://github.com/desplega-ai/agent-swarm/pull/1054).
+
+### Single OpenRouter gateway for all consumers
+
+`OPENROUTER_BASE_URL` now routes every OpenRouter consumer — summarizers, raters, raw-llm workflow nodes, all provider adapters — through one configurable endpoint. Point your stack at a proxy or self-hosted endpoint once instead of patching each consumer individually.
+
+See [#1010](https://github.com/desplega-ai/agent-swarm/pull/1010).
+
+### Operator configuration page at /settings/configuration
+
+All swarm configuration now lives in one place. Grouped cards with editable rows replace env-file hunting. The page surfaces every config key the operator needs to touch, with immediate save and validation.
+
+See [#1017](https://github.com/desplega-ai/agent-swarm/pull/1017).
+
+### Honest MCP tool results
+
+A new `SwarmToolResult` contract surfaces real success and error state from tool calls instead of opaque wrappers. Scripts can finally branch on what actually happened — a tool that returned an error produces a structured error result, not a silent failure. Oversized results are bounded and spilled to KV to protect context windows.
+
+See [#1023](https://github.com/desplega-ai/agent-swarm/pull/1023), [#1027](https://github.com/desplega-ai/agent-swarm/pull/1027), and [#1032](https://github.com/desplega-ai/agent-swarm/pull/1032).
+
+### Live model catalog + dynamic UI picker
+
+A live endpoint now serves the current model catalog, driving a dynamic model picker in the UI that always reflects what's actually available. No more stale dropdowns.
+
+See [#1022](https://github.com/desplega-ai/agent-swarm/pull/1022).
+
+### Mature memory retrieval on by default
+
+Graph-expansion and mature retrieval flags are enabled out of the box. New installs get richer recall without additional configuration.
+
+See [#1002](https://github.com/desplega-ai/agent-swarm/pull/1002).
+
+## Improvements
+
+- **Codex queue steering via harness lifecycle hooks** — Steering extends to codex by delivering queued guidance at the next tool-call boundary through harness hooks. See [#1036](https://github.com/desplega-ai/agent-swarm/pull/1036).
+
+- **Script-workflow agent-task steps wait for terminal status** — `ctx.step.agentTask` now blocks until the task reaches a terminal state, removing flaky early-returns from script workflows. See [#1059](https://github.com/desplega-ai/agent-swarm/pull/1059).
+
+- **Workflow definition lifecycle tracking** — Workflow definitions are now versioned and lifecycle-tracked alongside their runs. See [#1040](https://github.com/desplega-ai/agent-swarm/pull/1040).
+
+- **Searchable Lucide avatar picker** — Agent avatars get an expanded, searchable Lucide icon picker with normalized search and result caps. See [#1011](https://github.com/desplega-ai/agent-swarm/pull/1011).
+
+- **Activation-funnel telemetry** — Previously blind spots in the install-to-activation funnel are now instrumented. See [#1024](https://github.com/desplega-ai/agent-swarm/pull/1024).
+
+- **Persistent Slack thread tree** — Ephemeral Slack task relays are replaced with a durable, navigable thread tree. See [#1056](https://github.com/desplega-ai/agent-swarm/pull/1056).
+
+- **worker-slim Docker target** — A slimmer worker image with npx-skills installs and archil removal. See [#1021](https://github.com/desplega-ai/agent-swarm/pull/1021).
+
+- **gh-stack extension preinstalled** — Workers ship with the official gh-stack extension. See [#1055](https://github.com/desplega-ai/agent-swarm/pull/1055).
+
+- **Boot gated on control-plane readiness** — Workers wait for the control-plane API before booting, eliminating cold-start races. See [#1060](https://github.com/desplega-ai/agent-swarm/pull/1060).
+
+- **65% faster CI root tests** — Root test wall time cut by 65%. See [#1062](https://github.com/desplega-ai/agent-swarm/pull/1062).
+
+- **Third-party Actions pinned to commit SHAs** — Supply-chain safety through SHA pinning. See [#1048](https://github.com/desplega-ai/agent-swarm/pull/1048).
+
+## Bug Fixes
+
+- **Runner returns the agent's true final message** — Final output is delivered as task output; buffered output is scrubbed to prevent stale residue from leaking across runs. See [#1042](https://github.com/desplega-ai/agent-swarm/pull/1042) and [#1054](https://github.com/desplega-ai/agent-swarm/pull/1054).
+
+- **MCP: bound oversized results + preserve full SDK responses** — Oversized tool results are bounded and spilled to KV; full SDK responses are preserved by the tool layer. See [#1032](https://github.com/desplega-ai/agent-swarm/pull/1032) and [#1037](https://github.com/desplega-ai/agent-swarm/pull/1037).
+
+- **Script safety: KV CRUD + unknown args** — KV CRUD operations are safe from scripts; unknown top-level `ctx.api` args and repeated array params are rejected. See [#1043](https://github.com/desplega-ai/agent-swarm/pull/1043) and [#1049](https://github.com/desplega-ai/agent-swarm/pull/1049).
+
+- **Slack thread tree hardening** — Truncated tree delivered before cleanup, v2 historical backfill prevented, v2 thread rendering finalized, card-link unfurls suppressed. See [#1020](https://github.com/desplega-ai/agent-swarm/pull/1020), [#1063](https://github.com/desplega-ai/agent-swarm/pull/1063), [#1065](https://github.com/desplega-ai/agent-swarm/pull/1065), and [#1070](https://github.com/desplega-ai/agent-swarm/pull/1070).
+
+- **Devin health-check moved to v3** — Points the Devin health-check at v3 instead of the deprecated v1 API. See [#1016](https://github.com/desplega-ai/agent-swarm/pull/1016).
+
+- **Workflow run list bounded** — Run list no longer returns unbounded rows. See [#1028](https://github.com/desplega-ai/agent-swarm/pull/1028).
+
+- **Skills: baked vs seeded de-collision** — Baked and seeded skills no longer collide; bundled files are seeded correctly. See [#1044](https://github.com/desplega-ai/agent-swarm/pull/1044).
+
+- **Production agent IDs removed from examples** — Real agent IDs scrubbed from example docs and configs. See [#1041](https://github.com/desplega-ai/agent-swarm/pull/1041).
+
+- **GitHub: self-authored PR reviews ignored** — Self-authored reviews no longer counted toward review coverage. See [#1058](https://github.com/desplega-ai/agent-swarm/pull/1058).
+
+- **Bun timeout flakes attributable** — Flaky Bun timeouts now produce attributable diagnostics. See [#1033](https://github.com/desplega-ai/agent-swarm/pull/1033).
+
+## Migration Notes
+
+- **SwarmToolResult contract** — If you author custom scripts that consume tool results, move to the `SwarmToolResult` shape. Old opaque wrappers are superseded but not a runtime break — update proactively to stay current.
+
+- **archil removal** — The archil tooling is removed from the worker image. Operators with archil-dependent workflows should move to the `worker-slim` target and npx-skills installs before upgrading.

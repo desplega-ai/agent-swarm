@@ -166,25 +166,14 @@ async function slackFlush(
 
     const app = getSlackApp();
     if (app) {
-      const lastItem = items.at(-1)!;
-      try {
-        await app.client.reactions.add({
-          channel: channelId,
-          name: "eyes",
-          timestamp: lastItem.ts,
-        });
-      } catch (error) {
-        console.log(
-          `[Slack] Steering reaction failed: ${error instanceof Error ? error.message : error}`,
-        );
-      }
-
       if (!isSlackRenderV2Enabled()) {
         try {
           await app.client.chat.postMessage({
             channel: channelId,
             thread_ts: threadTs,
             text: formatSlackSteeringAck(steering.result),
+            unfurl_links: false,
+            unfurl_media: false,
           });
         } catch (error) {
           console.error("[Slack] Failed to post steering feedback:", error);
@@ -212,6 +201,7 @@ async function slackFlush(
     source: "slack",
     slackChannelId: channelId,
     slackThreadTs: threadTs,
+    slackTriggerMessageTs: items.at(-1)!.ts,
     slackUserId: originalRequesterId,
     dependsOn,
     parentTaskId: mostRecentTask?.id,
@@ -245,6 +235,8 @@ async function slackFlush(
         channel: channelId,
         thread_ts: threadTs,
         text: fallbackText,
+        unfurl_links: false,
+        unfurl_media: false,
         // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
         blocks: blocks as any,
       });

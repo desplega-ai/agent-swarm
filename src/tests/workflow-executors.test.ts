@@ -465,6 +465,23 @@ describe("ScriptExecutor", () => {
     expect(result.timeout).toBe(30_000);
   });
 
+  test("config schema accepts the 5m timeout ceiling and rejects larger values", () => {
+    expect(
+      executor.configSchema.safeParse({
+        runtime: "bash",
+        script: "echo hi",
+        timeout: 300_000,
+      }).success,
+    ).toBe(true);
+    expect(
+      executor.configSchema.safeParse({
+        runtime: "bash",
+        script: "echo hi",
+        timeout: 300_001,
+      }).success,
+    ).toBe(false);
+  });
+
   test("runs bash script and captures stdout", async () => {
     const result = await executor.run(input({ runtime: "bash", script: "echo 'hello world'" }, {}));
     expect(result.status).toBe("success");

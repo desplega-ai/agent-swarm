@@ -196,10 +196,10 @@ docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent
 Current worker-image defaults in `Dockerfile.worker`:
 
 - `CLAUDE_CODE_VERSION=2.1.220`
-- `PI_CODING_AGENT_VERSION=0.82.1`
-- `CODEX_VERSION=0.145.0`
-- `OPENCODE_VERSION=1.18.5`
-- `OPENCODE_SDK_VERSION=1.18.5`
+- `PI_CODING_AGENT_VERSION=0.83.0`
+- `CODEX_VERSION=0.146.0`
+- `OPENCODE_VERSION=1.18.11`
+- `OPENCODE_SDK_VERSION=1.18.11`
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
@@ -282,7 +282,8 @@ The Docker worker image uses a multi-stage build with two publishable targets:
 - **Runtime user**: Agent processes run as the non-root `worker` user without
   passwordless sudo. Bake additional system packages into the worker image or
   install them from a root-run startup script before the entrypoint drops
-  privileges.
+  privileges. The entrypoint restores worker ownership of `/home/worker/.claude`
+  after privileged credential and skill setup so harness session files remain writable.
 
 **Volumes:**
 
@@ -450,6 +451,7 @@ When a worker starts, it:
 | `AGENT_ROLE` | No | Role: `worker` (default) or `lead` |
 | `AGENT_NAME` | No | Display name for the agent (auto-generated if not set) |
 | `MCP_BASE_URL` | No | MCP server URL (default: `http://host.docker.internal:3013`) |
+| `WORKER_API_READY_TIMEOUT_SECONDS` | No | Positive-integer deadline for the entrypoint to reach `${MCP_BASE_URL}/health` before provider setup (default: `90`). This bootstrap-only setting must be present in the container environment. |
 | `SESSION_ID` | No | Log folder name (auto-generated if not provided) |
 | `YOLO` | No | Continue on errors (default: `false`) |
 | `SYSTEM_PROMPT` | No | Custom system prompt text |
@@ -562,6 +564,9 @@ SLACK_SIGNING_SECRET=...      # Signing Secret (optional for Socket Mode)
 
 # Disable Slack (if not using)
 SLACK_DISABLE=true
+
+# Optional: one persistent task tree plus streamed outcome cards (default: false)
+# SLACK_RENDER_V2=true
 
 # Optional: Filter allowed users
 SLACK_ALLOWED_EMAIL_DOMAINS=company.com,partner.com  # Comma-separated email domains

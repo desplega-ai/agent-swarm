@@ -45,6 +45,35 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
     workerAgent = createAgent(worker);
   });
 
+  test("direct Slack trigger timestamps round trip but never inherit", () => {
+    const parentTask = createTaskExtended("direct Slack ask", {
+      agentId: leadAgent.id,
+      source: "slack",
+      slackChannelId: "C_TRIGGER_METADATA",
+      slackThreadTs: "900.1",
+      slackTriggerMessageTs: "900.2",
+      slackUserId: "U_TRIGGER",
+    });
+    const childTask = createTaskExtended("delegated child", {
+      agentId: workerAgent.id,
+      creatorAgentId: leadAgent.id,
+      parentTaskId: parentTask.id,
+      sourceTaskId: parentTask.id,
+    });
+
+    expect(parentTask.slackTriggerMessageTs).toBe("900.2");
+    expect(
+      getDb()
+        .query("SELECT slackTriggerMessageTs FROM agent_tasks WHERE id = ?")
+        .get(parentTask.id),
+    ).toEqual({
+      slackTriggerMessageTs: "900.2",
+    });
+    expect(childTask.slackChannelId).toBe("C_TRIGGER_METADATA");
+    expect(childTask.slackThreadTs).toBe("900.1");
+    expect(childTask.slackTriggerMessageTs).toBeUndefined();
+  });
+
   test("sourceTaskId provided → inherits from that task's Slack metadata", () => {
     // Lead has an in-progress task with Slack metadata
     const leadTask = createTaskExtended("lead task with slack", {

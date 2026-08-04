@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_SCRIPT_WALL_CLOCK_MS } from "../../scripts-runtime/executors/types";
 import type { ExecutorMeta } from "../../types";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
@@ -8,7 +9,7 @@ export const ScriptConfigSchema = z.object({
   runtime: z.enum(["bash", "ts", "python"]),
   script: z.string(),
   args: z.array(z.string()).optional(),
-  timeout: z.number().int().min(1000).default(30_000),
+  timeout: z.number().int().min(1000).max(MAX_SCRIPT_WALL_CLOCK_MS).default(30_000),
   cwd: z.string().optional(),
 });
 

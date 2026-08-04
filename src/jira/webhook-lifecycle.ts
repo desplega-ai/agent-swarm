@@ -55,6 +55,8 @@ async function notifySlack(text: string): Promise<void> {
     await app.client.chat.postMessage({
       channel,
       text,
+      unfurl_links: false,
+      unfurl_media: false,
     });
     console.log(`[Jira webhook keepalive] Slack notification sent to ${channel}`);
   } catch (slackErr) {

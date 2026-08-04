@@ -1383,6 +1383,14 @@ export async function ensureTaskFinished(
           `[${role}] Runner marked task ${taskId.slice(0, 8)} as ${status} (exit code: ${exitCode})`,
         );
       }
+    } else if (response.status === 409) {
+      const error = await response.text();
+      // The agent may have completed through store-progress before the runner
+      // wrapper posts its fallback result. Preserve the first terminal write,
+      // surface the discarded wrapper result, and let session teardown finish.
+      console.warn(
+        `[${role}] Runner result for task ${taskId.slice(0, 8)} was discarded because the task is already terminal; continuing: ${error}`,
+      );
     } else if (response.status === 404) {
       console.log(`[${role}] Task ${taskId.slice(0, 8)} already finalized (not found), skipping`);
     } else {

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +21,7 @@ let mockGetTask: Record<string, unknown> | null = null;
 let mockGetTaskStatus = 200;
 let lastFinishBody: Record<string, unknown> | null = null;
 let mockFinishResponse: Record<string, unknown> = { success: true };
+let mockFinishStatus = 200;
 let mockFetchError: Error | null = null;
 let originalFetch: typeof fetch;
 // Result the mocked `claude -p --json-schema` extraction call (invoked by
@@ -38,6 +39,7 @@ function resetMocks() {
   mockGetTaskStatus = 200;
   lastFinishBody = null;
   mockFinishResponse = { success: true };
+  mockFinishStatus = 200;
   mockFetchError = null;
   mockClaudeExtractionResult = null;
   lastBunShellArgs = null;
@@ -76,7 +78,7 @@ beforeAll(() => {
       const body = typeof init?.body === "string" ? init.body : "";
       lastFinishBody = body ? JSON.parse(body) : null;
       return new Response(JSON.stringify(mockFinishResponse), {
-        status: 200,
+        status: mockFinishStatus,
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -750,6 +752,33 @@ describe("ensureTaskFinished", () => {
     // Should not throw
     await ensureTaskFinished(makeConfig(), "worker", "task-13", 0);
     expect(lastFinishBody).toBeTruthy();
+  });
+
+  test("logs and continues when the runner fallback conflicts with a terminal result", async () => {
+    resetMocks();
+    mockGetTask = {
+      id: "task-13b",
+      task: "Do work",
+      status: "in_progress",
+      output: null,
+      progress: null,
+      logs: [],
+    };
+    mockFinishStatus = 409;
+    mockFinishResponse = {
+      success: false,
+      error: "Discarded write; retry with force: true",
+    };
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      await ensureTaskFinished(makeConfig(), "worker", "task-13b", 0);
+      expect(lastFinishBody).toBeTruthy();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("was discarded"));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("continuing"));
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("sends failure reason when exit code is non-zero", async () => {

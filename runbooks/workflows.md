@@ -88,7 +88,7 @@ There are two script-oriented workflow nodes:
 - `script` (required): inline source to execute.
 - `args`: optional string arguments passed to the script.
 - `cwd`: optional working directory.
-- `timeout`: optional wall-clock timeout in milliseconds, minimum `1000`; defaults to `30000`. This value applies to both the inline script executor and the workflow step watchdog.
+- `timeout`: optional wall-clock timeout in milliseconds, from `1000` through `300000`; defaults to `30000`. This value applies to both the inline script executor and the workflow step watchdog.
 
 ### `swarm-script` config
 
@@ -97,11 +97,13 @@ There are two script-oriented workflow nodes:
 - `pinHash`: optional script content hash. When set, execution uses the matching `script_versions` row instead of the latest live source.
 - `args`: optional JSON object passed to the script as its first argument. Values support normal workflow interpolation.
 - `fsMode`: optional, defaults to `none`. `workspace-rw` is reserved for v2 worker-side execution and fails in v1 with a clear workflow-node error.
-- `timeoutMs`: optional wall-clock timeout in milliseconds. Defaults to `30000` (30s), accepts integers from `1000` through `60000`, and applies both to the workflow step timeout and the scripts-runtime `wallClockMs` resource budget.
+- `timeoutMs`: optional wall-clock timeout in milliseconds. Defaults to `30000` (30s), accepts integers from `1000` through `300000` (5m), and applies both to the workflow step timeout and the scripts-runtime `wallClockMs` resource budget.
 
 Agent-scoped lookup uses the workflow's `createdByAgentId`. If a workflow has no creator, `trigger.agentId` is accepted as a fallback; otherwise only global scripts can be resolved.
 
-`timeoutMs` controls elapsed wall-clock time, not CPU time. The scripts runtime also applies its resource caps: the default wall-clock budget is 30s, and the subprocess has a 60s CPU-time ulimit. Raising `timeoutMs` above 30s gives I/O-bound or waiting scripts more elapsed time, but CPU-bound scripts can still be terminated by the 60s CPU ulimit before the wall-clock timeout fires. The schema caps `timeoutMs` at 60s so workflows cannot request more elapsed time than the current CPU ceiling can coherently support.
+`timeoutMs` controls elapsed wall-clock time, not CPU time. The scripts runtime deliberately keeps a separate 60s CPU-time ulimit, so an I/O-bound or waiting script can use the full 5-minute wall-clock window while a hot loop is still terminated after roughly 60 CPU seconds. Workflow create, update, bulk-patch, and single-node patch operations validate executor config and reject values outside the allowed range before saving.
+
+For orchestration that needs more than 5 minutes, use `launch-script-run` to start a durable one-off script workflow and split the operation into bounded, journaled `ctx.step.swarmScript` (or other durable) steps. The durable run can resume across process restarts; it does not raise the per-script runtime limit for an individual step.
 
 Example:
 

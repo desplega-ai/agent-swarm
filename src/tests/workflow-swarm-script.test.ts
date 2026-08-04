@@ -150,6 +150,8 @@ beforeEach(() => {
 
 describe("SwarmScriptExecutor", () => {
   test("config schema validates timeoutMs bounds and applies the runtime default", () => {
+    expect(SWARM_SCRIPT_DEFAULT_TIMEOUT_MS).toBe(30_000);
+    expect(SWARM_SCRIPT_MAX_TIMEOUT_MS).toBe(300_000);
     expect(SwarmScriptConfigSchema.parse({ scriptName: "quick" }).timeoutMs).toBe(
       SWARM_SCRIPT_DEFAULT_TIMEOUT_MS,
     );

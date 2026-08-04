@@ -1,6 +1,6 @@
 {
-  "name": "Agent Swarm — Coordination intelligence for AI agents",
-  "short_name": "Agent Swarm",
+  "name": "agent-swarm.dev — Coordination intelligence for AI agents",
+  "short_name": "agent-swarm.dev",
   "description": "A lead delegates, workers ship in Docker, memory compounds across sessions. Run Devin, Claude Code, or any agent as a coordinated team.",
   "start_url": "/",
   "display": "standalone",

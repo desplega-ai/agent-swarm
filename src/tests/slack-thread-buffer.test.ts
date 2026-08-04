@@ -130,6 +130,7 @@ describe("Slack thread buffer", () => {
       expect(task!.source).toBe("slack");
       expect(task!.slackChannelId).toBe(channelId);
       expect(task!.slackThreadTs).toBe(threadTs);
+      expect(task!.slackTriggerMessageTs).toBe("6000.0020");
     });
 
     test("in-body <@U…> mentions are rewritten via the identity primitive — resolved and unknown", async () => {

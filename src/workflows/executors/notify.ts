@@ -68,6 +68,8 @@ export class NotifyExecutor extends BaseExecutor<
           const result = await app.client.chat.postMessage({
             channel: config.target || "",
             text: message,
+            unfurl_links: false,
+            unfurl_media: false,
           });
           return {
             status: "success",

@@ -30,6 +30,45 @@ Rule of thumb:
 - If it has secrets in it → `swarm_config`.
 - If it's bytes (image, pdf, large doc) → agent-fs.
 
+## Concurrency: `kv_set` has no compare-and-swap
+
+`ctx.swarm.kv_set` is an unconditional overwrite. There is no CAS, ETag, or
+version precondition. A read-modify-write on a shared key can silently lose
+updates when two callers overlap, even though both callers receive a `200`:
+
+```ts
+const prev = await kvGet(ctx, latestKey); // read
+const merged = { ...prev, actions: { ...prev.actions, ...mine } };
+await kvSet(ctx, latestKey, merged); // unconditional write
+```
+
+This failed in production in the `ci-timings` ingest on 2026-08-01. A test with
+six concurrent writers kept only two contributions: **4 of 6 were silently
+lost**. On agent-swarm PR #1064, `ui:lint`, `ui:tsc`, `ui:tokens`, and
+`docker.evals` all POSTed successfully but were missing from `latest` and the
+sticky PR comment.
+
+Sequential testing cannot expose this race. Posts 1s, 13s, and 33s apart all
+merged correctly. Test every fan-in path with `Promise.all`, never a loop plus
+sleep.
+
+Fix the key shape instead of trying to lock the shared blob:
+
+- Give each writer its own key: `runs/<runKey>/a/<action>/<shardIdx>`.
+- Put run-level context in a `…/meta` key that every writer sets to identical
+  content, so last-write-wins is harmless.
+- Assemble on read with `kv_list` over the prefix.
+- For any remaining shared key, use converging writers: each writer recomputes
+  from assembled state, so the last write contains the most complete version.
+
+Smell test: *can two callers write this key at the same time?* If yes and the
+write depends on a prior read, it is already broken. Reshape the keys.
+
+One adjacent shape trap makes this easier to misdiagnose: `kv_get` returns
+`{success,status,data:{namespace,key,value,…}}`; the payload is at
+`data.value`. A wrong-shape guard returns `null`, which merge code interprets
+as "no previous state" and uses to create a duplicate.
+
 ### Trade-offs
 
 **KV vs agent-fs** — KV is fast and API-native (no file I/O), but values are

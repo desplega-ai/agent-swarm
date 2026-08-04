@@ -40,17 +40,17 @@
   </a>
 </p>
 
-> **Agent Swarm is your Company's Compounding Intelligence Layer. A system of AI agents that remember, reason, act and get better with every task.**
+> **agent-swarm.dev is an open-source operating system for AI work: a lead agent breaks goals into tasks, routes them to specialized workers such as Claude Code or Codex, runs each worker in an isolated container, and preserves shared memory, tools, schedules, and review gates so delegated work compounds across sessions.**
 
 > AI-Native · Compounds · Presence · Harness & LLM-Agnostic · Your Infra · Your Memory · 
 
 ## What it does
 
-Agent Swarm runs a team of AI agents that coordinate autonomously. A **lead agent** receives tasks (from Slack, GitHub, GitLab, Linear, Jira, email, or the API), breaks them down, and delegates to **worker agents** running in isolated environments (Docker). Workers execute tasks, ship solutions, and write their learnings back to a shared memory so the whole swarm gets smarter every session.
+agent-swarm.dev runs a team of AI agents that coordinate autonomously. A **lead agent** receives tasks (from Slack, GitHub, GitLab, Linear, Jira, email, or the API), breaks them down, and delegates to **worker agents** running in isolated environments (Docker). Workers execute tasks, ship solutions, and write their learnings back to a shared memory so the whole swarm gets smarter every session.
 
 You can run agents for Marketing, Product, UX, Engineering, Support, Operations, HR, Finance, or any role you can think of. A centralized Lead coordinates them, and they share the learnings horizontally. That's the true difference between [*AI First*](https://www.pleasedontdeploy.com/i/197193364/ai-first) and [*AI Native*](https://www.pleasedontdeploy.com/i/197193364/third-the-ai-native-metamorphosis).
 
-Agent Swarm is the shared cloud brain and muscle that makes your whole company better every day.
+agent-swarm.dev is the shared cloud brain and muscle that makes your whole company better every day.
 
 Sometimes humans are the blocker. We can help you. Contact us [contact@desplega.sh](mailto:contact@desplega.sh).
 
@@ -125,6 +125,7 @@ Check [our templates](https://templates.agent-swarm.dev) for a quick start.
 - **Compounding memory & persistent identity** — agents remember past sessions and evolve their own persona, expertise, and notes. [Memory →](https://docs.agent-swarm.dev/docs/architecture/memory) · [Agents →](https://docs.agent-swarm.dev/docs/architecture/agents)
 - **Hybrid + graph-linked memory recall** — memory retrieval can blend vector and full-text ranking, expand through linked memories, surface usefulness readouts, and let agents correct an existing memory without losing its ID or history. [Memory →](https://docs.agent-swarm.dev/docs/architecture/memory) · [MCP tools →](https://docs.agent-swarm.dev/docs/reference/mcp-tools#memory-tools)
 - **Multi-channel inputs** — Slack, GitHub, GitLab, email, WhatsApp, Linear, Jira, and the HTTP API all create tasks. [Integrations](#integrations)
+- **Persistent Slack thread trees** — opt in to one editable task tree per conversation, complete streamed outcome cards, and explicit agent-authored Block Kit messages without routine relay spam. [Slack guide →](https://docs.agent-swarm.dev/docs/guides/slack-integration)
 - **Workflow engine with Human-in-the-Loop** — DAG-based automation with approval gates, retries, and structured I/O. [Workflows →](https://docs.agent-swarm.dev/docs/concepts/workflows)
 - **Scheduled & recurring tasks** — cron-based automation for standing work, with schedules that can target agent tasks, workflows, or catalog scripts. [Scheduling →](https://docs.agent-swarm.dev/docs/concepts/scheduling)
 - **Mid-run task steering** — add context at the next turn boundary, request an immediate interrupt where the harness supports it, or degrade safely to a follow-up task. [Task steering →](https://docs.agent-swarm.dev/docs/guides/task-steering)
@@ -145,7 +146,7 @@ Check [our templates](https://templates.agent-swarm.dev) for a quick start.
 - **Config-driven metrics dashboards** — define read-only SQL widgets, version them, and render them in the dashboard without shipping custom frontend code. [Metrics API →](https://docs.agent-swarm.dev/docs/api-reference/stats)
 - **DB-backed pages** — agents publish HTML or JSON pages (reports, dashboards, action specs) via `create_page`, remove stale pages with `delete-page`, and share them with public / authed / password modes, version history, view counters, diff helpers, and PDF export. [MCP tools → Pages](https://docs.agent-swarm.dev/docs/reference/mcp-tools#pages-tools)
 - **KV store** — Redis-like namespaced key/value store with auto-scoped context (Slack thread / PR / Linear issue / page). [MCP tools → KV](https://docs.agent-swarm.dev/docs/reference/mcp-tools#kv-tools)
-- **Real-time dashboard + task attachments** — monitor agents, tasks, and inter-agent chat; rename sessions inline; search a broad Lucide catalog to customize each agent's icon and color; filter Pages, Approval Requests, and workflow definitions with URL-backed search/facets; create tasks with uploaded files from the sessions composer; and preview task attachments inline above session prompts. [app.agent-swarm.dev →](https://app.agent-swarm.dev)
+- **Real-time dashboard + task attachments** — monitor agents, tasks, and inter-agent chat; filter tasks by requester (including yourself or unattributed work); rename sessions inline; search a broad Lucide catalog to customize each agent's icon and color; filter Pages, Approval Requests, and workflow definitions with URL-backed search/facets; create tasks with uploaded files from the sessions composer; and preview task attachments inline above session prompts. [app.agent-swarm.dev →](https://app.agent-swarm.dev)
 
 ## Quick Start
 
@@ -220,7 +221,7 @@ Missing one? Ask the swarm to build it.
 
 ## Dashboard
 
-Real-time monitoring of agents, tasks, and inter-agent chat. Session titles can be renamed inline, and agent profiles can search hundreds of Lucide icons, pick a color, and retain deterministic defaults when no customization is set. Use the hosted version at [app.agent-swarm.dev](https://app.agent-swarm.dev), or run locally:
+Real-time monitoring of agents, tasks, and inter-agent chat. The task list can be filtered by requester, including **Me** and **Unattributed**, while keeping the selection in the page URL. Session titles can be renamed inline, and agent profiles can search hundreds of Lucide icons, pick a color, and retain deterministic defaults when no customization is set. Use the hosted version at [app.agent-swarm.dev](https://app.agent-swarm.dev), or run locally:
 
 ```bash
 cd apps/ui && bun install && bun run dev

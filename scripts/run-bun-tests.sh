@@ -2,7 +2,7 @@
 
 set -o pipefail
 
-test_log="$(mktemp "${RUNNER_TEMP:-/tmp}/bun-test.XXXXXX.log")"
+test_log="$(mktemp "${RUNNER_TEMP:-/tmp}/bun-test.log.XXXXXX")"
 trap 'rm -f "$test_log"' EXIT
 
 set +e

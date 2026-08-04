@@ -137,6 +137,48 @@ describe("Workflow HTTP API v2", () => {
   // ─── CREATE ────────────────────────────────────────────────
 
   describe("POST /api/workflows (create)", () => {
+    test("validates swarm-script timeoutMs before creating", async () => {
+      const invalidRes = await fetch(`${baseUrl}/api/workflows`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          name: `invalid-timeout-${crypto.randomUUID()}`,
+          definition: {
+            nodes: [
+              {
+                id: "run-report",
+                type: "swarm-script",
+                config: { scriptName: "report", timeoutMs: 300_001 },
+              },
+            ],
+          },
+        }),
+      });
+      expect(invalidRes.status).toBe(400);
+      const invalidBody = (await invalidRes.json()) as { error: string };
+      expect(invalidBody.error).toContain("config.timeoutMs");
+      expect(invalidBody.error).toContain("300001");
+      expect(invalidBody.error).toContain("300000");
+
+      const validRes = await fetch(`${baseUrl}/api/workflows`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          name: `valid-timeout-${crypto.randomUUID()}`,
+          definition: {
+            nodes: [
+              {
+                id: "run-report",
+                type: "swarm-script",
+                config: { scriptName: "report", timeoutMs: 300_000 },
+              },
+            ],
+          },
+        }),
+      });
+      expect(validRes.status).toBe(201);
+    });
+
     test("creates workflow with new schema (triggers, cooldown, input)", async () => {
       const res = await fetch(`${baseUrl}/api/workflows`, {
         method: "POST",
@@ -432,6 +474,72 @@ describe("Workflow HTTP API v2", () => {
         }),
       });
       expect(res.status).toBe(400);
+    });
+
+    test("rejects oversized timeoutMs before updating or snapshotting", async () => {
+      const workflow = await createTestWorkflow({
+        definition: {
+          nodes: [
+            {
+              id: "run-report",
+              type: "swarm-script",
+              config: { scriptName: "report", timeoutMs: 300_000 },
+            },
+          ],
+        },
+      });
+
+      const res = await fetch(`${baseUrl}/api/workflows/${workflow.id}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({
+          definition: {
+            nodes: [
+              {
+                id: "run-report",
+                type: "swarm-script",
+                config: { scriptName: "report", timeoutMs: 300_001 },
+              },
+            ],
+          },
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("config.timeoutMs");
+      expect(body.error).toContain("300001");
+      expect(body.error).toContain("300000");
+      expect(getWorkflowVersions(workflow.id)).toHaveLength(0);
+
+      const storedRes = await fetch(`${baseUrl}/api/workflows/${workflow.id}`, { headers });
+      const stored = (await storedRes.json()) as Workflow;
+      expect(stored.definition.nodes[0]!.config.timeoutMs).toBe(300_000);
+    });
+
+    test("rejects oversized timeoutMs in single-node patches before snapshotting", async () => {
+      const workflow = await createTestWorkflow({
+        definition: {
+          nodes: [
+            {
+              id: "run-report",
+              type: "swarm-script",
+              config: { scriptName: "report", timeoutMs: 300_000 },
+            },
+          ],
+        },
+      });
+
+      const res = await fetch(`${baseUrl}/api/workflows/${workflow.id}/nodes/run-report`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ config: { scriptName: "report", timeoutMs: 300_001 } }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("config.timeoutMs");
+      expect(body.error).toContain("300001");
+      expect(body.error).toContain("300000");
+      expect(getWorkflowVersions(workflow.id)).toHaveLength(0);
     });
 
     test("returns 404 for missing workflow", async () => {

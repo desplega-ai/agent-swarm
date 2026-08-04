@@ -103,6 +103,31 @@ afterAll(async () => {
 });
 
 describe("Slack tool Block Kit support", () => {
+  test("every direct engine Slack post/update disables link and media unfurls", async () => {
+    const callSites: Array<{ path: string; line: number; source: string }> = [];
+    const glob = new Bun.Glob("src/**/*.ts");
+    for await (const path of glob.scan(".")) {
+      const lines = (await Bun.file(path).text()).split("\n");
+      lines.forEach((line, index) => {
+        if (!/chat\.(?:postMessage|update)\(/.test(line)) return;
+        callSites.push({
+          path,
+          line: index + 1,
+          source: lines.slice(Math.max(0, index - 24), index + 24).join("\n"),
+        });
+      });
+    }
+
+    expect(callSites.length).toBeGreaterThan(0);
+    for (const callSite of callSites) {
+      expect({
+        callSite: `${callSite.path}:${callSite.line}`,
+        unfurlLinksDisabled: callSite.source.includes("unfurl_links: false"),
+        unfurlMediaDisabled: callSite.source.includes("unfurl_media: false"),
+      }).toMatchObject({ unfurlLinksDisabled: true, unfurlMediaDisabled: true });
+    }
+  });
+
   test("slack-reply preserves supplied blocks and appends only the compact provenance footer", async () => {
     const tools = buildTools();
     const supplied = [
@@ -125,10 +150,12 @@ describe("Slack tool Block Kit support", () => {
       elements: [
         {
           type: "mrkdwn",
-          text: `Researcher Blocks · <https://app.agent-swarm.dev/tasks/${taskId}|\`${taskId.slice(0, 8)}\`> · <https://workspace.slack.com/archives/C_BLOCKS/p300tree|↑ tree>`,
+          text: `Researcher Blocks · <https://app.agent-swarm.dev/tasks/${taskId}|\`${taskId.slice(0, 8)}\`>`,
         },
       ],
     });
+    expect(payload).toMatchObject({ unfurl_links: false, unfurl_media: false });
+    expect(JSON.stringify(payload.blocks)).not.toContain("↑ tree");
     expect(getSlackMessageByChannelTs("C_BLOCKS", lastPostedTs)?.kind).toBe("agent");
   });
 
@@ -150,9 +177,84 @@ describe("Slack tool Block Kit support", () => {
       channel: "C_DIRECT",
       text: "fallback",
       blocks: supplied,
+      unfurl_links: false,
+      unfurl_media: false,
     });
+    expect(mockChatPostMessage.mock.calls[0]![0].blocks).toEqual(supplied);
     expect(getSlackTreeMessage(contextKey)?.kind).toBe("tree");
     expect(getSlackMessageByChannelTs("C_DIRECT", lastPostedTs)?.kind).toBe("agent");
+  });
+
+  test("slack-reply does not append provenance when the task thread has no v2 tree", async () => {
+    const tools = buildTools();
+    const noTreeContextKey = slackContextKey({ channelId: "C_NO_REPLY_TREE", threadTs: "400.1" });
+    const noTreeTask = createTaskExtended("reply without tree", {
+      agentId: workerId,
+      source: "slack",
+      slackChannelId: "C_NO_REPLY_TREE",
+      slackThreadTs: "400.1",
+      contextKey: noTreeContextKey,
+    });
+    const supplied = [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: "*No tree yet*" },
+      },
+    ];
+
+    const result = await tools["slack-reply"]!.handler(
+      { taskId: noTreeTask.id, message: "fallback", blocks: supplied },
+      meta(workerId),
+    );
+
+    expect(result.structuredContent.success).toBe(true);
+    expect(mockChatPostMessage.mock.calls[0]![0]).toMatchObject({
+      channel: "C_NO_REPLY_TREE",
+      text: "fallback",
+      blocks: supplied,
+      unfurl_links: false,
+      unfurl_media: false,
+    });
+    expect(mockChatPostMessage.mock.calls[0]![0].blocks).toEqual(supplied);
+  });
+
+  test("slack-post does not append provenance when the source task thread has no v2 tree", async () => {
+    const tools = buildTools();
+    const noTreeContextKey = slackContextKey({ channelId: "C_NO_POST_TREE", threadTs: "500.1" });
+    const noTreeTask = createTaskExtended("post without tree", {
+      agentId: leadId,
+      source: "slack",
+      slackChannelId: "C_NO_POST_TREE",
+      slackThreadTs: "500.1",
+      contextKey: noTreeContextKey,
+    });
+    const supplied = [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: "*No tree yet*" },
+      },
+    ];
+
+    const result = await tools["slack-post"]!.handler(
+      {
+        channelId: "C_NO_POST_TREE",
+        threadTs: "500.1",
+        message: "fallback",
+        blocks: supplied,
+      },
+      meta(leadId, noTreeTask.id),
+    );
+
+    expect(result.structuredContent.success).toBe(true);
+    expect(mockChatPostMessage.mock.calls[0]![0]).toMatchObject({
+      channel: "C_NO_POST_TREE",
+      thread_ts: "500.1",
+      text: "fallback",
+      blocks: supplied,
+      unfurl_links: false,
+      unfurl_media: false,
+    });
+    expect(mockChatPostMessage.mock.calls[0]![0].blocks).toEqual(supplied);
   });
 
   test("slack-start-thread preserves supplied blocks and records the explicit agent message", async () => {
@@ -173,6 +275,8 @@ describe("Slack tool Block Kit support", () => {
       channel: "C_START",
       text: "fallback",
       blocks: supplied,
+      unfurl_links: false,
+      unfurl_media: false,
     });
     expect(getSlackMessageByChannelTs("C_START", lastPostedTs)?.kind).toBe("agent");
   });

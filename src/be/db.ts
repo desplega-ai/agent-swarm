@@ -1154,6 +1154,7 @@ type AgentTaskRow = {
   rejectionReason: string | null;
   slackChannelId: string | null;
   slackThreadTs: string | null;
+  slackTriggerMessageTs: string | null;
   slackUserId: string | null;
   slackReplySent: number;
   slackProgressMessageTs: string | null;
@@ -1269,6 +1270,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     rejectionReason: row.rejectionReason ?? undefined,
     slackChannelId: row.slackChannelId ?? undefined,
     slackThreadTs: row.slackThreadTs ?? undefined,
+    slackTriggerMessageTs: row.slackTriggerMessageTs ?? undefined,
     slackUserId: row.slackUserId ?? undefined,
     slackReplySent: !!row.slackReplySent,
     slackProgressMessageTs: row.slackProgressMessageTs ?? undefined,
@@ -1413,6 +1415,13 @@ export const taskQueries = {
     getDb().prepare<AgentTaskRow, [string, string, string]>(
       `UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
+    ),
+
+  setTerminalResultText: () =>
+    getDb().prepare<AgentTaskRow, [string | null, string | null, string]>(
+      `UPDATE agent_tasks SET output = ?, failureReason = ?
+       WHERE id = ? AND status IN ('completed', 'failed', 'cancelled', 'superseded')
+       RETURNING *`,
     ),
 
   setCancelled: () =>
@@ -1576,6 +1585,29 @@ export function startTask(taskId: string): AgentTask | null {
 export function getTaskById(id: string): AgentTask | null {
   const row = taskQueries.getById().get(id);
   return row ? rowToAgentTask(row) : null;
+}
+
+export function getSlackRenderV2ActivatedAt(): string | null {
+  return (
+    getDb()
+      .prepare<{ activated_at: string }, []>(
+        `SELECT activated_at FROM slack_render_v2_state WHERE id = 1`,
+      )
+      .get()?.activated_at ?? null
+  );
+}
+
+export function ensureSlackRenderV2Activation(): string {
+  const activatedAt = new Date().toISOString();
+  getDb().run(
+    `INSERT INTO slack_render_v2_state (id, activated_at)
+     VALUES (1, ?)
+     ON CONFLICT(id) DO NOTHING`,
+    [activatedAt],
+  );
+  const persisted = getSlackRenderV2ActivatedAt();
+  if (!persisted) throw new Error("Failed to persist Slack render v2 activation");
+  return persisted;
 }
 
 export type SlackMessageKind = "tree" | "outcome" | "agent";
@@ -1879,14 +1911,16 @@ export function getSlackTreeMessages(): SlackMessageRecord[] {
     .prepare<SlackMessageRow, []>(
       `SELECT tree.*
        FROM slack_messages tree
+       JOIN slack_render_v2_state state ON state.id = 1
        WHERE tree.kind = 'tree'
        AND (
-         tree.ts LIKE 'pending:%'
+         (tree.ts LIKE 'pending:%' AND tree.created_at >= state.activated_at)
          OR EXISTS (
            SELECT 1 FROM agent_tasks task
            WHERE task.slackChannelId = tree.channel_id
            AND task.slackThreadTs = tree.thread_ts
            AND task.source = 'slack'
+           AND task.createdAt >= state.activated_at
            AND task.status IN ('completed', 'failed', 'cancelled')
            AND NOT EXISTS (
              SELECT 1 FROM slack_messages outcome
@@ -1900,19 +1934,23 @@ export function getSlackTreeMessages(): SlackMessageRecord[] {
            SELECT 1 FROM agent_tasks task
            WHERE task.slackChannelId = tree.channel_id
            AND task.slackThreadTs = tree.thread_ts
+           AND task.createdAt >= state.activated_at
            AND task.status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
          )
          OR EXISTS (
            SELECT 1 FROM agent_tasks task
            WHERE task.slackChannelId = tree.channel_id
            AND task.slackThreadTs = tree.thread_ts
+           AND task.createdAt >= state.activated_at
            AND task.lastUpdatedAt > tree.updated_at
          )
          OR EXISTS (
            SELECT 1 FROM slack_messages outcome
+           JOIN agent_tasks task ON task.id = outcome.task_id
            WHERE outcome.kind = 'outcome'
            AND outcome.channel_id = tree.channel_id
            AND outcome.thread_ts = tree.thread_ts
+           AND task.createdAt >= state.activated_at
            AND (
              outcome.finalized_at IS NULL
              OR outcome.updated_at > tree.updated_at
@@ -2186,6 +2224,8 @@ export interface TaskFilters {
   createdBefore?: string;
   /** Only return tasks requested by this canonical user. NULL rows are excluded. */
   requestedByUserId?: string;
+  /** When set, restrict to rows where `requestedByUserId` IS NULL. Takes priority over `requestedByUserId`. */
+  requestedByUserIdIsNull?: boolean;
   /** Sort list rows for either table freshness or timeline paging. */
   orderBy?: "lastUpdatedAt" | "createdAt";
   limit?: number;
@@ -2284,7 +2324,9 @@ export function getAllTasks(
     params.push(filters.createdBefore);
   }
 
-  if (filters?.requestedByUserId) {
+  if (filters?.requestedByUserIdIsNull) {
+    conditions.push("requestedByUserId IS NULL");
+  } else if (filters?.requestedByUserId) {
     conditions.push("requestedByUserId = ?");
     params.push(filters.requestedByUserId);
   }
@@ -2418,7 +2460,9 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
     params.push(filters.createdBefore);
   }
 
-  if (filters?.requestedByUserId) {
+  if (filters?.requestedByUserIdIsNull) {
+    conditions.push("requestedByUserId IS NULL");
+  } else if (filters?.requestedByUserId) {
     conditions.push("requestedByUserId = ?");
     params.push(filters.requestedByUserId);
   }
@@ -2590,10 +2634,19 @@ export function getSlackTasksMissingTree(): AgentTask[] {
   return getDb()
     .prepare<AgentTaskRow, []>(
       `SELECT task.* FROM agent_tasks task
+       JOIN slack_render_v2_state state ON state.id = 1
        WHERE task.source = 'slack'
        AND task.slackChannelId IS NOT NULL
        AND task.slackThreadTs IS NOT NULL
+       AND task.createdAt >= state.activated_at
        AND task.status NOT IN ('backlog', 'unassigned', 'superseded')
+       AND NOT EXISTS (
+         SELECT 1 FROM agent_tasks earlier
+         WHERE earlier.source = 'slack'
+         AND earlier.slackChannelId = task.slackChannelId
+         AND earlier.slackThreadTs = task.slackThreadTs
+         AND earlier.createdAt < state.activated_at
+       )
        AND NOT EXISTS (
          SELECT 1 FROM slack_messages tree
          WHERE tree.kind = 'tree'
@@ -2697,6 +2750,20 @@ export function getLatestTaskByContextKey(contextKey: string): AgentTask | null 
       `SELECT * FROM agent_tasks
        WHERE contextKey = ?
        ORDER BY createdAt DESC
+       LIMIT 1`,
+    )
+    .get(contextKey);
+  return row ? rowToAgentTask(row) : null;
+}
+
+export function getLatestScriptRunStepTaskByContextKey(contextKey: string): AgentTask | null {
+  if (!contextKey) return null;
+  const row = getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE contextKey = ?
+       AND taskType = 'script-run-step'
+       ORDER BY createdAt DESC, rowid DESC
        LIMIT 1`,
     )
     .get(contextKey);
@@ -2982,6 +3049,28 @@ export function failTask(id: string, reason: string): AgentTask | null {
     }
   }
   return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Replace result text on an already-terminal task without replaying terminal
+ * side effects or moving any lifecycle timestamps. Callers must opt in to
+ * this narrow escape hatch; ordinary completion remains first-call-wins.
+ */
+export function overwriteTerminalTaskResultText(
+  id: string,
+  patch: { output?: string; failureReason?: string },
+): AgentTask | null {
+  const task = getTaskById(id);
+  if (!task || !isTerminalTaskStatus(task.status)) return null;
+
+  const output = patch.output !== undefined ? scrubSecrets(patch.output) : (task.output ?? null);
+  const failureReason =
+    patch.failureReason !== undefined
+      ? scrubSecrets(patch.failureReason)
+      : (task.failureReason ?? null);
+  const row = taskQueries.setTerminalResultText().get(output, failureReason, id) ?? null;
+
+  return row ? rowToAgentTask(row) : task;
 }
 
 export function cancelTask(id: string, reason?: string): AgentTask | null {
@@ -4519,6 +4608,8 @@ export interface CreateTaskOptions {
   status?: "backlog" | "unassigned"; // Explicitly set initial status
   slackChannelId?: string;
   slackThreadTs?: string;
+  /** Exact Slack message that directly triggered this task; never inherited. */
+  slackTriggerMessageTs?: string;
   slackUserId?: string;
   /**
    * Opt out of the residual Slack/contextKey normalization below (see the
@@ -4870,13 +4961,13 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       `INSERT INTO agent_tasks (
         id, "key", agentId, creatorAgentId, task, status, source,
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
-        slackChannelId, slackThreadTs, slackUserId,
+        slackChannelId, slackThreadTs, slackTriggerMessageTs, slackUserId,
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -4894,6 +4985,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.offeredTo ? now : null,
       options?.slackChannelId ?? null,
       options?.slackThreadTs ?? null,
+      options?.slackTriggerMessageTs ?? null,
       options?.slackUserId ?? null,
       options?.vcsProvider ?? null,
       options?.vcsRepo ?? null,

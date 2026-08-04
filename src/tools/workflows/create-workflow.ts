@@ -3,7 +3,13 @@ import { z } from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { createWorkflow } from "@/be/db";
-import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import {
+  createToolRegistrar,
+  findLongScriptTimeoutHint,
+  swarmToolOutputSchema,
+  toolErr,
+  toolOk,
+} from "@/tools/utils";
 import {
   AssetKeySchema,
   CooldownConfigSchema,
@@ -11,6 +17,7 @@ import {
   TriggerConfigSchema,
   WorkflowDefinitionSchema,
 } from "@/types";
+import { getExecutorRegistry } from "@/workflows";
 import { validateDefinition } from "@/workflows/definition";
 
 export const registerCreateWorkflowTool = (server: McpServer) => {
@@ -109,7 +116,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
       }
       try {
         // Validate definition structure
-        const validation = validateDefinition(definition);
+        const validation = validateDefinition(definition, getExecutorRegistry());
         if (!validation.valid) {
           return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
         }
@@ -135,9 +142,14 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           },
           "mcp",
         );
+        const longScriptTimeoutHint = findLongScriptTimeoutHint(definition.nodes);
         return toolOk(`Created workflow "${workflow.name}".`, {
           details: `Created workflow "${workflow.name}" (${workflow.id}).`,
-          data: { yourAgentId: requestInfo.agentId, workflow },
+          data: {
+            yourAgentId: requestInfo.agentId,
+            workflow,
+            ...(longScriptTimeoutHint ? { longScriptTimeoutHint } : {}),
+          },
         });
       } catch (err) {
         return toolErr(String(err));

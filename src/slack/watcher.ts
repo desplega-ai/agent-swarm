@@ -467,6 +467,8 @@ async function postInitialDMTreeMessage(task: AgentTask): Promise<string | undef
       channel: task.slackChannelId,
       thread_ts: task.slackThreadTs,
       text: fallbackText,
+      unfurl_links: false,
+      unfurl_media: false,
       // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
       blocks: blocks as any,
     });

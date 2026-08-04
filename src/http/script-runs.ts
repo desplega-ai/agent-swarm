@@ -8,10 +8,11 @@ import {
   createScriptRun,
   createTaskExtended,
   getAgentById,
-  getLatestTaskByContextKey,
+  getLatestScriptRunStepTaskByContextKey,
   getScriptRun,
   getScriptRunByIdempotencyKey,
   getScriptRunJournalStep,
+  getTaskById,
   listScriptRunJournalSteps,
   listScriptRuns,
   updateScriptRun,
@@ -527,7 +528,7 @@ export async function handleScriptRuns(
     }
 
     const contextKey = `script-run:${run.id}:${parsed.body.stepKey}`;
-    let task = getLatestTaskByContextKey(contextKey);
+    let task = getLatestScriptRunStepTaskByContextKey(contextKey);
     if (!task) {
       task = createTaskExtended(parsed.body.template ?? parsed.body.task ?? parsed.body.stepKey, {
         agentId: parsed.body.agentId,
@@ -548,7 +549,9 @@ export async function handleScriptRuns(
 
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
-      const latest = getLatestTaskByContextKey(contextKey) ?? task;
+      // Once replay lookup/dispatch selects the step, stay pinned to its ID.
+      // A later same-context task must never change which work this poll resolves.
+      const latest = getTaskById(task.id) ?? task;
       if (latest.status === "completed") {
         json(res, { taskId: latest.id, taskOutput: latest.output ?? null });
         return true;

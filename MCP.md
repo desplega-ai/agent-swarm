@@ -292,10 +292,11 @@ Stores the progress of a specific task. Can also mark task as completed or faile
 | `taskId` | `uuid` | Yes | - | The ID of the task to update progress for. |
 | `progress` | `string` | No | - | The progress update to store. |
 | `status` | `completed \| failed` | No | - | Set to 'completed' or 'failed' to finish the task. |
-| `output` | `string` | No | - | The output of the task (used when completing). |
+| `output` | `string` | No | - | The task result (used when completing). For Slack-originated tasks, this is published verbatim in the thread's outcome card: provide a concrete summary scaled to what was asked, including only the outcome and any links or IDs the human needs—not process narration, a transcript, or a restatement of the brief. |
 | `failureReason` | `string` | No | - | The reason for failure (used when failing). |
 | `attachments` | `array` | No | - | Pointer-based artifacts produced by this step — agent-fs path, URL, shared-fs path, or swarm Page. No inline file data; upload to agent-fs first and attach by path. May be sent on any call (progress or completion) and accumulates across calls; duplicates are de-duped by sha256 (when present) or by (kind, pointer, name). |
 | `persistMemory` | `boolean` | No | - | Opt in to task_completion memory persistence for automatic/recurring tasks. Manual tasks are persisted by default; scheduled, system, heartbeat/boot-triage, monitor, and digest tasks are skipped unless this is true. |
+| `force` | `boolean` | No | - | On an already-terminal task, overwrite explicitly provided output and/or failureReason text while preserving status and finishedAt and without replaying events, memory writes, follow-up creation, business-use ensure, or capacity updates. Differing terminal text is otherwise discarded and reported as a failure. |
 
 ### my-agent-info
 
@@ -1515,7 +1516,7 @@ Read a key from the swarm KV store. Returns the entry or null if missing/expired
 
 **KV Set**
 
-Write a key in the swarm KV store. Upserts atomically. Namespace defaults to your current context. Use `expiresInSec` for opt-in TTL (default: never expires). 2 MiB body cap.
+Write a key in the swarm KV store. Each replacement is atomic but unconditional: there is no compare-and-swap, so concurrent read-modify-write callers can lose updates. Namespace defaults to your current context. Use `expiresInSec` for opt-in TTL (default: never expires). 2 MiB body cap.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1571,13 +1572,14 @@ Capability: `slack` (enabled by default)
 
 **Reply to Slack thread**
 
-Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads.
+Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads. The engine already publishes the task tree and outcome card, so send only a distinct agent-authored message. Prefer one reply per task over several, do not post progress, receipt, or acknowledgment messages, and match its length to what the user asked for.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `inboxMessageId` | `uuid` | No | - | The inbox message ID to reply to (for leads responding to inbox). |
 | `taskId` | `uuid` | No | - | The task ID with Slack context (for task-related threads). |
 | `message` | `string` | Yes | - | The message to send to the Slack thread. |
+| `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 
 ### slack-read
 
@@ -1604,6 +1606,7 @@ Post a message to a Slack channel. By default creates a new top-level message; p
 |-----------|------|----------|---------|-------------|
 | `channelId` | `string` | Yes | - | The Slack channel ID to post to. |
 | `message` | `string` | Yes | - | The message content to post. |
+| `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 | `threadTs` | `string` | No | - | Optional parent message ts to thread under. Obtain via `slack-start-thread`. When omitted, posts as a new top-level message. |
 
 ### slack-start-thread
@@ -1616,6 +1619,7 @@ Post a new top-level message to a Slack channel and return its ts so the caller 
 |-----------|------|----------|---------|-------------|
 | `channelId` | `string` | Yes | - | The Slack channel ID to post to. |
 | `message` | `string` | Yes | - | The message content to post. |
+| `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 
 ### slack-list-channels
 
