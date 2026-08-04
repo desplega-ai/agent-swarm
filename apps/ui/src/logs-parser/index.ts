@@ -21,6 +21,8 @@ import type {
 } from "./types";
 
 export { pairItems, resultPayloadText, unwrapResult } from "./helpers";
+export type { SubagentRun, SubagentRunStatus } from "./subagent-lifecycle";
+export { extractSubagentRuns } from "./subagent-lifecycle";
 export type {
   ContentBlock,
   NormalizedItem,
