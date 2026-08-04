@@ -185,6 +185,36 @@ describe("buildSkillContent ↔ parseSkillContent", () => {
     expect(rendered).toContain("description: Simple description.\n");
     expect(parseSkillContent(rendered).description).toBe("Simple description.");
   });
+
+  // A plain scalar YAML resolves as a bool/null/number/timestamp would reach a
+  // js-yaml-based harness reader as that type, not as the required string.
+  test.each([
+    "true",
+    "False",
+    "yes",
+    "NO",
+    "on",
+    "null",
+    "~",
+    "123",
+    "-4.5",
+    "1e6",
+    "0x1f",
+    ".inf",
+    "2026-08-04",
+  ])("description %p renders quoted (YAML would resolve it as a non-string)", (description) => {
+    const rendered = buildSkillContent({ name: "round-trip", description }, "Body.");
+    expect(rendered).toContain(`description: ${JSON.stringify(description)}\n`);
+    expect(parseSkillContent(rendered).description).toBe(description);
+  });
+
+  test("descriptions merely containing a number stay unquoted", () => {
+    const rendered = buildSkillContent(
+      { name: "round-trip", description: "Handles 123 retries." },
+      "Body.",
+    );
+    expect(rendered).toContain("description: Handles 123 retries.\n");
+  });
 });
 
 // ─── Invalid Inputs ─────────────────────────────────────────────────────────

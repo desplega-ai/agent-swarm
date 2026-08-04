@@ -333,6 +333,25 @@ function assertManifestOutputPath(path: string, skillNames: Set<string>): string
   return absolute;
 }
 
+/**
+ * Decode a double-quoted YAML scalar exactly as `parseSkillContent` does, so an
+ * upstream `description: "Build scripts: safely"` vendors as the string it
+ * denotes instead of carrying literal quote characters into the generated
+ * config, SKILL.md, and UI. Without this the round-trip guard cannot catch the
+ * corruption — it compares against the already-corrupted value. Malformed
+ * quoting falls back to the raw text.
+ */
+function decodeYamlScalar(raw: string): string {
+  if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')) {
+    try {
+      return JSON.parse(raw) as string;
+    } catch {
+      // keep raw
+    }
+  }
+  return raw;
+}
+
 // YAML-hostile descriptions (leading indicators, `: `, ` #`, …) need no gate here:
 // buildSkillContent emits them as quoted scalars and assertSkillRoundTrip proves
 // the rendered file parses back verbatim.
@@ -376,7 +395,7 @@ export function parseSkillMd(
     if (!currentKey) fail(`${skill}: empty top-level frontmatter key.`);
     if (values.has(currentKey)) fail(`${skill}: duplicate frontmatter key ${currentKey}.`);
     keys.push(currentKey);
-    values.set(currentKey, line.slice(separator + 1).trim());
+    values.set(currentKey, decodeYamlScalar(line.slice(separator + 1).trim()));
   }
 
   const unknown = keys.filter((key) => !ALLOWED_FRONTMATTER_KEYS.has(key));

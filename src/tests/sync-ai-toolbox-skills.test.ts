@@ -85,6 +85,25 @@ describe("ai-toolbox skill sync pure transforms", () => {
     ).not.toThrow();
   });
 
+  test("decodes a quoted upstream description instead of vendoring the quotes", () => {
+    const parsed = parseSkillMd(
+      "fixture",
+      '---\nname: fixture\ndescription: "Build scripts: safely and repeatably"\n---\n\nBody\n',
+    );
+    expect(parsed.description).toBe("Build scripts: safely and repeatably");
+    expect(() =>
+      assertSkillRoundTrip(config("fixture", parsed.description), parsed.body),
+    ).not.toThrow();
+  });
+
+  test("keeps a malformed quoted description as raw text", () => {
+    const parsed = parseSkillMd(
+      "fixture",
+      '---\nname: fixture\ndescription: "unterminated escape \\"\n---\n\nBody\n',
+    );
+    expect(parsed.description).toBe('"unterminated escape \\"');
+  });
+
   test("rewrites prose paths relatively, plugin-root paths absolutely, and ignores near matches", () => {
     const rewrites: PathRewrite[] = [];
     const body = [

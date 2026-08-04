@@ -831,7 +831,15 @@ export class DevinAdapter implements ProviderAdapter {
   private lastOrgId?: string;
   get traits(): ProviderTraits {
     const hasMcp = (process.env.HAS_MCP ?? "").toLowerCase() === "true";
-    return { hasMcp, hasLocalEnvironment: false, steerModes: ["queue"] };
+    // No native skill system (devin-skill-resolver.ts only inlines a SKILL.md
+    // when a prompt opens with `@skills:<name>`), so the system prompt has to
+    // enumerate the installed skills.
+    return {
+      hasMcp,
+      nativeSkillDiscovery: false,
+      hasLocalEnvironment: false,
+      steerModes: ["queue"],
+    };
   }
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
