@@ -23,6 +23,12 @@ Use this skill when you need to change an existing workflow without breaking liv
 - Scope parallel branches so they do not overwrite one another. Fan-out tasks should have separate context keys or branch-specific output fields.
 - Make retry paths idempotent. A rerun should detect existing artifacts, comments, PRs, or notifications and update or skip them rather than duplicating work.
 
+### `swarm-script` Timeout Limit
+
+- Keep `config.timeoutMs` at or below `60000`; the `swarm-script` node schema rejects larger values.
+- `patch-workflow-node` accepts an oversized value, but the run later fails with `Input validation failed ... timeoutMs ... Too big: expected number to be <=60000`.
+- For work that needs more than 60 seconds, add node-level `retry` (`{ maxRetries: 2, strategy: "exponential", baseDelayMs: 2000, maxDelayMs: 10000 }`) or split it into asynchronous submit + collect nodes. For example, `agent-swarm-unified-release-posting` uses `submit-standard-studio-render` → `collect-standard-studio-render`, both with `timeoutMs: 60000`.
+
 ## Common Failure Patterns
 
 | Symptom | Likely Cause | Fix |
