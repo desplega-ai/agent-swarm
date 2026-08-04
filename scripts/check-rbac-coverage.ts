@@ -58,8 +58,7 @@ const PIN_REASON =
   "no hard authorization gate at the slice-1 pin (plan Appendix A) — open to all authenticated agents";
 
 const UNGATED_TOOL_FILES: Record<string, string> = {
-  "src/tools/app-get.ts": "read-only app inspection mirrors the ungated HTTP app GET route",
-  "src/tools/app-list.ts": "read-only app listing mirrors the ungated HTTP app list route",
+  "src/tools/app-list.ts": "app summaries are list-level; per-app filtering is future work",
   "src/tools/create-channel.ts": PIN_REASON,
   "src/tools/create-metric.ts": PIN_REASON,
   "src/tools/create-page.ts": PIN_REASON,

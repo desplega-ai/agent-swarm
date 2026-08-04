@@ -686,14 +686,14 @@ describe("Spike 4 parameterized named queries", () => {
           slug: "matched",
         },
       },
-      { sessionId: "apps-spike4", requestInfo: { headers: {} } },
+      { sessionId: "apps-spike4", requestInfo: { headers: { "x-agent-id": AGENT_ID } } },
     )) as StructuredResult<{ count: number; rows: Array<Record<string, unknown>> }>;
     expect(called.isError).not.toBe(true);
     expect(called.structuredContent.count).toBe(1);
 
     const missing = (await tool.handler(
       { appId, query: "byParams", params: { quantity: 42 } },
-      { sessionId: "apps-spike4", requestInfo: { headers: {} } },
+      { sessionId: "apps-spike4", requestInfo: { headers: { "x-agent-id": AGENT_ID } } },
     )) as StructuredResult<{ missingParams: string[]; issues: Array<{ path: string }> }>;
     expect(missing.isError).toBe(true);
     expect(missing.structuredContent.missingParams).toEqual(["active", "happenedAt", "slug"]);
@@ -713,7 +713,10 @@ describe("Spike 4 parameterized named queries", () => {
 
     const invalidValue = (await tool.handler(
       { appId, query: "byParams", params: { ...validParams, quantity: "abc" } },
-      { sessionId: "apps-spike4-invalid", requestInfo: { headers: {} } },
+      {
+        sessionId: "apps-spike4-invalid",
+        requestInfo: { headers: { "x-agent-id": AGENT_ID } },
+      },
     )) as StructuredResult<{ issues: Array<{ path: string }> }>;
     expect(invalidValue.isError).toBe(true);
     expect(invalidValue.structuredContent.issues).toContainEqual(
@@ -726,7 +729,10 @@ describe("Spike 4 parameterized named queries", () => {
         query: "byParams",
         params: { ...validParams, quantity: "42", extra: "ignored-before-f12" },
       },
-      { sessionId: "apps-spike4-unknown", requestInfo: { headers: {} } },
+      {
+        sessionId: "apps-spike4-unknown",
+        requestInfo: { headers: { "x-agent-id": AGENT_ID } },
+      },
     )) as StructuredResult<{ issues: Array<{ path: string; message: string }> }>;
     expect(unknown.isError).toBe(true);
     expect(unknown.structuredContent.issues).toContainEqual({

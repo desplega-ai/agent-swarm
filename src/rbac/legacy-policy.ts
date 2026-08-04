@@ -190,6 +190,7 @@ export const LEGACY_POLICY = {
   "kv.write.any": leadOrOwnNamespace,
   "page.delete.any": leadOrResourceOwner,
   "app.manage": anyAuthenticated,
+  "app.use": anyAuthenticated,
   "script.global.write": leadOnly,
   "script.global.delete": leadOnly,
   "script.search": anyAuthenticated,

@@ -53,7 +53,7 @@ import { getAgentById, getAppVersion, getAppVersions, getLeadAgent } from "../be
 import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId, runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import { resolveTemplate } from "../prompts/resolver";
-import type { RbacPrincipal } from "../rbac";
+import type { RbacPrincipal, RbacResource } from "../rbac";
 import { can } from "../rbac";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { getRequestAuth } from "../utils/request-auth-context";
@@ -90,6 +90,8 @@ const listAppsRoute = route({
   summary: "List apps",
   tags: ["Apps"],
   responses: { 200: { description: "App summaries without definitions" } },
+  // App summaries remain list-level until a future policy can filter them per app.
+  rbac: { ungated: "app summaries are list-level; per-app filtering is future work" },
 });
 
 const createAppRoute = route({
@@ -123,6 +125,7 @@ const listAppVersionsRoute = route({
     200: { description: "App definition versions" },
     404: { description: "App not found" },
   },
+  rbac: { permission: "app.manage" },
 });
 
 const getAppVersionRoute = route({
@@ -136,6 +139,7 @@ const getAppVersionRoute = route({
     200: { description: "App definition version" },
     404: { description: "App or version not found" },
   },
+  rbac: { permission: "app.manage" },
 });
 
 const rollbackAppRoute = route({
@@ -170,8 +174,10 @@ const getAppRoute = route({
   params: appParamsSchema,
   responses: {
     200: { description: "App including its definition" },
+    403: { description: "Permission denied" },
     404: { description: "App not found" },
   },
+  rbac: { permission: "app.use" },
 });
 
 const updateAppRoute = route({
@@ -251,7 +257,7 @@ const createRowRoute = route({
     403: { description: "Permission denied" },
     404: { description: "App or model not found" },
   },
-  rbac: { permission: "app.manage" },
+  rbac: { permission: "app.use" },
 });
 
 const bulkCreateRowsRoute = route({
@@ -268,7 +274,7 @@ const bulkCreateRowsRoute = route({
     403: { description: "Permission denied" },
     404: { description: "App or model not found" },
   },
-  rbac: { permission: "app.manage" },
+  rbac: { permission: "app.use" },
 });
 
 const listRowsRoute = route({
@@ -285,8 +291,10 @@ const listRowsRoute = route({
   responses: {
     200: { description: "Filtered app model rows" },
     400: { description: "Invalid filter or sort" },
+    403: { description: "Permission denied" },
     404: { description: "App or model not found" },
   },
+  rbac: { permission: "app.use" },
 });
 
 const getRowRoute = route({
@@ -298,8 +306,10 @@ const getRowRoute = route({
   params: rowParamsSchema,
   responses: {
     200: { description: "App model row" },
+    403: { description: "Permission denied" },
     404: { description: "App, model, or row not found" },
   },
+  rbac: { permission: "app.use" },
 });
 
 const patchRowRoute = route({
@@ -316,7 +326,7 @@ const patchRowRoute = route({
     403: { description: "Permission denied" },
     404: { description: "App, model, or row not found" },
   },
-  rbac: { permission: "app.manage" },
+  rbac: { permission: "app.use" },
 });
 
 const deleteRowRoute = route({
@@ -331,7 +341,7 @@ const deleteRowRoute = route({
     403: { description: "Permission denied" },
     404: { description: "App, model, or row not found" },
   },
-  rbac: { permission: "app.manage" },
+  rbac: { permission: "app.use" },
 });
 
 const runNamedQueryRoute = route({
@@ -344,9 +354,11 @@ const runNamedQueryRoute = route({
   responses: {
     200: { description: "Named query rows" },
     400: { description: "Missing or invalid named query parameters" },
+    403: { description: "Permission denied" },
     409: { description: "App definition needs repair" },
     404: { description: "App or query not found" },
   },
+  rbac: { permission: "app.use" },
 });
 
 const runActionRoute = route({
@@ -365,18 +377,20 @@ const runActionRoute = route({
     409: { description: "App definition needs repair" },
     404: { description: "App or action not found" },
   },
-  rbac: { permission: "app.manage" },
+  rbac: { permission: "app.use" },
 });
 
 /**
- * RBAC-gate an app write and resolve the acting principal's stable actor id
+ * RBAC-gate an app operation and resolve the acting principal's stable actor id
  * (`user:<id>`, `agent:<id>`, or `operator`) for row provenance. Returns null
  * (after writing the 403) when the write is denied.
  */
-function authorizeAppWrite(
+function authorizeApp(
   req: IncomingMessage,
   res: ServerResponse,
   myAgentId: string | undefined,
+  verb: "app.manage" | "app.use",
+  resource: RbacResource,
 ): string | null {
   const auth = getRequestAuth(req);
   let principal: RbacPrincipal;
@@ -394,13 +408,37 @@ function authorizeAppWrite(
   }
   const decision = can({
     principal,
-    verb: "app.manage",
-    resource: { kind: "none" },
+    verb,
+    resource,
     source: "http",
   });
   if (decision.allow) return actor;
   jsonError(res, decision.reason, 403);
   return null;
+}
+
+function authorizeAppManage(
+  req: IncomingMessage,
+  res: ServerResponse,
+  myAgentId: string | undefined,
+  appId?: string,
+): string | null {
+  return authorizeApp(
+    req,
+    res,
+    myAgentId,
+    "app.manage",
+    appId ? { kind: "app", appId } : { kind: "none" },
+  );
+}
+
+function authorizeAppUse(
+  req: IncomingMessage,
+  res: ServerResponse,
+  myAgentId: string | undefined,
+  appId: string,
+): string | null {
+  return authorizeApp(req, res, myAgentId, "app.use", { kind: "app", appId });
 }
 
 function invalidDefinition(res: ServerResponse, issues: AppValidationIssue[]): void {
@@ -671,7 +709,8 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await createAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppWrite(req, res, myAgentId)) return true;
+    // App creation has no app resource to scope yet.
+    if (!authorizeAppManage(req, res, myAgentId)) return true;
     if (parsed.body.forceElementBreak) {
       jsonError(
         res,
@@ -707,6 +746,7 @@ export async function handleApps(
   if (listAppVersionsRoute.match(req.method, pathSegments)) {
     const parsed = await listAppVersionsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (!authorizeAppManage(req, res, myAgentId, parsed.params.id)) return true;
     if (!getApp(parsed.params.id)) {
       jsonError(res, "app not found", 404);
       return true;
@@ -718,6 +758,7 @@ export async function handleApps(
   if (getAppVersionRoute.match(req.method, pathSegments)) {
     const parsed = await getAppVersionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (!authorizeAppManage(req, res, myAgentId, parsed.params.id)) return true;
     if (!getApp(parsed.params.id)) {
       jsonError(res, "app not found", 404);
       return true;
@@ -735,7 +776,7 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await rollbackAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppWrite(req, res, myAgentId)) return true;
+    if (!authorizeAppManage(req, res, myAgentId, parsed.params.id)) return true;
     try {
       const rolledBack = await rollbackApp({
         appId: parsed.params.id,
@@ -768,7 +809,7 @@ export async function handleApps(
       return true;
     const parsed = await bulkCreateRowsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const actor = authorizeAppWrite(req, res, myAgentId);
+    const actor = authorizeAppUse(req, res, myAgentId, parsed.params.id);
     if (!actor) return true;
     const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
@@ -791,7 +832,7 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_ROW_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await createRowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const actor = authorizeAppWrite(req, res, myAgentId);
+    const actor = authorizeAppUse(req, res, myAgentId, parsed.params.id);
     if (!actor) return true;
     const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
@@ -813,6 +854,7 @@ export async function handleApps(
   if (listRowsRoute.match(req.method, pathSegments)) {
     const parsed = await listRowsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (!authorizeAppUse(req, res, myAgentId, parsed.params.id)) return true;
     const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
     const { filters, issues } = filtersFromQuery(queryParams, resolved.model);
@@ -866,6 +908,7 @@ export async function handleApps(
   if (getRowRoute.match(req.method, pathSegments)) {
     const parsed = await getRowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (!authorizeAppUse(req, res, myAgentId, parsed.params.id)) return true;
     if (!resolveModel(parsed.params.id, parsed.params.model, res)) return true;
     const row = getAppRow(parsed.params.id, parsed.params.model, parsed.params.rowId);
     if (!row) {
@@ -880,7 +923,7 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_ROW_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await patchRowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const actor = authorizeAppWrite(req, res, myAgentId);
+    const actor = authorizeAppUse(req, res, myAgentId, parsed.params.id);
     if (!actor) return true;
     const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
@@ -907,7 +950,7 @@ export async function handleApps(
   if (deleteRowRoute.match(req.method, pathSegments)) {
     const parsed = await deleteRowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppWrite(req, res, myAgentId)) return true;
+    if (!authorizeAppUse(req, res, myAgentId, parsed.params.id)) return true;
     const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
     if (
@@ -928,6 +971,7 @@ export async function handleApps(
   if (runNamedQueryRoute.match(req.method, pathSegments)) {
     const parsed = await runNamedQueryRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (!authorizeAppUse(req, res, myAgentId, parsed.params.id)) return true;
     const app = getApp(parsed.params.id);
     if (definitionNeedsRepair(res, app)) return true;
     const queries = app?.definition.queries;
@@ -966,7 +1010,8 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_ROW_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await runActionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppWrite(req, res, myAgentId)) return true;
+    const actor = authorizeAppUse(req, res, myAgentId, parsed.params.id);
+    if (!actor) return true;
 
     const app = getApp(parsed.params.id);
     if (!app) {
@@ -1001,7 +1046,7 @@ export async function handleApps(
         return true;
       }
 
-      // Spike tradeoff: app managers currently run saved scripts with the owner's bindings; revisit
+      // Spike tradeoff: app users currently run saved scripts with the owner's bindings; revisit
       // with invoker-rights checks or invoker-brokered credentials before productization.
       const runAsAgentId = getSavedScriptOwnerAgentId(script);
       if (!runAsAgentId) {
@@ -1043,6 +1088,7 @@ export async function handleApps(
     const task = createTaskWithSiblingAwareness(taskPrompt.text, {
       source: "api",
       agentId: action.agentId ?? lead?.id,
+      ...(actor.startsWith("user:") ? { requestedByUserId: actor.slice("user:".length) } : {}),
     });
     json(res, { ok: true, taskId: task.id, status: task.status });
     return true;
@@ -1052,7 +1098,7 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await patchAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppWrite(req, res, myAgentId)) return true;
+    if (!authorizeAppManage(req, res, myAgentId, parsed.params.id)) return true;
 
     if (!getApp(parsed.params.id)) {
       jsonError(res, "app not found", 404);
@@ -1136,7 +1182,7 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await updateAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppWrite(req, res, myAgentId)) return true;
+    if (!authorizeAppManage(req, res, myAgentId, parsed.params.id)) return true;
     if (!getApp(parsed.params.id)) {
       jsonError(res, "app not found", 404);
       return true;
@@ -1216,7 +1262,7 @@ export async function handleApps(
   if (deleteAppRoute.match(req.method, pathSegments)) {
     const parsed = await deleteAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppWrite(req, res, myAgentId)) return true;
+    if (!authorizeAppManage(req, res, myAgentId, parsed.params.id)) return true;
     const app = getApp(parsed.params.id);
     if (!app) {
       jsonError(res, "app not found", 404);
@@ -1239,6 +1285,7 @@ export async function handleApps(
   if (getAppRoute.match(req.method, pathSegments)) {
     const parsed = await getAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    if (!authorizeAppUse(req, res, myAgentId, parsed.params.id)) return true;
     const app = getApp(parsed.params.id);
     if (!app) {
       jsonError(res, "app not found", 404);

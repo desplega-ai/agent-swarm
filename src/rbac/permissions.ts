@@ -202,7 +202,11 @@ export const PERMISSIONS = {
     namespace: "page",
   },
   "app.manage": {
-    description: "Create, update, or delete apps and their model rows.",
+    description: "Create, update, delete, or roll back apps, and inspect app version history.",
+    namespace: "app",
+  },
+  "app.use": {
+    description: "View an app and act through it: queries, rows, and actions.",
     namespace: "app",
   },
   "script.global.write": {

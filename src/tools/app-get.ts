@@ -2,7 +2,9 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { type AppRow, listAppRows } from "@/apps/row-store";
 import { getApp } from "@/apps/store";
+import { getAgentById } from "@/be/db";
 import { AppQueryParamsError, applyQuery } from "@/http/apps";
+import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 function escapeTableCell(value: unknown): string {
@@ -32,6 +34,7 @@ export const registerAppGetTool = (server: McpServer) => {
       description:
         "Get an app by ID, including its models, named queries, actions, and json-render pages definition.",
       annotations: { readOnlyHint: true },
+      rbac: { permission: "app.use" },
       inputSchema: z.object({
         appId: z.string().min(1).describe("App ID to retrieve."),
       }),
@@ -39,7 +42,16 @@ export const registerAppGetTool = (server: McpServer) => {
         app: z.unknown().optional(),
       }),
     },
-    async ({ appId }) => {
+    async ({ appId }, requestInfo) => {
+      if (!requestInfo.agentId) return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
+      const agent = getAgentById(requestInfo.agentId);
+      const decision = can({
+        principal: { kind: "agent", agentId: requestInfo.agentId, isLead: agent?.isLead ?? false },
+        verb: "app.use",
+        resource: { kind: "app", appId },
+        source: "mcp",
+      });
+      if (!decision.allow) return toolErr(decision.reason);
       const app = getApp(appId);
       if (!app) return toolErr(`App ${appId} not found.`);
 
@@ -51,8 +63,7 @@ export const registerAppGetTool = (server: McpServer) => {
   );
 };
 
-// Keep ungated app reads together in this explicitly allowlisted registration
-// module. app-query.ts re-exports this symbol to preserve its public wiring.
+// app-query.ts re-exports this symbol to preserve its public wiring.
 export const registerAppQueryTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "app-query",
@@ -61,7 +72,7 @@ export const registerAppQueryTool = (server: McpServer) => {
       description:
         "Run one declared named app query with optional $param values and return its rows.",
       annotations: { readOnlyHint: true },
-      rbac: { ungated: "read-only app query mirrors the ungated HTTP app query route" },
+      rbac: { permission: "app.use" },
       inputSchema: z.object({
         appId: z.string().min(1).describe("App ID containing the named query."),
         query: z.string().min(1).describe("Declared query name."),
@@ -79,7 +90,16 @@ export const registerAppQueryTool = (server: McpServer) => {
         missingParams: z.array(z.string()).optional(),
       }),
     },
-    async ({ appId, query: queryName, params }) => {
+    async ({ appId, query: queryName, params }, requestInfo) => {
+      if (!requestInfo.agentId) return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
+      const agent = getAgentById(requestInfo.agentId);
+      const decision = can({
+        principal: { kind: "agent", agentId: requestInfo.agentId, isLead: agent?.isLead ?? false },
+        verb: "app.use",
+        resource: { kind: "app", appId },
+        source: "mcp",
+      });
+      if (!decision.allow) return toolErr(decision.reason);
       const app = getApp(appId);
       const query = app?.definition.queries?.[queryName];
       if (!app || !query) return toolErr(`App ${appId} or query "${queryName}" not found.`);

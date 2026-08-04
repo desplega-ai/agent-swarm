@@ -732,6 +732,9 @@
           "200": {
             "description": "App including its definition"
           },
+          "403": {
+            "description": "Permission denied"
+          },
           "404": {
             "description": "App not found"
           }
@@ -1387,6 +1390,9 @@
           "400": {
             "description": "Invalid filter or sort"
           },
+          "403": {
+            "description": "Permission denied"
+          },
           "404": {
             "description": "App or model not found"
           }
@@ -1513,6 +1519,9 @@
         "responses": {
           "200": {
             "description": "App model row"
+          },
+          "403": {
+            "description": "Permission denied"
           },
           "404": {
             "description": "App, model, or row not found"
@@ -1680,6 +1689,9 @@
           },
           "400": {
             "description": "Missing or invalid named query parameters"
+          },
+          "403": {
+            "description": "Permission denied"
           },
           "404": {
             "description": "App or query not found"

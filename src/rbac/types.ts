@@ -29,6 +29,7 @@ export type RbacResource =
   /** Target-agent resources (profile, context, skills-for-agent). */
   | { kind: "agent"; agentId: string }
   | { kind: "kv-namespace"; namespace: string }
+  | { kind: "app"; appId: string }
   /** Skills, mcp-servers, memory entries, scripts. */
   | { kind: "owned"; ownerAgentId?: string | null; scope?: string }
   | { kind: "none" };
