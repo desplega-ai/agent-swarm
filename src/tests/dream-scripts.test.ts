@@ -404,13 +404,22 @@ describe("dream scripts", () => {
         scope: "swarm",
       }),
     ).toBeNull();
-    // Skills still support both scopes — the restriction is memory-specific.
+    // Skill deltas are swarm-only for the same class of reason: dream-apply runs as
+    // the Lead, so an "agent"-scoped skill would bind to the Lead, never the lane.
     expect(
       validateReflectionDelta({
         kind: "skill",
         action: "create",
         content: "# skill",
         scope: "agent",
+      }),
+    ).toBe("skill scope must be swarm (agent-scoped skill deltas are not supported)");
+    expect(
+      validateReflectionDelta({
+        kind: "skill",
+        action: "create",
+        content: "# skill",
+        scope: "swarm",
       }),
     ).toBeNull();
   });
@@ -636,5 +645,122 @@ describe("dream-apply batches", () => {
       }),
     ]);
     expect(result.deferred).toEqual([]);
+  });
+
+  test("a runId-keyed retry skips already-applied deltas instead of re-mutating", async () => {
+    const kvStore = new Map<string, unknown>();
+    const writes: string[] = [];
+    const ctx = {
+      swarm: {
+        async inject_learning({ learning }: { learning: string }) {
+          writes.push(learning);
+          return { success: true, data: { success: true } };
+        },
+        async kv_get({ key }: { key: string }) {
+          return { success: true, data: { entry: kvStore.has(key) ? { value: "applied" } : null } };
+        },
+        async kv_set({ key, value }: { key: string; value: unknown }) {
+          kvStore.set(key, value);
+          return { success: true, data: { success: true } };
+        },
+      },
+    };
+    const args = {
+      runId: "run-77",
+      deltas: [{ kind: "memory", agentId: "agent-1", action: "write", content: "learned it" }],
+    };
+
+    const first = await dreamApply(args, ctx);
+    expect(first.applied).toEqual([expect.objectContaining({ kind: "memory" })]);
+    expect(first.applied[0]?.idempotentSkip).toBeUndefined();
+    expect(writes).toEqual(["learned it"]);
+    expect(kvStore.size).toBe(1);
+    expect([...kvStore.keys()][0]).toStartWith("apply:run-77:");
+
+    // The retry re-runs the whole loop (crash/timeout after checkpoint loss) —
+    // the receipt must prevent a duplicate memory write.
+    const second = await dreamApply(args, ctx);
+    expect(second.applied).toEqual([
+      expect.objectContaining({ kind: "memory", idempotentSkip: true }),
+    ]);
+    expect(writes).toEqual(["learned it"]);
+
+    // Without a runId there is no receipt to consult and the delta applies.
+    const third = await dreamApply({ deltas: args.deltas }, ctx);
+    expect(third.applied[0]?.idempotentSkip).toBeUndefined();
+    expect(writes).toEqual(["learned it", "learned it"]);
+  });
+
+  test("a memory delete is held unless the memory belongs to the declared agent", async () => {
+    const deletes: unknown[] = [];
+    const makeCtx = (owner: unknown, found = true) => ({
+      swarm: {
+        async db_query({ sql }: { sql: string }) {
+          expect(sql).toContain("FROM agent_memory");
+          return { success: true, data: { rows: found ? [[owner]] : [] } };
+        },
+        async memory_delete(request: unknown) {
+          deletes.push(request);
+          return { success: true, data: { success: true } };
+        },
+      },
+    });
+    const deleteDelta = (agentId: string) => ({
+      deltas: [{ kind: "memory", agentId, action: "delete", id: "mem-9" }],
+    });
+
+    const crossLane = await dreamApply(deleteDelta("agent-1"), makeCtx("agent-2"));
+    expect(deletes).toEqual([]);
+    expect(crossLane.held).toEqual([
+      expect.objectContaining({
+        kind: "memory",
+        reason: "memory mem-9 belongs to agent agent-2, not the declared agent",
+      }),
+    ]);
+
+    const missing = await dreamApply(deleteDelta("agent-1"), makeCtx(undefined, false));
+    expect(deletes).toEqual([]);
+    expect(missing.held).toEqual([
+      expect.objectContaining({ reason: "memory mem-9 was not found" }),
+    ]);
+
+    const owned = await dreamApply(deleteDelta("agent-1"), makeCtx("agent-1"));
+    expect(owned.applied).toEqual([expect.objectContaining({ kind: "memory" })]);
+    expect(deletes).toEqual([{ id: "mem-9" }]);
+  });
+
+  test("skill deltas land in the swarm catalog, never on the Lead identity", async () => {
+    const creates: Array<Record<string, unknown>> = [];
+    const ctx = {
+      swarm: {
+        async skill_create(request: Record<string, unknown>) {
+          creates.push(request);
+          return { success: true, data: { success: true } };
+        },
+      },
+    };
+
+    // skill-create defaults an omitted scope to "agent" (the requesting identity =
+    // the Lead running this script), so the apply must pin scope to swarm.
+    const created = await dreamApply(
+      { deltas: [{ kind: "skill", action: "create", content: "# Playbook" }] },
+      ctx,
+    );
+    expect(created.applied).toHaveLength(1);
+    expect(creates).toEqual([{ content: "# Playbook", scope: "swarm" }]);
+
+    // An explicitly agent-scoped skill delta cannot be honored (no target agentId
+    // semantics — it would bind to the Lead), so it is held, not misdelivered.
+    const agentScoped = await dreamApply(
+      { deltas: [{ kind: "skill", action: "create", content: "# Private", scope: "agent" }] },
+      ctx,
+    );
+    expect(agentScoped.applied).toEqual([]);
+    expect(agentScoped.held).toEqual([
+      expect.objectContaining({
+        reason: "skill scope must be swarm (agent-scoped skill deltas are not supported)",
+      }),
+    ]);
+    expect(creates).toHaveLength(1);
   });
 });

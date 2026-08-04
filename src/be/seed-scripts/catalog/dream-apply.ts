@@ -10,7 +10,29 @@ import {
 
 export const argsSchema = z.object({
   deltas: z.unknown().describe("Approved delta set produced by the dream critique"),
+  runId: z
+    .string()
+    .optional()
+    .describe(
+      "Workflow run ID — enables the per-delta idempotency receipts that make retries safe",
+    ),
 });
+
+const IDEMPOTENCY_NAMESPACE = "dreaming";
+const IDEMPOTENCY_TTL_SEC = 7 * 24 * 60 * 60;
+
+/** Deterministic serialization so the idempotency key survives key-order differences. */
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, nested]) => nested !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, nested]) => `${JSON.stringify(key)}:${stableStringify(nested)}`);
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
 
 const PROFILE_FIELDS: Record<ProfileFile, string> = {
   SOUL: "soulMd",
@@ -140,6 +162,40 @@ function normalizeDeltas(value: unknown): unknown[] | null {
   return Array.isArray(nested) ? nested : null;
 }
 
+/**
+ * A per-run, per-delta KV receipt makes retries safe: a crash or timeout after an
+ * early delta mutated state re-runs this whole loop, and without the receipt an
+ * `append-under` duplicates profile text, a memory write duplicates entries, and a
+ * hygiene delta advances its rotation cursor twice. The receipt is written AFTER a
+ * delta applies, so the re-apply window shrinks to a crash inside a single delta —
+ * exactly-once is not achievable from a sandboxed script without a transactional
+ * server-side receipt. Reads fail open (an unreachable KV must not re-apply-block
+ * a fresh run); writes fail soft and are noted on the audit entry.
+ */
+async function alreadyApplied(ctx: any, key: string): Promise<boolean> {
+  try {
+    const response = await ctx.swarm.kv_get({ key, namespace: IDEMPOTENCY_NAMESPACE });
+    const payload = response?.data ?? response;
+    return payload?.entry != null;
+  } catch {
+    return false;
+  }
+}
+
+async function markApplied(ctx: any, key: string, entry: Record<string, unknown>): Promise<void> {
+  try {
+    const written = await ctx.swarm.kv_set({
+      key,
+      value: "applied",
+      namespace: IDEMPOTENCY_NAMESPACE,
+      expiresInSec: IDEMPOTENCY_TTL_SEC,
+    });
+    assertSucceeded(written, "idempotency receipt write");
+  } catch (error) {
+    entry.receiptError = errorMessage(error);
+  }
+}
+
 /** Apply an approved dream delta set; this is Dreaming's sole state mutator. */
 export default async function dreamApply(args: any, ctx: any) {
   const parsed = argsSchema.safeParse(args);
@@ -148,6 +204,7 @@ export default async function dreamApply(args: any, ctx: any) {
   if (!deltas) {
     throw new Error("invalid args: deltas must be an array or an approved delta set");
   }
+  const runId = parsed.data.runId;
   const result: {
     applied: Record<string, unknown>[];
     held: Record<string, unknown>[];
@@ -161,6 +218,14 @@ export default async function dreamApply(args: any, ctx: any) {
       continue;
     }
     const delta = candidate as ReflectionDelta;
+    const idempotencyKey = runId
+      ? `apply:${runId}:${await contentHash(stableStringify(delta))}`
+      : null;
+    if (idempotencyKey && (await alreadyApplied(ctx, idempotencyKey))) {
+      // A previous attempt of this run already applied this exact delta.
+      result.applied.push({ ...(await auditEntry(delta)), idempotentSkip: true });
+      continue;
+    }
     try {
       if (delta.kind === "profile-op" || delta.kind === "hygiene") {
         const profileResult = await applyProfileDelta(delta, ctx);
@@ -181,13 +246,38 @@ export default async function dreamApply(args: any, ctx: any) {
             entry.cursorError = errorMessage(error);
           }
         }
+        if (idempotencyKey) await markApplied(ctx, idempotencyKey, entry);
         result.applied.push(entry);
         continue;
       }
 
       if (delta.kind === "memory") {
         if (delta.action === "delete") {
-          const deleted = await ctx.swarm.memory_delete({ id: delta.id ?? delta.memoryId });
+          const memoryId = delta.id ?? delta.memoryId;
+          // memory_delete is an unscoped by-ID admin endpoint — an approved delta
+          // whose agentId and memory ID disagree (hallucinated or cross-lane) would
+          // delete ANOTHER agent's memory while the receipt attributes it to the
+          // declared agent. Verify ownership first; anything unverifiable is held.
+          const ownerResponse = await ctx.swarm.db_query({
+            sql: "SELECT agentId FROM agent_memory WHERE id = ?",
+            params: [memoryId],
+          });
+          assertSucceeded(ownerResponse, "memory owner check");
+          const owner = firstCell(ownerResponse);
+          if (owner === undefined) {
+            result.held.push(await auditEntry(delta, `memory ${memoryId} was not found`));
+            continue;
+          }
+          if (owner !== delta.agentId) {
+            result.held.push(
+              await auditEntry(
+                delta,
+                `memory ${memoryId} belongs to agent ${owner ?? "(none)"}, not the declared agent`,
+              ),
+            );
+            continue;
+          }
+          const deleted = await ctx.swarm.memory_delete({ id: memoryId });
           assertSucceeded(deleted, "memory delete");
         } else {
           const written = await ctx.swarm.inject_learning({
@@ -197,12 +287,17 @@ export default async function dreamApply(args: any, ctx: any) {
           });
           assertSucceeded(written, "memory write");
         }
-        result.applied.push(await auditEntry(delta));
+        const memoryEntry = await auditEntry(delta);
+        if (idempotencyKey) await markApplied(ctx, idempotencyKey, memoryEntry);
+        result.applied.push(memoryEntry);
         continue;
       }
 
       if (delta.action === "create") {
-        const created = await ctx.swarm.skill_create({ content: delta.content, scope: delta.scope });
+        // skill-create defaults an omitted scope to "agent", which would bind the
+        // skill to the Lead running this script rather than the swarm catalog —
+        // Dreaming skills are always shared (the validator holds anything else).
+        const created = await ctx.swarm.skill_create({ content: delta.content, scope: "swarm" });
         assertSucceeded(created, "skill create");
       } else {
         const updated = await ctx.swarm.skill_update({
@@ -212,7 +307,9 @@ export default async function dreamApply(args: any, ctx: any) {
         });
         assertSucceeded(updated, "skill update");
       }
-      result.applied.push(await auditEntry(delta));
+      const skillEntry = await auditEntry(delta);
+      if (idempotencyKey) await markApplied(ctx, idempotencyKey, skillEntry);
+      result.applied.push(skillEntry);
     } catch (error) {
       result.deferred.push({
         delta,

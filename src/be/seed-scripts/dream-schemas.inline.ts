@@ -35,7 +35,9 @@ export const ReflectionDeltaSchema: JsonSchema = {
     memoryId: { type: "string" },
     key: { type: "string" },
     name: { type: "string" },
-    scope: { type: "string", enum: ["agent", "swarm"] },
+    // Both delta kinds that carry scope (memory, skill) only support "swarm" —
+    // see validateMemory / validateSkill for why "agent" cannot be honored.
+    scope: { type: "string", enum: ["swarm"] },
     tags: { type: "array", items: { type: "string" } },
     skillId: { type: "string" },
     rotationCursorKey: { type: "string" },
@@ -83,7 +85,8 @@ export type SkillDelta = {
   action: "create" | "update";
   content: string;
   skillId?: string;
-  scope?: "agent" | "swarm";
+  /** Only "swarm" is applicable — see validateSkill. */
+  scope?: "swarm";
   reason?: string;
 };
 
@@ -335,8 +338,14 @@ function validateSkill(value: Record<string, unknown>): string | null {
   if (!nonEmptyString(value.content)) return "skill requires content";
   if (value.action === "update" && !nonEmptyString(value.skillId))
     return "skill update requires skillId";
-  if (value.scope !== undefined && value.scope !== "agent" && value.scope !== "swarm")
-    return "skill scope must be agent or swarm";
+  if (value.scope !== undefined && value.scope !== "swarm") {
+    // dream-apply runs as the Lead and skill deltas carry no target agentId, so an
+    // "agent"-scoped skill would silently bind to the Lead identity — never to the
+    // lane that proposed it (skill-create defaults an omitted scope to agent for the
+    // requesting identity). The swarm catalog is the only shape Dreaming can honestly
+    // deliver, so anything else is held rather than misdelivered.
+    return "skill scope must be swarm (agent-scoped skill deltas are not supported)";
+  }
   return null;
 }
 

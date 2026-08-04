@@ -197,12 +197,14 @@ export const DREAM_WORKFLOW_DEFINITION: WorkflowDefinition = {
       inputs: {
         approved: "critique.taskOutput",
         leadAgentId: "gather-rich.result.leadAgentId",
+        runId: "run.id",
       },
       config: {
         scriptName: "dream-apply",
         scope: "global",
         agentId: "{{leadAgentId}}",
-        args: { deltas: "{{approved}}" },
+        // runId keys the per-delta idempotency receipts that make retries safe.
+        args: { deltas: "{{approved}}", runId: "{{runId}}" },
       },
       next: "receipt",
     },
@@ -213,12 +215,15 @@ export const DREAM_WORKFLOW_DEFINITION: WorkflowDefinition = {
       inputs: {
         apply: "apply.result",
         leadAgentId: "gather-rich.result.leadAgentId",
+        runId: "run.id",
       },
       config: {
         scriptName: "dream-receipt",
         scope: "global",
         agentId: "{{leadAgentId}}",
-        args: { apply: "{{apply}}" },
+        // The receipt's "Run: …" line correlates the durable memory/Slack audit
+        // with the workflow run that performed the mutations.
+        args: { apply: "{{apply}}", runId: "{{runId}}" },
       },
       next: "done",
     },

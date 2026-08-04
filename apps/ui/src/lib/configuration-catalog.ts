@@ -629,7 +629,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "DREAMING_ENABLED",
         label: "Enable Dreaming",
         description:
-          "Runtime kill switch for the Dreaming workflow. With no stored row a Dreaming run proceeds, but the dream-daily schedule ships disabled — enable that schedule to start the nightly pass.",
+          "Runtime kill switch for the Dreaming workflow (a DREAMING_ENABLED=false deployment env var works too). With no value a Dreaming run proceeds, but the dream-daily schedule ships disabled — enable that schedule to start the nightly pass.",
         kind: "boolean",
         defaultValue: "true",
         docsUrl: `${DOCS}addons/dreaming`,

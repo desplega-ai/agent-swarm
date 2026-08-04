@@ -195,3 +195,13 @@ export function validateConfigValue(key: string, value: unknown): string | null 
   const validator = VALIDATED_KEYS[key.toUpperCase()];
   return validator ? validator(value) : null;
 }
+
+/**
+ * Whether a key is a catalog-validated operator setting (feature flag, enum,
+ * threshold). These are non-secret by construction — secrets and credentials
+ * are rejected from the catalog — so they are the only keys `get-config` may
+ * resolve from the server's process.env when no swarm_config row exists.
+ */
+export function isOperatorConfigKey(key: string): boolean {
+  return key.toUpperCase() in VALIDATED_KEYS;
+}

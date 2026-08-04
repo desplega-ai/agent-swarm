@@ -95,7 +95,7 @@ Fields: `kind`, `agentId`, `action`, `content`, `id` / `memoryId`, `name`, `key`
 }
 ```
 
-`action: "write"` requires `content`. `action: "delete"` requires `id` or `memoryId` (take it from `memories[].id` in your slice) and no `content`.
+`action: "write"` requires `content`. `action: "delete"` requires `id` or `memoryId` (take it from `memories[].id` in your slice) and no `content`. The id must belong to the agent named in `agentId` — the apply verifies ownership and **holds** a delete whose memory belongs to someone else or doesn't exist, so never propose deleting from another lane's slice.
 
 Write memories the way you'd want to find them: the fact, the consequence, and the trigger that should fire. `"things went well"` is not a memory.
 
@@ -118,6 +118,8 @@ Fields: `kind`, `action`, `content`, `skillId`, `scope`, `reason`. **No `agentId
 ```
 
 `action: "create"` needs `content` only; `action: "update"` needs `skillId` too. `content` is the **whole** skill body, not a patch.
+
+`scope` may only be `swarm` (or omitted — same thing). The apply runs as the Lead and a skill delta names no agent, so an `"agent"`-scoped skill would silently become a Lead-personal skill instead of a catalog entry; such a delta is **held**.
 
 Propose a skill when the same shape of task has been done 3+ times with a stable approach, or when an agent burned context re-deriving something a playbook would have answered. Description and trigger wording are the load-bearing parts — a skill nobody finds is a skill that doesn't exist. Propose an update when a skill cites a host, endpoint, or command that no longer exists: a playbook with a dead step in it is worse than no playbook.
 

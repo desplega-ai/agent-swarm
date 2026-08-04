@@ -41,7 +41,7 @@ The output is not a report. It is edits: rules added to `CLAUDE.md`, gotchas add
 | `skills` | agent task (Lead) | Reviews skill inventory versus actual invocation — proposes new, updated, or better-described skills. |
 | `hygiene` | agent task (Lead) | Recurring-duty upkeep: what belongs in `HEARTBEAT.md`, what's stale, whose turn it is on rotation. |
 | `critique` | agent task (Lead) | Pools every lane's proposals, removes duplicates and drift, arbitrates conflicts, and emits the approved delta set. A lane that failed contributes nothing rather than blocking the run. |
-| `apply` | script (`dream-apply`, as Lead) | The **only** node that mutates state. Validates each delta, splices anchored profile edits, writes memories and skills. Every applied edit is recorded with its file, anchor, op, and a content hash. |
+| `apply` | script (`dream-apply`, as Lead) | The **only** node that mutates state. Validates each delta, splices anchored profile edits, writes memories and skills. Every applied edit is recorded with its file, anchor, op, and a content hash, and leaves a per-run idempotency receipt in KV — a retried or crash-recovered apply skips deltas it already applied instead of duplicating them. |
 | `receipt` | script (`dream-receipt`, as Lead) | Records what happened as a memory, and posts it to Slack if a channel is configured. |
 
 The parent `reflect` node owns the join: the run cannot reach `critique` until every agent's reflection task is terminal. A failed reflection lane does not kill the run — the failure is carried into the aggregate and the other agents' proposals still reach critique.
@@ -59,8 +59,8 @@ The unit of change is a **ReflectionDelta**. There are four kinds:
 | Kind | Target | Notes |
 | --- | --- | --- |
 | `profile-op` | `SOUL` / `IDENTITY` / `CLAUDE` / `TOOLS` / `HEARTBEAT` | Anchored section edit: `append-under`, `replace-section`, or `remove-section`. |
-| `memory` | Swarm memory | `write` (needs content) or `delete` (needs the memory id). `scope` may only be `swarm` — the write path stores swarm-scoped memory, so an agent-scoped request is held rather than silently published. |
-| `skill` | Skills catalog | `create` or `update`; content is the whole skill body. |
+| `memory` | Swarm memory | `write` (needs content) or `delete` (needs the memory id). `scope` may only be `swarm` — the write path stores swarm-scoped memory, so an agent-scoped request is held rather than silently published. A `delete` only applies when the memory actually belongs to the delta's `agentId`; a mismatched or unknown id is held. |
+| `skill` | Skills catalog | `create` or `update`; content is the whole skill body. `scope` may only be `swarm` — the apply runs as the Lead, so an agent-scoped skill would bind to the Lead identity instead of the lane that proposed it. |
 | `hygiene` | `HEARTBEAT` | Same anchored ops, plus an optional rotation-cursor advance. |
 
 Agents learn how to produce these from the seeded **`dreaming` skill**, which is the runtime playbook for a reflection lane: evidence rules, the field contract, anchor discipline, and which file a given piece of knowledge belongs in.
@@ -92,11 +92,11 @@ Both keys live on **Settings → Configuration**.
 
 | Key | Type | Default | Effect |
 | --- | --- | --- | --- |
-| `DREAMING_ENABLED` | boolean | *(absent — enabled)* | When set to `false`, the run stops at the gate node. This is the runtime kill switch, not the on switch: with no row a *triggered* run proceeds, but the `dream-daily` schedule still ships disabled, so nothing fires until you enable it. |
+| `DREAMING_ENABLED` | boolean | *(absent — enabled)* | When set to `false` — as a stored row **or** as a deployment environment variable — the run stops at the gate node. This is the runtime kill switch, not the on switch: with no value a *triggered* run proceeds, but the `dream-daily` schedule still ships disabled, so nothing fires until you enable it. |
 | `DREAMING_SLACK_CHANNEL` | string | *(absent — no post)* | Slack channel id for the nightly receipt. With no value, the receipt is still written to memory; it is just not announced. |
 
-<Callout type="warn">
-  The gate reads **stored configuration rows**, not process environment variables. Setting `DREAMING_ENABLED=false` in your deployment's environment alone will not stop the dream — save the value on Settings → Configuration (or `PUT /api/config`) so the gate can see it.
+<Callout>
+  The gate resolves the **effective** value: setting `DREAMING_ENABLED=false` in the deployment environment works as an emergency kill switch even with no stored row, because the config read falls back to the server's environment for catalog keys. The standard precedence still applies — env wins at boot, a value saved on Settings → Configuration wins after the config reload it triggers.
 </Callout>
 
 A Slack channel id is configuration, not a credential, so it belongs on this page rather than the Secrets page.
