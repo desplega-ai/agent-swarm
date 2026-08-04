@@ -415,23 +415,32 @@ declare module "swarm-sdk" {
 
     // --- pages & metrics ---
     app_get(args: { appId: string }): Promise<unknown>;
+    app_history(args: { appId: string; limit?: number }): Promise<unknown>;
+    app_diff(args: { appId: string; from?: number; to?: number }): Promise<unknown>;
     app_list(args?: Record<string, never>): Promise<unknown>;
     app_patch(args: {
       appId: string;
       name?: string;
       description?: string | null;
       definition?: Record<string, unknown>;
+      migration?: Record<string, unknown>;
     }): Promise<unknown>;
     app_query(args: {
       appId: string;
       query: string;
       params?: Record<string, string | number | boolean>;
     }): Promise<unknown>;
+    app_rollback(args: {
+      appId: string;
+      version: number;
+      migration?: Record<string, unknown>;
+    }): Promise<unknown>;
     app_upsert(args: {
       name: string;
       description?: string;
       definition: Record<string, unknown>;
       appId?: string;
+      migration?: Record<string, unknown>;
     }): Promise<unknown>;
     page_create(args: Record<string, unknown>): Promise<unknown>;
     page_delete(args: { pageId?: string; slug?: string }): Promise<unknown>;

@@ -13,10 +13,66 @@ Swarm Apps are persistent, agent-authored internal applications: a schema-backed
 | `app-upsert` | Create an app, or replace an existing app's entire definition when you intentionally have the full desired state. |
 | `app-patch` | Make a focused change while preserving everything not mentioned in the patch. Prefer this for iteration. |
 | `app-query` | Run one declared named query and return its rows. Use this when an agent or saved script needs to consume app data rather than render the app UI. |
+| `app-history` | List definition snapshots and their compact model/column digests before choosing a restore point. |
+| `app-diff` | Show a unified definition diff; defaults to newest snapshot → CURRENT. |
+| `app-rollback` | Restore a snapshot through the normal schema-migration engine. |
 
 For every edit: `app-get` -> modify the smallest coherent subtree -> `app-patch` -> if rejected, fix every returned `issues[]` entry (`path` + `message`) and retry. Validation happens before storage, so a rejected update leaves the saved app unchanged. Do not guess at the current definition or use `app-upsert` with a partial definition.
 
 `app-patch` can also change `name`; omit `description` to preserve it or pass `description: null` to clear it.
+
+## Safe schema evolution and rollback
+
+Prefer **hiding** a column over deleting it. A hidden column's values stay on every existing row, so an unhide or rollback can make it visible again. Hiding is metadata-only: hidden columns cannot be used in queries, page bindings, `app.mutate` values, or new row writes, and `required` is ignored while hidden. Row GETs still expose the historical value for backward compatibility.
+
+Do not reuse a hidden column name. The name remains held until you either unhide it or explicitly purge its stored values. To permanently remove a column, delete its declaration with `null` and include `{ "columnName": { "purge": true } }` in the same `migration` object. That is deliberately one-shot and irreversible for row data.
+
+Schema-changing writes can carry this sibling `migration` object:
+
+```json
+{
+  "migration": {
+    "priority": { "from": "flag", "map": { "urgent": "high", "watch": "low" }, "else": "none" },
+    "status": { "from": "flag", "map": { "watch": "watching", "done": "done" }, "else": "open" },
+    "oldColumn": { "purge": true },
+    "count": { "coerce": true, "else": 0 },
+    "owner": { "set": "unassigned" }
+  }
+}
+```
+
+Use `set` to backfill a changed column, `from` with optional `map`/`else` to derive it from one existing (including hidden) column, `coerce` for a kind change, and `purge` only for explicit destruction. Non-purge directives target a column changed in that same write. The server fails loudly before writing when a lossy change needs a directive: inspect every returned `issues[]` item, including its per-value row counts, then choose an explicit policy and retry. Never guess a migration just to get a 200.
+
+For example, split a legacy `flag` into `priority` and `status` without losing data in one patch: add the two columns, map both from `flag`, update every affected query/page binding, then hide `flag`.
+
+```json
+{
+  "appId": "<app-id>",
+  "definition": {
+    "models": {
+      "ticket": {
+        "columns": {
+          "priority": { "kind": "enum", "enum": ["none", "low", "high"] },
+          "status": { "kind": "enum", "enum": ["open", "watching", "done"] },
+          "flag": { "kind": "string", "hidden": true }
+        }
+      }
+    }
+  },
+  "migration": {
+    "priority": { "from": "flag", "map": { "urgent": "high", "watch": "low" }, "else": "none" },
+    "status": { "from": "flag", "map": { "watch": "watching", "done": "done" }, "else": "open" }
+  }
+}
+```
+
+Every schema migration returns `{ scanned, backfilled, coerced, mapped, elsed, purgedValues, idxRebuilt, orphanFields }`. Read `orphanFields`: it reports extra row fields that predate or no longer appear in the definition; they are preserved until an explicit purge. `schemaVersion` is server-managed: never set it in an input patch or try to use it as application data.
+
+Every successful definition write snapshots the previous definition. Use `app-history` to select a version, `app-diff({ appId, from: <version> })` to inspect it against CURRENT, then `app-rollback({ appId, version: <version>, migration? })` to restore it. Rollback is a forward migration over live rows, not row-level time travel: it creates a new pre-rollback snapshot and may reject a lossy restore with the same migration directives and counts. A rejected rollback changes nothing.
+
+Distinguish the two rollback 400s. A lossy-migration 400 is fixable: copy the required `migration` entries from the message and retry. A target-snapshot validation 400 explicitly says that directives cannot repair that historical definition; use `app-history` and choose a different version.
+
+When a schema patch reports stale page/query bindings, repair them in that same patch. Page elements are atomic: replace the complete `pages.<page>.elements.<id>` declaration, removing any reference to a hidden or deleted column, instead of sending only the changed nested prop. This is also the repair move for older apps whose stored page already references an undeclared column; full-definition validation otherwise blocks every patch.
 
 ## Definition reference
 
@@ -46,7 +102,7 @@ Model, query, action, column, page, and page-param names start with a lowercase 
 
 ### Models
 
-Each column is `{ "kind": ..., "required"?: boolean, "default"?: ..., "index"?: boolean, "enum"?: string[] }`.
+Each column is `{ "kind": ..., "required"?: boolean, "default"?: ..., "index"?: boolean, "enum"?: string[], "hidden"?: boolean }`.
 
 | `kind` | Values and indexing |
 |---|---|

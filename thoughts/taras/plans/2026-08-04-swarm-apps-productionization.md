@@ -235,19 +235,19 @@ Rollback-as-forward-migrate lands with its agent surface: `POST /api/apps/{id}/r
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/apps-spike5.test.ts` (full lifecycle floor green)
-- [ ] `bun run lint && bun run tsc:check`
-- [ ] `bun run check:rbac-coverage` (rollback route declared)
-- [ ] `bun run docs:openapi` — rollback route present; commit regenerated spec
-- [ ] `bun run check:skill-sources`
-- [ ] `bun run scripts/check-sdk-tool-registration.ts`
+- [x] `bun run test:root -- src/tests/apps-spike5.test.ts` (full lifecycle floor green)
+- [x] `bun run lint && bun run tsc:check`
+- [x] `bun run check:rbac-coverage` (rollback route declared)
+- [x] `bun run docs:openapi` — rollback route present; commit regenerated spec
+- [x] `bun run check:skill-sources`
+- [x] `bun run scripts/check-sdk-tool-registration.ts`
 
 #### Automated QA (MCP curl session per LOCAL_TESTING.md:108-133, agent `43172bc2-3887-402b-a111-be451a083e3a`):
-- [ ] `app-history` on Spike3 Scratch PM lists the Phase-2 QA writes; `app-diff` v1..CURRENT shows the hidden/purged column churn
-- [ ] `app-rollback` Spike3 Scratch PM to v1 → definition restored (hidden column visible again), 19 rows intact, a NEW snapshot exists for the pre-rollback state; `app-diff` v1..CURRENT ≈ empty
+- [x] `app-history` on Spike3 Scratch PM lists the Phase-2 QA writes; `app-diff` v1..CURRENT shows the hidden/purged column churn
+- [x] `app-rollback` Spike3 Scratch PM to v1 → definition restored (hidden column visible again), 19 rows intact, a NEW snapshot exists for the pre-rollback state; `app-diff` v1..CURRENT ≈ empty (QA note: v1's own snapshot is structurally invalid — pre-existing seed defect — so the flow was exercised against v2; that discovery produced the distinct broken-snapshot error class + test in the review round)
 
 #### Manual Verification:
-- [ ] Run the spec's zero-shot finale (flag → priority/status restructure + rollback, spec §Finale) as a worker task and judge the agent's path quality
+- [ ] Run the spec's zero-shot finale (flag → priority/status restructure + rollback, spec §Finale) as a worker task and judge the agent's path quality (DEFERRED to the final Manual E2E step 2 — same exercise, run once; Taras delegated manual QA 2026-08-04)
 
 **Implementation Note**: Pause, confirm, commit `[phase 3] rollback + history/diff tools + skill`. Phases 1–3 = the complete frozen spec; re-read the spec top-to-bottom before committing and log any deviation in the Appendix.
 

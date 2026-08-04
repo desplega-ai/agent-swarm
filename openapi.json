@@ -451,6 +451,245 @@
         }
       }
     },
+    "/api/apps/{id}/rollback": {
+      "post": {
+        "summary": "Rollback an app definition",
+        "description": "Restores a snapshot through the ordinary schema migration engine. Lossy restores require migration directives.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "migration": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "set": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "set"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "from": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-zA-Z0-9_]{0,39}$"
+                            },
+                            "map": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  }
+                                ]
+                              }
+                            },
+                            "else": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "from"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "coerce": {
+                              "type": "boolean",
+                              "enum": [
+                                true
+                              ]
+                            },
+                            "else": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "coerce"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "purge": {
+                              "type": "boolean",
+                              "enum": [
+                                true
+                              ]
+                            }
+                          },
+                          "required": [
+                            "purge"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "version"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rolled back app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "app": {},
+                    "migration": {
+                      "type": "object",
+                      "properties": {
+                        "scanned": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "backfilled": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "coerced": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "mapped": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "elsed": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "purgedValues": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "idxRebuilt": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "orphanFields": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "scanned",
+                        "backfilled",
+                        "coerced",
+                        "mapped",
+                        "elsed",
+                        "purgedValues",
+                        "idxRebuilt",
+                        "orphanFields"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "migration"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid rollback definition or schema migration"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "App or app version not found"
+          }
+        }
+      }
+    },
     "/api/apps/{id}": {
       "get": {
         "summary": "Get an app",

@@ -9,10 +9,13 @@ import { registerGithubTaskReactions } from "./github/task-reactions";
 import { loadGlobalConfigsIntoEnv } from "./http/core";
 import { isRbacEnabled } from "./rbac";
 import { registerAcceptSteerTool } from "./tools/accept-steer";
+import { registerAppDiffTool } from "./tools/app-diff";
 import { registerAppGetTool } from "./tools/app-get";
+import { registerAppHistoryTool } from "./tools/app-history";
 import { registerAppListTool } from "./tools/app-list";
 import { registerAppPatchTool } from "./tools/app-patch";
 import { registerAppQueryTool } from "./tools/app-query";
+import { registerAppRollbackTool } from "./tools/app-rollback";
 import { registerAppUpsertTool } from "./tools/app-upsert";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
@@ -468,9 +471,12 @@ export function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolea
   // Pages capability - DB-backed lightweight artifacts (HTML / JSON specs).
   if (hasCapability("pages")) {
     registerAppGetTool(server);
+    registerAppHistoryTool(server);
+    registerAppDiffTool(server);
     registerAppListTool(server);
     registerAppPatchTool(server);
     registerAppQueryTool(server);
+    registerAppRollbackTool(server);
     registerAppUpsertTool(server);
     registerCreatePageTool(server);
     registerDeletePageTool(server);

@@ -6,7 +6,11 @@ import { getAgentById, getContextVersion } from "@/be/db";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
-async function computeDiff(oldContent: string, newContent: string): Promise<string> {
+export async function computeDiff(
+  oldContent: string,
+  newContent: string,
+  labels: { old: string; new: string } = { old: "old", new: "new" },
+): Promise<string> {
   const tmpDir = tmpdir();
   const oldPath = join(tmpDir, `ctx-diff-old-${crypto.randomUUID()}.txt`);
   const newPath = join(tmpDir, `ctx-diff-new-${crypto.randomUUID()}.txt`);
@@ -15,10 +19,10 @@ async function computeDiff(oldContent: string, newContent: string): Promise<stri
     await Bun.write(oldPath, oldContent);
     await Bun.write(newPath, newContent);
 
-    const proc = Bun.spawn(["diff", "-u", "--label", "old", "--label", "new", oldPath, newPath], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    const proc = Bun.spawn(
+      ["diff", "-u", "--label", labels.old, "--label", labels.new, oldPath, newPath],
+      { stdout: "pipe", stderr: "pipe" },
+    );
 
     const output = await new Response(proc.stdout).text();
     await proc.exited;

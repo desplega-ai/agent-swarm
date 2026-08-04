@@ -40,7 +40,14 @@ import {
   listApps,
   updateApp,
 } from "../apps/store";
-import { decodeAppVersion, snapshotApp } from "../apps/version";
+import {
+  AppRollbackAppNotFoundError,
+  AppRollbackDefinitionError,
+  AppRollbackVersionNotFoundError,
+  decodeAppVersion,
+  rollbackApp,
+  snapshotApp,
+} from "../apps/version";
 import { getAgentById, getAppVersion, getAppVersions, getLeadAgent } from "../be/db";
 import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId, runSavedScriptAsAgent } from "../be/scripts/run-saved";
@@ -127,6 +134,28 @@ const getAppVersionRoute = route({
     200: { description: "App definition version" },
     404: { description: "App or version not found" },
   },
+});
+
+const rollbackAppRoute = route({
+  method: "post",
+  path: "/api/apps/{id}/rollback",
+  pattern: ["api", "apps", null, "rollback"],
+  summary: "Rollback an app definition",
+  description:
+    "Restores a snapshot through the ordinary schema migration engine. Lossy restores require migration directives.",
+  tags: ["Apps"],
+  params: appParamsSchema,
+  body: z.object({
+    version: z.number().int().positive(),
+    migration: AppMigrationSchema.optional(),
+  }),
+  responses: {
+    200: { description: "Rolled back app", schema: appWriteResponseSchema },
+    400: { description: "Invalid rollback definition or schema migration" },
+    403: { description: "Permission denied" },
+    404: { description: "App or app version not found" },
+  },
+  rbac: { permission: "app.manage" },
 });
 
 const getAppRoute = route({
@@ -686,6 +715,37 @@ export async function handleApps(
       return true;
     }
     json(res, { version: decodeAppVersion(version) });
+    return true;
+  }
+
+  if (rollbackAppRoute.match(req.method, pathSegments)) {
+    if (enforceContentLengthCap(req, res, MAX_APP_BODY_BYTES) === BODY_TOO_LARGE) return true;
+    const parsed = await rollbackAppRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!authorizeAppWrite(req, res, myAgentId)) return true;
+    try {
+      const rolledBack = await rollbackApp({
+        appId: parsed.params.id,
+        version: parsed.body.version,
+        migration: parsed.body.migration,
+        changedByAgentId: myAgentId,
+      });
+      json(res, { app: rolledBack.app, migration: rolledBack.migration });
+    } catch (error) {
+      if (error instanceof AppRollbackAppNotFoundError) {
+        jsonError(res, "app not found", 404);
+      } else if (error instanceof AppRollbackVersionNotFoundError) {
+        jsonError(res, "app version not found", 404);
+      } else if (error instanceof AppRollbackDefinitionError) {
+        json(res, { error: error.message, issues: error.issues }, 400);
+      } else if (error instanceof AppSchemaMigrationError) {
+        invalidMigration(res, error);
+      } else if (error instanceof AppSnapshotFailure) {
+        snapshotFailure(res);
+      } else {
+        throw error;
+      }
+    }
     return true;
   }
 

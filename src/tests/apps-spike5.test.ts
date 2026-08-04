@@ -21,7 +21,10 @@ import { getApp, updateApp } from "../apps/store";
 import { closeDb, countKv, createAgent, getDb, getKv, initDb, upsertKv } from "../be/db";
 import { handleApps } from "../http/apps";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { registerAppDiffTool } from "../tools/app-diff";
+import { registerAppHistoryTool } from "../tools/app-history";
 import { registerAppPatchTool } from "../tools/app-patch";
+import { registerAppRollbackTool } from "../tools/app-rollback";
 import { registerAppUpsertTool } from "../tools/app-upsert";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 
@@ -242,6 +245,290 @@ describe("apps spike 5 lifecycle", () => {
     ).toEqual({
       count: 0,
     });
+  });
+
+  test("rolls back a hidden column losslessly and snapshots the pre-rollback state", async () => {
+    const appId = await createApp();
+    const row = await createRow(appId, { title: "Preserved" });
+    const hidden = await request(`/api/apps/${appId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        definition: { models: { note: { columns: { title: { kind: "string", hidden: true } } } } },
+      }),
+    });
+    expect(hidden.status).toBe(200);
+    expect(getAppRow(appId, "note", row.id)?.title).toBe("Preserved");
+
+    const rolledBack = await request<{
+      app: {
+        definition: { models: { note: { columns: { title: { hidden?: boolean } } } } };
+      };
+      migration: { scanned: number };
+    }>(`/api/apps/${appId}/rollback`, {
+      method: "POST",
+      body: JSON.stringify({ version: 1 }),
+    });
+    expect(rolledBack.status).toBe(200);
+    expect(rolledBack.body.app.definition.models.note.columns.title.hidden).toBeUndefined();
+    expect(rolledBack.body.migration.scanned).toBe(1);
+    expect(getAppRow(appId, "note", row.id)?.title).toBe("Preserved");
+
+    const versions = await request<{
+      versions: Array<{ version: number; snapshot: { definition: { models: unknown } } }>;
+    }>(`/api/apps/${appId}/versions`);
+    expect(versions.body.versions.map((version) => version.version)).toEqual([2, 1]);
+    expect(versions.body.versions[0]?.snapshot.definition).toMatchObject({
+      models: { note: { columns: { title: { hidden: true } } } },
+    });
+  });
+
+  test("requires a migration directive for lossy rollback and succeeds when retried", async () => {
+    const appId = await createApp();
+    const row = await createRow(appId, { title: "12" });
+    const changed = await request(`/api/apps/${appId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        definition: { models: { note: { columns: { title: { kind: "number" } } } } },
+        migration: { title: { coerce: true } },
+      }),
+    });
+    expect(changed.status).toBe(200);
+    expect(getAppRow(appId, "note", row.id)?.title).toBe(12);
+
+    const rejected = await request<{ issues: Array<{ path: string; message: string }> }>(
+      `/api/apps/${appId}/rollback`,
+      { method: "POST", body: JSON.stringify({ version: 1 }) },
+    );
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.issues).toContainEqual(
+      expect.objectContaining({ path: "models.note.columns.title" }),
+    );
+    expect(getApp(appId)?.definition.models.note?.columns.title?.kind).toBe("number");
+
+    const restored = await request<{ migration: { coerced: number } }>(
+      `/api/apps/${appId}/rollback`,
+      {
+        method: "POST",
+        body: JSON.stringify({ version: 1, migration: { title: { coerce: true } } }),
+      },
+    );
+    expect(restored.status).toBe(200);
+    expect(restored.body.migration.coerced).toBe(1);
+    expect(getAppRow(appId, "note", row.id)?.title).toBe("12");
+  });
+
+  test("rolls back a definitionError app while preserving rows and reporting orphans", async () => {
+    const appId = await createApp();
+    const created = await createRow(appId, { title: "Repair me" });
+    const initialWrite = await request(`/api/apps/${appId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ description: "creates the good snapshot" }),
+    });
+    expect(initialWrite.status).toBe(200);
+    const row = getAppRow(appId, "note", created.id)!;
+    upsertKv({
+      namespace: appsNamespace(appId),
+      key: `note/row/${created.id}`,
+      value: { ...row, legacyPayload: "keep" },
+      valueType: "json",
+    });
+    getDb()
+      .prepare("UPDATE apps SET definition = ? WHERE id = ?")
+      .run(JSON.stringify({ models: "broken" }), appId);
+
+    const restored = await request<{
+      app: { definitionError?: unknown; definition: { models: { note: unknown } } };
+      migration: { orphanFields: string[] };
+    }>(`/api/apps/${appId}/rollback`, {
+      method: "POST",
+      body: JSON.stringify({ version: 1 }),
+    });
+    expect(restored.status).toBe(200);
+    expect(restored.body.app.definitionError).toBeUndefined();
+    expect(restored.body.app.definition.models.note).toBeDefined();
+    expect(restored.body.migration.orphanFields).toEqual(["legacyPayload"]);
+    expect(getAppRow(appId, "note", created.id)).toMatchObject({
+      title: "Repair me",
+      legacyPayload: "keep",
+    });
+  });
+
+  test("rejects an invalid target snapshot with non-migration remediation and no writes", async () => {
+    const appId = await createApp();
+    const before = getApp(appId);
+    const invalidSnapshotDefinition = structuredClone(definition) as any;
+    invalidSnapshotDefinition.pages.main.elements.root = {
+      type: "Table",
+      props: {
+        data: { $state: "/queries/allNotes/data" },
+        columns: [{ key: "missing" }],
+      },
+    };
+    getDb()
+      .prepare(
+        `INSERT INTO app_versions (id, appId, version, snapshot, changedByAgentId, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        crypto.randomUUID(),
+        appId,
+        1,
+        JSON.stringify({
+          name: "Broken snapshot",
+          description: null,
+          definition: invalidSnapshotDefinition,
+        }),
+        AGENT_ID,
+        new Date().toISOString(),
+      );
+    const expectedMessage =
+      "target snapshot v1's definition is invalid under current validation; migration directives cannot fix it — choose a different version with app-history";
+
+    const rejected = await request<{
+      error: string;
+      issues: Array<{ path: string; message: string }>;
+    }>(`/api/apps/${appId}/rollback`, {
+      method: "POST",
+      body: JSON.stringify({ version: 1 }),
+    });
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.error).toBe(expectedMessage);
+    expect(rejected.body.issues).toContainEqual(
+      expect.objectContaining({ path: "pages.main.elements.root.props.columns.0.key" }),
+    );
+
+    const tools = registeredTools([registerAppRollbackTool]);
+    const toolRejected = (await tools["app-rollback"]!.handler(
+      { appId, version: 1, migration: { missing: { purge: true } } },
+      toolMeta(),
+    )) as StructuredResult<{
+      success: boolean;
+      message: string;
+      issues: Array<{ path: string; message: string }>;
+    }>;
+    expect(toolRejected.isError).toBe(true);
+    expect(toolRejected.structuredContent.message).toBe(expectedMessage);
+    expect(toolRejected.structuredContent.issues).toEqual(rejected.body.issues);
+
+    expect(getApp(appId)).toEqual(before);
+    expect(
+      getDb().query("SELECT COUNT(*) AS count FROM app_versions WHERE appId = ?").get(appId) as {
+        count: number;
+      },
+    ).toEqual({ count: 1 });
+  });
+
+  test("round-trips app history, diff, and rollback tools including snapshot failure", async () => {
+    const appId = await createApp();
+    const tools = registeredTools([
+      registerAppHistoryTool,
+      registerAppDiffTool,
+      registerAppRollbackTool,
+    ]);
+    const changed = await request(`/api/apps/${appId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        definition: { models: { note: { columns: { body: { kind: "string" } } } } },
+      }),
+    });
+    expect(changed.status).toBe(200);
+
+    const history = (await tools["app-history"]!.handler(
+      { appId },
+      toolMeta(),
+    )) as StructuredResult<{
+      success: boolean;
+      versions: Array<{ version: number }>;
+      details: string;
+    }>;
+    expect(history.structuredContent.success).toBe(true);
+    expect(history.structuredContent.versions.map((version) => version.version)).toEqual([1]);
+    expect(history.structuredContent.details).toContain("note (1 columns)");
+
+    const diff = (await tools["app-diff"]!.handler(
+      { appId, from: 1 },
+      toolMeta(),
+    )) as StructuredResult<{
+      success: boolean;
+      diff: string;
+    }>;
+    expect(diff.structuredContent.success).toBe(true);
+    expect(diff.structuredContent.diff).toContain('+        "body": {');
+
+    const rolledBack = (await tools["app-rollback"]!.handler(
+      { appId, version: 1 },
+      toolMeta(),
+    )) as StructuredResult<{ success: boolean; app: { name: string } }>;
+    expect(rolledBack.structuredContent.success).toBe(true);
+    expect(rolledBack.structuredContent.app.name).toBe("Spike 5");
+
+    const cleanDiff = (await tools["app-diff"]!.handler(
+      { appId, from: 1 },
+      toolMeta(),
+    )) as StructuredResult<{
+      success: boolean;
+      diff: string;
+    }>;
+    expect(cleanDiff.structuredContent.diff).toBe("(no differences)");
+
+    getDb().run(`
+      CREATE TRIGGER fail_rollback_snapshot
+      BEFORE INSERT ON app_versions
+      BEGIN SELECT RAISE(FAIL, 'snapshot intentionally failed'); END;
+    `);
+    const failed = (await tools["app-rollback"]!.handler(
+      { appId, version: 2 },
+      toolMeta(),
+    )) as StructuredResult<{ success: boolean; message: string }>;
+    getDb().run("DROP TRIGGER fail_rollback_snapshot");
+    expect(failed.isError).toBe(true);
+    expect(failed.structuredContent.message).toStartWith("Failed to snapshot app");
+    expect(getApp(appId)?.name).toBe("Spike 5");
+  });
+
+  test("diffs two explicit historical app versions with unambiguous output labels", async () => {
+    const appId = await createApp();
+    expect(
+      (
+        await request(`/api/apps/${appId}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            definition: { models: { note: { columns: { body: { kind: "string" } } } } },
+          }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await request(`/api/apps/${appId}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            definition: { models: { note: { columns: { category: { kind: "string" } } } } },
+          }),
+        })
+      ).status,
+    ).toBe(200);
+
+    const tools = registeredTools([registerAppDiffTool]);
+    const historicalDiff = (await tools["app-diff"]!.handler(
+      { appId, from: 1, to: 2 },
+      toolMeta(),
+    )) as StructuredResult<{
+      success: boolean;
+      fromLabel: string;
+      toLabel: string;
+      diff: string;
+    }>;
+    expect(historicalDiff.isError).not.toBe(true);
+    expect(historicalDiff.structuredContent).toMatchObject({
+      success: true,
+      fromLabel: "v1",
+      toLabel: "v2",
+    });
+    expect(historicalDiff.structuredContent.diff).toContain("--- v1");
+    expect(historicalDiff.structuredContent.diff).toContain("+++ v2");
+    expect(historicalDiff.structuredContent.diff).toContain('+        "body": {');
+    expect(historicalDiff.structuredContent.diff).not.toContain("CURRENT");
   });
 
   test("retains raw invalid definitions in snapshots and permits PUT repair", async () => {
