@@ -130,6 +130,15 @@ export function isUpstream(def: WorkflowDefinition, sourceId: string, targetId: 
   return false;
 }
 
+function containsInterpolationToken(value: unknown): boolean {
+  if (typeof value === "string") return value.includes("{{") && value.includes("}}");
+  if (Array.isArray(value)) return value.some(containsInterpolationToken);
+  if (value && typeof value === "object") {
+    return Object.values(value).some(containsInterpolationToken);
+  }
+  return false;
+}
+
 /**
  * Validate a workflow definition for structural correctness.
  *
@@ -201,11 +210,36 @@ export function validateDefinition(
     }
   }
 
-  // 4. Check all node types are registered (if registry provided)
+  // 4. Check all node types and executor-specific configs (if registry provided)
   if (registry) {
     for (const node of def.nodes) {
       if (!registry.has(node.type)) {
         errors.push(`Node "${node.id}" uses unregistered executor type "${node.type}"`);
+        continue;
+      }
+
+      const configResult = registry.get(node.type).configSchema.safeParse(node.config);
+      if (!configResult.success) {
+        for (const issue of configResult.error.issues) {
+          const issuePath = issue.path.map(String);
+          const path = ["config", ...issuePath].join(".");
+          let value: unknown = node.config;
+          for (const segment of issue.path) {
+            if (value === null || typeof value !== "object") {
+              value = undefined;
+              break;
+            }
+            value = (value as Record<PropertyKey, unknown>)[segment];
+          }
+          // Exact interpolation tokens can resolve to non-string values at
+          // execution time, so defer only those dynamic fields to the same
+          // executor schema after interpolation. Static values still fail now.
+          if (containsInterpolationToken(value)) continue;
+          const renderedValue = value === undefined ? "undefined" : JSON.stringify(value);
+          errors.push(
+            `Node "${node.id}" (${node.type}) ${path} has invalid value ${renderedValue}: ${issue.message}`,
+          );
+        }
       }
     }
   }

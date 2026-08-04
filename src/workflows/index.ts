@@ -31,14 +31,21 @@ import { startWaitPoller } from "./wait-poller";
 
 let _registry: ExecutorRegistry | null = null;
 
+function createBuiltInExecutorRegistry(): ExecutorRegistry {
+  return createExecutorRegistry({
+    db,
+    eventBus: workflowEventBus,
+    interpolate: (template, ctx) => interpolate(template, ctx).result,
+  });
+}
+
 /**
- * Get the executor registry singleton.
- * Throws if called before `initWorkflows()`.
+ * Get the executor registry singleton, constructing its side-effect-free
+ * executor catalog on first use so authoring validation is available before
+ * the workflow pollers/listeners start.
  */
 export function getExecutorRegistry(): ExecutorRegistry {
-  if (!_registry) {
-    throw new Error("Workflow engine not initialized — call initWorkflows() first");
-  }
+  _registry ??= createBuiltInExecutorRegistry();
   return _registry;
 }
 
@@ -51,11 +58,7 @@ export function getExecutorRegistry(): ExecutorRegistry {
  */
 export function initWorkflows(): void {
   // 1. Create the executor registry singleton
-  _registry = createExecutorRegistry({
-    db,
-    eventBus: workflowEventBus,
-    interpolate: (template, ctx) => interpolate(template, ctx).result,
-  });
+  _registry = getExecutorRegistry();
 
   // 2. Wire up resume listener (task.completed / task.failed / task.cancelled)
   setupWorkflowResumeListener(workflowEventBus, _registry);

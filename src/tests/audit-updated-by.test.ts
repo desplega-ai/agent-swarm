@@ -193,7 +193,7 @@ describe("update-schedule MCP tool — updated_by column", () => {
 // ─── Workflow tests ────────────────────────────────────────────────────────────
 
 const MINIMAL_DEFINITION = {
-  nodes: [{ id: "start", type: "agent-task", config: { task: "hello" }, next: null }],
+  nodes: [{ id: "start", type: "agent-task", config: { template: "hello" }, next: null }],
   onNodeFailure: "fail" as const,
 };
 
@@ -285,7 +285,7 @@ describe("patch-workflow MCP tool — updated_by column", () => {
       "patch-workflow",
       {
         id: wf.id,
-        update: [{ nodeId: "start", node: { config: { task: "updated hello" } } }],
+        update: [{ nodeId: "start", node: { config: { template: "updated hello" } } }],
       },
       agentId,
       sourceTaskId,
@@ -313,7 +313,7 @@ describe("patch-workflow MCP tool — updated_by column", () => {
       "patch-workflow",
       {
         id: wf.id,
-        update: [{ nodeId: "start", node: { config: { task: "auto-patched" } } }],
+        update: [{ nodeId: "start", node: { config: { template: "auto-patched" } } }],
       },
       agentId,
       automationTask.id,
@@ -565,7 +565,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     const result = await callTool(
       server,
       "patch-workflow-node",
-      { id: wf.id, nodeId: "start", config: { task: "node updated" } },
+      { id: wf.id, nodeId: "start", config: { template: "node updated" } },
       agentId,
       sourceTaskId,
     );
@@ -590,7 +590,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     const result = await callTool(
       server,
       "patch-workflow-node",
-      { id: wf.id, nodeId: "start", config: { task: "auto node patch" } },
+      { id: wf.id, nodeId: "start", config: { template: "auto node patch" } },
       agentId,
       automationTask.id,
     );
@@ -623,7 +623,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     const result = await callTool(
       server,
       "patch-workflow-node",
-      { id: wf.id, nodeId: "start", config: { task: "spoof attempt" } },
+      { id: wf.id, nodeId: "start", config: { template: "spoof attempt" } },
       agentId,
       foreignTask.id,
     );

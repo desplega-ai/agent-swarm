@@ -25,9 +25,9 @@ Use this skill when you need to change an existing workflow without breaking liv
 
 ### `swarm-script` Timeout Limit
 
-- Keep `config.timeoutMs` at or below `60000`; the `swarm-script` node schema rejects larger values.
-- `patch-workflow-node` accepts an oversized value, but the run later fails with `Input validation failed ... timeoutMs ... Too big: expected number to be <=60000`.
-- For work that needs more than 60 seconds, add node-level `retry` (`{ maxRetries: 2, strategy: "exponential", baseDelayMs: 2000, maxDelayMs: 10000 }`) or split it into asynchronous submit + collect nodes. For example, `agent-swarm-unified-release-posting` uses `submit-standard-studio-render` → `collect-standard-studio-render`, both with `timeoutMs: 60000`.
+- Keep `config.timeoutMs` at or below `300000` (5 minutes); the default remains `30000` (30 seconds).
+- Workflow create, update, bulk-patch, and single-node patch operations validate executor config and reject an oversized value before saving it.
+- For orchestration that needs more than 5 minutes, use a durable one-off script workflow run via `launch-script-run` and split the work into bounded, journaled `ctx.step.swarmScript` (or other durable) steps. Do not stretch a single `swarm-script` node beyond the cap.
 
 ## Common Failure Patterns
 

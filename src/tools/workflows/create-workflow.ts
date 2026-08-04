@@ -11,6 +11,7 @@ import {
   TriggerConfigSchema,
   WorkflowDefinitionSchema,
 } from "@/types";
+import { getExecutorRegistry } from "@/workflows";
 import { validateDefinition } from "@/workflows/definition";
 
 export const registerCreateWorkflowTool = (server: McpServer) => {
@@ -109,7 +110,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
       }
       try {
         // Validate definition structure
-        const validation = validateDefinition(definition);
+        const validation = validateDefinition(definition, getExecutorRegistry());
         if (!validation.valid) {
           return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
         }

@@ -11,6 +11,7 @@ import {
   TriggerConfigSchema,
   WorkflowDefinitionSchema,
 } from "@/types";
+import { getExecutorRegistry } from "@/workflows";
 import { validateDefinition } from "@/workflows/definition";
 import { snapshotWorkflow } from "@/workflows/version";
 
@@ -105,7 +106,7 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
 
         // Validate new definition if provided
         if (definition) {
-          const validation = validateDefinition(definition);
+          const validation = validateDefinition(definition, getExecutorRegistry());
           if (!validation.valid) {
             return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
           }

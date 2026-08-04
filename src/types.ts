@@ -1506,6 +1506,7 @@ export const SwarmScriptNodeConfigSchema = z.object({
   pinHash: z.string().min(1).optional(),
   args: z.record(z.string(), z.unknown()).optional(),
   fsMode: z.enum(["none", "workspace-rw"]).optional(),
+  timeoutMs: z.number().int().min(1_000).max(300_000).optional(),
 });
 export type SwarmScriptNodeConfig = z.infer<typeof SwarmScriptNodeConfigSchema>;
 
@@ -1523,7 +1524,7 @@ export const WorkflowNodeSchema = z.object({
     .record(z.string(), z.unknown())
     .describe(
       "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. " +
-        "For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode? }. " +
+        "For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. " +
         "Values support {{interpolation}} from the node's inputs context. " +
         "NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, " +
         "while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}).",

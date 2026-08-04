@@ -13,6 +13,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
 import { registerCreateWorkflowTool } from "../tools/workflows/create-workflow";
 import { registerPatchWorkflowTool } from "../tools/workflows/patch-workflow";
+import { registerPatchWorkflowNodeTool } from "../tools/workflows/patch-workflow-node";
 import { registerTriggerWorkflowTool } from "../tools/workflows/trigger-workflow";
 import { registerUpdateWorkflowTool } from "../tools/workflows/update-workflow";
 import type { Workflow, WorkflowDefinition } from "../types";
@@ -52,6 +53,7 @@ function buildServerWithTools() {
   registerCreateWorkflowTool(server);
   registerUpdateWorkflowTool(server);
   registerPatchWorkflowTool(server);
+  registerPatchWorkflowNodeTool(server);
   registerTriggerWorkflowTool(server);
 
   const registeredTools = (server as unknown as Record<string, unknown>)._registeredTools as Record<
@@ -75,6 +77,7 @@ function buildServerWithTools() {
     callCreate: callTool("create-workflow"),
     callUpdate: callTool("update-workflow"),
     callPatch: callTool("patch-workflow"),
+    callPatchNode: callTool("patch-workflow-node"),
     callTrigger: callTool("trigger-workflow"),
   };
 }
@@ -109,6 +112,16 @@ const minimalDefinition: WorkflowDefinition = {
     },
   ],
 };
+
+const swarmScriptDefinition = (timeoutMs: number): WorkflowDefinition => ({
+  nodes: [
+    {
+      id: "run-report",
+      type: "swarm-script",
+      config: { scriptName: "report", timeoutMs },
+    },
+  ],
+});
 
 const createdWorkflowIds: string[] = [];
 let nameCounter = 0;
@@ -157,6 +170,55 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
   });
 
   // ─── create-workflow with triggerSchema ─────────────────────
+
+  test("workflow authoring tools reject oversized executor timeouts before persistence", async () => {
+    const rejectedCreate = await tools.callCreate({
+      name: uniqueName("mcp-timeout-rejected-create"),
+      definition: swarmScriptDefinition(300_001),
+    });
+    expect(rejectedCreate.structuredContent?.success).toBe(false);
+    expect(rejectedCreate.structuredContent?.message).toContain("config.timeoutMs");
+    expect(rejectedCreate.structuredContent?.message).toContain("300001");
+    expect(rejectedCreate.structuredContent?.message).toContain("300000");
+
+    const created = await tools.callCreate({
+      name: uniqueName("mcp-timeout-valid"),
+      definition: swarmScriptDefinition(300_000),
+    });
+    expect(created.structuredContent?.success).toBe(true);
+    const workflowId = created.structuredContent?.workflow?.id as string;
+    createdWorkflowIds.push(workflowId);
+
+    const rejectedUpdate = await tools.callUpdate({
+      id: workflowId,
+      definition: swarmScriptDefinition(300_001),
+    });
+    expect(rejectedUpdate.structuredContent?.success).toBe(false);
+    expect(rejectedUpdate.structuredContent?.message).toContain("config.timeoutMs");
+    expect(getWorkflow(workflowId)?.definition.nodes[0]?.config.timeoutMs).toBe(300_000);
+
+    const rejectedPatch = await tools.callPatch({
+      id: workflowId,
+      update: [
+        {
+          nodeId: "run-report",
+          node: { config: { scriptName: "report", timeoutMs: 300_001 } },
+        },
+      ],
+    });
+    expect(rejectedPatch.structuredContent?.success).toBe(false);
+    expect(rejectedPatch.structuredContent?.message).toContain("config.timeoutMs");
+    expect(getWorkflow(workflowId)?.definition.nodes[0]?.config.timeoutMs).toBe(300_000);
+
+    const rejectedNodePatch = await tools.callPatchNode({
+      id: workflowId,
+      nodeId: "run-report",
+      config: { scriptName: "report", timeoutMs: 300_001 },
+    });
+    expect(rejectedNodePatch.structuredContent?.success).toBe(false);
+    expect(rejectedNodePatch.structuredContent?.message).toContain("config.timeoutMs");
+    expect(getWorkflow(workflowId)?.definition.nodes[0]?.config.timeoutMs).toBe(300_000);
+  });
 
   test("create-workflow with triggerSchema persists schema; getWorkflow returns identical object", async () => {
     const triggerSchema: Record<string, unknown> = {

@@ -446,7 +446,7 @@ export async function handleWorkflows(
     if (!parsed) return true;
 
     // Validate definition structure
-    const validation = validateDefinition(parsed.body.definition);
+    const validation = validateDefinition(parsed.body.definition, getExecutorRegistry());
     if (!validation.valid) {
       jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
       return true;
@@ -524,7 +524,7 @@ export async function handleWorkflows(
       return true;
     }
 
-    const validation = validateDefinition(patchResult.definition);
+    const validation = validateDefinition(patchResult.definition, getExecutorRegistry());
     if (!validation.valid) {
       jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
       return true;
@@ -568,7 +568,7 @@ export async function handleWorkflows(
       return true;
     }
 
-    const validation = validateDefinition(patchResult.definition);
+    const validation = validateDefinition(patchResult.definition, getExecutorRegistry());
     if (!validation.valid) {
       jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
       return true;
@@ -627,7 +627,7 @@ export async function handleWorkflows(
 
     // Validate new definition if provided
     if (body.definition) {
-      const validation = validateDefinition(body.definition);
+      const validation = validateDefinition(body.definition, getExecutorRegistry());
       if (!validation.valid) {
         jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
         return true;

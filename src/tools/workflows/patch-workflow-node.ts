@@ -4,6 +4,7 @@ import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getWorkflow, updateWorkflow } from "@/be/db";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { WorkflowNodePatchSchema } from "@/types";
+import { getExecutorRegistry } from "@/workflows";
 import { applyDefinitionPatch, validateDefinition } from "@/workflows/definition";
 import { snapshotWorkflow } from "@/workflows/version";
 
@@ -42,7 +43,7 @@ export const registerPatchWorkflowNodeTool = (server: McpServer) => {
           return toolErr(`Patch errors: ${msg}`);
         }
 
-        const validation = validateDefinition(patchResult.definition);
+        const validation = validateDefinition(patchResult.definition, getExecutorRegistry());
         if (!validation.valid) {
           return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
         }
