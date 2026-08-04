@@ -68,6 +68,7 @@ import {
   Maximize2,
   Minimize2,
   RefreshCw,
+  Settings,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -84,8 +85,10 @@ import {
   useAppQueries,
   useAppQueryRefetch,
   useAppRefresh,
+  useAppUserConfig,
 } from "@/api/hooks/use-apps";
 import type { AgentTaskStatus, AppDefinition, AppDetail, AppPageDef, AppRow } from "@/api/types";
+import { AppSettingsDrawer } from "@/components/apps/app-settings-drawer";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
@@ -790,6 +793,48 @@ export function AppSurface({
     });
   }, [queryPlans, results, store]);
 
+  // ── `/user` mirror (per-viewer userConfig) ───────────────────────────────
+  // The CONSUMING app's own preferences, mirrored read-only at `/user/<field>`
+  // so any node — including one inside a borrowed element instance — can bind
+  // `{ "$state": "/user/<field>" }`.
+  //
+  // Deliberately NOT mirrored for the resolved DEFINING apps: a borrowed
+  // element reads its defining app's DATA through `/refs/<definingAppId>/…`,
+  // but `/user` is the viewer's preferences for the app they are actually
+  // looking at, so an embed inherits the host's settings rather than the
+  // producer's.
+  //
+  // Written as one object (not field-by-field) so a field dropped from the
+  // schema disappears from the mirror too, and guarded by a content signature
+  // because the whole subtree is replaced on every write.
+  const hasUserConfig = Object.keys(definition.userConfig ?? {}).length > 0;
+  const userConfig = useAppUserConfig(app.id, { enabled: hasUserConfig });
+  const userConfigValues = userConfig.data?.values;
+  const userConfigSignature = hasUserConfig ? JSON.stringify(userConfigValues ?? null) : null;
+  useEffect(() => {
+    if (userConfigSignature === null) {
+      // App declares no userConfig: touch the store ONLY to clear a mirror an
+      // earlier definition left behind. Content-aware, like the main path
+      // below — an already-cleared `{}` is not `undefined`, so a plain
+      // existence check would rewrite it (and churn every subscriber of this
+      // subtree) on every run of this effect.
+      const existing = store.get("/user");
+      const stale =
+        typeof existing === "object" &&
+        existing !== null &&
+        Object.keys(existing as Record<string, unknown>).length > 0;
+      if (stale) store.set("/user", {});
+      return;
+    }
+    // Nothing fetched yet — leave the warm mirror alone rather than blanking
+    // the values the page is already rendering.
+    if (!userConfigValues) return;
+    // Idempotent like the query mirror: re-mounting or a poll that changed
+    // nothing must not churn the store (and re-render the page).
+    if (JSON.stringify(store.get("/user") ?? null) === userConfigSignature) return;
+    store.set("/user", userConfigValues);
+  }, [userConfigSignature, userConfigValues, store]);
+
   const compiled = useMemo(() => {
     const swarmActions = createSwarmActionHandlers({
       onResponse: (result) => setLastResponse(result),
@@ -1058,7 +1103,12 @@ export function AppSurface({
       <PageHeader
         title={app.name}
         description={app.description ?? undefined}
-        action={<AppHeaderActions appIds={[...definitionsByApp.keys()]} />}
+        action={
+          <AppHeaderActions
+            appIds={[...definitionsByApp.keys()]}
+            settingsApp={hasUserConfig ? app : null}
+          />
+        }
       />
       {/* Bordered, self-scrolling canvas so the app's limits are visible
           against the dashboard chrome. Default view only — full/chromeless
@@ -1086,12 +1136,22 @@ export function AppSurface({
  * copy the chromeless (embeddable) URL, and force a definition + query
  * refresh without waiting for the 30s definition poll — for this app AND
  * every app it borrows elements from, so embeds refresh with the page.
+ *
+ * `settingsApp` is the app whose per-viewer `userConfig` the gear edits, or
+ * `null` for an app that declares none — in which case no gear is rendered.
  */
-function AppHeaderActions({ appIds }: { appIds: string[] }) {
+function AppHeaderActions({
+  appIds,
+  settingsApp,
+}: {
+  appIds: string[];
+  settingsApp: AppDetail | null;
+}) {
   const refresh = useAppRefresh(appIds);
   const location = useLocation();
   const { copied, copy } = useCopyToClipboard();
   const [refreshing, setRefreshing] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1141,6 +1201,26 @@ function AppHeaderActions({ appIds }: { appIds: string[] }) {
         <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
         Refresh
       </Button>
+      {settingsApp && (
+        <>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="App settings"
+            title="Your settings for this app"
+            data-testid="app-settings-open"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <Settings className="size-3.5" />
+          </Button>
+          <AppSettingsDrawer
+            appId={settingsApp.id}
+            appName={settingsApp.name}
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+          />
+        </>
+      )}
     </div>
   );
 }

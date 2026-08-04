@@ -632,7 +632,7 @@ describe("apps spike 5 lifecycle", () => {
     });
   });
 
-  test("rejects unknown top-level keys without accepting future definition surfaces", async () => {
+  test("rejects unknown top-level keys while accepting the userConfig definition surface", async () => {
     const result = await request<{ issues: Array<{ path: string; message: string }> }>(
       "/api/apps",
       {
@@ -646,15 +646,14 @@ describe("apps spike 5 lifecycle", () => {
       message: 'unknown top-level key "element" — did you mean "elements"?',
     });
 
-    const futureSurface = await request<{ issues: Array<{ path: string }> }>("/api/apps", {
+    const userConfigSurface = await request("/api/apps", {
       method: "POST",
       body: JSON.stringify({
         name: "Future surface",
         definition: { ...definition, userConfig: {} },
       }),
     });
-    expect(futureSurface.status).toBe(400);
-    expect(futureSurface.body.issues.some((issue) => issue.path === "userConfig")).toBe(true);
+    expect(userConfigSurface.status).toBe(201);
 
     const appId = await createApp();
     const patch = await request<{ issues: Array<{ path: string; message: string }> }>(

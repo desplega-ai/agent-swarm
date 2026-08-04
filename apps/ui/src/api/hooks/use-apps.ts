@@ -1,7 +1,7 @@
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { api } from "../client";
-import type { AppDefinition } from "../types";
+import type { AppDefinition, AppUserConfigValue } from "../types";
 
 /** Query key for one resolved named query of a swarm app. */
 export function appQueryKey(appId: string, queryName: string) {
@@ -28,6 +28,47 @@ export function useApp(id: string | undefined) {
     queryFn: () => api.getApp(id ?? ""),
     enabled: !!id,
     refetchInterval: 30_000,
+  });
+}
+
+/** Query key for one app's per-viewer userConfig values. */
+export function appUserConfigKey(appId: string) {
+  return ["app-user-config", appId] as const;
+}
+
+/**
+ * This viewer's merged `userConfig` values (+ the declaring schema) for one
+ * app. Polled at the definition cadence (30s), not the data cadence: these are
+ * per-user preferences that only change when this dashboard writes them, and
+ * the settings drawer invalidates the key on save.
+ *
+ * `enabled` lets a caller skip the request entirely for an app that declares no
+ * `userConfig` — the route answers `{values:{},schema:{}}` for those, so the
+ * call is merely pointless, never wrong.
+ */
+export function useAppUserConfig(appId: string | undefined, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: appUserConfigKey(appId ?? ""),
+    queryFn: () => api.getAppUserConfig(appId ?? ""),
+    enabled: !!appId && (options?.enabled ?? true),
+    refetchInterval: 30_000,
+  });
+}
+
+/**
+ * Save this viewer's preferences for one app. The PUT replaces the stored
+ * values wholesale and answers with the freshly merged view, which is written
+ * straight into the cache so the surface's `/user/<field>` mirror updates on
+ * the same tick; the invalidate then reconciles with the server.
+ */
+export function useSaveAppUserConfig(appId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (values: Record<string, AppUserConfigValue>) => api.putAppUserConfig(appId, values),
+    onSuccess: (data) => {
+      queryClient.setQueryData(appUserConfigKey(appId), data);
+      void queryClient.invalidateQueries({ queryKey: appUserConfigKey(appId) });
+    },
   });
 }
 

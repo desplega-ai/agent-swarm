@@ -70,6 +70,12 @@ Every schema migration returns `{ scanned, backfilled, coerced, mapped, elsed, p
 
 Every successful definition write snapshots the previous definition. Use `app-history` to select a version, `app-diff({ appId, from: <version> })` to inspect it against CURRENT, then `app-rollback({ appId, version: <version>, migration? })` to restore it. Rollback is a forward migration over live rows, not row-level time travel: it creates a new pre-rollback snapshot and may reject a lossy restore with the same migration directives and counts. A rejected rollback changes nothing.
 
+### Per-user configuration
+
+`userConfig` declares up to 20 typed settings in the versioned definition; its values are deliberately stored outside the definition, separately for each user (and the operator dashboard). Each field is `{ "kind": "string" | "number" | "boolean" | "date" | "enum", "default"?: ..., "enum"?: [...], "label"?: "..." }`. Defaults follow column rules, including enum membership; `required` is not allowed. A missing or obsolete stored value reads as its default, or `null` when no default is declared.
+
+Use `{ "$state": "/user/<field>" }` on a page for the read-only current-user binding; the field must be declared and the path cannot continue below it. Pure and bound reusable elements cannot bind `/user` directly — pass the value through an element prop from the consuming page. An agent acting on an owned user-requested task reads and edits that requester's preferences. `userConfig` schema changes are always migration-compatible and appear in migration reports; no migration directives are needed. Rollback restores the historical schema but never alters saved per-user values, so values can resurface when a field returns.
+
 Distinguish the two rollback 400s. A lossy-migration 400 is fixable: copy the required `migration` entries from the message and retry. A target-snapshot validation 400 explicitly says that directives cannot repair that historical definition; use `app-history` and choose a different version.
 
 When a schema patch reports stale page/query bindings, repair them in that same patch. Page elements are atomic: replace the complete `pages.<page>.elements.<id>` declaration, removing any reference to a hidden or deleted column, instead of sending only the changed nested prop. This is also the repair move for older apps whose stored page already references an undeclared column; full-definition validation otherwise blocks every patch.

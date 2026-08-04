@@ -33,6 +33,8 @@ const ColumnDefSchema = z
     if (column.kind === "enum") {
       if (!column.enum || column.enum.length === 0) {
         ctx.addIssue({ code: "custom", path: ["enum"], message: "enum values are required" });
+      } else if (column.enum.some((value) => value.length === 0)) {
+        ctx.addIssue({ code: "custom", path: ["enum"], message: "enum values must be non-empty" });
       } else if (new Set(column.enum).size !== column.enum.length) {
         ctx.addIssue({ code: "custom", path: ["enum"], message: "enum values must be unique" });
       }
@@ -65,6 +67,56 @@ const ColumnDefSchema = z
       });
     }
   });
+
+const UserConfigFieldSchema = z
+  .object({
+    kind: ColumnKindSchema,
+    default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+    enum: z.array(z.string()).optional(),
+    label: z.string().optional(),
+    required: z.never().optional(),
+  })
+  .strict()
+  .superRefine((field, ctx) => {
+    if (field.kind === "enum") {
+      if (!field.enum || field.enum.length === 0) {
+        ctx.addIssue({ code: "custom", path: ["enum"], message: "enum values are required" });
+      } else if (field.enum.some((value) => value.length === 0)) {
+        ctx.addIssue({ code: "custom", path: ["enum"], message: "enum values must be non-empty" });
+      } else if (new Set(field.enum).size !== field.enum.length) {
+        ctx.addIssue({ code: "custom", path: ["enum"], message: "enum values must be unique" });
+      }
+    } else if (field.enum !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["enum"],
+        message: "enum values are only allowed for enum fields",
+      });
+    }
+
+    if (field.default === undefined) return;
+    const valid =
+      (field.kind === "string" && typeof field.default === "string") ||
+      (field.kind === "number" &&
+        typeof field.default === "number" &&
+        Number.isFinite(field.default)) ||
+      (field.kind === "boolean" && typeof field.default === "boolean") ||
+      (field.kind === "date" &&
+        typeof field.default === "string" &&
+        isIso8601Date(field.default)) ||
+      (field.kind === "enum" &&
+        typeof field.default === "string" &&
+        Boolean(field.enum?.includes(field.default)));
+    if (!valid) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["default"],
+        message: `default must be a valid ${field.kind} value`,
+      });
+    }
+  });
+
+export const UserConfigSchema = z.record(AppNameSchema, UserConfigFieldSchema);
 
 const ModelDefSchema = z
   .object({
@@ -218,6 +270,7 @@ export const AppDefinitionSchema = z
     queries: z.record(AppNameSchema, AppQueryDefSchema).optional(),
     actions: z.record(AppNameSchema, AppActionDefSchema).optional(),
     elements: AppElementsSchema.optional(),
+    userConfig: UserConfigSchema.optional(),
     pages: z.record(AppNameSchema, AppPageSchema),
     defaultPage: AppNameSchema,
   })
@@ -253,6 +306,15 @@ export const AppDefinitionSchema = z
         code: "custom",
         path: ["actions"],
         message: "must define at most 20 actions",
+      });
+    }
+
+    const userConfigCount = Object.keys(definition.userConfig ?? {}).length;
+    if (userConfigCount > 20) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["userConfig"],
+        message: "must define at most 20 fields",
       });
     }
 
@@ -329,6 +391,7 @@ export const AppDefinitionSchema = z
 
 export type ColumnKind = z.infer<typeof ColumnKindSchema>;
 export type ColumnDef = z.infer<typeof ColumnDefSchema>;
+export type UserConfigField = z.infer<typeof UserConfigFieldSchema>;
 export type ModelDef = z.infer<typeof ModelDefSchema>;
 export type AppQueryDef = z.infer<typeof AppQueryDefSchema>;
 export type AppActionDef = z.infer<typeof AppActionDefSchema>;
@@ -348,6 +411,7 @@ const APP_DEFINITION_TOP_LEVEL_KEYS = new Set([
   "queries",
   "actions",
   "elements",
+  "userConfig",
   "pages",
   "defaultPage",
   "schemaVersion",
@@ -514,6 +578,7 @@ function applyMergePatch(target: unknown, patch: unknown, path: string[]): unkno
   const entriesAreAtomic =
     (path.length === 1 && path[0] === "actions") ||
     (path.length === 1 && path[0] === "elements") ||
+    (path.length === 1 && path[0] === "userConfig") ||
     (path.length === 3 && path[0] === "models" && path[2] === "columns") ||
     (path.length === 3 && path[0] === "elements" && path[2] === "elements") ||
     (path.length === 3 && path[0] === "pages" && (path[2] === "elements" || path[2] === "params"));

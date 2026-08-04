@@ -465,6 +465,23 @@ function validateStateRef(
       : issue(ref.path, `state reference targets unknown route param "${name}"`);
   }
 
+  const userConfigMatch = /^\/user\/([^/]+)(\/.*)?$/.exec(ref.value);
+  if (userConfigMatch) {
+    const [, name, suffix] = userConfigMatch;
+    if (suffix) {
+      return issue(
+        ref.path,
+        `userConfig state reference "${ref.value}" must target exactly /user/<field>; nested paths are not supported`,
+      );
+    }
+    if (Object.hasOwn(definition.userConfig ?? {}, name!)) return null;
+    const declared = Object.keys(definition.userConfig ?? {}).sort();
+    return issue(
+      ref.path,
+      `state reference targets unknown userConfig field "${name}"; declared fields: ${declared.length > 0 ? declared.join(", ") : "none"}`,
+    );
+  }
+
   const match = /^\/(queries|forms|actions|ui)\/([^/]+)(?:\/.*)?$/.exec(ref.value);
   if (!match) return issue(ref.path, `invalid state reference "${ref.value}"`);
 
@@ -1497,8 +1514,14 @@ export function validatePage(
 
   for (const ref of stateRefs) {
     const propMatch = /^\/props\/([^/]+)(?:\/.*)?$/.exec(ref.value);
+    const userConfigRef = ref.value === "/user" || ref.value.startsWith("/user/");
     let stateIssue: AppValidationIssue | null;
-    if (options?.elementMode && propMatch) {
+    if (options?.elementMode && userConfigRef) {
+      stateIssue = issue(
+        ref.path,
+        `${options.elementMode} elements cannot read /user state; read userConfig via a prop or bind it at page level`,
+      );
+    } else if (options?.elementMode && propMatch) {
       stateIssue = Object.hasOwn(options.elementProps ?? {}, propMatch[1]!)
         ? null
         : issue(ref.path, `state reference targets unknown element prop "${propMatch[1]}"`);

@@ -42,6 +42,12 @@ import {
   updateApp,
 } from "../apps/store";
 import {
+  getAppUserConfigValues,
+  mergeUserConfigValues,
+  upsertAppUserConfigValues,
+  userConfigValueIssues,
+} from "../apps/user-config";
+import {
   AppRollbackAppNotFoundError,
   AppRollbackDefinitionError,
   AppRollbackVersionNotFoundError,
@@ -58,12 +64,15 @@ import { can } from "../rbac";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubObject } from "../utils/secret-scrubber";
+import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
 import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
 
 const MAX_APP_BODY_BYTES = 5 * 1024 * 1024;
 const MAX_APP_ROW_BODY_BYTES = 1 * 1024 * 1024;
 const MAX_APP_BULK_ROWS_BODY_BYTES = 10 * 1024 * 1024;
+const MAX_USER_CONFIG_BODY_BYTES = 64 * 1024;
+const MAX_USER_CONFIG_VALUES_BYTES = 16 * 1024;
 const DECIMAL_NUMBER_PATTERN = /^[+-]?\d+(?:\.\d+)?$/;
 
 const appParamsSchema = z.object({ id: z.string().min(1) });
@@ -81,6 +90,45 @@ const valuesSchema = z.record(z.string(), z.unknown());
 const appWriteResponseSchema = z.object({
   app: z.unknown(),
   migration: AppMigrationReportSchema,
+});
+const userConfigBodySchema = z.object({ values: z.record(z.string(), z.unknown()) }).strict();
+
+const getUserConfigRoute = route({
+  method: "get",
+  path: "/api/apps/{id}/user-config",
+  pattern: ["api", "apps", null, "user-config"],
+  summary: "Get app user configuration",
+  description:
+    "Returns the current definition schema and this principal's tolerantly merged values.",
+  tags: ["Apps"],
+  params: appParamsSchema,
+  responses: {
+    200: { description: "Merged user configuration" },
+    403: { description: "Permission denied" },
+    404: { description: "App not found" },
+    409: { description: "App definition needs repair" },
+  },
+  rbac: { permission: "app.use" },
+});
+
+const putUserConfigRoute = route({
+  method: "put",
+  path: "/api/apps/{id}/user-config",
+  pattern: ["api", "apps", null, "user-config"],
+  summary: "Set app user configuration",
+  description: "Stores validated per-user values outside the versioned app definition.",
+  tags: ["Apps"],
+  params: appParamsSchema,
+  body: userConfigBodySchema,
+  responses: {
+    200: { description: "Stored user configuration" },
+    400: { description: "Invalid user configuration" },
+    403: { description: "Permission denied" },
+    413: { description: "Request exceeds 64 KB or serialized values exceed 16 KB" },
+    404: { description: "App not found" },
+    409: { description: "App definition needs repair" },
+  },
+  rbac: { permission: "app.use" },
 });
 
 const listAppsRoute = route({
@@ -1292,6 +1340,60 @@ export async function handleApps(
       return true;
     }
     json(res, { app });
+    return true;
+  }
+
+  if (getUserConfigRoute.match(req.method, pathSegments)) {
+    const parsed = await getUserConfigRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!authorizeAppUse(req, res, myAgentId, parsed.params.id)) return true;
+    const app = getApp(parsed.params.id);
+    if (!app) {
+      jsonError(res, "app not found", 404);
+      return true;
+    }
+    if (definitionNeedsRepair(res, app)) return true;
+    const schema = app.definition.userConfig ?? {};
+    const owner = resolveHttpFavoriteOwner(req, myAgentId);
+    const stored = owner ? getAppUserConfigValues(app.id, owner.scope) : {};
+    json(res, { values: mergeUserConfigValues(schema, stored), schema });
+    return true;
+  }
+
+  if (putUserConfigRoute.match(req.method, pathSegments)) {
+    if (enforceContentLengthCap(req, res, MAX_USER_CONFIG_BODY_BYTES) === BODY_TOO_LARGE)
+      return true;
+    const parsed = await putUserConfigRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!authorizeAppUse(req, res, myAgentId, parsed.params.id)) return true;
+    const app = getApp(parsed.params.id);
+    if (!app) {
+      jsonError(res, "app not found", 404);
+      return true;
+    }
+    if (definitionNeedsRepair(res, app)) return true;
+    const schema = app.definition.userConfig;
+    if (!schema) {
+      jsonError(res, "app does not define userConfig", 400);
+      return true;
+    }
+    const owner = resolveHttpFavoriteOwner(req, myAgentId);
+    if (!owner) {
+      jsonError(res, "userConfig is per-user; agents have no user scope", 403);
+      return true;
+    }
+    const serialized = JSON.stringify(parsed.body.values);
+    if (new TextEncoder().encode(serialized).byteLength > MAX_USER_CONFIG_VALUES_BYTES) {
+      jsonError(res, "userConfig values exceed the 16 KB serialized limit", 413);
+      return true;
+    }
+    const issues = userConfigValueIssues(schema, parsed.body.values);
+    if (issues.length > 0) {
+      json(res, { error: "invalid userConfig values", issues }, 400);
+      return true;
+    }
+    upsertAppUserConfigValues(app.id, owner.scope, parsed.body.values);
+    json(res, { values: mergeUserConfigValues(schema, parsed.body.values), schema });
     return true;
   }
 

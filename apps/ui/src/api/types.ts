@@ -2555,6 +2555,34 @@ export interface AppElementDef {
   elements: Record<string, unknown>;
 }
 
+/**
+ * One declared per-viewer preference. The SCHEMA is versioned with the app
+ * definition; the VALUES live outside it (per app × user), which is what makes
+ * a definition rollback leave a viewer's preferences intact.
+ *
+ * No `required`: every field must be total through `default` or read as null.
+ */
+export interface AppUserConfigField {
+  kind: AppColumnKind;
+  default?: string | number | boolean;
+  enum?: string[];
+  label?: string;
+}
+
+/** A stored userConfig value — `null` means "unset, and no declared default". */
+export type AppUserConfigValue = string | number | boolean | null;
+
+/**
+ * `GET|PUT /api/apps/:id/user-config`. `values` is the server's tolerant merge
+ * of the stored row against the CURRENT schema: unknown fields dropped,
+ * nonconforming ones replaced by their default (or null). An app with no
+ * declared `userConfig` answers `{ values: {}, schema: {} }`.
+ */
+export interface AppUserConfigResponse {
+  values: Record<string, AppUserConfigValue>;
+  schema: Record<string, AppUserConfigField>;
+}
+
 export interface AppDefinition {
   models: Record<string, AppModelDef>;
   queries?: Record<string, AppQueryDef>;
@@ -2567,6 +2595,8 @@ export interface AppDefinition {
    */
   pages?: Record<string, AppPageDef>;
   defaultPage?: string;
+  /** Per-viewer preference SCHEMA; the values live outside the definition. */
+  userConfig?: Record<string, AppUserConfigField>;
 }
 
 /**

@@ -14,6 +14,8 @@ import type {
   AppRow,
   ApprovalRequest,
   ApprovalRequestsResponse,
+  AppUserConfigResponse,
+  AppUserConfigValue,
   AssetEntityType,
   AssetKeyAuditResult,
   AssetKeyMapping,
@@ -151,6 +153,23 @@ export class TriggerSchemaApiError extends Error {
     this.name = "TriggerSchemaApiError";
     this.details = details;
     this.validationMessage = message;
+  }
+}
+
+/**
+ * Every non-OK `/api/apps/*` answer. `message` is the flattened, human-readable
+ * form (what generic error surfaces render); `issues` is the server's own
+ * field-level list — `[{ path: "values.density", message: "…" }]` — which
+ * schema-driven forms place next to the offending input.
+ */
+export class AppApiError extends Error {
+  readonly status: number;
+  readonly issues: { path?: string; message?: string }[];
+  constructor(message: string, status: number, issues: { path?: string; message?: string }[]) {
+    super(message);
+    this.name = "AppApiError";
+    this.status = status;
+    this.issues = issues;
   }
 }
 
@@ -2742,8 +2761,8 @@ class ApiClient {
 
   // ─── Swarm apps (spike) ───────────────────────────────────────────────────
   // `/api/apps/*`. Validation failures come back as 400 with
-  // `{ error, issues?: [{path, message}] }` — surfaced verbatim so the app
-  // runtime can show the server's own wording.
+  // `{ error, issues?: [{path, message}] }` — surfaced verbatim (see
+  // `AppApiError`) so the app runtime can show the server's own wording.
 
   private async appRequest<T>(
     path: string,
@@ -2762,7 +2781,12 @@ class ApiClient {
       const issues = body?.issues?.length
         ? ` (${body.issues.map((i) => `${i.path ?? ""}: ${i.message ?? ""}`).join("; ")})`
         : "";
-      throw new Error(`${label}: ${body?.error ?? res.status}${issues}`);
+      // Message shape is unchanged (every existing caller renders it as-is);
+      // the structured `issues` ride along for surfaces that can place a
+      // validation message on the field it belongs to.
+      throw new AppApiError(`${label}: ${body?.error ?? res.status}${issues}`, res.status, [
+        ...(body?.issues ?? []),
+      ]);
     }
     return res.json() as Promise<T>;
   }
@@ -2841,6 +2865,35 @@ class ApiClient {
       `/api/apps/${encodeURIComponent(appId)}/actions/${encodeURIComponent(name)}`,
       { method: "POST", body: JSON.stringify({ input: input ?? {} }) },
       `Failed to run action ${name}`,
+    );
+  }
+
+  /**
+   * This viewer's preferences for one app, already merged against the current
+   * schema server-side. An app declaring no `userConfig` answers
+   * `{ values: {}, schema: {} }` rather than 404.
+   */
+  async getAppUserConfig(appId: string): Promise<AppUserConfigResponse> {
+    return this.appRequest(
+      `/api/apps/${encodeURIComponent(appId)}/user-config`,
+      undefined,
+      "Failed to load app settings",
+    );
+  }
+
+  /**
+   * Replace this viewer's stored preferences wholesale — a field left OUT of
+   * `values` is unset, and reads back as its declared default (or null).
+   * Invalid values answer 400 with per-field `issues` (see `AppApiError`).
+   */
+  async putAppUserConfig(
+    appId: string,
+    values: Record<string, AppUserConfigValue>,
+  ): Promise<AppUserConfigResponse> {
+    return this.appRequest(
+      `/api/apps/${encodeURIComponent(appId)}/user-config`,
+      { method: "PUT", body: JSON.stringify({ values }) },
+      "Failed to save app settings",
     );
   }
 

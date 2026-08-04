@@ -316,6 +316,107 @@
         }
       }
     },
+    "/api/apps/{id}/user-config": {
+      "get": {
+        "summary": "Get app user configuration",
+        "description": "Returns the current definition schema and this principal's tolerantly merged values.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Merged user configuration"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "App not found"
+          },
+          "409": {
+            "description": "App definition needs repair"
+          }
+        }
+      },
+      "put": {
+        "summary": "Set app user configuration",
+        "description": "Stores validated per-user values outside the versioned app definition.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "values": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "values"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored user configuration"
+          },
+          "400": {
+            "description": "Invalid user configuration"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "App not found"
+          },
+          "409": {
+            "description": "App definition needs repair"
+          },
+          "413": {
+            "description": "Request exceeds 64 KB or serialized values exceed 16 KB"
+          }
+        }
+      }
+    },
     "/api/apps": {
       "get": {
         "summary": "List apps",
@@ -673,6 +774,12 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "userConfigChanged": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         }
                       },
                       "required": [
@@ -683,7 +790,8 @@
                         "elsed",
                         "purgedValues",
                         "idxRebuilt",
-                        "orphanFields"
+                        "orphanFields",
+                        "userConfigChanged"
                       ]
                     }
                   },
@@ -953,6 +1061,12 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "userConfigChanged": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         }
                       },
                       "required": [
@@ -963,7 +1077,8 @@
                         "elsed",
                         "purgedValues",
                         "idxRebuilt",
-                        "orphanFields"
+                        "orphanFields",
+                        "userConfigChanged"
                       ]
                     }
                   },
@@ -1205,6 +1320,12 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "userConfigChanged": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         }
                       },
                       "required": [
@@ -1215,7 +1336,8 @@
                         "elsed",
                         "purgedValues",
                         "idxRebuilt",
-                        "orphanFields"
+                        "orphanFields",
+                        "userConfigChanged"
                       ]
                     }
                   },

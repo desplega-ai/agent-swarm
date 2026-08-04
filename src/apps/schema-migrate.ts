@@ -50,6 +50,7 @@ export const AppMigrationReportSchema = z.object({
   purgedValues: z.number().int().nonnegative(),
   idxRebuilt: z.number().int().nonnegative(),
   orphanFields: z.array(z.string()),
+  userConfigChanged: z.array(z.string()),
 });
 
 export const AppMigrationReportOutputSchema = z.looseObject({
@@ -61,6 +62,7 @@ export const AppMigrationReportOutputSchema = z.looseObject({
   purgedValues: z.number().optional(),
   idxRebuilt: z.number().optional(),
   orphanFields: z.array(z.string()).optional(),
+  userConfigChanged: z.array(z.string()).optional(),
 });
 
 export type AppMigrationReport = z.infer<typeof AppMigrationReportSchema>;
@@ -101,6 +103,7 @@ const EMPTY_REPORT: AppMigrationReport = {
   purgedValues: 0,
   idxRebuilt: 0,
   orphanFields: [],
+  userConfigChanged: [],
 };
 
 const MAX_REPORTED_VALUES = 10;
@@ -821,6 +824,19 @@ function buildPlan(
     ),
   ];
   const report = structuredClone(EMPTY_REPORT);
+  const userConfigNames = new Set([
+    ...Object.keys(previousDefinition?.userConfig ?? {}),
+    ...Object.keys(nextDefinition.userConfig ?? {}),
+  ]);
+  report.userConfigChanged = [...userConfigNames]
+    .filter(
+      (name) =>
+        !definitionsEqual(
+          previousDefinition?.userConfig?.[name],
+          nextDefinition.userConfig?.[name],
+        ),
+    )
+    .sort();
   const oldSideUnparseable = previousDefinition === undefined;
   const affected = affectedModelNames(previousDefinition, nextDefinition, migration);
   const orphanFields = new Set<string>();
