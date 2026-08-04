@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { overlayOperatorEnvValue } from "../tools/swarm-config/get-config";
+import { overlayOperatorEnvValue, overlayOperatorEnvValues } from "../be/swarm-config-guard";
 
 type Entry = {
   id: string;
@@ -78,5 +78,20 @@ describe("get-config operator env overlay", () => {
   test("non-catalog keys never resolve from env — no credential exposure path", () => {
     process.env.API_KEY = "super-secret";
     expect(overlayOperatorEnvValue<Entry>([], "API_KEY")).toEqual([]);
+  });
+
+  test("the all-keys overlay (REST /api/config/resolved path) surfaces env-only operator values", () => {
+    // Scripts' ctx.swarm.config_get hits the REST route, which returns ALL
+    // resolved configs and lets the SDK filter client-side — so the env overlay
+    // must synthesize entries without a key filter, and still never leak
+    // non-catalog env vars.
+    process.env.DREAMING_ENABLED = "false";
+    process.env.API_KEY = "super-secret";
+    const result = overlayOperatorEnvValues<Entry>([row({ key: "OTHER", value: "x" })]);
+    const dreaming = result.find((c) => c.key === "DREAMING_ENABLED");
+    expect(dreaming?.value).toBe("false");
+    expect(dreaming?.scope).toBe("global");
+    expect(result.find((c) => c.key === "API_KEY")).toBeUndefined();
+    expect(result.find((c) => c.key === "OTHER")?.value).toBe("x");
   });
 });

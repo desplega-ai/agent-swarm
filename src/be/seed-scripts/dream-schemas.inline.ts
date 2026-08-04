@@ -363,15 +363,17 @@ function validateHygiene(value: Record<string, unknown>): string | null {
   ]);
   if (unexpected) return unexpected;
   if (!nonEmptyString(value.agentId)) return "hygiene requires agentId";
-  if (value.rotationCursorKey !== undefined && !nonEmptyString(value.rotationCursorKey))
-    return "rotationCursorKey must be a string";
-  if (value.rotationCursorNamespace !== undefined && !nonEmptyString(value.rotationCursorNamespace))
-    return "rotationCursorNamespace must be a string";
-  if (
-    value.rotationCursorBy !== undefined &&
-    (typeof value.rotationCursorBy !== "number" || !Number.isFinite(value.rotationCursorBy))
-  )
-    return "rotationCursorBy must be a finite number";
+  // Dreaming owns exactly one cursor: `rotation-cursor` in the `dreaming` KV
+  // namespace (what dream-gather reads and surfaces to the hygiene lane). The
+  // Lead-approved delta text is model-authored, and kv-incr would happily bump
+  // any counter the Lead may write — so a hallucinated or injected key/namespace
+  // must be held, not applied against an unrelated application counter.
+  if (value.rotationCursorKey !== undefined && value.rotationCursorKey !== "rotation-cursor")
+    return 'rotationCursorKey must be "rotation-cursor" (the only cursor Dreaming owns)';
+  if (value.rotationCursorNamespace !== undefined && value.rotationCursorNamespace !== "dreaming")
+    return 'rotationCursorNamespace must be "dreaming" (the only cursor Dreaming owns)';
+  if (value.rotationCursorBy !== undefined && value.rotationCursorBy !== 1)
+    return "rotationCursorBy must be 1 (the rotation advances one step per dream)";
   return validateSectionFields(value, "hygiene");
 }
 

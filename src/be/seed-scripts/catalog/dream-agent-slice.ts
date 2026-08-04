@@ -30,27 +30,30 @@ export default async function dreamAgentSlice(args: any, ctx: any) {
   const query = (sql: string, params: unknown[] = [agentId, windowModifier]) =>
     ctx.swarm.db_query({ sql, params }).then(rowsToObjects);
 
+  // julianday() on BOTH operands: stored timestamps are ISO ("...T12:00:00Z")
+  // while datetime('now', ?) renders space-separated — lexicographic comparison
+  // of the two formats sorts 'T' after ' ' and silently widens the window.
   const [tasks, tools, memories, costs, profiles, installedSkills, invokedSkills] = await Promise.all([
     query(
       `SELECT t.id, t.status, t.taskType, t.failureReason, t.createdAt, t.finishedAt,
               t.workflowRunStepId, COALESCE(wrs.retryCount, 0) AS retryCount
        FROM agent_tasks t
        LEFT JOIN workflow_run_steps wrs ON wrs.id = t.workflowRunStepId
-       WHERE t.agentId = ? AND t.createdAt > datetime('now', ?)
+       WHERE t.agentId = ? AND julianday(t.createdAt) > julianday('now', ?)
        ORDER BY t.createdAt DESC LIMIT 40`,
     ),
     query(
       `SELECT json_extract(data, '$.toolName') AS tool, count(*) AS calls
        FROM events
        WHERE agentId = ? AND category = 'tool' AND event = 'tool.start'
-         AND createdAt > datetime('now', ?)
+         AND julianday(createdAt) > julianday('now', ?)
        GROUP BY tool ORDER BY calls DESC LIMIT 20`,
     ),
     query(
       `SELECT id, name, scope, source, accessCount, alpha, beta, createdAt,
               ROUND(alpha / (alpha + beta), 3) AS usefulness
        FROM agent_memory
-       WHERE agentId = ? AND createdAt > datetime('now', ?)
+       WHERE agentId = ? AND julianday(createdAt) > julianday('now', ?)
        ORDER BY createdAt DESC LIMIT 20`,
     ),
     query(
@@ -59,7 +62,7 @@ export default async function dreamAgentSlice(args: any, ctx: any) {
               COALESCE(SUM(outputTokens), 0) AS outputTokens,
               COALESCE(SUM(cacheReadTokens), 0) AS cacheReadTokens,
               COALESCE(SUM(cacheWriteTokens), 0) AS cacheWriteTokens
-       FROM session_costs WHERE agentId = ? AND createdAt > datetime('now', ?)`,
+       FROM session_costs WHERE agentId = ? AND julianday(createdAt) > julianday('now', ?)`,
     ),
     query(
       `SELECT soulMd, identityMd, claudeMd, toolsMd, heartbeatMd
@@ -76,7 +79,7 @@ export default async function dreamAgentSlice(args: any, ctx: any) {
       `SELECT json_extract(data, '$.skillName') AS name, count(*) AS invokes
        FROM events
        WHERE agentId = ? AND category = 'skill' AND event = 'skill.invoke'
-         AND createdAt > datetime('now', ?)
+         AND julianday(createdAt) > julianday('now', ?)
        GROUP BY name ORDER BY invokes DESC`,
     ),
   ]);

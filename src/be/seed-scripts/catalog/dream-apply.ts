@@ -16,6 +16,12 @@ export const argsSchema = z.object({
     .describe(
       "Workflow run ID — enables the per-delta idempotency receipts that make retries safe",
     ),
+  agentIds: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Roster of agent IDs gathered for this run — agent-targeted deltas outside it are held",
+    ),
 });
 
 const IDEMPOTENCY_NAMESPACE = "dreaming";
@@ -174,9 +180,10 @@ function normalizeDeltas(value: unknown): unknown[] | null {
  */
 async function alreadyApplied(ctx: any, key: string): Promise<boolean> {
   try {
-    const response = await ctx.swarm.kv_get({ key, namespace: IDEMPOTENCY_NAMESPACE });
-    const payload = response?.data ?? response;
-    return payload?.entry != null;
+    // kv_getOrNull returns the KV entry itself (the SDK's kv route serves the
+    // REST body directly, NOT the MCP tool's { entry } wrapper) or null on miss.
+    const entry = await ctx.swarm.kv_getOrNull({ key, namespace: IDEMPOTENCY_NAMESPACE });
+    return entry != null;
   } catch {
     return false;
   }
@@ -205,6 +212,7 @@ export default async function dreamApply(args: any, ctx: any) {
     throw new Error("invalid args: deltas must be an array or an approved delta set");
   }
   const runId = parsed.data.runId;
+  const roster = parsed.data.agentIds ? new Set(parsed.data.agentIds) : null;
   const result: {
     applied: Record<string, unknown>[];
     held: Record<string, unknown>[];
@@ -218,6 +226,16 @@ export default async function dreamApply(args: any, ctx: any) {
       continue;
     }
     const delta = candidate as ReflectionDelta;
+    // The critique's delta text is model-authored and update-profile lets the
+    // Lead edit ANY agent — a hallucinated or injected agentId would mutate an
+    // agent no evidence was ever gathered for. When the workflow supplies the
+    // gathered roster, every agent-targeted delta must name one of its members.
+    if (roster && "agentId" in delta && !roster.has(delta.agentId)) {
+      result.held.push(
+        await auditEntry(delta, `agent ${delta.agentId} is not in this run's gathered roster`),
+      );
+      continue;
+    }
     const idempotencyKey = runId
       ? `apply:${runId}:${await contentHash(stableStringify(delta))}`
       : null;
@@ -300,6 +318,29 @@ export default async function dreamApply(args: any, ctx: any) {
         const created = await ctx.swarm.skill_create({ content: delta.content, scope: "swarm" });
         assertSucceeded(created, "skill create");
       } else {
+        // skill-update lets the Lead edit any owner's skill — a stale or
+        // hallucinated skillId could silently rewrite an agent-personal skill
+        // that was never in the swarm catalog the critique reviewed. Only
+        // already-swarm-scoped targets are updatable.
+        const scopeResponse = await ctx.swarm.db_query({
+          sql: "SELECT scope FROM skills WHERE id = ?",
+          params: [delta.skillId],
+        });
+        assertSucceeded(scopeResponse, "skill scope check");
+        const targetScope = firstCell(scopeResponse);
+        if (targetScope === undefined) {
+          result.held.push(await auditEntry(delta, `skill ${delta.skillId} was not found`));
+          continue;
+        }
+        if (targetScope !== "swarm") {
+          result.held.push(
+            await auditEntry(
+              delta,
+              `skill ${delta.skillId} is ${String(targetScope)}-scoped, not part of the swarm catalog`,
+            ),
+          );
+          continue;
+        }
         const updated = await ctx.swarm.skill_update({
           skillId: delta.skillId,
           content: delta.content,

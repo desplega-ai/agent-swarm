@@ -124,6 +124,7 @@ class DreamScriptExecutor extends BaseExecutor<
               enabled: true,
               hasActivity: true,
               agents: roster.map(({ id, name }) => ({ id, name })),
+              agentIds: roster.map(({ id }) => id),
               leadAgentId: lead.id,
               insights: null,
               blockers: [],
@@ -139,6 +140,7 @@ class DreamScriptExecutor extends BaseExecutor<
             enabled,
             hasActivity: Object.values(activity).some((count) => count > 0),
             agents: roster.map(({ id, name }) => ({ id, name })),
+            agentIds: roster.map(({ id }) => id),
             leadAgentId: lead.id,
             insights: { compound: {}, activity, skills: [], profileEvidence: [] },
             blockers: {
@@ -462,13 +464,19 @@ describe("Dreaming seeded workflow", () => {
     expect(getWorkflowRun(runId)?.status).toBe("completed");
 
     const gathers = scripts.calls.filter((call) => call.scriptName === "dream-gather");
+    // Both gathers carry this run's id — the activity gate excludes the dream
+    // workflow's own tasks by durable workflow ID, surviving a rename.
     expect(gathers).toEqual([
-      { scriptName: "dream-gather", args: { days: 1, preflightOnly: true } },
-      { scriptName: "dream-gather", agentId: lead.id, args: { days: 1 } },
+      { scriptName: "dream-gather", args: { days: 1, preflightOnly: true, runId } },
+      { scriptName: "dream-gather", agentId: lead.id, args: { days: 1, runId } },
     ]);
     const apply = scripts.calls.find((call) => call.scriptName === "dream-apply");
     const receipt = scripts.calls.find((call) => call.scriptName === "dream-receipt");
-    expect(apply).toMatchObject({ agentId: lead.id, args: { deltas: approved } });
+    // The apply gets the idempotency runId and the gathered roster for its guards.
+    expect(apply).toMatchObject({
+      agentId: lead.id,
+      args: { deltas: approved, runId, agentIds: [lead.id, worker.id] },
+    });
     expect(receipt).toMatchObject({
       agentId: lead.id,
       args: { apply: { applied: approved, held: [], deferred: [] } },

@@ -30,7 +30,8 @@ function scheduleSeedHash(schedule: AddonScheduleDef): string {
       ...base,
       taskTemplate: schedule.taskTemplate,
       taskType: schedule.taskType,
-      targetAgentId: schedule.targetAgentId,
+      // Normalized with upstreamHash: an omitted target is the pool form (NULL).
+      targetAgentId: schedule.targetAgentId ?? null,
       tags: schedule.tags ?? [],
     }),
   );
@@ -92,7 +93,7 @@ export function createSchedulesSeeder(addons: readonly Addon[] = ADDONS): Seeder
             targetType: existing.targetType,
             taskTemplate: existing.taskTemplate,
             taskType: existing.taskType,
-            targetAgentId: existing.targetAgentId,
+            targetAgentId: existing.targetAgentId ?? null,
             tags: existing.tags,
           }),
         );
@@ -143,6 +144,22 @@ export function createSchedulesSeeder(addons: readonly Addon[] = ADDONS): Seeder
               `the unmodified add-on seed — refusing to schedule a workflow this add-on does not own`,
           );
         }
+        // Keeping an existing binding skips the check above — but a shipped update
+        // that FLIPS a disabled schedule to enabled (the documented rollout switch)
+        // would start executing whatever that binding points at. Auto-enabling is
+        // only legitimate against the unmodified add-on graph; an operator-modified
+        // workflow must be enabled by the operator, not by a default change.
+        if (
+          existing &&
+          !existing.enabled &&
+          schedule.enabled &&
+          !isPristineSeededWorkflow(schedule.workflowName, addons)
+        ) {
+          throw new Error(
+            `Schedule "${schedule.name}" would be auto-enabled against a workflow that is not the ` +
+              `unmodified add-on seed — enable it manually if running the modified graph is intended`,
+          );
+        }
         const data = {
           name: schedule.name,
           description: schedule.description,
@@ -169,8 +186,19 @@ export function createSchedulesSeeder(addons: readonly Addon[] = ADDONS): Seeder
         targetAgentId: schedule.targetAgentId,
         tags: schedule.tags ?? [],
       } as const;
-      if (existing) updateScheduledTask(existing.id, { ...data, nextRunAt: resolvedNextRunAt });
-      else createScheduledTask({ ...data, nextRunAt: resolvedNextRunAt ?? undefined });
+      if (existing) {
+        // updateScheduledTask treats undefined as "leave unchanged" — a shipped
+        // update that DROPS targetAgentId (specific agent → pool form) must write
+        // SQL NULL, or the schedule keeps dispatching to the removed agent while
+        // the seeder records the new hash as applied.
+        updateScheduledTask(existing.id, {
+          ...data,
+          targetAgentId: schedule.targetAgentId ?? null,
+          nextRunAt: resolvedNextRunAt,
+        });
+      } else {
+        createScheduledTask({ ...data, nextRunAt: resolvedNextRunAt ?? undefined });
+      }
     },
   };
 }

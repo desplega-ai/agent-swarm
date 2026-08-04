@@ -141,6 +141,17 @@ describe("dream-gather gates", () => {
     expect(
       renamed.queries.find((query) => query.sql.includes("AS completedTasks"))!.params,
     ).toEqual(["-1 days", "nightly-dream", "-1 days", "nightly-dream"]);
+
+    // With the workflow's own runId available (the seeded workflow passes it),
+    // exclusion pivots to the durable workflow ID — an operator renaming the
+    // seeded workflow keeps its schedule binding, so a name join would silently
+    // stop excluding it and the gate would become self-sustaining again.
+    const byId = gatherHarness({ roster: [{ id: "lead-1", name: "Lead", isLead: 1 }] });
+    await dreamGather({ preflightOnly: true, runId: "run-42" }, byId.ctx);
+    const byIdQuery = byId.queries.find((query) => query.sql.includes("AS completedTasks"))!;
+    expect(byIdQuery.sql).toContain("SELECT workflowId FROM workflow_runs WHERE id = ?");
+    expect(byIdQuery.sql).not.toContain("w.name = ?");
+    expect(byIdQuery.params).toEqual(["-1 days", "run-42", "-1 days", "run-42"]);
   });
 
   test("no live Lead returns the exact slim shape before expensive gathering", async () => {
@@ -185,6 +196,7 @@ describe("dream-gather gates", () => {
       enabled: true,
       hasActivity: true,
       agents: [{ id: "lead-1", name: "Lead" }],
+      agentIds: ["lead-1"],
       leadAgentId: "lead-1",
       insights: null,
       blockers: [],
@@ -617,7 +629,8 @@ describe("dream-apply batches", () => {
             op: "append-under",
             anchor: "## Rotation",
             content: "New rotation item.",
-            rotationCursorKey: "dream-cursor",
+            rotationCursorKey: "rotation-cursor",
+            rotationCursorNamespace: "dreaming",
           },
         ],
       },
@@ -656,8 +669,11 @@ describe("dream-apply batches", () => {
           writes.push(learning);
           return { success: true, data: { success: true } };
         },
-        async kv_get({ key }: { key: string }) {
-          return { success: true, data: { entry: kvStore.has(key) ? { value: "applied" } : null } };
+        // Mirrors the real SDK contract: kv_getOrNull resolves to the KV entry
+        // object itself (the REST body — NOT the MCP tool's { entry } wrapper),
+        // or null when the key is missing.
+        async kv_getOrNull({ key }: { key: string }) {
+          return kvStore.has(key) ? { key, value: kvStore.get(key) } : null;
         },
         async kv_set({ key, value }: { key: string; value: unknown }) {
           kvStore.set(key, value);
@@ -762,5 +778,154 @@ describe("dream-apply batches", () => {
       }),
     ]);
     expect(creates).toHaveLength(1);
+  });
+
+  test("skill updates only touch targets already in the swarm catalog", async () => {
+    const updates: unknown[] = [];
+    const makeCtx = (scope: unknown, found = true) => ({
+      swarm: {
+        async db_query({ sql }: { sql: string }) {
+          expect(sql).toContain("FROM skills");
+          return { success: true, data: { rows: found ? [[scope]] : [] } };
+        },
+        async skill_update(request: unknown) {
+          updates.push(request);
+          return { success: true, data: { success: true } };
+        },
+      },
+    });
+    const updateDelta = {
+      deltas: [{ kind: "skill", action: "update", skillId: "sk-1", content: "# v2" }],
+    };
+
+    // A stale/hallucinated skillId pointing at an agent-personal skill must not
+    // be rewritten (skill-update authorizes the Lead to edit any owner's skill).
+    const personal = await dreamApply(updateDelta, makeCtx("agent"));
+    expect(updates).toEqual([]);
+    expect(personal.held).toEqual([
+      expect.objectContaining({
+        reason: "skill sk-1 is agent-scoped, not part of the swarm catalog",
+      }),
+    ]);
+
+    const missing = await dreamApply(updateDelta, makeCtx(undefined, false));
+    expect(updates).toEqual([]);
+    expect(missing.held).toEqual([expect.objectContaining({ reason: "skill sk-1 was not found" })]);
+
+    const catalog = await dreamApply(updateDelta, makeCtx("swarm"));
+    expect(catalog.applied).toHaveLength(1);
+    expect(updates).toEqual([{ skillId: "sk-1", content: "# v2", scope: undefined }]);
+  });
+
+  test("agent-targeted deltas outside the gathered roster are held", async () => {
+    const writes: string[] = [];
+    const ctx = {
+      swarm: {
+        async inject_learning({ learning }: { learning: string }) {
+          writes.push(learning);
+          return { success: true, data: { success: true } };
+        },
+      },
+    };
+    const result = await dreamApply(
+      {
+        agentIds: ["agent-1"],
+        deltas: [
+          { kind: "memory", agentId: "agent-1", action: "write", content: "in roster" },
+          { kind: "memory", agentId: "agent-ghost", action: "write", content: "hallucinated" },
+        ],
+      },
+      ctx,
+    );
+
+    expect(writes).toEqual(["in roster"]);
+    expect(result.applied).toHaveLength(1);
+    expect(result.held).toEqual([
+      expect.objectContaining({
+        agentId: "agent-ghost",
+        reason: "agent agent-ghost is not in this run's gathered roster",
+      }),
+    ]);
+  });
+
+  test("hygiene cursor coordinates are pinned to the cursor Dreaming owns", () => {
+    const base = {
+      kind: "hygiene",
+      agentId: "agent-1",
+      op: "remove-section",
+      anchor: "## Watch: something",
+    };
+    expect(validateReflectionDelta({ ...base, rotationCursorKey: "unrelated-counter" })).toContain(
+      'rotationCursorKey must be "rotation-cursor"',
+    );
+    expect(
+      validateReflectionDelta({
+        ...base,
+        rotationCursorKey: "rotation-cursor",
+        rotationCursorNamespace: "prod-billing",
+      }),
+    ).toContain('rotationCursorNamespace must be "dreaming"');
+    expect(
+      validateReflectionDelta({
+        ...base,
+        rotationCursorKey: "rotation-cursor",
+        rotationCursorNamespace: "dreaming",
+        rotationCursorBy: 5,
+      }),
+    ).toContain("rotationCursorBy must be 1");
+    expect(
+      validateReflectionDelta({
+        ...base,
+        rotationCursorKey: "rotation-cursor",
+        rotationCursorNamespace: "dreaming",
+        rotationCursorBy: 1,
+      }),
+    ).toBeNull();
+  });
+
+  test("a recovered receipt re-run does not duplicate the memory or the Slack post", async () => {
+    const kvStore = new Map<string, unknown>();
+    const memories: string[] = [];
+    const slackPosts: unknown[] = [];
+    const ctx = {
+      stdlib: { Redacted: { value: (v: unknown) => v } },
+      swarm: {
+        config: { agentId: "lead-1" },
+        async inject_learning({ learning }: { learning: string }) {
+          memories.push(learning);
+          return { success: true, data: { success: true } };
+        },
+        async config_get() {
+          return {
+            success: true,
+            data: { configs: [{ key: "DREAMING_SLACK_CHANNEL", value: "C123" }] },
+          };
+        },
+        async slack_post(request: unknown) {
+          slackPosts.push(request);
+          return { success: true, data: { ok: true } };
+        },
+        async kv_getOrNull({ key }: { key: string }) {
+          return kvStore.has(key) ? { key, value: kvStore.get(key) } : null;
+        },
+        async kv_set({ key, value }: { key: string; value: unknown }) {
+          kvStore.set(key, value);
+          return { success: true, data: { success: true } };
+        },
+      },
+    };
+    const args = { apply: { applied: [], held: [], deferred: [] }, runId: "run-9" };
+
+    const first = await dreamReceipt(args, ctx);
+    expect(first.receipt).toContain("Run: run-9");
+    expect(memories).toHaveLength(1);
+    expect(slackPosts).toHaveLength(1);
+
+    // Crash-recovery re-runs the instant step when the server died before the
+    // checkpoint — the per-run marker must keep both side effects single-shot.
+    const second = await dreamReceipt(args, ctx);
+    expect(second).toMatchObject({ duplicateOfRun: "run-9", slackPosted: false });
+    expect(memories).toHaveLength(1);
+    expect(slackPosts).toHaveLength(1);
   });
 });

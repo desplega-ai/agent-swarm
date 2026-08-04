@@ -41,8 +41,8 @@ The output is not a report. It is edits: rules added to `CLAUDE.md`, gotchas add
 | `skills` | agent task (Lead) | Reviews skill inventory versus actual invocation — proposes new, updated, or better-described skills. |
 | `hygiene` | agent task (Lead) | Recurring-duty upkeep: what belongs in `HEARTBEAT.md`, what's stale, whose turn it is on rotation. |
 | `critique` | agent task (Lead) | Pools every lane's proposals, removes duplicates and drift, arbitrates conflicts, and emits the approved delta set. A lane that failed contributes nothing rather than blocking the run. |
-| `apply` | script (`dream-apply`, as Lead) | The **only** node that mutates state. Validates each delta, splices anchored profile edits, writes memories and skills. Every applied edit is recorded with its file, anchor, op, and a content hash, and leaves a per-run idempotency receipt in KV — a retried or crash-recovered apply skips deltas it already applied instead of duplicating them. |
-| `receipt` | script (`dream-receipt`, as Lead) | Records what happened as a memory, and posts it to Slack if a channel is configured. |
+| `apply` | script (`dream-apply`, as Lead) | The **only** node that mutates state. Validates each delta, splices anchored profile edits, writes memories and skills. Every applied edit is recorded with its file, anchor, op, and a content hash, and leaves a per-run idempotency receipt in KV — a retried or crash-recovered apply skips deltas it already applied instead of duplicating them. Agent-targeted deltas naming an agent outside the run's gathered roster are held. |
+| `receipt` | script (`dream-receipt`, as Lead) | Records what happened as a memory, and posts it to Slack if a channel is configured. A per-run KV marker keeps a crash-recovered re-run from duplicating either. |
 
 The parent `reflect` node owns the join: the run cannot reach `critique` until every agent's reflection task is terminal. A failed reflection lane does not kill the run — the failure is carried into the aggregate and the other agents' proposals still reach critique.
 
@@ -60,7 +60,7 @@ The unit of change is a **ReflectionDelta**. There are four kinds:
 | --- | --- | --- |
 | `profile-op` | `SOUL` / `IDENTITY` / `CLAUDE` / `TOOLS` / `HEARTBEAT` | Anchored section edit: `append-under`, `replace-section`, or `remove-section`. |
 | `memory` | Swarm memory | `write` (needs content) or `delete` (needs the memory id). `scope` may only be `swarm` — the write path stores swarm-scoped memory, so an agent-scoped request is held rather than silently published. A `delete` only applies when the memory actually belongs to the delta's `agentId`; a mismatched or unknown id is held. |
-| `skill` | Skills catalog | `create` or `update`; content is the whole skill body. `scope` may only be `swarm` — the apply runs as the Lead, so an agent-scoped skill would bind to the Lead identity instead of the lane that proposed it. |
+| `skill` | Skills catalog | `create` or `update`; content is the whole skill body. `scope` may only be `swarm` — the apply runs as the Lead, so an agent-scoped skill would bind to the Lead identity instead of the lane that proposed it. Updates only touch targets that are already swarm-scoped. |
 | `hygiene` | `HEARTBEAT` | Same anchored ops, plus an optional rotation-cursor advance. |
 
 Agents learn how to produce these from the seeded **`dreaming` skill**, which is the runtime playbook for a reflection lane: evidence rules, the field contract, anchor discipline, and which file a given piece of knowledge belongs in.

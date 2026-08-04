@@ -66,13 +66,43 @@ export default async function dreamReceipt(args: any, ctx: any) {
   const parsed = argsSchema.safeParse(args || {});
   if (!parsed.success) return { error: `invalid args: ${parsed.error.message}` };
   const date = parsed.data.date ?? new Date().toISOString().slice(0, 10);
-  const receipt = renderDreamReceipt(parsed.data.apply, date, parsed.data.runId);
+  const runId = parsed.data.runId;
+
+  // Crash-recovery re-runs this instant step if the server died between the
+  // memory write and the step checkpoint — a per-run KV marker keeps the
+  // duplicate receipt memory and duplicate Slack post from landing. Read fails
+  // open (an unreachable KV must not silence a fresh receipt).
+  const dedupeKey = runId ? `receipt:${runId}` : null;
+  if (dedupeKey) {
+    try {
+      const existing = await ctx.swarm.kv_getOrNull({ key: dedupeKey, namespace: "dreaming" });
+      if (existing != null) {
+        return { date, receipt: null, slackPosted: false, duplicateOfRun: runId };
+      }
+    } catch {
+      // fall through — write the receipt
+    }
+  }
+
+  const receipt = renderDreamReceipt(parsed.data.apply, date, runId);
   const memory = await ctx.swarm.inject_learning({
     agentId: ctx.stdlib.Redacted.value(ctx.swarm.config.agentId),
     learning: receipt,
     category: "best-practice",
   });
   assertSucceeded(memory, "receipt memory write");
+  if (dedupeKey) {
+    try {
+      await ctx.swarm.kv_set({
+        key: dedupeKey,
+        value: "written",
+        namespace: "dreaming",
+        expiresInSec: 7 * 24 * 60 * 60,
+      });
+    } catch {
+      // best-effort — a failed marker write only risks a duplicate on recovery
+    }
+  }
 
   const configResponse = await ctx.swarm.config_get({ key: "DREAMING_SLACK_CHANNEL" });
   assertSucceeded(configResponse, "Dreaming Slack config read");

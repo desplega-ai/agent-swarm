@@ -33,10 +33,13 @@ export const DREAM_WORKFLOW_DEFINITION: WorkflowDefinition = {
       id: "gather",
       type: "swarm-script",
       label: "Gather daily evidence",
+      inputs: { runId: "run.id" },
       config: {
         scriptName: "dream-gather",
         scope: "global",
-        args: { days: 1, preflightOnly: true },
+        // runId lets the activity gate exclude this workflow's own tasks by
+        // durable workflow ID (rename-proof) instead of by shipped name.
+        args: { days: 1, preflightOnly: true, runId: "{{runId}}" },
       },
       next: "proceed",
     },
@@ -55,12 +58,12 @@ export const DREAM_WORKFLOW_DEFINITION: WorkflowDefinition = {
       id: "gather-rich",
       type: "swarm-script",
       label: "Gather rich daily evidence as Lead",
-      inputs: { leadAgentId: "gather.result.leadAgentId" },
+      inputs: { leadAgentId: "gather.result.leadAgentId", runId: "run.id" },
       config: {
         scriptName: "dream-gather",
         scope: "global",
         agentId: "{{leadAgentId}}",
-        args: { days: 1 },
+        args: { days: 1, runId: "{{runId}}" },
       },
       next: "rich-proceed",
     },
@@ -197,14 +200,16 @@ export const DREAM_WORKFLOW_DEFINITION: WorkflowDefinition = {
       inputs: {
         approved: "critique.taskOutput",
         leadAgentId: "gather-rich.result.leadAgentId",
+        agentIds: "gather-rich.result.agentIds",
         runId: "run.id",
       },
       config: {
         scriptName: "dream-apply",
         scope: "global",
         agentId: "{{leadAgentId}}",
-        // runId keys the per-delta idempotency receipts that make retries safe.
-        args: { deltas: "{{approved}}", runId: "{{runId}}" },
+        // runId keys the per-delta idempotency receipts that make retries safe;
+        // agentIds is the gathered roster — agent-targeted deltas outside it are held.
+        args: { deltas: "{{approved}}", runId: "{{runId}}", agentIds: "{{agentIds}}" },
       },
       next: "receipt",
     },

@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getResolvedConfig, maskSecrets } from "@/be/db";
-import { isOperatorConfigKey } from "@/be/swarm-config-guard";
+import { overlayOperatorEnvValue } from "@/be/swarm-config-guard";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { SwarmConfigScopeSchema } from "@/types";
@@ -20,52 +20,6 @@ const configEntryShape = z.looseObject({
   lastUpdatedAt: z.string().optional(),
   encrypted: z.boolean().optional(),
 });
-
-/**
- * The server's process.env is the effective source for operator settings:
- * swarm_config rows are materialized into it at boot (env wins) and on reload
- * (stored wins), but an env-only value never gets a row — so a rows-only read
- * would miss e.g. an emergency `DREAMING_ENABLED=false` set in the deployment
- * environment. Overlay env for catalog-validated operator keys only; those are
- * non-secret by construction, so this can never expose credentials.
- */
-export function overlayOperatorEnvValue<
-  T extends { key: string; scope: string; value: string; description: string | null },
->(configs: T[], key: string): T[] {
-  const envValue = process.env[key];
-  if (!isOperatorConfigKey(key) || envValue === undefined || envValue === "") {
-    return configs;
-  }
-  const stored = configs.find((c) => c.scope === "global");
-  if (!stored) {
-    const synthetic = {
-      id: `env:${key}`,
-      scope: "global",
-      scopeId: null,
-      key,
-      value: envValue,
-      isSecret: false,
-      envPath: null,
-      description: "Resolved from the server environment (no stored row)",
-      createdAt: "",
-      lastUpdatedAt: "",
-      encrypted: false,
-    } as unknown as T;
-    return [...configs, synthetic];
-  }
-  if (stored.value === envValue) return configs;
-  // A stored row that lost to env at boot (override=false) is stale until the
-  // next reload — the env value is what the server obeys.
-  return configs.map((c) =>
-    c === stored
-      ? {
-          ...c,
-          value: envValue,
-          description: "Resolved from the server environment (stored row is stale until reload)",
-        }
-      : c,
-  );
-}
 
 export const registerGetConfigTool = (server: McpServer) => {
   createToolRegistrar(server)(

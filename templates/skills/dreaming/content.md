@@ -133,7 +133,8 @@ Fields: `kind`, `agentId`, `op`, `anchor`, `content`, `rotationCursorKey`, `rota
   "agentId": "8f2c1d34-5e6a-4b7c-9d80-1a2b3c4d5e6f",
   "op": "remove-section",
   "anchor": "## Watch: staging migration backfill",
-  "rotationCursorKey": "dream:hygiene:cursor",
+  "rotationCursorKey": "rotation-cursor",
+  "rotationCursorNamespace": "dreaming",
   "rotationCursorBy": 1,
   "reason": "Backfill completed 3 days ago; the duty is stale and still firing."
 }

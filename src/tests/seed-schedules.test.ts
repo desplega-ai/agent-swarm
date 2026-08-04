@@ -254,4 +254,80 @@ describe("schedules seeder", () => {
       description: "Retimed by upstream.",
     });
   });
+
+  test("the rollout enable-flip refuses to start an operator-modified workflow", async () => {
+    // Ships disabled first (the staged-rollout posture), operator reworks the
+    // graph, then a later release flips the shipped default to enabled. The
+    // schedule row itself is pristine, so the update reaches apply() — but
+    // auto-enabling execution of a graph the add-on no longer owns needs the
+    // operator, not a default change.
+    const addon = makeAddon();
+    addon.schedules[0]!.enabled = false;
+    await seedAddon(addon);
+    const workflow = getWorkflowByName("test-scheduled-workflow");
+    expect(getScheduledTaskByName("test-workflow-schedule")?.enabled).toBe(false);
+
+    updateWorkflow(workflow!.id, {
+      definition: {
+        nodes: [{ id: "work", type: "agent-task", config: { template: "Reworked." } }],
+      },
+    });
+    addon.schedules[0]!.enabled = true;
+
+    const result = await runSeeder(createSchedulesSeeder([addon]), { quiet: true });
+    expect(result.failed).toEqual([
+      {
+        key: "test-workflow-schedule",
+        error:
+          'Schedule "test-workflow-schedule" would be auto-enabled against a workflow that is ' +
+          "not the unmodified add-on seed — enable it manually if running the modified graph is intended",
+      },
+    ]);
+    expect(getScheduledTaskByName("test-workflow-schedule")?.enabled).toBe(false);
+
+    // With the seeded workflow untouched the same flip goes through.
+    const pristine = makeAddon();
+    pristine.workflows[0]!.name = "test-pristine-workflow";
+    pristine.schedules[0]! = {
+      ...pristine.schedules[0]!,
+      name: "test-pristine-schedule",
+      workflowName: "test-pristine-workflow",
+      enabled: false,
+    };
+    await seedAddon(pristine);
+    expect(getScheduledTaskByName("test-pristine-schedule")?.enabled).toBe(false);
+    pristine.schedules[0]!.enabled = true;
+    const flipped = await runSeeder(createSchedulesSeeder([pristine]), { quiet: true });
+    expect(flipped.failed).toEqual([]);
+    expect(getScheduledTaskByName("test-pristine-schedule")?.enabled).toBe(true);
+  });
+
+  test("dropping a task schedule's target writes NULL instead of keeping the old agent", async () => {
+    const addon = makeAddon();
+    addon.schedules.push({
+      name: "test-task-schedule",
+      description: "An agent-task fixture schedule.",
+      cronExpression: "0 10 * * *",
+      timezone: "UTC",
+      enabled: true,
+      targetType: "agent-task",
+      taskTemplate: "Run the scheduled task.",
+      taskType: "maintenance",
+      targetAgentId: "agent-legacy",
+      tags: ["fixture"],
+    });
+    await seedAddon(addon);
+    expect(getScheduledTaskByName("test-task-schedule")?.targetAgentId).toBe("agent-legacy");
+
+    // Shipped update moves the schedule to the documented pool form (no target).
+    const taskSource = addon.schedules.find((item) => item.name === "test-task-schedule");
+    if (taskSource?.targetType === "agent-task") taskSource.targetAgentId = undefined;
+
+    const result = await runSeeder(createSchedulesSeeder([addon]), { quiet: true });
+    expect(result.failed).toEqual([]);
+    expect(result.updated).toBe(1);
+    // updateScheduledTask treats undefined as "leave unchanged" — the seeder must
+    // write SQL NULL or the schedule keeps dispatching to the removed agent.
+    expect(getScheduledTaskByName("test-task-schedule")?.targetAgentId).toBeUndefined();
+  });
 });

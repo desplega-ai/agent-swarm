@@ -11,7 +11,13 @@ export const argsSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Name of the Dreaming workflow whose own task output must not count as swarm activity (default 'dream')",
+      "Name of the Dreaming workflow whose own task output must not count as swarm activity (default 'dream'; the runId-based workflow-ID exclusion is preferred when available)",
+    ),
+  runId: z
+    .string()
+    .optional()
+    .describe(
+      "This dream run's workflow-run ID — used to exclude the bound workflow's own tasks by durable workflow ID, which survives a rename of the seeded workflow",
     ),
 });
 
@@ -122,28 +128,35 @@ export default async function dreamGather(args: any, ctx: any) {
   // yesterday's reflection/critique tasks and receipt memory all land inside today's
   // one-day window, so a quiet swarm would keep fanning out forever.
   //   - tasks: every task a dream run creates carries that run's workflowRunId, so the
-  //     add-on's whole task output is excluded by joining back to the dream workflow.
+  //     add-on's whole task output is excluded by joining back to the dream workflow —
+  //     by durable workflow ID when this run's runId is available (a renamed seeded
+  //     workflow keeps its schedule binding and keeps running, so a name-based match
+  //     would silently stop excluding it), by shipped name as the manual-run fallback.
   //   - memories: dream's writes are NOT attributable at the row level (inject_learning
   //     stores no provenance) and a receipt memory is written on every run, so counting
   //     memory writes would re-arm the gate unconditionally. Agents write memories while
   //     working tasks, so the task counters already carry that signal.
+  const runId = parsed.data.runId;
+  const selfRunsSubquery = runId
+    ? `SELECT r.id FROM workflow_runs r
+       WHERE r.workflowId = (SELECT workflowId FROM workflow_runs WHERE id = ?)`
+    : `SELECT r.id FROM workflow_runs r
+       JOIN workflows w ON w.id = r.workflowId
+       WHERE w.name = ?`;
+  const selfParam = runId ?? selfWorkflowName;
   const activityResponse = await ctx.swarm.db_query({
     sql: `SELECT
             (SELECT count(*) FROM agent_tasks t
              WHERE t.status = 'completed'
                AND julianday(t.finishedAt) > julianday('now', ?)
                AND (t.workflowRunId IS NULL OR t.workflowRunId NOT IN (
-                 SELECT r.id FROM workflow_runs r
-                 JOIN workflows w ON w.id = r.workflowId
-                 WHERE w.name = ?))) AS completedTasks,
+                 ${selfRunsSubquery}))) AS completedTasks,
             (SELECT count(*) FROM agent_tasks t
              WHERE t.status = 'failed'
                AND julianday(t.lastUpdatedAt) > julianday('now', ?)
                AND (t.workflowRunId IS NULL OR t.workflowRunId NOT IN (
-                 SELECT r.id FROM workflow_runs r
-                 JOIN workflows w ON w.id = r.workflowId
-                 WHERE w.name = ?))) AS failedTasks`,
-    params: [windowModifier, selfWorkflowName, windowModifier, selfWorkflowName],
+                 ${selfRunsSubquery}))) AS failedTasks`,
+    params: [windowModifier, selfParam, windowModifier, selfParam],
   });
   assertSucceeded(activityResponse, "Dreaming activity query");
   const activity = rowsToObjects(activityResponse)[0] ?? {};
@@ -173,11 +186,14 @@ export default async function dreamGather(args: any, ctx: any) {
     );
   }
   const agents = roster.map((agent) => ({ id: String(agent.id), name: String(agent.name) }));
+  // Flat id list for dream-apply's roster guard (workflow args interpolate it whole).
+  const agentIds = agents.map((agent) => agent.id);
   if (parsed.data.preflightOnly) {
     return {
       enabled: true,
       hasActivity: true,
       agents,
+      agentIds,
       leadAgentId: String(lead.id),
       insights: null,
       blockers: [],
@@ -269,6 +285,7 @@ export default async function dreamGather(args: any, ctx: any) {
     enabled: true,
     hasActivity: true,
     agents,
+    agentIds,
     leadAgentId: String(lead.id),
     insights: {
       compound: scriptResult(insightsResponse),
