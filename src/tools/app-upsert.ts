@@ -3,6 +3,7 @@ import * as z from "zod";
 import { parseAppDefinition } from "@/apps/definition";
 import type { AppRecord } from "@/apps/store";
 import { createApp, getApp, updateApp } from "@/apps/store";
+import { snapshotApp } from "@/apps/version";
 import { getAgentById } from "@/be/db";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -62,6 +63,11 @@ export const registerAppUpsertTool = (server: McpServer) => {
           return toolErr(`App ${input.appId} not found.`, {
             data: { appId: input.appId, url: `/apps/${input.appId}` },
           });
+        }
+        try {
+          snapshotApp(input.appId, requestInfo.agentId);
+        } catch {
+          return toolErr("Failed to snapshot app; update was not applied.");
         }
         app = updateApp(input.appId, {
           name: input.name,

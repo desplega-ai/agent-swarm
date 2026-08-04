@@ -9501,6 +9501,79 @@ export function getWorkflowVersion(workflowId: string, version: number): Workflo
   return row ? rowToWorkflowVersion(row) : null;
 }
 
+// --- App Version History ---
+
+export type AppVersion = {
+  id: string;
+  appId: string;
+  version: number;
+  snapshot: unknown;
+  changedByAgentId?: string;
+  createdAt: string;
+};
+
+type AppVersionRow = {
+  id: string;
+  appId: string;
+  version: number;
+  snapshot: string;
+  changedByAgentId: string | null;
+  createdAt: string;
+};
+
+function rowToAppVersion(row: AppVersionRow): AppVersion {
+  return {
+    id: row.id,
+    appId: row.appId,
+    version: row.version,
+    snapshot: JSON.parse(row.snapshot),
+    changedByAgentId: row.changedByAgentId ?? undefined,
+    createdAt: normalizeDateRequired(row.createdAt),
+  };
+}
+
+export function createAppVersion(data: {
+  appId: string;
+  version: number;
+  snapshot: unknown;
+  changedByAgentId?: string;
+}): AppVersion {
+  const id = crypto.randomUUID();
+  const row = getDb()
+    .prepare<AppVersionRow, [string, string, number, string, string | null, string]>(
+      `INSERT INTO app_versions (id, appId, version, snapshot, changedByAgentId, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.appId,
+      data.version,
+      JSON.stringify(data.snapshot),
+      data.changedByAgentId ?? null,
+      new Date().toISOString(),
+    );
+  if (!row) throw new Error("Failed to create app version");
+  return rowToAppVersion(row);
+}
+
+export function getAppVersions(appId: string): AppVersion[] {
+  return getDb()
+    .prepare<AppVersionRow, [string]>(
+      "SELECT * FROM app_versions WHERE appId = ? ORDER BY version DESC",
+    )
+    .all(appId)
+    .map(rowToAppVersion);
+}
+
+export function getAppVersion(appId: string, version: number): AppVersion | null {
+  const row = getDb()
+    .prepare<AppVersionRow, [string, number]>(
+      "SELECT * FROM app_versions WHERE appId = ? AND version = ?",
+    )
+    .get(appId, version);
+  return row ? rowToAppVersion(row) : null;
+}
+
 // ============================================================================
 // Pages CRUD + version history
 // ----------------------------------------------------------------------------

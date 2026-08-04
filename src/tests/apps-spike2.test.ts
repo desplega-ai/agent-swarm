@@ -1004,7 +1004,10 @@ describe("app MCP iteration tools", () => {
     }>;
     expect(fetched.structuredContent.success).toBe(true);
     expect(fetched.structuredContent.app.id).toBe(appId);
-    expect(fetched.structuredContent.app.definition).toEqual(normalizedBaseDefinition());
+    expect(fetched.structuredContent.app.definition).toEqual({
+      ...normalizedBaseDefinition(),
+      schemaVersion: 1,
+    });
     expect(fetched.structuredContent.app.definition).toMatchObject({
       pages: baseDefinition.pages,
       defaultPage: "main",
@@ -1027,6 +1030,16 @@ describe("app MCP iteration tools", () => {
     expect(patched.structuredContent.success).toBe(true);
     expect(patched.structuredContent.app.name).toBe("Patched by MCP");
     expect(patched.structuredContent).toMatchObject({ appId, url: `/apps/${appId}` });
+    const snapshot = getDb()
+      .query(
+        "SELECT snapshot, changedByAgentId FROM app_versions WHERE appId = ? ORDER BY version DESC LIMIT 1",
+      )
+      .get(appId) as { snapshot: string; changedByAgentId: string };
+    expect(snapshot.changedByAgentId).toBe(AGENT_ID);
+    expect(JSON.parse(snapshot.snapshot).definition).toEqual({
+      ...normalizedBaseDefinition(),
+      schemaVersion: 1,
+    });
 
     const invalid = (await tools["app-patch"]!.handler(
       { appId, definition: { pages: { main: { root: "missing" } } } },
@@ -1040,5 +1053,32 @@ describe("app MCP iteration tools", () => {
     expect(
       invalid.structuredContent.issues.some((issue) => issue.path.startsWith("pages.main.")),
     ).toBe(true);
+  });
+
+  test("fails closed when app-patch cannot snapshot", async () => {
+    const appId = await createApp();
+    const tools = registeredTools([registerAppPatchTool]);
+    const before = getApp(appId);
+    getDb().run(`
+      CREATE TRIGGER fail_mcp_app_snapshot
+      BEFORE INSERT ON app_versions
+      BEGIN SELECT RAISE(FAIL, 'snapshot intentionally failed'); END;
+    `);
+
+    const patched = (await tools["app-patch"]!.handler(
+      { appId, name: "must not persist", description: "must not persist" },
+      toolMeta(),
+    )) as StructuredResult<{ success: boolean; message: string }>;
+    getDb().run("DROP TRIGGER fail_mcp_app_snapshot");
+
+    expect(patched.isError).toBe(true);
+    expect(patched.structuredContent.success).toBe(false);
+    expect(patched.structuredContent.message).toStartWith("Failed to snapshot app");
+    expect(getApp(appId)).toEqual(before);
+    expect(
+      getDb().query("SELECT COUNT(*) AS count FROM app_versions WHERE appId = ?").get(appId) as {
+        count: number;
+      },
+    ).toEqual({ count: 0 });
   });
 });

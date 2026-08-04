@@ -378,6 +378,79 @@
         }
       }
     },
+    "/api/apps/{id}/versions": {
+      "get": {
+        "summary": "List app definition versions",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "App definition versions"
+          },
+          "404": {
+            "description": "App not found"
+          }
+        }
+      }
+    },
+    "/api/apps/{id}/versions/{version}": {
+      "get": {
+        "summary": "Get an app definition version",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "required": true,
+            "name": "version",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "App definition version"
+          },
+          "404": {
+            "description": "App or version not found"
+          }
+        }
+      }
+    },
     "/api/apps/{id}": {
       "get": {
         "summary": "Get an app",
@@ -975,6 +1048,9 @@
           },
           "404": {
             "description": "App or query not found"
+          },
+          "409": {
+            "description": "App definition needs repair"
           }
         }
       }
@@ -1038,6 +1114,9 @@
           },
           "404": {
             "description": "App or action not found"
+          },
+          "409": {
+            "description": "App definition needs repair"
           }
         }
       }

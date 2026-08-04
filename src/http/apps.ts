@@ -23,8 +23,16 @@ import {
   patchAppRow,
   purgeAppRows,
 } from "../apps/row-store";
-import { createApp, deleteApp, getApp, listApps, updateApp } from "../apps/store";
-import { getAgentById, getLeadAgent } from "../be/db";
+import {
+  appDefinitionNeedsRepair,
+  createApp,
+  deleteApp,
+  getApp,
+  listApps,
+  updateApp,
+} from "../apps/store";
+import { decodeAppVersion, snapshotApp } from "../apps/version";
+import { getAgentById, getAppVersion, getAppVersions, getLeadAgent } from "../be/db";
 import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId, runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import { resolveTemplate } from "../prompts/resolver";
@@ -42,6 +50,10 @@ const MAX_APP_BULK_ROWS_BODY_BYTES = 10 * 1024 * 1024;
 const DECIMAL_NUMBER_PATTERN = /^[+-]?\d+(?:\.\d+)?$/;
 
 const appParamsSchema = z.object({ id: z.string().min(1) });
+const appVersionParamsSchema = z.object({
+  id: z.string().min(1),
+  version: z.coerce.number().int().positive(),
+});
 const modelParamsSchema = z.object({ id: z.string().min(1), model: AppNameSchema });
 const rowParamsSchema = z.object({
   id: z.string().min(1),
@@ -76,6 +88,32 @@ const createAppRoute = route({
     403: { description: "Permission denied" },
   },
   rbac: { permission: "app.manage" },
+});
+
+const listAppVersionsRoute = route({
+  method: "get",
+  path: "/api/apps/{id}/versions",
+  pattern: ["api", "apps", null, "versions"],
+  summary: "List app definition versions",
+  tags: ["Apps"],
+  params: appParamsSchema,
+  responses: {
+    200: { description: "App definition versions" },
+    404: { description: "App not found" },
+  },
+});
+
+const getAppVersionRoute = route({
+  method: "get",
+  path: "/api/apps/{id}/versions/{version}",
+  pattern: ["api", "apps", null, "versions", null],
+  summary: "Get an app definition version",
+  tags: ["Apps"],
+  params: appVersionParamsSchema,
+  responses: {
+    200: { description: "App definition version" },
+    404: { description: "App or version not found" },
+  },
 });
 
 const getAppRoute = route({
@@ -257,6 +295,7 @@ const runNamedQueryRoute = route({
   responses: {
     200: { description: "Named query rows" },
     400: { description: "Missing or invalid named query parameters" },
+    409: { description: "App definition needs repair" },
     404: { description: "App or query not found" },
   },
 });
@@ -274,6 +313,7 @@ const runActionRoute = route({
     200: { description: "Action invoked" },
     400: { description: "Invalid action input or stale script reference" },
     403: { description: "Permission denied" },
+    409: { description: "App definition needs repair" },
     404: { description: "App or action not found" },
   },
   rbac: { permission: "app.manage" },
@@ -318,6 +358,16 @@ function invalidDefinition(res: ServerResponse, issues: AppValidationIssue[]): v
   json(res, { error: "invalid app definition", issues }, 400);
 }
 
+function definitionNeedsRepair(res: ServerResponse, app: ReturnType<typeof getApp>): boolean {
+  if (!app || !appDefinitionNeedsRepair(app)) return false;
+  json(res, { error: "definition needs repair", issues: app.definitionError }, 409);
+  return true;
+}
+
+function snapshotFailure(res: ServerResponse): void {
+  jsonError(res, "failed to snapshot app", 500);
+}
+
 function invalidRows(res: ServerResponse, error: unknown): boolean {
   if (error instanceof AppRowAppNotFoundError) {
     jsonError(res, "app not found", 404);
@@ -334,6 +384,7 @@ function resolveModel(
   res: ServerResponse,
 ): { app: NonNullable<ReturnType<typeof getApp>>; model: ModelDef } | null {
   const app = getApp(appId);
+  if (definitionNeedsRepair(res, app)) return null;
   if (!app || !Object.hasOwn(app.definition.models, modelName)) {
     jsonError(res, "app or model not found", 404);
     return null;
@@ -592,6 +643,33 @@ export async function handleApps(
     return true;
   }
 
+  if (listAppVersionsRoute.match(req.method, pathSegments)) {
+    const parsed = await listAppVersionsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!getApp(parsed.params.id)) {
+      jsonError(res, "app not found", 404);
+      return true;
+    }
+    json(res, { versions: getAppVersions(parsed.params.id).map(decodeAppVersion) });
+    return true;
+  }
+
+  if (getAppVersionRoute.match(req.method, pathSegments)) {
+    const parsed = await getAppVersionRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!getApp(parsed.params.id)) {
+      jsonError(res, "app not found", 404);
+      return true;
+    }
+    const version = getAppVersion(parsed.params.id, parsed.params.version);
+    if (!version) {
+      jsonError(res, "app version not found", 404);
+      return true;
+    }
+    json(res, { version: decodeAppVersion(version) });
+    return true;
+  }
+
   if (bulkCreateRowsRoute.match(req.method, pathSegments)) {
     if (enforceContentLengthCap(req, res, MAX_APP_BULK_ROWS_BODY_BYTES) === BODY_TOO_LARGE)
       return true;
@@ -757,6 +835,7 @@ export async function handleApps(
     const parsed = await runNamedQueryRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const app = getApp(parsed.params.id);
+    if (definitionNeedsRepair(res, app)) return true;
     const queries = app?.definition.queries;
     if (!app || !queries || !Object.hasOwn(queries, parsed.params.name)) {
       jsonError(res, "app or query not found", 404);
@@ -800,6 +879,7 @@ export async function handleApps(
       jsonError(res, "app not found", 404);
       return true;
     }
+    if (definitionNeedsRepair(res, app)) return true;
     const actions = app.definition.actions;
     if (!actions || !Object.hasOwn(actions, parsed.params.name)) {
       jsonError(res, "app action not found", 404);
@@ -885,6 +965,7 @@ export async function handleApps(
       jsonError(res, "app not found", 404);
       return true;
     }
+    if (definitionNeedsRepair(res, existing)) return true;
     const patch = applyAppDefinitionPatch(existing.definition, parsed.body.definition ?? {});
     if (!patch.success) {
       invalidDefinition(res, patch.issues);
@@ -893,6 +974,12 @@ export async function handleApps(
     const definition = parseAppDefinition(patch.definition);
     if (!definition.success) {
       invalidDefinition(res, definition.issues);
+      return true;
+    }
+    try {
+      snapshotApp(parsed.params.id, myAgentId);
+    } catch {
+      snapshotFailure(res);
       return true;
     }
     // Spike limitation: schema updates do not migrate rows or rebuild KV indexes.
@@ -914,7 +1001,8 @@ export async function handleApps(
     const parsed = await updateAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!authorizeAppWrite(req, res, myAgentId)) return true;
-    if (!getApp(parsed.params.id)) {
+    const existing = getApp(parsed.params.id);
+    if (!existing) {
       jsonError(res, "app not found", 404);
       return true;
     }
@@ -926,6 +1014,14 @@ export async function handleApps(
         return true;
       }
       definition = parsedDefinition.definition;
+    } else if (definitionNeedsRepair(res, existing)) {
+      return true;
+    }
+    try {
+      snapshotApp(parsed.params.id, myAgentId);
+    } catch {
+      snapshotFailure(res);
+      return true;
     }
     // Spike limitation: schema updates do not migrate rows or rebuild KV indexes.
     const app = updateApp(parsed.params.id, {

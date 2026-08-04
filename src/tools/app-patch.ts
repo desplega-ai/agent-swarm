@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { applyAppDefinitionPatch, parseAppDefinition } from "@/apps/definition";
-import { getApp, updateApp } from "@/apps/store";
+import { appDefinitionNeedsRepair, getApp, updateApp } from "@/apps/store";
+import { snapshotApp } from "@/apps/version";
 import { getAgentById } from "@/be/db";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -57,6 +58,9 @@ export const registerAppPatchTool = (server: McpServer) => {
 
       const existing = getApp(input.appId);
       if (!existing) return toolErr(`App ${input.appId} not found.`);
+      if (appDefinitionNeedsRepair(existing)) {
+        return toolErr("Definition needs repair.", { data: { issues: existing.definitionError } });
+      }
 
       const patch = applyAppDefinitionPatch(existing.definition, input.definition ?? {});
       if (!patch.success) {
@@ -73,6 +77,11 @@ export const registerAppPatchTool = (server: McpServer) => {
         });
       }
 
+      try {
+        snapshotApp(input.appId, requestInfo.agentId);
+      } catch {
+        return toolErr("Failed to snapshot app; patch was not applied.");
+      }
       const app = updateApp(input.appId, {
         name: input.name,
         description: input.description,

@@ -260,6 +260,20 @@ export interface AppValidationIssue {
   message: string;
 }
 
+const APP_DEFINITION_TOP_LEVEL_KEYS = new Set([
+  "models",
+  "queries",
+  "actions",
+  "pages",
+  "defaultPage",
+  "schemaVersion",
+]);
+
+const TOP_LEVEL_KEY_SUGGESTIONS: Record<string, string> = {
+  element: "elements",
+  userconfig: "userConfig",
+};
+
 export type AppDefinitionPatchResult =
   | { success: true; definition: unknown }
   | { success: false; issues: AppValidationIssue[] };
@@ -290,7 +304,21 @@ export function parseAppDefinition(
       ],
     };
   }
-  const parsed = AppDefinitionSchema.safeParse(input);
+  if (isMergePatchObject(input)) {
+    const unknownKeys = Object.keys(input).filter((key) => !APP_DEFINITION_TOP_LEVEL_KEYS.has(key));
+    if (unknownKeys.length > 0) {
+      return {
+        success: false,
+        issues: unknownKeys.map((key) => ({
+          path: key,
+          message: `unknown top-level key "${key}"${TOP_LEVEL_KEY_SUGGESTIONS[key] ? ` — did you mean "${TOP_LEVEL_KEY_SUGGESTIONS[key]}"?` : ""}`,
+        })),
+      };
+    }
+  }
+  const parsedInput = isMergePatchObject(input) ? { ...input } : input;
+  if (isMergePatchObject(parsedInput)) delete parsedInput.schemaVersion;
+  const parsed = AppDefinitionSchema.safeParse(parsedInput);
   if (!parsed.success) return { success: false, issues: appDefinitionIssues(parsed.error) };
 
   const issues = [
@@ -370,6 +398,13 @@ function definitionPatchIssues(stored: AppDefinition, patch: unknown): AppValida
   return issues;
 }
 
+function withoutSchemaVersion(patch: unknown): unknown {
+  if (!isMergePatchObject(patch)) return patch;
+  const normalized = { ...patch };
+  delete normalized.schemaVersion;
+  return normalized;
+}
+
 function applyMergePatch(target: unknown, patch: unknown, path: string[]): unknown {
   if (!isMergePatchObject(patch)) return patch;
 
@@ -403,9 +438,10 @@ export function applyAppDefinitionPatch(
   stored: AppDefinition,
   patch: unknown,
 ): AppDefinitionPatchResult {
-  const issues = definitionPatchIssues(stored, patch);
+  const normalizedPatch = withoutSchemaVersion(patch);
+  const issues = definitionPatchIssues(stored, normalizedPatch);
   if (issues.length > 0) return { success: false, issues };
 
-  const merged = applyMergePatch(structuredClone(stored), patch, []);
+  const merged = applyMergePatch(structuredClone(stored), normalizedPatch, []);
   return { success: true, definition: structuredClone(merged) };
 }

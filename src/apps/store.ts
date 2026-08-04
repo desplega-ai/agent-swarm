@@ -1,6 +1,11 @@
 import { getDb } from "../be/db";
-import type { AppDefinition } from "./definition";
-import { AppDefinitionSchema } from "./definition";
+import type { AppDefinition, AppValidationIssue } from "./definition";
+import { AppDefinitionSchema, appDefinitionIssues } from "./definition";
+import {
+  CURRENT_APP_SCHEMA_VERSION,
+  stampAppDefinition,
+  upgradeAppDefinition,
+} from "./format-upgrades";
 
 interface AppDbRow {
   id: string;
@@ -15,20 +20,74 @@ export interface AppRecord {
   id: string;
   name: string;
   description?: string;
-  definition: AppDefinition;
+  definition: AppDefinition & { schemaVersion: number };
+  definitionError?: AppValidationIssue[];
   createdAt: string;
   updatedAt: string;
 }
 
-function decodeApp(row: AppDbRow): AppRecord {
+function invalidJsonIssue(error: unknown): AppValidationIssue {
+  return {
+    path: "definition",
+    message: `invalid stored JSON${error instanceof Error ? `: ${error.message}` : ""}`,
+  };
+}
+
+export function decodeAppDefinition(raw: unknown): {
+  definition: AppRecord["definition"];
+  definitionError?: AppValidationIssue[];
+} {
+  const upgraded = upgradeAppDefinition(raw);
+  const parsed = AppDefinitionSchema.safeParse(upgraded);
+  if (!parsed.success) {
+    return {
+      definition: raw as AppRecord["definition"],
+      definitionError: appDefinitionIssues(parsed.error),
+    };
+  }
+  return {
+    definition: {
+      ...parsed.data,
+      schemaVersion: CURRENT_APP_SCHEMA_VERSION,
+    },
+  };
+}
+
+export function decodeApp(row: AppDbRow): AppRecord {
+  let rawDefinition: unknown;
+  try {
+    rawDefinition = JSON.parse(row.definition);
+  } catch (error) {
+    return {
+      id: row.id,
+      name: row.name,
+      ...(row.description === null ? {} : { description: row.description }),
+      definition: row.definition as unknown as AppRecord["definition"],
+      definitionError: [invalidJsonIssue(error)],
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+  const decoded = decodeAppDefinition(rawDefinition);
   return {
     id: row.id,
     name: row.name,
     ...(row.description === null ? {} : { description: row.description }),
-    definition: AppDefinitionSchema.parse(JSON.parse(row.definition)),
+    definition: decoded.definition,
+    ...(decoded.definitionError ? { definitionError: decoded.definitionError } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+export function appDefinitionNeedsRepair(
+  app: AppRecord,
+): app is AppRecord & { definitionError: AppValidationIssue[] } {
+  return app.definitionError !== undefined;
+}
+
+function encodeDefinition(definition: AppDefinition): string {
+  return JSON.stringify(stampAppDefinition(definition));
 }
 
 function nextTimestamp(previous?: string): string {
@@ -51,7 +110,7 @@ export function createApp(input: {
        VALUES (?, ?, ?, ?, ?, ?)
        RETURNING id, name, description, definition, created_at, updated_at`,
     )
-    .get(id, input.name, input.description ?? null, JSON.stringify(input.definition), now, now);
+    .get(id, input.name, input.description ?? null, encodeDefinition(input.definition), now, now);
   if (!row) throw new Error("Failed to create app");
   return decodeApp(row);
 }
@@ -98,7 +157,7 @@ export function updateApp(
     .get(
       patch.name ?? existing.name,
       patch.description === undefined ? (existing.description ?? null) : patch.description,
-      JSON.stringify(patch.definition ?? existing.definition),
+      encodeDefinition(patch.definition ?? existing.definition),
       updatedAt,
       id,
     );
