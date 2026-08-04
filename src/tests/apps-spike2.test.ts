@@ -157,7 +157,12 @@ function expectIssue(definition: unknown, expectedPath: string): void {
   expect(parsed.issues.some((issue) => issue.path.includes(expectedPath))).toBe(true);
 }
 
+// Script actions resolve the swarm bearer via getApiKey(); CI runs without a
+// .env, so provide a key for the duration of this file and restore after.
+const PRIOR_AGENT_SWARM_API_KEY = process.env.AGENT_SWARM_API_KEY;
+
 beforeAll(async () => {
+  process.env.AGENT_SWARM_API_KEY ??= "test-apps-spike2-key-1234567890";
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(`${TEST_DB_PATH}${suffix}`);
@@ -181,6 +186,9 @@ beforeEach(() => {
 });
 
 afterAll(async () => {
+  if (PRIOR_AGENT_SWARM_API_KEY === undefined) {
+    delete process.env.AGENT_SWARM_API_KEY;
+  }
   await new Promise<void>((resolve) => server.close(() => resolve()));
   setScriptEmbeddingProviderForTests(null);
   closeDb();

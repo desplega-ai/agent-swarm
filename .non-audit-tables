@@ -8,6 +8,9 @@ agent_mcp_servers
 agent_memory_edge
 agent_skills
 api_key_status
+app_user_config        # attribution via scope (user:<userId>) (128)
+app_versions           # append-only snapshots; writes audited via app.* verbs in permission_audit (127)
+apps                   # provenance columns deferred (PR #1066 follow-up); writes audited via app.* verbs in permission_audit (126)
 asset_key_history
 budget_refusal_notifications
 channel_activity_cursors
