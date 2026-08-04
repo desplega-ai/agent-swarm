@@ -93,6 +93,8 @@ import type {
   SessionLogsResponse,
   SessionsListResponse,
   Skill,
+  SkillFile,
+  SkillFilesResponse,
   SkillsResponse,
   Stats,
   SteeringMessage,
@@ -1683,6 +1685,23 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/skills/${id}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch skill: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchSkillFiles(id: string): Promise<SkillFilesResponse> {
+    const url = `${this.getBaseUrl()}/api/skills/${id}/files`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch skill files: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchSkillFile(id: string, path: string): Promise<{ file: SkillFile }> {
+    // The route matches segments after /files/, so encode each segment
+    // individually and keep the slashes literal.
+    const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+    const url = `${this.getBaseUrl()}/api/skills/${id}/files/${encodedPath}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch skill file: ${res.status}`);
     return res.json();
   }
 

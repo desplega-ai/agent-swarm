@@ -47,7 +47,7 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   rb: "ruby",
 };
 
-function MonacoCodeBlock({ language, value }: { language: string; value: string }) {
+export function MonacoCodeBlock({ language, value }: { language: string; value: string }) {
   const { theme } = useTheme();
   const resolvedLanguage = LANGUAGE_ALIASES[language] ?? language;
   const lineCount = value.split("\n").length;
