@@ -96,7 +96,10 @@ describe("seed-scripts catalog", () => {
       if (!tc.ok) failures.push(`${s.name}: typecheck — ${tc.diagnostics.join(" | ")}`);
     }
     expect(failures).toEqual([]);
-  }, 10_000);
+    // One `tsc --noEmit` per catalog script — well past bun's 5s default on a loaded CI
+    // runner, and a timeout here just wastes three more retries doing the same work.
+    // The dream scripts add several more, so keep the larger budget over main's 10s.
+  }, 120_000);
 
   test("every catalog script exposes a documented default export", () => {
     for (const s of SEED_SCRIPTS) {
