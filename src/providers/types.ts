@@ -185,6 +185,15 @@ export interface ProviderResult {
 export interface ProviderTraits {
   /** Provider can call MCP tools (store-progress, task-action, skills, slack-reply, etc.) */
   hasMcp: boolean;
+  /**
+   * Provider discovers installed skills on its own — it reads the local skills
+   * tree and ambient-injects each skill's name + description into the session
+   * (claude, pi). When false the harness has no native skill system (codex,
+   * opencode: a SKILL.md is only inlined when a turn prompt opens with
+   * `/name`), so the system prompt has to enumerate the installed skills or the
+   * agent never learns they exist. Defaults to true when omitted.
+   */
+  nativeSkillDiscovery?: boolean;
   /** Provider runs in the local Docker container with /workspace, identity files, agent-fs, PM2, etc. */
   hasLocalEnvironment: boolean;
   /** Live steering modes supported by this provider. Absent means none. */

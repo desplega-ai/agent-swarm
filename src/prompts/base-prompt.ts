@@ -106,7 +106,11 @@ export type BasePromptArgs = {
 
 export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   const { role, agentId, swarmUrl, traits } = args;
-  const { hasMcp = true, hasLocalEnvironment: hasLocalEnv = true } = traits ?? {};
+  const {
+    hasMcp = true,
+    hasLocalEnvironment: hasLocalEnv = true,
+    nativeSkillDiscovery = true,
+  } = traits ?? {};
   const steerModes = traits?.steerModes ?? [];
 
   const vars: Record<string, string> = { role, agentId, swarmUrl };
@@ -234,14 +238,25 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     }
   }
 
-  // Installed skills section — a bounded count + discovery pointers, NOT an
-  // enumerated list. Harnesses already self-advertise skills from their local
-  // skills tree (Claude and pi inject name+description natively), so listing
-  // them here doubled the cost and grew linearly with the installed count.
-  // Skip for providers without MCP — the discovery tools are MCP tools.
+  // Installed skills section — shape depends on whether the harness discovers
+  // skills on its own. Skip entirely for providers without MCP: the discovery
+  // tools are MCP tools.
   if (hasMcp && args.skillsSummary && args.skillsSummary.length > 0) {
-    const count = args.skillsSummary.length;
-    prompt += `\n\n## Installed Skills\n\nYou have ${count} skill${count === 1 ? "" : "s"} installed. Your harness loads them from its skills directory (each skill is a folder with a SKILL.md — e.g. ~/.claude/skills/, ~/.codex/skills/, ~/.pi/agent/skills/, ~/.opencode/skills/) and most harnesses surface them natively. To browse the full catalog use the \`skill-list\` MCP tool, find one by intent with \`skill-search\`, and read a skill's content with \`skill-get\`.\n`;
+    const discovery =
+      "To browse the full catalog use the `skill-list` MCP tool, find one by intent with `skill-search`, and read a skill's content with `skill-get`.";
+    if (nativeSkillDiscovery) {
+      // Claude and pi read their local skills tree and inject name+description
+      // natively, so enumerating here is pure duplication that grows linearly
+      // with the installed count — emit a bounded count + discovery pointers.
+      const count = args.skillsSummary.length;
+      prompt += `\n\n## Installed Skills\n\nYou have ${count} skill${count === 1 ? "" : "s"} installed. Your harness loads them from its skills directory (each skill is a folder with a SKILL.md — e.g. ~/.claude/skills/, ~/.codex/skills/, ~/.pi/agent/skills/, ~/.opencode/skills/) and most harnesses surface them natively. ${discovery}\n`;
+    } else {
+      // Codex and opencode have no native skill system — we only inline a
+      // SKILL.md when a turn prompt opens with `/name`. Without this list they
+      // have zero ambient awareness that any skill exists.
+      const summaries = args.skillsSummary.map((s) => `- /${s.name}: ${s.description}`).join("\n");
+      prompt += `\n\n## Installed Skills\n\nThe following skills are available. To use one, read its SKILL.md from your skills directory and follow its instructions.\n\n${summaries}\n\n${discovery}\n`;
+    }
   }
 
   // Installed MCP servers section — skip for providers without MCP

@@ -488,19 +488,18 @@ describe("getBasePrompt — truncation", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Installed Skills section — bounded count + discovery pointers, never an
-// enumerated list (harnesses self-advertise skills; a list doubles the cost
-// and grows linearly with installed count)
+// Installed Skills section — bounded count + discovery pointers for harnesses
+// that self-advertise skills (a list doubles the cost and grows linearly with
+// installed count), enumerated list for harnesses that don't
 // ---------------------------------------------------------------------------
 describe("getBasePrompt — installed skills section", () => {
+  const twoSkills = [
+    { name: "commit", description: "Create a commit" },
+    { name: "deploy", description: "Ship it to production" },
+  ];
+
   test("emits a count and discovery tooling, not per-skill lines", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      skillsSummary: [
-        { name: "commit", description: "Create a commit" },
-        { name: "deploy", description: "Ship it to production" },
-      ],
-    });
+    const result = await getBasePrompt({ ...minimalArgs, skillsSummary: twoSkills });
     expect(result).toContain("Installed Skills");
     expect(result).toContain("You have 2 skills installed");
     expect(result).toContain("skill-list");
@@ -511,9 +510,36 @@ describe("getBasePrompt — installed skills section", () => {
     expect(result).not.toContain("Ship it to production");
   });
 
+  test("enumerates skills for harnesses without native skill discovery", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      traits: { hasMcp: true, nativeSkillDiscovery: false, hasLocalEnvironment: true },
+      skillsSummary: twoSkills,
+    });
+    expect(result).toContain("Installed Skills");
+    expect(result).toContain("- /commit: Create a commit");
+    expect(result).toContain("- /deploy: Ship it to production");
+    // …and still learns the discovery tools.
+    expect(result).toContain("skill-list");
+    expect(result).toContain("skill-search");
+    expect(result).toContain("skill-get");
+    // The bounded phrasing belongs to the native branch only.
+    expect(result).not.toContain("You have 2 skills installed");
+  });
+
   test("omits the section when no skills are installed", async () => {
     const result = await getBasePrompt({ ...minimalArgs, skillsSummary: [] });
     expect(result).not.toContain("Installed Skills");
+  });
+
+  test("omits the section without MCP even when native discovery is off", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      traits: { hasMcp: false, nativeSkillDiscovery: false, hasLocalEnvironment: false },
+      skillsSummary: twoSkills,
+    });
+    expect(result).not.toContain("Installed Skills");
+    expect(result).not.toContain("/commit");
   });
 });
 
