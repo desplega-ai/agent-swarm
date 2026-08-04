@@ -1,8 +1,12 @@
 import { z } from "zod";
 
 export const argsSchema = z.object({
-  repo: z.string().describe("Repository in 'owner/name' form, e.g. 'owner/name'"),
-  number: z.number().int().positive().describe("Pull request number"),
+  repo: z.string().optional().describe("Repository in 'owner/name' form, e.g. 'owner/name'"),
+  number: z.number().int().positive().optional().describe("Pull request number"),
+  skipIfMissing: z
+    .boolean()
+    .optional()
+    .describe("Return a skipped result when repo/number are absent instead of validating them"),
   token: z
     .string()
     .optional()
@@ -35,9 +39,13 @@ export default async function ghPrSnapshot(args: any, ctx: any) {
   const parsed = argsSchema.safeParse(args);
   if (!parsed.success) return { error: "invalid args: " + parsed.error.message };
   const { repo, number } = parsed.data;
-  if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) {
+  if (parsed.data.skipIfMissing && (repo === undefined || number === undefined)) {
+    return { skipped: true, reason: "no pull request rotation target" };
+  }
+  if (repo === undefined || !/^[^/\s]+\/[^/\s]+$/.test(repo)) {
     return { error: "repo must be in 'owner/name' form" };
   }
+  if (number === undefined) return { error: "number is required" };
 
   const token = await resolveSecret(ctx, "GITHUB_TOKEN", parsed.data.token);
   const headers: any = {

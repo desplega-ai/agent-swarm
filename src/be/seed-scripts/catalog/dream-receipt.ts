@@ -14,7 +14,24 @@ function oneLine(value: any): string {
   const agent = value?.agentId ?? value?.delta?.agentId ?? "swarm";
   const kind = value?.kind ?? value?.delta?.kind ?? "delta";
   const reason = value?.reason ? ` — ${String(value.reason)}` : "";
-  return `${agent}: ${kind}${reason}`;
+  const delta = value?.delta ?? {};
+  const details = [
+    ["file", value?.file ?? delta.file],
+    ["anchor", value?.anchor ?? delta.anchor],
+    ["op", value?.op ?? delta.op],
+    ["action", value?.action ?? delta.action],
+    ["id", value?.id ?? delta.id],
+    ["memoryId", value?.memoryId ?? delta.memoryId],
+    ["key", value?.key ?? delta.key],
+    ["name", value?.name ?? delta.name],
+    ["skillId", value?.skillId ?? delta.skillId],
+    ["scope", value?.scope ?? delta.scope],
+    ["contentHash", value?.contentHash ?? delta.contentHash],
+  ]
+    .filter((detail) => detail[1] !== undefined)
+    .map(([label, nested]) => `${label}=${String(nested)}`);
+  const audit = details.length > 0 ? ` [${details.join(", ")}]` : "";
+  return `${agent}: ${kind}${reason}${audit}`;
 }
 
 /** Render the durable memory/Slack body for a Dreaming apply result. */

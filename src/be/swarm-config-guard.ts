@@ -126,7 +126,12 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     if (value === "sdk" || value === "bearer") return null;
     return "Invalid BEDROCK_AUTH_MODE value (must be one of: sdk, bearer)";
   },
+  DREAMING_SLACK_CHANNEL: (value) => {
+    if (typeof value === "string" && /^[CG][A-Z0-9]{8,}$/.test(value)) return null;
+    return "Invalid DREAMING_SLACK_CHANNEL value (must be a Slack channel ID)";
+  },
   ...booleanValidators([
+    "DREAMING_ENABLED",
     "STEERING_ENABLED",
     "MEMORY_HYBRID_SEARCH",
     "MEMORY_GRAPH_EXPANSION",

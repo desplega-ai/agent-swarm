@@ -61,6 +61,23 @@ describe("swarm-config-guard: Configuration-page value validation", () => {
     expect(validateConfigValue("SLACK_THREAD_STEERING_MODE", "now")).toContain("must be one of");
   });
 
+  test("Dreaming receipt channel requires a Slack channel ID", () => {
+    expect(validateConfigValue("DREAMING_SLACK_CHANNEL", "C0123456789")).toBeNull();
+    expect(validateConfigValue("DREAMING_SLACK_CHANNEL", "G0123456789")).toBeNull();
+    expect(validateConfigValue("DREAMING_SLACK_CHANNEL", "#dreaming")).toContain(
+      "must be a Slack channel ID",
+    );
+    expect(validateConfigValue("DREAMING_SLACK_CHANNEL", "c0123456789")).toContain(
+      "must be a Slack channel ID",
+    );
+    expect(validateConfigValue("DREAMING_SLACK_CHANNEL", "U0123456789")).toContain(
+      "must be a Slack channel ID",
+    );
+    expect(validateConfigValue("DREAMING_SLACK_CHANNEL", "C1")).toContain(
+      "must be a Slack channel ID",
+    );
+  });
+
   test("interval and count keys require positive integers", () => {
     expect(validateConfigValue("HEARTBEAT_INTERVAL_MS", "90000")).toBeNull();
     expect(validateConfigValue("HEARTBEAT_INTERVAL_MS", "0")).toContain("integer >= 1");

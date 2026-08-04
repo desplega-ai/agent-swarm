@@ -76,6 +76,8 @@ import downloadTaskAttachmentConfig from "../../../templates/skills/download-tas
 import downloadTaskAttachmentContent from "../../../templates/skills/download-task-attachment/content.md" with {
   type: "text",
 };
+import dreamingConfig from "../../../templates/skills/dreaming/config.json" with { type: "text" };
+import dreamingContent from "../../../templates/skills/dreaming/content.md" with { type: "text" };
 import engineeringStandardsConfig from "../../../templates/skills/engineering-standards/config.json" with {
   type: "text",
 };
@@ -218,6 +220,22 @@ import type { Seeder, SeedItem } from "../seed/types";
 import bundledFilesManifest from "./bundled-files.generated.json";
 import { buildSkillContent, type SkillTemplateConfig } from "./render";
 
+export type BuiltInSkillSource = {
+  config: SkillTemplateConfig;
+  body: string;
+};
+
+function parseBuiltInSkillConfig(configRaw: string | SkillTemplateConfig): SkillTemplateConfig {
+  if (typeof configRaw !== "string") return configRaw;
+  try {
+    return JSON.parse(configRaw) as SkillTemplateConfig;
+  } catch (error) {
+    throw new Error(`Failed to parse built-in skill config: ${configRaw.slice(0, 80)}`, {
+      cause: error,
+    });
+  }
+}
+
 /** One bundled file shipped alongside a skill's SKILL.md. */
 export type SeedSkillFile = {
   /** Path relative to the skill directory, e.g. `examples/report-page.html`. */
@@ -252,7 +270,7 @@ export type SeedSkill = {
  */
 const BUILT_IN_SKILL_FILES = bundledFilesManifest as Record<string, SeedSkillFile[]>;
 
-export const BUILT_IN_SKILL_SOURCES = [
+export const BUILT_IN_SKILL_SOURCES: readonly BuiltInSkillSource[] = [
   { config: appsConfig, body: appsContent },
   { config: artifactsConfig, body: artifactsContent },
   { config: askUserConfig, body: askUserContent },
@@ -267,6 +285,7 @@ export const BUILT_IN_SKILL_SOURCES = [
   { config: delegateWorkConfig, body: delegateWorkContent },
   { config: designDocsConfig, body: designDocsContent },
   { config: downloadTaskAttachmentConfig, body: downloadTaskAttachmentContent },
+  { config: dreamingConfig, body: dreamingContent },
   { config: engineeringStandardsConfig, body: engineeringStandardsContent },
   { config: implementingConfig, body: implementingContent },
   { config: improveAgentsMdConfig, body: improveAgentsMdContent },
@@ -293,7 +312,7 @@ export const BUILT_IN_SKILL_SOURCES = [
   { config: workflowIterateConfig, body: workflowIterateContent },
   { config: workflowStructuredOutputConfig, body: workflowStructuredOutputContent },
   { config: wtsExpertConfig, body: wtsExpertContent },
-];
+].map(({ config, body }) => ({ config: parseBuiltInSkillConfig(config), body }));
 
 /** Canonical, order-independent rendering of a bundled file set for hashing. */
 function canonicalFiles(files: SeedSkillFile[]): string {
@@ -340,12 +359,7 @@ function skillSeedHash(
   return computeContentHash(`${base}# seed:files\n${canonicalFiles(files)}\n`);
 }
 
-function seedSkillFromSource(
-  configRaw: string | SkillTemplateConfig,
-  body: string,
-): SeedSkill | null {
-  const config =
-    typeof configRaw === "string" ? (JSON.parse(configRaw) as SkillTemplateConfig) : configRaw;
+function seedSkillFromSource(config: SkillTemplateConfig, body: string): SeedSkill | null {
   if (!config.runAllSeedersCandidate) return null;
   return {
     name: config.name,

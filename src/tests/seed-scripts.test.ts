@@ -55,8 +55,8 @@ afterAll(async () => {
 });
 
 describe("seed-scripts catalog", () => {
-  test("manifest holds 27 unique, well-described scripts", () => {
-    expect(SEED_SCRIPTS.length).toBe(27);
+  test("manifest holds 28 unique, well-described scripts", () => {
+    expect(SEED_SCRIPTS.length).toBe(28);
     const names = SEED_SCRIPTS.map((s) => s.name);
     expect(new Set(names).size).toBe(names.length);
     for (const s of SEED_SCRIPTS) {
@@ -78,6 +78,13 @@ describe("seed-scripts catalog", () => {
 
       expect(inlineSource, `${name}.inline.ts drifted from ${name}.ts`).toBe(runtimeSource);
     }
+
+    const scriptsDir = join(import.meta.dir, "../be/seed-scripts");
+    const dreamSchemas = await Bun.file(join(scriptsDir, "dream-schemas.ts")).text();
+    const inlineDreamSchemas = await Bun.file(join(scriptsDir, "dream-schemas.inline.ts")).text();
+    expect(inlineDreamSchemas, "dream-schemas.inline.ts drifted from dream-schemas.ts").toBe(
+      dreamSchemas,
+    );
   });
 
   test("every catalog script passes the import allowlist and the script typecheck", () => {

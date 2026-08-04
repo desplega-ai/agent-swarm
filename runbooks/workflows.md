@@ -145,9 +145,21 @@ There are two script-oriented workflow nodes:
 - `scriptName` (required): catalog script name.
 - `scope`: optional `agent` or `global`. If omitted, workflow execution tries the workflow creator's agent scope first, then global.
 - `pinHash`: optional script content hash. When set, execution uses the matching `script_versions` row instead of the latest live source.
+- `agentId`: reserved for declared nodes in unmodified shipped add-on workflows. It resolves
+  `$lead` or a concrete live Lead id; ordinary workflows cannot use it as a run-as primitive.
+  Identity-bearing nodes execute the exact built-in script version by seeded content hash, even
+  when the live script row was later edited.
 - `args`: optional JSON object passed to the script as its first argument. Values support normal workflow interpolation.
 - `fsMode`: optional, defaults to `none`. `workspace-rw` is reserved for v2 worker-side execution and fails in v1 with a clear workflow-node error.
 - `timeoutMs`: optional wall-clock timeout in milliseconds. Defaults to `30000` (30s), accepts integers from `1000` through `300000` (5m), and applies both to the workflow step timeout and the scripts-runtime `wallClockMs` resource budget.
+
+`onNodeFailure: "continue"` applies only when an asynchronous agent task later reports a
+failed or cancelled lifecycle event. It does not recover an instant node that throws or returns
+failure while the graph is being walked; instant-node failures still stop that branch/run.
+
+Release note: `agentId` on `swarm-script` nodes was previously accepted and silently stripped.
+It now hard-fails unless the node is a declared identity-bearing node in an unmodified shipped
+add-on workflow.
 
 Agent-scoped lookup uses the workflow's `createdByAgentId`. If a workflow has no creator, `trigger.agentId` is accepted as a fallback; otherwise only global scripts can be resolved.
 

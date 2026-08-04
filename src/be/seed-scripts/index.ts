@@ -31,6 +31,7 @@ import dateResolveSrc from "./catalog/date-resolve.ts" with { type: "text" };
 import delegateSrc from "./catalog/delegate.ts" with { type: "text" };
 import dreamAgentSliceSrc from "./catalog/dream-agent-slice.ts" with { type: "text" };
 import dreamApplySrc from "./catalog/dream-apply.ts" with { type: "text" };
+import dreamGatherSrc from "./catalog/dream-gather.ts" with { type: "text" };
 import dreamReceiptSrc from "./catalog/dream-receipt.ts" with { type: "text" };
 import fetchReadableSrc from "./catalog/fetch-readable.ts" with { type: "text" };
 import getChildOutputsSrc from "./catalog/get-child-outputs.ts" with { type: "text" };
@@ -52,7 +53,7 @@ import textDiffSrc from "./catalog/text-diff.ts" with { type: "text" };
 import toolUsageSrc from "./catalog/tool-usage.ts" with { type: "text" };
 import waitForTaskSrc from "./catalog/wait-for-task.ts" with { type: "text" };
 // @ts-expect-error Bun text imports synthesize a default string for this helper.
-import dreamSchemasSrc from "./dream-schemas.ts" with { type: "text" };
+import dreamSchemasSrc from "./dream-schemas.inline.ts" with { type: "text" };
 
 export type SeedScript = {
   name: string;
@@ -199,6 +200,14 @@ export const SEED_SCRIPTS: SeedScript[] = [
     source: bundleCatalogReport(asText(compoundInsightsSrc)),
   },
   {
+    name: "dream-gather",
+    description:
+      "Deterministic Dreaming prelude: daily compound insights, live roster and Lead identity, activity/config gate, blocker sweep, skill catalog, and rotation cursor.",
+    intent:
+      "Gather the complete read-only context needed to start a Dreaming workflow and skip quiet or disabled days.",
+    source: bundleDreamSchemas(asText(dreamGatherSrc)),
+  },
+  {
     name: "dream-agent-slice",
     description:
       "Compact per-agent Dreaming reflection slice: task outcomes and failures, tools, memory usefulness, cost/context, editable profile anchors, and installed-versus-invoked skills.",
@@ -294,6 +303,12 @@ export const SEED_SCRIPTS: SeedScript[] = [
     source: asText(swarmOverviewSrc),
   },
 ];
+
+/** SHA-256 identity of one exact script source shipped in the built-in catalog. */
+export function getSeedScriptContentHash(name: string): string | null {
+  const script = SEED_SCRIPTS.find((candidate) => candidate.name === name);
+  return script ? computeContentHash(script.source) : null;
+}
 
 /** A catalog entry resolved into a generic {@link SeedItem}. */
 type ScriptSeedItem = SeedItem & { script: SeedScript };

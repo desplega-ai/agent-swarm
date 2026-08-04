@@ -52,8 +52,81 @@ async function applyProfileDelta(delta: ProfileOpDelta | HygieneDelta, ctx: any)
   return { applied: true as const };
 }
 
-function appliedEntry(delta: ReflectionDelta): Record<string, unknown> {
-  return { kind: delta.kind, agentId: "agentId" in delta ? delta.agentId : undefined, reason: delta.reason };
+async function contentHash(content: unknown, normalizeProfileText = false): Promise<string> {
+  let serialized: string;
+  if (typeof content === "string") {
+    serialized = normalizeProfileText ? content.trim() : content;
+  } else {
+    try {
+      serialized = JSON.stringify(content) ?? String(content ?? "");
+    } catch {
+      serialized = String(content ?? "");
+    }
+  }
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(serialized),
+  );
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function auditEntry(delta: unknown, heldReason?: string): Promise<Record<string, unknown>> {
+  const value =
+    typeof delta === "object" && delta !== null && !Array.isArray(delta)
+      ? (delta as Record<string, unknown>)
+      : {};
+  const kind = typeof value.kind === "string" ? value.kind : "invalid";
+  const reason = heldReason ?? (typeof value.reason === "string" ? value.reason : "approved");
+
+  if (kind === "profile-op" || kind === "hygiene") {
+    return {
+      kind,
+      agentId: value.agentId,
+      file: kind === "hygiene" ? "HEARTBEAT" : value.file,
+      anchor: value.anchor,
+      op: value.op,
+      // applyAnchoredProfileOp trims inserted text before writing it.
+      contentHash: await contentHash(value.content, true),
+      reason,
+    };
+  }
+
+  if (kind === "memory") {
+    return withoutUndefined({
+      kind,
+      agentId: value.agentId,
+      action: value.action,
+      id: value.id,
+      memoryId: value.memoryId,
+      key: value.key,
+      name: value.name,
+      scope: value.scope,
+      tags: value.tags,
+      ...(typeof value.content === "string"
+        ? { contentHash: await contentHash(value.content) }
+        : {}),
+      reason,
+    });
+  }
+
+  if (kind === "skill") {
+    return withoutUndefined({
+      kind,
+      action: value.action,
+      skillId: value.skillId,
+      scope: value.scope,
+      ...(typeof value.content === "string"
+        ? { contentHash: await contentHash(value.content) }
+        : {}),
+      reason,
+    });
+  }
+
+  return withoutUndefined({ kind, agentId: value.agentId, reason });
+}
+
+function withoutUndefined(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([, nested]) => nested !== undefined));
 }
 
 function errorMessage(error: unknown): string {
@@ -77,14 +150,14 @@ export default async function dreamApply(args: any, ctx: any) {
   }
   const result: {
     applied: Record<string, unknown>[];
-    held: Array<{ delta: unknown; reason: string }>;
+    held: Record<string, unknown>[];
     deferred: Array<{ delta: ReflectionDelta; reason: string }>;
   } = { applied: [], held: [], deferred: [] };
 
   for (const candidate of deltas) {
     const validationError = validateReflectionDelta(candidate);
     if (validationError) {
-      result.held.push({ delta: candidate, reason: validationError });
+      result.held.push(await auditEntry(candidate, validationError));
       continue;
     }
     const delta = candidate as ReflectionDelta;
@@ -92,10 +165,10 @@ export default async function dreamApply(args: any, ctx: any) {
       if (delta.kind === "profile-op" || delta.kind === "hygiene") {
         const profileResult = await applyProfileDelta(delta, ctx);
         if (!profileResult.applied) {
-          result.held.push({ delta, reason: profileResult.reason });
+          result.held.push(await auditEntry(delta, profileResult.reason));
           continue;
         }
-        const entry = appliedEntry(delta);
+        const entry = await auditEntry(delta);
         if (delta.kind === "hygiene" && delta.rotationCursorKey) {
           try {
             const increment = await ctx.swarm.kv_incr({
@@ -124,7 +197,7 @@ export default async function dreamApply(args: any, ctx: any) {
           });
           assertSucceeded(written, "memory write");
         }
-        result.applied.push(appliedEntry(delta));
+        result.applied.push(await auditEntry(delta));
         continue;
       }
 
@@ -139,7 +212,7 @@ export default async function dreamApply(args: any, ctx: any) {
         });
         assertSucceeded(updated, "skill update");
       }
-      result.applied.push(appliedEntry(delta));
+      result.applied.push(await auditEntry(delta));
     } catch (error) {
       result.deferred.push({
         delta,

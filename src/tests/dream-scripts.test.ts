@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import dreamAgentSlice from "../be/seed-scripts/catalog/dream-agent-slice";
 import dreamApply from "../be/seed-scripts/catalog/dream-apply";
+import dreamGather from "../be/seed-scripts/catalog/dream-gather";
 import dreamReceipt, { renderDreamReceipt } from "../be/seed-scripts/catalog/dream-receipt";
+import ghPrSnapshot from "../be/seed-scripts/catalog/gh-pr-snapshot";
 import {
   ApprovedDeltaSetSchema,
   applyAnchoredProfileOp,
@@ -10,6 +12,185 @@ import {
   ReflectionDeltaSchema,
   validateReflectionDelta,
 } from "../be/seed-scripts/dream-schemas";
+
+const SLIM_GATHER_RESULT = {
+  enabled: false,
+  hasActivity: false,
+  agents: [],
+  leadAgentId: null,
+  insights: null,
+  blockers: [],
+};
+
+function gatherHarness({
+  configValue,
+  activity = { completedTasks: 1, failedTasks: 0, memoryWrites: 0 },
+  roster = [],
+}: {
+  configValue?: string;
+  activity?: { completedTasks: number; failedTasks: number; memoryWrites: number };
+  roster?: Array<Record<string, unknown>>;
+} = {}) {
+  const calls: string[] = [];
+  return {
+    calls,
+    ctx: {
+      swarm: {
+        async config_get() {
+          calls.push("config_get");
+          return {
+            success: true,
+            data: {
+              configs:
+                configValue === undefined ? [] : [{ key: "DREAMING_ENABLED", value: configValue }],
+            },
+          };
+        },
+        async db_query({ sql }: { sql: string }) {
+          if (sql.includes("AS completedTasks")) {
+            calls.push("activity_query");
+            return { success: true, data: { rows: [activity] } };
+          }
+          if (sql.includes("FROM agents")) {
+            calls.push("roster_query");
+            return { success: true, data: { rows: roster } };
+          }
+          calls.push("expensive_query");
+          return { success: true, data: { rows: [] } };
+        },
+        async script_run() {
+          calls.push("compound_insights");
+          return { success: true, data: { exitCode: 0, result: { summary: "ok" } } };
+        },
+        async skill_list() {
+          calls.push("skill_list");
+          return { success: true, data: { skills: [] } };
+        },
+        async kv_getOrNull() {
+          calls.push("kv_getOrNull");
+          return null;
+        },
+      },
+    },
+  };
+}
+
+describe("dream-gather gates", () => {
+  test("disabled config returns the exact slim shape before any other call", async () => {
+    const harness = gatherHarness({ configValue: "false" });
+
+    expect(await dreamGather({}, harness.ctx)).toEqual({
+      ...SLIM_GATHER_RESULT,
+      reason: "disabled",
+    });
+    expect(harness.calls).toEqual(["config_get"]);
+  });
+
+  test("invalid config warns and continues as enabled", async () => {
+    const harness = gatherHarness({
+      configValue: "sometimes",
+      roster: [{ id: "lead-1", name: "Lead", isLead: 1 }],
+    });
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (message: unknown) => warnings.push(String(message));
+    try {
+      const result = await dreamGather({}, harness.ctx);
+      expect(result).toMatchObject({ enabled: true, hasActivity: true, leadAgentId: "lead-1" });
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(warnings).toEqual([
+      'DREAMING_ENABLED has invalid boolean value "sometimes"; treating it as enabled',
+    ]);
+    expect(harness.calls).toContain("compound_insights");
+  });
+
+  test("no activity returns the exact slim shape before roster or expensive reads", async () => {
+    const harness = gatherHarness({
+      activity: { completedTasks: 0, failedTasks: 0, memoryWrites: 0 },
+    });
+
+    expect(await dreamGather({}, harness.ctx)).toEqual({
+      ...SLIM_GATHER_RESULT,
+      reason: "no-activity",
+    });
+    expect(harness.calls).toEqual(["config_get", "activity_query"]);
+  });
+
+  test("no live Lead returns the exact slim shape before expensive gathering", async () => {
+    const harness = gatherHarness({
+      roster: [{ id: "worker-1", name: "Worker", isLead: 0 }],
+    });
+
+    expect(await dreamGather({}, harness.ctx)).toEqual({
+      ...SLIM_GATHER_RESULT,
+      reason: "no-lead",
+    });
+    expect(harness.calls).toEqual(["config_get", "activity_query", "roster_query"]);
+  });
+
+  test("multiple live Leads warn and use the first deterministic roster row", async () => {
+    const harness = gatherHarness({
+      roster: [
+        { id: "lead-a", name: "Alpha", isLead: 1 },
+        { id: "lead-b", name: "Beta", isLead: 1 },
+      ],
+    });
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (message: unknown) => warnings.push(String(message));
+    try {
+      expect(await dreamGather({}, harness.ctx)).toMatchObject({ leadAgentId: "lead-a" });
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(warnings).toEqual([
+      "Dreaming found 2 live Lead agents; using lead-a by roster ordering",
+    ]);
+  });
+
+  test("preflight returns the discovered Lead before nested or other expensive calls", async () => {
+    const harness = gatherHarness({
+      roster: [{ id: "lead-1", name: "Lead", isLead: 1 }],
+    });
+
+    expect(await dreamGather({ preflightOnly: true }, harness.ctx)).toEqual({
+      enabled: true,
+      hasActivity: true,
+      agents: [{ id: "lead-1", name: "Lead" }],
+      leadAgentId: "lead-1",
+      insights: null,
+      blockers: [],
+      reason: "ready",
+    });
+    expect(harness.calls).toEqual(["config_get", "activity_query", "roster_query"]);
+  });
+
+  test("profile evidence is bounded and keeps exact fence-safe H2 anchors", async () => {
+    const soul = ["```md", "## Fenced", "```", "## Visible", "x".repeat(700)].join("\n");
+    const harness = gatherHarness({
+      roster: [{ id: "lead-1", name: "Lead", isLead: 1, soulMd: soul }],
+    });
+
+    const result = await dreamGather({}, harness.ctx);
+    expect(result.insights.profileEvidence[0].files.SOUL).toEqual({
+      excerpt: `${soul.slice(0, 600)}…`,
+      h2Anchors: ["## Visible"],
+    });
+    expect(result.blockers.rotation.target).toBeNull();
+    expect(result.blockers.rotation.snapshotArgs).toEqual({ skipIfMissing: true });
+  });
+
+  test("PR snapshot skips truly absent optional coordinates", async () => {
+    await expect(ghPrSnapshot({ skipIfMissing: true }, {})).resolves.toEqual({
+      skipped: true,
+      reason: "no pull request rotation target",
+    });
+  });
+});
 
 describe("dream scripts", () => {
   const profile = "## Working style\nKeep changes small.\n\n## Notes\nUseful detail.\n".padEnd(
@@ -54,6 +235,10 @@ describe("dream scripts", () => {
         content: "Changed.",
       }),
     ).toMatchObject({ applied: true });
+  });
+
+  test("an unterminated fence does not swallow later anchors", () => {
+    expect(getH2Anchors("```md\nexample\n## Later anchor\nBody.\n")).toEqual(["## Later anchor"]);
   });
 
   test("a trailing-whitespace heading matches a trimmed anchor", () => {
@@ -173,17 +358,42 @@ describe("dream scripts", () => {
     ).toContain("unexpected field(s) for memory: anchor");
   });
 
-  test("receipt includes held lines", () => {
-    expect(
-      renderDreamReceipt(
-        {
-          applied: [],
-          held: [{ delta: { agentId: "agent-1", kind: "profile-op" }, reason: "anchor not found" }],
-          deferred: [],
-        },
-        "2026-08-03",
-      ),
-    ).toContain("HELD (1)\nagent-1: profile-op — anchor not found");
+  test("receipt includes hashes, locations, and memory identifiers", () => {
+    const receipt = renderDreamReceipt(
+      {
+        applied: [
+          {
+            agentId: "agent-1",
+            kind: "memory",
+            action: "write",
+            key: "daily-learning",
+            scope: "agent",
+            contentHash: "abc123",
+            reason: "approved",
+          },
+        ],
+        held: [
+          {
+            agentId: "agent-1",
+            kind: "profile-op",
+            file: "CLAUDE",
+            anchor: "## Notes",
+            op: "append-under",
+            contentHash: "def456",
+            reason: "anchor not found",
+          },
+        ],
+        deferred: [],
+      },
+      "2026-08-03",
+    );
+
+    expect(receipt).toContain(
+      "APPLIED (1)\nagent-1: memory — approved [action=write, key=daily-learning, scope=agent, contentHash=abc123]",
+    );
+    expect(receipt).toContain(
+      "HELD (1)\nagent-1: profile-op — anchor not found [file=CLAUDE, anchor=## Notes, op=append-under, contentHash=def456]",
+    );
   });
 
   test("receipt keeps the memory record when Slack posting fails", async () => {
@@ -260,6 +470,37 @@ describe("dream scripts", () => {
 });
 
 describe("dream-apply batches", () => {
+  test("distinct malformed profile contents have distinct held audit hashes", async () => {
+    const result = await dreamApply(
+      {
+        deltas: [
+          {
+            kind: "profile-op",
+            agentId: "agent-1",
+            file: "CLAUDE",
+            op: "append-under",
+            anchor: "## Notes",
+            content: { proposed: "first" },
+          },
+          {
+            kind: "profile-op",
+            agentId: "agent-1",
+            file: "CLAUDE",
+            op: "append-under",
+            anchor: "## Notes",
+            content: { proposed: "second" },
+          },
+        ],
+      },
+      { swarm: {} },
+    );
+
+    expect(result.held).toHaveLength(2);
+    expect(result.held[0]?.contentHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(result.held[1]?.contentHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(result.held[0]?.contentHash).not.toBe(result.held[1]?.contentHash);
+  });
+
   test("a validator-rejected delta is held while a valid sibling applies", async () => {
     const writes: string[] = [];
     const result = await dreamApply(

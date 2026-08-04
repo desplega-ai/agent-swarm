@@ -535,6 +535,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "127_backfill_user_attribution.sql");
       // 128 alters session_costs, which this partial fixture does not create.
       markMigrationApplied(database, "128_session_costs_accuracy.sql");
+      // Alters workflow_runs, which this partial fixture does not create.
+      markMigrationApplied(database, "126_workflow_run_definition_hash.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

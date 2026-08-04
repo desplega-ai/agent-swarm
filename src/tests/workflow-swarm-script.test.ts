@@ -6,23 +6,31 @@ import {
   createAgent,
   createWorkflow,
   getDb,
+  getWorkflowByName,
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
   initDb,
+  updateWorkflow,
 } from "../be/db";
 import { upsertScriptConnection } from "../be/script-connections";
 import { upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
+import { canonicalJson } from "../be/seed/addons";
+import { runSeeder } from "../be/seed/runner";
+import { workflowsSeeder } from "../be/seed/workflows-seeder";
+import { getSeedScriptContentHash, scriptsSeeder } from "../be/seed-scripts";
 import type { Workflow, WorkflowDefinition } from "../types";
-import { startWorkflowExecution } from "../workflows/engine";
+import { computeWorkflowDefinitionHash, startWorkflowExecution } from "../workflows/engine";
 import { InProcessEventBus } from "../workflows/event-bus";
 import {
   BaseExecutor,
   type ExecutorDependencies,
   type ExecutorResult,
 } from "../workflows/executors/base";
+import { CodeMatchExecutor } from "../workflows/executors/code-match";
 import { ExecutorRegistry } from "../workflows/executors/registry";
 import {
+  isTrustedAddonIdentityNode,
   SWARM_SCRIPT_DEFAULT_TIMEOUT_MS,
   SWARM_SCRIPT_MAX_TIMEOUT_MS,
   SWARM_SCRIPT_MIN_TIMEOUT_MS,
@@ -206,6 +214,196 @@ describe("SwarmScriptExecutor", () => {
     expect(result.status).toBe("success");
     expect(result.output?.result).toEqual({ value: 7 });
     expect(result.output?.scriptName).toBe("add-one");
+  });
+
+  test("an ordinary workflow cannot override the script execution identity", async () => {
+    const otherAgent = createAgent({
+      name: `workflow-script-other-${crypto.randomUUID()}`,
+      status: "idle",
+    });
+    await upsertScriptByName({
+      name: "report-execution-agent",
+      scope: "global",
+      source:
+        "export default async (_args, ctx) => ({ agentId: ctx.stdlib.Redacted.value(ctx.swarm.config.agentId) });",
+      description: "report execution identity",
+      intent: "verify workflow swarm-script identity override",
+      signatureJson,
+      agentId,
+      typeChecked: true,
+    });
+
+    const executor = new SwarmScriptExecutor(deps);
+    const wf = makeWorkflow({ nodes: [] });
+    const result = await executor.run({
+      config: {
+        scriptName: "report-execution-agent",
+        scope: "global",
+        agentId: otherAgent.id,
+      },
+      context: {},
+      meta: {
+        runId: crypto.randomUUID(),
+        stepId: crypto.randomUUID(),
+        nodeId: "script",
+        workflowId: wf.id,
+        dryRun: false,
+      },
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("unmodified shipped add-on workflow");
+  });
+
+  test("the real seeded gather reaches its gate without requiring a live Lead", async () => {
+    const seededResult = await runSeeder(workflowsSeeder, { quiet: true });
+    expect(seededResult.failed).toEqual([]);
+    const workflow = getWorkflowByName("dream");
+    if (!workflow) throw new Error("dream workflow was not seeded");
+    const gather = workflow.definition.nodes.find((node) => node.id === "gather");
+    expect(gather?.config).not.toHaveProperty("agentId");
+
+    await upsertScriptByName({
+      name: "dream-gather",
+      scope: "global",
+      source: `export default async () => ({
+        enabled: false,
+        hasActivity: false,
+        agents: [],
+        leadAgentId: null,
+        insights: null,
+        blockers: [],
+        reason: "no-lead",
+      });`,
+      description: "no-Lead gather fixture",
+      intent: "exercise the production swarm-script identity path",
+      signatureJson,
+      agentId: null,
+      typeChecked: true,
+      embeddingMode: "skip",
+    });
+
+    getDb().prepare("UPDATE agents SET status = 'offline' WHERE id = ?").run(agentId);
+    try {
+      const productionRegistry = new ExecutorRegistry();
+      productionRegistry.register(new SwarmScriptExecutor(deps));
+      productionRegistry.register(new CodeMatchExecutor(deps));
+      const expectedHash = computeWorkflowDefinitionHash(workflow.definition);
+      const runId = await startWorkflowExecution(workflow, {}, productionRegistry);
+
+      expect(getWorkflowRun(runId)).toMatchObject({
+        status: "completed",
+        definitionHash: expectedHash,
+      });
+      expect(getWorkflowRunStepsByRunId(runId).map((step) => step.nodeId)).toEqual([
+        "gather",
+        "proceed",
+        "done",
+      ]);
+    } finally {
+      getDb().prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(agentId);
+    }
+  });
+
+  test("the engine hash trusts a canonically equivalent real seeded add-on definition", async () => {
+    const scriptSeed = await runSeeder(scriptsSeeder, {
+      quiet: true,
+      scriptEmbeddingMode: "skip",
+    });
+    const workflowSeed = await runSeeder(workflowsSeeder, { quiet: true });
+    expect(scriptSeed.failed).toEqual([]);
+    expect(workflowSeed.failed).toEqual([]);
+    const seeded = getWorkflowByName("dream");
+    if (!seeded) throw new Error("dream workflow was not seeded");
+
+    const canonicallyReordered = Object.fromEntries(
+      Object.entries(seeded.definition).reverse(),
+    ) as WorkflowDefinition;
+    expect(JSON.stringify(canonicallyReordered)).not.toBe(JSON.stringify(seeded.definition));
+    expect(canonicalJson(canonicallyReordered)).toBe(canonicalJson(seeded.definition));
+    updateWorkflow(seeded.id, { definition: canonicallyReordered });
+    const wf = getWorkflowByName("dream");
+    if (!wf) throw new Error("dream workflow disappeared after key-order rewrite");
+    const engineHash = computeWorkflowDefinitionHash(wf.definition);
+
+    expect(
+      isTrustedAddonIdentityNode(wf, "apply", "dream-apply", engineHash, engineHash, deps.db),
+    ).toBe(true);
+
+    const replacement = await upsertScriptByName({
+      name: "dream-apply",
+      scope: "global",
+      source:
+        "export default async (_args, ctx) => ({ agentId: ctx.stdlib.Redacted.value(ctx.swarm.config.agentId) });",
+      description: "report trusted Dreaming execution identity",
+      intent: "verify the shipped Dreaming Lead identity override",
+      signatureJson,
+      agentId,
+      typeChecked: true,
+      embeddingMode: "skip",
+    });
+    const executor = new SwarmScriptExecutor(deps);
+    const trustedConfig = {
+      scriptName: "dream-apply",
+      scope: "global" as const,
+      agentId,
+      args: { deltas: [] },
+    };
+
+    const forgedSnapshot = await executor.run({
+      config: trustedConfig,
+      context: {},
+      meta: {
+        runId: crypto.randomUUID(),
+        stepId: crypto.randomUUID(),
+        nodeId: "apply",
+        workflowId: wf.id,
+        workflowDefinitionHash: deps.db.computeContentHash("forged run snapshot"),
+        workflowRunDefinitionHash: engineHash,
+        dryRun: false,
+      },
+    });
+
+    const modifiedResumeDefinition = structuredClone(wf.definition);
+    const modifiedApply = modifiedResumeDefinition.nodes.find((node) => node.id === "apply");
+    if (!modifiedApply) throw new Error("seeded apply node missing");
+    modifiedApply.label = "Modified apply node captured during resume";
+    const modifiedResume = await executor.run({
+      config: trustedConfig,
+      context: {},
+      meta: {
+        runId: crypto.randomUUID(),
+        stepId: crypto.randomUUID(),
+        nodeId: "apply",
+        workflowId: wf.id,
+        workflowDefinitionHash: computeWorkflowDefinitionHash(modifiedResumeDefinition),
+        workflowRunDefinitionHash: engineHash,
+        dryRun: false,
+      },
+    });
+
+    const result = await executor.run({
+      config: trustedConfig,
+      context: {},
+      meta: {
+        runId: crypto.randomUUID(),
+        stepId: crypto.randomUUID(),
+        nodeId: "apply",
+        workflowId: wf.id,
+        workflowDefinitionHash: engineHash,
+        workflowRunDefinitionHash: engineHash,
+        dryRun: false,
+      },
+    });
+
+    expect(forgedSnapshot.status).toBe("failed");
+    expect(forgedSnapshot.error).toContain("unmodified shipped add-on workflow");
+    expect(modifiedResume.status).toBe("failed");
+    expect(modifiedResume.error).toContain("unmodified shipped add-on workflow");
+    expect(result.status).toBe("success");
+    expect(result.output?.result).toEqual({ applied: [], held: [], deferred: [] });
+    expect(result.output?.contentHash).toBe(getSeedScriptContentHash("dream-apply"));
+    expect(result.output?.contentHash).not.toBe(replacement.script.contentHash);
   });
 
   test("swarm-script executor includes API connection descriptors in ctx.api", async () => {

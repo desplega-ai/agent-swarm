@@ -710,21 +710,29 @@ at the gate with a single gather execution; zero-activity window short-circuits 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] New suite passes: `bun run test:root -- src/tests/workflow-dream.test.ts`
-- [ ] Skill-source checks pass: `bun run check:skill-sources && bun run check:seed-skill-files`
-- [ ] UI builds (catalog touched): `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
-- [ ] Full suite: `bun run test:root`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] New suite passes: `bun run test:root -- src/tests/workflow-dream.test.ts` (11 tests
+      post-review-fixes; + workflow-swarm-script 20, dream-scripts 27)
+- [x] Skill-source checks pass: `bun run check:skill-sources && bun run check:seed-skill-files`
+- [x] UI builds (catalog touched): `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
+- [x] Full suite: `bun run test:root` (6863 pass / 0 fail; incl. new migration 126
+      `workflow_runs.definitionHash` — fresh-boot apply verified)
 
 #### Automated QA:
-- [ ] Fresh-install walkthrough: `rm -f agent-swarm-db.sqlite*`, `bun run start:http`; confirm via
-      `curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/workflows` +
-      `/api/schedules` that `dream` and its daily schedule are seeded enabled; confirm the
-      `dreaming` skill appears in the skills API; flip `DREAMING_ENABLED` off via
-      `PUT /api/config`, trigger the workflow, and assert the run ends at the gate node.
-- [ ] Settings → Configuration screenshot session (qa-use; merge-gate for `apps/ui`): both keys
-      visible with descriptions and docs links, toggling `DREAMING_ENABLED` persists.
+- [x] Fresh-install walkthrough: `dream` + `dream-daily` (10 2 * * * UTC) seeded enabled once,
+      restart-idempotent; `dreaming` skill + all dream scripts listed; kill-switch verified in
+      isolation (DREAMING_ENABLED=false → gate exit after ONE cheap gather); activity gate and
+      no-lead fresh-install path verified (structured `{enabled:false, reason}` returns — no more
+      nightly failed runs). Trigger surface: `POST /api/workflows/{id}/trigger`.
+- [x] Settings → Configuration screenshot session (agent-browser; `/tmp/dreaming-phase4-qa/`):
+      Add-ons group (placed last), both keys with descriptions + docs links, toggle persists
+      through reload; workflow detail page renders the full DAG.
+      **Review-round outcome (4 reviewers + QA)**: two-stage gather (cheap unprivileged preflight
+      → lead-identity `gather-rich`), trust hash canonicalized both sides + hoisted per-run
+      (persisted as `workflow_runs.definitionHash`, migration 126), receipt audit records
+      file/anchor/op/content-hash, bounded profile evidence, fan-out node dropped, fence-masking
+      newline fix. Security verdict: no gate bypass — all probed paths fail closed.
 
 #### Manual Verification:
 - [ ] Taras reviews the `dreaming` skill playbook text and the critique prompt (judgment call on

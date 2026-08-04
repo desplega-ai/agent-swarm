@@ -1,4 +1,5 @@
 import type { WorkflowDefinition } from "../../types";
+import { DREAM_WORKFLOW_DEFINITION } from "../seed-workflows/dream";
 
 function sortJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortJson);
@@ -63,5 +64,40 @@ export interface Addon {
 }
 
 export const ADDONS: readonly Addon[] = [
-  /* dreaming — content lands in Phase 4 */
+  {
+    name: "dreaming",
+    description:
+      "Daily evidence-backed reflection across the live swarm, with Lead critique and mechanical application.",
+    docsPath: "docs-site/content/docs/(documentation)/addons/dreaming.mdx",
+    workflows: [
+      {
+        name: "dream",
+        description:
+          "Fan out daily reflection to live agents, converge on Lead critique, then apply and record approved deltas.",
+        enabled: true,
+        definition: DREAM_WORKFLOW_DEFINITION,
+      },
+    ],
+    schedules: [
+      {
+        name: "dream-daily",
+        description: "Run the Dreaming add-on daily (fka compounding).",
+        cronExpression: "10 2 * * *",
+        timezone: "UTC",
+        enabled: true,
+        targetType: "workflow",
+        workflowName: "dream",
+      },
+    ],
+    skillNames: ["dreaming"],
+    scriptNames: [
+      "compound-insights",
+      "dream-gather",
+      "dream-agent-slice",
+      "dream-apply",
+      "dream-receipt",
+      "gh-pr-snapshot",
+    ],
+    configKeys: ["DREAMING_ENABLED", "DREAMING_SLACK_CHANNEL"],
+  },
 ];
