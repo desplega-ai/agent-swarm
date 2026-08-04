@@ -1,4 +1,4 @@
-import type { AppDefinition, AppValidationIssue } from "./definition";
+import { type AppDefinition, type AppValidationIssue, SYSTEM_COLUMN_KINDS } from "./definition";
 
 interface JsonSchema {
   type?: string | string[];
@@ -334,11 +334,12 @@ function actionParams(
       !isStateBinding(params.values)
     ) {
       for (const column of Object.keys(params.values)) {
-        if (!Object.hasOwn(definition.models[model]!.columns, column)) {
+        const columnDefinition = definition.models[model]!.columns[column];
+        if (!columnDefinition || columnDefinition.hidden === true) {
           result.issues.push(
             issue(
               appendPath(appendPath(paramsPath, "values"), column),
-              `unknown column "${column}"`,
+              `unknown or hidden column "${column}"`,
             ),
           );
         }
@@ -441,7 +442,20 @@ function validateStateRef(
         : namespace === "actions"
           ? "action"
           : "UI control";
-  return exists ? null : issue(ref.path, `state reference targets unknown ${targetKind} "${name}"`);
+  if (!exists) return issue(ref.path, `state reference targets unknown ${targetKind} "${name}"`);
+
+  if (namespace === "queries") {
+    const dataMatch = /^\/queries\/[^/]+\/data(?:\/(.*))?$/.exec(ref.value);
+    const segments = dataMatch?.[1]?.split("/").filter(Boolean) ?? [];
+    if (/^\d+$/.test(segments[0] ?? "")) segments.shift();
+    const columnName = segments[0];
+    const query = definition.queries?.[name!];
+    if (columnName && query && Object.hasOwn(definition.models, query.model)) {
+      return fieldBindingIssue(query.model, definition.models[query.model]!, columnName, ref.path);
+    }
+  }
+
+  return null;
 }
 
 const COMPARISON_KEYS = ["eq", "neq", "gt", "gte", "lt", "lte"] as const;
@@ -512,6 +526,83 @@ function collectStateRefs(value: unknown, path: string, refs: StateRef[]): void 
   for (const [key, child] of Object.entries(value)) {
     if (key !== "$state") collectStateRefs(child, appendPath(path, key), refs);
   }
+}
+
+function queryModelFromDataBinding(
+  definition: AppDefinition,
+  value: unknown,
+): { modelName: string; model: AppDefinition["models"][string] } | null {
+  if (!isStateBinding(value)) return null;
+  const match = /^\/queries\/([^/]+)\/data(?:\/\d+)?$/.exec(value.$state);
+  if (!match) return null;
+  const queryName = match[1]!;
+  const query = Object.hasOwn(definition.queries ?? {}, queryName)
+    ? definition.queries?.[queryName]
+    : undefined;
+  if (!query || !Object.hasOwn(definition.models, query.model)) return null;
+  return { modelName: query.model, model: definition.models[query.model]! };
+}
+
+function fieldBindingIssue(
+  modelName: string,
+  model: AppDefinition["models"][string],
+  columnName: string,
+  path: string,
+  allowSystemField = true,
+): AppValidationIssue | null {
+  if (columnName === "") return null;
+  const column = Object.hasOwn(model.columns, columnName) ? model.columns[columnName] : undefined;
+  if (column && column.hidden !== true) return null;
+  // System fields are queryable and renderable even though they are not declared columns.
+  if (allowSystemField && Object.hasOwn(SYSTEM_COLUMN_KINDS, columnName)) return null;
+  return issue(path, `unknown or hidden column "${columnName}" on model "${modelName}"`);
+}
+
+function collectRowFieldIssues(
+  value: unknown,
+  path: string,
+  modelName: string,
+  model: AppDefinition["models"][string],
+  issues: AppValidationIssue[],
+): void {
+  if (isPlainObject(value) && typeof value.$row === "string") {
+    const found = fieldBindingIssue(modelName, model, value.$row, appendPath(path, "$row"));
+    if (found) issues.push(found);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const [index, child] of value.entries()) {
+      collectRowFieldIssues(child, appendPath(path, index), modelName, model, issues);
+    }
+    return;
+  }
+  if (!isPlainObject(value)) return;
+  for (const [key, child] of Object.entries(value)) {
+    collectRowFieldIssues(child, appendPath(path, key), modelName, model, issues);
+  }
+}
+
+function literalMutateModel(
+  definition: AppDefinition,
+  chain: unknown,
+): { modelName: string; model: AppDefinition["models"][string] } | null {
+  if (!Array.isArray(chain)) return null;
+  const names = new Set<string>();
+  for (const step of chain) {
+    if (
+      isPlainObject(step) &&
+      step.action === "app.mutate" &&
+      isPlainObject(step.params) &&
+      typeof step.params.model === "string"
+    ) {
+      names.add(step.params.model);
+    }
+  }
+  if (names.size !== 1) return null;
+  const modelName = [...names][0]!;
+  return Object.hasOwn(definition.models, modelName)
+    ? { modelName, model: definition.models[modelName]! }
+    : null;
 }
 
 function visitActionChain(
@@ -709,6 +800,76 @@ export function validatePage(
       }
     } else if (!Object.hasOwn(rawElement, "props")) {
       issues.push(issue(appendPath(elementPath, "props"), "is required"));
+    }
+
+    if (isPlainObject(rawElement.props)) {
+      if (type === "Table") {
+        const queryModel = queryModelFromDataBinding(definition, rawElement.props.data);
+        if (queryModel) {
+          if (Array.isArray(rawElement.props.columns)) {
+            for (const [index, field] of rawElement.props.columns.entries()) {
+              if (!isPlainObject(field) || typeof field.key !== "string") continue;
+              const found = fieldBindingIssue(
+                queryModel.modelName,
+                queryModel.model,
+                field.key,
+                `${elementPath}.props.columns.${index}.key`,
+              );
+              if (found) issues.push(found);
+            }
+          }
+          if (
+            isPlainObject(rawElement.props.filters) &&
+            !isStateBinding(rawElement.props.filters)
+          ) {
+            for (const columnName of Object.keys(rawElement.props.filters)) {
+              const found = fieldBindingIssue(
+                queryModel.modelName,
+                queryModel.model,
+                columnName,
+                `${elementPath}.props.filters.${columnName}`,
+              );
+              if (found) issues.push(found);
+            }
+          }
+          collectRowFieldIssues(
+            rawElement.props.rowActions,
+            `${elementPath}.props.rowActions`,
+            queryModel.modelName,
+            queryModel.model,
+            issues,
+          );
+        }
+      } else if (type === "DetailList") {
+        const queryModel = queryModelFromDataBinding(definition, rawElement.props.data);
+        if (queryModel && Array.isArray(rawElement.props.fields)) {
+          for (const [index, field] of rawElement.props.fields.entries()) {
+            if (!isPlainObject(field) || typeof field.key !== "string") continue;
+            const found = fieldBindingIssue(
+              queryModel.modelName,
+              queryModel.model,
+              field.key,
+              `${elementPath}.props.fields.${index}.key`,
+            );
+            if (found) issues.push(found);
+          }
+        }
+      } else if (type === "Form") {
+        const mutateModel = literalMutateModel(definition, rawElement.props.onSubmit);
+        if (mutateModel && Array.isArray(rawElement.props.fields)) {
+          for (const [index, field] of rawElement.props.fields.entries()) {
+            if (!isPlainObject(field) || typeof field.name !== "string") continue;
+            const found = fieldBindingIssue(
+              mutateModel.modelName,
+              mutateModel.model,
+              field.name,
+              `${elementPath}.props.fields.${index}.name`,
+              false,
+            );
+            if (found) issues.push(found);
+          }
+        }
+      }
     }
 
     if (Object.hasOwn(rawElement, "children")) {

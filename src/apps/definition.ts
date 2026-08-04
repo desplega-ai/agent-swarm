@@ -22,6 +22,7 @@ const ColumnDefSchema = z
     enum: z.array(z.string()).optional(),
     index: z.boolean().optional(),
     default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+    hidden: z.boolean().optional(),
   })
   .superRefine((column, ctx) => {
     if (column.kind === "enum") {
@@ -203,11 +204,14 @@ export const AppDefinitionSchema = z
           : Object.hasOwn(SYSTEM_COLUMN_KINDS, column)
             ? { kind: SYSTEM_COLUMN_KINDS[column]! }
             : undefined;
-        if (!columnDefinition) {
+        if (
+          !columnDefinition ||
+          ("hidden" in columnDefinition && columnDefinition.hidden === true)
+        ) {
           ctx.addIssue({
             code: "custom",
             path: ["queries", queryName, "filter", column],
-            message: `unknown column "${column}"`,
+            message: `unknown or hidden column "${column}"`,
           });
           continue;
         }
@@ -235,12 +239,12 @@ export const AppDefinitionSchema = z
         sortColumn &&
         sortColumn !== "createdAt" &&
         sortColumn !== "updatedAt" &&
-        !Object.hasOwn(model.columns, sortColumn)
+        (!Object.hasOwn(model.columns, sortColumn) || model.columns[sortColumn]!.hidden === true)
       ) {
         ctx.addIssue({
           code: "custom",
           path: ["queries", queryName, "sort", "column"],
-          message: `unknown column "${sortColumn}"`,
+          message: `unknown or hidden column "${sortColumn}"`,
         });
       }
     }

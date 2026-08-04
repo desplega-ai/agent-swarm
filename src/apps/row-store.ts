@@ -1,10 +1,12 @@
 import { deleteKv, getDb, getKv, listKv, upsertKv } from "../be/db";
 import {
+  AppDefinitionSchema,
   type AppValidationIssue,
   type ColumnDef,
   isIso8601Date,
   type ModelDef,
 } from "./definition";
+import { upgradeAppDefinition } from "./format-upgrades";
 
 export type AppRow = {
   id: string;
@@ -65,6 +67,7 @@ export function appIndexKey(model: string, column: string, value: unknown, rowId
 }
 
 function isIndexed(column: ColumnDef): boolean {
+  if (column.hidden === true) return false;
   if (column.kind === "enum") return true;
   return column.index === true && (column.kind === "string" || column.kind === "boolean");
 }
@@ -98,13 +101,15 @@ function prepareValues(
   const prepared: Record<string, unknown> = { ...values };
 
   for (const name of Object.keys(values)) {
-    if (!Object.hasOwn(definition.columns, name)) {
-      issues.push({ path: `values.${name}`, message: `unknown column "${name}"` });
+    const column = Object.hasOwn(definition.columns, name) ? definition.columns[name] : undefined;
+    if (!column || column.hidden === true) {
+      issues.push({ path: `values.${name}`, message: `unknown or hidden column "${name}"` });
     }
   }
 
   if (mode === "create") {
     for (const [name, column] of Object.entries(definition.columns)) {
+      if (column.hidden === true) continue;
       if (!Object.hasOwn(prepared, name) && column.default !== undefined)
         prepared[name] = column.default;
       if (
@@ -159,6 +164,23 @@ function appExists(appId: string): boolean {
   );
 }
 
+function currentModelDefinition(appId: string, model: string): ModelDef | null {
+  const row = getDb()
+    .prepare<{ definition: string }, [string]>("SELECT definition FROM apps WHERE id = ?")
+    .get(appId);
+  if (!row) return null;
+  try {
+    const definition = AppDefinitionSchema.safeParse(
+      upgradeAppDefinition(JSON.parse(row.definition)),
+    );
+    return definition.success && Object.hasOwn(definition.data.models, model)
+      ? (definition.data.models[model] ?? null)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function createRowUnlocked(
   appId: string,
   model: string,
@@ -194,29 +216,31 @@ export function createAppRowUnlocked(
 export function createAppRow(
   appId: string,
   model: string,
-  definition: ModelDef,
+  _definition: ModelDef,
   values: Record<string, unknown>,
   options: AppRowWriteOptions = {},
 ): Promise<AppRow> {
-  const prepared = prepareValues(definition, values, "create");
   return withMutationLock(appId, model, () => {
-    if (!appExists(appId)) throw new AppRowAppNotFoundError(appId);
-    return createRowUnlocked(appId, model, definition, prepared, options.actor);
+    const currentDefinition = currentModelDefinition(appId, model);
+    if (!currentDefinition) throw new AppRowAppNotFoundError(appId);
+    const prepared = prepareValues(currentDefinition, values, "create");
+    return createRowUnlocked(appId, model, currentDefinition, prepared, options.actor);
   });
 }
 
 export function createAppRows(
   appId: string,
   model: string,
-  definition: ModelDef,
+  _definition: ModelDef,
   rows: Array<Record<string, unknown>>,
   options: AppRowWriteOptions = {},
 ): Promise<AppRow[]> {
-  const prepared = rows.map((values) => prepareValues(definition, values, "create"));
   return withMutationLock(appId, model, () => {
-    if (!appExists(appId)) throw new AppRowAppNotFoundError(appId);
+    const currentDefinition = currentModelDefinition(appId, model);
+    if (!currentDefinition) throw new AppRowAppNotFoundError(appId);
+    const prepared = rows.map((values) => prepareValues(currentDefinition, values, "create"));
     return prepared.map((values) =>
-      createRowUnlocked(appId, model, definition, values, options.actor),
+      createRowUnlocked(appId, model, currentDefinition, values, options.actor),
     );
   });
 }
@@ -243,18 +267,41 @@ export function listAppRows(appId: string, model: string): AppRow[] {
     );
 }
 
+const MIGRATION_KV_BATCH_SIZE = 1000;
+
+/** Caller must already hold the app/model mutation lock. */
+export function listAllAppRowsForMigrationUnlocked(appId: string, model: string): AppRow[] {
+  const rows: AppRow[] = [];
+  const namespace = appsNamespace(appId);
+  const prefix = `${model}/row/`;
+  let offset = 0;
+  while (true) {
+    const entries = listKv(namespace, { prefix, limit: MIGRATION_KV_BATCH_SIZE, offset });
+    for (const entry of entries) {
+      const value = entry.value;
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        rows.push(value as AppRow);
+      }
+    }
+    if (entries.length < MIGRATION_KV_BATCH_SIZE) return rows;
+    offset += entries.length;
+  }
+}
+
 export function patchAppRow(
   appId: string,
   model: string,
-  definition: ModelDef,
+  _definition: ModelDef,
   rowId: string,
   values: Record<string, unknown>,
   options: AppRowWriteOptions = {},
 ): Promise<AppRow | null> {
-  const prepared = prepareValues(definition, values, "patch");
-  return withMutationLock(appId, model, () =>
-    patchPreparedRowUnlocked(appId, model, definition, rowId, prepared, options),
-  );
+  return withMutationLock(appId, model, () => {
+    const currentDefinition = currentModelDefinition(appId, model);
+    if (!currentDefinition) throw new AppRowAppNotFoundError(appId);
+    const prepared = prepareValues(currentDefinition, values, "patch");
+    return patchPreparedRowUnlocked(appId, model, currentDefinition, rowId, prepared, options);
+  });
 }
 
 function patchPreparedRowUnlocked(
@@ -308,18 +355,62 @@ export function patchAppRowUnlocked(
   return patchPreparedRowUnlocked(appId, model, definition, rowId, prepared, options);
 }
 
+/** Caller must already hold the app/model mutation lock. */
+export function writeAppRowForMigrationUnlocked(appId: string, model: string, row: AppRow): void {
+  upsertKv({
+    namespace: appsNamespace(appId),
+    key: rowKey(model, row.id),
+    value: row,
+    valueType: "json",
+  });
+}
+
+/** Caller must already hold the app/model mutation lock. */
+export function rebuildAppColumnIndexUnlocked(
+  appId: string,
+  model: string,
+  columnName: string,
+  column: ColumnDef | undefined,
+  rows: AppRow[],
+): void {
+  const namespace = appsNamespace(appId);
+  const prefix = `${model}/idx/${columnName}/`;
+  while (true) {
+    const entries = listKv(namespace, {
+      prefix,
+      limit: MIGRATION_KV_BATCH_SIZE,
+      offset: 0,
+    });
+    if (entries.length === 0) break;
+    for (const entry of entries) deleteKv(namespace, entry.key);
+  }
+  if (!column || !isIndexed(column)) return;
+  for (const row of rows) {
+    if (!Object.hasOwn(row, columnName)) continue;
+    const value = row[columnName];
+    if (value === undefined || value === null) continue;
+    upsertKv({
+      namespace,
+      key: appIndexKey(model, columnName, value, row.id),
+      value: "1",
+      valueType: "json",
+    });
+  }
+}
+
 export function deleteAppRow(
   appId: string,
   model: string,
-  definition: ModelDef,
+  _definition: ModelDef,
   rowId: string,
 ): Promise<boolean> {
   return withMutationLock(appId, model, () => {
-    if (!appExists(appId)) return false;
+    const currentDefinition = currentModelDefinition(appId, model);
+    if (!currentDefinition) return false;
     const namespace = appsNamespace(appId);
     const row = getAppRow(appId, model, rowId);
     if (!row) return false;
-    for (const key of indexKeys(model, definition, row)) deleteKv(namespace, key);
+    for (const key of indexKeys(model, currentDefinition, row)) deleteKv(namespace, key);
     deleteKv(namespace, rowKey(model, rowId));
     return true;
   });

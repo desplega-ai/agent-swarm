@@ -516,7 +516,127 @@
                   "description": {
                     "type": "string"
                   },
-                  "definition": {}
+                  "definition": {},
+                  "migration": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "set": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "set"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "from": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-zA-Z0-9_]{0,39}$"
+                            },
+                            "map": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  }
+                                ]
+                              }
+                            },
+                            "else": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "from"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "coerce": {
+                              "type": "boolean",
+                              "enum": [
+                                true
+                              ]
+                            },
+                            "else": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "coerce"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "purge": {
+                              "type": "boolean",
+                              "enum": [
+                                true
+                              ]
+                            }
+                          },
+                          "required": [
+                            "purge"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  }
                 }
               }
             }
@@ -524,7 +644,69 @@
         },
         "responses": {
           "200": {
-            "description": "Updated app"
+            "description": "Updated app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "app": {},
+                    "migration": {
+                      "type": "object",
+                      "properties": {
+                        "scanned": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "backfilled": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "coerced": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "mapped": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "elsed": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "purgedValues": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "idxRebuilt": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "orphanFields": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "scanned",
+                        "backfilled",
+                        "coerced",
+                        "mapped",
+                        "elsed",
+                        "purgedValues",
+                        "idxRebuilt",
+                        "orphanFields"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "migration"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid app definition"
@@ -578,6 +760,126 @@
                   "definition": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "migration": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "set": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "set"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "from": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-zA-Z0-9_]{0,39}$"
+                            },
+                            "map": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  }
+                                ]
+                              }
+                            },
+                            "else": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "from"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "coerce": {
+                              "type": "boolean",
+                              "enum": [
+                                true
+                              ]
+                            },
+                            "else": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "coerce"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "purge": {
+                              "type": "boolean",
+                              "enum": [
+                                true
+                              ]
+                            }
+                          },
+                          "required": [
+                            "purge"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
                   }
                 }
               }
@@ -586,7 +888,69 @@
         },
         "responses": {
           "200": {
-            "description": "Patched app"
+            "description": "Patched app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "app": {},
+                    "migration": {
+                      "type": "object",
+                      "properties": {
+                        "scanned": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "backfilled": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "coerced": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "mapped": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "elsed": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "purgedValues": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "idxRebuilt": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "orphanFields": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "scanned",
+                        "backfilled",
+                        "coerced",
+                        "mapped",
+                        "elsed",
+                        "purgedValues",
+                        "idxRebuilt",
+                        "orphanFields"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "migration"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid app definition"

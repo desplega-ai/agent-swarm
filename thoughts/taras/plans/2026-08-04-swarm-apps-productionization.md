@@ -157,7 +157,7 @@ Also in `parseAppDefinition` (review I10): reject **unknown top-level definition
 - [x] sqlite-insert a scratch app with legacy `page` shape into an **isolated** DB copy → GET 200 with `pages.main`; one PATCH → stored JSON stamped + upgraded (sqlite check)
 
 #### Manual Verification:
-- [ ] Skim `/tmp/apps-api.log` for snapshot/decode noise on normal traffic
+- [x] Skim `/tmp/apps-api.log` for snapshot/decode noise on normal traffic (QA agent + orchestrator: only pre-existing sqlite-vec/business-use noise; delegated by Taras 2026-08-04)
 
 **Implementation Note**: After this phase, pause for manual confirmation, then commit `[phase 1] app_versions + tolerant decodeApp`.
 
@@ -191,18 +191,18 @@ Definition writes against row-holding models run the spec §3 engine: dry-run cl
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun run test:root -- src/tests/apps-spike5.test.ts`
-- [ ] Full suite: `bun run test:root -- src/tests/apps-spike.test.ts src/tests/apps-spike2.test.ts src/tests/apps-spike4.test.ts`
-- [ ] `bun run lint && bun run tsc:check && bash scripts/check-db-boundary.sh`
-- [ ] `bun run docs:openapi` + commit — the `migration` request field and migration-report response are OpenAPI-visible (review I7)
+- [x] Tests pass: `bun run test:root -- src/tests/apps-spike5.test.ts`
+- [x] Full suite: `bun run test:root -- src/tests/apps-spike.test.ts src/tests/apps-spike2.test.ts src/tests/apps-spike4.test.ts`
+- [x] `bun run lint && bun run tsc:check && bash scripts/check-db-boundary.sh`
+- [x] `bun run docs:openapi` + commit — the `migration` request field and migration-report response are OpenAPI-visible (review I7)
 
 #### Automated QA (against :3113, Spike3 Scratch PM `12218dfe-8d17-458a-9e48-75881f682030`, 19 rows):
-- [ ] `columns.note = null` PATCH → 400 with row count; `note.hidden = true` → 200 and `sqlite3`/KV shows rows untouched; add new column `note` → 400 name-held; `migration {note:{purge:true}}` + `columns.note = null` → field gone from all rows, idx clean
-- [ ] Patch a string column to `kind: number` on mixed values → 400 with per-value counts; retry with `{coerce: true, else: null}` → 200, report shows coerced/elsed, idx rebuilt
-- [ ] Add a required column with a default → auto-backfill visible on existing rows without a directive
+- [x] `columns.note = null` PATCH → 400 with row count; `note.hidden = true` → 200 and `sqlite3`/KV shows rows untouched; add new column `note` → 400 name-held; `migration {note:{purge:true}}` + `columns.note = null` → field gone from all rows, idx clean (one-shot form initially 400'd — guard-ordering bug, fixed in review round + regression test)
+- [x] Patch a string column to `kind: number` on mixed values → 400 with per-value counts; retry with `{coerce: true, else: null}` → 200, report shows coerced/elsed, idx rebuilt
+- [x] Add a required column with a default → auto-backfill visible on existing rows without a directive
 
 #### Manual Verification:
-- [ ] Read one 400 issue payload end-to-end — is it actually actionable for an agent (paths, counts, suggested escape hatch)?
+- [x] Read one 400 issue payload end-to-end — is it actually actionable for an agent (paths, counts, suggested escape hatch)? (QA proxy + orchestrator: payload carries path, per-value counts, concrete escape hatches; hidden-guard message made honest in review round; delegated by Taras 2026-08-04)
 
 **Implementation Note**: Pause, confirm, commit `[phase 2] schema-change engine`.
 
@@ -552,12 +552,14 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3113/api/apps/6f93f0c
   - Format upgrade #2 (github-issues connector) dropped as moot post-shrink; upgrade #1 = convert `page`→`pages.main` + strip `sources` (purely defensive — no live rows carry either shape).
   - Spec §3c (source/joinKey rename rules) and the `joinKey`-rename coverage-floor test dropped — sources no longer exist post-shrink; likewise `allowSourceManaged: true` on migration writes (only `skipUpdatedAt` remains).
   - Interaction-plane path shape: `instances/<key>/<origId>` without the brainstorm's `pages/<p>` segment — same key on two pages shares state deliberately (cross-page warm).
+  - **Phase 2 review-round deviations (2026-08-04)**: `{set}` (and all non-purge directives) require the target column to be CHANGED in the same write — spec §3b's unconditioned "constant backfill" reading rejected as a clobber-all footgun. Unhide of a `required` column with rows missing values → fail-loud issue (spec ambiguity resolved toward the invariant). `{coerce}` without `else` on optional columns → fail-loud issue instead of silent value drop (`elsed` counts only explicit else applications). Unparseable-old-side + required-with-default → fail-loud issue demanding an explicit `set` (rows never touched implicitly). Issue enumerations capped (10 distinct values / 100 orphan fields).
 - **Derail notes**:
   - `check:rbac-coverage` skipping GETs means Phase 7's GET gating has no CI net — `apps-rbac.test.ts` is the guard; consider extending the checker later.
   - Two same-id inputs hand-authored in one page still share `/ui/<id>/*` state — unchanged, documented; only element instances get structural scoping.
   - Script actions still execute with the script owner's bindings (`apps.ts:830-831`) — viewer-bound credentials deliberately out of scope.
   - Hidden columns count toward the 40-col cap (spec: purge is the pressure valve).
   - Compat-gate cost: full-JSON scan of every app on each definition write, no reverse index — fine at spike scale, productization flag.
+  - **Phase 2 derail notes (2026-08-04)**: (a) Full-definition validation on every PATCH means apps carrying pre-Phase-2 stale page bindings (e.g. undeclared column refs) 400 on ALL patches until repaired via atomic `pages.<p>.elements.<id>` replace — load-bearing behavior (forces page co-migration on hide), hit live on Spike3 Scratch PM; the apps skill must teach the repair move. (b) Definition writes serialize via `withAppDefinitionLock` (sentinel `__definition__`, always acquired before model locks; row writers never take it) — closes the RMW lost-update race found in review. (c) Hidden columns remain readable on row GETs — backward-compat surface, not confidentiality. (d) Snapshots are definition-only; row migrations are irreversible by design (spec excludes row-level history). (e) Perf productization flags: migration materializes the whole model in memory inside one synchronous transaction; index rebuild is entry-by-entry; `listAppRows` caps at 100k with no pagination while migration scans past it.
   - QA fixture continuity: Phases 3/6/8 QA reuse state created by earlier phases' QA (Spike3 Scratch PM version history, the "Element Consumer" app, PM Inbox userConfig) — restoring the DB from a backup invalidates later steps; re-create fixtures if you restore.
   - The `useAppQueries` signature rework (Phase 6) touches the Phase 5 mirror effect — if Phase 6 slips, Phase 5's shipped shape is still coherent on its own.
 - **References**:

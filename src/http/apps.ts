@@ -24,6 +24,15 @@ import {
   purgeAppRows,
 } from "../apps/row-store";
 import {
+  type AppMigrationReport,
+  AppMigrationReportSchema,
+  AppMigrationSchema,
+  AppSchemaMigrationError,
+  AppSnapshotFailure,
+  migrateAppSchema,
+  withAppDefinitionLock,
+} from "../apps/schema-migrate";
+import {
   appDefinitionNeedsRepair,
   createApp,
   deleteApp,
@@ -61,6 +70,10 @@ const rowParamsSchema = z.object({
   rowId: z.string().min(1),
 });
 const valuesSchema = z.record(z.string(), z.unknown());
+const appWriteResponseSchema = z.object({
+  app: z.unknown(),
+  migration: AppMigrationReportSchema,
+});
 
 const listAppsRoute = route({
   method: "get",
@@ -140,9 +153,10 @@ const updateAppRoute = route({
     name: z.string().min(1).optional(),
     description: z.string().optional(),
     definition: z.unknown().optional(),
+    migration: AppMigrationSchema.optional(),
   }),
   responses: {
-    200: { description: "Updated app" },
+    200: { description: "Updated app", schema: appWriteResponseSchema },
     400: { description: "Invalid app definition" },
     403: { description: "Permission denied" },
     404: { description: "App not found" },
@@ -163,9 +177,10 @@ const patchAppRoute = route({
     name: z.string().min(1).optional(),
     description: z.string().nullable().optional(),
     definition: z.record(z.string(), z.unknown()).optional(),
+    migration: AppMigrationSchema.optional(),
   }),
   responses: {
-    200: { description: "Patched app" },
+    200: { description: "Patched app", schema: appWriteResponseSchema },
     400: { description: "Invalid app definition" },
     403: { description: "Permission denied" },
     404: { description: "App not found" },
@@ -368,6 +383,10 @@ function snapshotFailure(res: ServerResponse): void {
   jsonError(res, "failed to snapshot app", 500);
 }
 
+function invalidMigration(res: ServerResponse, error: AppSchemaMigrationError): void {
+  json(res, { error: error.message, issues: error.issues }, 400);
+}
+
 function invalidRows(res: ServerResponse, error: unknown): boolean {
   if (error instanceof AppRowAppNotFoundError) {
     jsonError(res, "app not found", 404);
@@ -538,8 +557,8 @@ function filtersFromQuery(
   for (const [key, raw] of queryParams.entries()) {
     if (!key.startsWith("filter.")) continue;
     const columnName = key.slice("filter.".length);
-    if (!Object.hasOwn(model.columns, columnName)) {
-      issues.push({ path: key, message: `unknown column "${columnName}"` });
+    if (!Object.hasOwn(model.columns, columnName) || model.columns[columnName]!.hidden === true) {
+      issues.push({ path: key, message: `unknown or hidden column "${columnName}"` });
       continue;
     }
     const column = model.columns[columnName]!;
@@ -739,7 +758,8 @@ export async function handleApps(
         (dir !== "asc" && dir !== "desc") ||
         (column !== "createdAt" &&
           column !== "updatedAt" &&
-          !Object.hasOwn(resolved.model.columns, column))
+          (!Object.hasOwn(resolved.model.columns, column) ||
+            resolved.model.columns[column]!.hidden === true))
       ) {
         json(
           res,
@@ -960,39 +980,76 @@ export async function handleApps(
     if (!parsed) return true;
     if (!authorizeAppWrite(req, res, myAgentId)) return true;
 
-    const existing = getApp(parsed.params.id);
-    if (!existing) {
+    if (!getApp(parsed.params.id)) {
       jsonError(res, "app not found", 404);
       return true;
     }
-    if (definitionNeedsRepair(res, existing)) return true;
-    const patch = applyAppDefinitionPatch(existing.definition, parsed.body.definition ?? {});
-    if (!patch.success) {
-      invalidDefinition(res, patch.issues);
-      return true;
-    }
-    const definition = parseAppDefinition(patch.definition);
-    if (!definition.success) {
-      invalidDefinition(res, definition.issues);
-      return true;
-    }
+    let app: ReturnType<typeof updateApp> = null;
+    let migration!: AppMigrationReport;
+    let responseHandled = false;
     try {
-      snapshotApp(parsed.params.id, myAgentId);
-    } catch {
-      snapshotFailure(res);
-      return true;
+      await withAppDefinitionLock(parsed.params.id, async () => {
+        const existing = getApp(parsed.params.id);
+        if (!existing) {
+          jsonError(res, "app not found", 404);
+          responseHandled = true;
+          return;
+        }
+        if (definitionNeedsRepair(res, existing)) {
+          responseHandled = true;
+          return;
+        }
+        const patch = applyAppDefinitionPatch(existing.definition, parsed.body.definition ?? {});
+        if (!patch.success) {
+          invalidDefinition(res, patch.issues);
+          responseHandled = true;
+          return;
+        }
+        const definition = parseAppDefinition(patch.definition);
+        if (!definition.success) {
+          invalidDefinition(res, definition.issues);
+          responseHandled = true;
+          return;
+        }
+        const migrated = await migrateAppSchema({
+          appId: parsed.params.id,
+          previousDefinition: existing.definition,
+          nextDefinition: definition.definition,
+          migration: parsed.body.migration,
+          snapshot: () => {
+            try {
+              snapshotApp(parsed.params.id, myAgentId);
+            } catch {
+              throw new AppSnapshotFailure();
+            }
+          },
+          writeDefinition: () =>
+            updateApp(parsed.params.id, {
+              name: parsed.body.name,
+              description: parsed.body.description,
+              definition: definition.definition,
+            }),
+        });
+        app = migrated.result;
+        migration = migrated.migration;
+      });
+    } catch (error) {
+      if (error instanceof AppSchemaMigrationError) {
+        invalidMigration(res, error);
+        return true;
+      }
+      if (error instanceof AppSnapshotFailure) {
+        snapshotFailure(res);
+        return true;
+      }
+      throw error;
     }
-    // Spike limitation: schema updates do not migrate rows or rebuild KV indexes.
-    const app = updateApp(parsed.params.id, {
-      name: parsed.body.name,
-      description: parsed.body.description,
-      definition: definition.definition,
-    });
+    if (responseHandled) return true;
     if (!app) {
       jsonError(res, "app not found", 404);
       return true;
     }
-    json(res, { app });
+    json(res, { app, migration });
     return true;
   }
 
@@ -1001,39 +1058,74 @@ export async function handleApps(
     const parsed = await updateAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!authorizeAppWrite(req, res, myAgentId)) return true;
-    const existing = getApp(parsed.params.id);
-    if (!existing) {
+    if (!getApp(parsed.params.id)) {
       jsonError(res, "app not found", 404);
       return true;
     }
-    let definition: AppDefinition | undefined;
-    if (parsed.body.definition !== undefined) {
-      const parsedDefinition = parseAppDefinition(parsed.body.definition);
-      if (!parsedDefinition.success) {
-        invalidDefinition(res, parsedDefinition.issues);
+    let app: ReturnType<typeof updateApp> = null;
+    let migration!: AppMigrationReport;
+    let responseHandled = false;
+    try {
+      await withAppDefinitionLock(parsed.params.id, async () => {
+        const existing = getApp(parsed.params.id);
+        if (!existing) {
+          jsonError(res, "app not found", 404);
+          responseHandled = true;
+          return;
+        }
+        let definition: AppDefinition | undefined;
+        if (parsed.body.definition !== undefined) {
+          const parsedDefinition = parseAppDefinition(parsed.body.definition);
+          if (!parsedDefinition.success) {
+            invalidDefinition(res, parsedDefinition.issues);
+            responseHandled = true;
+            return;
+          }
+          definition = parsedDefinition.definition;
+        } else if (definitionNeedsRepair(res, existing)) {
+          responseHandled = true;
+          return;
+        }
+        const nextDefinition = definition ?? existing.definition;
+        const migrated = await migrateAppSchema({
+          appId: parsed.params.id,
+          previousDefinition: appDefinitionNeedsRepair(existing) ? undefined : existing.definition,
+          nextDefinition,
+          migration: parsed.body.migration,
+          snapshot: () => {
+            try {
+              snapshotApp(parsed.params.id, myAgentId);
+            } catch {
+              throw new AppSnapshotFailure();
+            }
+          },
+          writeDefinition: () =>
+            updateApp(parsed.params.id, {
+              name: parsed.body.name,
+              description: parsed.body.description,
+              definition,
+            }),
+        });
+        app = migrated.result;
+        migration = migrated.migration;
+      });
+    } catch (error) {
+      if (error instanceof AppSchemaMigrationError) {
+        invalidMigration(res, error);
         return true;
       }
-      definition = parsedDefinition.definition;
-    } else if (definitionNeedsRepair(res, existing)) {
-      return true;
+      if (error instanceof AppSnapshotFailure) {
+        snapshotFailure(res);
+        return true;
+      }
+      throw error;
     }
-    try {
-      snapshotApp(parsed.params.id, myAgentId);
-    } catch {
-      snapshotFailure(res);
-      return true;
-    }
-    // Spike limitation: schema updates do not migrate rows or rebuild KV indexes.
-    const app = updateApp(parsed.params.id, {
-      name: parsed.body.name,
-      description: parsed.body.description,
-      definition,
-    });
+    if (responseHandled) return true;
     if (!app) {
       jsonError(res, "app not found", 404);
       return true;
     }
-    json(res, { app });
+    json(res, { app, migration });
     return true;
   }
 
