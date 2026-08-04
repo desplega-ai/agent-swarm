@@ -34,11 +34,13 @@ Read `profiles.<file>.h2Anchors` **before** writing any profile op. Those string
 - **A convention you confirmed by doing it.** The command that actually worked, the route that's really there, the review rule that held under a real diff. Confirmed beats plausible.
 - **An installed skill with `invokes: 0` that you needed today.** That's a discoverability problem, not a knowledge problem — fix the skill's description/trigger, or note the skill in `TOOLS`.
 - **A memory contradicted by what you saw today.** Delete it, or write the corrected one. Stale institutional knowledge is worse than none.
-- **A `RESOLVED-STALE` item or a blocker that sat unverified for days.** The root cause is almost always an assumption nobody re-checked. Codify the trigger that should have caught it — that class of lesson is the highest-signal thing you get.
+- **A `RESOLVED-STALE` item or a blocker that sat unverified for days.** The root cause is almost always an assumption nobody re-checked. Codify the trigger that should have caught it — that class of lesson is the highest-signal thing you get. Verify, don't assume: every PR or issue reference in `HEARTBEAT` is a claim to re-check, not a status. One that already merged is `RESOLVED-STALE` and the line should come out.
+- **A stale reference in a file you already have open.** A dead host or endpoint, a retired tool, a repo that moved, a rule that contradicts the infra you actually used today. A line that is now false costs more than a line that is missing — fix it or remove it.
 
 ### What does not
 
 - **One-offs.** One flaky test, one merge conflict, one rate limit. Wait for the second occurrence.
+- **Noise dressed up as failure.** `superseded_workflow_task` and `cancelled` are bookkeeping, not failures. Neither are the transient infra reasons — NUL spawn errors, provider quota windows, reboot-sweep "worker session not found", OOM, `e2big` — nor sentinel-progress phantoms, where the work landed and only the structured receipt is missing. Filter these out *before* you call two failures a pattern; what survives the filter is real signal and deserves a delta.
 - **Speculation.** "Agents should probably…", "it might help if…", "consider…". If it didn't happen, it isn't evidence.
 - **Restating existing profile text.** Read the section under your anchor. If it already says it — even in different words — there is no delta. Paraphrase is noise with a diff attached.
 - **Vibes.** "Collaboration went well", "strong day". No task id, no failure reason, no tool count → not evidence.
@@ -115,7 +117,7 @@ Fields: `kind`, `action`, `content`, `skillId`, `scope`, `reason`. **No `agentId
 
 `action: "create"` needs `content` only; `action: "update"` needs `skillId` too. `content` is the **whole** skill body, not a patch.
 
-Propose a skill when the same shape of task has been done 3+ times with a stable approach, or when an agent burned context re-deriving something a playbook would have answered. Description and trigger wording are the load-bearing parts — a skill nobody finds is a skill that doesn't exist.
+Propose a skill when the same shape of task has been done 3+ times with a stable approach, or when an agent burned context re-deriving something a playbook would have answered. Description and trigger wording are the load-bearing parts — a skill nobody finds is a skill that doesn't exist. Propose an update when a skill cites a host, endpoint, or command that no longer exists: a playbook with a dead step in it is worse than no playbook.
 
 ### `hygiene` — recurring-duty upkeep on `HEARTBEAT`
 
@@ -134,6 +136,10 @@ Fields: `kind`, `agentId`, `op`, `anchor`, `content`, `rotationCursorKey`, `rota
 ```
 
 Rotation-cursor fields are optional; include them only when the delta advances a rotation you actually consumed.
+
+`HEARTBEAT` is a runbook, not a log. A line recording what happened belongs in a `memory`; a line telling you to do something *again* belongs here. Once a file has filled with incident detail, resolved watches, and merged PRs, the useful delta is a removal — not another addition.
+
+Removals need a why that outlives the receipt. `reason` shows on today's receipt and is then gone, so pair a non-obvious removal with a `memory` recording what you took out and why it's dead. Otherwise a later dream sees the gap and regrows it. This is the one case where the same lesson legitimately belongs in two deltas.
 
 ## Anchor discipline
 
@@ -191,6 +197,8 @@ A HELD list that is empty or short is the goal. A long HELD list means the propo
 - Inventing an anchor because the section you wanted doesn't exist.
 - Writing the same lesson as both a `memory` and a `profile-op` — pick the one that will actually be read at the right moment.
 - Padding the set to look productive.
+- Only ever adding. A dream that never removes anything grows the files faster than it grows the signal.
+- Removing something without recording why, so the next dream puts it straight back.
 - Vague memories ("things went well") instead of specific ones.
 - Ignoring a skill that exists and is never invoked.
 - Treating a Slack post or a summary as the deliverable. The deltas are the deliverable.

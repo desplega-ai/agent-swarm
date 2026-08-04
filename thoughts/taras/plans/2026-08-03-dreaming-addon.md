@@ -3,7 +3,7 @@ date: 2026-08-03T00:00:00+0200
 author: Taras (planned by Claude)
 topic: "Dreaming add-on — foreach executor, seeders, dream workflow, cutover"
 tags: [plan, workflows, foreach, seeding, addons, dreaming]
-status: in-progress
+status: completed
 brainstorm: thoughts/taras/brainstorms/2026-07-31-compounding-engine-workflow.md
 autonomy: critical
 ---
@@ -802,22 +802,34 @@ content — not seeded; verified.)
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Migration applies on a fresh DB: `rm -f agent-swarm-db.sqlite* && bun run start:http`
-      (boots clean, `_migrations` includes the new entry)
-- [ ] Migration is a no-op-safe UPDATE on a DB copy containing the target rows (assert
-      `enabled = 0` after; scripted in a small test or one-off check)
-- [ ] Type check + lint + full suite: `bun run tsc:check && bun run lint && bun run test:root`
+- [x] Migration applies on a fresh DB (`127_retire_daily_evolution_monolith.sql` — 126 was taken
+      by Phase 4's `workflow_runs.definitionHash`): boots clean, `_migrations` includes 127.
+- [x] Migration disables both rows on a DB copy containing them (verified: prod-shaped rows
+      inserted → re-boot → both `enabled = 0`, `dream-daily` untouched).
+- [x] Type check + lint + full suite: `bun run tsc:check && bun run lint && bun run test:root`
+      (6856 pass / 0 fail).
 
 #### Automated QA:
-- [ ] Diff report artifact: the extracted prod-prompt delta and where each fact landed
-      (skill section / lane input), attached to the PR.
+- [x] Diff report artifact: `thoughts/taras/research/2026-08-04-dreaming-phase5-transplant-report.md`
+      (8 folded / 11 recommended / 17 dropped, + already-covered appendix).
+      **⚠️ Plan correction from the prod fetch**: the id mapping was SWAPPED — `cdfa3f00-…` is
+      `daily-blocker-digest` (cron 5 2); the monolith is `daily-compounding-reflection`
+      (`0e960516-8dc6-42ab-b1c3-14a8a8aab8d0`, cron 10 2, ~15.8k chars). The plan's draft
+      migration would have left the monolith running; 127 disables both by name AND both ids.
+      **`Heartbeat Audit` is a prod-DB script, not repo-seeded** — its digest check needs a
+      post-deploy prod-side edit (dream-run check); repo-side `src/heartbeat/templates.ts` updated.
 
 #### Manual Verification:
 - [ ] Taras signs off the transplanted-knowledge diff (nothing durable dropped) **before** the
-      migration merges.
+      migration merges. Open decisions from the report: (1) cross-repo open-PR digest deliverable
+      has no home in the new architecture — keep or retire; (2) rotation cursor rotates PR refs,
+      not the old 5 deep-clean categories — accept substitution?; (3) verify
+      `app.agent-swarm.dev` vs `cloud.agent-swarm.dev` before any host list reaches a profile;
+      (4) post-deploy: re-point Lead CLAUDE.md Rules #11/#17 (defined against the digest
+      schedule) and update the prod `Heartbeat Audit` script.
 - [ ] After deploy (merging `main` auto-deploys): observe the first scheduled dream run on prod —
       receipt posted (if `DREAMING_SLACK_CHANNEL` set), HELD list empty or plausible, profiles
-      changed surgically, `cdfa3f00` + `daily-blocker-digest` show disabled.
+      changed surgically, `daily-compounding-reflection` + `daily-blocker-digest` show disabled.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as
 `[phase 5] transplant monolith knowledge + retire cdfa3f00/daily-blocker-digest` after verification
@@ -876,7 +888,10 @@ list, and that both retired schedules stay disabled across an API restart.
 - **Follow-up plans** (v2 candidates, per Taras): add-on as a first-class template primitive
   (refactor of `templates/` + `src/workflows/templates.ts`), add-ons UI/API + "add an add-on"
   skill, peer critique, `foreach` `concurrency` when a large-N consumer exists, per-anchor
-  cooldowns.
+  cooldowns, skill-delta INSTALL support (v1 creates/updates catalog skills but never installs
+  them to agents — Taras 2026-08-04), cross-repo open-PR digest (retired with the monolith,
+  Taras 2026-08-04 — `pr-review-status-sweep-3h` + heartbeat rules cover PR staleness; revive
+  inside dream-gather's rich stage if missed).
 - **Derail notes**:
   - The resume landmine technically also exists on today's crash-recovery path
     (`recovery.ts:121-124`) but is unreachable because the engine always writes `nodeId = node.id`

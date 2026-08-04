@@ -1,5 +1,7 @@
 # Daily Compounding Reflection
 
+> **Superseded for swarm installs by the [Dreaming add-on](https://docs.agent-swarm.dev/docs/addons/dreaming)** (fka compounding) — a seeded `dream` workflow that fans out per-agent reflection lanes with a Lead critique and a mechanical apply step. This template remains as copy-paste prior art for standalone use.
+
 Capture lessons from the day into memory, skills, and workflow improvements.
 
 ## Schedule
