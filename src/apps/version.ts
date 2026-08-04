@@ -132,7 +132,10 @@ function rollbackSnapshot(version: AppVersion): {
     ]);
   }
 
-  const parsed = parseAppDefinition(upgradeAppDefinition(snapshot.definition));
+  const parsed = parseAppDefinition(upgradeAppDefinition(snapshot.definition), {
+    currentAppId: version.appId,
+    resolveApp: getApp,
+  });
   if (!parsed.success) throw new AppRollbackDefinitionError(version.version, parsed.issues);
   return {
     name: snapshot.name,
@@ -150,6 +153,7 @@ export async function rollbackApp(input: {
   appId: string;
   version: number;
   migration?: AppMigration;
+  forceElementBreak?: string[];
   changedByAgentId?: string;
 }): Promise<{ app: AppRecord; migration: AppMigrationReport }> {
   return withAppDefinitionLock(input.appId, async () => {
@@ -165,8 +169,10 @@ export async function rollbackApp(input: {
     const migrated = await migrateAppSchema({
       appId: input.appId,
       previousDefinition: appDefinitionNeedsRepair(existing) ? undefined : existing.definition,
+      previousRawDefinition: existing.definition,
       nextDefinition: snapshot.definition,
       migration: input.migration,
+      forceElementBreak: input.forceElementBreak,
       snapshot: () => {
         try {
           snapshotApp(input.appId, input.changedByAgentId);

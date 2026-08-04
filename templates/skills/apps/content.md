@@ -98,7 +98,53 @@ When a schema patch reports stale page/query bindings, repair them in that same 
 }
 ```
 
-Model, query, action, column, page, and page-param names start with a lowercase letter, contain only letters, numbers, or underscores, and are at most 40 characters. A definition has 1-10 models; each model has 1-40 columns.
+Model, reusable-element, element-prop, query, action, column, page, and page-param names start with a lowercase letter, contain only letters, numbers, or underscores, and are at most 40 characters. A definition has 0-10 models and at most 20 reusable elements; each declared model has 1-40 columns. Zero-model apps are valid for pure UI utilities as long as their pages and reusable elements validate.
+
+### Reusable elements
+
+Top-level `elements` are versioned inside the app definition and can be reused from the app's own pages or, when explicitly exported, from another app. They are private by default. Each entry declares a `mode`, optional typed `props`, one `root`, and a flat `elements` node map using the same validated tree vocabulary as a page:
+
+```json
+{
+  "elements": {
+    "statCard": {
+      "mode": "pure",
+      "export": true,
+      "props": {
+        "label": { "kind": "string", "required": true },
+        "value": { "kind": "number", "default": 0 }
+      },
+      "root": "card",
+      "elements": {
+        "card": { "type": "Card", "props": {}, "children": ["label", "slot"] },
+        "label": { "type": "Metric", "props": { "label": { "$state": "/props/label" }, "value": { "$state": "/props/value" } } },
+        "slot": { "type": "ElementSlot", "props": {} }
+      }
+    }
+  }
+}
+```
+
+- `pure` elements may read only their declared `/props/<name>` state; `$item` and `$index` are also legal inside repeated nodes. They cannot invoke any action step. A pure tree may contain at most one leaf `ElementSlot` where consumer children are inserted.
+- `bound` elements may additionally read the defining app's declared queries and actions and use its models. Those references are validated against the defining app, including hidden-column rules. Exported bound elements cannot use `app.navigate`; private bound elements may navigate within their defining app.
+- Prop kinds are `string`, `number`, `boolean`, `date`, or `enum`. An enum prop requires a non-empty `enum: ["value", ...]` values array. A literal default and each literal consumer value must match the kind and, for enums, be one of those values. A required prop without a default must be supplied.
+
+Reference an element with an `ElementRef` node. Omit `app` for same-app reuse; cross-app references name the defining app id and require `export: true`. `instanceKey` is optional. Consumer `children` are accepted only when the target has an `ElementSlot`:
+
+```json
+{
+  "type": "ElementRef",
+  "props": {
+    "app": "<defining-app-id>",
+    "element": "statCard",
+    "props": { "label": "Open issues", "value": 12 },
+    "instanceKey": "openIssues"
+  },
+  "children": ["details"]
+}
+```
+
+Element references float to the defining app's current definition. `app` and `element` must be literal strings; dynamic references are not supported. The server rejects reference cycles and expansion deeper than five, missing/private targets, invalid props, and a breaking write to an exported element that other apps reference. Removing or unexporting an exported element, changing its mode, removing a declared prop, changing a prop kind, or adding a required prop without a default is breaking; publish the new contract under a new element name. If consumers are abandoned intentionally, retry the PUT, PATCH, or rollback with `"forceElementBreak": ["elementName"]`. The named consumers will then render an error once element rendering is available; deleting an entire app is deliberately not compatibility-gated.
 
 ### Models
 
@@ -418,7 +464,8 @@ An action-chain step is `{ "action": "<type>", "params": {...} }`. Available act
 - object keys merge recursively;
 - arrays and scalar values replace;
 - `null` deletes a key;
-- exception: every supplied `pages.<page>.elements.<id>`, `pages.<page>.params.<param>`, `actions.<name>`, and `models.<name>.columns.<col>` value is atomic and replaces that complete stored element/action/column/param declaration; `null` deletes it.
+- reusable-element disambiguation: a patch value for `elements.<name>` containing ONLY the `elements` key merges node-by-node; any other key present (`mode`, `root`, `props`, or `export`) makes it a full element replace — restate every field you want kept. In that node-by-node form, `elements.<name>.elements.<id>: null` deletes one node. Literal null nodes are rejected in a full element replace so they cannot be mistaken for deletions.
+- otherwise every supplied `pages.<page>.elements.<id>`, `pages.<page>.params.<param>`, `actions.<name>`, and `models.<name>.columns.<col>` value is atomic and replaces that complete declaration; `null` deletes it.
 
 `pages.<page>: null` deletes a page, except the current `defaultPage` cannot be deleted. `root`, `title`, and top-level `defaultPage` use ordinary merge semantics. A top-level `page` patch is rejected with guidance to patch `pages.<name>` instead.
 

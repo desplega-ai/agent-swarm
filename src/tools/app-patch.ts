@@ -7,6 +7,7 @@ import {
   AppMigrationSchema,
   AppSchemaMigrationError,
   AppSnapshotFailure,
+  ForceElementBreakSchema,
   migrateAppSchema,
   unexpectedMigrationDetails,
   withAppDefinitionLock,
@@ -23,7 +24,7 @@ export const registerAppPatchTool = (server: McpServer) => {
     {
       title: "Patch an app",
       description:
-        "Partially update an app. The definition uses RFC 7396 JSON Merge Patch semantics, except each pages.<page>.elements.<id>, pages.<page>.params.<param>, actions.<name>, and models.<name>.columns.<col> value is replaced atomically; null deletes a key.",
+        "Partially update an app, including zero-model pure-UI apps. Reusable elements are private by default: pure elements read declared props, allow $item/$index inside repeats, may expose one leaf ElementSlot, and cannot invoke actions; bound elements may use the defining app's queries/actions, while exported bound elements cannot navigate. Prop kinds include enum with a required non-empty enum values array. Pages or elements reuse them with literal ElementRef targets, and cross-app refs require export: true. RFC 7396 merge-patch applies with this element rule: a patch value containing ONLY the elements key merges node-by-node; any other key present (mode/root/props/export) makes it a full element replace — restate every field you want kept. Page elements/params, actions, and model columns are also atomic; null deletes. Breaking a referenced export is blocked and names consumers unless forceElementBreak explicitly names it.",
       annotations: { destructiveHint: false },
       inputSchema: z.object({
         appId: z.string().min(1).describe("App ID to patch."),
@@ -37,10 +38,13 @@ export const registerAppPatchTool = (server: McpServer) => {
           .record(z.string(), z.unknown())
           .optional()
           .describe(
-            "Definition merge patch. Objects merge recursively; arrays and scalars replace; null deletes. Element, param, action, and column entries replace atomically.",
+            "Definition merge patch. Objects merge recursively; arrays and scalars replace; null deletes. For elements.<name>, a value containing ONLY the elements key merges node-by-node; any mode/root/props/export key makes it a full replace, so restate every field to keep. Page-element, param, action, and column entries replace atomically.",
           ),
         migration: AppMigrationSchema.optional().describe(
           "Explicit per-column directives for lossy schema changes (set, from/map/else, coerce/else, or purge).",
+        ),
+        forceElementBreak: ForceElementBreakSchema.optional().describe(
+          "Exported element names whose known consumers may be broken by this patch. Use only to abandon those consumers explicitly.",
         ),
       }),
       outputSchema: swarmToolOutputSchema({
@@ -88,7 +92,10 @@ export const registerAppPatchTool = (server: McpServer) => {
             data: { issues: patch.issues },
           });
         }
-        const parsed = parseAppDefinition(patch.definition);
+        const parsed = parseAppDefinition(patch.definition, {
+          currentAppId: input.appId,
+          resolveApp: getApp,
+        });
         if (!parsed.success) {
           return toolErr("Invalid app definition.", {
             details: JSON.stringify({ issues: parsed.issues }, null, 2),
@@ -102,8 +109,10 @@ export const registerAppPatchTool = (server: McpServer) => {
           const migrated = await migrateAppSchema({
             appId: input.appId,
             previousDefinition: lockedExisting.definition,
+            previousRawDefinition: lockedExisting.definition,
             nextDefinition: parsed.definition,
             migration: input.migration,
+            forceElementBreak: input.forceElementBreak,
             snapshot: () => {
               try {
                 snapshotApp(input.appId, requestInfo.agentId);

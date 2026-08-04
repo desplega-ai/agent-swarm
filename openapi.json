@@ -356,7 +356,15 @@
                   "description": {
                     "type": "string"
                   },
-                  "definition": {}
+                  "definition": {},
+                  "forceElementBreak": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-zA-Z0-9_]{0,39}$"
+                    },
+                    "maxItems": 20
+                  }
                 },
                 "required": [
                   "name"
@@ -603,6 +611,14 @@
                         }
                       ]
                     }
+                  },
+                  "forceElementBreak": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-zA-Z0-9_]{0,39}$"
+                    },
+                    "maxItems": 20
                   }
                 },
                 "required": [
@@ -875,6 +891,14 @@
                         }
                       ]
                     }
+                  },
+                  "forceElementBreak": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-zA-Z0-9_]{0,39}$"
+                    },
+                    "maxItems": 20
                   }
                 }
               }
@@ -960,7 +984,7 @@
       },
       "patch": {
         "summary": "Patch an app",
-        "description": "Applies an RFC 7396 merge patch to the definition, with app actions, page elements, and model columns treated as atomic entries.",
+        "description": "Applies an RFC 7396 merge patch to the definition, with reusable elements, app actions, page elements, and model columns treated as atomic entries.",
         "tags": [
           "Apps"
         ],
@@ -1119,6 +1143,14 @@
                         }
                       ]
                     }
+                  },
+                  "forceElementBreak": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-zA-Z0-9_]{0,39}$"
+                    },
+                    "maxItems": 20
                   }
                 }
               }

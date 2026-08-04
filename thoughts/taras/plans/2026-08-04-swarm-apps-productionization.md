@@ -301,21 +301,21 @@ Caps: ≤ 20 elements per app, element subtree node budget same as pages. Relax 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/apps-elements.test.ts`
-- [ ] Lifecycle + prior suites: `bun run test:root -- src/tests/apps-spike5.test.ts src/tests/apps-spike.test.ts src/tests/apps-spike2.test.ts src/tests/apps-spike4.test.ts`
-- [ ] `bun run lint && bun run tsc:check && bash scripts/check-db-boundary.sh`
-- [ ] `bun run check:skill-sources`
-- [ ] Catalog drift guard: `cd apps/ui && bun run generate:catalog-schema && git diff --exit-code ../../src/apps/catalog.generated.json`
-- [ ] UI package still builds: `cd apps/ui && bun run lint && bunx tsc -b` (catalog.ts changed)
+- [x] `bun run test:root -- src/tests/apps-elements.test.ts` (17 tests post-review-round)
+- [x] Lifecycle + prior suites: `bun run test:root -- src/tests/apps-spike5.test.ts src/tests/apps-spike.test.ts src/tests/apps-spike2.test.ts src/tests/apps-spike4.test.ts`
+- [x] `bun run lint && bun run tsc:check && bash scripts/check-db-boundary.sh`
+- [x] `bun run check:skill-sources`
+- [x] Catalog drift guard: `cd apps/ui && bun run generate:catalog-schema && git diff --exit-code ../../src/apps/catalog.generated.json` (pre-commit form: regen byte-stable across runs, sha `9374a393…`)
+- [x] UI package still builds: `cd apps/ui && bun run lint && bunx tsc -b` (catalog.ts changed; APP_SEED.json pre-existing lint failure fixed in 167f5944)
 
 #### Automated QA (against :3113):
-- [ ] Via MCP `app-patch`: add an exported pure element (e.g. a stat card) to Notes Mini (`bae5343b…`); add a private bound element (query-backed list); `app-get` shows both; version history gained a snapshot
-- [ ] Create fixture app **"Element Consumer"** (record its id — reused by Phase 6/8 QA and Manual E2E); `app-patch` an `ElementRef` to the exported element → accepted; to the private one → rejected with the export issue
-- [ ] Attempt to delete the referenced exported element from Notes Mini → 400 issue naming Element Consumer; retry with `forceElementBreak: ["<name>"]` on a **DB copy** → accepted (don't break the live fixture)
-- [ ] Create a 0-model pure-UI app (pages + pure elements only) → accepted; `GET` 200
+- [x] Via MCP `app-patch`: add an exported pure element (e.g. a stat card) to Notes Mini (`bae5343b…`); add a private bound element (query-backed list); `app-get` shows both; version history gained a snapshot (names: `noteStatCard` / `recentNotes` — element names share AppNameSchema, hyphens invalid)
+- [x] Create fixture app **"Element Consumer"** (id `78eef421-f91a-44d8-a594-daad27c47cd0` — reused by Phase 6/8 QA and Manual E2E); `app-patch` an `ElementRef` to the exported element → accepted; to the private one → rejected with the export issue
+- [x] Attempt to delete the referenced exported element from Notes Mini → 400 issue naming Element Consumer; retry with `forceElementBreak: ["<name>"]` on a **DB copy** → accepted (don't break the live fixture)
+- [x] Create a 0-model pure-UI app (pages + pure elements only) → accepted; `GET` 200 ("Phase4 Zero Model" `ad83fefa-b733-427b-8e09-51b5ac5ffac8`)
 
 #### Manual Verification:
-- [ ] Review the element validation issue texts for agent-actionability
+- [x] Review the element validation issue texts for agent-actionability (QA + both review axes assessed messages; `$self` leak fixed in review round; delegated by Taras 2026-08-04)
 
 **Implementation Note**: Pause, confirm, commit `[phase 4] elements definition surface`. UI does not render `ElementRef` yet — that's Phase 6; an `ElementRef` in a live page renders as the renderer's fallback (acceptable mid-stack, don't add refs to live apps' default pages until Phase 6).
 
@@ -559,6 +559,7 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3113/api/apps/6f93f0c
   - Script actions still execute with the script owner's bindings (`apps.ts:830-831`) — viewer-bound credentials deliberately out of scope.
   - Hidden columns count toward the 40-col cap (spec: purge is the pressure valve).
   - Compat-gate cost: full-JSON scan of every app on each definition write, no reverse index — fine at spike scale, productization flag.
+  - **Phase 4 review-round notes (2026-08-04)**: (a) ElementRef expansion is memoized `(appId, elementName)` with a 100-expansion/100-issue budget + one summary issue (review found B^5 blowup: 4.7 KB payload → RangeError, 9.6 KB → 40 s event-loop stall; now sub-ms). Element subtrees capped at 150 nodes; PAGE node maps stay uncapped (legacy-brick risk — productization flag, revisit at port-to-main together with `$item`/`$index` page-mode consistency). (b) ElementRef `element`/`app` props are literal-only (dynamic `$state` values bypassed both validation and the compat gate). (c) Pure elements reject ALL action steps (incl. swarm.sdk/swarm.call — privilege-laundering shape); exported bound elements reject `app.navigate`. (d) Element atomicity: patch value with ONLY `elements` key = node-merge, any other key = full replace (documented in skill+tool; literal nulls in full-replace rejected fail-loud). (e) Compat gate additionally covers prop-kind changes + new-required-prop-without-default; unknown `forceElementBreak` names fail loud; parsed consumers scanned at node-maps only (no substring false positives). (f) Known gate gaps (flagged, not built): element-prop enum narrowing, optional→required transition on an existing prop, ElementSlot removal — consumer-breaking but ungated; TOCTOU consumer-add vs producer-remove race documented (Phase-6 error card catches). (g) Element/prop names share AppNameSchema (no hyphens — plan's hyphenated examples adapted to camelCase).
   - **Phase 2 derail notes (2026-08-04)**: (a) Full-definition validation on every PATCH means apps carrying pre-Phase-2 stale page bindings (e.g. undeclared column refs) 400 on ALL patches until repaired via atomic `pages.<p>.elements.<id>` replace — load-bearing behavior (forces page co-migration on hide), hit live on Spike3 Scratch PM; the apps skill must teach the repair move. (b) Definition writes serialize via `withAppDefinitionLock` (sentinel `__definition__`, always acquired before model locks; row writers never take it) — closes the RMW lost-update race found in review. (c) Hidden columns remain readable on row GETs — backward-compat surface, not confidentiality. (d) Snapshots are definition-only; row migrations are irreversible by design (spec excludes row-level history). (e) Perf productization flags: migration materializes the whole model in memory inside one synchronous transaction; index rebuild is entry-by-entry; `listAppRows` caps at 100k with no pagination while migration scans past it.
   - QA fixture continuity: Phases 3/6/8 QA reuse state created by earlier phases' QA (Spike3 Scratch PM version history, the "Element Consumer" app, PM Inbox userConfig) — restoring the DB from a backup invalidates later steps; re-create fixtures if you restore.
   - The `useAppQueries` signature rework (Phase 6) touches the Phase 5 mirror effect — if Phase 6 slips, Phase 5's shipped shape is still coherent on its own.

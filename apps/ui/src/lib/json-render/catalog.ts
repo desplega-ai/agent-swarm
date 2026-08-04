@@ -372,6 +372,15 @@ const detailListProps = z.object({
   columns: z.union([z.literal(1), z.literal(2)]).optional(),
 });
 
+const elementRefProps = z.object({
+  app: z.string().optional(),
+  element: z.string(),
+  props: z.record(z.string(), z.unknown()).optional(),
+  instanceKey: z.string().optional(),
+});
+
+const elementSlotProps = z.object({});
+
 export type TableColumn = z.infer<typeof tableColumnSchema>;
 export type TableRowAction = z.infer<typeof tableRowActionSchema>;
 export type TableRowActionConfirm = z.infer<typeof tableRowActionConfirmSchema>;
@@ -496,6 +505,16 @@ export const swarmCatalogSpec = {
       description:
         'Read-only label/value detail view for ONE record. Bind `data` to a single row — usually `{ "$state": "/queries/<name>/data/0" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `code` for raw/JSON values. Shows `emptyMessage` while the record is loading or missing.',
     },
+    ElementRef: {
+      props: elementRefProps,
+      slots: ["default"],
+      description:
+        "Reference a reusable element from this app or an exported element from another app. Consumer children are inserted at the target's ElementSlot.",
+    },
+    ElementSlot: {
+      props: elementSlotProps,
+      description: "Leaf insertion point for children supplied by an ElementRef consumer.",
+    },
   },
   actions: {
     "swarm.sdk": {
@@ -528,4 +547,16 @@ export const swarmCatalogSpec = {
   },
 };
 
-export const swarmCatalog = defineCatalog(schema, swarmCatalogSpec);
+const {
+  ElementRef: _elementRef,
+  ElementSlot: _elementSlot,
+  ...runtimeComponents
+} = swarmCatalogSpec.components;
+
+// ElementRef/ElementSlot are server-valid definition nodes in Phase 4, but the
+// runtime must continue treating them as unknown so Renderer uses its fallback.
+// Phase 6 expands references before rendering and can then unify these catalogs.
+export const swarmCatalog = defineCatalog(schema, {
+  components: runtimeComponents,
+  actions: swarmCatalogSpec.actions,
+});

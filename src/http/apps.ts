@@ -29,6 +29,7 @@ import {
   AppMigrationSchema,
   AppSchemaMigrationError,
   AppSnapshotFailure,
+  ForceElementBreakSchema,
   migrateAppSchema,
   withAppDefinitionLock,
 } from "../apps/schema-migrate";
@@ -101,6 +102,7 @@ const createAppRoute = route({
     name: z.string().min(1),
     description: z.string().optional(),
     definition: z.unknown(),
+    forceElementBreak: ForceElementBreakSchema.optional(),
   }),
   responses: {
     201: { description: "Created app" },
@@ -148,6 +150,7 @@ const rollbackAppRoute = route({
   body: z.object({
     version: z.number().int().positive(),
     migration: AppMigrationSchema.optional(),
+    forceElementBreak: ForceElementBreakSchema.optional(),
   }),
   responses: {
     200: { description: "Rolled back app", schema: appWriteResponseSchema },
@@ -183,6 +186,7 @@ const updateAppRoute = route({
     description: z.string().optional(),
     definition: z.unknown().optional(),
     migration: AppMigrationSchema.optional(),
+    forceElementBreak: ForceElementBreakSchema.optional(),
   }),
   responses: {
     200: { description: "Updated app", schema: appWriteResponseSchema },
@@ -199,7 +203,7 @@ const patchAppRoute = route({
   pattern: ["api", "apps", null],
   summary: "Patch an app",
   description:
-    "Applies an RFC 7396 merge patch to the definition, with app actions, page elements, and model columns treated as atomic entries.",
+    "Applies an RFC 7396 merge patch to the definition, with reusable elements, app actions, page elements, and model columns treated as atomic entries.",
   tags: ["Apps"],
   params: appParamsSchema,
   body: z.object({
@@ -207,6 +211,7 @@ const patchAppRoute = route({
     description: z.string().nullable().optional(),
     definition: z.record(z.string(), z.unknown()).optional(),
     migration: AppMigrationSchema.optional(),
+    forceElementBreak: ForceElementBreakSchema.optional(),
   }),
   responses: {
     200: { description: "Patched app", schema: appWriteResponseSchema },
@@ -667,7 +672,15 @@ export async function handleApps(
     const parsed = await createAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!authorizeAppWrite(req, res, myAgentId)) return true;
-    const definition = parseAppDefinition(parsed.body.definition);
+    if (parsed.body.forceElementBreak) {
+      jsonError(
+        res,
+        "forceElementBreak requires an existing app; new apps have no consumers to break",
+        400,
+      );
+      return true;
+    }
+    const definition = parseAppDefinition(parsed.body.definition, { resolveApp: getApp });
     if (!definition.success) {
       invalidDefinition(res, definition.issues);
       return true;
@@ -728,6 +741,7 @@ export async function handleApps(
         appId: parsed.params.id,
         version: parsed.body.version,
         migration: parsed.body.migration,
+        forceElementBreak: parsed.body.forceElementBreak,
         changedByAgentId: myAgentId,
       });
       json(res, { app: rolledBack.app, migration: rolledBack.migration });
@@ -1065,7 +1079,10 @@ export async function handleApps(
           responseHandled = true;
           return;
         }
-        const definition = parseAppDefinition(patch.definition);
+        const definition = parseAppDefinition(patch.definition, {
+          currentAppId: parsed.params.id,
+          resolveApp: getApp,
+        });
         if (!definition.success) {
           invalidDefinition(res, definition.issues);
           responseHandled = true;
@@ -1074,8 +1091,10 @@ export async function handleApps(
         const migrated = await migrateAppSchema({
           appId: parsed.params.id,
           previousDefinition: existing.definition,
+          previousRawDefinition: existing.definition,
           nextDefinition: definition.definition,
           migration: parsed.body.migration,
+          forceElementBreak: parsed.body.forceElementBreak,
           snapshot: () => {
             try {
               snapshotApp(parsed.params.id, myAgentId);
@@ -1135,7 +1154,10 @@ export async function handleApps(
         }
         let definition: AppDefinition | undefined;
         if (parsed.body.definition !== undefined) {
-          const parsedDefinition = parseAppDefinition(parsed.body.definition);
+          const parsedDefinition = parseAppDefinition(parsed.body.definition, {
+            currentAppId: parsed.params.id,
+            resolveApp: getApp,
+          });
           if (!parsedDefinition.success) {
             invalidDefinition(res, parsedDefinition.issues);
             responseHandled = true;
@@ -1150,8 +1172,10 @@ export async function handleApps(
         const migrated = await migrateAppSchema({
           appId: parsed.params.id,
           previousDefinition: appDefinitionNeedsRepair(existing) ? undefined : existing.definition,
+          previousRawDefinition: existing.definition,
           nextDefinition,
           migration: parsed.body.migration,
+          forceElementBreak: parsed.body.forceElementBreak,
           snapshot: () => {
             try {
               snapshotApp(parsed.params.id, myAgentId);
@@ -1199,6 +1223,8 @@ export async function handleApps(
       return true;
     }
     let deleted = false;
+    // Intentional float-model asymmetry: DELETE bypasses the ElementRef compatibility
+    // gate; consumers of the removed app degrade to the Phase 6 error card.
     await purgeAppRows(app.id, Object.keys(app.definition.models), () => {
       deleted = deleteApp(app.id);
     });

@@ -648,10 +648,13 @@ describe("apps spike 5 lifecycle", () => {
 
     const futureSurface = await request<{ issues: Array<{ path: string }> }>("/api/apps", {
       method: "POST",
-      body: JSON.stringify({ name: "Future surface", definition: { ...definition, elements: {} } }),
+      body: JSON.stringify({
+        name: "Future surface",
+        definition: { ...definition, userConfig: {} },
+      }),
     });
     expect(futureSurface.status).toBe(400);
-    expect(futureSurface.body.issues.some((issue) => issue.path === "elements")).toBe(true);
+    expect(futureSurface.body.issues.some((issue) => issue.path === "userConfig")).toBe(true);
 
     const appId = await createApp();
     const patch = await request<{ issues: Array<{ path: string; message: string }> }>(

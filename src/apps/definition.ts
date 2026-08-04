@@ -1,7 +1,12 @@
 import * as z from "zod";
 import { getScriptById } from "../be/scripts/db";
 import catalog from "./catalog.generated.json";
-import { crossPageDefinitionIssues, validatePage } from "./page-validator";
+import {
+  crossPageDefinitionIssues,
+  type ElementReferenceContext,
+  elementDefinitionIssues,
+  validatePage,
+} from "./page-validator";
 
 export const AppNameSchema = z.string().regex(/^[a-z][a-zA-Z0-9_]{0,39}$/, {
   message: "must start with a lowercase letter and contain only letters, numbers, or underscores",
@@ -145,11 +150,74 @@ const AppPageSchema = z
   })
   .strict();
 
+const ElementPropDefSchema = z
+  .object({
+    kind: ColumnKindSchema,
+    required: z.boolean().optional(),
+    enum: z.array(z.string()).min(1).optional(),
+    default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+  })
+  .strict()
+  .superRefine((prop, ctx) => {
+    if (prop.kind === "enum") {
+      if (!prop.enum) {
+        ctx.addIssue({ code: "custom", path: ["enum"], message: "enum values are required" });
+      }
+    } else if (prop.enum !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["enum"],
+        message: "enum values are only allowed for enum props",
+      });
+    }
+
+    if (prop.default === undefined) return;
+    const valid =
+      (prop.kind === "string" && typeof prop.default === "string") ||
+      (prop.kind === "number" &&
+        typeof prop.default === "number" &&
+        Number.isFinite(prop.default)) ||
+      (prop.kind === "boolean" && typeof prop.default === "boolean") ||
+      (prop.kind === "date" && typeof prop.default === "string" && isIso8601Date(prop.default)) ||
+      (prop.kind === "enum" &&
+        typeof prop.default === "string" &&
+        Boolean(prop.enum?.includes(prop.default)));
+    if (!valid) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["default"],
+        message: `default must be a valid ${prop.kind} value`,
+      });
+    }
+  });
+
+const AppElementSchema = z
+  .object({
+    mode: z.enum(["pure", "bound"]),
+    export: z.boolean().optional(),
+    props: z.record(AppNameSchema, ElementPropDefSchema).optional(),
+    root: z.string(),
+    elements: z.record(z.string(), z.unknown()),
+  })
+  .strict()
+  .superRefine((element, ctx) => {
+    if (Object.keys(element.elements).length > 150) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["elements"],
+        message: "must contain at most 150 nodes",
+      });
+    }
+  });
+
+export const AppElementsSchema = z.record(AppNameSchema, AppElementSchema);
+
 export const AppDefinitionSchema = z
   .object({
     models: z.record(AppNameSchema, ModelDefSchema),
     queries: z.record(AppNameSchema, AppQueryDefSchema).optional(),
     actions: z.record(AppNameSchema, AppActionDefSchema).optional(),
+    elements: AppElementsSchema.optional(),
     pages: z.record(AppNameSchema, AppPageSchema),
     defaultPage: AppNameSchema,
   })
@@ -175,8 +243,8 @@ export const AppDefinitionSchema = z
     }
 
     const modelCount = Object.keys(definition.models).length;
-    if (modelCount < 1 || modelCount > 10) {
-      ctx.addIssue({ code: "custom", path: ["models"], message: "must define 1 to 10 models" });
+    if (modelCount > 10) {
+      ctx.addIssue({ code: "custom", path: ["models"], message: "must define at most 10 models" });
     }
 
     const actionCount = Object.keys(definition.actions ?? {}).length;
@@ -185,6 +253,15 @@ export const AppDefinitionSchema = z
         code: "custom",
         path: ["actions"],
         message: "must define at most 20 actions",
+      });
+    }
+
+    const elementCount = Object.keys(definition.elements ?? {}).length;
+    if (elementCount > 20) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["elements"],
+        message: "must define at most 20 reusable elements",
       });
     }
 
@@ -257,6 +334,8 @@ export type AppQueryDef = z.infer<typeof AppQueryDefSchema>;
 export type AppActionDef = z.infer<typeof AppActionDefSchema>;
 export type AppPageParam = z.infer<typeof AppPageParamSchema>;
 export type AppPage = z.infer<typeof AppPageSchema>;
+export type AppElementPropDef = z.infer<typeof ElementPropDefSchema>;
+export type AppElement = z.infer<typeof AppElementSchema>;
 export type AppDefinition = z.infer<typeof AppDefinitionSchema>;
 
 export interface AppValidationIssue {
@@ -268,6 +347,7 @@ const APP_DEFINITION_TOP_LEVEL_KEYS = new Set([
   "models",
   "queries",
   "actions",
+  "elements",
   "pages",
   "defaultPage",
   "schemaVersion",
@@ -296,6 +376,7 @@ export function appDefinitionIssues(error: z.ZodError): AppValidationIssue[] {
 
 export function parseAppDefinition(
   input: unknown,
+  elementContext: ElementReferenceContext = {},
 ): { success: true; definition: AppDefinition } | { success: false; issues: AppValidationIssue[] } {
   if (isMergePatchObject(input) && Object.hasOwn(input, "page")) {
     return {
@@ -330,6 +411,7 @@ export function parseAppDefinition(
       validatePage(parsed.data, catalog, pageName),
     ),
     ...crossPageDefinitionIssues(parsed.data, catalog),
+    ...elementDefinitionIssues(parsed.data, catalog, elementContext),
   ];
   for (const [name, action] of Object.entries(parsed.data.actions ?? {})) {
     if (action.kind === "script" && !getScriptById(action.scriptId)) {
@@ -399,6 +481,22 @@ function definitionPatchIssues(stored: AppDefinition, patch: unknown): AppValida
     }
   }
 
+  if (isMergePatchObject(patch.elements)) {
+    for (const [elementName, elementPatch] of Object.entries(patch.elements)) {
+      if (!isMergePatchObject(elementPatch)) continue;
+      const replacesWholeElement = Object.keys(elementPatch).some((key) => key !== "elements");
+      if (!replacesWholeElement || !isMergePatchObject(elementPatch.elements)) continue;
+      for (const [nodeId, nodePatch] of Object.entries(elementPatch.elements)) {
+        if (nodePatch !== null) continue;
+        issues.push({
+          path: `elements.${elementName}.elements.${nodeId}`,
+          message:
+            "null node in a full element replace — to delete a node use elements.<name>.elements.<id> = null",
+        });
+      }
+    }
+  }
+
   return issues;
 }
 
@@ -415,7 +513,9 @@ function applyMergePatch(target: unknown, patch: unknown, path: string[]): unkno
   const result: Record<string, unknown> = isMergePatchObject(target) ? { ...target } : {};
   const entriesAreAtomic =
     (path.length === 1 && path[0] === "actions") ||
+    (path.length === 1 && path[0] === "elements") ||
     (path.length === 3 && path[0] === "models" && path[2] === "columns") ||
+    (path.length === 3 && path[0] === "elements" && path[2] === "elements") ||
     (path.length === 3 && path[0] === "pages" && (path[2] === "elements" || path[2] === "params"));
 
   for (const [key, value] of Object.entries(patch)) {
@@ -426,7 +526,16 @@ function applyMergePatch(target: unknown, patch: unknown, path: string[]): unkno
     defineMergePatchValue(
       result,
       key,
-      entriesAreAtomic ? value : applyMergePatch(result[key], value, [...path, key]),
+      entriesAreAtomic &&
+        !(
+          path.length === 1 &&
+          path[0] === "elements" &&
+          isMergePatchObject(value) &&
+          Object.keys(value).length === 1 &&
+          isMergePatchObject(value.elements)
+        )
+        ? value
+        : applyMergePatch(result[key], value, [...path, key]),
     );
   }
   return result;
@@ -435,8 +544,8 @@ function applyMergePatch(target: unknown, patch: unknown, path: string[]): unkno
 /**
  * Apply RFC 7396 JSON Merge Patch semantics to an app definition without
  * mutating either input. Individual action, page-element, and model-column
- * entries are intentionally atomic so callers cannot accidentally leave half
- * of one executable/renderable subtree behind.
+ * entries are intentionally atomic. A reusable-element patch containing only
+ * `elements` merges node-by-node; any other key makes it a full replacement.
  */
 export function applyAppDefinitionPatch(
   stored: AppDefinition,

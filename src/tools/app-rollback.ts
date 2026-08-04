@@ -5,6 +5,7 @@ import {
   AppMigrationSchema,
   AppSchemaMigrationError,
   AppSnapshotFailure,
+  ForceElementBreakSchema,
   unexpectedMigrationDetails,
 } from "@/apps/schema-migrate";
 import {
@@ -23,7 +24,7 @@ export const registerAppRollbackTool = (server: McpServer) => {
     {
       title: "Rollback an app",
       description:
-        "Restore a historical app snapshot through the schema migration engine. Lossy restores require explicit migration directives.",
+        "Restore a historical app snapshot through the schema migration and exported-element compatibility gates. Lossy row restores require migration directives; intentional consumer breaks require forceElementBreak.",
       annotations: { destructiveHint: false },
       rbac: { permission: "app.manage" },
       inputSchema: z.object({
@@ -31,6 +32,9 @@ export const registerAppRollbackTool = (server: McpServer) => {
         version: z.number().int().positive().describe("Snapshot version to restore."),
         migration: AppMigrationSchema.optional().describe(
           "Explicit per-column directives for a lossy restore (set, from/map/else, coerce/else, or purge).",
+        ),
+        forceElementBreak: ForceElementBreakSchema.optional().describe(
+          "Exported element names whose consumers may be broken by this restore.",
         ),
       }),
       outputSchema: swarmToolOutputSchema({
@@ -43,7 +47,7 @@ export const registerAppRollbackTool = (server: McpServer) => {
           .optional(),
       }),
     },
-    async ({ appId, version, migration }, requestInfo) => {
+    async ({ appId, version, migration, forceElementBreak }, requestInfo) => {
       if (!requestInfo.agentId) return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       const agent = getAgentById(requestInfo.agentId);
       const decision = can({
@@ -59,6 +63,7 @@ export const registerAppRollbackTool = (server: McpServer) => {
           appId,
           version,
           migration,
+          forceElementBreak,
           changedByAgentId: requestInfo.agentId,
         });
         const url = `/apps/${rolledBack.app.id}`;

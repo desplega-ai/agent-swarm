@@ -20,7 +20,9 @@
     "Table",
     "Form",
     "Drawer",
-    "DetailList"
+    "DetailList",
+    "ElementRef",
+    "ElementSlot"
   ],
   "actionTypes": [
     "swarm.sdk",
@@ -794,6 +796,43 @@
           }
         },
         "required": ["fields"],
+        "additionalProperties": false
+      }
+    },
+    "ElementRef": {
+      "description": "Reference a reusable element from this app or an exported element from another app. Consumer children are inserted at the target's ElementSlot.",
+      "slots": ["default"],
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "app": {
+            "type": "string"
+          },
+          "element": {
+            "type": "string"
+          },
+          "props": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "instanceKey": {
+            "type": "string"
+          }
+        },
+        "required": ["element"],
+        "additionalProperties": false
+      }
+    },
+    "ElementSlot": {
+      "description": "Leaf insertion point for children supplied by an ElementRef consumer.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
         "additionalProperties": false
       }
     }

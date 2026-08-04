@@ -3,13 +3,16 @@ import { getDb } from "../be/db";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   type AppDefinition,
+  AppElementsSchema,
   AppNameSchema,
   type AppValidationIssue,
   type ColumnDef,
   isIso8601Date,
   type ModelDef,
+  parseAppDefinition,
   SYSTEM_COLUMN_KINDS,
 } from "./definition";
+import { upgradeAppDefinition } from "./format-upgrades";
 import {
   type AppRow,
   listAllAppRowsForMigrationUnlocked,
@@ -34,6 +37,7 @@ export const AppMigrationDirectiveSchema = z.union([
 ]);
 
 export const AppMigrationSchema = z.record(AppNameSchema, AppMigrationDirectiveSchema);
+export const ForceElementBreakSchema = z.array(AppNameSchema).max(20);
 export type AppMigration = z.infer<typeof AppMigrationSchema>;
 export type AppMigrationDirective = z.infer<typeof AppMigrationDirectiveSchema>;
 
@@ -120,6 +124,227 @@ function summarizeCounts(
 
 function definitionsEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+interface StoredAppDefinitionRow {
+  id: string;
+  name: string;
+  definition: string;
+}
+
+interface BreakingElementChange {
+  name: string;
+  reasons: string[];
+}
+
+function previousElementsForCompatibility(
+  previousDefinition: AppDefinition | undefined,
+  previousRawDefinition: unknown,
+): AppDefinition["elements"] | undefined {
+  if (previousDefinition?.elements) return previousDefinition.elements;
+  const upgradedRaw = upgradeAppDefinition(previousRawDefinition);
+  const recoveredElements =
+    typeof upgradedRaw === "object" && upgradedRaw !== null && !Array.isArray(upgradedRaw)
+      ? AppElementsSchema.safeParse((upgradedRaw as Record<string, unknown>).elements)
+      : undefined;
+  return recoveredElements?.success ? recoveredElements.data : undefined;
+}
+
+function breakingElementChanges(
+  previousDefinition: AppDefinition | undefined,
+  previousRawDefinition: unknown,
+  nextDefinition: AppDefinition,
+): BreakingElementChange[] {
+  const previousElements = previousElementsForCompatibility(
+    previousDefinition,
+    previousRawDefinition,
+  );
+  // Fail open when even the producer's elements map cannot be recovered. Repairing
+  // a corrupt producer must not be blocked by corruption in its own old definition.
+  if (!previousElements) return [];
+  const changes: BreakingElementChange[] = [];
+  for (const [name, previous] of Object.entries(previousElements)) {
+    if (previous.export !== true) continue;
+    const next = nextDefinition.elements?.[name];
+    const reasons: string[] = [];
+    if (!next) reasons.push("removed");
+    else {
+      if (next.export !== true) reasons.push("made private");
+      if (next.mode !== previous.mode)
+        reasons.push(`mode changed from ${previous.mode} to ${next.mode}`);
+      const removedProps = Object.keys(previous.props ?? {}).filter(
+        (propName) => !Object.hasOwn(next.props ?? {}, propName),
+      );
+      if (removedProps.length > 0) reasons.push(`removed props: ${removedProps.join(", ")}`);
+      const changedPropKinds = Object.entries(previous.props ?? {})
+        .filter(
+          ([propName, prop]) =>
+            Object.hasOwn(next.props ?? {}, propName) && next.props![propName]!.kind !== prop.kind,
+        )
+        .map(([propName, prop]) => `${propName} (${prop.kind} to ${next.props![propName]!.kind})`);
+      if (changedPropKinds.length > 0) {
+        reasons.push(`changed prop kinds: ${changedPropKinds.join(", ")}`);
+      }
+      const newRequiredProps = Object.entries(next.props ?? {})
+        .filter(
+          ([propName, prop]) =>
+            !Object.hasOwn(previous.props ?? {}, propName) &&
+            prop.required === true &&
+            prop.default === undefined,
+        )
+        .map(([propName]) => propName);
+      if (newRequiredProps.length > 0) {
+        reasons.push(`added required props without defaults: ${newRequiredProps.join(", ")}`);
+      }
+    }
+    if (reasons.length > 0) changes.push({ name, reasons });
+  }
+  return changes;
+}
+
+function scanRawElementReferences(
+  value: unknown,
+  targetAppId: string,
+  elementNames: Set<string>,
+  found: Set<string>,
+): void {
+  if (typeof value !== "object" || value === null) return;
+  const definition = value as Record<string, unknown>;
+  const nodeMaps: unknown[] = [];
+  for (const collectionKey of ["pages", "elements"] as const) {
+    const collection = definition[collectionKey];
+    if (typeof collection !== "object" || collection === null || Array.isArray(collection)) {
+      continue;
+    }
+    for (const entry of Object.values(collection)) {
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
+      nodeMaps.push((entry as Record<string, unknown>).elements);
+    }
+  }
+
+  for (const nodeMap of nodeMaps) {
+    if (typeof nodeMap !== "object" || nodeMap === null || Array.isArray(nodeMap)) continue;
+    for (const node of Object.values(nodeMap)) {
+      if (typeof node !== "object" || node === null || Array.isArray(node)) continue;
+      const element = node as Record<string, unknown>;
+      if (
+        element.type !== "ElementRef" ||
+        typeof element.props !== "object" ||
+        element.props === null ||
+        Array.isArray(element.props)
+      ) {
+        continue;
+      }
+      const props = element.props as Record<string, unknown>;
+      if (
+        props.app === targetAppId &&
+        typeof props.element === "string" &&
+        elementNames.has(props.element)
+      ) {
+        found.add(props.element);
+      }
+    }
+  }
+}
+
+function exportedElementCompatibilityIssues(
+  appId: string,
+  previousDefinition: AppDefinition | undefined,
+  previousRawDefinition: unknown,
+  nextDefinition: AppDefinition,
+  forceElementBreak: string[],
+): AppValidationIssue[] {
+  const previousElements = previousElementsForCompatibility(
+    previousDefinition,
+    previousRawDefinition,
+  );
+  const knownElementNames = new Set([
+    ...Object.keys(previousElements ?? {}),
+    ...Object.keys(nextDefinition.elements ?? {}),
+  ]);
+  const forceIssues = forceElementBreak.flatMap((name, index) =>
+    knownElementNames.has(name)
+      ? []
+      : [
+          {
+            path: `forceElementBreak.${index}`,
+            message: `forceElementBreak names unknown element "${name}"`,
+          },
+        ],
+  );
+  if (forceIssues.length > 0) return forceIssues;
+
+  const forced = new Set(forceElementBreak);
+  const breaking = breakingElementChanges(
+    previousDefinition,
+    previousRawDefinition,
+    nextDefinition,
+  ).filter(({ name }) => !forced.has(name));
+  if (breaking.length === 0) return [];
+
+  const breakingNames = new Set(breaking.map(({ name }) => name));
+  const consumersByElement = new Map<string, string[]>();
+  const unscannableByElement = new Map<string, string[]>();
+  for (const name of breakingNames) {
+    consumersByElement.set(name, []);
+    unscannableByElement.set(name, []);
+  }
+
+  // Compatibility is intentionally a full definition scan on every write;
+  // Phase 4 has no reverse ElementRef index yet. This scan shares no lock with
+  // consumer writes, so a concurrent consumer-add can race a producer removal;
+  // Phase 6's unresolved-reference error card is the fallback for that TOCTOU.
+  const rows = getDb()
+    .prepare<StoredAppDefinitionRow, [string]>(
+      "SELECT id, name, definition FROM apps WHERE id != ? ORDER BY name, id",
+    )
+    .all(appId);
+  for (const row of rows) {
+    let raw: unknown;
+    let parseable = false;
+    try {
+      raw = JSON.parse(row.definition);
+      parseable = parseAppDefinition(upgradeAppDefinition(raw), {
+        currentAppId: row.id,
+        skipExternalTargetResolution: true,
+      }).success;
+    } catch {
+      raw = row.definition;
+    }
+
+    const found = new Set<string>();
+    if (typeof raw === "string") {
+      for (const name of breakingNames) {
+        if (raw.includes(appId) && raw.includes(`"element"`) && raw.includes(name)) {
+          unscannableByElement.get(name)!.push(`"${row.name}" (${row.id})`);
+        }
+      }
+      continue;
+    }
+    scanRawElementReferences(raw, appId, breakingNames, found);
+    for (const name of found) {
+      consumersByElement
+        .get(name)!
+        .push(`"${row.name}" (${row.id})${parseable ? "" : " [raw scan: invalid definition]"}`);
+    }
+  }
+
+  const issues: AppValidationIssue[] = [];
+  for (const change of breaking) {
+    const consumers = consumersByElement.get(change.name)!;
+    const unscannable = unscannableByElement.get(change.name)!;
+    if (consumers.length === 0 && unscannable.length === 0) continue;
+    const consumerText = consumers.length > 0 ? ` Referencing apps: ${consumers.join(", ")}.` : "";
+    const unscannableText =
+      unscannable.length > 0
+        ? ` ${unscannable.length} app${unscannable.length === 1 ? " is" : "s are"} unscannable but may reference it: ${unscannable.join(", ")}.`
+        : "";
+    issues.push({
+      path: `elements.${change.name}`,
+      message: `breaking change to exported element "${change.name}" (${change.reasons.join("; ")}).${consumerText}${unscannableText} Publish the breaking contract under a new element name, or retry with forceElementBreak: ["${change.name}"] to accept broken consumers.`,
+    });
+  }
+  return issues;
 }
 
 function ownColumn(model: ModelDef | undefined, columnName: string): ColumnDef | undefined {
@@ -580,10 +805,21 @@ function planModel(
 function buildPlan(
   appId: string,
   previousDefinition: AppDefinition | undefined,
+  previousRawDefinition: unknown,
   nextDefinition: AppDefinition,
   migration: AppMigration,
+  forceElementBreak: string[],
 ): MigrationPlan {
-  const issues = validateDirectiveOrder(migration);
+  const issues = [
+    ...validateDirectiveOrder(migration),
+    ...exportedElementCompatibilityIssues(
+      appId,
+      previousDefinition,
+      previousRawDefinition,
+      nextDefinition,
+      forceElementBreak,
+    ),
+  ];
   const report = structuredClone(EMPTY_REPORT);
   const oldSideUnparseable = previousDefinition === undefined;
   const affected = affectedModelNames(previousDefinition, nextDefinition, migration);
@@ -673,15 +909,24 @@ function withModelLocks<T>(
 export async function migrateAppSchema<T>(input: {
   appId: string;
   previousDefinition?: AppDefinition;
+  previousRawDefinition?: unknown;
   nextDefinition: AppDefinition;
   migration?: AppMigration;
+  forceElementBreak?: string[];
   snapshot: () => void;
   writeDefinition: () => T;
 }): Promise<{ result: T; migration: AppMigrationReport }> {
   const migration = input.migration ?? {};
   const modelNames = affectedModelNames(input.previousDefinition, input.nextDefinition, migration);
   return withModelLocks(input.appId, modelNames, () => {
-    const plan = buildPlan(input.appId, input.previousDefinition, input.nextDefinition, migration);
+    const plan = buildPlan(
+      input.appId,
+      input.previousDefinition,
+      input.previousRawDefinition,
+      input.nextDefinition,
+      migration,
+      input.forceElementBreak ?? [],
+    );
     if (plan.issues.length > 0) throw new AppSchemaMigrationError(plan.issues);
 
     const transaction = getDb().transaction(() => {

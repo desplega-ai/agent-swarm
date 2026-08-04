@@ -1,4 +1,9 @@
-import { type AppDefinition, type AppValidationIssue, SYSTEM_COLUMN_KINDS } from "./definition";
+import {
+  type AppDefinition,
+  type AppValidationIssue,
+  isIso8601Date,
+  SYSTEM_COLUMN_KINDS,
+} from "./definition";
 
 interface JsonSchema {
   type?: string | string[];
@@ -28,7 +33,15 @@ interface StateRef {
   value: string;
 }
 
-const ELEMENT_KEYS = new Set(["type", "props", "children", "on", "visible", "repeat", "watch"]);
+export const ELEMENT_KEYS = new Set([
+  "type",
+  "props",
+  "children",
+  "on",
+  "visible",
+  "repeat",
+  "watch",
+]);
 const UI_STATE_COMPONENTS = new Set(["SearchInput", "Select", "Tabs"]);
 const CONDITION_KEYS = new Set(["eq", "neq", "gt", "gte", "lt", "lte", "not"]);
 
@@ -56,6 +69,31 @@ function isParamBinding(value: unknown): value is { $param: string } {
   return (
     isPlainObject(value) && Object.keys(value).length === 1 && typeof value.$param === "string"
   );
+}
+
+function isRepeatBinding(value: unknown): boolean {
+  if (!isPlainObject(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length !== 1) return false;
+  if (keys[0] === "$item") return typeof value.$item === "string";
+  return keys[0] === "$index" && value.$index === true;
+}
+
+function collectRepeatBindingPaths(value: unknown, path: string, paths: string[]): void {
+  if (isRepeatBinding(value)) {
+    paths.push(path);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const [index, child] of value.entries()) {
+      collectRepeatBindingPaths(child, appendPath(path, index), paths);
+    }
+    return;
+  }
+  if (!isPlainObject(value)) return;
+  for (const [key, child] of Object.entries(value)) {
+    collectRepeatBindingPaths(child, appendPath(path, key), paths);
+  }
 }
 
 function isActionSentinel(value: unknown): boolean {
@@ -125,6 +163,8 @@ function validateSchema(
   if (isStateBinding(value)) {
     return { issues: [], stateRefs: [{ path, value: value.$state }] };
   }
+
+  if (isRepeatBinding(value)) return { issues: [], stateRefs: [] };
 
   if (isActionSentinel(value)) {
     return allowActionSentinels
@@ -619,7 +659,7 @@ function visitActionChain(
 }
 
 function visitPageActionSteps(
-  page: AppDefinition["pages"][string],
+  page: ElementTree,
   pagePath: string,
   visit: (step: Record<string, unknown>, path: string) => void,
 ): void {
@@ -720,17 +760,401 @@ export function crossPageDefinitionIssues(
   return dedupeIssues(issues);
 }
 
+export interface ElementReferenceTarget {
+  id: string;
+  name?: string;
+  definition: AppDefinition;
+  definitionError?: AppValidationIssue[];
+}
+
+export interface ElementReferenceContext {
+  currentAppId?: string;
+  resolveApp?: (appId: string) => ElementReferenceTarget | null;
+  /** Internal compatibility-scan mode: validate everything except unresolved external targets. */
+  skipExternalTargetResolution?: boolean;
+}
+
+interface ElementRefNode {
+  path: string;
+  node: Record<string, unknown>;
+}
+
+interface ElementTree {
+  root: string;
+  elements: Record<string, unknown>;
+}
+
+const MAX_ELEMENT_REF_DEPTH = 5;
+const MAX_ELEMENT_REF_EXPANSION_WORK = 100;
+const MAX_ELEMENT_REF_EXPANSION_ISSUES = 100;
+
+function collectElementRefs(
+  elements: Record<string, unknown>,
+  elementsPath: string,
+): ElementRefNode[] {
+  const refs: ElementRefNode[] = [];
+  for (const [elementId, rawElement] of Object.entries(elements)) {
+    if (!isPlainObject(rawElement) || rawElement.type !== "ElementRef") continue;
+    refs.push({ path: appendPath(elementsPath, elementId), node: rawElement });
+  }
+  return refs;
+}
+
+function reusableElementHasSlot(element: NonNullable<AppDefinition["elements"]>[string]): boolean {
+  return Object.values(element.elements).some(
+    (node) => isPlainObject(node) && node.type === "ElementSlot",
+  );
+}
+
+function isElementPropBinding(value: unknown): boolean {
+  return isStateBinding(value) || isRepeatBinding(value);
+}
+
+function elementPropAccepts(
+  prop: NonNullable<NonNullable<AppDefinition["elements"]>[string]["props"]>[string],
+  value: unknown,
+): boolean {
+  if (isElementPropBinding(value)) return true;
+  if (prop.kind === "string") return typeof value === "string";
+  if (prop.kind === "enum") {
+    return typeof value === "string" && Boolean(prop.enum?.includes(value));
+  }
+  if (prop.kind === "number") return typeof value === "number" && Number.isFinite(value);
+  if (prop.kind === "boolean") return typeof value === "boolean";
+  return typeof value === "string" && isIso8601Date(value);
+}
+
+function elementReferenceIssues(
+  definition: AppDefinition,
+  context: ElementReferenceContext,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const rootAppId = context.currentAppId ?? "$self";
+  const cleanTargetDepths = new Map<string, number>();
+  let expansionWork = 0;
+  let expansionIssueCount = 0;
+  let expansionStopped = false;
+
+  const stopExpansion = (path: string): void => {
+    if (expansionStopped) return;
+    expansionStopped = true;
+    issues.push(
+      issue(path, "element reference expansion exceeded budget — simplify the reference graph"),
+    );
+  };
+
+  const pushExpansionIssue = (found: AppValidationIssue): void => {
+    if (expansionStopped) return;
+    if (expansionIssueCount >= MAX_ELEMENT_REF_EXPANSION_ISSUES) {
+      stopExpansion(found.path);
+      return;
+    }
+    expansionIssueCount += 1;
+    issues.push(found);
+  };
+
+  const consumeExpansionWork = (path: string): boolean => {
+    if (expansionStopped) return false;
+    if (expansionWork >= MAX_ELEMENT_REF_EXPANSION_WORK) {
+      stopExpansion(path);
+      return false;
+    }
+    expansionWork += 1;
+    return true;
+  };
+
+  type ResolvedTargetApp = {
+    appId: string;
+    name?: string;
+    definition: AppDefinition;
+    unparseable?: boolean;
+  };
+  const resolvedApps = new Map<string, ResolvedTargetApp | null>();
+
+  const resolveTarget = (appId: string): ResolvedTargetApp | null => {
+    if (appId === rootAppId) return { appId, definition };
+    if (resolvedApps.has(appId)) return resolvedApps.get(appId)!;
+    const resolved = context.resolveApp?.(appId);
+    const target = resolved
+      ? {
+          appId,
+          name: resolved.name,
+          definition: resolved.definition,
+          unparseable: resolved.definitionError !== undefined,
+        }
+      : null;
+    resolvedApps.set(appId, target);
+    return target;
+  };
+
+  const describeTargetApp = (target: ResolvedTargetApp): string =>
+    target.appId === rootAppId && !target.name
+      ? "this app"
+      : `app "${target.name ?? target.appId}"`;
+
+  const validateReference = (
+    ref: ElementRefNode,
+    ownerDefinition: AppDefinition,
+    ownerAppId: string,
+    depth: number,
+    stack: Set<string>,
+  ): boolean => {
+    if (expansionStopped) return false;
+    if (!isPlainObject(ref.node.props)) return false;
+    let referenceClean = true;
+    const elementName = ref.node.props.element;
+    if (typeof elementName !== "string") {
+      pushExpansionIssue(
+        issue(
+          appendPath(ref.path, "props.element"),
+          "element and app must be literal strings — dynamic references are not supported",
+        ),
+      );
+      return false;
+    }
+    const explicitAppId = ref.node.props.app;
+    if (explicitAppId !== undefined && typeof explicitAppId !== "string") {
+      pushExpansionIssue(
+        issue(
+          appendPath(ref.path, "props.app"),
+          "element and app must be literal strings — dynamic references are not supported",
+        ),
+      );
+      return false;
+    }
+    const targetAppId = explicitAppId ?? ownerAppId;
+    if (depth > MAX_ELEMENT_REF_DEPTH) {
+      pushExpansionIssue(
+        issue(
+          appendPath(ref.path, "props.element"),
+          `element reference expansion exceeds the maximum depth of ${MAX_ELEMENT_REF_DEPTH}`,
+        ),
+      );
+      return false;
+    }
+
+    const targetApp =
+      targetAppId === ownerAppId
+        ? { appId: ownerAppId, definition: ownerDefinition }
+        : resolveTarget(targetAppId);
+    if (!targetApp) {
+      if (context.skipExternalTargetResolution && targetAppId !== ownerAppId) return true;
+      pushExpansionIssue(
+        issue(appendPath(ref.path, "props.app"), `referenced app "${targetAppId}" not found`),
+      );
+      return false;
+    }
+    if (targetApp.unparseable) {
+      pushExpansionIssue(
+        issue(
+          appendPath(ref.path, "props.app"),
+          `referenced app "${targetApp.name ?? targetAppId}" has an invalid definition and cannot supply elements`,
+        ),
+      );
+      return false;
+    }
+
+    const target = targetApp.definition.elements?.[elementName];
+    if (!target) {
+      const targetLocation = targetAppId === rootAppId ? "" : ` in ${describeTargetApp(targetApp)}`;
+      pushExpansionIssue(
+        issue(
+          appendPath(ref.path, "props.element"),
+          `element "${elementName}" not found${targetLocation}`,
+        ),
+      );
+      return false;
+    }
+    if (targetAppId !== ownerAppId && target.export !== true) {
+      referenceClean = false;
+      pushExpansionIssue(
+        issue(
+          appendPath(ref.path, "props.element"),
+          `element "${elementName}" in ${describeTargetApp(targetApp)} is private; set export: true before referencing it from another app`,
+        ),
+      );
+    }
+
+    const suppliedProps = isPlainObject(ref.node.props.props) ? ref.node.props.props : {};
+    const declaredProps = target.props ?? {};
+    for (const propName of Object.keys(suppliedProps)) {
+      const declared = declaredProps[propName];
+      if (!declared) {
+        referenceClean = false;
+        pushExpansionIssue(
+          issue(
+            `${ref.path}.props.props.${propName}`,
+            `prop "${propName}" is not declared by element "${elementName}"`,
+          ),
+        );
+      } else if (!elementPropAccepts(declared, suppliedProps[propName])) {
+        referenceClean = false;
+        pushExpansionIssue(
+          issue(
+            `${ref.path}.props.props.${propName}`,
+            `prop "${propName}" must be a ${declared.kind} value or a binding`,
+          ),
+        );
+      }
+    }
+    for (const [propName, declared] of Object.entries(declaredProps)) {
+      if (
+        declared.required === true &&
+        declared.default === undefined &&
+        !Object.hasOwn(suppliedProps, propName)
+      ) {
+        referenceClean = false;
+        pushExpansionIssue(
+          issue(
+            `${ref.path}.props.props.${propName}`,
+            `required prop "${propName}" is missing for element "${elementName}"`,
+          ),
+        );
+      }
+    }
+
+    if (
+      Array.isArray(ref.node.children) &&
+      ref.node.children.length > 0 &&
+      !reusableElementHasSlot(target)
+    ) {
+      referenceClean = false;
+      pushExpansionIssue(
+        issue(
+          appendPath(ref.path, "children"),
+          `element "${elementName}" has no ElementSlot and cannot accept children`,
+        ),
+      );
+    }
+
+    const targetKey = `${targetAppId}\0${elementName}`;
+    if (stack.has(targetKey)) {
+      const targetLocation = targetAppId === rootAppId ? "" : ` in ${describeTargetApp(targetApp)}`;
+      pushExpansionIssue(
+        issue(
+          appendPath(ref.path, "props.element"),
+          `recursive element reference cycle reaches "${elementName}"${targetLocation}`,
+        ),
+      );
+      return false;
+    }
+    const cleanAtDepth = cleanTargetDepths.get(targetKey);
+    if (cleanAtDepth !== undefined && depth <= cleanAtDepth) return referenceClean;
+    if (!consumeExpansionWork(appendPath(ref.path, "props.element"))) return false;
+
+    const nextStack = new Set(stack).add(targetKey);
+    let targetClean = true;
+    for (const nested of collectElementRefs(
+      target.elements,
+      `${ref.path}.target.${elementName}.elements`,
+    )) {
+      if (!validateReference(nested, targetApp.definition, targetAppId, depth + 1, nextStack)) {
+        targetClean = false;
+      }
+      if (expansionStopped) break;
+    }
+    if (targetClean && !expansionStopped) {
+      cleanTargetDepths.set(targetKey, Math.max(cleanAtDepth ?? 0, depth));
+    }
+    return referenceClean && targetClean;
+  };
+
+  for (const [pageName, page] of Object.entries(definition.pages)) {
+    if (expansionStopped) break;
+    for (const ref of collectElementRefs(page.elements, `pages.${pageName}.elements`)) {
+      validateReference(ref, definition, rootAppId, 1, new Set());
+      if (expansionStopped) break;
+    }
+  }
+  for (const [elementName, element] of Object.entries(definition.elements ?? {})) {
+    if (expansionStopped) break;
+    const stack = new Set([`${rootAppId}\0${elementName}`]);
+    for (const ref of collectElementRefs(element.elements, `elements.${elementName}.elements`)) {
+      validateReference(ref, definition, rootAppId, 1, stack);
+      if (expansionStopped) break;
+    }
+  }
+  return issues;
+}
+
+export function elementDefinitionIssues(
+  definition: AppDefinition,
+  catalog: AppCatalog,
+  context: ElementReferenceContext = {},
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  for (const [elementName, element] of Object.entries(definition.elements ?? {})) {
+    const elementPath = `elements.${elementName}`;
+    issues.push(
+      ...validatePage(definition, catalog, {
+        tree: element,
+        path: elementPath,
+        elementMode: element.mode,
+        elementProps: element.props,
+      }),
+    );
+
+    const slots = Object.entries(element.elements).filter(
+      ([, node]) => isPlainObject(node) && node.type === "ElementSlot",
+    );
+    if (element.mode === "pure" && slots.length > 1) {
+      for (const [slotId] of slots.slice(1)) {
+        issues.push(
+          issue(
+            `${elementPath}.elements.${slotId}`,
+            "pure elements may contain at most one ElementSlot",
+          ),
+        );
+      }
+    }
+
+    visitPageActionSteps(element, elementPath, (step, path) => {
+      const navigation = actionParams(step, path, definition, catalog, true);
+      issues.push(...navigation.issues);
+      if (element.mode === "pure") {
+        issues.push(
+          issue(
+            appendPath(path, "action"),
+            "pure elements cannot invoke actions — use a bound element",
+          ),
+        );
+      } else if (element.export === true && step.action === "app.navigate") {
+        issues.push(
+          issue(
+            appendPath(path, "action"),
+            "exported bound elements cannot use app.navigate; keep navigation in the consuming app or make the element private",
+          ),
+        );
+      }
+    });
+  }
+  for (const referenceIssue of elementReferenceIssues(definition, context)) {
+    issues.push(referenceIssue);
+  }
+  return dedupeIssues(issues);
+}
+
+interface ElementTreeValidationTarget {
+  tree: ElementTree;
+  path: string;
+  elementMode: "pure" | "bound";
+  elementProps?: Record<string, unknown>;
+}
+
 export function validatePage(
   definition: AppDefinition,
   catalog: AppCatalog,
-  pageName: string,
+  target: string | ElementTreeValidationTarget,
 ): AppValidationIssue[] {
   const issues: AppValidationIssue[] = [];
   const stateRefs: StateRef[] = [];
   const formIds = new Set<string>();
   const uiIds = new Set<string>();
-  const page = definition.pages[pageName]!;
-  const pagePath = appendPath("pages", pageName);
+  const pageName = typeof target === "string" ? target : undefined;
+  const options = typeof target === "string" ? undefined : target;
+  const page = options?.tree ?? definition.pages[pageName!]!;
+  const pagePath = options?.path ?? appendPath("pages", pageName!);
+  const pageParams = pageName ? (definition.pages[pageName]?.params ?? {}) : {};
   const elementsPath = appendPath(pagePath, "elements");
   const root = page.root;
   const elements = page.elements;
@@ -767,6 +1191,23 @@ export function validatePage(
       issues.push(issue(appendPath(elementPath, "type"), "must be a string"));
     } else if (!catalog.componentTypes.includes(type) || !component) {
       issues.push(issue(appendPath(elementPath, "type"), `unknown component type "${type}"`));
+    }
+
+    if (type === "ElementSlot") {
+      if (options?.elementMode !== "pure") {
+        issues.push(
+          issue(
+            appendPath(elementPath, "type"),
+            "ElementSlot is only allowed inside a pure reusable element",
+          ),
+        );
+      }
+      if (
+        Object.hasOwn(rawElement, "children") &&
+        (!Array.isArray(rawElement.children) || rawElement.children.length > 0)
+      ) {
+        issues.push(issue(appendPath(elementPath, "children"), "ElementSlot must be a leaf"));
+      }
     }
 
     if (component) {
@@ -872,7 +1313,7 @@ export function validatePage(
       }
     }
 
-    if (Object.hasOwn(rawElement, "children")) {
+    if (Object.hasOwn(rawElement, "children") && type !== "ElementSlot") {
       if (!Array.isArray(rawElement.children)) {
         issues.push(issue(appendPath(elementPath, "children"), "must be an array of element ids"));
       } else {
@@ -982,6 +1423,35 @@ export function validatePage(
     }
   }
 
+  if (options?.elementMode) {
+    for (const [elementId, rawElement] of elementEntries) {
+      if (!isPlainObject(rawElement)) continue;
+      const repeatBindingPaths: string[] = [];
+      collectRepeatBindingPaths(rawElement, `${elementsPath}.${elementId}`, repeatBindingPaths);
+      if (repeatBindingPaths.length === 0) continue;
+
+      let repeatedScope = Object.hasOwn(rawElement, "repeat");
+      let parentId = parentByChild.get(elementId);
+      const visitedParents = new Set<string>();
+      while (!repeatedScope && parentId && !visitedParents.has(parentId)) {
+        visitedParents.add(parentId);
+        const parent = elements[parentId];
+        repeatedScope = isPlainObject(parent) && Object.hasOwn(parent, "repeat");
+        parentId = parentByChild.get(parentId);
+      }
+      if (!repeatedScope) {
+        for (const bindingPath of repeatBindingPaths) {
+          issues.push(
+            issue(
+              bindingPath,
+              "$item and $index bindings are only allowed inside a repeated element",
+            ),
+          );
+        }
+      }
+    }
+  }
+
   const visited = new Set<string>();
   const visiting = new Set<string>();
   const visit = (elementId: string): void => {
@@ -1026,7 +1496,20 @@ export function validatePage(
   }
 
   for (const ref of stateRefs) {
-    const stateIssue = validateStateRef(ref, definition, formIds, uiIds, page.params ?? {});
+    const propMatch = /^\/props\/([^/]+)(?:\/.*)?$/.exec(ref.value);
+    let stateIssue: AppValidationIssue | null;
+    if (options?.elementMode && propMatch) {
+      stateIssue = Object.hasOwn(options.elementProps ?? {}, propMatch[1]!)
+        ? null
+        : issue(ref.path, `state reference targets unknown element prop "${propMatch[1]}"`);
+    } else if (options?.elementMode === "pure") {
+      stateIssue = issue(
+        ref.path,
+        `pure element state reference "${ref.value}" escapes /props/<declared>; use a declared prop or switch the element to bound mode`,
+      );
+    } else {
+      stateIssue = validateStateRef(ref, definition, formIds, uiIds, pageParams);
+    }
     if (stateIssue) issues.push(stateIssue);
   }
   return dedupeIssues(issues);

@@ -442,6 +442,7 @@ declare module "swarm-sdk" {
       description?: string | null;
       definition?: Record<string, unknown>;
       migration?: Record<string, unknown>;
+      forceElementBreak?: string[];
     }): Promise<unknown>;
     app_query(args: {
       appId: string;
@@ -452,6 +453,7 @@ declare module "swarm-sdk" {
       appId: string;
       version: number;
       migration?: Record<string, unknown>;
+      forceElementBreak?: string[];
     }): Promise<unknown>;
     app_upsert(args: {
       name: string;
@@ -459,6 +461,7 @@ declare module "swarm-sdk" {
       definition: Record<string, unknown>;
       appId?: string;
       migration?: Record<string, unknown>;
+      forceElementBreak?: string[];
     }): Promise<unknown>;
     page_create(args: Record<string, unknown>): Promise<unknown>;
     page_delete(args: { pageId?: string; slug?: string }): Promise<unknown>;

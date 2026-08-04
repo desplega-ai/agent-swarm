@@ -7,6 +7,7 @@ import {
   AppMigrationSchema,
   AppSchemaMigrationError,
   AppSnapshotFailure,
+  ForceElementBreakSchema,
   migrateAppSchema,
   unexpectedMigrationDetails,
   withAppDefinitionLock,
@@ -23,17 +24,22 @@ export const registerAppUpsertTool = (server: McpServer) => {
     {
       title: "Create or update an app",
       description:
-        "Stores a schema-backed app definition and returns its dashboard URL. Pass appId to update an existing app.",
+        "Stores a schema-backed app definition with models, queries/actions, pages, and reusable elements, then returns its dashboard URL. Elements are private by default: pure elements read declared props, allow $item/$index inside repeats, may expose one leaf ElementSlot, and cannot invoke actions; bound elements may use the defining app's queries/actions, while exported bound elements cannot navigate. Prop kinds include enum with a required non-empty enum values array. Pages or elements reuse them with literal ElementRef targets, and cross-app refs require export: true. Zero-model pure-UI apps are valid. Pass appId to update; breaking a referenced export is blocked by the compatibility gate unless forceElementBreak explicitly names it.",
       annotations: { destructiveHint: false },
       inputSchema: z.object({
         name: z.string().min(1).describe("Human-readable app name."),
         description: z.string().optional().describe("Optional short app description."),
         definition: z
           .unknown()
-          .describe("App models, named queries, and json-render page definition."),
+          .describe(
+            "App models, reusable pure/bound elements, named queries/actions, and json-render pages.",
+          ),
         appId: z.string().min(1).optional().describe("Existing app ID to update."),
         migration: AppMigrationSchema.optional().describe(
           "Explicit per-column directives for an update's lossy schema changes. Requires appId.",
+        ),
+        forceElementBreak: ForceElementBreakSchema.optional().describe(
+          "Exported element names whose known consumers may be broken by this update. Requires appId and should only be used to abandon those consumers explicitly.",
         ),
       }),
       outputSchema: swarmToolOutputSchema({
@@ -77,7 +83,10 @@ export const registerAppUpsertTool = (server: McpServer) => {
               data: { appId, url: `/apps/${appId}` },
             });
           }
-          const parsed = parseAppDefinition(input.definition);
+          const parsed = parseAppDefinition(input.definition, {
+            currentAppId: appId,
+            resolveApp: getApp,
+          });
           if (!parsed.success) {
             return toolErr("Invalid app definition.", {
               details: JSON.stringify({ issues: parsed.issues }, null, 2),
@@ -92,8 +101,10 @@ export const registerAppUpsertTool = (server: McpServer) => {
               previousDefinition: lockedExisting.definitionError
                 ? undefined
                 : lockedExisting.definition,
+              previousRawDefinition: lockedExisting.definition,
               nextDefinition: parsed.definition,
               migration: input.migration,
+              forceElementBreak: input.forceElementBreak,
               snapshot: () => {
                 try {
                   snapshotApp(appId, requestInfo.agentId);
@@ -135,7 +146,9 @@ export const registerAppUpsertTool = (server: McpServer) => {
 
       if (input.migration)
         return toolErr("migration requires appId; new apps have no rows to migrate.");
-      const parsed = parseAppDefinition(input.definition);
+      if (input.forceElementBreak)
+        return toolErr("forceElementBreak requires appId; new apps have no consumers to break.");
+      const parsed = parseAppDefinition(input.definition, { resolveApp: getApp });
       if (!parsed.success) {
         return toolErr("Invalid app definition.", {
           details: JSON.stringify({ issues: parsed.issues }, null, 2),
