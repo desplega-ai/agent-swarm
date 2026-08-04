@@ -87,30 +87,41 @@ export class ForeachExecutor extends BaseExecutor<
       ({ itemKey }) => !childStepsByNodeId.has(`${meta.nodeId}#${itemKey}`),
     ).length;
     const maxSteps = getMaxWorkflowStepsPerRun();
-    if (runSteps.length + childCountToCreate > maxSteps) {
+    // `>=` (not `>`): walkGraph's circuit breaker rejects any post-join walk once
+    // allSteps.length >= maxSteps, so a fan-out that lands exactly on the cap would
+    // spend all its child work and then fail routing the successor. Reserve that
+    // headroom here, before any child is dispatched.
+    if (childCountToCreate > 0 && runSteps.length + childCountToCreate >= maxSteps) {
       return {
         status: "failed",
-        error: `foreach would exceed ${maxSteps} total steps (WORKFLOW_MAX_STEPS_PER_RUN): ${runSteps.length} existing + ${childCountToCreate} children`,
+        error: `foreach would reach ${maxSteps} total steps (WORKFLOW_MAX_STEPS_PER_RUN): ${runSteps.length} existing + ${childCountToCreate} children leaves no room for the post-join walk`,
       };
+    }
+
+    // Materialize EVERY child step row before dispatching ANY child task. A task
+    // dispatched for an early child can complete (and trigger joinForeach) while
+    // later children are still being set up — the join must always see the full
+    // child set, with not-yet-dispatched children in a non-terminal state.
+    for (const { index, itemKey } of items) {
+      const childNodeId = `${meta.nodeId}#${itemKey}`;
+      if (childStepsByNodeId.has(childNodeId)) continue;
+      const childStepId = crypto.randomUUID();
+      const childStep = this.deps.db.createWorkflowRunStep({
+        id: childStepId,
+        runId: meta.runId,
+        nodeId: childNodeId,
+        nodeType: "agent-task",
+        input: { itemKey, index },
+      });
+      this.deps.db.updateWorkflowRunStep(childStepId, {
+        idempotencyKey: `${meta.runId}:${childNodeId}:0`,
+      });
+      childStepsByNodeId.set(childNodeId, childStep);
     }
 
     for (const { item, index, itemKey } of items) {
       const childNodeId = `${meta.nodeId}#${itemKey}`;
-      let childStep = childStepsByNodeId.get(childNodeId);
-      if (!childStep) {
-        const childStepId = crypto.randomUUID();
-        childStep = this.deps.db.createWorkflowRunStep({
-          id: childStepId,
-          runId: meta.runId,
-          nodeId: childNodeId,
-          nodeType: "agent-task",
-          input: { itemKey, index },
-        });
-        this.deps.db.updateWorkflowRunStep(childStepId, {
-          idempotencyKey: `${meta.runId}:${childNodeId}:0`,
-        });
-        childStepsByNodeId.set(childNodeId, childStep);
-      }
+      const childStep = childStepsByNodeId.get(childNodeId)!;
 
       // Re-walks must not regress terminal children or disturb their aggregate
       // inputs. Retry resets only the failed child to pending before arriving here.

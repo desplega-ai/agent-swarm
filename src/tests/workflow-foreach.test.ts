@@ -19,6 +19,7 @@ import { startWorkflowExecution, walkGraph } from "../workflows/engine";
 import { InProcessEventBus } from "../workflows/event-bus";
 import { AgentTaskExecutor } from "../workflows/executors/agent-task";
 import {
+  type AsyncExecutorResult,
   BaseExecutor,
   type ExecutorDependencies,
   type ExecutorResult,
@@ -31,6 +32,7 @@ import {
   retryFailedRun,
   setupWorkflowResumeListener,
 } from "../workflows/resume";
+import { startRetryPoller, stopRetryPoller } from "../workflows/retry-poller";
 import { interpolate } from "../workflows/template";
 
 const TEST_DB_PATH = "./test-workflow-foreach.sqlite";
@@ -51,6 +53,35 @@ class RecordExecutor extends BaseExecutor<
     config: z.infer<typeof RecordExecutor.configSchema>,
   ): Promise<ExecutorResult<z.infer<typeof RecordExecutor.outputSchema>>> {
     return { status: "success", output: { message: config.message } };
+  }
+}
+
+class FlakyAsyncExecutor extends BaseExecutor<
+  typeof FlakyAsyncExecutor.configSchema,
+  typeof FlakyAsyncExecutor.outputSchema
+> {
+  static readonly configSchema = z.object({});
+  static readonly outputSchema = z.object({ ok: z.boolean() });
+
+  readonly type = "flaky-async";
+  readonly mode = "async" as const;
+  readonly configSchema = FlakyAsyncExecutor.configSchema;
+  readonly outputSchema = FlakyAsyncExecutor.outputSchema;
+  attempts = 0;
+
+  protected async execute(): Promise<
+    ExecutorResult<z.infer<typeof FlakyAsyncExecutor.outputSchema>>
+  > {
+    this.attempts += 1;
+    if (this.attempts === 1) {
+      return { status: "failed", error: "transient dispatch failure" };
+    }
+    return {
+      status: "success",
+      async: true,
+      waitFor: "task.completed",
+      correlationId: "flaky",
+    } as AsyncExecutorResult<z.infer<typeof FlakyAsyncExecutor.outputSchema>>;
   }
 }
 
@@ -223,6 +254,71 @@ describe("workflow foreach", () => {
     expect(getWorkflowRun(runId)?.error).toBeUndefined();
   });
 
+  test("stale events from a superseded task cannot fail or complete a retried step", async () => {
+    const { bus, registry } = createRegistry(true);
+    const workflow = makeWorkflow(foreachDefinition());
+    const runId = await startWorkflowExecution(
+      workflow,
+      { items: agentItems.slice(0, 1) },
+      registry,
+    );
+    const child = foreachChildren(runId)[0]!;
+    const originalTask = getTaskByWorkflowRunStepId(child.id)!;
+
+    await failChild(runId, child.id, "first attempt broke", bus);
+    await waitFor(() => getWorkflowRun(runId)?.status === "failed");
+    await retryFailedRun(runId, registry);
+    expect(getWorkflowRun(runId)?.status).toBe("waiting");
+
+    // failTask's own after-commit bus emit lands on a later tick and can arrive
+    // AFTER the retry re-dispatched the step with a new task (the exact sequence
+    // that flaked CI shard 3). Neither a duplicate failure nor a completion for
+    // the superseded task may touch the step.
+    bus.emit("task.failed", {
+      taskId: originalTask.id,
+      failureReason: "first attempt broke",
+      workflowRunId: runId,
+      workflowRunStepId: child.id,
+    });
+    bus.emit("task.completed", {
+      taskId: originalTask.id,
+      output: "zombie output",
+      workflowRunId: runId,
+      workflowRunStepId: child.id,
+    });
+    await Bun.sleep(20);
+
+    expect(getWorkflowRun(runId)?.status).toBe("waiting");
+    expect(stepById(runId, child.id)?.status).toBe("waiting");
+
+    await completeChild(runId, child.id, "real retry output", bus);
+    await waitFor(() => getWorkflowRun(runId)?.status === "completed");
+    const aggregate = getContext(runId).reflect as {
+      results: Array<{ output: { taskOutput: string } }>;
+    };
+    expect(aggregate.results[0]?.output.taskOutput).toBe("real retry output");
+  });
+
+  test("nodes can reference their own run via the run.id context builtin", async () => {
+    const { registry } = createRegistry(false);
+    const workflow = makeWorkflow({
+      nodes: [
+        {
+          id: "receipt",
+          type: "record",
+          inputs: { runId: "run.id" },
+          config: { message: "run {{runId}}" },
+        },
+      ],
+    });
+    const runId = await startWorkflowExecution(workflow, {}, registry);
+
+    expect(getWorkflowRun(runId)?.status).toBe("completed");
+    expect((stepByNodeId(runId, "receipt")?.output as { message: string }).message).toBe(
+      `run ${runId}`,
+    );
+  });
+
   test("late task cancellation cannot resurrect a cancelled run", async () => {
     const { bus, registry } = createRegistry(true);
     const workflow = makeWorkflow({ ...foreachDefinition(), onNodeFailure: "continue" });
@@ -317,6 +413,143 @@ describe("workflow foreach", () => {
         process.env.WORKFLOW_MAX_STEPS_PER_RUN = originalLimit;
       }
     }
+  });
+
+  test("foreach rejects a fan-out that lands exactly on the step cap when reaching it", async () => {
+    // 1 existing (parent) + 3 children == cap of 4. Admitting this would spend all
+    // child work and then trip walkGraph's inclusive `>=` breaker when routing the
+    // "after" successor — so the executor must refuse upfront, before any dispatch.
+    const originalLimit = process.env.WORKFLOW_MAX_STEPS_PER_RUN;
+    process.env.WORKFLOW_MAX_STEPS_PER_RUN = "4";
+    try {
+      const { registry } = createRegistry(false);
+      const workflow = makeWorkflow(foreachDefinition());
+      const runId = await startWorkflowExecution(workflow, { items: agentItems }, registry);
+
+      expect(getWorkflowRun(runId)?.status).toBe("failed");
+      expect(stepByNodeId(runId, "reflect")?.error).toContain("WORKFLOW_MAX_STEPS_PER_RUN");
+      expect(foreachChildren(runId)).toHaveLength(0);
+      expect(taskCountForForeachChildren(runId)).toBe(0);
+    } finally {
+      if (originalLimit === undefined) {
+        delete process.env.WORKFLOW_MAX_STEPS_PER_RUN;
+      } else {
+        process.env.WORKFLOW_MAX_STEPS_PER_RUN = originalLimit;
+      }
+    }
+  });
+
+  test("all child rows are materialized before any child task is dispatched", async () => {
+    // A real agent can complete an early child while later children are still
+    // being set up; the join must never observe a partial child set. The
+    // executor's pre-dispatch linkedTask lookup is the first per-child call on
+    // the dispatch side, so the full fan-out must already be materialized then.
+    let childRowsAtFirstDispatch: number | null = null;
+    const wrappedDb: ExecutorDependencies["db"] = {
+      ...db,
+      getTaskByWorkflowRunStepId: (stepId: string) => {
+        if (childRowsAtFirstDispatch === null) {
+          const step = db.getWorkflowRunStep(stepId);
+          if (step) {
+            childRowsAtFirstDispatch = getWorkflowRunStepsByRunId(step.runId).filter((s) =>
+              s.nodeId.startsWith("reflect#"),
+            ).length;
+          }
+        }
+        return getTaskByWorkflowRunStepId(stepId);
+      },
+    };
+    const bus = new InProcessEventBus();
+    const deps: ExecutorDependencies = {
+      db: wrappedDb,
+      eventBus: bus,
+      interpolate: (template, ctx) => interpolate(template, ctx).result,
+    };
+    const registry = new ExecutorRegistry();
+    registry.register(new ForeachExecutor(deps));
+    registry.register(new AgentTaskExecutor(deps));
+    registry.register(new RecordExecutor(deps));
+
+    const workflow = makeWorkflow(foreachDefinition());
+    const runId = await startWorkflowExecution(workflow, { items: agentItems }, registry);
+
+    expect(childRowsAtFirstDispatch).toBe(3);
+    expect(foreachChildren(runId)).toHaveLength(3);
+    expect(taskCountForForeachChildren(runId)).toBe(3);
+  });
+
+  test("the retry poller keeps a re-dispatched async step waiting instead of routing successors", async () => {
+    const bus = new InProcessEventBus();
+    const deps: ExecutorDependencies = {
+      db,
+      eventBus: bus,
+      interpolate: (template, ctx) => interpolate(template, ctx).result,
+    };
+    const registry = new ExecutorRegistry();
+    const flaky = new FlakyAsyncExecutor(deps);
+    registry.register(flaky);
+    registry.register(new RecordExecutor(deps));
+
+    const workflow = makeWorkflow({
+      nodes: [
+        {
+          id: "dispatch",
+          type: "flaky-async",
+          config: {},
+          retry: { maxRetries: 1, strategy: "static", baseDelayMs: 1, maxDelayMs: 10 },
+          next: "after",
+        },
+        { id: "after", type: "record", config: { message: "routed" } },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(workflow, {}, registry);
+    expect(flaky.attempts).toBe(1);
+
+    try {
+      startRetryPoller(registry, 10);
+      await waitFor(() => flaky.attempts === 2);
+      await waitFor(() => getWorkflowRun(runId)?.status === "waiting");
+    } finally {
+      stopRetryPoller();
+    }
+
+    // The second attempt returned the async marker — the step is waiting on task
+    // events again, and the successor must not have run off the marker object.
+    expect(stepByNodeId(runId, "dispatch")?.status).toBe("waiting");
+    expect(stepByNodeId(runId, "after")).toBeUndefined();
+    expect(getWorkflowRun(runId)?.status).toBe("waiting");
+  });
+
+  test("definition validation rejects node-level outputSchema and validation on foreach", () => {
+    const base = {
+      id: "reflect",
+      type: "foreach",
+      config: {
+        over: [],
+        itemKey: "id",
+        body: { type: "agent-task", config: { template: "Reflect" } },
+      },
+    };
+    const withOutputSchema = validateDefinition({
+      nodes: [{ ...base, outputSchema: { type: "object" } }],
+    });
+    expect(withOutputSchema.valid).toBe(false);
+    expect(
+      withOutputSchema.errors.some((error) =>
+        error.includes("node-level outputSchema/validation is not supported in v1"),
+      ),
+    ).toBe(true);
+
+    const withValidation = validateDefinition({
+      nodes: [{ ...base, validation: { rules: [] } }],
+    });
+    expect(withValidation.valid).toBe(false);
+    expect(
+      withValidation.errors.some((error) =>
+        error.includes("node-level outputSchema/validation is not supported in v1"),
+      ),
+    ).toBe(true);
   });
 
   test("definition validation rejects reserved hashes and foreach concurrency", () => {

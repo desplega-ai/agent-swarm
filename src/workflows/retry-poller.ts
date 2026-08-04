@@ -6,9 +6,10 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import type { RetryPolicy } from "../types";
-import { checkpointStep, checkpointStepFailure } from "./checkpoint";
+import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { getSuccessors } from "./definition";
 import { interpolateNodeConfig, walkGraph } from "./engine";
+import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
 import { runStepValidation } from "./validation";
 
@@ -93,6 +94,14 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
                 step.retryCount,
                 retryPolicy,
               );
+            } else if ("async" in result && (result as AsyncExecutorResult).async) {
+              // An async executor (agent-task, foreach) re-dispatched its work —
+              // the step is waiting on task events again, exactly like the
+              // executeStep async path. Checkpointing the async marker as a
+              // completed output would route successors while the re-dispatched
+              // work is still running, and the eventual completion/join would
+              // find the parent already advanced.
+              checkpointStepWaiting(run.id, step.id, ctx);
             } else {
               // Success! Re-run validation if configured before checkpointing.
               if (node.validation) {

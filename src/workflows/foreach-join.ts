@@ -18,7 +18,10 @@ export interface SyntheticNodeId {
 }
 
 export function parseSyntheticNodeId(nodeId: string): SyntheticNodeId | null {
-  // Keep this parser aligned with `apps/ui/src/lib/synthetic-step-id.ts`.
+  // Keep this parser aligned with `apps/ui/src/lib/synthetic-step-id.ts`. This side
+  // stays permissive because every caller verifies the parsed parent is a real
+  // `foreach` node (resolveForeachParent / the executor's meta.nodeId match); the UI
+  // variant takes the foreach-id set explicitly for the same guarantee.
   const separatorIndex = nodeId.indexOf("#");
   if (separatorIndex <= 0 || separatorIndex === nodeId.length - 1) return null;
   return {

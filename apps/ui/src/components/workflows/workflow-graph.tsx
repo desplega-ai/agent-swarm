@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import "@xyflow/react/dist/style.css";
 import type { WorkflowDefinition, WorkflowRunStep } from "@/api/types";
 import { useTheme } from "@/hooks/use-theme";
-import { parseSyntheticStepId } from "@/lib/synthetic-step-id";
+import { foreachParentIds, parseSyntheticStepId } from "@/lib/synthetic-step-id";
 import { cn } from "@/lib/utils";
 import { ActionNode } from "./action-node";
 import { ConditionNode } from "./condition-node";
@@ -36,7 +36,7 @@ export function WorkflowGraph({
     const graph = toReactFlowGraph(definition, steps);
     // A selected synthetic `foreach` child step highlights the parent node it fanned out from.
     const selectedParentNodeId = selectedNodeId
-      ? parseSyntheticStepId(selectedNodeId).parentNodeId
+      ? parseSyntheticStepId(selectedNodeId, foreachParentIds(definition.nodes)).parentNodeId
       : null;
     if (selectedParentNodeId) {
       for (const node of graph.nodes) {

@@ -108,6 +108,7 @@ async function resumeFromTaskCompletion(
 
   const step = getWorkflowRunStep(event.workflowRunStepId!);
   if (!step || step.status !== "waiting") return;
+  if (isStaleTaskEvent(step.id, event)) return;
 
   const workflow = getWorkflow(run.workflowId);
   if (!workflow) return;
@@ -192,6 +193,7 @@ async function handleTaskFailure(
 
   const step = getWorkflowRunStep(event.workflowRunStepId!);
   if (!step || step.status !== "waiting") return;
+  if (isStaleTaskEvent(step.id, event)) return;
 
   const workflow = getWorkflow(run.workflowId);
   if (!workflow) return;
@@ -234,6 +236,19 @@ async function handleTaskFailure(
   } else {
     finalizeOrWait(run.id);
   }
+}
+
+/**
+ * A retried step has a NEW task bound to it. Task lifecycle events are emitted
+ * from several places (the db mutators' after-commit emits, test/manual emits,
+ * crash-recovery echoes) and can arrive on a later tick — after the step was
+ * reset and re-dispatched. An event whose taskId no longer matches the task
+ * currently bound to the step must not complete or fail a step it doesn't own.
+ */
+function isStaleTaskEvent(stepId: string, event: TaskEvent): boolean {
+  if (!event.taskId) return false;
+  const boundTask = getTaskByWorkflowRunStepId(stepId);
+  return boundTask != null && boundTask.id !== event.taskId;
 }
 
 /**

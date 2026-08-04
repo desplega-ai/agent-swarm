@@ -8,7 +8,7 @@ import type {
   WorkflowRunStep,
   WorkflowRunStepStatus,
 } from "@/api/types";
-import { parseSyntheticStepId } from "@/lib/synthetic-step-id";
+import { foreachParentIds, parseSyntheticStepId } from "@/lib/synthetic-step-id";
 
 const CONDITION_TYPES = new Set(["property-match", "code-match", "validate", "raw-llm"]);
 export type NodeCategory = "triggerNode" | "conditionNode" | "actionNode";
@@ -75,9 +75,10 @@ export function toReactFlowGraph(
   // of their own, so they aggregate by precedence onto their parent node instead.
   const statusMap = new Map<string, WorkflowRunStepStatus>();
   if (steps) {
+    const foreachIds = foreachParentIds(definition.nodes);
     const childStatuses = new Map<string, WorkflowRunStepStatus[]>();
     for (const step of steps) {
-      const { parentNodeId, itemKey } = parseSyntheticStepId(step.nodeId);
+      const { parentNodeId, itemKey } = parseSyntheticStepId(step.nodeId, foreachIds);
       if (itemKey === null) {
         statusMap.set(step.nodeId, step.status);
         continue;

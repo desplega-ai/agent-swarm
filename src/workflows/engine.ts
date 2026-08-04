@@ -161,6 +161,13 @@ export async function walkGraph(
   options: WorkflowExecutionOptions = {},
 ): Promise<void> {
   let nodeExecutionCount = 0;
+  // `run.id` is a context builtin (like `trigger` / `input`) so nodes can reference
+  // their own run — e.g. an audit/receipt node correlating its output with the run
+  // that produced it. Hydrated here so every path (initial walk, resume, retry,
+  // recovery) resolves it even when the stored context predates the builtin.
+  if (!("run" in ctx)) {
+    ctx.run = { id: runId };
+  }
   const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
 
   // Track active edges: "sourceId→targetId" — only edges on actually-taken

@@ -264,7 +264,9 @@ export function validateDefinition(
       if (!sourceNodeId) continue;
 
       // Skip built-in context sources
-      if (sourceNodeId === "trigger" || sourceNodeId === "input") continue;
+      if (sourceNodeId === "trigger" || sourceNodeId === "input" || sourceNodeId === "run") {
+        continue;
+      }
 
       // Check source node exists
       if (!nodeIds.has(sourceNodeId)) {
@@ -290,6 +292,17 @@ function validateForeachNode(node: WorkflowNode, errors: string[]): void {
   const config = node.config;
   if (Object.hasOwn(config, "concurrency")) {
     errors.push(`Node "${node.id}" foreach concurrency is not supported in v1`);
+  }
+
+  // The asynchronous join (joinForeach) checkpoints the aggregate and routes
+  // successors without re-entering executeStep, so node-level outputSchema /
+  // validation would be silently skipped on every async completion. Reject at
+  // authoring time rather than half-enforcing. The per-child agent-task
+  // body.config.outputSchema is unaffected.
+  if (node.outputSchema !== undefined || node.validation !== undefined) {
+    errors.push(
+      `Node "${node.id}" foreach node-level outputSchema/validation is not supported in v1`,
+    );
   }
 
   const over = config.over;

@@ -14,7 +14,7 @@ import { JsonTree } from "@/components/workflows/json-tree";
 import { StepCard } from "@/components/workflows/step-card";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
-import { parseSyntheticStepId } from "@/lib/synthetic-step-id";
+import { foreachParentIds, parseSyntheticStepId } from "@/lib/synthetic-step-id";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 export default function WorkflowRunDetailPage() {
@@ -33,6 +33,10 @@ export default function WorkflowRunDetailPage() {
   );
   const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const steps = useMemo(() => run?.steps ?? [], [run?.steps]);
+  const foreachIds = useMemo(
+    () => foreachParentIds(workflow?.definition.nodes),
+    [workflow?.definition.nodes],
+  );
 
   const setSelectedNodeId = useCallback(
     (nodeId: string | null) => setParam("node", nodeId),
@@ -70,7 +74,9 @@ export default function WorkflowRunDetailPage() {
       setSelectedNodeId(nodeId);
       const ownStepIds = steps
         .map((step) => step.nodeId)
-        .filter((stepNodeId) => parseSyntheticStepId(stepNodeId).parentNodeId === nodeId);
+        .filter(
+          (stepNodeId) => parseSyntheticStepId(stepNodeId, foreachIds).parentNodeId === nodeId,
+        );
       const next = new Set(expandedStepIds);
       for (const stepNodeId of ownStepIds.length > 0 ? ownStepIds : [nodeId]) {
         next.add(stepNodeId);
@@ -82,7 +88,7 @@ export default function WorkflowRunDetailPage() {
         el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       });
     },
-    [expandedStepIds, setExpandedSteps, setSelectedNodeId, steps],
+    [expandedStepIds, setExpandedSteps, setSelectedNodeId, steps, foreachIds],
   );
 
   // When a step card is clicked, highlight the node in the graph (don't toggle expand)
@@ -111,12 +117,12 @@ export default function WorkflowRunDetailPage() {
       !run.steps.some(
         (s) =>
           s.nodeId === selectedNodeId ||
-          parseSyntheticStepId(s.nodeId).parentNodeId === selectedNodeId,
+          parseSyntheticStepId(s.nodeId, foreachIds).parentNodeId === selectedNodeId,
       )
     ) {
       setSelectedNodeId(null);
     }
-  }, [selectedNodeId, run?.steps, setSelectedNodeId]);
+  }, [selectedNodeId, run?.steps, setSelectedNodeId, foreachIds]);
 
   useEffect(() => {
     if (!run?.steps || expandedStepIds.size === 0) return;
@@ -286,7 +292,7 @@ export default function WorkflowRunDetailPage() {
                   workflowNodes={workflow?.definition.nodes}
                   isSelected={
                     selectedNodeId === step.nodeId ||
-                    selectedNodeId === parseSyntheticStepId(step.nodeId).parentNodeId
+                    selectedNodeId === parseSyntheticStepId(step.nodeId, foreachIds).parentNodeId
                   }
                   isExpanded={expandedStepIds.has(step.nodeId)}
                   onClick={() => handleStepClick(step.nodeId)}

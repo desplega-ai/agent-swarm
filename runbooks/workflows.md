@@ -10,6 +10,7 @@ Upstream outputs are **not** available by default. Declare an `inputs` mapping:
 - Values are context paths (usually a node ID).
 - Agent-task output shape is `{ taskId, taskOutput }`, so access via `localName.taskOutput.field`.
 - For trigger data: `{ "pr": "trigger.pullRequest" }` → `{{pr.number}}`.
+- For the current run: `{ "runId": "run.id" }` → `{{runId}}` (builtin, like `trigger`/`input` — useful for receipts/audit nodes correlating their output with the run).
 
 Without `inputs`, upstream references silently resolve to empty strings — check `diagnostics.unresolvedTokens`.
 

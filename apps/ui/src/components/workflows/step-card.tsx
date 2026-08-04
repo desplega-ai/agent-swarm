@@ -15,7 +15,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { JsonTree } from "@/components/workflows/json-tree";
-import { parseSyntheticStepId } from "@/lib/synthetic-step-id";
+import { foreachParentIds, parseSyntheticStepId } from "@/lib/synthetic-step-id";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 export interface StepCardProps {
@@ -57,7 +57,10 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
   ({ step, workflowNodes, isSelected, isExpanded, onClick, onToggleExpand }, ref) => {
     // `foreach` children carry synthetic `<parentNodeId>#<itemKey>` ids — the definition only holds
     // the parent node, so label and config always resolve against the parent.
-    const { parentNodeId, itemKey } = parseSyntheticStepId(step.nodeId);
+    const { parentNodeId, itemKey } = parseSyntheticStepId(
+      step.nodeId,
+      foreachParentIds(workflowNodes),
+    );
     const node = workflowNodes?.find((n) => n.id === parentNodeId);
     const label = node?.label || parentNodeId;
     const duration =
