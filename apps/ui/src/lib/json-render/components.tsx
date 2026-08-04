@@ -1307,7 +1307,11 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
       </AlertCallout>
     );
   },
-  Badge: ({ props }) => <StatusPill text={String(props.text)} tone={props.tone ?? "neutral"} />,
+  Badge: ({ props }) => {
+    // Unset bindings resolve to undefined — render nothing instead of "undefined".
+    const text = props.text === null || props.text === undefined ? "" : String(props.text);
+    return text === "" ? null : <StatusPill text={text} tone={props.tone ?? "neutral"} />;
+  },
   Table: ({ props }) => <TableComponent props={props} />,
   Form: ({ props }) => <FormComponent props={props} />,
 };
