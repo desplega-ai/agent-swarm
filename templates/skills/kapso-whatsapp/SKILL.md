@@ -57,7 +57,7 @@ git clone --depth=1 https://github.com/gokapso/agent-skills /tmp/kapso-skills
 cd /tmp/kapso-skills/skills/integrate-whatsapp && npm i  # or observe-whatsapp / automate-whatsapp
 ```
 
-The Meta Cloud API is proxied at `$KAPSO_API_BASE_URL/meta/whatsapp/v24.0/...` (auth: `X-API-Key`). Kapso's own platform endpoints live at `$KAPSO_API_BASE_URL/platform/v1/...`.
+The Meta Cloud API is proxied at `$API_BASE/meta/whatsapp/v24.0/...` (auth: `X-API-Key`). Kapso's own platform endpoints live at `$API_BASE/platform/v1/...`.
 
 ## Inbound webhook payload (v2)
 
@@ -133,7 +133,7 @@ Media messages carry a Meta **media id** (`message.<type>.id`), not a URL. Two-s
 1. Resolve the media id to a temporary URL + metadata:
    ```bash
    curl -s -H "X-API-Key: $API_KEY" \
-     "$KAPSO_API_BASE_URL/meta/whatsapp/v24.0/<MEDIA_ID>"
+     "$API_BASE/meta/whatsapp/v24.0/<MEDIA_ID>"
    # → { "url": "https://lookaside.fbsbx.com/...", "mime_type": "...", "file_size": ..., "id": "...", "sha256": "..." }
    ```
 2. Download the binary from that `url` (Meta lookaside URLs expire fast — download immediately):
@@ -141,7 +141,7 @@ Media messages carry a Meta **media id** (`message.<type>.id`), not a URL. Two-s
    curl -sL -H "X-API-Key: $API_KEY" "<url>" -o /tmp/media.bin
    ```
 
-NB: verify the exact proxy path against a real media message if your swarm has only handled `text` inbound so far. If the lookaside `url` 403s with `X-API-Key`, retry through `$KAPSO_API_BASE_URL/meta/whatsapp/...`.
+NB: verify the exact proxy path against a real media message if your swarm has only handled `text` inbound so far. If the lookaside `url` 403s with `X-API-Key`, retry through `$API_BASE/meta/whatsapp/...`.
 
 ### Recommended handling per type (proposal — adapt to what your swarm has installed)
 
