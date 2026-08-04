@@ -488,6 +488,36 @@ describe("getBasePrompt — truncation", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Installed Skills section — bounded count + discovery pointers, never an
+// enumerated list (harnesses self-advertise skills; a list doubles the cost
+// and grows linearly with installed count)
+// ---------------------------------------------------------------------------
+describe("getBasePrompt — installed skills section", () => {
+  test("emits a count and discovery tooling, not per-skill lines", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      skillsSummary: [
+        { name: "commit", description: "Create a commit" },
+        { name: "deploy", description: "Ship it to production" },
+      ],
+    });
+    expect(result).toContain("Installed Skills");
+    expect(result).toContain("You have 2 skills installed");
+    expect(result).toContain("skill-list");
+    expect(result).toContain("skill-search");
+    // The section must stay O(1): no enumerated names or descriptions.
+    expect(result).not.toContain("/commit");
+    expect(result).not.toContain("Create a commit");
+    expect(result).not.toContain("Ship it to production");
+  });
+
+  test("omits the section when no skills are installed", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, skillsSummary: [] });
+    expect(result).not.toContain("Installed Skills");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Remote provider (no MCP, no local environment) — trait-aware prompt assembly
 // ---------------------------------------------------------------------------
 const remoteTraits: ProviderTraits = { hasMcp: false, hasLocalEnvironment: false };

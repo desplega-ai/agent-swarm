@@ -234,11 +234,14 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     }
   }
 
-  // Installed skills section (progressive disclosure — name + description only)
-  // Skip for providers without MCP — skills require the Skill MCP tool
+  // Installed skills section — a bounded count + discovery pointers, NOT an
+  // enumerated list. Harnesses already self-advertise skills from their local
+  // skills tree (Claude and pi inject name+description natively), so listing
+  // them here doubled the cost and grew linearly with the installed count.
+  // Skip for providers without MCP — the discovery tools are MCP tools.
   if (hasMcp && args.skillsSummary && args.skillsSummary.length > 0) {
-    const summaries = args.skillsSummary.map((s) => `- /${s.name}: ${s.description}`).join("\n");
-    prompt += `\n\n## Installed Skills\n\nThe following skills are available. Use the Skill tool to invoke them by name.\n\n${summaries}\n`;
+    const count = args.skillsSummary.length;
+    prompt += `\n\n## Installed Skills\n\nYou have ${count} skill${count === 1 ? "" : "s"} installed. Your harness loads them from its skills directory (each skill is a folder with a SKILL.md — e.g. ~/.claude/skills/, ~/.codex/skills/, ~/.pi/agent/skills/, ~/.opencode/skills/) and most harnesses surface them natively. To browse the full catalog use the \`skill-list\` MCP tool, find one by intent with \`skill-search\`, and read a skill's content with \`skill-get\`.\n`;
   }
 
   // Installed MCP servers section — skip for providers without MCP
