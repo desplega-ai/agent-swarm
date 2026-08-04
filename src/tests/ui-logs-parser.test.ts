@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  extractSubagentRuns,
   normalizeSessionLogs,
   parseSessionLogs,
   type SessionLogRecord,
@@ -592,6 +593,409 @@ describe("ui logs parser", () => {
       }),
       { type: "text", text: "Devin update" },
     ]);
+  });
+
+  test("extracts a completed Claude foreground Agent run from its paired result", () => {
+    const runs = extractSubagentRuns([
+      log("spawn", "claude", 1, {
+        type: "assistant",
+        timestamp: "2026-06-01T10:00:00.000Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_agent_1",
+              name: "Agent",
+              input: {
+                description: "Inspect parser fixtures",
+                prompt: "Find the relevant raw lifecycle shapes",
+                subagent_type: "researcher",
+              },
+            },
+          ],
+        },
+      }),
+      log("result", "claude", 2, {
+        type: "user",
+        timestamp: "2026-06-01T10:00:03.500Z",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_agent_1",
+              content: [{ type: "text", text: "Found three lifecycle shapes." }],
+            },
+          ],
+        },
+      }),
+    ]);
+
+    expect(runs).toEqual([
+      {
+        id: "toolu_agent_1",
+        provider: "claude",
+        label: "Inspect parser fixtures",
+        agentType: "researcher",
+        input: "Find the relevant raw lifecycle shapes",
+        outcome: "Found three lifecycle shapes.",
+        status: "completed",
+        startedAt: "2026-06-01T10:00:00.000Z",
+        finishedAt: "2026-06-01T10:00:03.500Z",
+        durationMs: 3_500,
+        background: false,
+        sourceRecordIds: ["spawn", "result"],
+      },
+    ]);
+  });
+
+  test("recognizes legacy Claude Task calls and leaves unpaired work running", () => {
+    const runs = extractSubagentRuns([
+      log("legacy-spawn", "claude-managed", 1, {
+        type: "agent.tool_use",
+        timestamp: "2026-06-01T10:01:00.000Z",
+        id: "toolu_legacy_1",
+        name: "Task",
+        input: { description: "Legacy task", prompt: "Keep working" },
+      }),
+    ]);
+
+    expect(runs).toEqual([
+      expect.objectContaining({
+        id: "toolu_legacy_1",
+        label: "Legacy task",
+        status: "running",
+        background: false,
+        durationMs: 0,
+      }),
+    ]);
+    expect(runs[0]?.finishedAt).toBeUndefined();
+  });
+
+  test("correlates Claude background completion by task id and ignores its launch ack", () => {
+    const runs = extractSubagentRuns([
+      log("background-spawn", "claude", 1, {
+        type: "assistant",
+        timestamp: "2026-06-01T10:02:00.000Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_background_1",
+              name: "Agent",
+              input: {
+                description: "Audit in background",
+                prompt: "Inspect all lifecycle states",
+                subagent_type: "auditor",
+                run_in_background: true,
+              },
+            },
+          ],
+        },
+      }),
+      log(
+        "background-started",
+        "claude",
+        2,
+        {
+          type: "system",
+          subtype: "task_started",
+          task_id: "child-task-1",
+          tool_use_id: "toolu_background_1",
+          task_type: "local_agent",
+        },
+        "2026-06-01T10:02:01.000Z",
+      ),
+      log(
+        "launch-ack",
+        "claude",
+        3,
+        {
+          type: "user",
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_background_1",
+                content: "Agent launched successfully.",
+              },
+            ],
+          },
+        },
+        "2026-06-01T10:02:02.000Z",
+      ),
+      log(
+        "background-done",
+        "claude",
+        4,
+        {
+          type: "system",
+          subtype: "task_notification",
+          task_id: "child-task-1",
+          status: "completed",
+          summary: "The audit passed.",
+        },
+        "2026-06-01T10:02:08.000Z",
+      ),
+    ]);
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toEqual(
+      expect.objectContaining({
+        id: "toolu_background_1",
+        childId: "child-task-1",
+        status: "completed",
+        background: true,
+        outcome: "The audit passed.",
+        startedAt: "2026-06-01T10:02:00.000Z",
+        finishedAt: "2026-06-01T10:02:08.000Z",
+        durationMs: 8_000,
+        sourceRecordIds: expect.arrayContaining([
+          "background-spawn",
+          "background-started",
+          "launch-ack",
+          "background-done",
+        ]),
+      }),
+    );
+    expect(runs[0]?.outcome).not.toContain("launched successfully");
+  });
+
+  test("does not treat Claude local_bash lifecycle rows as sub-agents", () => {
+    const runs = extractSubagentRuns([
+      log("bash-started", "claude", 1, {
+        type: "system",
+        subtype: "task_started",
+        task_id: "shell-job-1",
+        tool_use_id: "toolu_bash_1",
+        task_type: "local_bash",
+      }),
+      log("bash-done", "claude", 2, {
+        type: "system",
+        subtype: "task_notification",
+        task_id: "shell-job-1",
+        tool_use_id: "toolu_bash_1",
+        task_type: "local_bash",
+        status: "completed",
+        summary: "Command finished.",
+      }),
+    ]);
+
+    expect(runs).toEqual([]);
+  });
+
+  test("merges duplicate OpenCode task states and trusts terminal fields", () => {
+    const exactStart = Date.parse("2026-06-01T10:03:00.250Z");
+    const exactEnd = Date.parse("2026-06-01T10:03:04.750Z");
+    const runs = extractSubagentRuns([
+      log(
+        "oc-tool-start",
+        "opencode",
+        1,
+        { type: "tool_start", toolCallId: "call_task_1", toolName: "task", args: {} },
+        "2026-06-01T10:02:59.000Z",
+      ),
+      log(
+        "oc-pending",
+        "opencode",
+        2,
+        {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              type: "tool",
+              tool: "task",
+              callID: "call_task_1",
+              state: {
+                status: "pending",
+                input: { description: "Draft label", prompt: "Draft prompt" },
+              },
+            },
+          },
+        },
+        "2026-06-01T10:03:01.000Z",
+      ),
+      log(
+        "oc-running",
+        "opencode",
+        3,
+        {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              type: "tool",
+              tool: "task",
+              callID: "call_task_1",
+              state: {
+                status: "running",
+                input: { description: "Draft label", prompt: "Draft prompt" },
+              },
+            },
+          },
+        },
+        "2026-06-01T10:03:02.000Z",
+      ),
+      log(
+        "oc-completed",
+        "opencode",
+        4,
+        {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              type: "tool",
+              tool: "task",
+              callID: "call_task_1",
+              state: {
+                status: "completed",
+                input: {
+                  description: "Final label",
+                  prompt: "Final prompt",
+                  subagent_type: "general",
+                },
+                output: "Final child outcome",
+                metadata: { sessionId: "ses_child_1" },
+                time: { start: exactStart, end: exactEnd },
+              },
+            },
+          },
+        },
+        "2026-06-01T10:03:05.000Z",
+      ),
+      log(
+        "oc-late-pending",
+        "opencode",
+        5,
+        {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              type: "tool",
+              tool: "task",
+              callID: "call_task_1",
+              state: {
+                status: "pending",
+                input: { description: "Stale label", prompt: "Stale prompt" },
+                time: { start: Date.parse("2026-06-01T10:03:01.000Z") },
+              },
+            },
+          },
+        },
+        "2026-06-01T10:03:05.500Z",
+      ),
+      log(
+        "oc-tool-end",
+        "opencode",
+        6,
+        {
+          type: "tool_end",
+          toolCallId: "call_task_1",
+          toolName: "task",
+          result: "Duplicate generic result",
+        },
+        "2026-06-01T10:03:06.000Z",
+      ),
+    ]);
+
+    expect(runs).toEqual([
+      {
+        id: "call_task_1",
+        provider: "opencode",
+        label: "Final label",
+        agentType: "general",
+        input: "Final prompt",
+        outcome: "Final child outcome",
+        status: "completed",
+        startedAt: "2026-06-01T10:03:00.250Z",
+        finishedAt: "2026-06-01T10:03:04.750Z",
+        durationMs: 4_500,
+        background: false,
+        childId: "ses_child_1",
+        sourceRecordIds: [
+          "oc-pending",
+          "oc-running",
+          "oc-completed",
+          "oc-late-pending",
+          "oc-tool-start",
+          "oc-tool-end",
+        ],
+      },
+    ]);
+  });
+
+  test("extracts failed OpenCode task states with DB timestamp fallbacks", () => {
+    const runs = extractSubagentRuns([
+      log(
+        "oc-error",
+        "opencode",
+        1,
+        {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              type: "tool",
+              tool: "task",
+              callID: "call_task_error",
+              state: {
+                status: "error",
+                input: {
+                  description: "Failing child",
+                  prompt: "Try the unavailable operation",
+                },
+                error: "capacity exceeded",
+              },
+            },
+          },
+        },
+        "2026-06-01T10:04:00.000Z",
+      ),
+    ]);
+
+    expect(runs).toEqual([
+      expect.objectContaining({
+        id: "call_task_error",
+        status: "failed",
+        outcome: "capacity exceeded",
+        startedAt: "2026-06-01T10:04:00.000Z",
+        finishedAt: "2026-06-01T10:04:00.000Z",
+        durationMs: 0,
+      }),
+    ]);
+  });
+
+  test("ignores OpenCode task_action, malformed task parts, and unrelated harness events", () => {
+    const runs = extractSubagentRuns([
+      log("task-action", "opencode", 1, {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            type: "tool",
+            tool: "task_action",
+            callID: "call_action_1",
+            state: { status: "completed", input: {}, output: "created" },
+          },
+        },
+      }),
+      log("missing-call-id", "opencode", 2, {
+        type: "message.part.updated",
+        properties: {
+          part: { type: "tool", tool: "task", state: { status: "running" } },
+        },
+      }),
+      log("text-part", "opencode", 3, {
+        type: "message.part.updated",
+        properties: { part: { type: "text", callID: "call_text_1", text: "hello" } },
+      }),
+      log("codex-collab", "codex", 4, {
+        type: "item.started",
+        item: { id: "collab_1", type: "collab_tool_call", tool: "spawn_agent" },
+      }),
+    ]);
+
+    expect(runs).toEqual([]);
   });
 
   test("unwraps prose followed by embedded JSON", () => {
