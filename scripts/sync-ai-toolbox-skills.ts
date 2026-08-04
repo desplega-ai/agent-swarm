@@ -334,20 +334,48 @@ function assertManifestOutputPath(path: string, skillNames: Set<string>): string
 }
 
 /**
- * Decode a double-quoted YAML scalar exactly as `parseSkillContent` does, so an
- * upstream `description: "Build scripts: safely"` vendors as the string it
- * denotes instead of carrying literal quote characters into the generated
- * config, SKILL.md, and UI. Without this the round-trip guard cannot catch the
- * corruption — it compares against the already-corrupted value. Malformed
- * quoting falls back to the raw text.
+ * Decode a single-quoted YAML scalar body (the text between the quotes). The
+ * only escape YAML defines there is a doubled quote; a lone quote means the
+ * value is not a well-formed single-quoted scalar, so the caller keeps it raw.
+ */
+function decodeSingleQuotedBody(inner: string): string | null {
+  let out = "";
+  for (let i = 0; i < inner.length; i++) {
+    if (inner[i] !== "'") {
+      out += inner[i];
+      continue;
+    }
+    if (inner[i + 1] === "'") {
+      out += "'";
+      i++;
+      continue;
+    }
+    return null;
+  }
+  return out;
+}
+
+/**
+ * Decode a quoted YAML scalar, so an upstream
+ * `description: "Build scripts: safely"` (or its single-quoted spelling)
+ * vendors as the string it denotes instead of carrying literal quote
+ * characters into the generated config, SKILL.md, and UI. Without this the
+ * round-trip guard cannot catch the corruption — it compares against the
+ * already-corrupted value. Double-quoted handling matches `parseSkillContent`;
+ * single quotes are decoded here too because upstream skills are authored by
+ * hand and YAML treats both spellings as valid. Malformed quoting falls back to
+ * the raw text.
  */
 function decodeYamlScalar(raw: string): string {
   if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')) {
     try {
       return JSON.parse(raw) as string;
     } catch {
-      // keep raw
+      return raw;
     }
+  }
+  if (raw.length >= 2 && raw.startsWith("'") && raw.endsWith("'")) {
+    return decodeSingleQuotedBody(raw.slice(1, -1)) ?? raw;
   }
   return raw;
 }

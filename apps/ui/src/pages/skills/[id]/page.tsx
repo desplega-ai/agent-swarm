@@ -446,15 +446,19 @@ export default function SkillDetailPage() {
               {skill.name}/{viewingFile ? selectedFilePath : "SKILL.md"}
             </span>
           </div>
-          <div className="min-h-0 flex-1 overflow-auto px-6 py-8">
-            <div className="prose-doc mx-auto max-w-[72ch] text-[0.95rem] leading-[1.75]">
-              {viewingFile && !isMarkdownFile ? (
-                <MonacoCodeBlock language={fileLanguage} value={readableText} />
-              ) : (
-                <MarkdownView text={readableText} normalizeSoftBreaks={false} />
-              )}
+          {viewingFile && !isMarkdownFile ? (
+            // Code gets the full width and a definite height, so Monaco can
+            // scroll a wrapped or minified line instead of clipping it.
+            <div className="min-h-0 flex-1 overflow-hidden px-6 py-6">
+              <MonacoCodeBlock language={fileLanguage} value={readableText} fill />
             </div>
-          </div>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-auto px-6 py-8">
+              <div className="prose-doc mx-auto max-w-[72ch] text-[0.95rem] leading-[1.75]">
+                <MarkdownView text={readableText} normalizeSoftBreaks={false} />
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

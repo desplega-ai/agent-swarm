@@ -104,6 +104,25 @@ describe("ai-toolbox skill sync pure transforms", () => {
     expect(parsed.description).toBe('"unterminated escape \\"');
   });
 
+  test("decodes a single-quoted description, doubled quotes included", () => {
+    const parsed = parseSkillMd(
+      "fixture",
+      "---\nname: fixture\ndescription: 'Build scripts: don''t repeat yourself'\n---\n\nBody\n",
+    );
+    expect(parsed.description).toBe("Build scripts: don't repeat yourself");
+    expect(() =>
+      assertSkillRoundTrip(config("fixture", parsed.description), parsed.body),
+    ).not.toThrow();
+  });
+
+  test("keeps a single-quoted description with a lone inner quote as raw text", () => {
+    const parsed = parseSkillMd(
+      "fixture",
+      "---\nname: fixture\ndescription: 'a' 'b'\n---\n\nBody\n",
+    );
+    expect(parsed.description).toBe("'a' 'b'");
+  });
+
   test("rewrites prose paths relatively, plugin-root paths absolutely, and ignores near matches", () => {
     const rewrites: PathRewrite[] = [];
     const body = [
