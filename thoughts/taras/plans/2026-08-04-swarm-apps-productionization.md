@@ -3,7 +3,7 @@ date: 2026-08-04T10:00:00+02:00
 author: claude
 topic: "Swarm Apps productionization: lifecycle, elements, global ctx, viewer RBAC, userConfig"
 tags: [plan, swarm-apps, app-lifecycle, elements, rbac, user-config]
-status: in-progress # reviewed 2026-08-04 (see thoughts/taras/reviews/2026-08-04-swarm-apps-productionization-review.md); all critical+important findings applied
+status: completed # all 8 phases implemented+reviewed+QA'd 2026-08-04 (commits ac419df9..f22342f4); final Manual E2E green incl. zero-shot worker finale (REST path — MCP-surface re-run optional); see Appendix "Final E2E notes"
 branch: spike/swarm-apps
 last_updated: 2026-08-04
 last_updated_by: claude
@@ -547,6 +547,7 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3113/api/apps/6f93f0c
 
 ## Appendix
 
+- **Final E2E notes (2026-08-04)**: steps 1/2/7 run fresh (backup incl. WAL at /tmp/apps-spike-e2e.backup-1785869095.sqlite); steps 3-6 covered verbatim by phase 6/7/8 QA (evidence in those rounds). Zero-shot finale PASS both directions, 0 data loss: worker chose an injective enum mapping over the brief's naive boolean collapse (disclosed deviation, scored as correct judgment), used hidden-not-purge unprompted, deliberately probed the no-directive rollback 400 then supplied purge directives after proving derivability. CAVEAT: worker ran the REST path — native worker + stale worktree .mcp.json (points at :3013) left the MCP surface disabled; the "does it reach for app-history/app-diff" question needs an optional re-run with .mcp.json wired to :3113. Run findings: (a) migration 126 checksum-mismatch WARNING on the dev DB — the review round added a header comment after 126 had been applied there; fresh DBs apply clean; moot at port-time renumbering, but it violates the letter of the never-modify-applied rule — renumber/regenerate at port. (b) spike3-pm-sync schedule auto-disabled (calls the shrink-removed app_sync) — stale spike artifact, left disabled. (c) Pre-existing global dev-mode console error `useCurrentUser must be used within a CurrentUserProvider` (IdentityGate, providers.tsx:41) on every page incl. dashboard root — NOT an apps regression, separate ticket. (d) PM Inbox fixture ended richer than pre-run (4 flags, 3 notes persist), app_versions=15.
 - **Follow-up plans**: connections/sync reintroduction (as `{connection, entity}` + format upgrade); dashboard adoption of `aswt_` user tokens as default credential; per-app policy beyond `anyAuthenticated` (real grants UI); list-level app filtering under `app.use`; "app needs repair" dashboard state; port-to-main branch plan (migration renumbering 125/126 → next free numbers, PR series).
 - **Spec deviations (all flagged, review I8)**:
   - Format upgrade #2 (github-issues connector) dropped as moot post-shrink; upgrade #1 = convert `page`→`pages.main` + strip `sources` (purely defensive — no live rows carry either shape).
