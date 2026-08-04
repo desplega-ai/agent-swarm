@@ -72,7 +72,8 @@ export type MemoryDelta = {
   memoryId?: string;
   name?: string;
   key?: string;
-  scope?: "agent" | "swarm";
+  /** Only "swarm" is applicable — see validateMemory. */
+  scope?: "swarm";
   tags?: string[];
   reason?: string;
 };
@@ -307,8 +308,13 @@ function validateMemory(value: Record<string, unknown>): string | null {
   if (value.action === "delete" && !nonEmptyString(value.id) && !nonEmptyString(value.memoryId)) {
     return "memory delete requires id or memoryId";
   }
-  if (value.scope !== undefined && value.scope !== "agent" && value.scope !== "swarm")
-    return "memory scope must be agent or swarm";
+  if (value.scope !== undefined && value.scope !== "swarm") {
+    // inject_learning — the only memory write path exposed to scripts — always stores
+    // swarm scope (src/tools/inject-learning.ts). Accepting "agent" here would silently
+    // publish agent-private reflection to every worker while the receipt claimed
+    // otherwise, so an agent-scoped write is refused (HELD) rather than downgraded.
+    return "memory scope must be swarm (agent-scoped memory writes are not supported)";
+  }
   if (value.tags !== undefined && (!Array.isArray(value.tags) || !value.tags.every(nonEmptyString)))
     return "memory tags must be strings";
   return null;

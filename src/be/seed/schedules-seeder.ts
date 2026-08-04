@@ -9,6 +9,7 @@ import {
 } from "../db";
 import { ADDONS, type Addon, type AddonScheduleDef, canonicalJson } from "./addons";
 import type { Seeder, SeedItem } from "./types";
+import { isPristineSeededWorkflow } from "./workflows-seeder";
 
 type ScheduleSeedItem = SeedItem & { schedule: AddonScheduleDef };
 
@@ -114,10 +115,32 @@ export function createSchedulesSeeder(addons: readonly Addon[] = ADDONS): Seeder
       const existing = getScheduledTaskByName(schedule.name);
 
       if (schedule.targetType === "workflow") {
-        const workflow = getWorkflowByName(schedule.workflowName);
+        // Prefer the binding this schedule already has: re-resolving by name on every
+        // reseed would let a later rename/replacement silently re-point an operator's
+        // schedule. Only fall back to name resolution when there is nothing to keep, or
+        // when the current binding no longer refers to the workflow we ship.
+        const boundWorkflow = existing?.workflowId ? getWorkflow(existing.workflowId) : null;
+        const workflow =
+          boundWorkflow?.name === schedule.workflowName
+            ? boundWorkflow
+            : getWorkflowByName(schedule.workflowName);
         if (!workflow) {
           throw new Error(
             `Workflow "${schedule.workflowName}" for schedule "${schedule.name}" was not found`,
+          );
+        }
+        // A name match is not proof of ownership. If the operator already had a workflow
+        // called e.g. "dream", the workflow seeder preserved it as user-modified — binding
+        // an enabled add-on schedule to it would run arbitrary user graph every night
+        // without them opting in. Fail loudly (seed failures are logged and retried on the
+        // next boot) instead of scheduling something we did not ship.
+        if (
+          workflow.id !== boundWorkflow?.id &&
+          !isPristineSeededWorkflow(schedule.workflowName, addons)
+        ) {
+          throw new Error(
+            `Workflow "${schedule.workflowName}" for schedule "${schedule.name}" exists but is not ` +
+              `the unmodified add-on seed — refusing to schedule a workflow this add-on does not own`,
           );
         }
         const data = {

@@ -99,7 +99,9 @@ Fields: `kind`, `agentId`, `action`, `content`, `id` / `memoryId`, `name`, `key`
 
 Write memories the way you'd want to find them: the fact, the consequence, and the trigger that should fire. `"things went well"` is not a memory.
 
-Reality check: on the apply path a memory write persists `agentId` + `content`. `name` / `key` / `scope` / `tags` are accepted by the validator but do not currently change what gets stored — don't rely on them.
+`scope` may only be `swarm`. The apply path's memory write always stores swarm-scoped memory, so a delta asking for `scope: "agent"` is **held**, not quietly downgraded — a memory you meant to keep private would otherwise be readable by every worker while the receipt claimed agent scope. Omit the field unless you want to state it explicitly.
+
+Reality check: on the apply path a memory write persists `agentId` + `content`. `name` / `key` / `tags` are accepted by the validator but do not currently change what gets stored — don't rely on them.
 
 ### `skill` — create or update a procedural playbook
 

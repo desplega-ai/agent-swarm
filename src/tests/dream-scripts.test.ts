@@ -24,16 +24,18 @@ const SLIM_GATHER_RESULT = {
 
 function gatherHarness({
   configValue,
-  activity = { completedTasks: 1, failedTasks: 0, memoryWrites: 0 },
+  activity = { completedTasks: 1, failedTasks: 0 },
   roster = [],
 }: {
   configValue?: string;
-  activity?: { completedTasks: number; failedTasks: number; memoryWrites: number };
+  activity?: { completedTasks: number; failedTasks: number };
   roster?: Array<Record<string, unknown>>;
 } = {}) {
   const calls: string[] = [];
+  const queries: Array<{ sql: string; params: unknown[] }> = [];
   return {
     calls,
+    queries,
     ctx: {
       swarm: {
         async config_get() {
@@ -46,7 +48,8 @@ function gatherHarness({
             },
           };
         },
-        async db_query({ sql }: { sql: string }) {
+        async db_query({ sql, params = [] }: { sql: string; params?: unknown[] }) {
+          queries.push({ sql, params });
           if (sql.includes("AS completedTasks")) {
             calls.push("activity_query");
             return { success: true, data: { rows: [activity] } };
@@ -109,7 +112,7 @@ describe("dream-gather gates", () => {
 
   test("no activity returns the exact slim shape before roster or expensive reads", async () => {
     const harness = gatherHarness({
-      activity: { completedTasks: 0, failedTasks: 0, memoryWrites: 0 },
+      activity: { completedTasks: 0, failedTasks: 0 },
     });
 
     expect(await dreamGather({}, harness.ctx)).toEqual({
@@ -117,6 +120,27 @@ describe("dream-gather gates", () => {
       reason: "no-activity",
     });
     expect(harness.calls).toEqual(["config_get", "activity_query"]);
+  });
+
+  test("the activity query excludes the add-on's own runs and never counts memory writes", async () => {
+    const harness = gatherHarness({ roster: [{ id: "lead-1", name: "Lead", isLead: 1 }] });
+    await dreamGather({ preflightOnly: true }, harness.ctx);
+
+    const activityQuery = harness.queries.find((query) => query.sql.includes("AS completedTasks"));
+    expect(activityQuery).toBeDefined();
+    // Dream's own reflection/critique tasks carry the run id; excluding them is what keeps
+    // a quiet swarm quiet instead of re-arming the gate off last night's dream.
+    expect(activityQuery!.sql).toContain("t.workflowRunId NOT IN");
+    expect(activityQuery!.params).toEqual(["-1 days", "dream", "-1 days", "dream"]);
+    // Memory writes are unattributable (inject_learning records no provenance) and the
+    // receipt writes one every run, so they are deliberately not part of the signal.
+    expect(activityQuery!.sql).not.toContain("agent_memory");
+
+    const renamed = gatherHarness({ roster: [{ id: "lead-1", name: "Lead", isLead: 1 }] });
+    await dreamGather({ preflightOnly: true, selfWorkflowName: "nightly-dream" }, renamed.ctx);
+    expect(
+      renamed.queries.find((query) => query.sql.includes("AS completedTasks"))!.params,
+    ).toEqual(["-1 days", "nightly-dream", "-1 days", "nightly-dream"]);
   });
 
   test("no live Lead returns the exact slim shape before expensive gathering", async () => {
@@ -358,6 +382,39 @@ describe("dream scripts", () => {
     ).toContain("unexpected field(s) for memory: anchor");
   });
 
+  test("an agent-scoped memory write is rejected rather than silently published", () => {
+    // inject_learning — the only memory write path scripts have — always stores swarm
+    // scope. Accepting "agent" would expose agent-private reflection to every worker
+    // while the receipt recorded the requested scope as though it had been honored.
+    expect(
+      validateReflectionDelta({
+        kind: "memory",
+        agentId: "agent-1",
+        action: "write",
+        content: "remember this",
+        scope: "agent",
+      }),
+    ).toBe("memory scope must be swarm (agent-scoped memory writes are not supported)");
+    expect(
+      validateReflectionDelta({
+        kind: "memory",
+        agentId: "agent-1",
+        action: "write",
+        content: "remember this",
+        scope: "swarm",
+      }),
+    ).toBeNull();
+    // Skills still support both scopes — the restriction is memory-specific.
+    expect(
+      validateReflectionDelta({
+        kind: "skill",
+        action: "create",
+        content: "# skill",
+        scope: "agent",
+      }),
+    ).toBeNull();
+  });
+
   test("receipt includes hashes, locations, and memory identifiers", () => {
     const receipt = renderDreamReceipt(
       {
@@ -367,7 +424,7 @@ describe("dream scripts", () => {
             kind: "memory",
             action: "write",
             key: "daily-learning",
-            scope: "agent",
+            scope: "swarm",
             contentHash: "abc123",
             reason: "approved",
           },
@@ -389,7 +446,7 @@ describe("dream scripts", () => {
     );
 
     expect(receipt).toContain(
-      "APPLIED (1)\nagent-1: memory — approved [action=write, key=daily-learning, scope=agent, contentHash=abc123]",
+      "APPLIED (1)\nagent-1: memory — approved [action=write, key=daily-learning, scope=swarm, contentHash=abc123]",
     );
     expect(receipt).toContain(
       "HELD (1)\nagent-1: profile-op — anchor not found [file=CLAUDE, anchor=## Notes, op=append-under, contentHash=def456]",

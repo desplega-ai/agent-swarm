@@ -14,6 +14,7 @@ import {
   completeTask,
   createAgent,
   createTaskExtended,
+  createWorkflowRun,
   deleteSwarmConfigByKey,
   failTask,
   getDb,
@@ -229,18 +230,23 @@ describe("Dreaming seeded workflow", () => {
     expect(() => assertAddonReferences()).not.toThrow();
   });
 
-  test("runAllSeeders ships an enabled dream workflow and daily schedule", () => {
+  test("runAllSeeders ships an enabled dream workflow and a DISABLED daily schedule", () => {
     const workflow = getWorkflowByName("dream");
     const schedule = getScheduledTaskByName("dream-daily");
 
+    // The workflow seeds enabled so it is inspectable and can be triggered by hand...
     expect(workflow?.enabled).toBe(true);
+    // ...but nothing fires on its own until an operator opts in. Dreaming edits profiles,
+    // memories and skills; a fresh install must not acquire that silently. Flipping the
+    // shipped default is the staged-rollout switch (see ADDONS in src/be/seed/addons.ts).
     expect(schedule).toMatchObject({
-      enabled: true,
+      enabled: false,
       targetType: "workflow",
       workflowId: workflow?.id,
       cronExpression: "10 2 * * *",
       timezone: "UTC",
     });
+    expect(schedule?.nextRunAt ?? null).toBeNull();
     expect(validateDefinition(workflow!.definition)).toEqual({ valid: true, errors: [] });
   });
 
@@ -276,6 +282,31 @@ describe("Dreaming seeded workflow", () => {
       excerpt: "## Real anchor\nKeep this text.\n\n```md\n## Fenced example\n```",
       h2Anchors: ["## Real anchor"],
     });
+  });
+
+  test("the activity gate ignores Dreaming's own task output", async () => {
+    const lead = createAgent({ name: "Gate Lead", isLead: true, status: "idle" });
+    const workflow = getWorkflowByName("dream");
+    const run = createWorkflowRun({ id: crypto.randomUUID(), workflowId: workflow!.id });
+
+    // Yesterday's run: a completed reflection lane and a failed one, both inside today's
+    // one-day window. Counting them would make the gate self-sustaining — the swarm would
+    // fan out every night forever off nothing but its own dreaming.
+    const reflected = createTaskExtended("reflect on your day", { agentId: lead.id });
+    completeTask(reflected.id, "proposed 2 deltas");
+    const brokenLane = createTaskExtended("reflect on your day", { agentId: lead.id });
+    failTask(brokenLane.id, "lane crashed");
+    getDb()
+      .prepare("UPDATE agent_tasks SET workflowRunId = ? WHERE id IN (?, ?)")
+      .run(run.id, reflected.id, brokenLane.id);
+
+    expect(await runRealGather()).toMatchObject({ hasActivity: false, reason: "no-activity" });
+
+    // One task the swarm actually did re-opens the gate.
+    const realWork = createTaskExtended("ship the thing", { agentId: lead.id });
+    completeTask(realWork.id, "shipped");
+
+    expect(await runRealGather()).toMatchObject({ hasActivity: true });
   });
 
   test("skill and hygiene lanes reject deltas of the wrong kind", () => {

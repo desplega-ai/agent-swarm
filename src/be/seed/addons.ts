@@ -84,7 +84,14 @@ export const ADDONS: readonly Addon[] = [
         description: "Run the Dreaming add-on daily (fka compounding).",
         cronExpression: "10 2 * * *",
         timezone: "UTC",
-        enabled: true,
+        // Staged rollout: the whole add-on seeds on every install (workflow, scripts,
+        // skill) so it is inspectable and manually triggerable, but nothing fires until
+        // an operator enables this schedule. Dreaming edits agent profiles, memories and
+        // skills — that is not a default an install should acquire silently. Flipping this
+        // to `true` here is the rollout switch: `enabled` is inside the preservation hash,
+        // so installs that never touched the row pick the new default up on next boot,
+        // while anyone who already enabled (or explicitly disabled) it keeps their choice.
+        enabled: false,
         targetType: "workflow",
         workflowName: "dream",
       },

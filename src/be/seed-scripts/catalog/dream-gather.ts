@@ -7,6 +7,12 @@ export const argsSchema = z.object({
     .boolean()
     .optional()
     .describe("Stop after the enabled/activity/Lead checks so the workflow can gate rich gathering"),
+  selfWorkflowName: z
+    .string()
+    .optional()
+    .describe(
+      "Name of the Dreaming workflow whose own task output must not count as swarm activity (default 'dream')",
+    ),
 });
 
 function payload(response: any): any {
@@ -107,28 +113,43 @@ export default async function dreamGather(args: any, ctx: any) {
   if (!parsed.success) throw new Error(`invalid args: ${parsed.error.message}`);
   const days = parsed.data.days ?? 1;
   const windowModifier = `-${days} days`;
+  const selfWorkflowName = parsed.data.selfWorkflowName ?? "dream";
 
   const enabledResponse = await ctx.swarm.config_get({ key: "DREAMING_ENABLED" });
   if (!enabledFromConfig(enabledResponse)) return slimGatherResult("disabled");
 
+  // The gate must measure activity Dreaming did NOT cause, or it becomes self-sustaining:
+  // yesterday's reflection/critique tasks and receipt memory all land inside today's
+  // one-day window, so a quiet swarm would keep fanning out forever.
+  //   - tasks: every task a dream run creates carries that run's workflowRunId, so the
+  //     add-on's whole task output is excluded by joining back to the dream workflow.
+  //   - memories: dream's writes are NOT attributable at the row level (inject_learning
+  //     stores no provenance) and a receipt memory is written on every run, so counting
+  //     memory writes would re-arm the gate unconditionally. Agents write memories while
+  //     working tasks, so the task counters already carry that signal.
   const activityResponse = await ctx.swarm.db_query({
     sql: `SELECT
-            (SELECT count(*) FROM agent_tasks
-             WHERE status = 'completed'
-               AND julianday(finishedAt) > julianday('now', ?)) AS completedTasks,
-            (SELECT count(*) FROM agent_tasks
-             WHERE status = 'failed'
-               AND julianday(lastUpdatedAt) > julianday('now', ?)) AS failedTasks,
-            (SELECT count(*) FROM agent_memory
-             WHERE julianday(createdAt) > julianday('now', ?)) AS memoryWrites`,
-    params: [windowModifier, windowModifier, windowModifier],
+            (SELECT count(*) FROM agent_tasks t
+             WHERE t.status = 'completed'
+               AND julianday(t.finishedAt) > julianday('now', ?)
+               AND (t.workflowRunId IS NULL OR t.workflowRunId NOT IN (
+                 SELECT r.id FROM workflow_runs r
+                 JOIN workflows w ON w.id = r.workflowId
+                 WHERE w.name = ?))) AS completedTasks,
+            (SELECT count(*) FROM agent_tasks t
+             WHERE t.status = 'failed'
+               AND julianday(t.lastUpdatedAt) > julianday('now', ?)
+               AND (t.workflowRunId IS NULL OR t.workflowRunId NOT IN (
+                 SELECT r.id FROM workflow_runs r
+                 JOIN workflows w ON w.id = r.workflowId
+                 WHERE w.name = ?))) AS failedTasks`,
+    params: [windowModifier, selfWorkflowName, windowModifier, selfWorkflowName],
   });
   assertSucceeded(activityResponse, "Dreaming activity query");
   const activity = rowsToObjects(activityResponse)[0] ?? {};
   const activityCounts = {
     completedTasks: Number(activity.completedTasks) || 0,
     failedTasks: Number(activity.failedTasks) || 0,
-    memoryWrites: Number(activity.memoryWrites) || 0,
   };
   if (!Object.values(activityCounts).some((count) => count > 0)) {
     return slimGatherResult("no-activity");

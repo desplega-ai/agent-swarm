@@ -34,7 +34,7 @@ The output is not a report. It is edits: rules added to `CLAUDE.md`, gotchas add
 | Node | Type | What it does |
 | --- | --- | --- |
 | `gather` | script (`dream-gather`) | Cheap unprivileged preflight: the `DREAMING_ENABLED` setting, the activity signal, and the live agent roster (including which agent is Lead). Disabled swarms, quiet days, and installs with no Lead all stop here. |
-| `proceed?` | code-match | Routes to `done` unless dreaming is enabled **and** the window had activity. A quiet day costs exactly one cheap script execution. |
+| `proceed?` | code-match | Routes to `done` unless dreaming is enabled **and** the window had activity. A quiet day costs exactly one cheap script execution. Activity means tasks the swarm ran that Dreaming did not create — its own reflection and critique tasks are excluded, so a quiet swarm stays quiet instead of dreaming about its own dreaming. |
 | `gather-rich` | script (`dream-gather`, as Lead) | The full evidence pass — swarm-wide insights, blocker sweep, profile anchor inventory — run under the Lead's identity, re-gated by `rich-proceed?`. |
 | `hygiene-snapshot` | script (`gh-pr-snapshot`) | Snapshots the rotating pull-request target (skips gracefully when there is none), then fans out the three lanes. |
 | `reflect` | foreach → agent task | One reflection task per live agent, fanned out in parallel. Each agent reads its own `dream-agent-slice` and proposes deltas. |
@@ -59,7 +59,7 @@ The unit of change is a **ReflectionDelta**. There are four kinds:
 | Kind | Target | Notes |
 | --- | --- | --- |
 | `profile-op` | `SOUL` / `IDENTITY` / `CLAUDE` / `TOOLS` / `HEARTBEAT` | Anchored section edit: `append-under`, `replace-section`, or `remove-section`. |
-| `memory` | Agent memory | `write` (needs content) or `delete` (needs the memory id). |
+| `memory` | Swarm memory | `write` (needs content) or `delete` (needs the memory id). `scope` may only be `swarm` — the write path stores swarm-scoped memory, so an agent-scoped request is held rather than silently published. |
 | `skill` | Skills catalog | `create` or `update`; content is the whole skill body. |
 | `hygiene` | `HEARTBEAT` | Same anchored ops, plus an optional rotation-cursor advance. |
 
@@ -92,7 +92,7 @@ Both keys live on **Settings → Configuration**.
 
 | Key | Type | Default | Effect |
 | --- | --- | --- | --- |
-| `DREAMING_ENABLED` | boolean | *(absent — enabled)* | When set to `false`, the run stops at the gate node. No row means dreaming is on, so a fresh install dreams without any setup. |
+| `DREAMING_ENABLED` | boolean | *(absent — enabled)* | When set to `false`, the run stops at the gate node. This is the runtime kill switch, not the on switch: with no row a *triggered* run proceeds, but the `dream-daily` schedule still ships disabled, so nothing fires until you enable it. |
 | `DREAMING_SLACK_CHANNEL` | string | *(absent — no post)* | Slack channel id for the nightly receipt. With no value, the receipt is still written to memory; it is just not announced. |
 
 <Callout type="warn">
@@ -129,11 +129,17 @@ Each line is `<agent id>: <delta kind> — <reason>`; empty buckets render `- no
 
 ## Scheduling, disabling, retiming
 
-Dreaming ships as an [add-on](/docs/addons): a workflow named `dream`, a daily schedule that fires it, the `dreaming` skill, six catalog scripts (`dream-gather`, `dream-agent-slice`, `dream-apply`, `dream-receipt`, plus the shared `compound-insights` and `gh-pr-snapshot`), and the two configuration keys above. Everything is seeded and enabled on first boot.
+Dreaming ships as an [add-on](/docs/addons): a workflow named `dream`, a daily schedule that fires it, the `dreaming` skill, six catalog scripts (`dream-gather`, `dream-agent-slice`, `dream-apply`, `dream-receipt`, plus the shared `compound-insights` and `gh-pr-snapshot`), and the two configuration keys above. Everything is seeded on first boot.
 
+<Callout type="warn" title="The schedule ships disabled">
+  Dreaming edits agent profiles, memories, and skills, so a fresh install does not acquire it silently. Every piece seeds — you can open the `dream` workflow, read the scripts, and trigger a run by hand — but nothing fires on a timer until you **enable the `dream-daily` schedule** in the dashboard. Enabling it is also what pins it: `enabled` is part of the preservation hash, so your choice survives every later release.
+</Callout>
+
+- **Turn it on** — enable the `dream-daily` schedule (dashboard → Schedules). It runs daily at 02:10 UTC.
+- **Try it once first** — trigger the `dream` workflow manually and read the receipt before committing to a nightly cadence.
 - **Pause it** — set `DREAMING_ENABLED = false`. The schedule still fires; the run exits at the gate after one cheap script execution. Reversible at any time.
-- **Stop it entirely** — disable the schedule in the dashboard.
-- **Retime it** — change the schedule's cron (it runs daily at 02:10 UTC by default) or its timezone.
+- **Stop it entirely** — disable the schedule again.
+- **Retime it** — change the schedule's cron or its timezone.
 
 All three survive restarts, redeploys, and upgrades. Editing a seeded entity — flipping `enabled`, changing the cron, reworking the workflow graph — marks it as yours, and the seeder never overwrites it again. See [Add-ons](/docs/addons) for the full preservation contract and how to return an entity to the shipped version.
 

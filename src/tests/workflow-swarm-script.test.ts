@@ -303,7 +303,10 @@ describe("SwarmScriptExecutor", () => {
     } finally {
       getDb().prepare("UPDATE agents SET status = 'idle' WHERE id = ?").run(agentId);
     }
-  });
+    // Seeds the real script + workflow catalogs and spawns sandboxed subprocesses; the
+    // 5s bun default is not enough headroom on a loaded CI runner, and a timeout here
+    // interleaves the retry's beforeEach cleanup with the still-running attempt.
+  }, 60_000);
 
   test("the engine hash trusts a canonically equivalent real seeded add-on definition", async () => {
     const scriptSeed = await runSeeder(scriptsSeeder, {
@@ -404,7 +407,8 @@ describe("SwarmScriptExecutor", () => {
     expect(result.output?.result).toEqual({ applied: [], held: [], deferred: [] });
     expect(result.output?.contentHash).toBe(getSeedScriptContentHash("dream-apply"));
     expect(result.output?.contentHash).not.toBe(replacement.script.contentHash);
-  });
+    // Seeds the real catalogs and runs three sandboxed subprocesses — see the note above.
+  }, 60_000);
 
   test("swarm-script executor includes API connection descriptors in ctx.api", async () => {
     await upsertScriptConnection({

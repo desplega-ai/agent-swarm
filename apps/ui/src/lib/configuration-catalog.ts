@@ -629,7 +629,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "DREAMING_ENABLED",
         label: "Enable Dreaming",
         description:
-          "Run the daily Dreaming workflow. When no stored row exists, Dreaming is enabled by default.",
+          "Runtime kill switch for the Dreaming workflow. With no stored row a Dreaming run proceeds, but the dream-daily schedule ships disabled — enable that schedule to start the nightly pass.",
         kind: "boolean",
         defaultValue: "true",
         docsUrl: `${DOCS}addons/dreaming`,

@@ -1,17 +1,19 @@
 ---
 title: "Add-ons"
-description: "Bundled swarm capabilities that seed themselves at boot — what ships enabled by default, how your edits are preserved, and how to turn any of it off."
+description: "Bundled swarm capabilities that seed themselves at boot — what ships, what is on by default, how your edits are preserved, and how to turn any of it off."
 ---
 
 An **add-on** is a capability that ships with Agent Swarm as a bundle of ordinary entities: a workflow, the schedule that fires it, a skill, some catalog scripts, and a couple of configuration keys. Nothing about an add-on is special at runtime — once seeded, its workflow is a workflow you can open in the dashboard, its schedule is a schedule you can retime, and its skill is a skill you can edit.
 
-The only thing that makes it an add-on is that the swarm creates it for you on first boot, so a fresh install has the capability running with zero manual steps.
+The only thing that makes it an add-on is that the swarm creates it for you on first boot, so the capability is there — already wired together — with zero manual steps. Seeding an add-on is not the same as switching it on: an add-on whose schedule ships disabled is fully installed and inspectable, and waits for you to enable it.
 
-## What ships enabled by default
+## What ships
 
-| Add-on | What it does | Kill switch |
-| --- | --- | --- |
-| [**Dreaming**](/docs/addons/dreaming) *(fka compounding)* | A nightly reflection pass: every agent reviews its own day, the Lead critiques the proposals, and approved changes are applied surgically to profiles, memories, and skills. | `DREAMING_ENABLED` |
+| Add-on | What it does | On by default? | Kill switch |
+| --- | --- | --- | --- |
+| [**Dreaming**](/docs/addons/dreaming) *(fka compounding)* | A nightly reflection pass: every agent reviews its own day, the Lead critiques the proposals, and approved changes are applied surgically to profiles, memories, and skills. | **No** — seeded, but its `dream-daily` schedule ships disabled. Enable it to start dreaming. | `DREAMING_ENABLED` |
+
+An add-on that writes to your agents' profiles, memories, or skills ships **off**: it is installed so you can read it and try it by hand, and it starts only when you enable its schedule.
 
 ## How seeding works
 
@@ -39,6 +41,10 @@ The content hash covers the fields an operator would meaningfully change:
 - **Skills** — seeded skills are version-tracked with user-edit preservation; see the [skills authoring rules](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/skills.md).
 
 Changes made anywhere — dashboard, MCP tool, REST API, or direct DB write — count the same. There is no separate "opt out of updates" flag; editing *is* the opt-out.
+
+## Turning an add-on on
+
+An add-on that ships with its schedule disabled — Dreaming does — needs one deliberate step: **enable its schedule** in the dashboard. Everything else is already seeded, so there is nothing to install and nothing to re-seed. Because `enabled` is part of the preservation hash, that flip is permanent: a later release can change the shipped default without ever overriding the choice you made.
 
 ## Turning an add-on off
 

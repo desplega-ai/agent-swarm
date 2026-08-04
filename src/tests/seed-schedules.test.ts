@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   closeDb,
+  createWorkflow,
   getScheduledTaskByName,
   getWorkflowByName,
   initDb,
   updateScheduledTask,
+  updateWorkflow,
 } from "../be/db";
 import { getSeedState, runSeeder } from "../be/seed";
 import type { Addon } from "../be/seed/addons";
@@ -194,6 +196,62 @@ describe("schedules seeder", () => {
     expect(getScheduledTaskByName("test-task-schedule")).toMatchObject({
       enabled: false,
       cronExpression: "0 10 * * *",
+    });
+  });
+
+  test("refuses to schedule a user-owned workflow that merely shares the shipped name", async () => {
+    const addon = makeAddon();
+    // The operator already owns a workflow by this name. The workflow seeder preserves it
+    // (that is the contract) — but binding the add-on's enabled schedule to it by name
+    // would run their graph every night without them ever opting in.
+    const userOwned = createWorkflow({
+      name: "test-scheduled-workflow",
+      description: "Operator's own workflow that happens to share the name.",
+      definition: {
+        nodes: [{ id: "theirs", type: "agent-task", config: { template: "Their work." } }],
+      },
+    });
+
+    const { workflows, schedules } = await seedAddon(addon);
+
+    expect(workflows.skippedUserModified).toBe(1);
+    expect(getWorkflowByName("test-scheduled-workflow")?.id).toBe(userOwned.id);
+    expect(schedules.created).toBe(0);
+    expect(schedules.failed).toEqual([
+      {
+        key: "test-workflow-schedule",
+        error:
+          'Workflow "test-scheduled-workflow" for schedule "test-workflow-schedule" exists but ' +
+          "is not the unmodified add-on seed — refusing to schedule a workflow this add-on does not own",
+      },
+    ]);
+    expect(getScheduledTaskByName("test-workflow-schedule")).toBeNull();
+    // Nothing was recorded, so the next boot retries rather than treating it as seeded.
+    expect(getSeedState("schedule", "test-workflow-schedule")).toBeNull();
+  });
+
+  test("a later edit to the seeded workflow does not re-point or break its schedule", async () => {
+    const addon = makeAddon();
+    await seedAddon(addon);
+    const workflow = getWorkflowByName("test-scheduled-workflow");
+    const schedule = getScheduledTaskByName("test-workflow-schedule");
+    expect(schedule?.workflowId).toBe(workflow!.id);
+
+    // Operator reworks the graph — the schedule is already bound and must stay bound.
+    updateWorkflow(workflow!.id, {
+      definition: {
+        nodes: [{ id: "work", type: "agent-task", config: { template: "Reworked." } }],
+      },
+    });
+    const source = addon.schedules.find((item) => item.name === "test-workflow-schedule");
+    if (source) source.description = "Retimed by upstream.";
+
+    const result = await runSeeder(createSchedulesSeeder([addon]), { quiet: true });
+
+    expect(result.failed).toEqual([]);
+    expect(getScheduledTaskByName("test-workflow-schedule")).toMatchObject({
+      workflowId: workflow!.id,
+      description: "Retimed by upstream.",
     });
   });
 });

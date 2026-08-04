@@ -873,6 +873,13 @@ curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/workflow-run
 # 7. Kill-switch check: flip DREAMING_ENABLED off in Settings → Configuration (or PUT /api/config),
 #    re-trigger, assert the run ends at the gate with one gather execution.
 
+# 7b. Staged-rollout check (post-plan amendment, PR #1088 review round): the seeded
+#     `dream-daily` schedule ships DISABLED, so assert it seeds with enabled=0 and
+#     nextRunAt=null, then enable it and confirm the enable survives an API restart
+#     (it is a user edit, so the seeder must preserve it):
+curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/scheduled-tasks \
+  | jq '.tasks[] | select(.name=="dream-daily") | {enabled, nextRunAt}'
+
 # 8. Cleanup
 docker stop e2e-lead-$SUFFIX e2e-worker-$SUFFIX
 kill $(lsof -ti :3013)
