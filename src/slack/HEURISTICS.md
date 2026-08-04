@@ -111,6 +111,8 @@ Both are read from environment variables. `ADDITIVE_SLACK` must be exactly `"tru
 
 | Event | Slack Feedback | Description |
 |-------|---------------|-------------|
+| Accepted message creates or queues a task | :eyes: reaction | Acknowledges the swarm accepted the message, including follow-ups after all thread tasks finish |
+| Accepted message steers an active task | :eyes: reaction | Acknowledges the swarm accepted the steering message |
 | First non-mention message buffered | :eyes: reaction | Acknowledges the message was captured |
 | Additional message appended to buffer | :heavy_plus_sign: reaction | Indicates the message was added to existing buffer |
 | `!now` command used | :zap: reaction | Confirms instant flush was triggered |

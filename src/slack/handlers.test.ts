@@ -1,4 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import * as dbModule from "../be/db";
+import * as siblingAwarenessModule from "../tasks/sibling-awareness";
+import { ackSlackMessage } from "./ack";
+import { createAssistant } from "./assistant";
+import * as slackEnrichModule from "./enrich";
 import type { SlackFile } from "./files";
 import {
   buildAttachmentText,
@@ -7,6 +12,7 @@ import {
   formatFileSize,
   isBotMessage,
   isSwarmThreadRoot,
+  registerMessageHandler,
   type UserFilterConfig,
 } from "./handlers";
 
@@ -392,5 +398,160 @@ describe("isSwarmThreadRoot", () => {
 
   test("falls back to bot_id when bot user ID is unknown but bot_id is", () => {
     expect(isSwarmThreadRoot({ bot_id: "B_SWARM" }, null, "B_SWARM")).toBe(true);
+  });
+});
+
+describe("Slack accepted-message acknowledgements", () => {
+  const previousEnv = {
+    ADDITIVE_SLACK: process.env.ADDITIVE_SLACK,
+    SLACK_RENDER_V2: process.env.SLACK_RENDER_V2,
+    SLACK_THREAD_STEERING: process.env.SLACK_THREAD_STEERING,
+    STEERING_ENABLED: process.env.STEERING_ENABLED,
+  };
+
+  const lead = {
+    id: "11111111-2222-3333-4444-555555555555",
+    name: "Test Lead",
+    isLead: true,
+    status: "idle",
+  };
+  const completedTask = {
+    id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    agentId: lead.id,
+    status: "completed",
+  };
+
+  const createTaskSpy = spyOn(siblingAwarenessModule, "createTaskWithSiblingAwareness");
+  const getAgentByIdSpy = spyOn(dbModule, "getAgentById");
+  const getAgentWorkingOnThreadSpy = spyOn(dbModule, "getAgentWorkingOnThread");
+  const getAllAgentsSpy = spyOn(dbModule, "getAllAgents");
+  const getLatestLeadTaskInThreadSpy = spyOn(dbModule, "getLatestLeadTaskInThread");
+  const getMostRecentTaskInThreadSpy = spyOn(dbModule, "getMostRecentTaskInThread");
+  const resolveSlackUserIdSpy = spyOn(slackEnrichModule, "resolveSlackUserId");
+
+  const reactionsAdd = mock(async () => ({ ok: true }));
+  const client = {
+    auth: {
+      test: async () => ({ user_id: "U_SWARM_BOT", bot_id: "B_SWARM_BOT" }),
+    },
+    conversations: {
+      replies: async () => ({ messages: [], ok: true }),
+    },
+    reactions: { add: reactionsAdd },
+  };
+
+  let messageHandler: ((args: Record<string, unknown>) => Promise<void>) | undefined;
+  let assistantMessageHandler: ((args: Record<string, unknown>) => Promise<void>) | undefined;
+
+  beforeAll(() => {
+    process.env.ADDITIVE_SLACK = "false";
+    process.env.SLACK_RENDER_V2 = "false";
+    process.env.SLACK_THREAD_STEERING = "lead";
+    process.env.STEERING_ENABLED = "true";
+
+    registerMessageHandler({
+      event: (eventType: string, handler: (args: Record<string, unknown>) => Promise<void>) => {
+        if (eventType === "message") messageHandler = handler;
+      },
+    } as never);
+    assistantMessageHandler = (
+      createAssistant() as never as {
+        userMessage: Array<(args: Record<string, unknown>) => Promise<void>>;
+      }
+    ).userMessage[0];
+  });
+
+  beforeEach(() => {
+    createTaskSpy.mockClear();
+    getAgentByIdSpy.mockClear();
+    getAgentWorkingOnThreadSpy.mockClear();
+    getAllAgentsSpy.mockClear();
+    getLatestLeadTaskInThreadSpy.mockClear();
+    getMostRecentTaskInThreadSpy.mockClear();
+    resolveSlackUserIdSpy.mockClear();
+    reactionsAdd.mockClear();
+
+    createTaskSpy.mockImplementation(() => ({ id: "new-follow-up-task" }) as never);
+    getAgentByIdSpy.mockImplementation(() => lead as never);
+    getAgentWorkingOnThreadSpy.mockImplementation(() => lead as never);
+    getAllAgentsSpy.mockImplementation(() => [lead] as never);
+    getLatestLeadTaskInThreadSpy.mockImplementation(() => completedTask as never);
+    getMostRecentTaskInThreadSpy.mockImplementation(() => completedTask as never);
+    resolveSlackUserIdSpy.mockImplementation(async () => undefined);
+  });
+
+  afterAll(() => {
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    mock.restore();
+  });
+
+  test("thread reply after the last task completed gets an eyes reaction", async () => {
+    expect(messageHandler).toBeDefined();
+
+    await messageHandler!({
+      event: {
+        type: "message",
+        channel: "D_THREAD_ACK_TEST",
+        thread_ts: "2100000000.000001",
+        ts: "2100000000.000002",
+        text: "<@U_SWARM_BOT> one more follow-up",
+        user: "U_HUMAN",
+      },
+      body: { event_id: "evt_thread_ack_completed_001" },
+      client,
+      say: mock(async () => {}),
+    });
+
+    expect(createTaskSpy).toHaveBeenCalledTimes(1);
+    expect(reactionsAdd).toHaveBeenCalledWith({
+      channel: "D_THREAD_ACK_TEST",
+      name: "eyes",
+      timestamp: "2100000000.000002",
+    });
+  });
+
+  test("assistant thread reply after the last task completed gets an eyes reaction", async () => {
+    expect(assistantMessageHandler).toBeDefined();
+
+    await assistantMessageHandler!({
+      message: {
+        channel: "D_ASSISTANT_ACK_TEST",
+        thread_ts: "2200000000.000001",
+        ts: "2200000000.000002",
+        text: "one more DM follow-up",
+        user: "U_HUMAN",
+      },
+      body: { event_id: "evt_assistant_ack_completed_001" },
+      client,
+      say: mock(async () => {}),
+      setStatus: mock(async () => {}),
+      setTitle: mock(async () => {}),
+      getThreadContext: mock(async () => ({})),
+    });
+
+    expect(createTaskSpy).toHaveBeenCalledTimes(1);
+    expect(reactionsAdd).toHaveBeenCalledWith({
+      channel: "D_ASSISTANT_ACK_TEST",
+      name: "eyes",
+      timestamp: "2200000000.000002",
+    });
+  });
+
+  test("already_reacted is a successful no-op", async () => {
+    const alreadyReacted = mock(async () => {
+      throw { data: { error: "already_reacted" } };
+    });
+
+    await expect(
+      ackSlackMessage(
+        { reactions: { add: alreadyReacted } } as never,
+        "D_THREAD_ACK_TEST",
+        "2100000000.000003",
+        "eyes",
+      ),
+    ).resolves.toBeUndefined();
   });
 });
