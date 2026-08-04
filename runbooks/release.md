@@ -53,13 +53,13 @@ If you push to `main` **without** a version change, none of the publish jobs run
 
 ### Swarm Cloud image-release callback
 
-After the server and worker Docker manifest lists are published, the workflow posts one signed callback to Swarm Cloud's image-release intake endpoint. The callback is limited to the protected publish context: `desplega-ai/agent-swarm`, non-PR events, and `refs/heads/main`.
+After the server and worker Docker manifest lists are published, the workflow posts the same release payload to each configured Swarm Cloud image-release intake. The callbacks are limited to the protected publish context: `desplega-ai/agent-swarm`, non-PR events, and `refs/heads/main`.
 
 The callback reports the detected release version when `package.json` changed, matching the tag created by `create-git-tag`; ordinary `main` pushes report `main`.
 
-The callback sends the manifest-list digest refs for the API and worker images, for example `ghcr.io/desplega-ai/agent-swarm:latest@sha256:...` and `ghcr.io/desplega-ai/agent-swarm-worker:latest@sha256:...`. The workflow builds `payload.json` with `jq`, signs the exact file bytes with HMAC-SHA256, and sends that same file with `curl --data-binary` so the signature matches Swarm Cloud's raw-body verification.
+The callbacks send the manifest-list digest refs for the API and worker images, for example `ghcr.io/desplega-ai/agent-swarm:latest@sha256:...` and `ghcr.io/desplega-ai/agent-swarm-worker:latest@sha256:...`. The workflow builds `payload.json` once with `jq`, signs its exact bytes separately for each deployment's secret, and sends those same bytes with `curl --data-binary` so every signature matches raw-body verification.
 
-The repository must have the `SWARM_CLOUD_BASE_URL` and `IMAGE_RELEASE_INTAKE_SECRET` Actions secrets configured. If either is missing, the workflow emits a warning and skips only the callback; configured callbacks treat HTTP 200 and 201 as success and fail on other responses.
+The production target uses `SWARM_CLOUD_BASE_URL` with `IMAGE_RELEASE_INTAKE_SECRET`; it is authoritative, so a transport or non-200/201 response fails the release job. The development target uses `SWARM_CLOUD_DEV_BASE_URL` with `IMAGE_RELEASE_DEV_INTAKE_SECRET`; it is best-effort so development metadata stays fresh without making a development outage block publishing. An incomplete target pair is skipped with a warning. Even when production fails, the workflow still attempts development delivery before returning the production failure.
 
 ## Verifying a release
 

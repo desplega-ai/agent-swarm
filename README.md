@@ -146,7 +146,7 @@ Check [our templates](https://templates.agent-swarm.dev) for a quick start.
 - **Config-driven metrics dashboards** — define read-only SQL widgets, version them, and render them in the dashboard without shipping custom frontend code. [Metrics API →](https://docs.agent-swarm.dev/docs/api-reference/stats)
 - **DB-backed pages** — agents publish HTML or JSON pages (reports, dashboards, action specs) via `create_page`, remove stale pages with `delete-page`, and share them with public / authed / password modes, version history, view counters, diff helpers, and PDF export. [MCP tools → Pages](https://docs.agent-swarm.dev/docs/reference/mcp-tools#pages-tools)
 - **KV store** — Redis-like namespaced key/value store with auto-scoped context (Slack thread / PR / Linear issue / page). [MCP tools → KV](https://docs.agent-swarm.dev/docs/reference/mcp-tools#kv-tools)
-- **Real-time dashboard + task attachments** — monitor agents, tasks, and inter-agent chat; rename sessions inline; search a broad Lucide catalog to customize each agent's icon and color; filter Pages, Approval Requests, and workflow definitions with URL-backed search/facets; create tasks with uploaded files from the sessions composer; and preview task attachments inline above session prompts. [app.agent-swarm.dev →](https://app.agent-swarm.dev)
+- **Real-time dashboard + task attachments** — monitor agents, tasks, and inter-agent chat; filter tasks by requester (including yourself or unattributed work); rename sessions inline; search a broad Lucide catalog to customize each agent's icon and color; filter Pages, Approval Requests, and workflow definitions with URL-backed search/facets; create tasks with uploaded files from the sessions composer; and preview task attachments inline above session prompts. [app.agent-swarm.dev →](https://app.agent-swarm.dev)
 
 ## Quick Start
 
@@ -221,7 +221,7 @@ Missing one? Ask the swarm to build it.
 
 ## Dashboard
 
-Real-time monitoring of agents, tasks, and inter-agent chat. Session titles can be renamed inline, and agent profiles can search hundreds of Lucide icons, pick a color, and retain deterministic defaults when no customization is set. Use the hosted version at [app.agent-swarm.dev](https://app.agent-swarm.dev), or run locally:
+Real-time monitoring of agents, tasks, and inter-agent chat. The task list can be filtered by requester, including **Me** and **Unattributed**, while keeping the selection in the page URL. Session titles can be renamed inline, and agent profiles can search hundreds of Lucide icons, pick a color, and retain deterministic defaults when no customization is set. Use the hosted version at [app.agent-swarm.dev](https://app.agent-swarm.dev), or run locally:
 
 ```bash
 cd apps/ui && bun install && bun run dev

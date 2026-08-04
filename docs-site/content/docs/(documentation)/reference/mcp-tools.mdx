@@ -135,6 +135,9 @@ Store task progress, or mark a task as completed or failed.
 | `failureReason` | string | No | Reason (for failure) |
 | `attachments` | array | No | Pointer-based artifacts to attach to the task (max 20 per call). Each entry is one of: `{kind: "agent-fs", path, name, orgId?, driveId?, ...}`, `{kind: "url", url, name, ...}`, `{kind: "shared-fs", path, name, ...}`, `{kind: "page", pageId, name, ...}`. May be sent on any call (progress or completion); accumulates across calls; deduped by `sha256` when present, else by `(kind, pointer, name)`. No inline file data — upload to agent-fs first and attach by path. |
 | `persistMemory` | boolean | No | Opt in to task-completion memory persistence for automatic or recurring tasks. Manual tasks persist by default; scheduled, system, heartbeat, monitor, and digest tasks are skipped unless this is `true`. |
+| `force` | boolean | No | On an already-terminal task, replace only the explicitly supplied `output` and/or `failureReason`. Status, `finishedAt`, completion events, memories, follow-ups, and capacity updates are preserved rather than replayed. |
+
+Terminal results are first-call-wins. Repeating the same result succeeds as an idempotent no-op; a different result is rejected and reported as discarded unless `force: true` is explicit. Forced corrections still validate `outputSchema` and return `wasForcedOverwrite: true` on success.
 
 ### cancel-task
 

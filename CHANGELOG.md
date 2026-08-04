@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.128.0] - 2026-08-04
+
+### Added
+- **Tasks can be filtered by requester in the dashboard and API** (#1080) — the URL-backed single-select facet supports a specific user, the current dashboard identity, or unattributed tasks while keeping list and count queries aligned.
+
+### Changed
+- **Image releases are reported to both production and development intake endpoints** (#1085) — production delivery remains authoritative while the best-effort development leg keeps golden-image metadata fresh without masking production failures.
+- **Repository, package, and documentation metadata use the canonical `agent-swarm.dev` identity** (#1076, #1077) — public titles, descriptions, social metadata, and installable-app surfaces now name the domain consistently without changing the npm package name.
+
+### Fixed
+- **Terminal task results are consistently first-call-wins across MCP and HTTP** (#1082, #1084) — conflicting late writes are reported instead of silently discarded, identical retries remain idempotent, and an explicit `force` correction can replace result text without replaying completion side effects.
+- **Slack task threads avoid duplicate status and outcome messages** (#1079, #1081) — routine lifecycle receipts stay in the task tree, and a completed task that already used `slack-reply` receives only a compact outcome card.
+- **Worker bootstrap keeps Claude session state writable after privileged setup** (#1078) — the entrypoint restores ownership of `/home/worker/.claude` before starting the non-root harness, preventing `session-env` permission failures.
+
 ## [1.126.1] - 2026-08-03
 
 ### Changed

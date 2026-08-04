@@ -282,7 +282,8 @@ The Docker worker image uses a multi-stage build with two publishable targets:
 - **Runtime user**: Agent processes run as the non-root `worker` user without
   passwordless sudo. Bake additional system packages into the worker image or
   install them from a root-run startup script before the entrypoint drops
-  privileges.
+  privileges. The entrypoint restores worker ownership of `/home/worker/.claude`
+  after privileged credential and skill setup so harness session files remain writable.
 
 **Volumes:**
 
