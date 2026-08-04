@@ -30,6 +30,15 @@
  * stay app-relative, and the store SURVIVES unmount: leaving an app and coming
  * back keeps its query data, form drafts and action slots warm.
  *
+ * 4. `ElementRef` nodes are expanded before rendering (`@/lib/json-render/
+ *    assemble`). Elements borrowed from ANOTHER app make this surface run that
+ *    app's queries too (one `useQueries`, `appId`-keyed as always) and mirror
+ *    them at `/refs/<definingAppId>/queries/<name>`; actions dispatched from
+ *    inside such an instance carry a `$app` marker and hit the DEFINING app's
+ *    routes, with their slot at `/refs/<definingAppId>/actions/<name>`. Both
+ *    mirrors live inside the CONSUMING app's subtree — a surface never writes
+ *    into another app's state.
+ *
  * Router tier: `/apps/:id` renders `defaultPage`, `/apps/:id/p/<name>` renders
  * that page — both URLs are valid and neither redirects. The route is mirrored
  * into state at `/route` as `{ page, params }` (declared params only, coerced
@@ -70,13 +79,23 @@ import {
 } from "react-router-dom";
 import { api } from "@/api/client";
 import type { AppQueryPlan } from "@/api/hooks/use-apps";
-import { useAppQueries, useAppQueryRefetch, useAppRefresh } from "@/api/hooks/use-apps";
+import {
+  useAppDefinitions,
+  useAppQueries,
+  useAppQueryRefetch,
+  useAppRefresh,
+} from "@/api/hooks/use-apps";
 import type { AgentTaskStatus, AppDefinition, AppDetail, AppPageDef, AppRow } from "@/api/types";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { createSwarmActionHandlers, swarmCatalog, swarmComponents } from "@/lib/json-render";
+import {
+  assemblePageSpec,
+  collectElementRefAppIds,
+  DEFINING_APP_PARAM,
+} from "@/lib/json-render/assemble";
 import { getAppStoreView, getAppsStoreSnapshot } from "@/lib/json-render/store-registry";
 import { cn } from "@/lib/utils";
 
@@ -137,8 +156,10 @@ interface PollRegistry {
 
 interface RuntimeCtx {
   app: AppDetail;
-  refetchModel: (model: string) => Promise<void>;
-  refetchQuery: (queryName?: string) => Promise<void>;
+  refetchModel: (appId: string, model: string) => Promise<void>;
+  refetchQuery: (appId: string, queryName?: string) => Promise<void>;
+  /** Every app on this surface — a script action can touch any of them. */
+  refetchAll: () => Promise<void>;
   store: StateStore;
   poll: PollRegistry;
   /** Router push, read live: `ActionProvider` snapshots handlers at mount. */
@@ -157,9 +178,15 @@ interface RouteSlot {
  * A named query plus how the runtime should run it right now. `missing` names
  * the route params a `$param` query is waiting on — non-empty means the query
  * is parked (`enabled: false`) and its state slot carries that as an error.
+ *
+ * `statePath` is where the result is mirrored INSIDE the consuming app's view:
+ * `/queries/<name>` for the surface's own app, `/refs/<definingAppId>/queries/
+ * <name>` for a query pulled in by a borrowed bound element (which is exactly
+ * the path the assembler rewrote that element's bindings to).
  */
 interface QueryPlan extends AppQueryPlan {
   missing: string[];
+  statePath: string;
 }
 
 // ─── Pages map ──────────────────────────────────────────────────────────────
@@ -281,6 +308,28 @@ function urlWithMode(
   return `${location.pathname}${query ? `?${query}` : ""}`;
 }
 
+/**
+ * Which app an `app.*` action must execute against.
+ *
+ * The assembler tags every app-scoped action step inside a BORROWED bound
+ * element instance with `$app: "<definingAppId>"` (see
+ * `@/lib/json-render/assemble`) — that marker is the instance → defining-app
+ * bookkeeping, and it travels in the params because `@json-render`'s
+ * `ActionProvider` hands handlers the resolved params only: the dispatching
+ * node's identity never reaches them, so a node-id → app sidecar map could not
+ * be consulted here. Everything untagged is this surface's own app.
+ *
+ * VIEWER IDENTITY (review I9): these cross-app calls go out with the
+ * dashboard's shared operator key, exactly like same-app calls. Rendering an
+ * embedded element therefore does NOT yet prove the viewer may use the
+ * defining app — `app.use` scoping (Phase 7) plus user-token adoption is what
+ * will enforce that. Shipping rendering first is deliberate.
+ */
+function definingAppOf(params: { [key: string]: unknown } | undefined, ownAppId: string): string {
+  const tagged = params?.[DEFINING_APP_PARAM];
+  return typeof tagged === "string" && tagged ? tagged : ownAppId;
+}
+
 export function errorMessage(error: unknown): string | null {
   if (!error) return null;
   return error instanceof Error ? error.message : String(error);
@@ -300,9 +349,10 @@ function waitUnlessDisposed(poll: PollRegistry, ms: number): Promise<boolean> {
 
 /**
  * Watch a task-backed `app.action` until the task reaches a terminal status,
- * mirroring every observed status into `/actions/<name>/taskStatus`. On a
- * completed task all named queries are refetched — the task most likely wrote
- * rows the page is displaying.
+ * mirroring every observed status into `<path>/taskStatus` (`path` is
+ * `/actions/<name>`, or `/refs/<definingAppId>/actions/<name>` for an action
+ * invoked from a borrowed bound element). On a completed task every app on
+ * the surface is refetched — the task most likely wrote rows it displays.
  *
  * Runs detached from the invoking action handler, so it never rejects: any
  * non-transient failure is surfaced through `onError` (and, while the slot is
@@ -317,11 +367,10 @@ function waitUnlessDisposed(poll: PollRegistry, ms: number): Promise<boolean> {
  */
 async function pollActionTask(
   ctxRef: React.RefObject<RuntimeCtx>,
-  name: string,
+  path: string,
   taskId: string,
   onError: (message: string) => void,
 ): Promise<void> {
-  const path = `/actions/${name}`;
   const poll = ctxRef.current.poll;
   try {
     for (;;) {
@@ -354,7 +403,7 @@ async function pollActionTask(
         ...(ok ? {} : { error: `task ${status}` }),
       } satisfies ActionSlot);
       if (ok) {
-        await ctx.refetchQuery();
+        await ctx.refetchAll();
       } else {
         // Surface the terminal failure in the runtime's error callout too —
         // not every app page binds `/actions/<name>/error`.
@@ -431,43 +480,129 @@ export function AppSurface({
   // change, so the mirror below would otherwise churn the store on every render.
   const routeSignature = JSON.stringify({ page: activePageName, params: routeParams });
 
+  // ── Borrowed elements: resolve the apps they are defined in ──────────────
+  // ONE `useQueries` over the whole target list (a `useApp()` per target would
+  // make the hook count vary with the definition). `collectElementRefAppIds`
+  // only sees one level at a time — an element borrowed from app B may itself
+  // reference app C — so newly resolved apps feed the next render's list,
+  // which converges within the reference-depth cap.
+  const [discoveredAppIds, setDiscoveredAppIds] = useState<string[]>([]);
+  const targetAppIds = useMemo(() => {
+    const ids = new Set(collectElementRefAppIds(app));
+    for (const id of discoveredAppIds) if (id !== app.id) ids.add(id);
+    return [...ids].sort();
+  }, [app, discoveredAppIds]);
+
+  const definitionResults = useAppDefinitions(targetAppIds);
+  // Identity-stable across polls: the memo re-runs only when a definition
+  // actually changes, so the assembled spec keeps hitting `Renderer`'s memo.
+  const definitionSignature = definitionResults
+    .map((result) => {
+      const loaded = result.data?.app;
+      return loaded ? `${loaded.id}@${loaded.updatedAt}` : "";
+    })
+    .join("|");
+  // Rebuilt only when that signature changes (`definitionResults` is a fresh
+  // array every render, so a `useMemo` over it would churn the map identity —
+  // and with it the assembled spec — on every 5s poll tick).
+  const resolvedAppsRef = useRef<{ signature: string | null; map: Map<string, AppDetail> }>({
+    signature: null,
+    map: new Map(),
+  });
+  if (resolvedAppsRef.current.signature !== definitionSignature) {
+    const map = new Map<string, AppDetail>();
+    for (const result of definitionResults) {
+      const loaded = result.data?.app;
+      if (loaded) map.set(loaded.id, loaded);
+    }
+    resolvedAppsRef.current = { signature: definitionSignature, map };
+  }
+  const resolvedApps = resolvedAppsRef.current.map;
+  // A target whose definition request is still in flight gets a neutral
+  // "Loading…" card from the assembler instead of an "app unavailable" error.
+  // `useQueries` keeps result order, so the index lines up with the id list.
+  const pendingAppIds = targetAppIds
+    .filter((id, index) => !resolvedApps.has(id) && definitionResults[index]?.isError !== true)
+    .join(",");
+
+  useEffect(() => {
+    const next = collectElementRefAppIds(app, resolvedApps).filter((id) => id !== app.id);
+    const known = new Set(targetAppIds);
+    if (next.length !== targetAppIds.length || next.some((id) => !known.has(id))) {
+      setDiscoveredAppIds(next);
+    }
+  }, [app, resolvedApps, targetAppIds]);
+
   // The json-render spec of the active page — `title` / `params` are runtime
-  // metadata, not part of it. Every element gets `props` normalized to `{}`:
-  // the bundled renderer's `resolveBindings` calls `Object.entries(props)`
-  // without a null guard, so one propless container (a bare
-  // `{"type":"Stack","children":[…]}` — a shape the validator accepts and
-  // agents naturally write) would crash the whole page. Memoized so the
-  // `Renderer` keeps hitting its own spec-identity memo across the 5s poll
-  // re-renders.
-  const activeSpec = useMemo(() => {
-    if (!activePage) return null;
-    const elements = Object.fromEntries(
-      Object.entries(activePage.elements).map(([id, element]) => {
-        const el = element as Record<string, unknown>;
-        return [id, el.props === undefined || el.props === null ? { ...el, props: {} } : el];
+  // metadata, not part of it. Every `ElementRef` is expanded here (instance-
+  // namespaced ids, `/refs/<definingAppId>` data refs) so `<Renderer>` and the
+  // component catalog stay stock. Memoized so the `Renderer` keeps hitting its
+  // own spec-identity memo across the 5s poll re-renders.
+  const assembled = useMemo(
+    () =>
+      assemblePageSpec(app, activePageName, resolvedApps, {
+        pendingAppIds: pendingAppIds ? pendingAppIds.split(",") : [],
       }),
-    );
-    return { root: activePage.root, elements };
-  }, [activePage]);
+    [app, activePageName, resolvedApps, pendingAppIds],
+  );
+  const activeSpec = assembled.spec;
 
   // Named queries, each with the route params its `$param` filters need. A
   // query missing one is parked (not executed) and gets an explicit error slot.
+  // The surface's OWN queries all run; a borrowed app contributes only the
+  // queries its embedded elements actually bind to.
   const queryPlans = useMemo<QueryPlan[]>(() => {
-    return Object.keys(definition.queries ?? {}).map((name) => {
-      const paramNames = queryParamNames(definition, name);
-      if (paramNames.length === 0) return { name, missing: [] };
+    const plan = (
+      planAppId: string,
+      planDefinition: AppDefinition,
+      name: string,
+      statePath: string,
+    ): QueryPlan => {
+      const paramNames = queryParamNames(planDefinition, name);
+      if (paramNames.length === 0) return { appId: planAppId, name, statePath, missing: [] };
       const missing = paramNames.filter((param) => routeParams[param] === undefined);
-      if (missing.length > 0) return { name, enabled: false, missing };
+      if (missing.length > 0) {
+        return { appId: planAppId, name, statePath, enabled: false, missing };
+      }
       const params: Record<string, string | number | boolean> = {};
       for (const param of paramNames) {
         params[param] = routeParams[param] as string | number | boolean;
       }
-      return { name, params, missing: [] };
-    });
-  }, [definition, routeParams]);
+      return { appId: planAppId, name, statePath, params, missing: [] };
+    };
 
-  const results = useAppQueries(app.id, queryPlans);
-  const { refetchModel, refetchQuery } = useAppQueryRefetch(app.id, definition);
+    const plans = Object.keys(definition.queries ?? {}).map((name) =>
+      plan(app.id, definition, name, `/queries/${name}`),
+    );
+    // A borrowed bound element reads its OWN app's queries; the route params
+    // available here are the CONSUMER's, which is all a cross-app embed can
+    // offer (a `$param` query it cannot satisfy parks with an explicit error).
+    for (const [definingAppId, names] of Object.entries(assembled.boundQueries)) {
+      const definingApp = resolvedApps.get(definingAppId);
+      if (!definingApp) continue;
+      for (const name of names) {
+        if (!definingApp.definition.queries?.[name]) continue;
+        plans.push(
+          plan(
+            definingAppId,
+            definingApp.definition,
+            name,
+            `/refs/${definingAppId}/queries/${name}`,
+          ),
+        );
+      }
+    }
+    return plans;
+  }, [app.id, definition, routeParams, assembled, resolvedApps]);
+
+  const results = useAppQueries(queryPlans);
+  // Definitions of every app this surface runs queries/actions against.
+  const definitionsByApp = useMemo(() => {
+    const map = new Map<string, AppDefinition>([[app.id, definition]]);
+    for (const [appId, loaded] of resolvedApps) map.set(appId, loaded.definition);
+    return map;
+  }, [app.id, definition, resolvedApps]);
+  const { refetchModel, refetchQuery, refetchAll } = useAppQueryRefetch(definitionsByApp);
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [lastResponse, setLastResponse] = useState<unknown>(undefined);
@@ -534,6 +669,7 @@ export function AppSurface({
     app,
     refetchModel,
     refetchQuery,
+    refetchAll,
     store,
     poll: pollRef.current,
     navigate,
@@ -543,6 +679,7 @@ export function AppSurface({
     app,
     refetchModel,
     refetchQuery,
+    refetchAll,
     store,
     poll: pollRef.current,
     navigate,
@@ -568,12 +705,25 @@ export function AppSurface({
     pollRef.current = poll;
     ctxRef.current.poll = poll;
 
-    const actions = ctxRef.current.store.get("/actions");
-    if (actions && typeof actions === "object") {
+    // Both action roots are scanned: this app's own `/actions/<name>` slots
+    // AND the `/refs/<definingAppId>/actions/<name>` slots written by actions
+    // invoked from a borrowed bound element. Skipping the latter would
+    // reintroduce the orphaned-`running`-forever bug for exactly the embeds
+    // Phase 6 adds.
+    const readSlots = (root: string): void => {
+      const actions = ctxRef.current.store.get(root);
+      if (!actions || typeof actions !== "object") return;
       for (const [name, slot] of Object.entries(actions as Record<string, ActionSlot>)) {
         if (slot?.status === "running" && slot.taskId) {
-          void pollActionTask(ctxRef, name, slot.taskId, setActionError);
+          void pollActionTask(ctxRef, `${root}/${name}`, slot.taskId, setActionError);
         }
+      }
+    };
+    readSlots("/actions");
+    const refs = ctxRef.current.store.get("/refs");
+    if (refs && typeof refs === "object") {
+      for (const definingAppId of Object.keys(refs as Record<string, unknown>)) {
+        readSlots(`/refs/${definingAppId}/actions`);
       }
     }
 
@@ -594,7 +744,12 @@ export function AppSurface({
     scrollRef.current?.scrollTo({ top: 0 });
   }, [activePageName]);
 
-  // Mirror query results into `/queries/<name>`. The previous slot is read
+  // Mirror query results into their state slot — `/queries/<name>` for this
+  // app's own queries, `/refs/<definingAppId>/queries/<name>` for the ones a
+  // borrowed bound element reads. BOTH are written through this app's view,
+  // i.e. they live under `/apps/<consumerId>/…`: the defining app's own
+  // subtree is never written from here, and each consumer keeps its own copy
+  // of the mirror (react-query below is the single fetch). The previous slot is read
   // back out of the STORE (not a per-mount ref): the store is what the page
   // actually renders and it stays warm across mounts, so a remount whose
   // react-query entry has been garbage-collected must not blank the rows the
@@ -602,7 +757,7 @@ export function AppSurface({
   useEffect(() => {
     queryPlans.forEach((plan, index) => {
       const result = results[index];
-      const prev = store.get(`/queries/${plan.name}`) as QuerySlot | undefined;
+      const prev = store.get(plan.statePath) as QuerySlot | undefined;
       // A `$param` query whose params aren't all in the route never ran —
       // say so in the slot instead of leaving it on a permanent spinner. The
       // previous rows are RETAINED (not blanked) so content driven by the
@@ -631,7 +786,7 @@ export function AppSurface({
       ) {
         return;
       }
-      store.set(`/queries/${plan.name}`, next);
+      store.set(plan.statePath, next);
     });
   }, [queryPlans, results, store]);
 
@@ -662,32 +817,40 @@ export function AppSurface({
           setActionError(null);
           if (!params) return;
           const ctx = ctxRef.current;
+          const targetAppId = definingAppOf(params, ctx.app.id);
           try {
             if (params.op === "create") {
               setLastResponse(
-                await api.createAppRow(ctx.app.id, params.model, params.values ?? {}),
+                await api.createAppRow(targetAppId, params.model, params.values ?? {}),
               );
               // The Form injects its own id, so a successful create resets the
-              // fields the user just submitted.
+              // fields the user just submitted. Inside an element instance
+              // that id is already `instances/<key>/<origId>`.
               if (params.formId) ctx.store.set(`/forms/${params.formId}`, {});
             } else if (params.op === "update") {
               if (!params.rowId) throw new Error("app.mutate op=update requires rowId");
               setLastResponse(
-                await api.updateAppRow(ctx.app.id, params.model, params.rowId, params.values ?? {}),
+                await api.updateAppRow(
+                  targetAppId,
+                  params.model,
+                  params.rowId,
+                  params.values ?? {},
+                ),
               );
             } else {
               if (!params.rowId) throw new Error("app.mutate op=delete requires rowId");
-              setLastResponse(await api.deleteAppRow(ctx.app.id, params.model, params.rowId));
+              setLastResponse(await api.deleteAppRow(targetAppId, params.model, params.rowId));
             }
-            await ctx.refetchModel(params.model);
+            await ctx.refetchModel(targetAppId, params.model);
           } catch (e) {
             setActionError(e instanceof Error ? e.message : String(e));
           }
         },
         "app.refresh": async (params) => {
           setActionError(null);
+          const ctx = ctxRef.current;
           try {
-            await ctxRef.current.refetchQuery(params?.query);
+            await ctx.refetchQuery(definingAppOf(params, ctx.app.id), params?.query);
           } catch (e) {
             setActionError(e instanceof Error ? e.message : String(e));
           }
@@ -703,10 +866,17 @@ export function AppSurface({
             return;
           }
           const ctx = ctxRef.current;
-          const path = `/actions/${name}`;
+          const targetAppId = definingAppOf(params, ctx.app.id);
+          // Consumer-local slot: each surface tracks its own invocation state
+          // (and its own task polling), even when two of them invoke the same
+          // action of the same defining app.
+          const path =
+            targetAppId === ctx.app.id
+              ? `/actions/${name}`
+              : `/refs/${targetAppId}/actions/${name}`;
           ctx.store.set(path, { status: "running" } satisfies ActionSlot);
           try {
-            const response = await api.invokeAppAction(ctx.app.id, name, params?.input);
+            const response = await api.invokeAppAction(targetAppId, name, params?.input);
             setLastResponse(response);
 
             if (response.taskId) {
@@ -715,7 +885,7 @@ export function AppSurface({
                 taskId: response.taskId,
                 taskStatus: response.status,
               } satisfies ActionSlot);
-              void pollActionTask(ctxRef, name, response.taskId, setActionError);
+              void pollActionTask(ctxRef, path, response.taskId, setActionError);
               return;
             }
 
@@ -724,8 +894,8 @@ export function AppSurface({
                 status: "ok",
                 result: response.result,
               } satisfies ActionSlot);
-              // A script action can touch any model — refetch everything.
-              await ctx.refetchQuery();
+              // A script action can touch any model of any app on the surface.
+              await ctx.refetchAll();
               return;
             }
 
@@ -888,7 +1058,7 @@ export function AppSurface({
       <PageHeader
         title={app.name}
         description={app.description ?? undefined}
-        action={<AppHeaderActions app={app} />}
+        action={<AppHeaderActions appIds={[...definitionsByApp.keys()]} />}
       />
       {/* Bordered, self-scrolling canvas so the app's limits are visible
           against the dashboard chrome. Default view only — full/chromeless
@@ -914,10 +1084,11 @@ export function AppSurface({
 /**
  * Header action cluster, mirroring `pages/:id`'s: maximize within the SPA,
  * copy the chromeless (embeddable) URL, and force a definition + query
- * refresh without waiting for the 30s definition poll.
+ * refresh without waiting for the 30s definition poll — for this app AND
+ * every app it borrows elements from, so embeds refresh with the page.
  */
-function AppHeaderActions({ app }: { app: AppDetail }) {
-  const refresh = useAppRefresh(app.id);
+function AppHeaderActions({ appIds }: { appIds: string[] }) {
+  const refresh = useAppRefresh(appIds);
   const location = useLocation();
   const { copied, copy } = useCopyToClipboard();
   const [refreshing, setRefreshing] = useState(false);

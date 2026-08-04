@@ -2531,10 +2531,36 @@ export interface AppPageDef {
   params?: Record<string, AppPageParamDef>;
 }
 
+/** One declared prop of a reusable element (`definition.elements.<name>`). */
+export interface AppElementPropDef {
+  kind: AppColumnKind;
+  required?: boolean;
+  enum?: string[];
+  default?: string | number | boolean;
+}
+
+/**
+ * A reusable element: a json-render subtree (`root` + `elements`) referenced
+ * from a page — or, when `export` is set, from another app — through an
+ * `ElementRef` node. `pure` elements render only from their declared `props`;
+ * `bound` elements additionally read their OWN app's queries and actions,
+ * which the client assembler rewrites to `/refs/<definingAppId>/…` when the
+ * element is borrowed (see `@/lib/json-render/assemble`).
+ */
+export interface AppElementDef {
+  mode: "pure" | "bound";
+  export?: boolean;
+  props?: Record<string, AppElementPropDef>;
+  root: string;
+  elements: Record<string, unknown>;
+}
+
 export interface AppDefinition {
   models: Record<string, AppModelDef>;
   queries?: Record<string, AppQueryDef>;
   actions?: Record<string, AppActionDef>;
+  /** Reusable element subtrees, referenced by `ElementRef` nodes. */
+  elements?: Record<string, AppElementDef>;
   /**
    * The canonical multi-page form (server-normalized on every write): named
    * json-render specs plus the page a bare `/apps/:id` renders.

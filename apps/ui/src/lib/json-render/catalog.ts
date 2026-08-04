@@ -553,9 +553,13 @@ const {
   ...runtimeComponents
 } = swarmCatalogSpec.components;
 
-// ElementRef/ElementSlot are server-valid definition nodes in Phase 4, but the
-// runtime must continue treating them as unknown so Renderer uses its fallback.
-// Phase 6 expands references before rendering and can then unify these catalogs.
+// ElementRef/ElementSlot are server-valid definition nodes (they belong in the
+// GENERATED catalog the API validates against) that the runtime registry must
+// never resolve. Since Phase 6 they are expanded away before `<Renderer>` sees
+// a spec (`./assemble`), so in principle nothing would reach a registered
+// component — the strip stays as belt-and-braces: if an expansion path is ever
+// missed, the renderer's unknown-type fallback is a visible no-op instead of a
+// silently mounted, propless container pretending the reference worked.
 export const swarmCatalog = defineCatalog(schema, {
   components: runtimeComponents,
   actions: swarmCatalogSpec.actions,
