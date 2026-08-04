@@ -247,7 +247,7 @@ Rollback-as-forward-migrate lands with its agent surface: `POST /api/apps/{id}/r
 - [x] `app-rollback` Spike3 Scratch PM to v1 → definition restored (hidden column visible again), 19 rows intact, a NEW snapshot exists for the pre-rollback state; `app-diff` v1..CURRENT ≈ empty (QA note: v1's own snapshot is structurally invalid — pre-existing seed defect — so the flow was exercised against v2; that discovery produced the distinct broken-snapshot error class + test in the review round)
 
 #### Manual Verification:
-- [ ] Run the spec's zero-shot finale (flag → priority/status restructure + rollback, spec §Finale) as a worker task and judge the agent's path quality (DEFERRED to the final Manual E2E step 2 — same exercise, run once; Taras delegated manual QA 2026-08-04)
+- [x] Run the spec's zero-shot finale (flag → priority/status restructure + rollback, spec §Finale) as a worker task and judge the agent's path quality (ran as the final Manual E2E step 2 — PASSED both directions, zero data loss; see Appendix "Final E2E notes"; Taras delegated manual QA 2026-08-04)
 
 **Implementation Note**: Pause, confirm, commit `[phase 3] rollback + history/diff tools + skill`. Phases 1–3 = the complete frozen spec; re-read the spec top-to-bottom before committing and log any deviation in the Appendix.
 
@@ -335,7 +335,7 @@ One dashboard-global state store with per-app mounts (`/apps/<appId>/…`), defi
 
 #### 2. AppSurface extraction
 **Files**: `apps/ui/src/components/apps/app-surface.tsx` (new, extracted from `apps/ui/src/pages/apps/[id]/page.tsx`), `page.tsx` (becomes a thin route wrapper)
-**Changes**: move `AppRuntime` + `RuntimeCtx`/`ctxRef` (`page.tsx:122-132,459-476`), the query mirror (`:504-539`), action handlers (`:554-647`), `pollActionTask` (`:296-359`), and the provider triple (`:740-744`) into `AppSurface({app, mode, pageName, navigate})`. Replace `storeRef`/`createStateStore` (`:435-441`) with `getAppStoreView(app.id)`. **First-paint route seed** (review I3): the old constructor seeded `{route}` so deep-linked route-driven UI (Drawer via route param, `visible` conditions) renders on first paint; with a shared store, seed `/apps/<id>/route` synchronously at view acquisition **iff absent** — never clobber a warm store on re-entry. The `/route` mirror (`:488-492`) writes through the view — per-mount, so two concurrent surfaces of different apps can't race; two surfaces of the *same* app share route state (accepted; note in code). Keep `key={app.id}` remount on the route page for poll disposal (`pollRef`); the store itself survives unmount — cross-app-warm by design (brainstorm). Components (`apps/ui/src/lib/json-render/components.tsx`) stay untouched, and `catalog.ts` is untouched **beyond Phase 4's `ElementRef`/`ElementSlot` additions** — components keep writing app-relative paths through the view they get from context.
+**Changes**: move `AppRuntime` + `RuntimeCtx`/`ctxRef` (`page.tsx:122-132,459-476`), the query mirror (`:504-539`), action handlers (`:554-647`), `pollActionTask` (`:296-359`), and the provider triple (`:740-744`) into `AppSurface({app, mode, pageName, navigate})`. Replace `storeRef`/`createStateStore` (`:435-441`) with `getAppStoreView(app.id)`. **First-paint route seed** (review I3): the old constructor seeded `{route}` so deep-linked route-driven UI (Drawer via route param, `visible` conditions) renders on first paint; with a shared store, seed `/apps/<id>/route` synchronously at view acquisition keyed by a route **signature** — reseed only when the signature differs, so a warm re-entry with a *different* route doesn't render stale route state (shipped behavior; see Appendix Phase-5 note (b)). The `/route` mirror (`:488-492`) writes through the view — per-mount, so two concurrent surfaces of different apps can't race; two surfaces of the *same* app share route state (accepted; note in code). Keep `key={app.id}` remount on the route page for poll disposal (`pollRef`); the store itself survives unmount — cross-app-warm by design (brainstorm). Components (`apps/ui/src/lib/json-render/components.tsx`) stay untouched, and `catalog.ts` is untouched **beyond Phase 4's `ElementRef`/`ElementSlot` additions** — components keep writing app-relative paths through the view they get from context.
 
 #### 3. Embeddability proof (locked directive, review M4)
 **File**: `apps/ui/src/app/router.tsx` + a small dev-only page
@@ -348,7 +348,7 @@ One dashboard-global state store with per-app mounts (`/apps/<appId>/…`), defi
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
+- [x] `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
 - [x] Root suites still green: `bun run test:root -- src/tests/apps-spike4.test.ts` (server untouched — sanity)
 
 #### Automated QA (agent-browser against http://localhost:5375):
@@ -468,7 +468,7 @@ Apps declare a typed `userConfig` schema (versioned with the definition); per-(a
 
 #### 3. Ctx exposure + settings UI
 **Files**: `apps/ui/src/components/apps/app-surface.tsx`, `apps/ui/src/api/client.ts` + `use-apps.ts` (hooks), new `apps/ui/src/components/apps/app-settings-drawer.tsx`
-**Changes**: `AppSurface` fetches user-config and mirrors merged values to `/apps/<id>/user/<field>` (read-only mirror, query-mirror pattern `page.tsx:504-539`) so any element can bind `{ "$state": "/user/<field>" }` (app-relative). Settings entry in `AppHeaderActions` (gear) opens a schema-driven drawer form (kind-appropriate inputs, defaults shown); save → PUT → refetch → mirror updates live. Hidden when the app declares no `userConfig`.
+**Changes**: `AppSurface` fetches user-config and mirrors merged values to `/apps/<id>/user/<field>` (read-only mirror, query-mirror pattern `page.tsx:504-539`) so page-level nodes can bind `{ "$state": "/user/<field>" }` (app-relative; **pages only** — pure/bound elements receive userConfig via props, see Appendix Phase-8 note (a)). Settings entry in `AppHeaderActions` (gear) opens a schema-driven drawer form (kind-appropriate inputs, defaults shown); save → PUT → refetch → mirror updates live. Hidden when the app declares no `userConfig`.
 
 #### 4. Docs/skill
 **Files**: `templates/skills/apps/content.md`, `src/tools/app-upsert.ts`/`app-patch.ts` descriptions
