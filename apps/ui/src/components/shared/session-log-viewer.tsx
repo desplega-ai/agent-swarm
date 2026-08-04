@@ -388,6 +388,10 @@ function isThinkingTokensBlock(block: ProviderMetaBlock): boolean {
   return block.kind === "helper" && block.data.helperType === "thinking_tokens";
 }
 
+function isToolProgressBlock(block: ProviderMetaBlock): boolean {
+  return block.kind === "helper" && block.data.helperType === "tool_progress";
+}
+
 function appendProviderMetaRow(rows: StreamRow[], row: MetaRow) {
   if (isThinkingTokensBlock(row.block)) {
     appendThinkingTokenRow(rows, row);
@@ -521,6 +525,10 @@ function buildStream(
 ): StreamRow[] {
   // Index every tool_result by the id of the call it answers (+ its timestamp).
   const resultById = new Map<string, { content: string; isError: boolean; at: number }>();
+  const progressById = new Map<
+    string,
+    { toolName?: string; elapsedSeconds?: number; at: number }
+  >();
   const callIds = new Set<string>();
   for (const m of messages) {
     const at = new Date(m.timestamp).getTime();
@@ -530,6 +538,17 @@ function buildStream(
       }
       if (b.type === "tool_result" && b.tool_use_id) {
         resultById.set(b.tool_use_id, { content: b.content, isError: b.isError === true, at });
+      }
+      if (b.type === "provider_meta" && isToolProgressBlock(b)) {
+        const parentId = stringValue(b.data.parentToolUseId);
+        const previous = parentId ? progressById.get(parentId) : undefined;
+        if (parentId && (!previous || at >= previous.at)) {
+          progressById.set(parentId, {
+            toolName: stringValue(b.data.toolName),
+            elapsedSeconds: numberValue(b.data.elapsedSeconds),
+            at,
+          });
+        }
       }
     }
   }
@@ -623,8 +642,12 @@ function buildStream(
       if (b.type === "tool_use") {
         const c = classifyTool(b.name, b.input);
         const res = b.id ? resultById.get(b.id) : undefined;
+        const progress = b.id ? progressById.get(b.id) : undefined;
         const body = res ? res.content : "";
         const durMs = res ? Math.max(0, res.at - item.t) : 0;
+        const progressDuration = progress?.elapsedSeconds
+          ? formatDur(progress.elapsedSeconds * 1000)
+          : "";
         const entry: ToolEntry = {
           id: `${blockId}:${b.id || "noid"}`,
           kind: c.kind,
@@ -633,7 +656,11 @@ function buildStream(
           title: c.title,
           detail: c.detail,
           input: prettyInput(b.input),
-          preview: res ? previewOf(body) : "running…",
+          preview: res
+            ? previewOf(body)
+            : progress
+              ? `${progress.toolName ?? c.title} — still running${progressDuration ? `, ${progressDuration}` : ""}`
+              : "running…",
           body,
           ok: res ? !res.isError : true,
           hasResult: !!res,
@@ -687,6 +714,8 @@ function buildStream(
           isNew,
         });
       } else if (b.type === "provider_meta") {
+        const parentId = isToolProgressBlock(b) ? stringValue(b.data.parentToolUseId) : undefined;
+        if (parentId && callIds.has(parentId)) return; // folded into the parent tool row
         appendProviderMetaRow(rows, {
           type: "meta",
           id: blockId,
@@ -773,6 +802,11 @@ function metaOutlineLabel(block: ProviderMetaBlock): string {
       return `Context · ${formatPercent(numberValue(block.data.contextPercent)) ?? "usage"}`;
     }
     if (block.data.helperType === "turn_usage") return "Turn usage";
+    if (block.data.helperType === "tool_progress") {
+      const tool = stringValue(block.data.toolName) ?? "Tool";
+      const elapsed = numberValue(block.data.elapsedSeconds);
+      return `${tool} · still running${elapsed ? ` · ${formatDur(elapsed * 1000)}` : ""}`;
+    }
     return "Helper";
   }
   if (block.kind === "internal") {
@@ -788,7 +822,7 @@ function metaOutlineLabel(block: ProviderMetaBlock): string {
   }
   if (block.kind === "lifecycle") return stringValue(block.data.type) ?? "Lifecycle";
   const raw = recordValue(block.data.raw);
-  return stringValue(raw?.type) ?? block.kind.replaceAll("_", " ");
+  return stringValue(block.data.type) ?? stringValue(raw?.type) ?? block.kind.replaceAll("_", " ");
 }
 
 type TickTone = "agent" | "tool" | "user" | "muted";
@@ -1089,7 +1123,22 @@ function HelperMetaBubble({ block }: { block: ProviderMetaBlock }) {
   }
   if (block.data.helperType === "context_usage") return <ContextUsageMeta block={block} />;
   if (block.data.helperType === "turn_usage") return <TurnUsageMeta block={block} />;
+  if (block.data.helperType === "tool_progress") return <ToolProgressMeta block={block} />;
   return <GenericMetaBubble block={block} />;
+}
+
+function ToolProgressMeta({ block }: { block: ProviderMetaBlock }) {
+  const tool = stringValue(block.data.toolName) ?? "Tool";
+  const elapsed = numberValue(block.data.elapsedSeconds);
+  return (
+    <LowKeyMetaLine
+      icon={<Activity className="size-3" />}
+      title={tool}
+      detail={`still running${elapsed ? ` · ${formatDur(elapsed * 1000)}` : ""}`}
+      raw={block.data}
+      stats={<LowKeyStat label="Parent" value={shortId(stringValue(block.data.parentToolUseId))} />}
+    />
+  );
 }
 
 function InternalMetaBubble({ block }: { block: ProviderMetaBlock }) {
