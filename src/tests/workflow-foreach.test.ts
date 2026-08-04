@@ -689,6 +689,84 @@ describe("workflow foreach", () => {
     ).toBe(true);
   });
 
+  test("a foreach cannot share its synthetic child id space with a legacy hash node", () => {
+    // A grandfathered `reflect#foo` node beside a `reflect` foreach would be
+    // indistinguishable from reflect's own children — reject the foreach.
+    const result = validateDefinition(
+      {
+        nodes: [
+          {
+            id: "reflect",
+            type: "foreach",
+            config: {
+              over: [],
+              itemKey: "id",
+              body: { type: "agent-task", config: { template: "Reflect" } },
+            },
+            next: "reflect#foo",
+          },
+          { id: "reflect#foo", type: "record", config: { message: "legacy" } },
+        ],
+      },
+      undefined,
+      { legacyNodeIds: new Set(["reflect#foo"]) },
+    );
+    expect(result.valid).toBe(false);
+    expect(
+      result.errors.some((error) => error.includes("collides with its synthetic child id space")),
+    ).toBe(true);
+  });
+
+  test("static foreach body config is validated against the agent-task schema at authoring", () => {
+    const { registry } = createRegistry(false);
+    const invalid = validateDefinition(
+      {
+        nodes: [
+          {
+            id: "reflect",
+            type: "foreach",
+            config: {
+              over: "{{trigger.items}}",
+              itemKey: "id",
+              body: {
+                type: "agent-task",
+                config: { template: "Reflect", priority: 101, tags: "review" },
+              },
+            },
+          },
+        ],
+      },
+      registry,
+    );
+    expect(invalid.valid).toBe(false);
+    expect(invalid.errors.some((error) => error.includes("config.body.config.priority"))).toBe(
+      true,
+    );
+    expect(invalid.errors.some((error) => error.includes("config.body.config.tags"))).toBe(true);
+
+    // Interpolated fields still defer to execution-time validation.
+    const deferred = validateDefinition(
+      {
+        nodes: [
+          {
+            id: "reflect",
+            type: "foreach",
+            config: {
+              over: "{{trigger.items}}",
+              itemKey: "id",
+              body: {
+                type: "agent-task",
+                config: { template: "Reflect {{item.name}}", agentId: "{{item.id}}" },
+              },
+            },
+          },
+        ],
+      },
+      registry,
+    );
+    expect(deferred.valid).toBe(true);
+  });
+
   test("definition validation rejects reserved hashes and foreach concurrency", () => {
     const hashResult = validateDefinition({
       nodes: [{ id: "reflect#bad", type: "record", config: { message: "bad" } }],

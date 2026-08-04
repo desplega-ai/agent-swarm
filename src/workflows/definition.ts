@@ -179,6 +179,19 @@ export function validateDefinition(
       if (isUpstream(def, node.id, node.id)) {
         errors.push("foreach inside a loop is not supported in v1");
       }
+      // Synthetic children are named `<foreachId>#<itemKey>`. A (legacy,
+      // grandfathered) node whose id starts with that prefix would be
+      // indistinguishable from a child — resolveForeachParent would classify
+      // both, corrupting the join and routing — so the foreach itself is
+      // rejected when such a sibling exists.
+      const collidingSibling = def.nodes.find(
+        (other) => other.id !== node.id && other.id.startsWith(`${node.id}#`),
+      );
+      if (collidingSibling) {
+        errors.push(
+          `Node "${node.id}" cannot be a foreach: node "${collidingSibling.id}" collides with its synthetic child id space ("${node.id}#…")`,
+        );
+      }
     }
   }
 
@@ -244,26 +257,25 @@ export function validateDefinition(
         continue;
       }
 
-      const configResult = registry.get(node.type).configSchema.safeParse(node.config);
-      if (!configResult.success) {
-        for (const issue of configResult.error.issues) {
-          const issuePath = issue.path.map(String);
-          const path = ["config", ...issuePath].join(".");
-          let value: unknown = node.config;
-          for (const segment of issue.path) {
-            if (value === null || typeof value !== "object") {
-              value = undefined;
-              break;
-            }
-            value = (value as Record<PropertyKey, unknown>)[segment];
-          }
-          // Exact interpolation tokens can resolve to non-string values at
-          // execution time, so defer only those dynamic fields to the same
-          // executor schema after interpolation. Static values still fail now.
-          if (containsInterpolationToken(value)) continue;
-          const renderedValue = value === undefined ? "undefined" : JSON.stringify(value);
-          errors.push(
-            `Node "${node.id}" (${node.type}) ${path} has invalid value ${renderedValue}: ${issue.message}`,
+      reportStaticConfigIssues(node, registry.get(node.type).configSchema, node.config, errors);
+
+      // A foreach body is executed by the agent-task executor per item — hold its
+      // static config to the same schema a top-level agent-task node gets, so an
+      // invalid field (priority: 101, tags: "x") fails at authoring instead of
+      // after the fan-out materialized. Interpolated fields defer as usual.
+      if (node.type === "foreach" && registry.has("agent-task")) {
+        const body = node.config.body;
+        const bodyConfig =
+          typeof body === "object" && body !== null && !Array.isArray(body)
+            ? (body as Record<string, unknown>).config
+            : undefined;
+        if (typeof bodyConfig === "object" && bodyConfig !== null && !Array.isArray(bodyConfig)) {
+          reportStaticConfigIssues(
+            node,
+            registry.get("agent-task").configSchema,
+            bodyConfig,
+            errors,
+            "config.body.config",
           );
         }
       }
@@ -300,6 +312,40 @@ export function validateDefinition(
   }
 
   return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Report schema issues for the statically-known parts of a config object.
+ * Fields containing interpolation tokens defer to the same executor schema
+ * after interpolation; static values fail at authoring time.
+ */
+function reportStaticConfigIssues(
+  node: WorkflowNode,
+  schema: { safeParse: (value: unknown) => { success: boolean; error?: { issues: unknown[] } } },
+  config: unknown,
+  errors: string[],
+  pathPrefix = "config",
+): void {
+  const result = schema.safeParse(config);
+  if (result.success) return;
+  for (const rawIssue of result.error?.issues ?? []) {
+    const issue = rawIssue as { path: PropertyKey[]; message: string };
+    const issuePath = issue.path.map(String);
+    const path = [pathPrefix, ...issuePath].join(".");
+    let value: unknown = config;
+    for (const segment of issue.path) {
+      if (value === null || typeof value !== "object") {
+        value = undefined;
+        break;
+      }
+      value = (value as Record<PropertyKey, unknown>)[segment];
+    }
+    if (containsInterpolationToken(value)) continue;
+    const renderedValue = value === undefined ? "undefined" : JSON.stringify(value);
+    errors.push(
+      `Node "${node.id}" (${node.type}) ${path} has invalid value ${renderedValue}: ${issue.message}`,
+    );
+  }
 }
 
 function validateForeachNode(node: WorkflowNode, errors: string[]): void {
