@@ -3,7 +3,13 @@ import { z } from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getWorkflow, updateWorkflow } from "@/be/db";
-import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import {
+  createToolRegistrar,
+  findLongScriptTimeoutHint,
+  swarmToolOutputSchema,
+  toolErr,
+  toolOk,
+} from "@/tools/utils";
 import type { WorkflowPatch } from "@/types";
 import { AssetKeySchema, WorkflowNodePatchSchema } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
@@ -119,6 +125,22 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
           return toolErr(`Workflow not found: ${id}`);
         }
 
+        const timeoutAuthoredNodeIds = new Set((create ?? []).map((node) => node.id));
+        for (const { nodeId, node } of update ?? []) {
+          const config = node.config;
+          if (
+            node.type === "script" ||
+            node.type === "swarm-script" ||
+            (config && (Object.hasOwn(config, "timeout") || Object.hasOwn(config, "timeoutMs")))
+          ) {
+            timeoutAuthoredNodeIds.add(nodeId);
+          }
+        }
+        const authoredFinalNodes = patchResult.definition.nodes.filter((node) =>
+          timeoutAuthoredNodeIds.has(node.id),
+        );
+        const longScriptTimeoutHint = findLongScriptTimeoutHint(authoredFinalNodes);
+
         return toolOk(`Patched workflow "${workflow.name}".`, {
           details: `Patched workflow "${workflow.name}" (${id}). Version ${version.version} snapshot created.`,
           data: {
@@ -127,6 +149,7 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
             nodesCreated: create?.length ?? 0,
             nodesUpdated: update?.length ?? 0,
             nodesDeleted: del?.length ?? 0,
+            ...(longScriptTimeoutHint ? { longScriptTimeoutHint } : {}),
           },
         });
       } catch (err) {

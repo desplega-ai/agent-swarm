@@ -11,6 +11,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, deleteWorkflow, getWorkflow, initDb } from "../be/db";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
+import { SCRIPT_LONG_TIMEOUT_HINT_MS } from "../scripts-runtime/executors/types";
+import { WORKFLOW_LONG_SCRIPT_TIMEOUT_NUDGE } from "../tools/utils";
 import { registerCreateWorkflowTool } from "../tools/workflows/create-workflow";
 import { registerPatchWorkflowTool } from "../tools/workflows/patch-workflow";
 import { registerPatchWorkflowNodeTool } from "../tools/workflows/patch-workflow-node";
@@ -36,6 +38,7 @@ type ToolResult = {
   structuredContent?: {
     success: boolean;
     message: string;
+    nudge?: string;
     workflow?: { id: string; triggerSchema?: Record<string, unknown> } & Record<string, unknown>;
     versionCreated?: number;
     runId?: string;
@@ -119,6 +122,16 @@ const swarmScriptDefinition = (timeoutMs: number): WorkflowDefinition => ({
       id: "run-report",
       type: "swarm-script",
       config: { scriptName: "report", timeoutMs },
+    },
+  ],
+});
+
+const inlineScriptDefinition = (timeout: number): WorkflowDefinition => ({
+  nodes: [
+    {
+      id: "run-inline",
+      type: "script",
+      config: { runtime: "bash", script: "true", timeout },
     },
   ],
 });
@@ -218,6 +231,105 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     expect(rejectedNodePatch.structuredContent?.success).toBe(false);
     expect(rejectedNodePatch.structuredContent?.message).toContain("config.timeoutMs");
     expect(getWorkflow(workflowId)?.definition.nodes[0]?.config.timeoutMs).toBe(300_000);
+  });
+
+  test("workflow authoring tools nudge strictly above the long-timeout hint", async () => {
+    const overThreshold = SCRIPT_LONG_TIMEOUT_HINT_MS + 1;
+    const belowThreshold = SCRIPT_LONG_TIMEOUT_HINT_MS - 1;
+    const createdLong = await tools.callCreate({
+      name: uniqueName("mcp-timeout-nudge-create"),
+      definition: inlineScriptDefinition(overThreshold),
+    });
+    expect(createdLong.structuredContent?.nudge).toBe(WORKFLOW_LONG_SCRIPT_TIMEOUT_NUDGE);
+    expect(createdLong.content[0]?.text).toContain(WORKFLOW_LONG_SCRIPT_TIMEOUT_NUDGE);
+    createdWorkflowIds.push(createdLong.structuredContent?.workflow?.id as string);
+
+    const createdBelowThreshold = await tools.callCreate({
+      name: uniqueName("mcp-timeout-nudge-below-threshold"),
+      definition: swarmScriptDefinition(belowThreshold),
+    });
+    expect(createdBelowThreshold.structuredContent?.nudge).toBeUndefined();
+    const workflowId = createdBelowThreshold.structuredContent?.workflow?.id as string;
+    createdWorkflowIds.push(workflowId);
+
+    const updatedLong = await tools.callUpdate({
+      id: workflowId,
+      definition: swarmScriptDefinition(overThreshold),
+    });
+    expect(updatedLong.structuredContent?.nudge).toBe(WORKFLOW_LONG_SCRIPT_TIMEOUT_NUDGE);
+    const unrelatedUpdate = await tools.callUpdate({
+      id: workflowId,
+      description: "Does not author a node timeout",
+    });
+    expect(unrelatedUpdate.structuredContent?.nudge).toBeUndefined();
+    const updatedAtThreshold = await tools.callUpdate({
+      id: workflowId,
+      definition: swarmScriptDefinition(SCRIPT_LONG_TIMEOUT_HINT_MS),
+    });
+    expect(updatedAtThreshold.structuredContent?.nudge).toBeUndefined();
+
+    const patchedLong = await tools.callPatch({
+      id: workflowId,
+      update: [
+        {
+          nodeId: "run-report",
+          node: { config: { scriptName: "report", timeoutMs: overThreshold } },
+        },
+      ],
+    });
+    expect(patchedLong.structuredContent?.nudge).toBe(WORKFLOW_LONG_SCRIPT_TIMEOUT_NUDGE);
+    const unrelatedPatch = await tools.callPatch({
+      id: workflowId,
+      update: [{ nodeId: "run-report", node: { label: "Still does not author a timeout" } }],
+    });
+    expect(unrelatedPatch.structuredContent?.nudge).toBeUndefined();
+    const patchedAtThreshold = await tools.callPatch({
+      id: workflowId,
+      update: [
+        {
+          nodeId: "run-report",
+          node: {
+            config: { scriptName: "report", timeoutMs: SCRIPT_LONG_TIMEOUT_HINT_MS },
+          },
+        },
+      ],
+    });
+    expect(patchedAtThreshold.structuredContent?.nudge).toBeUndefined();
+    const patchedLongThenLowered = await tools.callPatch({
+      id: workflowId,
+      update: [
+        {
+          nodeId: "run-report",
+          node: { config: { scriptName: "report", timeoutMs: overThreshold } },
+        },
+        {
+          nodeId: "run-report",
+          node: {
+            config: { scriptName: "report", timeoutMs: SCRIPT_LONG_TIMEOUT_HINT_MS },
+          },
+        },
+      ],
+    });
+    expect(patchedLongThenLowered.structuredContent?.nudge).toBeUndefined();
+
+    const patchedNodeLong = await tools.callPatchNode({
+      id: workflowId,
+      nodeId: "run-report",
+      config: { scriptName: "report", timeoutMs: overThreshold },
+    });
+    expect(patchedNodeLong.structuredContent?.nudge).toBe(WORKFLOW_LONG_SCRIPT_TIMEOUT_NUDGE);
+    const unrelatedNodePatch = await tools.callPatchNode({
+      id: workflowId,
+      nodeId: "run-report",
+      label: "Does not author a timeout either",
+    });
+    expect(unrelatedNodePatch.structuredContent?.nudge).toBeUndefined();
+    const patchedNodeAtThreshold = await tools.callPatchNode({
+      id: workflowId,
+      nodeId: "run-report",
+      config: { scriptName: "report", timeoutMs: SCRIPT_LONG_TIMEOUT_HINT_MS },
+    });
+    expect(patchedNodeAtThreshold.structuredContent?.nudge).toBeUndefined();
   });
 
   test("create-workflow with triggerSchema persists schema; getWorkflow returns identical object", async () => {

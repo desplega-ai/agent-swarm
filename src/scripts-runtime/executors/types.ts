@@ -79,6 +79,9 @@ export interface ScriptExecutor {
 }
 
 export const MIN_SCRIPT_WALL_CLOCK_MS = 1_000;
+// Above 2m, steer authors toward durable journaled steps before they reach the
+// 5m hard cap and keep a blocking workflow node open for several minutes.
+export const SCRIPT_LONG_TIMEOUT_HINT_MS = 120_000;
 export const MAX_SCRIPT_WALL_CLOCK_MS = 300_000;
 
 export const DEFAULT_SCRIPT_RESOURCES: ScriptResourcePolicy = {
