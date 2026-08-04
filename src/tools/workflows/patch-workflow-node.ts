@@ -11,7 +11,11 @@ import {
 } from "@/tools/utils";
 import { WorkflowNodePatchSchema } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
-import { applyDefinitionPatch, validateDefinition } from "@/workflows/definition";
+import {
+  applyDefinitionPatch,
+  definitionNodeIds,
+  validateDefinition,
+} from "@/workflows/definition";
 import { snapshotWorkflow } from "@/workflows/version";
 
 export const registerPatchWorkflowNodeTool = (server: McpServer) => {
@@ -49,7 +53,9 @@ export const registerPatchWorkflowNodeTool = (server: McpServer) => {
           return toolErr(`Patch errors: ${msg}`);
         }
 
-        const validation = validateDefinition(patchResult.definition, getExecutorRegistry());
+        const validation = validateDefinition(patchResult.definition, getExecutorRegistry(), {
+          legacyNodeIds: definitionNodeIds(existing.definition),
+        });
         if (!validation.valid) {
           return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
         }

@@ -696,6 +696,31 @@ describe("workflow foreach", () => {
     expect(hashResult.valid).toBe(false);
     expect(hashResult.errors.some((error) => error.includes('reserved character "#"'))).toBe(true);
 
+    // A workflow stored BEFORE the reserved-# rule stays editable: update/patch
+    // paths pass the stored definition's ids as legacyNodeIds, which exempts the
+    // pre-existing id while a NEW hash id in the same definition is still rejected.
+    const legacy = new Set(["legacy#node"]);
+    const grandfathered = validateDefinition(
+      { nodes: [{ id: "legacy#node", type: "record", config: { message: "old" } }] },
+      undefined,
+      { legacyNodeIds: legacy },
+    );
+    expect(grandfathered.valid).toBe(true);
+    const newHashId = validateDefinition(
+      {
+        nodes: [
+          { id: "legacy#node", type: "record", config: { message: "old" }, next: "fresh#node" },
+          { id: "fresh#node", type: "record", config: { message: "new" } },
+        ],
+      },
+      undefined,
+      { legacyNodeIds: legacy },
+    );
+    expect(newHashId.valid).toBe(false);
+    expect(
+      newHashId.errors.some((error) => error.includes('Node "fresh#node" contains reserved')),
+    ).toBe(true);
+
     const concurrencyResult = validateDefinition({
       nodes: [
         {

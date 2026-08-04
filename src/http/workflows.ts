@@ -28,7 +28,12 @@ import {
 } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
-import { applyDefinitionPatch, generateEdges, validateDefinition } from "../workflows/definition";
+import {
+  applyDefinitionPatch,
+  definitionNodeIds,
+  generateEdges,
+  validateDefinition,
+} from "../workflows/definition";
 import { TriggerSchemaError } from "../workflows/engine";
 import { validateJsonSchema } from "../workflows/json-schema-validator";
 import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
@@ -524,7 +529,9 @@ export async function handleWorkflows(
       return true;
     }
 
-    const validation = validateDefinition(patchResult.definition, getExecutorRegistry());
+    const validation = validateDefinition(patchResult.definition, getExecutorRegistry(), {
+      legacyNodeIds: definitionNodeIds(existing.definition),
+    });
     if (!validation.valid) {
       jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
       return true;
@@ -568,7 +575,9 @@ export async function handleWorkflows(
       return true;
     }
 
-    const validation = validateDefinition(patchResult.definition, getExecutorRegistry());
+    const validation = validateDefinition(patchResult.definition, getExecutorRegistry(), {
+      legacyNodeIds: definitionNodeIds(existing.definition),
+    });
     if (!validation.valid) {
       jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
       return true;
@@ -627,7 +636,9 @@ export async function handleWorkflows(
 
     // Validate new definition if provided
     if (body.definition) {
-      const validation = validateDefinition(body.definition, getExecutorRegistry());
+      const validation = validateDefinition(body.definition, getExecutorRegistry(), {
+        legacyNodeIds: definitionNodeIds(existing.definition),
+      });
       if (!validation.valid) {
         jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
         return true;

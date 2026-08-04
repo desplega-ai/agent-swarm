@@ -18,7 +18,7 @@ import {
   WorkflowDefinitionSchema,
 } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
-import { validateDefinition } from "@/workflows/definition";
+import { definitionNodeIds, validateDefinition } from "@/workflows/definition";
 import { snapshotWorkflow } from "@/workflows/version";
 
 export const registerUpdateWorkflowTool = (server: McpServer) => {
@@ -112,7 +112,9 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
 
         // Validate new definition if provided
         if (definition) {
-          const validation = validateDefinition(definition, getExecutorRegistry());
+          const validation = validateDefinition(definition, getExecutorRegistry(), {
+            legacyNodeIds: definitionNodeIds(existing.definition),
+          });
           if (!validation.valid) {
             return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
           }

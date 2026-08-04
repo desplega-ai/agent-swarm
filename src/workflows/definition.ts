@@ -140,6 +140,15 @@ function containsInterpolationToken(value: unknown): boolean {
 }
 
 /**
+ * Node ids of a stored definition — passed to validateDefinition as
+ * `legacyNodeIds` by update/patch paths so ids that predate the reserved-`#`
+ * rule stay editable.
+ */
+export function definitionNodeIds(def: WorkflowDefinition): Set<string> {
+  return new Set(def.nodes.map((node) => node.id));
+}
+
+/**
  * Validate a workflow definition for structural correctness.
  *
  * Checks:
@@ -152,12 +161,17 @@ function containsInterpolationToken(value: unknown): boolean {
 export function validateDefinition(
   def: WorkflowDefinition,
   registry?: ExecutorRegistry,
+  options: { legacyNodeIds?: ReadonlySet<string> } = {},
 ): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
   const nodeIds = new Set(def.nodes.map((n) => n.id));
 
   for (const node of def.nodes) {
-    if (node.id.includes("#")) {
+    // `#` is reserved for synthetic foreach child ids — but only for NEW or
+    // renamed nodes. Node ids were unrestricted before this rule, so update/patch
+    // paths pass the stored definition's ids (legacyNodeIds) to keep a workflow
+    // that already contains one editable instead of bricked.
+    if (node.id.includes("#") && !options.legacyNodeIds?.has(node.id)) {
       errors.push(`Node "${node.id}" contains reserved character "#"`);
     }
     if (node.type === "foreach") {
