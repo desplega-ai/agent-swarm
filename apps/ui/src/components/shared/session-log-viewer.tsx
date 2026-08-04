@@ -1663,7 +1663,7 @@ function GenericMetaBubble({ block }: { block: ProviderMetaBlock }) {
 }
 
 // Shared 2-column [time | content] row scaffold (prose / thinking / meta / tool group).
-function RowShell({
+export function SessionLogRowShell({
   time,
   iso,
   flash,
@@ -2252,7 +2252,7 @@ export function SessionLogViewer({
         const isUser = row.role === "user";
         const isSystem = row.role === "system";
         return (
-          <RowShell
+          <SessionLogRowShell
             time={row.time}
             iso={row.iso}
             flash={flash}
@@ -2272,12 +2272,12 @@ export function SessionLogViewer({
               text={row.md}
               className="absolute right-0 top-px cursor-pointer bg-card opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
             />
-          </RowShell>
+          </SessionLogRowShell>
         );
       }
       if (row.type === "thinking") {
         return (
-          <RowShell
+          <SessionLogRowShell
             time={row.time}
             iso={row.iso}
             flash={flash}
@@ -2286,12 +2286,12 @@ export function SessionLogViewer({
             streamDelayMs={streamDelayMs}
           >
             <ThinkingRow text={row.text} />
-          </RowShell>
+          </SessionLogRowShell>
         );
       }
       if (row.type === "meta") {
         return (
-          <RowShell
+          <SessionLogRowShell
             time={row.time}
             iso={row.iso}
             flash={flash}
@@ -2300,12 +2300,12 @@ export function SessionLogViewer({
             streamDelayMs={streamDelayMs}
           >
             <ProviderMetaBubble block={row.block} />
-          </RowShell>
+          </SessionLogRowShell>
         );
       }
       if (row.type === "steering") {
         return (
-          <RowShell
+          <SessionLogRowShell
             time={row.time}
             iso={row.iso}
             flash={flash}
@@ -2315,7 +2315,7 @@ export function SessionLogViewer({
           >
             {/* One line, same rhythm as the SYSTEM/meta rows: accent marker
                 carries the "user injected this" signal, the chip carries the
-                lifecycle, RowShell's gutter already owns the timestamp. */}
+                lifecycle, SessionLogRowShell's gutter already owns the timestamp. */}
             <SteeringLine
               message={row.message}
               className="text-[12.5px]"
@@ -2325,13 +2325,13 @@ export function SessionLogViewer({
                 </span>
               }
             />
-          </RowShell>
+          </SessionLogRowShell>
         );
       }
       const open = isGroupOpen(row);
       const dur = formatDur(row.durMs);
       return (
-        <RowShell
+        <SessionLogRowShell
           time={row.time}
           iso={row.iso}
           flash={flash}
@@ -2373,7 +2373,7 @@ export function SessionLogViewer({
               ))}
             </div>
           )}
-        </RowShell>
+        </SessionLogRowShell>
       );
     },
     [

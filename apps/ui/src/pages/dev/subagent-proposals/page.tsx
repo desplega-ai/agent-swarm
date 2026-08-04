@@ -1,27 +1,14 @@
-import {
-  Activity,
-  Bot,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  Clock3,
-  GanttChartSquare,
-  ListTree,
-  PanelRight,
-  Search,
-  Terminal,
-} from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Bot, Check, ChevronRight, Circle, Search, Terminal } from "lucide-react";
+import { useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { SessionLogRowShell } from "@/components/shared/session-log-viewer";
 import { Input } from "@/components/ui/input";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 type AgentStatus = "running" | "completed";
-type ProposalKey = "inline" | "roster" | "timeline";
+type ViewKey = "logs" | "agents";
 
 interface SubAgentSample {
   id: string;
@@ -29,12 +16,12 @@ interface SubAgentSample {
   kind: string;
   status: AgentStatus;
   started: string;
+  startedIso: string;
   finished?: string;
   duration: string;
   input: string;
   outcome?: string;
-  mark: string;
-  rail: string;
+  dot: string;
   bar: string;
   timeline: string;
 }
@@ -46,15 +33,15 @@ const agents: SubAgentSample[] = [
     kind: "qa-use:browser-navigator",
     status: "completed",
     started: "06:30:40",
+    startedIso: "2026-08-04T06:30:40.000Z",
     finished: "06:32:03",
     duration: "1m 23s",
     input:
       "Navigate to news.ycombinator.com/newest and extract every story with title, URL, item ID, points, comments, and age.",
     outcome:
       "30 stories extracted successfully. Browser session d8f13c72 loaded 670 DOM elements and closed cleanly.",
-    mark: "border-action-agent-task/40 bg-action-agent-task/10 text-action-agent-task",
-    rail: "border-l-action-agent-task",
-    bar: "border-action-agent-task/50 bg-action-agent-task/20",
+    dot: "bg-action-agent-task",
+    bar: "bg-action-agent-task/12 text-action-agent-task",
     timeline: "col-start-1 col-span-4",
   },
   {
@@ -63,15 +50,15 @@ const agents: SubAgentSample[] = [
     kind: "qa-use:browser-navigator",
     status: "completed",
     started: "06:30:35",
+    startedIso: "2026-08-04T06:30:35.000Z",
     finished: "06:32:47",
     duration: "2m 12s",
     input:
       "Navigate to news.ycombinator.com and return all front-page stories with full HN metadata and comments links.",
     outcome:
       "All 30 front-page stories returned with full metadata after loading 645 DOM elements in session 0682921f.",
-    mark: "border-action-script/40 bg-action-script/10 text-action-script",
-    rail: "border-l-action-script",
-    bar: "border-action-script/50 bg-action-script/20",
+    dot: "bg-action-script",
+    bar: "bg-action-script/12 text-action-script",
     timeline: "col-start-1 col-span-6",
   },
   {
@@ -80,169 +67,97 @@ const agents: SubAgentSample[] = [
     kind: "research spike",
     status: "running",
     started: "15:32:18",
+    startedIso: "2026-08-04T15:32:18.000Z",
     duration: "6m 12s",
     input:
       "Ground OpenCode and Pi sub-agent lifecycle feasibility in raw session_logs JSONL; enumerate exact searches and missing fields.",
-    mark: "border-action-notify/40 bg-action-notify/10 text-action-notify",
-    rail: "border-l-action-notify",
-    bar: "border-action-notify/50 bg-action-notify/20",
+    dot: "bg-action-notify",
+    bar: "bg-action-notify/12 text-action-notify",
     timeline: "col-start-1 col-span-16",
   },
 ];
 
-const proposalMeta: Record<
-  ProposalKey,
-  { title: string; description: string; cost: string; icon: typeof ListTree }
-> = {
-  inline: {
-    title: "Inline lifecycle cards",
-    description:
-      "The running hand-off stays pinned above causal history; completed agents remain beside the tool calls that created them.",
-    cost: "FE-only: Claude/OpenCode · backend for full coverage",
-    icon: ListTree,
-  },
-  roster: {
-    title: "Agent roster rail",
-    description:
-      "A quiet operational lane keeps running agents visible while the transcript remains unchanged.",
-    cost: "Backend lifecycle index",
-    icon: PanelRight,
-  },
-  timeline: {
-    title: "Agent waterfall",
-    description:
-      "Parallelism and duration become the primary view; input and outcome sit in a selected detail pane.",
-    cost: "Backend lifecycle index + stable IDs",
-    icon: GanttChartSquare,
-  },
-};
-
-function StatusPill({ status }: { status: AgentStatus }) {
+function AgentDot({ agent }: { agent: SubAgentSample }) {
   return (
-    <Badge
-      variant="outline"
-      size="tag"
-      className={cn(
-        status === "running"
-          ? "border-status-active/30 text-status-active-strong"
-          : "border-status-success/30 text-status-success-strong",
-      )}
-    >
-      {status === "running" ? (
-        <span className="size-1.5 rounded-full bg-status-active" aria-hidden="true" />
-      ) : (
-        <CheckCircle2 className="size-2.5" aria-hidden="true" />
-      )}
-      {status}
-    </Badge>
-  );
-}
-
-function AgentMark({ agent, compact = false }: { agent: SubAgentSample; compact?: boolean }) {
-  const initials = agent.name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((word) => word[0])
-    .join("")
-    .toUpperCase();
-  return (
-    <span
-      className={cn(
-        "grid shrink-0 place-items-center rounded-md border font-mono font-bold",
-        compact ? "size-6 text-[9px]" : "size-8 text-[10px]",
-        agent.mark,
-      )}
-      role="img"
-      aria-label={`${agent.name} colour marker`}
-    >
-      {initials}
+    <span className="relative grid size-4 shrink-0 place-items-center" aria-hidden="true">
+      <span className={cn("relative size-2 rounded-full", agent.dot)} />
     </span>
   );
 }
 
-function FieldBlock({
-  label,
-  children,
-  compact = false,
-}: {
-  label: string;
-  children: React.ReactNode;
-  compact?: boolean;
-}) {
+function StatusText({ agent }: { agent: SubAgentSample }) {
   return (
-    <section className="min-w-0 rounded-lg border border-border bg-surface px-3 py-2.5">
-      <h4 className="mb-1 font-mono text-[9px] font-bold uppercase tracking-[0.1em] text-muted-foreground">
-        {label}
-      </h4>
-      <p className={cn("text-xs leading-relaxed text-foreground/85", compact && "line-clamp-2")}>
-        {children}
-      </p>
-    </section>
+    <span
+      className={cn(
+        "shrink-0 font-mono text-[10px]",
+        agent.status === "running" ? "text-status-active-strong" : "text-status-success-strong",
+      )}
+    >
+      {agent.status === "completed" && <Check className="mr-1 inline size-2.5" />}
+      {agent.status}
+    </span>
   );
 }
 
-function ProposalIntro({ proposal }: { proposal: ProposalKey }) {
-  const meta = proposalMeta[proposal];
-  const Icon = meta.icon;
+function DetailField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-start gap-3 rounded-lg border border-border bg-muted/25 px-3 py-2.5">
-      <span className="grid size-8 shrink-0 place-items-center rounded-md border border-border bg-background text-muted-foreground">
-        <Icon className="size-4" />
-      </span>
-      <div className="min-w-[220px] flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-sm font-semibold">{meta.title}</h2>
-          <Badge variant="outline" size="tag" className="text-muted-foreground">
-            {meta.cost}
-          </Badge>
-        </div>
-        <p className="mt-0.5 text-xs text-muted-foreground">{meta.description}</p>
-      </div>
-      <p className="max-w-sm text-[10px] leading-relaxed text-muted-foreground">
-        Lifecycle content is copied from raw Claude Task rows; surrounding tool density is
-        benchmarked against tasks <span className="font-mono">6ea7735f</span> and{" "}
-        <span className="font-mono">9936a794</span>.
-      </p>
+    <div className="grid min-w-0 gap-1 sm:grid-cols-[72px_minmax(0,1fr)] sm:gap-4">
+      <dt className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="m-0 text-[11.5px] leading-[1.6] text-foreground/85">{children}</dd>
     </div>
   );
 }
 
-function MockTaskHeader() {
+function AgentLogRow({
+  agent,
+  open,
+  onToggle,
+}: {
+  agent: SubAgentSample;
+  open: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <header className="shrink-0 border-b border-border bg-background px-4 py-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge
-          variant="outline"
-          size="tag"
-          className="border-status-success/30 text-status-success-strong"
-        >
-          <CheckCircle2 className="size-2.5" /> completed
-        </Badge>
-        <Badge variant="outline" size="tag">
-          research
-        </Badge>
-        <Badge variant="outline" size="tag">
-          codex
-        </Badge>
-        <Badge variant="outline" size="tag">
-          claude
-        </Badge>
-        <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-          raw sample · 2b213b5c
+    <SessionLogRowShell time={agent.started} iso={agent.startedIso}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex min-h-6 w-full min-w-0 cursor-pointer items-center gap-2 text-left"
+        aria-expanded={open}
+      >
+        <ChevronRight
+          className={cn(
+            "size-3 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-90",
+          )}
+        />
+        <AgentDot agent={agent} />
+        <span className="min-w-0 shrink truncate text-xs font-medium text-foreground">
+          {agent.name}
         </span>
-      </div>
-      <h1 className="mt-2 line-clamp-1 text-sm font-semibold">
-        Empirically verify the local setup and inspect the harness lifecycle data
-      </h1>
-      <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">
-        Real source density from the reported Codex and Claude transcripts; no child transcripts
-        shown.
-      </p>
-    </header>
+        <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-muted-foreground max-sm:hidden">
+          {agent.kind}
+        </span>
+        <StatusText agent={agent} />
+        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+          {agent.duration}
+        </span>
+      </button>
+      {open && (
+        <dl className="mt-1.5 grid gap-2 border-t border-border/40 py-2 pr-2 sm:ml-9">
+          <DetailField label="Input">{agent.input}</DetailField>
+          <DetailField label="Outcome">
+            {agent.outcome ?? "Running now. The outcome appears here when the harness returns."}
+          </DetailField>
+        </dl>
+      )}
+    </SessionLogRowShell>
   );
 }
 
-function ToolLine({
+function ToolLogRow({
   time,
   name,
   detail,
@@ -254,218 +169,68 @@ function ToolLine({
   duration: string;
 }) {
   return (
-    <div className="grid grid-cols-[52px_minmax(0,1fr)] gap-3 border-b border-border/50 px-3 py-2 last:border-b-0">
-      <span className="pt-0.5 font-mono text-[10px] tabular-nums text-muted-foreground">
-        {time}
-      </span>
-      <div className="flex min-w-0 items-center gap-2">
+    <SessionLogRowShell time={time} iso={`2026-08-04T${time}.000Z`}>
+      <div className="flex min-h-6 min-w-0 items-center gap-2">
         <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
-        <Terminal className="size-3 shrink-0 text-muted-foreground" />
-        <span className="shrink-0 font-mono text-xs font-medium">{name}</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">
+        <span className="grid size-4 shrink-0 place-items-center text-muted-foreground">
+          <Terminal className="size-3" />
+        </span>
+        <span className="shrink-0 font-mono text-xs text-foreground">{name}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-muted-foreground">
           {detail}
         </span>
-        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{duration}</span>
-      </div>
-    </div>
-  );
-}
-
-function TranscriptToolbar({ children }: { children?: React.ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/25 px-3 py-2">
-      <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-        Session logs
-      </span>
-      {children}
-      <div className="relative ml-auto">
-        <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          aria-label="Filter mock session log"
-          placeholder="Filter…"
-          className="h-7 w-36 pl-7 text-xs"
-        />
-      </div>
-    </div>
-  );
-}
-
-function InlineAgentCard({ agent }: { agent: SubAgentSample }) {
-  return (
-    <div className="grid grid-cols-[52px_minmax(0,1fr)] gap-3 border-b border-border/50 px-3 py-2.5">
-      <span className="pt-1 font-mono text-[10px] tabular-nums text-muted-foreground">
-        {agent.started}
-      </span>
-      <article
-        className={cn(
-          "overflow-hidden rounded-lg border border-border border-l-2 bg-card",
-          agent.rail,
-        )}
-      >
-        <div className="flex min-w-0 items-center gap-2 px-3 py-2">
-          <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-          <AgentMark agent={agent} compact />
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-xs font-semibold">{agent.name}</span>
-              <span className="hidden truncate font-mono text-[9px] text-muted-foreground sm:block">
-                {agent.kind}
-              </span>
-            </div>
-          </div>
-          <StatusPill status={agent.status} />
-          <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-            {agent.duration}
-          </span>
-        </div>
-        <div className="grid gap-2 border-t border-border bg-muted/15 p-2.5 md:grid-cols-2">
-          <FieldBlock label="Input" compact>
-            {agent.input}
-          </FieldBlock>
-          <FieldBlock label={agent.status === "running" ? "Outcome" : "Outcome · returned"} compact>
-            {agent.outcome ??
-              "Still running. Outcome will appear here when the harness returns it."}
-          </FieldBlock>
-        </div>
-      </article>
-    </div>
-  );
-}
-
-function InlineProposal() {
-  return (
-    <Card className="h-full min-h-0 gap-0 overflow-hidden py-0">
-      <MockTaskHeader />
-      <TranscriptToolbar>
-        <Badge variant="outline" size="tag" className="text-muted-foreground">
-          3 agents
-        </Badge>
-      </TranscriptToolbar>
-      <div className="min-h-0 flex-1 overflow-auto">
-        <InlineAgentCard agent={agents[2]} />
-        <ToolLine time="06:30:34" name="bash" detail="qa-use browser list" duration="13s" />
-        <InlineAgentCard agent={agents[1]} />
-        <InlineAgentCard agent={agents[0]} />
-        <ToolLine time="06:32:05" name="wait" detail="receiver thread state" duration="30s" />
-      </div>
-      <div className="flex items-center gap-2 border-t border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-        <span className="size-2 rounded-full bg-status-active" />1 child agent is running
-        <span className="ml-auto font-mono text-[10px]">7 lifecycle events</span>
-      </div>
-    </Card>
-  );
-}
-
-function RosterCard({
-  agent,
-  selected,
-  onSelect,
-}: {
-  agent: SubAgentSample;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={cn(
-        "w-full rounded-lg border border-border border-l-2 bg-background p-2.5 text-left transition-colors hover:bg-muted/30",
-        agent.rail,
-        selected && "ring-2 ring-ring/30",
-      )}
-    >
-      <div className="flex min-w-0 items-center gap-2">
-        <AgentMark agent={agent} compact />
-        <span className="min-w-0 flex-1 truncate text-xs font-semibold">{agent.name}</span>
-        <StatusPill status={agent.status} />
-      </div>
-      <div className="mt-2 flex items-center gap-2 pl-8 font-mono text-[9px] text-muted-foreground">
-        <span>{agent.kind}</span>
-        <span aria-hidden="true">·</span>
-        <span>
-          {agent.status === "running" ? `running ${agent.duration}` : `finished ${agent.finished}`}
+        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+          {duration}
         </span>
       </div>
-    </button>
+    </SessionLogRowShell>
   );
 }
 
-function RosterProposal() {
-  const [selectedId, setSelectedId] = useState(agents[2].id);
-  const selected = agents.find((agent) => agent.id === selectedId) ?? agents[0];
+function LogsView({
+  expandedId,
+  onToggleAgent,
+}: {
+  expandedId: string | null;
+  onToggleAgent: (agentId: string) => void;
+}) {
   return (
-    <Card className="h-full min-h-0 gap-0 overflow-hidden py-0">
-      <MockTaskHeader />
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_154px]">
-        <div className="grid min-h-0 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <section className="flex min-h-0 flex-col overflow-hidden border-r border-border">
-            <TranscriptToolbar />
-            <div className="min-h-0 flex-1 overflow-auto">
-              <ToolLine time="13:43:00" name="bash" detail="bun test packages/cli" duration="13s" />
-              <ToolLine
-                time="13:48:27"
-                name="bash"
-                detail="pipe backpressure reproduction"
-                duration="14s"
-              />
-              <ToolLine
-                time="13:51:02"
-                name="bash"
-                detail="writeSync retry verification"
-                duration="2m 3s"
-              />
-              <ToolLine time="13:55:47" name="wait" detail="receiver thread state" duration="30s" />
-              <div className="px-3 py-5 text-center text-xs text-muted-foreground">
-                Child transcripts stay out of this stream.
-              </div>
-            </div>
-          </section>
-          <aside className="min-h-0 overflow-auto bg-muted/10">
-            <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
-              <Activity className="size-3.5 text-muted-foreground" />
-              <h2 className="text-xs font-semibold">Sub-agents</h2>
-              <Badge
-                variant="outline"
-                size="tag"
-                className="ml-auto border-status-active/30 text-status-active-strong"
-              >
-                1 running
-              </Badge>
-            </div>
-            <div className="grid gap-2 p-3">
-              {[agents[2], agents[0], agents[1]].map((agent) => (
-                <RosterCard
-                  key={agent.id}
-                  agent={agent}
-                  selected={selected.id === agent.id}
-                  onSelect={() => setSelectedId(agent.id)}
-                />
-              ))}
-            </div>
-          </aside>
+    <div className="min-h-0">
+      <div className="flex items-center gap-2 border-b border-border/60 py-2">
+        <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground">
+          Session logs
+        </span>
+        <span className="font-mono text-[9.5px] text-muted-foreground">18 events</span>
+        <div className="relative ml-auto">
+          <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            aria-label="Filter mock session log"
+            placeholder="Filter…"
+            className="h-7 w-36 pl-7 text-xs shadow-none"
+          />
         </div>
-        <section className="grid min-h-0 grid-cols-[210px_minmax(0,1fr)_minmax(0,1fr)] gap-3 border-t border-border bg-background p-3">
-          <div className="flex min-w-0 items-start gap-2 rounded-lg border border-border bg-muted/20 p-3">
-            <AgentMark agent={selected} compact />
-            <div className="min-w-0 flex-1">
-              <h3 className="truncate text-xs font-semibold">{selected.name}</h3>
-              <p className="font-mono text-[9px] text-muted-foreground">{selected.id}</p>
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <StatusPill status={selected.status} />
-                <span className="font-mono text-[10px] text-muted-foreground">
-                  {selected.duration}
-                </span>
-              </div>
-            </div>
-          </div>
-          <FieldBlock label="Input">{selected.input}</FieldBlock>
-          <FieldBlock label="Outcome">
-            {selected.outcome ?? "Running now. The returned outcome will replace this live state."}
-          </FieldBlock>
-        </section>
       </div>
-    </Card>
+      <div>
+        <ToolLogRow time="06:30:34" name="bash" detail="qa-use browser list" duration="13s" />
+        <AgentLogRow
+          agent={agents[1]}
+          open={expandedId === agents[1].id}
+          onToggle={() => onToggleAgent(agents[1].id)}
+        />
+        <AgentLogRow
+          agent={agents[0]}
+          open={expandedId === agents[0].id}
+          onToggle={() => onToggleAgent(agents[0].id)}
+        />
+        <ToolLogRow time="06:32:05" name="wait" detail="receiver thread state" duration="30s" />
+        <AgentLogRow
+          agent={agents[2]}
+          open={expandedId === agents[2].id}
+          onToggle={() => onToggleAgent(agents[2].id)}
+        />
+        <ToolLogRow time="15:38:30" name="bash" detail="rg session_logs lifecycle" duration="8s" />
+      </div>
+    </div>
   );
 }
 
@@ -483,195 +248,178 @@ function TimelineLane({
       type="button"
       onClick={onSelect}
       className={cn(
-        "grid grid-cols-[180px_minmax(480px,1fr)_64px] items-center gap-3 border-b border-border/50 px-3 py-2 text-left last:border-b-0 hover:bg-muted/30",
-        selected && "bg-primary/5",
+        "grid w-full grid-cols-[190px_minmax(480px,1fr)_68px] items-center gap-4 border-b border-border/40 py-2 text-left transition-colors hover:bg-muted/30",
+        selected && "bg-muted/25",
       )}
     >
       <span className="flex min-w-0 items-center gap-2">
-        <AgentMark agent={agent} compact />
+        <AgentDot agent={agent} />
         <span className="min-w-0">
-          <span className="block truncate text-xs font-semibold">{agent.name}</span>
-          <span className="block truncate font-mono text-[9px] text-muted-foreground">
+          <span className="block truncate text-xs font-medium">{agent.name}</span>
+          <span className="block truncate font-mono text-[9.5px] text-muted-foreground">
             {agent.kind}
           </span>
         </span>
       </span>
-      <span className="grid h-8 grid-cols-16 items-center rounded-md bg-muted/40 px-1">
+      <span className="grid h-7 grid-cols-16 items-center bg-[linear-gradient(to_right,var(--color-border)_1px,transparent_1px)] bg-[size:25%_100%]">
         <span
           className={cn(
-            "flex h-5 items-center rounded border px-2",
+            "flex h-4 items-center rounded-sm px-2",
             agent.bar,
             agent.timeline,
-            agent.status === "running" && "border-r-2 border-r-status-active",
+            agent.status === "running" &&
+              "after:ml-auto after:size-1.5 after:rounded-full after:bg-status-active",
           )}
         >
-          <span className="truncate font-mono text-[9px] font-medium">{agent.duration}</span>
+          <span className="truncate font-mono text-[9px] font-bold">{agent.duration}</span>
         </span>
       </span>
-      <span className="text-right font-mono text-[9px] text-muted-foreground">
+      <span className="text-right font-mono text-[9.5px] tabular-nums text-muted-foreground">
         {agent.finished ?? "now"}
       </span>
     </button>
   );
 }
 
-function TimelineProposal() {
-  const [selectedId, setSelectedId] = useState(agents[0].id);
+function AgentsView({
+  selectedId,
+  onSelectAgent,
+}: {
+  selectedId: string;
+  onSelectAgent: (agentId: string) => void;
+}) {
   const selected = agents.find((agent) => agent.id === selectedId) ?? agents[0];
   return (
-    <Card className="h-full min-h-0 gap-0 overflow-hidden py-0">
-      <MockTaskHeader />
-      <div className="flex flex-wrap items-center gap-3 border-b border-border px-3 py-2.5">
-        <GanttChartSquare className="size-3.5 text-muted-foreground" />
-        <h2 className="text-xs font-semibold">Sub-agent waterfall</h2>
-        <span className="font-mono text-[10px] text-muted-foreground">6m 12s live window</span>
-        <div className="ml-auto flex items-center gap-3 text-[10px] text-muted-foreground">
-          {agents.map((agent) => (
-            <span key={agent.id} className="flex items-center gap-1.5">
-              <span className={cn("size-2 rounded-sm border", agent.mark)} />
-              {agent.name.replace(" navigator", "")}
-            </span>
-          ))}
-        </div>
+    <div className="min-h-0">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 py-2 text-[10px] text-muted-foreground">
+        <span className="font-mono uppercase tracking-[0.1em]">Agent waterfall</span>
+        <span className="font-mono">6m 12s live window</span>
+        <span className="ml-auto flex items-center gap-1.5">
+          <Circle className="size-2 fill-status-active text-status-active" /> 1 running
+        </span>
       </div>
-      <ScrollArea className="shrink-0 border-b border-border">
-        <div className="min-w-[820px]">
-          <div className="grid grid-cols-[180px_minmax(480px,1fr)_64px] gap-3 border-b border-border/50 px-3 py-1.5">
-            <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-              Agent
-            </span>
-            <span className="grid grid-cols-4 font-mono text-[9px] tabular-nums text-muted-foreground">
+      <ScrollArea className="border-b border-border/60">
+        <div className="min-w-[790px]">
+          <div className="grid grid-cols-[190px_minmax(480px,1fr)_68px] gap-4 border-b border-border/40 py-1.5 font-mono text-[9px] uppercase tracking-[0.08em] text-muted-foreground">
+            <span>Agent</span>
+            <span className="grid grid-cols-4 tabular-nums">
               <span>0s</span>
               <span>2m</span>
               <span>4m</span>
               <span className="text-right">6m 12s</span>
             </span>
-            <span className="text-right font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-              End
-            </span>
+            <span className="text-right">End</span>
           </div>
           {agents.map((agent) => (
             <TimelineLane
               key={agent.id}
               agent={agent}
               selected={agent.id === selected.id}
-              onSelect={() => setSelectedId(agent.id)}
+              onSelect={() => onSelectAgent(agent.id)}
             />
           ))}
         </div>
-        <ScrollBar orientation="horizontal" />
+        <ScrollBar orientation="horizontal" className="h-1.5" />
       </ScrollArea>
-      <div className="grid min-h-0 flex-1 gap-3 overflow-auto p-3 md:grid-cols-[220px_minmax(0,1fr)]">
-        <section className="rounded-lg border border-border bg-muted/20 p-3">
-          <div className="flex items-center gap-2">
-            <AgentMark agent={selected} />
-            <div className="min-w-0">
-              <h3 className="truncate text-xs font-semibold">{selected.name}</h3>
-              <p className="font-mono text-[9px] text-muted-foreground">{selected.id}</p>
-            </div>
-          </div>
-          <div className="mt-3 grid gap-1.5 text-[10px]">
-            <p className="flex justify-between">
-              <span className="text-muted-foreground">Status</span>
-              <StatusPill status={selected.status} />
-            </p>
-            <p className="flex justify-between">
-              <span className="text-muted-foreground">Started</span>
-              <span className="font-mono">{selected.started}</span>
-            </p>
-            <p className="flex justify-between">
-              <span className="text-muted-foreground">Finished</span>
-              <span className="font-mono">{selected.finished ?? "—"}</span>
-            </p>
-            <p className="flex justify-between">
-              <span className="text-muted-foreground">Duration</span>
-              <span className="font-mono">{selected.duration}</span>
+      <section className="grid gap-3 border-b border-border/40 py-3 sm:grid-cols-[190px_minmax(0,1fr)] sm:gap-4">
+        <div className="flex min-w-0 items-start gap-2">
+          <AgentDot agent={selected} />
+          <div className="min-w-0">
+            <h3 className="truncate text-xs font-medium">{selected.name}</h3>
+            <p className="mt-0.5 font-mono text-[9.5px] text-muted-foreground">{selected.id}</p>
+            <p className="mt-2 flex items-center gap-2">
+              <StatusText agent={selected} />
+              <span className="font-mono text-[9.5px] text-muted-foreground">
+                {selected.started} → {selected.finished}
+              </span>
             </p>
           </div>
-        </section>
-        <div className="grid content-start gap-3 md:grid-cols-2">
-          <FieldBlock label="Input">{selected.input}</FieldBlock>
-          <FieldBlock label="Outcome">
-            {selected.outcome ??
-              "Still running. The timeline extends to the current time until completion."}
-          </FieldBlock>
         </div>
-      </div>
-    </Card>
+        <dl className="grid content-start gap-2">
+          <DetailField label="Input">{selected.input}</DetailField>
+          <DetailField label="Outcome">{selected.outcome}</DetailField>
+        </dl>
+      </section>
+    </div>
   );
 }
 
-function coerceProposal(value: string | null): ProposalKey {
-  return value === "roster" || value === "timeline" ? value : "inline";
+function coerceView(value: string | null): ViewKey {
+  return value === "agents" ? "agents" : "logs";
 }
 
 export default function SubAgentProposalsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const proposal = useMemo(() => coerceProposal(searchParams.get("proposal")), [searchParams]);
+  const view = useMemo(() => coerceView(searchParams.get("view")), [searchParams]);
+  const expandedId = searchParams.get("expanded");
+  const selectedId = searchParams.get("selected") ?? agents[0].id;
 
   useEffect(() => {
     document.documentElement.classList.remove("dark");
     document.documentElement.style.colorScheme = "light";
   }, []);
 
-  const setProposal = (value: string) => {
-    const next = coerceProposal(value);
+  const setView = (value: string) => {
     setSearchParams((current) => {
       const params = new URLSearchParams(current);
-      params.set("proposal", next);
+      params.set("view", coerceView(value));
+      params.delete("expanded");
+      return params;
+    });
+  };
+
+  const toggleAgent = (agentId: string) => {
+    setSearchParams((current) => {
+      const params = new URLSearchParams(current);
+      if (params.get("expanded") === agentId) params.delete("expanded");
+      else params.set("expanded", agentId);
+      return params;
+    });
+  };
+
+  const selectAgent = (agentId: string) => {
+    setSearchParams((current) => {
+      const params = new URLSearchParams(current);
+      params.set("selected", agentId);
       return params;
     });
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-      <div className="flex shrink-0 flex-wrap items-center gap-3">
-        <div className="min-w-[240px] flex-1">
-          <div className="flex items-center gap-2">
-            <Bot className="size-5 text-muted-foreground" />
-            <h1 className="text-xl font-semibold">Sub-agent tracking proposals</h1>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Three product-native directions · design review only · light mode
-          </p>
-        </div>
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
-          <Clock3 className="size-3.5 text-muted-foreground" />
-          <span>
-            <strong>1</strong> running
-          </span>
-          <span className="text-muted-foreground">·</span>
-          <span>
-            <strong>2</strong> completed
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <header className="shrink-0 border-b border-border/60 pb-3">
+        <div className="flex items-center gap-2">
+          <Bot className="size-4 text-muted-foreground" />
+          <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground">
+            Design review · combined direction
           </span>
         </div>
-      </div>
+        <h1 className="mt-1.5 text-base font-semibold">
+          Empirically verify the local setup and inspect harness lifecycle data
+        </h1>
+        <p className="mt-1 hidden text-xs text-muted-foreground sm:block">
+          Child transcripts stay out of the task stream; lifecycle input and outcome remain one
+          expansion away.
+        </p>
+      </header>
 
-      <Tabs
-        value={proposal}
-        onValueChange={setProposal}
-        className="flex min-h-0 flex-1 flex-col gap-2"
-      >
-        <TabsList className="shrink-0">
-          <TabsTrigger value="inline">
-            <ListTree /> A · Inline
+      <Tabs value={view} onValueChange={setView} className="min-h-0 flex-1 gap-0">
+        <TabsList variant="line" className="h-9 shrink-0 border-b border-border/60 p-0">
+          <TabsTrigger value="logs" className="h-8 flex-none rounded-none px-3 text-xs">
+            Logs
           </TabsTrigger>
-          <TabsTrigger value="roster">
-            <PanelRight /> B · Roster rail
-          </TabsTrigger>
-          <TabsTrigger value="timeline">
-            <GanttChartSquare /> C · Waterfall
-          </TabsTrigger>
+          {agents.length > 0 && (
+            <TabsTrigger value="agents" className="h-8 flex-none rounded-none px-3 text-xs">
+              Agents{" "}
+              <span className="font-mono text-[10px] text-muted-foreground">({agents.length})</span>
+            </TabsTrigger>
+          )}
         </TabsList>
-        <ProposalIntro proposal={proposal} />
-        <TabsContent value="inline" className="mt-0 min-h-0 flex-1">
-          <InlineProposal />
+        <TabsContent value="logs" className="min-h-0 overflow-auto">
+          <LogsView expandedId={expandedId} onToggleAgent={toggleAgent} />
         </TabsContent>
-        <TabsContent value="roster" className="mt-0 min-h-0 flex-1">
-          <RosterProposal />
-        </TabsContent>
-        <TabsContent value="timeline" className="mt-0 min-h-0 flex-1">
-          <TimelineProposal />
+        <TabsContent value="agents" className="min-h-0 overflow-auto">
+          <AgentsView selectedId={selectedId} onSelectAgent={selectAgent} />
         </TabsContent>
       </Tabs>
     </div>
