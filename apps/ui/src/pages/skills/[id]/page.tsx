@@ -279,6 +279,11 @@ export default function SkillDetailPage() {
                 <SearchableSelect
                   value={selectedFilePath}
                   onChange={setSelectedFilePath}
+                  // The editor stays bound to SKILL.md while editing (Edit is
+                  // only offered on SKILL.md), so switching files mid-edit
+                  // would show a bundled file's path over SKILL.md's content
+                  // and Save would silently overwrite SKILL.md.
+                  disabled={editContent !== null}
                   options={[
                     { value: "", label: `${skill.name}/SKILL.md` },
                     ...skillFiles.map((file) => ({
@@ -355,7 +360,7 @@ export default function SkillDetailPage() {
                     ) : isMarkdownFile ? (
                       <MarkdownView text={selectedFile.content} normalizeSoftBreaks={false} />
                     ) : (
-                      <MonacoCodeBlock language={fileLanguage} value={selectedFile.content} />
+                      <MonacoCodeBlock language={fileLanguage} value={selectedFile.content} fill />
                     )
                   ) : body.trim() ? (
                     <MarkdownView text={body} normalizeSoftBreaks={false} />
