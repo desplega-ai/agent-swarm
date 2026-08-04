@@ -55,6 +55,7 @@ const MemoryPage = lazy(() => import("@/pages/memory/page"));
 const MetricsPage = lazy(() => import("@/pages/metrics/page"));
 const PageDetailPage = lazy(() => import("@/pages/pages/[id]/page"));
 const PagesListingPage = lazy(() => import("@/pages/pages/page"));
+const SubAgentProposalsPage = lazy(() => import("@/pages/dev/subagent-proposals/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
 
 /**
@@ -157,6 +158,9 @@ export const router = createBrowserRouter([
       { path: "memory", element: <MemoryPage /> },
       { path: "pages", element: <PagesListingPage /> },
       { path: "pages/:id", element: <PageDetailPage /> },
+      ...(import.meta.env.DEV
+        ? [{ path: "dev/subagent-proposals", element: <SubAgentProposalsPage /> }]
+        : []),
       ...redirectRoutes,
       { path: "*", element: <NotFoundPage /> },
     ],

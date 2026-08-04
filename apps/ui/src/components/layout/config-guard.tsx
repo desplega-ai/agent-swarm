@@ -9,6 +9,12 @@ export function ConfigGuard({ children }: ConfigGuardProps) {
   const { isConfigured } = useConfig();
   const location = useLocation();
 
+  // Design-review routes contain static, in-product proposals and must be
+  // reproducible without connecting the UI to a live swarm.
+  if (import.meta.env.DEV && location.pathname.startsWith("/dev/")) {
+    return <>{children}</>;
+  }
+
   // Always allow access to the connections page itself. After the
   // sidebar-trim IA rework Config split into /settings/connections; matching
   // the new path here avoids an infinite redirect loop (the WelcomeCard
