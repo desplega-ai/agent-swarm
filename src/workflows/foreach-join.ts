@@ -1,7 +1,6 @@
 import { getLatestStepForNode, getWorkflowRunStepsByRunId } from "../be/db";
 import type { WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
 import { checkpointStep } from "./checkpoint";
-import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
 import { getSuccessors } from "./definition";
 import type { ForeachOutput } from "./executors/foreach";
 
@@ -110,15 +109,9 @@ function childIndex(step: WorkflowRunStep): number {
 
 function resultStatus(step: WorkflowRunStep): ForeachOutput["results"][number]["status"] {
   if (step.status !== "completed") return step.status as "failed" | "cancelled" | "skipped";
-  if (
-    typeof step.output === "object" &&
-    step.output !== null &&
-    typeof (step.output as Record<string, unknown>).taskOutput === "string" &&
-    ((step.output as Record<string, unknown>).taskOutput as string).startsWith(
-      FAILED_TASK_OUTPUT_PREFIX,
-    )
-  ) {
-    return "failed";
-  }
-  return "completed";
+  // An onNodeFailure:"continue" completion persists its failure reason on
+  // step.error (completeTaskStepAndResolveSuccessors). Classify on that explicit
+  // metadata — a successful child whose OUTPUT merely begins with "[FAILED:"
+  // (e.g. an agent quoting a log line) is user-controlled text, not a failure.
+  return step.error ? "failed" : "completed";
 }

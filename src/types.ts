@@ -1480,6 +1480,11 @@ export const ExecutorMetaSchema = z.object({
   workflowId: z.string().uuid(),
   dryRun: z.boolean().default(false),
   requestedByUserId: z.string().optional(),
+  // The node's declared-inputs interpolation context (aliases + builtins) as built
+  // by buildNodeInterpolationCtx. Executors that defer interpolation (foreach's
+  // per-item body pass) must use THIS — not the full run context — so deferred
+  // config obeys the same explicit-dataflow boundary as normal node config.
+  inputCtx: z.record(z.string(), z.unknown()).optional(),
 });
 export type ExecutorMeta = z.infer<typeof ExecutorMetaSchema>;
 

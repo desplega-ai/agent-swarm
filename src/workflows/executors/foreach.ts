@@ -127,7 +127,12 @@ export class ForeachExecutor extends BaseExecutor<
       // inputs. Retry resets only the failed child to pending before arriving here.
       if (FOREACH_TERMINAL_STEP_STATUSES.has(childStep.status)) continue;
 
-      const childInterpolation = deepInterpolate(config.body.config, { ...context, item, index });
+      // The deferred per-item pass interpolates against the node's declared-inputs
+      // context (meta.inputCtx) plus item/index — NOT the full run context — so
+      // body.config obeys the same explicit-dataflow boundary as normal node
+      // config instead of silently reading undeclared upstream outputs.
+      const bodyCtx = { ...(meta.inputCtx ?? context), item, index };
+      const childInterpolation = deepInterpolate(config.body.config, bodyCtx);
       if (childInterpolation.unresolved.length > 0) {
         console.warn(
           `[workflow] Step ${childNodeId}: unresolved interpolation tokens: ${childInterpolation.unresolved.join(", ")}`,

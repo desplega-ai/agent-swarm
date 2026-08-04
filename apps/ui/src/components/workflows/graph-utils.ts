@@ -58,11 +58,12 @@ function aggregateStepStatus(statuses: WorkflowRunStepStatus[]): WorkflowRunStep
 
 /**
  * A `foreach` child that failed under `onNodeFailure: 'continue'` is persisted as `completed` with
- * a `[FAILED: …]` task output — count it as failed when aggregating onto the parent node.
+ * the failure reason on `step.error` — count it as failed when aggregating onto the parent node.
+ * (Classification uses that explicit metadata, not the `[FAILED: …]` output text, which a
+ * successful child could legitimately produce.)
  */
 function effectiveChildStatus(step: WorkflowRunStep): WorkflowRunStepStatus {
-  const taskOutput = (step.output as { taskOutput?: unknown } | null | undefined)?.taskOutput;
-  if (typeof taskOutput === "string" && taskOutput.startsWith("[FAILED:")) return "failed";
+  if (step.status === "completed" && step.error) return "failed";
   return step.status;
 }
 

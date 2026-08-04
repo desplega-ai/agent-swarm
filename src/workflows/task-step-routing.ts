@@ -20,6 +20,7 @@ export function completeTaskStepAndResolveSuccessors(
   step: WorkflowRunStep,
   output: unknown,
   ctx: Record<string, unknown>,
+  failureReason?: string,
 ): TaskStepRoutingResult {
   const txn = getDb().transaction((): TaskStepRoutingResult => {
     const foreachParent = resolveForeachParent(def, step.nodeId);
@@ -27,6 +28,10 @@ export function completeTaskStepAndResolveSuccessors(
       updateWorkflowRunStep(step.id, {
         status: "completed",
         output,
+        // onNodeFailure:"continue" completions persist the failure reason as
+        // explicit metadata — the join classifies children on THIS, not on
+        // whether user-controlled output text happens to start with "[FAILED:".
+        ...(failureReason !== undefined ? { error: failureReason } : {}),
         finishedAt: new Date().toISOString(),
       });
       const join = joinForeach(def, runId, step, ctx);

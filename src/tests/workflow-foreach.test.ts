@@ -177,7 +177,144 @@ describe("workflow foreach", () => {
     expect(aggregate.failedCount).toBe(1);
     expect(aggregate.results[1]?.status).toBe("failed");
     expect(aggregate.results[1]?.output.taskOutput).toStartWith("[FAILED: reflection broke]");
+    // The failure is explicit metadata on the completed child, not just output text.
+    expect(stepById(runId, children[1]!.id)?.error).toBe("reflection broke");
     expect(stepByNodeId(runId, "after")?.status).toBe("completed");
+  });
+
+  test("a successful child whose output text starts with [FAILED: is not misclassified", async () => {
+    const { bus, registry } = createRegistry(true);
+    const workflow = makeWorkflow(foreachDefinition());
+    const runId = await startWorkflowExecution(
+      workflow,
+      { items: agentItems.slice(0, 1) },
+      registry,
+    );
+    const child = foreachChildren(runId)[0]!;
+
+    // A legitimate completion quoting a log line — user-controlled text, not the
+    // continue-on-failure marker. Only step.error may mark a completed child failed.
+    await completeChild(
+      runId,
+      child.id,
+      "[FAILED: 3 assertions] was the CI summary I analyzed",
+      bus,
+    );
+    await waitFor(() => getWorkflowRun(runId)?.status === "completed");
+
+    const aggregate = getContext(runId).reflect as {
+      results: Array<{ status: string }>;
+      okCount: number;
+      failedCount: number;
+    };
+    expect(aggregate.okCount).toBe(1);
+    expect(aggregate.failedCount).toBe(0);
+    expect(aggregate.results[0]?.status).toBe("completed");
+  });
+
+  test("foreach body config cannot read undeclared upstream outputs", async () => {
+    const { registry } = createRegistry(false);
+    const definition: WorkflowDefinition = {
+      nodes: [
+        {
+          id: "seed",
+          type: "record",
+          config: { message: "classified" },
+          next: "reflect",
+        },
+        {
+          id: "reflect",
+          type: "foreach",
+          // `seed` is deliberately NOT declared in inputs — the deferred body pass
+          // must obey the same explicit-dataflow boundary as normal node config.
+          config: {
+            over: "{{trigger.items}}",
+            itemKey: "id",
+            body: {
+              type: "agent-task",
+              config: {
+                agentId: "{{item.id}}",
+                template: "leak:{{seed.message}} name:{{item.name}}",
+              },
+            },
+          },
+        },
+      ],
+    };
+    const workflow = makeWorkflow(definition);
+    const runId = await startWorkflowExecution(
+      workflow,
+      { items: agentItems.slice(0, 1) },
+      registry,
+    );
+
+    const child = foreachChildren(runId)[0]!;
+    const task = getTaskByWorkflowRunStepId(child.id)!;
+    expect(task.task.split("\n").at(-1)).toBe(`leak: name:${agentItems[0]!.name}`);
+    expect(child.diagnostics).toContain("seed.message");
+  });
+
+  test("the retry poller rebuilds declared input aliases for a retried foreach", async () => {
+    const { registry } = createRegistry(false);
+    const definition: WorkflowDefinition = {
+      nodes: [
+        {
+          id: "reflect",
+          type: "foreach",
+          inputs: { items: "trigger.items" },
+          config: {
+            over: "{{items}}",
+            itemKey: "id",
+            body: {
+              type: "agent-task",
+              config: { agentId: "{{item.id}}", template: "Retry reflect {{item.name}}" },
+            },
+          },
+          retry: { maxRetries: 2, strategy: "static", baseDelayMs: 1, maxDelayMs: 10 },
+          next: "after",
+        },
+        {
+          id: "after",
+          type: "record",
+          inputs: { aggregate: "reflect" },
+          config: { message: "ok" },
+        },
+      ],
+    };
+    const workflow = makeWorkflow(definition);
+    const runId = await startWorkflowExecution(
+      workflow,
+      { items: agentItems.slice(0, 2) },
+      registry,
+    );
+    expect(foreachChildren(runId)).toHaveLength(2);
+
+    // Simulate a transient fan-out failure recorded for the retry poller: the
+    // parent step failed before any child survived, run is failed, retry due.
+    for (const child of foreachChildren(runId)) {
+      db.getDb().prepare("DELETE FROM agent_tasks WHERE workflowRunStepId = ?").run(child.id);
+      db.getDb().prepare("DELETE FROM workflow_run_steps WHERE id = ?").run(child.id);
+    }
+    const parent = stepByNodeId(runId, "reflect")!;
+    db.updateWorkflowRunStep(parent.id, {
+      status: "failed",
+      error: "transient dispatch failure",
+      nextRetryAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    db.updateWorkflowRun(runId, { status: "failed" });
+
+    try {
+      startRetryPoller(registry, 10);
+      // Without buildNodeInterpolationCtx on the retry path, {{items}} resolves to
+      // "" from raw run.context, the config schema rejects it, and no child is
+      // ever re-dispatched.
+      await waitFor(() => foreachChildren(runId).length === 2);
+      await waitFor(() => getWorkflowRun(runId)?.status === "waiting");
+    } finally {
+      stopRetryPoller();
+    }
+    expect(stepByNodeId(runId, "reflect")?.status).toBe("waiting");
+    expect(taskCountForForeachChildren(runId)).toBe(2);
   });
 
   test("re-walk after partial completion does not duplicate children or tasks", async () => {

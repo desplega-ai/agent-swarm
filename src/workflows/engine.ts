@@ -483,35 +483,7 @@ async function executeStep(
   const executor = registry.get(node.type);
 
   // 3b. Build local interpolation context from explicit inputs mapping
-  let interpolationCtx: Record<string, unknown>;
-  if (node.inputs) {
-    interpolationCtx = {};
-    // Always include built-in sources
-    if (ctx.trigger !== undefined) interpolationCtx.trigger = ctx.trigger;
-    if (ctx.input !== undefined) interpolationCtx.input = ctx.input;
-    if (ctx.workflow !== undefined) interpolationCtx.workflow = ctx.workflow;
-    if (ctx.swarm !== undefined) interpolationCtx.swarm = ctx.swarm;
-    // Resolve declared inputs
-    for (const [localName, sourcePath] of Object.entries(node.inputs)) {
-      const keys = sourcePath.split(".");
-      let value: unknown = ctx;
-      for (const key of keys) {
-        if (value == null || typeof value !== "object") {
-          value = undefined;
-          break;
-        }
-        value = (value as Record<string, unknown>)[key];
-      }
-      interpolationCtx[localName] = value;
-    }
-  } else {
-    // No inputs declared — only built-in sources available
-    interpolationCtx = {};
-    if (ctx.trigger !== undefined) interpolationCtx.trigger = ctx.trigger;
-    if (ctx.input !== undefined) interpolationCtx.input = ctx.input;
-    if (ctx.workflow !== undefined) interpolationCtx.workflow = ctx.workflow;
-    if (ctx.swarm !== undefined) interpolationCtx.swarm = ctx.swarm;
-  }
+  const interpolationCtx = buildNodeInterpolationCtx(node, ctx);
 
   // 3c. Validate resolved inputs against inputSchema if defined
   if (node.inputSchema) {
@@ -548,6 +520,7 @@ async function executeStep(
     workflowId: workflowId || "",
     dryRun: false,
     requestedByUserId: options.requestedByUserId,
+    inputCtx: interpolationCtx,
   };
 
   // Inline script nodes historically expose their wall-clock budget as
@@ -750,6 +723,41 @@ export function findReadyNodes(
     }
     return true;
   });
+}
+
+/**
+ * Build a node's interpolation context: the built-in sources plus its declared
+ * `inputs` aliases resolved against the run context. This is THE dataflow
+ * boundary for node config — every path that interpolates a node's config
+ * (initial execution AND the retry poller) must resolve aliases through this,
+ * or `{{alias}}` tokens silently resolve to empty strings on that path.
+ */
+export function buildNodeInterpolationCtx(
+  node: Pick<WorkflowNode, "inputs">,
+  ctx: Record<string, unknown>,
+): Record<string, unknown> {
+  const interpolationCtx: Record<string, unknown> = {};
+  // Always include built-in sources
+  if (ctx.trigger !== undefined) interpolationCtx.trigger = ctx.trigger;
+  if (ctx.input !== undefined) interpolationCtx.input = ctx.input;
+  if (ctx.workflow !== undefined) interpolationCtx.workflow = ctx.workflow;
+  if (ctx.swarm !== undefined) interpolationCtx.swarm = ctx.swarm;
+  if (ctx.run !== undefined) interpolationCtx.run = ctx.run;
+  if (!node.inputs) return interpolationCtx;
+  // Resolve declared inputs
+  for (const [localName, sourcePath] of Object.entries(node.inputs)) {
+    const keys = sourcePath.split(".");
+    let value: unknown = ctx;
+    for (const key of keys) {
+      if (value == null || typeof value !== "object") {
+        value = undefined;
+        break;
+      }
+      value = (value as Record<string, unknown>)[key];
+    }
+    interpolationCtx[localName] = value;
+  }
+  return interpolationCtx;
 }
 
 export function interpolateNodeConfig(

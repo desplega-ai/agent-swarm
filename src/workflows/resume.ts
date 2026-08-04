@@ -217,6 +217,7 @@ async function handleTaskFailure(
     step,
     stepOutput,
     ctx,
+    reason,
   );
 
   // Use direct successor-based routing (loop-aware).

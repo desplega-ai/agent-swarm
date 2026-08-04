@@ -8,7 +8,7 @@ import {
 import type { RetryPolicy } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { getSuccessors } from "./definition";
-import { interpolateNodeConfig, walkGraph } from "./engine";
+import { buildNodeInterpolationCtx, interpolateNodeConfig, walkGraph } from "./engine";
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
 import { runStepValidation } from "./validation";
@@ -61,8 +61,13 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
 
           const ctx = (run.context ?? {}) as Record<string, unknown>;
 
-          // Deep-interpolate config
-          const { value: interpolatedValue } = interpolateNodeConfig(node, ctx);
+          // Deep-interpolate config against the node's declared-inputs context —
+          // the raw run context has no `inputs` aliases, so interpolating against
+          // it directly resolves every {{alias}} to "" and (e.g.) a retried
+          // foreach with `over: "{{items}}"` burns all its retries on schema
+          // rejections without ever re-dispatching.
+          const inputCtx = buildNodeInterpolationCtx(node, ctx);
+          const { value: interpolatedValue } = interpolateNodeConfig(node, inputCtx);
           const interpolatedConfig = interpolatedValue as Record<string, unknown>;
 
           // Get executor and re-run
@@ -73,6 +78,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
             nodeId: step.nodeId,
             workflowId: workflow.id,
             dryRun: false,
+            inputCtx,
           };
 
           try {
