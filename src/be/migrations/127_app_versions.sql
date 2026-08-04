@@ -1,4 +1,4 @@
--- Spike-only app definition history. Snapshots preserve the pre-write state.
+-- App definition history. Snapshots preserve the pre-write state.
 CREATE TABLE IF NOT EXISTS app_versions (
   id TEXT PRIMARY KEY,
   appId TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
