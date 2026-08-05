@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Interactive exploration of ideas through Socratic Q&A. Produces progressive documents that serve as lightweight pre-PRDs feeding into research.",
+  "displayName": "Brainstorming",
+  "kind": "skill",
+  "name": "brainstorming",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "brainstorming",
+  "systemDefault": true,
+  "tags": [
+    "ideation",
+    "discovery",
+    "planning"
+  ],
+  "title": "Brainstorming",
+  "version": "1.0.0"
+}

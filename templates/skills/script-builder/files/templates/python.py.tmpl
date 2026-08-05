@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+{{UV_METADATA}}
+"""
+{{WHAT}}
+
+When:    {{WHEN}}
+Env:     {{ENV}}
+Example: {{EXAMPLE}}
+
+Output convention:
+  - stdout (default):  one PASS/FAIL line + path to /tmp log
+  - stdout (--verbose): full log streamed
+  - stdout (--json):    {"status":"pass"|"fail","log":"<path>","summary":"..."}
+  - exit code:         0 on PASS, non-zero on FAIL
+
+Generated/maintained via `/script-builder`.
+"""
+
+import argparse
+import json as _json
+import os
+import sys
+from datetime import datetime
+from pathlib import Path
+
+SCRIPT_NAME = "{{SCRIPT_NAME}}"
+TS = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+LOG_PATH = Path(f"/tmp/{SCRIPT_NAME}-{TS}.log")
+
+
+class TeeLogger:
+    """Writes every line to the /tmp log; mirrors to stdout only when --verbose."""
+
+    def __init__(self, log_path: Path, verbose: bool) -> None:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = log_path.open("a", buffering=1)
+        self._verbose = verbose
+
+    def log(self, msg: str) -> None:
+        line = f"[{datetime.utcnow().isoformat()}] {msg}\n"
+        self._fh.write(line)
+        if self._verbose:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+
+    def close(self) -> None:
+        self._fh.close()
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog=SCRIPT_NAME,
+        description="{{WHAT}}",
+        epilog=f"When: {{WHEN}}\nEnv: {{ENV}}\nExample: {{EXAMPLE}}",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("-v", "--verbose", action="store_true", help="Stream full log to stdout")
+    p.add_argument("--json", action="store_true", help="Emit a single JSON summary line")
+    return p.parse_args()
+
+
+def summary(status: str, message: str, json_out: bool) -> int:
+    if json_out:
+        sys.stdout.write(_json.dumps({"status": status, "log": str(LOG_PATH), "summary": message}) + "\n")
+    else:
+        tag = "PASS" if status == "pass" else "FAIL"
+        sys.stdout.write(f"{tag}: {message} (log: {LOG_PATH})\n")
+    return 0 if status == "pass" else 1
+
+
+def main() -> int:
+    args = parse_args()
+    logger = TeeLogger(LOG_PATH, args.verbose)
+    logger.log(f"Starting {SCRIPT_NAME}")
+    try:
+        {{TEST_BODY}}
+        return summary("pass", "{{WHAT}}", args.json)
+    except Exception as err:  # noqa: BLE001 — top-level guard for context-optimal output
+        logger.log(f"ERROR: {err!r}")
+        return summary("fail", str(err), args.json)
+    finally:
+        logger.close()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

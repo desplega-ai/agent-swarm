@@ -8,6 +8,7 @@ import type {
   WorkflowRunStep,
   WorkflowRunStepStatus,
 } from "@/api/types";
+import { foreachParentIds, parseSyntheticStepId } from "@/lib/synthetic-step-id";
 
 const CONDITION_TYPES = new Set(["property-match", "code-match", "validate", "raw-llm"]);
 export type NodeCategory = "triggerNode" | "conditionNode" | "actionNode";
@@ -33,14 +34,68 @@ export interface FlowNodeData {
   [key: string]: unknown;
 }
 
+/**
+ * Order in which the statuses of a `foreach` node's synthetic child steps collapse into the single
+ * status shown on the parent graph node — the most actionable one wins (any running → running,
+ * then any failed → failed, …, all completed → completed).
+ */
+const STATUS_PRECEDENCE: WorkflowRunStepStatus[] = [
+  "running",
+  "failed",
+  "cancelled",
+  "waiting",
+  "pending",
+  "completed",
+  "skipped",
+];
+
+function aggregateStepStatus(statuses: WorkflowRunStepStatus[]): WorkflowRunStepStatus {
+  for (const candidate of STATUS_PRECEDENCE) {
+    if (statuses.includes(candidate)) return candidate;
+  }
+  return statuses[0];
+}
+
+/**
+ * A `foreach` child that failed under `onNodeFailure: 'continue'` is persisted as `completed` with
+ * the failure reason on `step.error` — count it as failed when aggregating onto the parent node.
+ * (Classification uses that explicit metadata, not the `[FAILED: …]` output text, which a
+ * successful child could legitimately produce.)
+ */
+export function effectiveChildStatus(step: WorkflowRunStep): WorkflowRunStepStatus {
+  if (step.status === "completed" && step.error) return "failed";
+  return step.status;
+}
+
 export function toReactFlowGraph(
   definition: WorkflowDefinition,
   steps?: WorkflowRunStep[],
 ): { nodes: Node<FlowNodeData>[]; edges: Edge[] } {
-  const stepMap = new Map<string, WorkflowRunStep>();
+  // Steps that own a node keep latest-wins semantics (a loop node re-executes, and the graph shows
+  // the current iteration). Synthetic `foreach` children (`<parentNodeId>#<itemKey>`) have no node
+  // of their own, so they aggregate by precedence onto their parent node instead.
+  const statusMap = new Map<string, WorkflowRunStepStatus>();
   if (steps) {
+    const foreachIds = foreachParentIds(definition.nodes);
+    const childStatuses = new Map<string, WorkflowRunStepStatus[]>();
     for (const step of steps) {
-      stepMap.set(step.nodeId, step);
+      const { parentNodeId, itemKey } = parseSyntheticStepId(step.nodeId, foreachIds);
+      if (itemKey === null) {
+        statusMap.set(step.nodeId, step.status);
+        continue;
+      }
+      const statuses = childStatuses.get(parentNodeId);
+      if (statuses) {
+        statuses.push(effectiveChildStatus(step));
+      } else {
+        childStatuses.set(parentNodeId, [effectiveChildStatus(step)]);
+      }
+    }
+    for (const [nodeId, statuses] of childStatuses) {
+      // A parent-level failure (the fan-out or the join itself) outranks the children's aggregate.
+      const own = statusMap.get(nodeId);
+      const withOwn = own === "failed" || own === "cancelled" ? [own, ...statuses] : statuses;
+      statusMap.set(nodeId, aggregateStepStatus(withOwn));
     }
   }
 
@@ -54,7 +109,6 @@ export function toReactFlowGraph(
   }
 
   const nodes: Node<FlowNodeData>[] = definition.nodes.map((node) => {
-    const step = stepMap.get(node.id);
     const ports = outputPortsMap.get(node.id);
     const outputPorts = ports ? Array.from(ports) : [];
     return {
@@ -65,16 +119,15 @@ export function toReactFlowGraph(
         label: getNodeLabel(node),
         nodeType: node.type,
         config: node.config,
-        stepStatus: step?.status,
+        stepStatus: statusMap.get(node.id),
         outputPorts,
       },
     };
   });
 
   const edges: Edge[] = (definition.edges ?? []).map((edge: WorkflowEdge) => {
-    const sourceStep = stepMap.get(edge.source);
-    const targetStep = stepMap.get(edge.target);
-    const bothCompleted = sourceStep?.status === "completed" && targetStep?.status === "completed";
+    const bothCompleted =
+      statusMap.get(edge.source) === "completed" && statusMap.get(edge.target) === "completed";
     return {
       id: edge.id,
       source: edge.source,

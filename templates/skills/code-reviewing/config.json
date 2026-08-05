@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Two-axis code review of a diff — Standards (is the code well built?) and Spec (does it actually solve the stated problem?) — run as parallel sub-agents and reported separately, never merged. Use when reviewing implementation output (a phase, a wave, a branch, a PR), when the user says \"review the code\", \"review the diff\", \"review this phase\", or when another desplega skill (implementing, v-implementing, verifying, delegate-work) calls for a per-phase or final code review. For reviewing DOCUMENTS (plans, research, brainstorms), use desplega:reviewing instead.",
+  "displayName": "Code Reviewing",
+  "kind": "skill",
+  "name": "code-reviewing",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "code-reviewing",
+  "systemDefault": true,
+  "tags": [
+    "code-review",
+    "quality",
+    "verification"
+  ],
+  "title": "Code Reviewing",
+  "version": "1.0.0"
+}

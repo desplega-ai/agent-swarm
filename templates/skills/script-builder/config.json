@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Generate durable, re-runnable scripts from session intent — validation scripts (PASS/FAIL contract) AND gather/bulk scripts (many API/tool calls in code, one derived summary out). Supports TypeScript, Python, Bash with auto-detection, enforces context-optimal output, and auto-documents scripts in CLAUDE.md. Triggers on \"turn this into a script\", \"I want to test/validate X end-to-end\", \"wrap this in a re-runnable script\" — and, critically, whenever you are about to make (or just made) ~10+ similar tool/API calls or any bulk fan-out over a list: that mechanical middle belongs in a script, not in context.",
+  "displayName": "Script Builder",
+  "kind": "skill",
+  "name": "script-builder",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "script-builder",
+  "systemDefault": true,
+  "tags": [
+    "scripts",
+    "automation",
+    "validation"
+  ],
+  "title": "Script Builder",
+  "version": "1.0.0"
+}

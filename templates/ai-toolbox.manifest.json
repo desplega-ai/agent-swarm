@@ -1,0 +1,220 @@
+{
+  "commit": "db05890849d4ea8ffe0827f095064ecda3f86ae2",
+  "excludedSkills": [
+    "feedback"
+  ],
+  "files": {
+    "templates/skills/ask-user/config.json": "ea3031995620d2fefbdc646b7436831a2d37a44f9819698fcfe5715e46bb52bd",
+    "templates/skills/ask-user/content.md": "9ff296170aa60c9d7569e1f123a183a7c86693b85d29d2c733832dd21cee02c6",
+    "templates/skills/brainstorming/config.json": "95fae1a5f47ca5dc20f30af3552d7ec85581c0b1042d3eb040720444c930e54f",
+    "templates/skills/brainstorming/content.md": "6e6738dd9ca3dc63d45dd658d07f3b101a40339eef68c4591006ce2d1704a3d2",
+    "templates/skills/brainstorming/files/template.md": "ae0aabc02a307db0550f9026aca33fb471608c31f7a0b65ecc781073f17cc953",
+    "templates/skills/code-reviewing/config.json": "dde1298b15d55428b898a0421033d1aa140ef152d335d49345059e29deab96f2",
+    "templates/skills/code-reviewing/content.md": "85e9aa3b276384ab3f3bc570aece2e8c103a8614c19129378cf4dfec3457a18b",
+    "templates/skills/delegate-work/config.json": "5b1542eb0be359bb8a17117fcf87917e0607d1b939ae3266ddffacdc14efb281",
+    "templates/skills/delegate-work/content.md": "c9562bd17846d3595d40172ecfdc6f85bb99eaf23597eb9d5aa9635d5c14d079",
+    "templates/skills/delegate-work/files/scripts/codex-exec.sh": "c2222986c46ac608403f28f201230cb34c7d7ac41a2262dc2c8dbd99c8645dbb",
+    "templates/skills/design-docs/config.json": "b78141763541486d67a105e8fa23873c9ffee6a682832c4b7266b8320d55ead7",
+    "templates/skills/design-docs/content.md": "fc860031defbd192c1b8e1c024b46509d78dcf10dbf1b8c93cc4d62396153a52",
+    "templates/skills/design-docs/files/template.md": "72d2cdcf8713c08d525d69892c5fed536107594522e3e799ae44f51df7015a36",
+    "templates/skills/engineering-standards/config.json": "84492cdc6e14034654704c4075c5bc50d1cd7d1d2cee7ba04d74dfabab854914",
+    "templates/skills/engineering-standards/content.md": "bc760dcde03c99004e926b4abfb90263ff537a17ff3aefde6c1cd4d41c81fd1e",
+    "templates/skills/implementing/config.json": "e93d221c99540f2a060521d886060bea58ffff6f5d996760cc0480c1f9e54fe6",
+    "templates/skills/implementing/content.md": "64e33bb9a385bcc16d8984f7a65ba4dae8b8dd9b2443a7ecf7adb268b6cea4e5",
+    "templates/skills/improve-agents-md/config.json": "6d856d60b0c2e94e6ce3b1a6abcf65659d65487ba3049d192042a783d9e07d89",
+    "templates/skills/improve-agents-md/content.md": "e76e20af06b0dce602e72b33216bfaf46c70b4c7d7602aab4dc7ad4c3baa9d4b",
+    "templates/skills/learning/config.json": "6c77b404f87a07a1f1cf67a1a2cc217606927f39c19cc6e52ef3f2e077e99cd9",
+    "templates/skills/learning/content.md": "76008076b6d26c20b95f5be10237bc9fc7e33141d601e8f10bfbad2b6e6f44e3",
+    "templates/skills/learning/files/template.md": "83501d796641ea260efd45335399541eb3351a7610c73389d7c29a2b1614c339",
+    "templates/skills/one-shot/config.json": "744b82666fad4cedf0afd7073d59f81d6f1546bb9af5d7eee682c5a887a25cd0",
+    "templates/skills/one-shot/content.md": "4c4a405ffb1003542d5e9a225a2ffc5028a145f8ca31bda6310497b8fa679433",
+    "templates/skills/phase-running/config.json": "41a7b8bbf7623542bc2b1b92ce01b70bdee9f468687c293892374f6dca0dee8e",
+    "templates/skills/phase-running/content.md": "925ebcec2b4e97f92d4363dd5bde888b5fad41d24e02a88843223390bf580cd3",
+    "templates/skills/planning/config.json": "5377b04a2d5dea9c6f067c6c874b552557cab7d7a1f2c0bb9c23655dbf1f035e",
+    "templates/skills/planning/content.md": "543476e4dbb5c352acd686c3929c45cc992d7d033d06f7e9a30f78009b50785c",
+    "templates/skills/planning/files/template.md": "c0d5ca63c07934546172322bbd1180e2901dc45e27b5d12ce3dc5c30f5e7a98b",
+    "templates/skills/qa/config.json": "c53b01558a691c0343b6270a548e6172af86600a429b789eedb518849f7ea741",
+    "templates/skills/qa/content.md": "afac65d0deef288b3e84aa2911c715028606ecc6e4dd251255fc31d98f1d04ec",
+    "templates/skills/qa/files/template.md": "1902e4bb65b19ab58c54ab5b63693ad09adecee69079c2c70f58d7d6c6597896",
+    "templates/skills/questioning/config.json": "da2d5fe6dfdac1915a0476a7063e62ebeb996b84caff07cc7527a55477656a80",
+    "templates/skills/questioning/content.md": "66f826a191e96d0041adca00a7c197a458de8e6fe164c1599b8708098d4109ab",
+    "templates/skills/questioning/files/template.md": "a68d72801a0b10380bf773b07e9d2f8d4c5b4b1c609ce954289e38ffc78cc223",
+    "templates/skills/researching/config.json": "921c062cab599097cc7677d2dad4797ec4d5844d2ee73607fbd417ec3fa487d4",
+    "templates/skills/researching/content.md": "0e8f98a7a5c75059fba6cd2c908b8268efce13192c1220ba594f2a9e3bf1e60a",
+    "templates/skills/researching/files/template.md": "411d34b98c610ef715edf0f24d09f828ba2d0f65f688e7879ef33a9453007949",
+    "templates/skills/reviewing/config.json": "09c40bb098e9738c60a848995fa9fe7568d158631a089c76ba02c0dd955445c7",
+    "templates/skills/reviewing/content.md": "1bbc285c9ad8cc3312f1ee2c558b04ffee914ffb6f5c63fb3741fcbb3e300fa5",
+    "templates/skills/script-builder/config.json": "6117cba2f490386d8a27e142e589a7ee034da7f5db968f34fe55ee9057c24fb3",
+    "templates/skills/script-builder/content.md": "453d8908a03f3e44ecaee87822515dc45cd7fc847f8af9372befa4a39755b817",
+    "templates/skills/script-builder/files/templates/README.md": "fd96009834ab57d1862c41d215729f4a7e1e192850c0541afdaa081daa968854",
+    "templates/skills/script-builder/files/templates/bash.sh.tmpl": "83430f02c2ac3cda8e2eaa1022e06f1801e58780a33c08d7b42c58209df96ac4",
+    "templates/skills/script-builder/files/templates/python.py.tmpl": "e990a2e40c302de4a06140cfa88ab63de735dae1afae66386a2b62c161924c96",
+    "templates/skills/script-builder/files/templates/typescript.ts.tmpl": "b2983600a708b8fbef55f9b42e7080cf7e0da296c8751a95e4814232aa0aa737",
+    "templates/skills/step-running/config.json": "3bbd609758be44a5738b0d10e9e213cd2343af5675fc1eb776a6ec8471949b1b",
+    "templates/skills/step-running/content.md": "07d1e3d07e71ebe1c453109e03b80a01197de48b82d9726726645eb2c1899404",
+    "templates/skills/tackle-gh-comments/config.json": "72956f602192bea70db950e36eaa298cbea0995cebfaa67bdd74a77c5a46678b",
+    "templates/skills/tackle-gh-comments/content.md": "5aff640173081dc5b965d023f2d53526a57ad5135229ac46eb248b496675eb34",
+    "templates/skills/tackle-gh-comments/files/scripts/gh-pr-comments.ts": "85efca9bea5899ddf54fdb24586547f70939be43587d3137406b362fc51ba240",
+    "templates/skills/tdd-planning/config.json": "d03fce2559b03f02ba962d9d79c6363238380ba7a89a1e2ebe316cbe9b6b4616",
+    "templates/skills/tdd-planning/content.md": "87808dca0db0b224ac9dcb3722805fd61f64f6bde033847de3ec14ad3584d8ca",
+    "templates/skills/tdd-planning/files/template.md": "61f0f6aad195067b1f13289f02523f5ef606ed33f22db94bda923dcd0bd0674c",
+    "templates/skills/v-implementing/config.json": "e11fb54b78bebeb32a43c8ac92bd6754114445018fcfb2014d6c69691764574c",
+    "templates/skills/v-implementing/content.md": "0d24db3e54bd6836766005d756512aa5f5af19108fb39889d33f4dbadf1ac455",
+    "templates/skills/v-planning/config.json": "5a54360357bdceba19254d08f5f787e181b254f45ef9466e81792e02dfb611fb",
+    "templates/skills/v-planning/content.md": "30c4cc59706cc00c22c045c1ea288a093ff520233316167019b80182051101b0",
+    "templates/skills/v-planning/files/templates/root.md": "b78d70b552864b535cccc3ddb35dd1bee188856cf8b27d778d26951523ec3079",
+    "templates/skills/v-planning/files/templates/step.md": "54f408d170c18cf24c7e0e7097ea0f38fd106d67f20f556824d9e40d6856ffda",
+    "templates/skills/verifying/config.json": "e2dbc6580e2574ad4f9f2e21fa21d49aa6fb1f542facfced0ac2b2860552604f",
+    "templates/skills/verifying/content.md": "503b48614d3fcaafbf370e0095bc5af2aee746f6e7e61b359f3c007fc46528b1",
+    "templates/skills/wts-expert/config.json": "8044272e7ebc8f4631cfb799c87d37bd853771b018f596609331ebd159b40af8",
+    "templates/skills/wts-expert/content.md": "848b778c26d05b9f8c8588a08b0c1b8a5a3dde08a7960548a1aa2961f4e50d71",
+    "templates/skills/wts-expert/files/COMMANDS.md": "458cc61ca688c4647ec75d8ab1e49564690f98a1a67e43f38546f6772e956fbe"
+  },
+  "skills": [
+    "ask-user",
+    "brainstorming",
+    "code-reviewing",
+    "delegate-work",
+    "design-docs",
+    "engineering-standards",
+    "implementing",
+    "improve-agents-md",
+    "learning",
+    "one-shot",
+    "phase-running",
+    "planning",
+    "qa",
+    "questioning",
+    "researching",
+    "reviewing",
+    "script-builder",
+    "step-running",
+    "tackle-gh-comments",
+    "tdd-planning",
+    "v-implementing",
+    "v-planning",
+    "verifying",
+    "wts-expert"
+  ],
+  "source": "https://github.com/desplega-ai/ai-toolbox.git",
+  "transforms": {
+    "executableBitsDowngraded": [
+      {
+        "path": "scripts/codex-exec.sh",
+        "skill": "delegate-work"
+      }
+    ],
+    "hooksDropped": [
+      "implementing",
+      "phase-running",
+      "step-running",
+      "v-implementing"
+    ],
+    "pathRewrites": [
+      {
+        "from": "cc-plugin/base/skills/brainstorming/template.md",
+        "line": 36,
+        "skill": "brainstorming",
+        "to": "template.md"
+      },
+      {
+        "from": "`${CLAUDE_PLUGIN_ROOT}/skills/delegate-work/scripts/codex-exec.sh`",
+        "line": 66,
+        "skill": "delegate-work",
+        "to": "`bash ~/.claude/skills/delegate-work/scripts/codex-exec.sh`"
+      },
+      {
+        "from": "| codex-exec.sh -m",
+        "line": 69,
+        "skill": "delegate-work",
+        "to": "| bash ~/.claude/skills/delegate-work/scripts/codex-exec.sh -m"
+      },
+      {
+        "from": "cc-plugin/base/skills/design-docs/template.md",
+        "line": 7,
+        "skill": "design-docs",
+        "to": "template.md"
+      },
+      {
+        "from": "cc-plugin/base/skills/learning/template.md",
+        "line": 101,
+        "skill": "learning",
+        "to": "template.md"
+      },
+      {
+        "from": "cc-plugin/base/skills/planning/template.md",
+        "line": 30,
+        "skill": "planning",
+        "to": "template.md"
+      },
+      {
+        "from": "cc-plugin/base/skills/planning/template.md",
+        "line": 72,
+        "skill": "planning",
+        "to": "template.md"
+      },
+      {
+        "from": "cc-plugin/base/skills/qa/template.md",
+        "line": 71,
+        "skill": "qa",
+        "to": "template.md"
+      },
+      {
+        "from": "cc-plugin/base/skills/questioning/template.md",
+        "line": 86,
+        "skill": "questioning",
+        "to": "template.md"
+      },
+      {
+        "from": "cc-plugin/base/skills/researching/template.md",
+        "line": 113,
+        "skill": "researching",
+        "to": "template.md"
+      },
+      {
+        "from": "cc-plugin/base/skills/script-builder/templates/{typescript.ts.tmpl|python.py.tmpl|bash.sh.tmpl",
+        "line": 112,
+        "skill": "script-builder",
+        "to": "templates/{typescript.ts.tmpl|python.py.tmpl|bash.sh.tmpl"
+      },
+      {
+        "from": "SKILL=\"${CLAUDE_PLUGIN_ROOT}/skills/tackle-gh-comments/scripts/gh-pr-comments.ts\"",
+        "line": 25,
+        "skill": "tackle-gh-comments",
+        "to": "SKILL=~/.claude/skills/tackle-gh-comments/scripts/gh-pr-comments.ts"
+      },
+      {
+        "from": "cc-plugin/base/skills/tdd-planning/template.md",
+        "line": 158,
+        "skill": "tdd-planning",
+        "to": "template.md"
+      },
+      {
+        "from": "cc-plugin/base/skills/v-planning/templates/root.md",
+        "line": 34,
+        "skill": "v-planning",
+        "to": "templates/root.md"
+      },
+      {
+        "from": "cc-plugin/base/skills/v-planning/templates/step.md",
+        "line": 43,
+        "skill": "v-planning",
+        "to": "templates/step.md"
+      },
+      {
+        "from": "cc-plugin/base/skills/v-planning/templates/root.md",
+        "line": 85,
+        "skill": "v-planning",
+        "to": "templates/root.md"
+      },
+      {
+        "from": "cc-plugin/base/skills/v-planning/templates/step.md",
+        "line": 86,
+        "skill": "v-planning",
+        "to": "templates/step.md"
+      }
+    ],
+    "userInvocableFalse": []
+  },
+  "version": 1
+}

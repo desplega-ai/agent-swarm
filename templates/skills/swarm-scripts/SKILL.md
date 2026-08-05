@@ -1,6 +1,6 @@
 ---
 name: swarm-scripts
-description: Use swarm scripts for bulk SDK calls, repetitive fan-out, and context-efficient data processing. Scripts must export default async function (args, ctx) — args first, ctx second.
+description: Use swarm scripts for bulk SDK calls, repetitive fan-out, and context-efficient data processing.
 ---
 
 # Swarm Scripts
@@ -32,16 +32,18 @@ Use `script-query-types` before non-trivial work so the script matches the live 
 Use `script-run` with inline source for one-off work:
 
 ```typescript
-export default async function main(args: { status: string; limit: number }, ctx) {
+export default async function main(args: any, ctx: any) {
   const { swarm, logger } = ctx;
-  const result = await swarm.task_list({ status: args.status, limit: args.limit });
-  logger.info(`Fetched ${result.tasks.length} tasks`);
+  // All SDK methods return Promise<unknown> — unwrap defensively.
+  const res: any = await swarm.task_list({ status: args?.status, limit: args?.limit ?? 50 });
+  const tasks: any[] = res?.data?.tasks ?? res?.tasks ?? [];
+  logger.info(`Fetched ${tasks.length} tasks`);
   return {
-    total: result.tasks.length,
-    tasks: result.tasks.map((task) => ({
+    total: tasks.length,
+    tasks: tasks.map((task: any) => ({
       id: task.id,
       status: task.status,
-      title: task.task.slice(0, 120),
+      title: task.task?.slice(0, 120),
     })),
   };
 }
@@ -60,8 +62,85 @@ Good named scripts:
 - Fan out over many swarm tasks, memories, repos, or schedules.
 - Convert noisy JSON or HTML into a compact summary.
 
+## Connected APIs and MCPs (`ctx.api` / `ctx.mcp`)
+
+Registered script connections give every script typed clients for external
+services — check what exists before hand-rolling `fetch` calls:
+
+```typescript
+export default async function main(args: any, ctx: any) {
+  return { api: Object.keys(ctx.api ?? {}), mcp: Object.keys(ctx.mcp ?? {}) };
+}
+```
+
+Three kinds, all credential-injected at egress (script code never sees the
+secret, only `[REDACTED:<KEY>]` placeholders):
+
+- **OpenAPI** — `ctx.api.<slug>.<operationId>({ path, query, header, body })`.
+  Registered from a spec URL; every operation becomes a typed method.
+- **GraphQL** — `ctx.api.<slug>.graphql(query, variables)` (positional args).
+- **MCP** — `ctx.mcp.<slug>.<toolName>(args)`. Proxied server-side; returns the
+  raw MCP envelope, so unwrap `res.structuredContent ?? res.content?.[0]?.text`.
+
+When to reach for a connection instead of raw `fetch`:
+
+- The task talks to a third-party API (GitHub, Notion, an internal service) —
+  a connection means typed methods, managed auth, and no secret handling.
+- The credential is OAuth-based — bindings resolve tokens from the swarm's
+  OAuth store and auto-refresh them; a script cannot do that itself.
+- Multiple scripts or agents will hit the same API — register once, reuse.
+
+Registration is **lead-only** (`script-connections` + `credential-bindings`
+tools). Workers who need a connection that does not exist yet should not
+work around it with raw fetch + pasted secrets — ask the lead (or suggest in
+the task result) to register one, handing over: `slug`, `baseUrl` or spec URL,
+`allowedHosts`, and how it authenticates (config key vs OAuth provider). Leads:
+prefer `upsert-openapi` with a spec URL so operations stay refreshable, and use
+`credential-bindings` `oauth-app-upsert` → `oauth-authorize-url` for OAuth
+providers (Notion-style Basic/JSON token endpoints are supported via
+`tokenAuthStyle` / `tokenBodyFormat`).
+
+Full reference: the "Script connections" guide on the docs site
+(`docs-site/content/docs/(documentation)/guides/script-connections.mdx`).
+
+## Using `db_query` For Aggregation
+
+For scripts that aggregate over tasks, sessions, or memory, `ctx.swarm.db_query` with direct SQL is far more efficient than fetching lists client-side.
+
+**The parameter is `sql`:**
+
+```typescript
+// CORRECT
+const res = await ctx.swarm.db_query({ sql: "SELECT status, count(*) as cnt FROM agent_tasks GROUP BY status" });
+
+// Legacy scripts may still run with `query`, but new code should not use it.
+```
+
+**`db_query` returns positional rows, not objects.** The response shape is `{ rows: unknown[][], columns: string[] }`. Zip them into objects:
+
+```typescript
+function rowsToObjects(res: any): any[] {
+  const p = res?.data ?? res;
+  const cols: string[] = p?.columns ?? [];
+  return (p?.rows ?? []).map((r: any) =>
+    Array.isArray(r) ? Object.fromEntries(cols.map((c, i) => [c, r[i]])) : r,
+  );
+}
+
+const rows = rowsToObjects(await ctx.swarm.db_query({
+  sql: `SELECT status, count(*) as cnt FROM agent_tasks WHERE createdAt > datetime('now','-3 days') GROUP BY status`,
+}));
+// rows = [{ status: "completed", cnt: 42 }, ...]
+```
+
+**Common tables:** `agent_tasks` (tasks), `session_logs` (tool call logs), `agent_memory` (memories), `scheduled_tasks` (schedules), `agents` (agent registry).
+
+**`session_logs` has no `tool_name` column.** Tool names are embedded in the `content` JSON column. Extract them SQL-side with `instr`/`substr` or parse JSON in JS after fetching.
+
 ## SDK And Context Gotchas
 
+- **`args` can be undefined.** When a script is called without arguments, `args` is `undefined`. Always guard: `argsSchema.safeParse(args || {})` or use optional chaining (`args?.field`).
+- **All SDK methods return `Promise<unknown>`.** Never assume a specific return shape without defensive unwrapping (`res?.data?.tasks ?? res?.tasks ?? []`). Run `script-query-types` to see live type signatures — return types are `unknown` and actual shapes vary by endpoint.
 - `agentId` is propagated to scripts via the `X-Agent-ID` header, so SDK calls run as the invoking agent.
 - `taskId` is not ambient. If a script needs to call `ctx.swarm.task_storeProgress`, pass `taskId` explicitly in `args`.
 - Scripts invoked from a workflow script node may run with a workflow identity rather than a human or worker agent identity.
@@ -73,7 +152,7 @@ Good named scripts:
 Thread task identity explicitly:
 
 ```typescript
-export default async function main(args: { taskId: string; items: string[] }, ctx) {
+export default async function main(args: { taskId: string; items: string[] }, ctx: any) {
   const { swarm } = ctx;
   await swarm.task_storeProgress({
     taskId: args.taskId,

@@ -140,6 +140,15 @@ function containsInterpolationToken(value: unknown): boolean {
 }
 
 /**
+ * Node ids of a stored definition — passed to validateDefinition as
+ * `legacyNodeIds` by update/patch paths so ids that predate the reserved-`#`
+ * rule stay editable.
+ */
+export function definitionNodeIds(def: WorkflowDefinition): Set<string> {
+  return new Set(def.nodes.map((node) => node.id));
+}
+
+/**
  * Validate a workflow definition for structural correctness.
  *
  * Checks:
@@ -152,9 +161,47 @@ function containsInterpolationToken(value: unknown): boolean {
 export function validateDefinition(
   def: WorkflowDefinition,
   registry?: ExecutorRegistry,
+  options: { legacyNodeIds?: ReadonlySet<string> } = {},
 ): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
   const nodeIds = new Set(def.nodes.map((n) => n.id));
+
+  for (const node of def.nodes) {
+    // `#` is reserved for synthetic foreach child ids — but only for NEW or
+    // renamed nodes. Node ids were unrestricted before this rule, so update/patch
+    // paths pass the stored definition's ids (legacyNodeIds) to keep a workflow
+    // that already contains one editable instead of bricked.
+    if (node.id.includes("#") && !options.legacyNodeIds?.has(node.id)) {
+      errors.push(`Node "${node.id}" contains reserved character "#"`);
+    }
+    if (node.type === "foreach") {
+      validateForeachNode(node, errors);
+      // A legacy `#` id may stay editable as a NORMAL node, but never as a foreach
+      // parent: its children would be `a#b#item`, and parseSyntheticNodeId splits on
+      // the FIRST `#`, so the join would resolve them to parent "a" and never close.
+      if (node.id.includes("#")) {
+        errors.push(
+          `Node "${node.id}" cannot be a foreach: its id contains "#", which is reserved for synthetic child ids`,
+        );
+      }
+      if (isUpstream(def, node.id, node.id)) {
+        errors.push("foreach inside a loop is not supported in v1");
+      }
+      // Synthetic children are named `<foreachId>#<itemKey>`. A (legacy,
+      // grandfathered) node whose id starts with that prefix would be
+      // indistinguishable from a child — resolveForeachParent would classify
+      // both, corrupting the join and routing — so the foreach itself is
+      // rejected when such a sibling exists.
+      const collidingSibling = def.nodes.find(
+        (other) => other.id !== node.id && other.id.startsWith(`${node.id}#`),
+      );
+      if (collidingSibling) {
+        errors.push(
+          `Node "${node.id}" cannot be a foreach: node "${collidingSibling.id}" collides with its synthetic child id space ("${node.id}#…")`,
+        );
+      }
+    }
+  }
 
   // 1. Check all next refs point to existing nodes
   for (const node of def.nodes) {
@@ -218,26 +265,25 @@ export function validateDefinition(
         continue;
       }
 
-      const configResult = registry.get(node.type).configSchema.safeParse(node.config);
-      if (!configResult.success) {
-        for (const issue of configResult.error.issues) {
-          const issuePath = issue.path.map(String);
-          const path = ["config", ...issuePath].join(".");
-          let value: unknown = node.config;
-          for (const segment of issue.path) {
-            if (value === null || typeof value !== "object") {
-              value = undefined;
-              break;
-            }
-            value = (value as Record<PropertyKey, unknown>)[segment];
-          }
-          // Exact interpolation tokens can resolve to non-string values at
-          // execution time, so defer only those dynamic fields to the same
-          // executor schema after interpolation. Static values still fail now.
-          if (containsInterpolationToken(value)) continue;
-          const renderedValue = value === undefined ? "undefined" : JSON.stringify(value);
-          errors.push(
-            `Node "${node.id}" (${node.type}) ${path} has invalid value ${renderedValue}: ${issue.message}`,
+      reportStaticConfigIssues(node, registry.get(node.type).configSchema, node.config, errors);
+
+      // A foreach body is executed by the agent-task executor per item — hold its
+      // static config to the same schema a top-level agent-task node gets, so an
+      // invalid field (priority: 101, tags: "x") fails at authoring instead of
+      // after the fan-out materialized. Interpolated fields defer as usual.
+      if (node.type === "foreach" && registry.has("agent-task")) {
+        const body = node.config.body;
+        const bodyConfig =
+          typeof body === "object" && body !== null && !Array.isArray(body)
+            ? (body as Record<string, unknown>).config
+            : undefined;
+        if (typeof bodyConfig === "object" && bodyConfig !== null && !Array.isArray(bodyConfig)) {
+          reportStaticConfigIssues(
+            node,
+            registry.get("agent-task").configSchema,
+            bodyConfig,
+            errors,
+            "config.body.config",
           );
         }
       }
@@ -252,7 +298,9 @@ export function validateDefinition(
       if (!sourceNodeId) continue;
 
       // Skip built-in context sources
-      if (sourceNodeId === "trigger" || sourceNodeId === "input") continue;
+      if (sourceNodeId === "trigger" || sourceNodeId === "input" || sourceNodeId === "run") {
+        continue;
+      }
 
       // Check source node exists
       if (!nodeIds.has(sourceNodeId)) {
@@ -272,6 +320,92 @@ export function validateDefinition(
   }
 
   return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Report schema issues for the statically-known parts of a config object.
+ * Fields containing interpolation tokens defer to the same executor schema
+ * after interpolation; static values fail at authoring time.
+ */
+function reportStaticConfigIssues(
+  node: WorkflowNode,
+  schema: { safeParse: (value: unknown) => { success: boolean; error?: { issues: unknown[] } } },
+  config: unknown,
+  errors: string[],
+  pathPrefix = "config",
+): void {
+  const result = schema.safeParse(config);
+  if (result.success) return;
+  for (const rawIssue of result.error?.issues ?? []) {
+    const issue = rawIssue as { path: PropertyKey[]; message: string };
+    const issuePath = issue.path.map(String);
+    const path = [pathPrefix, ...issuePath].join(".");
+    let value: unknown = config;
+    for (const segment of issue.path) {
+      if (value === null || typeof value !== "object") {
+        value = undefined;
+        break;
+      }
+      value = (value as Record<PropertyKey, unknown>)[segment];
+    }
+    if (containsInterpolationToken(value)) continue;
+    const renderedValue = value === undefined ? "undefined" : JSON.stringify(value);
+    errors.push(
+      `Node "${node.id}" (${node.type}) ${path} has invalid value ${renderedValue}: ${issue.message}`,
+    );
+  }
+}
+
+function validateForeachNode(node: WorkflowNode, errors: string[]): void {
+  const config = node.config;
+  if (Object.hasOwn(config, "concurrency")) {
+    errors.push(`Node "${node.id}" foreach concurrency is not supported in v1`);
+  }
+
+  // The asynchronous join (joinForeach) checkpoints the aggregate and routes
+  // successors without re-entering executeStep, so node-level outputSchema /
+  // validation would be silently skipped on every async completion. Reject at
+  // authoring time rather than half-enforcing. The per-child agent-task
+  // body.config.outputSchema is unaffected.
+  if (node.outputSchema !== undefined || node.validation !== undefined) {
+    errors.push(
+      `Node "${node.id}" foreach node-level outputSchema/validation is not supported in v1`,
+    );
+  }
+
+  const over = config.over;
+  const isInterpolatedArray = typeof over === "string" && /^\{\{[^}]+\}\}$/.test(over.trim());
+  if (!Array.isArray(over) && !isInterpolatedArray) {
+    errors.push(
+      `Node "${node.id}" foreach config.over must be an array or one exact {{interpolation}} token`,
+    );
+  }
+
+  if (typeof config.itemKey !== "string" || config.itemKey.length === 0) {
+    errors.push(`Node "${node.id}" foreach config.itemKey must be a non-empty string`);
+  }
+
+  const body = config.body;
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    errors.push(`Node "${node.id}" foreach config.body must be an object`);
+    return;
+  }
+  const bodyRecord = body as Record<string, unknown>;
+  if (bodyRecord.type !== "agent-task") {
+    errors.push(`Node "${node.id}" foreach config.body.type must be "agent-task" in v1`);
+  }
+  if (
+    typeof bodyRecord.config !== "object" ||
+    bodyRecord.config === null ||
+    Array.isArray(bodyRecord.config)
+  ) {
+    errors.push(`Node "${node.id}" foreach config.body.config must be an object`);
+    return;
+  }
+  const bodyConfig = bodyRecord.config as Record<string, unknown>;
+  if (typeof bodyConfig.template !== "string") {
+    errors.push(`Node "${node.id}" foreach agent-task body.config.template must be a string`);
+  }
 }
 
 /**

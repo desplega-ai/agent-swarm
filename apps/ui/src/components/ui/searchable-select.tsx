@@ -34,6 +34,8 @@ export interface SearchableSelectProps {
   emptyLabel?: string;
   triggerClassName?: string;
   contentClassName?: string;
+  /** Freeze the current selection (e.g. while an unsaved edit is bound to it). */
+  disabled?: boolean;
 }
 
 /**
@@ -50,17 +52,19 @@ export function SearchableSelect({
   emptyLabel = "No matches.",
   triggerClassName,
   contentClassName,
+  disabled = false,
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false);
   const selected = options.find((o) => o.value === value);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open && !disabled} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
           role="combobox"
-          aria-expanded={open}
+          aria-expanded={open && !disabled}
+          disabled={disabled}
           className={cn("justify-between font-normal", triggerClassName)}
         >
           <span className="flex min-w-0 flex-1 items-center gap-1.5">

@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Parallel DAG-plan implementation skill. Reads a v-planning plan directory (root.md + step-<n>.md files), topologically schedules ready steps, and fans them out as parallel sub-agents. Use whenever the user invokes /v-implement, points at a plan directory produced by /v-plan, or asks to \"run the parallel plan\", \"implement the DAG\", or \"fan out the steps\" — even without those exact words. For linear plans (single .md file), use `implementing` instead.",
+  "displayName": "V-Implementing",
+  "kind": "skill",
+  "name": "v-implementing",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "v-implementing",
+  "systemDefault": true,
+  "tags": [
+    "implementation",
+    "dag",
+    "agents"
+  ],
+  "title": "V-Implementing",
+  "version": "1.0.0"
+}

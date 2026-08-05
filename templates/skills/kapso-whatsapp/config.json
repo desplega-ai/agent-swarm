@@ -1,13 +1,19 @@
 {
   "kind": "skill",
   "name": "kapso-whatsapp",
-  "displayName": "WhatsApp Messaging",
+  "displayName": "Kapso WhatsApp",
   "slug": "kapso-whatsapp",
-  "title": "WhatsApp Messaging",
-  "description": "Generic WhatsApp messaging guardrails for approved business messaging providers.",
+  "title": "Kapso WhatsApp",
+  "description": "How to interact with Kapso WhatsApp from the swarm — read inbound webhook payloads (text AND media), fetch message history, send free-form messages within the 24h session window (and template messages outside it), mark-as-read, show the typing indicator, send reactions, download media, verify webhook signatures, and resolve contacts to swarm users. Canonical reference for ANY Kapso interaction beyond the thin `send-whatsapp-message` / `reply-whatsapp-message` MCP tools — for templates, media, reactions, typing, mark-as-read, signature verify, contact resolution, conversation history, drop to the REST recipes here. Use whenever a task references a WhatsApp message routed through Kapso, or when a workflow needs to reply on WhatsApp.",
   "version": "1.0.0",
   "category": "skills",
-  "placeholders": ["WHATSAPP_PROVIDER_API_KEY", "WHATSAPP_SENDER_ID"],
+  "placeholders": [
+    "KAPSO_API_KEY",
+    "KAPSO_API_BASE_URL",
+    "KAPSO_PHONE_NUMBER_ID",
+    "KAPSO_WEBHOOK_HMAC_SECRET"
+  ],
   "runAllSeedersCandidate": false,
+  "userInvocable": false,
   "tags": ["whatsapp", "messaging", "communications"]
 }

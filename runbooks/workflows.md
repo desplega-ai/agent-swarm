@@ -10,6 +10,7 @@ Upstream outputs are **not** available by default. Declare an `inputs` mapping:
 - Values are context paths (usually a node ID).
 - Agent-task output shape is `{ taskId, taskOutput }`, so access via `localName.taskOutput.field`.
 - For trigger data: `{ "pr": "trigger.pullRequest" }` → `{{pr.number}}`.
+- For the current run: `{ "runId": "run.id" }` → `{{runId}}` (builtin, like `trigger`/`input` — useful for receipts/audit nodes correlating their output with the run).
 
 Without `inputs`, upstream references silently resolve to empty strings — check `diagnostics.unresolvedTokens`.
 
@@ -74,6 +75,55 @@ Do not include patch bodies, diff hunks, raw `git log --stat` output, downloaded
 - `vcsRepo`
 - `model`
 - `parentTaskId`
+
+## Foreach nodes
+
+`foreach` fans out one `agent-task` child per array item, waits for every child, then exposes one
+parent-owned aggregate to downstream nodes.
+
+```yaml
+- id: reflect
+  type: foreach
+  inputs: { agents: "gather.result.agents" }
+  config:
+    over: "{{agents}}"
+    itemKey: id
+    body:
+      type: agent-task
+      config:
+        agentId: "{{item.id}}"
+        template: "Reflect for {{item.name}} (index {{index}})"
+  next: critique
+```
+
+- `over` must resolve to an array. An exact interpolation token preserves the array value instead
+  of JSON-stringifying it.
+- `itemKey` names a required non-empty string property whose value is unique across the array.
+- `body.type` is restricted to `agent-task` in v1. `body.config` accepts the normal agent-task
+  fields and is interpolated separately for each child with `item` and zero-based `index`.
+- Child steps have synthetic IDs `<foreachNodeId>#<itemKey>`. The parent remains waiting until all
+  children are terminal; only the parent aggregate is written to workflow context.
+- Empty arrays complete synchronously and still route to the successor.
+- `concurrency` is rejected in v1. All children are materialized in one fan-out.
+- A `foreach` node in a cycle is rejected in v1. Child steps are scoped to the run, so a later
+  parent iteration cannot safely re-adopt them.
+
+The parent output shape is:
+
+```json
+{
+  "results": [
+    { "itemKey": "agent-id", "status": "completed", "output": { "taskId": "...", "taskOutput": {} } }
+  ],
+  "okCount": 1,
+  "failedCount": 0
+}
+```
+
+The workflow-level `onNodeFailure` policy applies to foreach children. The default `fail` stops the
+run on the first failed/cancelled child. With `onNodeFailure: "continue"`, the child contributes a
+`failed` result whose output contains the existing `[FAILED: <reason>]` marker; the remaining
+children finish and the parent closes the join.
 
 ## Script node types
 

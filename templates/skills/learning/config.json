@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Compounding knowledge across projects and teams. Captures, searches, and promotes institutional learnings via tiered backends (local/qmd/agent-fs).",
+  "displayName": "Learning",
+  "kind": "skill",
+  "name": "learning",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "learning",
+  "systemDefault": true,
+  "tags": [
+    "learning",
+    "knowledge",
+    "memory"
+  ],
+  "title": "Learning",
+  "version": "1.0.0"
+}

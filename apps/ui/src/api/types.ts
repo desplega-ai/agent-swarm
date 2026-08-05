@@ -1061,6 +1061,7 @@ export type WorkflowRunStepStatus =
   | "waiting"
   | "completed"
   | "failed"
+  | "cancelled"
   | "skipped";
 
 export interface WorkflowRunStep {
@@ -1810,6 +1811,27 @@ export interface SkillsResponse {
 
 export interface AgentSkillsResponse {
   skills: AgentSkill[];
+  total: number;
+}
+
+/** Manifest entry for a bundled skill file — everything but the content. */
+export interface SkillFileManifestEntry {
+  id: string;
+  skillId: string;
+  path: string;
+  mimeType: string;
+  isBinary: boolean;
+  size: number | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export interface SkillFile extends SkillFileManifestEntry {
+  content: string;
+}
+
+export interface SkillFilesResponse {
+  files: SkillFileManifestEntry[];
   total: number;
 }
 

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import * as dbModule from "../be/db";
 import * as siblingAwarenessModule from "../tasks/sibling-awareness";
-import { ackSlackMessage } from "./ack";
+import { ackSlackMessage, finalizeSlackMessageReaction } from "./ack";
 import { createAssistant } from "./assistant";
 import * as slackEnrichModule from "./enrich";
 import type { SlackFile } from "./files";
@@ -553,5 +553,31 @@ describe("Slack accepted-message acknowledgements", () => {
         "eyes",
       ),
     ).resolves.toBeUndefined();
+  });
+
+  test("finalization removes every acceptance reaction before adding the outcome", async () => {
+    const remove = mock(async ({ name }: { name: string }) => {
+      if (name !== "zap")
+        throw { data: { error: name === "eyes" ? "no_reaction" : "message_not_found" } };
+    });
+    const add = mock(async () => {});
+
+    await finalizeSlackMessageReaction(
+      { reactions: { add, remove } } as never,
+      "D_THREAD_ACK_TEST",
+      "2100000000.000004",
+      "white_check_mark",
+    );
+
+    expect(remove.mock.calls.map(([call]) => call.name)).toEqual([
+      "eyes",
+      "heavy_plus_sign",
+      "zap",
+    ]);
+    expect(add).toHaveBeenCalledWith({
+      channel: "D_THREAD_ACK_TEST",
+      name: "white_check_mark",
+      timestamp: "2100000000.000004",
+    });
   });
 });

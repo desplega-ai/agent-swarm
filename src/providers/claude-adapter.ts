@@ -1083,6 +1083,9 @@ export class ClaudeAdapter implements ProviderAdapter {
   readonly name = "claude";
   readonly traits: ProviderTraits = {
     hasMcp: true,
+    // Claude Code reads ~/.claude/skills itself and advertises every skill's
+    // name + description natively.
+    nativeSkillDiscovery: true,
     hasLocalEnvironment: true,
     steerModes: ["queue"],
   };

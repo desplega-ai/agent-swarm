@@ -14,13 +14,16 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import { checkpointStep } from "./checkpoint";
+import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
 import { getSuccessors } from "./definition";
 import { findReadyNodes, walkGraph } from "./engine";
 import type { WorkflowEventBus } from "./event-bus";
 import { workflowEventBus } from "./event-bus";
 import type { ExecutorRegistry } from "./executors/registry";
 import { computeNextPort } from "./executors/wait";
+import { resolveForeachParent } from "./foreach-join";
 import { getSecretInputKeys } from "./input";
+import { completeTaskStepAndResolveSuccessors } from "./task-step-routing";
 import { matchesFilter } from "./wait-filter";
 
 interface TaskEvent {
@@ -105,6 +108,7 @@ async function resumeFromTaskCompletion(
 
   const step = getWorkflowRunStep(event.workflowRunStepId!);
   if (!step || step.status !== "waiting") return;
+  if (isStaleTaskEvent(step.id, event)) return;
 
   const workflow = getWorkflow(run.workflowId);
   if (!workflow) return;
@@ -126,16 +130,19 @@ async function resumeFromTaskCompletion(
   }
   const stepOutput = { taskId: event.taskId, taskOutput };
 
-  checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput }, ctx);
-
-  // Set run back to running
-  updateWorkflowRun(run.id, { status: "running" });
+  const routing = completeTaskStepAndResolveSuccessors(
+    workflow.definition,
+    run.id,
+    step,
+    stepOutput,
+    ctx,
+  );
 
   // Use direct successor-based routing (same as resumeFromApprovalResolution).
   // findReadyNodes is NOT loop-aware — it excludes nodes with any completed step,
   // which breaks loop workflows where a node needs re-execution on a new iteration.
   // walkGraph handles convergence internally via activeEdges reconstruction.
-  const successors = getSuccessors(workflow.definition, step.nodeId);
+  const successors = routing.successors;
 
   if (successors.length > 0) {
     const secretKeys = getSecretInputKeys(workflow.input);
@@ -182,7 +189,11 @@ async function handleTaskFailure(
   registry: ExecutorRegistry,
 ): Promise<void> {
   const run = getWorkflowRun(event.workflowRunId!);
-  if (!run) return;
+  if (!run || (run.status !== "waiting" && run.status !== "running")) return;
+
+  const step = getWorkflowRunStep(event.workflowRunStepId!);
+  if (!step || step.status !== "waiting") return;
+  if (isStaleTaskEvent(step.id, event)) return;
 
   const workflow = getWorkflow(run.workflowId);
   if (!workflow) return;
@@ -195,20 +206,22 @@ async function handleTaskFailure(
   }
 
   // "continue": treat as completed with error output
-  const step = getWorkflowRunStep(event.workflowRunStepId!);
-  if (!step) return;
-
   const ctx = (run.context ?? {}) as Record<string, unknown>;
   const stepOutput = {
     taskId: event.taskId,
-    taskOutput: `[FAILED: ${reason}] This node failed or was cancelled.`,
+    taskOutput: `${FAILED_TASK_OUTPUT_PREFIX} ${reason}] This node failed or was cancelled.`,
   };
-  checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput }, ctx);
-
-  updateWorkflowRun(run.id, { status: "running" });
+  const routing = completeTaskStepAndResolveSuccessors(
+    workflow.definition,
+    run.id,
+    step,
+    stepOutput,
+    ctx,
+    reason,
+  );
 
   // Use direct successor-based routing (loop-aware).
-  const successors = getSuccessors(workflow.definition, step.nodeId);
+  const successors = routing.successors;
 
   if (successors.length > 0) {
     const secretKeys = getSecretInputKeys(workflow.input);
@@ -224,6 +237,19 @@ async function handleTaskFailure(
   } else {
     finalizeOrWait(run.id);
   }
+}
+
+/**
+ * A retried step has a NEW task bound to it. Task lifecycle events are emitted
+ * from several places (the db mutators' after-commit emits, test/manual emits,
+ * crash-recovery echoes) and can arrive on a later tick — after the step was
+ * reset and re-dispatched. An event whose taskId no longer matches the task
+ * currently bound to the step must not complete or fail a step it doesn't own.
+ */
+function isStaleTaskEvent(stepId: string, event: TaskEvent): boolean {
+  if (!event.taskId) return false;
+  const boundTask = getTaskByWorkflowRunStepId(stepId);
+  return boundTask != null && boundTask.id !== event.taskId;
 }
 
 /**
@@ -259,14 +285,16 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   if (!failedStep) throw new Error("No failed step found");
 
   // Reset step and run
-  updateWorkflowRunStep(failedStep.id, { status: "pending", error: undefined });
+  updateWorkflowRunStep(failedStep.id, { status: "pending", error: null });
   const ctx = (run.context ?? {}) as Record<string, unknown>;
-  updateWorkflowRun(runId, { status: "running", error: undefined, context: ctx });
+  updateWorkflowRun(runId, { status: "running", error: null, context: ctx });
 
   // Resume from the failed node — use findReadyNodes for convergence safety
   const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
   const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
-  const failedNode = workflow.definition.nodes.find((n) => n.id === failedStep.nodeId);
+  const failedNode =
+    resolveForeachParent(workflow.definition, failedStep.nodeId) ??
+    workflow.definition.nodes.find((n) => n.id === failedStep.nodeId);
   if (!failedNode) throw new Error(`Node ${failedStep.nodeId} not found in workflow definition`);
 
   // Include the failed node if it's not already in ready nodes

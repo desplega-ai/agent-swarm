@@ -682,17 +682,9 @@ export const INTEGRATIONS: IntegrationDef[] = [
     iconKey: "route",
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/composio",
     restartRequired: true,
-    recommendedSkills: [
-      {
-        name: "composio",
-        source: "template",
-        templateRepo: "desplega-ai/agent-swarm",
-        templatePath: "plugin/skills/composio",
-        roles: ["lead", "worker"],
-        reason:
-          "Operational recipes for creating Tool Router sessions, checking connected accounts, and executing Composio actions through `agent-swarm x composio` or `swarm_x`.",
-      },
-    ],
+    // No recommendedSkills entry: the composio skill (+ its google siblings) is
+    // seeded as a system default on every agent, so a remote-install action here
+    // would just create a duplicate global-scope row next to the seeded one.
     fields: [
       {
         key: "COMPOSIO_API_KEY",

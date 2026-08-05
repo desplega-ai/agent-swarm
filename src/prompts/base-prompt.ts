@@ -106,7 +106,11 @@ export type BasePromptArgs = {
 
 export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   const { role, agentId, swarmUrl, traits } = args;
-  const { hasMcp = true, hasLocalEnvironment: hasLocalEnv = true } = traits ?? {};
+  const {
+    hasMcp = true,
+    hasLocalEnvironment: hasLocalEnv = true,
+    nativeSkillDiscovery = true,
+  } = traits ?? {};
   const steerModes = traits?.steerModes ?? [];
 
   const vars: Record<string, string> = { role, agentId, swarmUrl };
@@ -234,11 +238,38 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     }
   }
 
-  // Installed skills section (progressive disclosure — name + description only)
-  // Skip for providers without MCP — skills require the Skill MCP tool
+  // Installed skills section — shape depends on whether the harness discovers
+  // skills on its own. Skip entirely for providers without MCP: the discovery
+  // tools are MCP tools.
   if (hasMcp && args.skillsSummary && args.skillsSummary.length > 0) {
-    const summaries = args.skillsSummary.map((s) => `- /${s.name}: ${s.description}`).join("\n");
-    prompt += `\n\n## Installed Skills\n\nThe following skills are available. Use the Skill tool to invoke them by name.\n\n${summaries}\n`;
+    const discovery =
+      "To browse the full catalog use the `skill-list` MCP tool, find one by intent with `skill-search`, and read a skill's content with `skill-get`.";
+    if (nativeSkillDiscovery) {
+      // Claude and pi read their local skills tree and inject name+description
+      // natively, so enumerating here is pure duplication that grows linearly
+      // with the installed count — emit a bounded count + discovery pointers.
+      const count = args.skillsSummary.length;
+      const where = hasLocalEnv
+        ? "Your harness loads them from its skills directory (each skill is a folder with a SKILL.md — e.g. ~/.claude/skills/, ~/.codex/skills/, ~/.pi/agent/skills/, ~/.opencode/skills/) and most harnesses surface them natively."
+        : "This session has no local skills directory, so reach them through the MCP tools.";
+      prompt += `\n\n## Installed Skills\n\nYou have ${count} skill${count === 1 ? "" : "s"} installed. ${where} ${discovery}\n`;
+    } else {
+      // Codex and opencode have no native skill system — we only inline a
+      // SKILL.md when a turn prompt opens with `/name`. Without this list they
+      // have zero ambient awareness that any skill exists.
+      //
+      // Remote providers (devin) take this branch too, but have no skills tree
+      // to read and don't use the `/name` trigger, so neither the slash prefix
+      // nor the directory instruction applies to them — `skill-get` is their
+      // only route to a skill's content.
+      const summaries = args.skillsSummary
+        .map((s) => `- ${hasLocalEnv ? "/" : ""}${s.name}: ${s.description}`)
+        .join("\n");
+      const howTo = hasLocalEnv
+        ? "To use one, read its SKILL.md from your skills directory and follow its instructions."
+        : "To use one, read its content with the `skill-get` MCP tool and follow its instructions.";
+      prompt += `\n\n## Installed Skills\n\nThe following skills are available. ${howTo}\n\n${summaries}\n\n${discovery}\n`;
+    }
   }
 
   // Installed MCP servers section — skip for providers without MCP

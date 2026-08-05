@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Functional validation skill. Captures test evidence (screenshots, recordings, links) and produces QA reports in thoughts/*/qa/.",
+  "displayName": "QA",
+  "kind": "skill",
+  "name": "qa",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "qa",
+  "systemDefault": true,
+  "tags": [
+    "qa",
+    "testing",
+    "evidence"
+  ],
+  "title": "QA",
+  "version": "1.0.0"
+}

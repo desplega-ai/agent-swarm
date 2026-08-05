@@ -6,19 +6,22 @@
  *   1. **Seeded** — `templates/skills/<name>/{config.json,content.md,files/}`
  *      with `runAllSeedersCandidate: true`. Embedded into the API binary at build
  *      time, written to the DB at boot, synced to every harness skill tree.
- *   2. **Baked** — `plugin/skills/<name>/SKILL.md`, COPYed into the worker image.
+ *   2. **Baked** — a pinned `npx skills add` in `Dockerfile.worker` (agent-fs,
+ *      qa-use), the image-copied `plugin/pi-skills/<name>/` (pi tree), or
+ *      `plugin/commands/<name>.md` (converted to Codex skills at image build).
+ *      `plugin/skills/` is retired — seeded templates replaced it.
  *   3. **Remote-installed on demand** — a `SKILL.md` at a path the integrations
  *      catalog points at (`templatePath`), fetched from GitHub raw by
- *      `skill-install-remote`. Both `templates/skills/` and `plugin/skills/`
- *      host these, which is why a `SKILL.md` may legitimately sit next to a
- *      `content.md`.
+ *      `skill-install-remote`. These live under `templates/skills/`, where a
+ *      sibling `SKILL.md` is generated from `config.json` and `content.md`.
  *
- * (1) and (2) both land at `~/.claude/skills/<name>/SKILL.md`. When the same name
- * exists in both, the DB copy wins at runtime, the baked content is silently
- * lost, and the filesystem writer then prunes any bundled file that has no
- * `skill_files` row. That shipped: `artifacts`, `kv-storage` and `pages` were
- * each defined twice with different content, and agents were served the
- * truncated version with its examples deleted.
+ * (1) and (2) write into the same per-harness skill trees (`~/.claude/skills/`,
+ * `~/.pi/agent/skills/`, `~/.codex/skills/`, …). When the same name exists in
+ * both, the DB copy wins at runtime, the baked content is silently lost, and
+ * the filesystem writer then prunes any bundled file that has no `skill_files`
+ * row. That shipped: `artifacts`, `kv-storage` and `pages` were each defined
+ * twice with different content, and agents were served the truncated version
+ * with its examples deleted.
  *
  * These checks make that class of mistake fail at CI instead of in production.
  *
@@ -28,19 +31,16 @@
  */
 
 import { join } from "node:path";
+import type { SkillTemplateConfig } from "../src/be/seed-skills/render";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 const TEMPLATES_DIR = join(REPO_ROOT, "templates", "skills");
 const PLUGIN_DIR = join(REPO_ROOT, "plugin", "skills");
+const PI_SKILLS_DIR = join(REPO_ROOT, "plugin", "pi-skills");
+const COMMANDS_DIR = join(REPO_ROOT, "plugin", "commands");
+const WORKER_DOCKERFILE = join(REPO_ROOT, "Dockerfile.worker");
 const SEEDER_INDEX = join(REPO_ROOT, "src", "be", "seed-skills", "index.ts");
-const INTEGRATIONS_CATALOG = join(
-  REPO_ROOT,
-  "apps",
-  "ui",
-  "src",
-  "lib",
-  "integrations-catalog.ts",
-);
+const INTEGRATIONS_CATALOG = join(REPO_ROOT, "apps", "ui", "src", "lib", "integrations-catalog.ts");
 
 type Problem = { rule: string; detail: string };
 const problems: Problem[] = [];
@@ -61,7 +61,43 @@ async function skillDirs(root: string, marker: string): Promise<string[]> {
 
 const templateNames = await skillDirs(TEMPLATES_DIR, "config.json").catch(() => []);
 const pluginNames = await skillDirs(PLUGIN_DIR, "SKILL.md").catch(() => []);
+const piSkillNames = await skillDirs(PI_SKILLS_DIR, "SKILL.md").catch(() => []);
 const seederSource = await Bun.file(SEEDER_INDEX).text();
+
+/** Command names baked as ~/.claude/commands/*.md and converted to Codex skills. */
+async function commandNames(): Promise<string[]> {
+  const names: string[] = [];
+  for await (const file of new Bun.Glob("*.md").scan({ cwd: COMMANDS_DIR })) {
+    names.push(file.replace(/\.md$/, ""));
+  }
+  return names.sort();
+}
+
+const commandSkillNames = await commandNames().catch(() => []);
+
+/** Skill names passed to pinned `npx skills add` commands in Dockerfile.worker. */
+async function dockerfileSkillNames(): Promise<string[]> {
+  const source = (await Bun.file(WORKER_DOCKERFILE).text())
+    .split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n")
+    .replace(/\\\r?\n/g, " ");
+  const names = new Set<string>();
+
+  for (const command of source.matchAll(/\bnpx\s+.*?\bskills(?:@\S+)?\s+add\s+([^&\n]+)/g)) {
+    const args = command[1] ?? "";
+    for (const flag of args.matchAll(
+      /--skill(?:=|\s+)(?:"([a-z0-9][a-z0-9-]*)"|'([a-z0-9][a-z0-9-]*)'|([a-z0-9][a-z0-9-]*))/g,
+    )) {
+      const name = flag[1] ?? flag[2] ?? flag[3];
+      if (name) names.add(name);
+    }
+  }
+
+  return [...names].sort();
+}
+
+const dockerfileNames = await dockerfileSkillNames();
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -89,17 +125,38 @@ for (const name of templateNames) {
         `baked one is dead content. Pick one — prefer templates/skills/.`,
     );
   }
+  if (dockerfileNames.includes(name)) {
+    fail(
+      "duplicate-delivery-path",
+      `"${name}" exists in templates/skills/ AND is installed by an npx skills add ` +
+        `--skill flag in Dockerfile.worker. Both write ` +
+        `~/.claude/skills/${name}/SKILL.md and the DB copy wins, so the baked one is ` +
+        `dead content. Pick one — prefer templates/skills/.`,
+    );
+  }
+  if (piSkillNames.includes(name)) {
+    fail(
+      "duplicate-delivery-path",
+      `"${name}" exists in templates/skills/ AND plugin/pi-skills/. Both write ` +
+        `~/.pi/agent/skills/${name}/SKILL.md and the DB copy wins, so the baked pi ` +
+        `variant is dead content and its bundled files get pruned. Pick one.`,
+    );
+  }
+  if (commandSkillNames.includes(name)) {
+    fail(
+      "duplicate-delivery-path",
+      `"${name}" exists in templates/skills/ AND plugin/commands/${name}.md. The ` +
+        `image converts commands into ~/.codex/skills/${name}/SKILL.md, the DB copy ` +
+        `wins there, and the baked one is dead content. Pick one.`,
+    );
+  }
 }
 
 for (const name of templateNames) {
   const dir = join(TEMPLATES_DIR, name);
   const configPath = join(dir, "config.json");
 
-  let config: {
-    name?: string;
-    runAllSeedersCandidate?: boolean;
-    systemDefault?: boolean;
-  };
+  let config: SkillTemplateConfig;
   try {
     config = await Bun.file(configPath).json();
   } catch (error) {
@@ -213,5 +270,7 @@ if (problems.length > 0) {
 
 console.log(
   `Skill source-of-truth check passed ` +
-    `(${templateNames.length} seeded template(s), ${pluginNames.length} baked skill(s), no overlap).`,
+    `(${templateNames.length} seeded template(s), ${pluginNames.length} plugin-baked skill(s), ` +
+    `${dockerfileNames.length} Docker-installed skill(s), ${piSkillNames.length} pi-baked ` +
+    `skill(s), ${commandSkillNames.length} baked command(s), no overlap).`,
 );

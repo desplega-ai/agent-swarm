@@ -31,3 +31,25 @@ export async function ackSlackMessage(
     );
   }
 }
+
+/** Replace this bot's acceptance reaction with the terminal task outcome. */
+export async function finalizeSlackMessageReaction(
+  client: SlackReactionClient,
+  channel: string,
+  timestamp: string,
+  outcome: "white_check_mark" | "x",
+): Promise<void> {
+  for (const name of ["eyes", "heavy_plus_sign", "zap"]) {
+    try {
+      await client.reactions.remove({ channel, name, timestamp });
+    } catch (error) {
+      const code = slackErrorCode(error);
+      if (code === "no_reaction" || code === "message_not_found") continue;
+      console.log(
+        `[Slack] ${name} acknowledgement reaction removal failed: ${error instanceof Error ? error.message : error}`,
+      );
+    }
+  }
+
+  await ackSlackMessage(client, channel, timestamp, outcome);
+}

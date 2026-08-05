@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Vertical / parallel implementation planning skill. Creates DAG-structured plan directories where each step is an independent, QA-able vertical slice that sub-agents can pick up and implement in parallel. Use whenever the user wants a plan that fans out (multiple independent features), invokes /v-plan, or asks for a \"parallel plan\", \"DAG plan\", \"vertical plan\", or \"plan that can be parallelized\" — even if they don't say those exact words. Prefer the linear `planning` skill for strictly sequential work.",
+  "displayName": "V-Planning",
+  "kind": "skill",
+  "name": "v-planning",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "v-planning",
+  "systemDefault": true,
+  "tags": [
+    "planning",
+    "dag",
+    "parallel"
+  ],
+  "title": "V-Planning",
+  "version": "1.0.0"
+}

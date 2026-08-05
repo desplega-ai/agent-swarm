@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Execute a single DAG step as an autonomous background sub-agent. Sibling of phase-running for DAG plans produced by v-planning. Reads a step-<n>.md file directly, atomically claims it via frontmatter status, runs the three-bucket Success Criteria, and reports back. Spawned by v-implementing or by /run-step.",
+  "displayName": "Step Running",
+  "kind": "skill",
+  "name": "step-running",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "step-running",
+  "systemDefault": true,
+  "tags": [
+    "implementation",
+    "dag",
+    "agents"
+  ],
+  "title": "Step Running",
+  "version": "1.0.0"
+}

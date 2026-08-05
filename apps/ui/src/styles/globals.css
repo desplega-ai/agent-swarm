@@ -87,6 +87,8 @@
   --color-action-create-task: oklch(0.585 0.233 277.117);     /* indigo-500 */
   --color-action-send-message: oklch(0.656 0.241 354.308);    /* pink-500 */
   --color-action-delegate-to-agent: oklch(0.627 0.265 303.9); /* purple-500 */
+  --color-action-foreach: oklch(0.768 0.233 130.85);          /* lime-500 — fan-out */
+  --color-action-swarm-script: oklch(0.696 0.17 162.48);      /* emerald-500 — catalog script */
   --color-action-default: oklch(0.623 0.214 259.815);         /* blue-500 — fallback action */
   --color-action-property-match: oklch(0.769 0.188 70.08);    /* amber-500 — condition */
   --color-action-code-match: oklch(0.795 0.184 86.047);       /* yellow-500 — condition */
@@ -179,6 +181,8 @@
   --color-action-create-task: oklch(0.673 0.182 276.935);     /* indigo-400 */
   --color-action-send-message: oklch(0.718 0.202 349.761);    /* pink-400 */
   --color-action-delegate-to-agent: oklch(0.714 0.203 305.504); /* purple-400 */
+  --color-action-foreach: oklch(0.841 0.238 128.85);          /* lime-400 */
+  --color-action-swarm-script: oklch(0.765 0.177 163.223);    /* emerald-400 */
   --color-action-default: oklch(0.707 0.165 254.624);         /* blue-400 */
   --color-action-property-match: oklch(0.828 0.189 84.429);   /* amber-400 */
   --color-action-code-match: oklch(0.852 0.199 91.936);       /* yellow-400 */

@@ -6,5 +6,6 @@ export const statusBorderColor: Record<WorkflowRunStepStatus, string> = {
   waiting: "border-status-pending",
   completed: "border-status-success",
   failed: "border-status-error",
+  cancelled: "border-status-neutral",
   skipped: "border-status-neutral/40",
 };

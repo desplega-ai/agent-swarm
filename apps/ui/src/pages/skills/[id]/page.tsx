@@ -1,10 +1,10 @@
-import { ArrowLeft, Maximize2, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowLeft, FolderTree, Maximize2, ShieldCheck, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import { useDeleteSkill, useSkill, useUpdateSkill } from "@/api/hooks";
+import { useDeleteSkill, useSkill, useSkillFile, useSkillFiles, useUpdateSkill } from "@/api/hooks";
 import { MarkdownEditor } from "@/components/shared/markdown-editor";
-import { MarkdownView } from "@/components/shared/markdown-view";
+import { MarkdownView, MonacoCodeBlock } from "@/components/shared/markdown-view";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/detail-page-layout";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/ui/page-header";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatRelativeTime } from "@/lib/utils";
@@ -94,6 +95,22 @@ export default function SkillDetailPage() {
   const deleteSkill = useDeleteSkill();
   const [editContent, setEditContent] = useState<string | null>(null);
   const [isReading, setIsReading] = useState(false);
+  // "" = the SKILL.md itself; any other value is a bundled-file path.
+  const [selectedFilePath, setSelectedFilePath] = useState("");
+  const { data: skillFiles = [] } = useSkillFiles(id!);
+  const { data: selectedFile, isLoading: isFileLoading } = useSkillFile(
+    id!,
+    selectedFilePath || null,
+  );
+
+  // The component stays mounted across /skills/:id navigations — drop any
+  // bundled-file selection that belongs to the previous skill (state-adjust
+  // during render instead of an effect, per the React docs pattern).
+  const [lastSkillId, setLastSkillId] = useState(id);
+  if (lastSkillId !== id) {
+    setLastSkillId(id);
+    setSelectedFilePath("");
+  }
 
   if (isLoading) {
     return (
@@ -129,6 +146,22 @@ export default function SkillDetailPage() {
   const { frontmatter, body } = splitFrontmatter(skill.content ?? "");
   const frontmatterEntries = frontmatter ? parseFrontmatter(frontmatter) : [];
 
+  const viewingFile = selectedFilePath !== "";
+  const isMarkdownFile = selectedFilePath.endsWith(".md");
+  // Monaco language from the file extension; `.tmpl` wrappers defer to the
+  // inner extension (bash.sh.tmpl → sh). MonacoCodeBlock aliases sh → shell etc.
+  const fileLanguage =
+    selectedFilePath
+      .replace(/\.tmpl$/, "")
+      .split(".")
+      .pop()
+      ?.toLowerCase() ?? "";
+  const readableText = viewingFile
+    ? selectedFile && !selectedFile.isBinary
+      ? selectedFile.content
+      : ""
+    : body;
+
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden gap-3">
       <button
@@ -144,6 +177,20 @@ export default function SkillDetailPage() {
         title={
           <div className="flex items-center gap-3 min-w-0">
             <h1 className="text-xl font-semibold">{skill.name}</h1>
+            {skill.isComplex && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <FolderTree
+                    className="h-4 w-4 shrink-0 text-muted-foreground"
+                    aria-label="Complex skill"
+                  />
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  Complex skill — ships bundled files alongside SKILL.md. Use the file selector
+                  below to browse them.
+                </TooltipContent>
+              </Tooltip>
+            )}
             <Badge variant="outline" size="tag">
               {skill.type}
             </Badge>
@@ -228,7 +275,30 @@ export default function SkillDetailPage() {
         main={
           <div className="flex flex-col flex-1 min-h-0 gap-3">
             <div className="flex items-center justify-between shrink-0">
-              <span className="text-sm text-muted-foreground">SKILL.md content</span>
+              {skillFiles.length > 0 ? (
+                <SearchableSelect
+                  value={selectedFilePath}
+                  onChange={setSelectedFilePath}
+                  // The editor stays bound to SKILL.md while editing (Edit is
+                  // only offered on SKILL.md), so switching files mid-edit
+                  // would show a bundled file's path over SKILL.md's content
+                  // and Save would silently overwrite SKILL.md.
+                  disabled={editContent !== null}
+                  options={[
+                    { value: "", label: `${skill.name}/SKILL.md` },
+                    ...skillFiles.map((file) => ({
+                      value: file.path,
+                      label: `${skill.name}/${file.path}`,
+                      hint: file.isBinary ? "binary" : undefined,
+                    })),
+                  ]}
+                  searchPlaceholder="Search files…"
+                  triggerClassName="h-8 w-auto min-w-[220px] max-w-[480px] px-2.5 text-sm text-muted-foreground"
+                  contentClassName="w-auto min-w-[320px]"
+                />
+              ) : (
+                <span className="text-sm text-muted-foreground">SKILL.md content</span>
+              )}
               {editContent !== null ? (
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={() => setEditContent(null)}>
@@ -247,7 +317,7 @@ export default function SkillDetailPage() {
                         size="icon"
                         className="size-8"
                         onClick={() => setIsReading(true)}
-                        disabled={!body.trim()}
+                        disabled={!readableText.trim()}
                         aria-label="Read full screen"
                       >
                         <Maximize2 className="h-4 w-4" />
@@ -255,7 +325,7 @@ export default function SkillDetailPage() {
                     </TooltipTrigger>
                     <TooltipContent side="bottom">Read full screen</TooltipContent>
                   </Tooltip>
-                  {!skill.systemDefault && (
+                  {!skill.systemDefault && !viewingFile && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -276,7 +346,23 @@ export default function SkillDetailPage() {
             ) : (
               <Card className="flex-1 min-h-0 overflow-hidden py-0">
                 <CardContent className="prose-doc h-full overflow-auto px-4 py-4">
-                  {body.trim() ? (
+                  {viewingFile ? (
+                    isFileLoading ? (
+                      <Skeleton className="h-32 w-full" />
+                    ) : !selectedFile ? (
+                      <p className="text-sm text-muted-foreground">File not found.</p>
+                    ) : selectedFile.isBinary ? (
+                      <p className="text-sm text-muted-foreground">
+                        Binary file ({selectedFile.mimeType}
+                        {selectedFile.size != null ? `, ${selectedFile.size} bytes` : ""}) — not
+                        rendered.
+                      </p>
+                    ) : isMarkdownFile ? (
+                      <MarkdownView text={selectedFile.content} normalizeSoftBreaks={false} />
+                    ) : (
+                      <MonacoCodeBlock language={fileLanguage} value={selectedFile.content} fill />
+                    )
+                  ) : body.trim() ? (
                     <MarkdownView text={body} normalizeSoftBreaks={false} />
                   ) : (
                     <p className="text-sm text-muted-foreground">
@@ -356,13 +442,23 @@ export default function SkillDetailPage() {
         >
           <div className="flex shrink-0 items-center gap-3 border-b px-6 py-3">
             <DialogTitle className="truncate text-sm font-semibold">{skill.name}</DialogTitle>
-            <span className="truncate text-xs text-muted-foreground">SKILL.md</span>
+            <span className="truncate text-xs text-muted-foreground">
+              {skill.name}/{viewingFile ? selectedFilePath : "SKILL.md"}
+            </span>
           </div>
-          <div className="min-h-0 flex-1 overflow-auto px-6 py-8">
-            <div className="prose-doc mx-auto max-w-[72ch] text-[0.95rem] leading-[1.75]">
-              <MarkdownView text={body} normalizeSoftBreaks={false} />
+          {viewingFile && !isMarkdownFile ? (
+            // Code gets the full width and a definite height, so Monaco can
+            // scroll a wrapped or minified line instead of clipping it.
+            <div className="min-h-0 flex-1 overflow-hidden px-6 py-6">
+              <MonacoCodeBlock language={fileLanguage} value={readableText} fill />
             </div>
-          </div>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-auto px-6 py-8">
+              <div className="prose-doc mx-auto max-w-[72ch] text-[0.95rem] leading-[1.75]">
+                <MarkdownView text={readableText} normalizeSoftBreaks={false} />
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

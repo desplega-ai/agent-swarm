@@ -1,0 +1,73 @@
+#!/usr/bin/env bun
+// Falls back to `npx tsx` or compiled Node if Bun is not installed; see {{EXAMPLE}}.
+//
+// What:    {{WHAT}}
+// When:    {{WHEN}}
+// Env:     {{ENV}}
+// Example: {{EXAMPLE}}
+//
+// Output convention:
+//   - stdout (default):  one PASS/FAIL line + path to /tmp log
+//   - stdout (--verbose): full log streamed
+//   - stdout (--json):    {"status":"pass"|"fail","log":"<path>","summary":"..."}
+//   - exit code:         0 on PASS, non-zero on FAIL
+//
+// Generated/maintained via `/script-builder`.
+
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+
+const SCRIPT_NAME = "{{SCRIPT_NAME}}";
+const TS = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
+const LOG_PATH = `/tmp/${SCRIPT_NAME}-${TS}.log`;
+
+const args = new Set(process.argv.slice(2));
+const VERBOSE = args.has("--verbose") || args.has("-v");
+const JSON_OUT = args.has("--json");
+const HELP = args.has("--help") || args.has("-h");
+
+if (HELP) {
+  console.log(`Usage: ${SCRIPT_NAME} [--verbose] [--json] [--help]
+
+  --verbose, -v   Stream full log to stdout (default: only PASS/FAIL summary)
+  --json          Emit a single JSON object with {status, log, summary}
+  --help, -h      Show this message
+
+What:    {{WHAT}}
+When:    {{WHEN}}
+Env:     {{ENV}}
+Example: {{EXAMPLE}}
+`);
+  process.exit(0);
+}
+
+mkdirSync(dirname(LOG_PATH), { recursive: true });
+
+function log(msg: string) {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  appendFileSync(LOG_PATH, line);
+  if (VERBOSE) process.stdout.write(line);
+}
+
+function summary(status: "pass" | "fail", message: string): never {
+  if (JSON_OUT) {
+    process.stdout.write(JSON.stringify({ status, log: LOG_PATH, summary: message }) + "\n");
+  } else {
+    const tag = status === "pass" ? "PASS" : "FAIL";
+    process.stdout.write(`${tag}: ${message} (log: ${LOG_PATH})\n`);
+  }
+  process.exit(status === "pass" ? 0 : 1);
+}
+
+async function main() {
+  log(`Starting ${SCRIPT_NAME}`);
+  try {
+    {{TEST_BODY}}
+    summary("pass", "{{WHAT}}");
+  } catch (err) {
+    log(`ERROR: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
+    summary("fail", err instanceof Error ? err.message : String(err));
+  }
+}
+
+main();

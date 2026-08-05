@@ -203,12 +203,11 @@ USER worker
 # Install prek for opt-in worker repo hook setup.
 COPY --from=prek /prek /usr/local/bin/prek
 
-# Install skills with `npx skills` (vercel-labs skills-only installer), pinned
-# to tags for reproducible builds. Replaces the previous desplega/wts/qa-use/
-# agent-fs marketplace plugins (~950 MB of full repo clones + bun cache) —
-# the only plugin surface the swarm used was their skills; the CLIs themselves
-# are installed via /opt/global-deps. Deliberately NOT `|| true`-guarded:
-# pinned refs are deterministic, so a fetch failure should fail the build.
+# Install CLI-coupled skills with `npx skills` (vercel-labs skills-only
+# installer), pinned to tags for reproducible builds. agent-fs is installed
+# here; qa-use is installed in worker-full-base. The ai-toolbox catalog is
+# DB-seeded from templates/skills/ instead. Deliberately NOT `|| true`-guarded:
+# a pinned fetch failure should fail the build.
 # Gotcha (vercel-labs/skills#851): global claude-code installs occasionally
 # land only in ~/.agents/skills — the `test -e` asserts catch that, and the
 # mirror step in the leaf stages dereferences symlinks when fanning out to
@@ -219,15 +218,7 @@ ARG SKILLS_CLI_VERSION
 # /opt/global-deps (below) — bump the ARG to update both in lockstep.
 ARG AGENT_FS_VERSION=0.10.1
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
-    && npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/ai-toolbox@cc-desplega-2.0.0 \
-       --skill ask-user --skill brainstorming --skill implementing --skill improve-agents-md \
-       --skill learning --skill phase-running --skill planning --skill qa --skill questioning \
-       --skill researching --skill reviewing --skill script-builder --skill step-running \
-       --skill tdd-planning --skill v-implementing --skill v-planning --skill verifying \
-       --skill wts-expert \
-       -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
-    && test -e /home/worker/.claude/skills/wts-expert/SKILL.md \
     && rm -rf /home/worker/.npm
 
 # Configure wts for agent mode (no tmux, no auto-Claude)
@@ -386,10 +377,9 @@ COPY --chmod=755 scripts/init-local-postgres.sh /usr/local/bin/init-local-postgr
 COPY --chmod=755 scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
 COPY --chmod=755 scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
 
-# Copy commands / agents / skills
+# Copy commands / agents
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
 COPY --chown=worker:worker plugin/agents/* /home/worker/.claude/agents/
-COPY --chown=worker:worker plugin/skills/ /home/worker/.claude/skills/
 
 # Copy pi-mono skills (used when HARNESS_PROVIDER=pi)
 COPY --chown=worker:worker plugin/pi-skills/ /home/worker/.pi/agent/skills/
@@ -604,10 +594,9 @@ COPY --chmod=755 scripts/init-local-postgres.sh /usr/local/bin/init-local-postgr
 COPY --chmod=755 scripts/init-local-redis.sh /usr/local/bin/init-local-redis.sh
 COPY --chmod=755 scripts/install-repo-hooks.sh /usr/local/bin/install-repo-hooks.sh
 
-# Copy commands / agents / skills
+# Copy commands / agents
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
 COPY --chown=worker:worker plugin/agents/* /home/worker/.claude/agents/
-COPY --chown=worker:worker plugin/skills/ /home/worker/.claude/skills/
 
 # Copy pi-mono skills (used when HARNESS_PROVIDER=pi)
 COPY --chown=worker:worker plugin/pi-skills/ /home/worker/.pi/agent/skills/

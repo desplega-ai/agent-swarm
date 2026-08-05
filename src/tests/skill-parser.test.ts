@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { buildSkillContent } from "../be/seed-skills/render";
 import { parseSkillContent } from "../be/skill-parser";
 
 // ─── Valid Parsing ──────────────────────────────────────────────────────────
@@ -138,6 +139,81 @@ Body.`;
 
     const result = parseSkillContent(content);
     expect(result.description).toBe("A skill with: colons in description");
+  });
+
+  test("strips YAML double-quoted scalar values", () => {
+    const content = `---
+name: quoted-skill
+description: "Covers the \\"timeMin\\" trap: pass timeMin explicitly."
+---
+
+Body.`;
+
+    const result = parseSkillContent(content);
+    expect(result.description).toBe('Covers the "timeMin" trap: pass timeMin explicitly.');
+  });
+
+  test("keeps malformed quoted values raw", () => {
+    const content = `---
+name: quoted-skill
+description: "trailing escape \\"
+---
+
+Body.`;
+
+    const result = parseSkillContent(content);
+    expect(result.description).toBe('"trailing escape \\"');
+  });
+});
+
+// ─── buildSkillContent round-trip ───────────────────────────────────────────
+
+describe("buildSkillContent ↔ parseSkillContent", () => {
+  test("YAML-unsafe descriptions render quoted and parse back verbatim", () => {
+    const description =
+      'Covers the "events from a year ago" trap: EVENTS_LIST has no default timeMin.';
+    const rendered = buildSkillContent({ name: "round-trip", description }, "Body.");
+    expect(rendered).toContain('description: "');
+    expect(parseSkillContent(rendered).description).toBe(description);
+  });
+
+  test("plain-safe descriptions stay unquoted (seed-hash byte stability)", () => {
+    const rendered = buildSkillContent(
+      { name: "round-trip", description: "Simple description." },
+      "Body.",
+    );
+    expect(rendered).toContain("description: Simple description.\n");
+    expect(parseSkillContent(rendered).description).toBe("Simple description.");
+  });
+
+  // A plain scalar YAML resolves as a bool/null/number/timestamp would reach a
+  // js-yaml-based harness reader as that type, not as the required string.
+  test.each([
+    "true",
+    "False",
+    "yes",
+    "NO",
+    "on",
+    "null",
+    "~",
+    "123",
+    "-4.5",
+    "1e6",
+    "0x1f",
+    ".inf",
+    "2026-08-04",
+  ])("description %p renders quoted (YAML would resolve it as a non-string)", (description) => {
+    const rendered = buildSkillContent({ name: "round-trip", description }, "Body.");
+    expect(rendered).toContain(`description: ${JSON.stringify(description)}\n`);
+    expect(parseSkillContent(rendered).description).toBe(description);
+  });
+
+  test("descriptions merely containing a number stay unquoted", () => {
+    const rendered = buildSkillContent(
+      { name: "round-trip", description: "Handles 123 retries." },
+      "Body.",
+    );
+    expect(rendered).toContain("description: Handles 123 retries.\n");
   });
 });
 

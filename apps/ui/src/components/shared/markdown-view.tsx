@@ -2,7 +2,7 @@ import Editor from "@monaco-editor/react";
 import type { ReactNode } from "react";
 import { Streamdown } from "streamdown";
 import { useTheme } from "@/hooks/use-theme";
-import { normalizeNewlines } from "@/lib/utils";
+import { cn, normalizeNewlines } from "@/lib/utils";
 import { CopyButton } from "./copy-button";
 
 // Returns prettified JSON text if `text` parses to an object/array, else null.
@@ -47,7 +47,22 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   rb: "ruby",
 };
 
-function MonacoCodeBlock({ language, value }: { language: string; value: string }) {
+export function MonacoCodeBlock({
+  language,
+  value,
+  fill = false,
+}: {
+  language: string;
+  value: string;
+  /**
+   * Fill the parent's height and let Monaco own vertical scrolling. Use when
+   * the block renders a whole file rather than a snippet: the default height
+   * comes from the source newline count, which under `wordWrap` badly
+   * under-measures a long or minified single line — an 80px box with no way to
+   * reach the rest of the content.
+   */
+  fill?: boolean;
+}) {
   const { theme } = useTheme();
   const resolvedLanguage = LANGUAGE_ALIASES[language] ?? language;
   const lineCount = value.split("\n").length;
@@ -57,9 +72,12 @@ function MonacoCodeBlock({ language, value }: { language: string; value: string 
   const height = Math.max(80, lineCount * MONACO_LINE_HEIGHT + MONACO_PADDING);
   return (
     <div
-      className="relative my-2 w-full border-y border-border overflow-hidden"
+      className={cn(
+        "relative w-full border-y border-border overflow-hidden",
+        fill ? "h-full" : "my-2",
+      )}
       data-monaco-block="markdown-view"
-      style={{ height }}
+      style={fill ? undefined : { height }}
     >
       <CopyButton value={value} />
       <Editor
@@ -71,8 +89,11 @@ function MonacoCodeBlock({ language, value }: { language: string; value: string 
           minimap: { enabled: false },
           scrollBeyondLastLine: false,
           // Monaco's own scrollbars are disabled so the outer container is the
-          // single source of scroll truth.
-          scrollbar: { vertical: "hidden", horizontal: "auto", handleMouseWheel: false },
+          // single source of scroll truth — except in `fill` mode, where the
+          // editor owns its viewport and must scroll itself.
+          scrollbar: fill
+            ? { vertical: "auto", horizontal: "auto", handleMouseWheel: true }
+            : { vertical: "hidden", horizontal: "auto", handleMouseWheel: false },
           fontSize: 12,
           lineHeight: MONACO_LINE_HEIGHT,
           lineNumbers: "off",

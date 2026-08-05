@@ -1062,6 +1062,8 @@ export class PiMonoAdapter implements ProviderAdapter {
   readonly name = "pi";
   readonly traits: ProviderTraits = {
     hasMcp: true,
+    // Pi reads ~/.pi/agent/skills itself and advertises them natively.
+    nativeSkillDiscovery: true,
     hasLocalEnvironment: true,
     steerModes: ["steer", "queue"],
   };

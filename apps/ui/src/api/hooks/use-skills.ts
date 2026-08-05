@@ -25,6 +25,24 @@ export function useSkill(id: string) {
   });
 }
 
+export function useSkillFiles(skillId: string) {
+  return useQuery({
+    queryKey: ["skill-files", skillId],
+    queryFn: () => api.fetchSkillFiles(skillId),
+    enabled: !!skillId,
+    select: (data) => data.files,
+  });
+}
+
+export function useSkillFile(skillId: string, path: string | null) {
+  return useQuery({
+    queryKey: ["skill-file", skillId, path],
+    queryFn: () => api.fetchSkillFile(skillId, path!),
+    enabled: !!skillId && !!path,
+    select: (data) => data.file,
+  });
+}
+
 export function useAgentSkills(agentId: string, enabled = true) {
   return useQuery({
     queryKey: ["agent-skills", agentId],
