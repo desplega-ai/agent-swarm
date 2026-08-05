@@ -112,7 +112,15 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
             </>
           )}
 
-          <Badge variant="outline" size="tag" className="shrink-0">
+          <Badge
+            variant="outline"
+            size="tag"
+            className={cn(
+              "shrink-0",
+              (itemKey != null || step.nodeType === "foreach") &&
+                "border-action-foreach/40 text-action-foreach",
+            )}
+          >
             {typeBadge}
           </Badge>
 

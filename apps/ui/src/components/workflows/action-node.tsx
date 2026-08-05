@@ -2,9 +2,11 @@ import type { NodeProps } from "@xyflow/react";
 import {
   Bell,
   Bot,
+  Library,
   ListPlus,
   type LucideIcon,
   MessageCircle,
+  Repeat,
   Share2,
   Terminal,
   UserCheck,
@@ -73,6 +75,20 @@ const nodeStyleMap: Record<string, NodeStyle> = {
     handle: "!bg-action-delegate-to-agent",
     icon: Share2,
   },
+  foreach: {
+    border: "border-action-foreach/50",
+    bg: "bg-action-foreach/10",
+    text: "text-action-foreach",
+    handle: "!bg-action-foreach",
+    icon: Repeat,
+  },
+  "swarm-script": {
+    border: "border-action-swarm-script/50",
+    bg: "bg-action-swarm-script/10",
+    text: "text-action-swarm-script",
+    handle: "!bg-action-swarm-script",
+    icon: Library,
+  },
 };
 
 const defaultStyle: NodeStyle = {
@@ -83,7 +99,7 @@ const defaultStyle: NodeStyle = {
   icon: Zap,
 };
 
-const ASYNC_TYPES = new Set(["agent-task", "create-task", "delegate-to-agent"]);
+const ASYNC_TYPES = new Set(["agent-task", "create-task", "delegate-to-agent", "foreach"]);
 
 export function ActionNode({ data }: NodeProps) {
   const d = data as unknown as FlowNodeData;
