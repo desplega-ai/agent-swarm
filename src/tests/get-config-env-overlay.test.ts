@@ -93,9 +93,14 @@ describe("get-config operator env overlay", () => {
       expect(result).toEqual([scoped]);
       expect(result.filter((c) => c.key === "DREAMING_ENABLED")).toHaveLength(1);
     }
-    // The all-keys path (REST route) must hold the same line.
+    // The all-keys path (REST route) must hold the same line. Assert on this
+    // key's rows only: the all-keys overlay legitimately synthesizes entries for
+    // every OTHER validated operator key that happens to be in the environment,
+    // and the full-suite process has several set.
     const scoped = row({ id: "agent-row", scope: "agent", scopeId: "agent-1", value: "true" });
-    expect(overlayOperatorEnvValues([scoped])).toEqual([scoped]);
+    expect(overlayOperatorEnvValues([scoped]).filter((c) => c.key === "DREAMING_ENABLED")).toEqual([
+      scoped,
+    ]);
   });
 
   test("the all-keys overlay (REST /api/config/resolved path) surfaces env-only operator values", () => {
