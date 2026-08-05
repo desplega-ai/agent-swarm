@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { getApiKey } from "../../src/utils/api-key";
 
-const seedPath = new URL("../../apps/ui/APP_SEED.json", import.meta.url);
+const seedPath = new URL("./ideas-app.seed.json", import.meta.url);
 
 const fallbackPage = {
   root: "root",

@@ -7,7 +7,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import appSeed from "../../apps/ui/APP_SEED.json";
+import appSeed from "../../scripts/dev/ideas-app.seed.json";
 import { applyAppDefinitionPatch, parseAppDefinition } from "../apps/definition";
 import { createAppRow } from "../apps/row-store";
 import { getApp } from "../apps/store";
@@ -357,7 +357,7 @@ describe("app definition patches", () => {
 });
 
 describe("server page validation", () => {
-  test("accepts the committed APP_SEED page verbatim", () => {
+  test("accepts the committed ideas-app seed page verbatim", () => {
     expect(parseAppDefinition(appSeed).success).toBe(true);
   });
 
