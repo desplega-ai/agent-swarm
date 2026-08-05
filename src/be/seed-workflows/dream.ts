@@ -121,7 +121,9 @@ export const DREAM_WORKFLOW_DEFINITION: WorkflowDefinition = {
           "Every delta must have kind `skill`; an empty deltas array is valid. " +
           "The catalog above is metadata only — before proposing an `update` delta, read the " +
           "skill's CURRENT full SKILL.md (skill-get tool) and return the COMPLETE revised " +
-          "document (frontmatter + body) as content; never a partial edit or a reconstruction.",
+          "document (frontmatter + body) as content; never a partial edit or a reconstruction. " +
+          "Entries with systemDefault true are seeded from repo templates and cannot be edited " +
+          "at all — for those, propose a new skill or record the gap as a memory instead.",
         outputSchema: deltaSetSchemaForKind("skill"),
       },
       next: "critique",

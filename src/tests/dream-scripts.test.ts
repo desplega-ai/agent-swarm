@@ -884,11 +884,11 @@ describe("dream-apply batches", () => {
 
   test("skill updates only touch targets already in the swarm catalog", async () => {
     const updates: unknown[] = [];
-    const makeCtx = (scope: unknown, found = true) => ({
+    const makeCtx = (scope: unknown, found = true, systemDefault: unknown = 0) => ({
       swarm: {
         async db_query({ sql }: { sql: string }) {
           expect(sql).toContain("FROM skills");
-          return { success: true, data: { rows: found ? [[scope]] : [] } };
+          return { success: true, data: { rows: found ? [[scope, systemDefault]] : [] } };
         },
         async skill_update(request: unknown) {
           updates.push(request);
@@ -914,6 +914,19 @@ describe("dream-apply batches", () => {
     const missing = await dreamApply(updateDelta, makeCtx(undefined, false));
     expect(updates).toEqual([]);
     expect(missing.held).toEqual([expect.objectContaining({ reason: "skill sk-1 was not found" })]);
+
+    // Since the baked-skills->DB migration (#1083) nearly every swarm skill is
+    // seeded and systemDefault, and skill-update hard-rejects content edits on
+    // those. Held as policy so the receipt says why instead of surfacing a raw
+    // tool error in DEFERRED every night.
+    const seeded = await dreamApply(updateDelta, makeCtx("swarm", true, 1));
+    expect(updates).toEqual([]);
+    expect(seeded.held).toEqual([
+      expect.objectContaining({
+        reason:
+          "skill sk-1 is system-managed (seeded from a repo template) and cannot be edited — propose a new skill or a repo change instead",
+      }),
+    ]);
 
     // skill_update replaces the WHOLE SKILL.md — a delta authored from catalog
     // metadata alone (no frontmatter, partial body) would wipe the playbook.

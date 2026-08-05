@@ -119,6 +119,8 @@ Fields: `kind`, `action`, `content`, `skillId`, `scope`, `reason`. **No `agentId
 
 `action: "create"` needs `content` only; `action: "update"` needs `skillId` too. `content` is the **whole** skill body, not a patch — for an update, read the skill's current SKILL.md first (the catalog you were given is metadata-only) and return the complete revised document; content without frontmatter is held.
 
+Skills whose catalog entry shows `systemDefault: true` are **system-managed** — seeded from a repo template on every boot. `update` deltas against them are held: the tool rejects the edit, and even if it landed the next seeder run would render the template back over it. Changing one means changing the repo template; from a dream, propose a *new* skill or a `memory` instead.
+
 `scope` may only be `swarm` (or omitted — same thing). The apply runs as the Lead and a skill delta names no agent, so an `"agent"`-scoped skill would silently become a Lead-personal skill instead of a catalog entry; such a delta is **held**.
 
 Propose a skill when the same shape of task has been done 3+ times with a stable approach, or when an agent burned context re-deriving something a playbook would have answered. Description and trigger wording are the load-bearing parts — a skill nobody finds is a skill that doesn't exist. Propose an update when a skill cites a host, endpoint, or command that no longer exists: a playbook with a dead step in it is worse than no playbook.

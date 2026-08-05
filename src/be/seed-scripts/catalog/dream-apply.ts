@@ -364,11 +364,13 @@ export default async function dreamApply(args: any, ctx: any) {
         // that was never in the swarm catalog the critique reviewed. Only
         // already-swarm-scoped targets are updatable.
         const scopeResponse = await ctx.swarm.db_query({
-          sql: "SELECT scope FROM skills WHERE id = ?",
+          sql: "SELECT scope, systemDefault FROM skills WHERE id = ?",
           params: [delta.skillId],
         });
         assertSucceeded(scopeResponse, "skill scope check");
-        const targetScope = firstCell(scopeResponse);
+        const skillRow = ((scopeResponse?.data ?? scopeResponse)?.rows?.[0] ?? []) as unknown[];
+        const targetScope = skillRow[0];
+        const targetSystemDefault = skillRow[1];
         if (targetScope === undefined) {
           result.held.push(await auditEntry(delta, `skill ${delta.skillId} was not found`));
           continue;
@@ -378,6 +380,19 @@ export default async function dreamApply(args: any, ctx: any) {
             await auditEntry(
               delta,
               `skill ${delta.skillId} is ${String(targetScope)}-scoped, not part of the swarm catalog`,
+            ),
+          );
+          continue;
+        }
+        // Seeded skills are system-managed: skill-update rejects content edits on
+        // them, and the seeder would re-render the template over any edit that did
+        // land. Held here so the reason reads as policy on the receipt instead of
+        // arriving as a raw tool error in DEFERRED every night.
+        if (targetSystemDefault === 1 || targetSystemDefault === true) {
+          result.held.push(
+            await auditEntry(
+              delta,
+              `skill ${delta.skillId} is system-managed (seeded from a repo template) and cannot be edited — propose a new skill or a repo change instead`,
             ),
           );
           continue;
