@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ExecutorMeta } from "../../types";
 import { deepInterpolate } from "../../utils/template";
+import { getSuccessors } from "../definition";
 import {
   buildForeachAggregate,
   FOREACH_TERMINAL_STEP_STATUSES,
@@ -87,14 +88,22 @@ export class ForeachExecutor extends BaseExecutor<
       ({ itemKey }) => !childStepsByNodeId.has(`${meta.nodeId}#${itemKey}`),
     ).length;
     const maxSteps = getMaxWorkflowStepsPerRun();
-    // `>=` (not `>`): walkGraph's circuit breaker rejects any post-join walk once
-    // allSteps.length >= maxSteps, so a fan-out that lands exactly on the cap would
-    // spend all its child work and then fail routing the successor. Reserve that
-    // headroom here, before any child is dispatched.
-    if (childCountToCreate > 0 && runSteps.length + childCountToCreate >= maxSteps) {
+    // walkGraph's circuit breaker rejects any post-join walk once allSteps.length
+    // >= maxSteps, so a fan-out with a successor that lands exactly on the cap would
+    // spend all its child work and then fail routing. Reserve that headroom here,
+    // before any child is dispatched — but only when there IS a post-join walk: a
+    // terminal foreach (no successors) just closes the join and finalizes, so an
+    // exact-cap fan-out is allowed there.
+    const workflow = this.deps.db.getWorkflow(meta.workflowId);
+    const hasSuccessors = workflow
+      ? getSuccessors(workflow.definition, meta.nodeId).length > 0
+      : true;
+    const totalSteps = runSteps.length + childCountToCreate;
+    const capBreached = hasSuccessors ? totalSteps >= maxSteps : totalSteps > maxSteps;
+    if (childCountToCreate > 0 && capBreached) {
       return {
         status: "failed",
-        error: `foreach would reach ${maxSteps} total steps (WORKFLOW_MAX_STEPS_PER_RUN): ${runSteps.length} existing + ${childCountToCreate} children leaves no room for the post-join walk`,
+        error: `foreach would reach ${maxSteps} total steps (WORKFLOW_MAX_STEPS_PER_RUN): ${runSteps.length} existing + ${childCountToCreate} children${hasSuccessors ? " leaves no room for the post-join walk" : " exceeds the per-run cap"}`,
       };
     }
 

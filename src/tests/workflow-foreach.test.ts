@@ -576,6 +576,144 @@ describe("workflow foreach", () => {
     }
   });
 
+  test("a terminal foreach (no successors) may land exactly on the step cap", async () => {
+    // With no post-join walk to reserve headroom for, 1 parent + 3 children == cap 4
+    // is legal: the last child closes the join and the run finalizes.
+    const originalLimit = process.env.WORKFLOW_MAX_STEPS_PER_RUN;
+    process.env.WORKFLOW_MAX_STEPS_PER_RUN = "4";
+    try {
+      const { registry } = createRegistry(false);
+      const definition: WorkflowDefinition = {
+        nodes: [
+          {
+            id: "reflect",
+            type: "foreach",
+            config: {
+              over: "{{trigger.items}}",
+              itemKey: "id",
+              body: {
+                type: "agent-task",
+                config: { agentId: "{{item.id}}", template: "Terminal {{item.name}}" },
+              },
+            },
+          },
+        ],
+      };
+      const workflow = makeWorkflow(definition);
+      const runId = await startWorkflowExecution(workflow, { items: agentItems }, registry);
+
+      expect(getWorkflowRun(runId)?.status).toBe("waiting");
+      expect(stepByNodeId(runId, "reflect")?.status).toBe("waiting");
+      expect(foreachChildren(runId)).toHaveLength(3);
+
+      // One item beyond the cap must still be refused.
+      process.env.WORKFLOW_MAX_STEPS_PER_RUN = "3";
+      const secondRun = await startWorkflowExecution(workflow, { items: agentItems }, registry);
+      expect(getWorkflowRun(secondRun)?.status).toBe("failed");
+      expect(stepByNodeId(secondRun, "reflect")?.error).toContain("WORKFLOW_MAX_STEPS_PER_RUN");
+    } finally {
+      if (originalLimit === undefined) {
+        delete process.env.WORKFLOW_MAX_STEPS_PER_RUN;
+      } else {
+        process.env.WORKFLOW_MAX_STEPS_PER_RUN = originalLimit;
+      }
+    }
+  });
+
+  test("the retry poller rehydrates the run.id builtin for a never-checkpointed run", async () => {
+    const { registry } = createRegistry(false);
+    const definition: WorkflowDefinition = {
+      nodes: [
+        {
+          id: "reflect",
+          type: "foreach",
+          inputs: { items: "trigger.items", runId: "run.id" },
+          config: {
+            over: "{{items}}",
+            itemKey: "id",
+            body: {
+              type: "agent-task",
+              config: { agentId: "{{item.id}}", template: "RetryRun {{runId}} {{item.name}}" },
+            },
+          },
+          retry: { maxRetries: 2, strategy: "static", baseDelayMs: 1, maxDelayMs: 10 },
+        },
+      ],
+    };
+    const workflow = makeWorkflow(definition);
+    const runId = await startWorkflowExecution(
+      workflow,
+      { items: agentItems.slice(0, 2) },
+      registry,
+    );
+    expect(foreachChildren(runId)).toHaveLength(2);
+
+    // Reset to a pre-checkpoint world: no children, parent failed and retry-due,
+    // and a persisted context WITHOUT the walkGraph-hydrated `run` key.
+    for (const child of foreachChildren(runId)) {
+      db.getDb().prepare("DELETE FROM agent_tasks WHERE workflowRunStepId = ?").run(child.id);
+      db.getDb().prepare("DELETE FROM workflow_run_steps WHERE id = ?").run(child.id);
+    }
+    const parent = stepByNodeId(runId, "reflect")!;
+    db.updateWorkflowRunStep(parent.id, {
+      status: "failed",
+      error: "transient dispatch failure",
+      nextRetryAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    db.updateWorkflowRun(runId, {
+      status: "failed",
+      context: { trigger: { items: agentItems.slice(0, 2) } },
+    });
+
+    try {
+      startRetryPoller(registry, 10);
+      await waitFor(() => foreachChildren(runId).length === 2);
+    } finally {
+      stopRetryPoller();
+    }
+    const redispatched = db
+      .getDb()
+      .prepare(
+        "SELECT t.task FROM agent_tasks t JOIN workflow_run_steps s ON s.id = t.workflowRunStepId WHERE s.runId = ?",
+      )
+      .all(runId) as Array<{ task: string }>;
+    expect(redispatched).toHaveLength(2);
+    for (const row of redispatched) {
+      expect(row.task).toContain(`RetryRun ${runId}`);
+    }
+  });
+
+  test("a grandfathered hash id can stay a normal node but never become a foreach parent", () => {
+    const foreachWithHashId = {
+      nodes: [
+        {
+          id: "legacy#fan",
+          type: "foreach",
+          config: {
+            over: [],
+            itemKey: "id",
+            body: { type: "agent-task", config: { template: "Reflect" } },
+          },
+        },
+      ],
+    };
+    const asForeach = validateDefinition(foreachWithHashId, undefined, {
+      legacyNodeIds: new Set(["legacy#fan"]),
+    });
+    expect(asForeach.valid).toBe(false);
+    expect(
+      asForeach.errors.some((error) => error.includes('cannot be a foreach: its id contains "#"')),
+    ).toBe(true);
+
+    // The same grandfathered id stays editable as a NORMAL node.
+    const asRecord = validateDefinition(
+      { nodes: [{ id: "legacy#fan", type: "record", config: { message: "ok" } }] },
+      undefined,
+      { legacyNodeIds: new Set(["legacy#fan"]) },
+    );
+    expect(asRecord.valid).toBe(true);
+  });
+
   test("all child rows are materialized before any child task is dispatched", async () => {
     // A real agent can complete an early child while later children are still
     // being set up; the join must never observe a partial child set. The

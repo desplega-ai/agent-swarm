@@ -176,6 +176,14 @@ export function validateDefinition(
     }
     if (node.type === "foreach") {
       validateForeachNode(node, errors);
+      // A legacy `#` id may stay editable as a NORMAL node, but never as a foreach
+      // parent: its children would be `a#b#item`, and parseSyntheticNodeId splits on
+      // the FIRST `#`, so the join would resolve them to parent "a" and never close.
+      if (node.id.includes("#")) {
+        errors.push(
+          `Node "${node.id}" cannot be a foreach: its id contains "#", which is reserved for synthetic child ids`,
+        );
+      }
       if (isUpstream(def, node.id, node.id)) {
         errors.push("foreach inside a loop is not supported in v1");
       }
