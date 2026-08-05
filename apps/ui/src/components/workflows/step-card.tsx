@@ -93,7 +93,10 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
         onClick={onClick}
         className={cn(
           "rounded-md border bg-background transition-colors cursor-pointer",
-          isSelected && "border-l-2 border-l-status-active",
+          // Same selection language as the graph nodes: a primary ring + soft glow
+          // (scaled down for list density) instead of a barely-visible left border.
+          isSelected &&
+            "ring-2 ring-primary ring-offset-1 ring-offset-background shadow-md shadow-primary/30",
         )}
       >
         {/* Header row - always visible */}
