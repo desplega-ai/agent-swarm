@@ -8,6 +8,10 @@ import type { OnboardState } from "./types.ts";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_API_KEY = "      - API_KEY=${API_KEY}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_INSTALL_METHOD = "      - INSTALL_METHOD=${INSTALL_METHOD}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_INSTALL_PRESET = "      - INSTALL_PRESET=${INSTALL_PRESET:-}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_SLACK_BOT_TOKEN = "      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_SLACK_APP_TOKEN = "      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}";
@@ -59,6 +63,8 @@ export function generateCompose(state: OnboardState): string {
 
   lines.push("    environment:");
   lines.push(ENV_API_KEY);
+  lines.push(ENV_INSTALL_METHOD);
+  lines.push(ENV_INSTALL_PRESET);
   lines.push(`      - MCP_BASE_URL=http://localhost:${port}`);
   lines.push("      - APP_URL=https://app.agent-swarm.dev");
 

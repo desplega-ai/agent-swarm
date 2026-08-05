@@ -55,6 +55,12 @@ SLACK_DISABLE=true
 
 If no agents are online, the message is queued as an unassigned task in the pool. The bot confirms that your request has been queued and will be processed when agents come back up.
 
+### Acceptance reactions
+
+When the swarm accepts a Slack message, it adds an :eyes: reaction after it has successfully created or queued the task. The same acknowledgement appears when a thread message is accepted as steering for a running task. If ingestion fails before the request is accepted, the bot leaves the message unreacted instead of implying that work started; repeated delivery of an already-acknowledged event is treated as a harmless no-op.
+
+Additive thread buffering uses a slightly richer vocabulary: :eyes: for the first captured message, :heavy_plus_sign: for later messages appended to that buffer, and :zap: when `!now` triggers an immediate flush.
+
 ### Thread Follow-up Routing
 
 When you @mention the bot in a thread where a worker is already handling a task, the message routes directly to that worker — no lead delegation needed. This keeps conversations flowing naturally.

@@ -434,6 +434,12 @@ All three open the file with `Bun.file(config.logFile).writer()` and append JSON
   - Raw SDK `ThreadEvent` mirrored as `raw_log` at L466.
   - Closed at L734.
 
+### Live transcript normalization
+
+The task details page normalizes the live event shapes emitted by Claude, Codex, and OpenCode instead of assuming a single provider's transcript format. Tool calls and results, reasoning, file changes, stderr, progress markers, errors, web searches, todo snapshots, and Codex collaboration events remain readable while a session is still running; genuinely unknown events stay visible with their provider event type for debugging.
+
+For Claude and OpenCode sessions, recognized child-agent lifecycle events are also grouped into a sub-agent waterfall above the transcript. Each row shows the child label/type, running or terminal state, duration, input, and outcome when the provider exposes them. The viewer consumes the underlying lifecycle records once so the same child run is not repeated as noisy raw tool events in the transcript.
+
 <Callout type="warn">
   **Secret scrubbing is mandatory at every log egress.** Import `scrubSecrets` from [`src/utils/secret-scrubber.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/utils/secret-scrubber.ts) and wrap every string before writing. All three reference adapters do this; a new adapter must too (see claude L284, L294, L303, L320, L344; pi L170–173; codex L352–355).
 </Callout>

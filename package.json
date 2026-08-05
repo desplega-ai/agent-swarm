@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.127.1",
+  "version": "1.128.0",
   "description": "agent-swarm.dev — an open-source operating system for AI work: a lead agent breaks goals into tasks, routes them to specialized workers such as Claude Code or Codex, runs each worker in an isolated container, and preserves shared memory, tools, schedules, and review gates so delegated work compounds across sessions.",
   "keywords": [
     "agent-swarm.dev",
@@ -170,7 +170,7 @@
     "@linear/sdk": "^77.0.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@openai/codex-sdk": "^0.146.0",
-    "@opencode-ai/sdk": "^1.18.11",
+    "@opencode-ai/sdk": "^1.18.13",
     "@openfort/openfort-node": "^0.9.1",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.218.0",
