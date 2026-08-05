@@ -45,6 +45,40 @@ function configRows(response: any): any[] {
   return payload(response)?.configs ?? [];
 }
 
+/**
+ * True only when the global script `name` is byte-identical to what the seeder
+ * shipped.
+ *
+ * The rich gather runs under the Lead identity, granted by the definition-hash
+ * trust gate on this node — but `script_run` resolves a nested helper by NAME
+ * against the mutable catalog, and the seeders deliberately preserve
+ * user-modified scripts. Without this check a customized `compound-insights`
+ * row would execute inside the trust that gate granted to THIS script.
+ *
+ * `scripts.contentHash` and the recorded seed hash are the same SHA-256 of the
+ * source (see the scripts seeder), so equality is the pristine test. Fails
+ * CLOSED: an unreadable or unrecorded provenance skips the helper.
+ */
+async function isPristineSeededScript(ctx: any, name: string): Promise<boolean> {
+  try {
+    const response = await ctx.swarm.db_query({
+      sql: `SELECT s.contentHash AS liveHash, ss.seededHash AS seededHash
+              FROM scripts s
+              LEFT JOIN seed_state ss ON ss.kind = 'script' AND ss.key = s.name
+             WHERE s.name = ? AND s.scope = 'global'`,
+      params: [name],
+    });
+    assertSucceeded(response, `${name} provenance check`);
+    const row = rowsToObjects(response)[0];
+    const seededHash = row?.seededHash;
+    return (
+      typeof seededHash === "string" && seededHash.length > 0 && row?.liveHash === seededHash
+    );
+  } catch {
+    return false;
+  }
+}
+
 function scriptResult(response: any): any {
   assertSucceeded(response, "compound-insights");
   const data = payload(response);
@@ -201,6 +235,10 @@ export default async function dreamGather(args: any, ctx: any) {
     };
   }
 
+  // Checked BEFORE the fan-out: a non-pristine helper must never be dispatched
+  // at all, not merely have its result discarded.
+  const compoundPristine = await isPristineSeededScript(ctx, "compound-insights");
+
   const [
     insightsResponse,
     blockersResponse,
@@ -209,12 +247,14 @@ export default async function dreamGather(args: any, ctx: any) {
     cursorResponse,
   ] =
     await Promise.all([
-      ctx.swarm.script_run({
-        name: "compound-insights",
-        scope: "global",
-        intent: "Dreaming daily gather",
-        args: { days, publishPage: false },
-      }),
+      compoundPristine
+        ? ctx.swarm.script_run({
+            name: "compound-insights",
+            scope: "global",
+            intent: "Dreaming daily gather",
+            args: { days, publishPage: false },
+          })
+        : Promise.resolve(null),
       ctx.swarm.db_query({
         sql: `SELECT id, agentId, status, substr(task, 1, 240) AS task,
                      substr(failureReason, 1, 240) AS failureReason, createdAt, lastUpdatedAt
@@ -297,7 +337,13 @@ export default async function dreamGather(args: any, ctx: any) {
     agentIds,
     leadAgentId: String(lead.id),
     insights: {
-      compound: scriptResult(insightsResponse),
+      compound: compoundPristine
+        ? scriptResult(insightsResponse)
+        : {
+            skipped: true,
+            reason:
+              "compound-insights is not the seeded script (modified or unrecorded) — not run under the Lead identity",
+          },
       activity: activityCounts,
       skills,
       profileEvidence,

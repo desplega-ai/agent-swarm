@@ -26,16 +26,20 @@ function gatherHarness({
   configValue,
   activity = { completedTasks: 1, failedTasks: 0 },
   roster = [],
+  compoundProvenance = ["hash-seeded", "hash-seeded"] as [unknown, unknown] | null,
 }: {
   configValue?: string;
   activity?: { completedTasks: number; failedTasks: number };
   roster?: Array<Record<string, unknown>>;
+  compoundProvenance?: [unknown, unknown] | null;
 } = {}) {
   const calls: string[] = [];
   const queries: Array<{ sql: string; params: unknown[] }> = [];
+  const scriptRuns: unknown[] = [];
   return {
     calls,
     queries,
+    scriptRuns,
     ctx: {
       swarm: {
         async config_get() {
@@ -50,6 +54,16 @@ function gatherHarness({
         },
         async db_query({ sql, params = [] }: { sql: string; params?: unknown[] }) {
           queries.push({ sql, params });
+          if (sql.includes("seed_state")) {
+            calls.push("provenance_query");
+            return {
+              success: true,
+              data: {
+                columns: ["liveHash", "seededHash"],
+                rows: compoundProvenance ? [compoundProvenance] : [],
+              },
+            };
+          }
           if (sql.includes("AS completedTasks")) {
             calls.push("activity_query");
             return { success: true, data: { rows: [activity] } };
@@ -61,8 +75,9 @@ function gatherHarness({
           calls.push("expensive_query");
           return { success: true, data: { rows: [] } };
         },
-        async script_run() {
+        async script_run(request: unknown) {
           calls.push("compound_insights");
+          scriptRuns.push(request);
           return { success: true, data: { exitCode: 0, result: { summary: "ok" } } };
         },
         async skill_list() {
@@ -167,6 +182,38 @@ describe("dream-gather gates", () => {
     expect(byIdQuery.sql).toContain("SELECT workflowId FROM workflow_runs WHERE id = ?");
     expect(byIdQuery.sql).not.toContain("w.name = ?");
     expect(byIdQuery.params).toEqual(["-1 days", "run-42", "-1 days", "run-42"]);
+  });
+
+  test("a non-pristine compound-insights is never dispatched under the Lead identity", async () => {
+    // gather-rich runs as Lead via the definition-hash trust gate, but script_run
+    // resolves the nested helper by NAME against the mutable catalog and the
+    // seeders preserve user-modified scripts — so a customized row would execute
+    // inside that trust. Skipped, not just discarded.
+    for (const provenance of [
+      ["hash-modified", "hash-seeded"], // operator-customized row
+      ["hash-live", undefined], // no recorded seed provenance
+      null, // no script row at all
+    ] as Array<[unknown, unknown] | null>) {
+      const harness = gatherHarness({
+        roster: [{ id: "lead-1", name: "Lead", isLead: 1 }],
+        compoundProvenance: provenance,
+      });
+      const result = await dreamGather({}, harness.ctx);
+
+      expect(harness.scriptRuns).toEqual([]);
+      expect(harness.calls).not.toContain("compound_insights");
+      expect(result.insights.compound).toEqual({
+        skipped: true,
+        reason:
+          "compound-insights is not the seeded script (modified or unrecorded) — not run under the Lead identity",
+      });
+    }
+
+    // The pristine row still runs.
+    const pristine = gatherHarness({ roster: [{ id: "lead-1", name: "Lead", isLead: 1 }] });
+    const ok = await dreamGather({}, pristine.ctx);
+    expect(pristine.scriptRuns).toHaveLength(1);
+    expect(ok.insights.compound).toEqual({ summary: "ok" });
   });
 
   test("no live Lead returns the exact slim shape before expensive gathering", async () => {
