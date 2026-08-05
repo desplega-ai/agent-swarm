@@ -58,6 +58,8 @@ export interface NormalizedItem {
   diff?: unknown;
   meta?: unknown;
   raw?: unknown;
+  /** Extra source-row ids aggregated into this item (e.g. opencode stream deltas). */
+  coveredRecIds?: string[];
 }
 
 export interface ParseGate {

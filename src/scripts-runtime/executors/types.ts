@@ -78,8 +78,16 @@ export interface ScriptExecutor {
   run(input: ExecutorInput): Promise<ExecutorOutput>;
 }
 
+export const MIN_SCRIPT_WALL_CLOCK_MS = 1_000;
+// Above 2m, steer authors toward durable journaled steps before they reach the
+// 5m hard cap and keep a blocking workflow node open for several minutes.
+export const SCRIPT_LONG_TIMEOUT_HINT_MS = 120_000;
+export const MAX_SCRIPT_WALL_CLOCK_MS = 300_000;
+
 export const DEFAULT_SCRIPT_RESOURCES: ScriptResourcePolicy = {
   memoryMb: 512,
+  // Keep CPU time lower than the wall-clock ceiling so waiting/network scripts
+  // can run for 5m without allowing a hot loop to consume 5m of CPU.
   cpuTimeSec: 60,
   wallClockMs: 30_000,
   maxProcs: 32,

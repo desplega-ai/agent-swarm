@@ -275,8 +275,12 @@ jobs:
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
   test:
-    name: Run Tests
+    name: Run Tests (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout repository
@@ -293,18 +297,22 @@ jobs:
       - name: Run tests
         id: tests
         # apps/evals/ excluded from the root run via bunfig.toml pathIgnorePatterns
-        # (separate bun package with its own deps + CI test step).
+        # (separate bun package with its own deps + CI test step). Sharded 4-way to
+        # match merge-gate.yml's partitioning so ci-timings PR-vs-main wall-clock
+        # comparisons are apples-to-apples (each shard gets its own runner because
+        # these tests start servers, subprocesses, and SQLite workers).
         run: |
           start=$(date +%s%3N)
           set +e
-          bun run test:root -- --timeout 10000
+          bun run test:root -- --timeout 10000 --shard=${{ matrix.shard }}/4
           code=$?
           set -e
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
-      # Main provides the baseline for PR comparisons. See agent-fs docs/ci-timings.md.
+      # Each shard reports independently; main provides the baseline for PR
+      # comparisons. See agent-fs docs/ci-timings.md.
       - name: Report test timing to ci-timings
         if: always() && github.event_name == 'push'
         continue-on-error: true
@@ -329,9 +337,11 @@ jobs:
             --arg actor "$GITHUB_ACTOR" \
             --argjson dur "${{ steps.tests.outputs.duration_ms || '0' }}" \
             --arg status "${{ steps.tests.outputs.status || 'skipped' }}" \
+            --argjson idx "${{ matrix.shard }}" \
             '{repo:$repo, branch:$branch, sha:$sha, baseBranch:$base, prNumber:$pr,
               runId:$runId, runAttempt:$attempt, runUrl:$url, workflow:$wf,
               event:$event, actor:$actor,
-              actions:[{name:"test:root", group:"tests", durationMs:$dur, status:$status}]}')
+              actions:[{name:"test:root", group:"tests", durationMs:$dur, status:$status,
+                        shard:{index:$idx, total:4}, job:("test (\($idx)/4)")}]}')
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"

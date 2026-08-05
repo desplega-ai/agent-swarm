@@ -44,7 +44,7 @@ function asObject(value: unknown): Json | undefined {
  *   - Codex — the adapter mirrors every raw SDK ThreadEvent as `raw_log` JSONL,
  *     so a row is `{type:"item.started"|"item.completed", item:{...}}`. Tool
  *     items are `command_execution` / `file_change` / `mcp_tool_call` /
- *     `web_search` (src/providers/codex-adapter.ts:644-653,712-763). Error =
+ *     `collab_tool_call` / `web_search` (src/providers/codex-adapter.ts:644-653,712-763). Error =
  *     a completed `command_execution` with non-zero `exit_code`/failed `status`
  *     or an `mcp_tool_call` with `status==="failed"`.
  *   - pi — shares the Claude-style `{type:"assistant"|"user",
@@ -259,6 +259,18 @@ function codexToolFromItem(
       return {
         toolName: typeof item.tool === "string" ? item.tool : "mcp_tool_call",
         input: { server: item.server, tool: item.tool, arguments: item.arguments },
+        isError: status === "failed",
+      };
+    }
+    case "collab_tool_call": {
+      const status = typeof item.status === "string" ? item.status : undefined;
+      return {
+        toolName: typeof item.tool === "string" ? item.tool : "collaboration",
+        input: {
+          prompt: item.prompt,
+          receiver_thread_ids: item.receiver_thread_ids,
+          agents_states: item.agents_states,
+        },
         isError: status === "failed",
       };
     }

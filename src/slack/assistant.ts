@@ -3,11 +3,12 @@ import { getAgentWorkingOnThread, getLeadAgent, getMostRecentTaskInThread } from
 import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { ackSlackMessage } from "./ack";
 import { resolveSlackUserId, rewriteSlackMentions } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { hasOtherUserMention } from "./router";
-import { bufferThreadMessage } from "./thread-buffer";
+import { bufferThreadMessage, getBufferMessageCount } from "./thread-buffer";
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";
 import { isEnvFlagEnabled } from "../utils/env-flag";
@@ -126,6 +127,13 @@ export function createAssistant(): Assistant {
           // Follow-up message → route to the same agent
           if (isAdditiveSlack()) {
             bufferThreadMessage(channelId, threadTs, messageText, userId, message.ts);
+            const count = getBufferMessageCount(`${channelId}:${threadTs}`);
+            await ackSlackMessage(
+              client,
+              channelId,
+              message.ts,
+              count === 1 ? "eyes" : "heavy_plus_sign",
+            );
             await safeSetStatus("Queuing follow-up...");
             return;
           }
@@ -143,6 +151,7 @@ export function createAssistant(): Assistant {
             requestedByUserId,
             contextKey: slackContextKey({ channelId, threadTs }),
           });
+          await ackSlackMessage(client, channelId, message.ts, "eyes");
 
           if (isSlackRenderV2Enabled()) await ensureSlackThreadTree([task.id]);
 
@@ -180,6 +189,7 @@ export function createAssistant(): Assistant {
             requestedByUserId,
             contextKey: slackContextKey({ channelId, threadTs }),
           });
+          await ackSlackMessage(client, channelId, message.ts, "eyes");
           if (isSlackRenderV2Enabled()) {
             await ensureSlackThreadTree([task.id]);
           } else {
@@ -199,6 +209,7 @@ export function createAssistant(): Assistant {
           requestedByUserId,
           contextKey: slackContextKey({ channelId, threadTs }),
         });
+        await ackSlackMessage(client, channelId, message.ts, "eyes");
         if (isSlackRenderV2Enabled()) await ensureSlackThreadTree([task.id]);
         // setStatus shows typing indicator — watcher will post final result when done
       } catch (error) {

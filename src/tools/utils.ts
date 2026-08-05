@@ -17,6 +17,7 @@ import { sweepExpiredKvPrefix, upsertKv } from "../be/db";
 import { MCP_OVERFLOW_NAMESPACE, mcpOverflowNamespace } from "../kv-overflow";
 import { withSpan } from "../otel";
 import type { PermissionVerb } from "../rbac/permissions";
+import { SCRIPT_LONG_TIMEOUT_HINT_MS } from "../scripts-runtime/executors/types";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 
 type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;
@@ -181,6 +182,32 @@ export const swarmToolOutputSchema = <S extends z.ZodRawShape>(dataShape?: S) =>
 
 export const SCRIPT_AUTHORING_NUDGE =
   "Scripts must `export default async function (args, ctx)` — args FIRST, ctx second; run script-query-types (no name) for the full ctx/SDK type surface, and see the `swarm-scripts` skill for authoring patterns.";
+export const SCRIPT_RUN_TIMEOUT_NUDGE =
+  "This one-off script timed out; use `launch-script-run` with bounded journaled steps for a durable run instead.";
+export const WORKFLOW_LONG_SCRIPT_TIMEOUT_NUDGE =
+  "This workflow keeps a script node blocking for over two minutes; use `launch-script-run` with bounded journaled steps for durable one-off work instead.";
+
+export type LongScriptTimeoutHint = {
+  nodeId: string;
+  field: "timeout" | "timeoutMs";
+  value: number;
+};
+
+export function findLongScriptTimeoutHint(nodes: unknown): LongScriptTimeoutHint | undefined {
+  if (!Array.isArray(nodes)) return undefined;
+  for (const node of nodes) {
+    if (!node || typeof node !== "object") continue;
+    const { id, type, config } = node as { id?: unknown; type?: unknown; config?: unknown };
+    if (typeof id !== "string" || !config || typeof config !== "object") continue;
+    const field = type === "script" ? "timeout" : type === "swarm-script" ? "timeoutMs" : undefined;
+    if (!field) continue;
+    const value = (config as Record<string, unknown>)[field];
+    if (typeof value === "number" && value > SCRIPT_LONG_TIMEOUT_HINT_MS) {
+      return { nodeId: id, field, value };
+    }
+  }
+  return undefined;
+}
 
 // Only steer on failures plausibly caused by the script itself (typecheck or
 // runtime) — on lookup/transport/authorization errors the authoring advice
@@ -190,16 +217,33 @@ const scriptAuthoringNudge = (r: SwarmToolResult): string | undefined =>
     ? SCRIPT_AUTHORING_NUDGE
     : undefined;
 
+const scriptRunNudge = (r: SwarmToolResult): string | undefined => {
+  const body = (r.data as { data?: { error?: unknown } } | undefined)?.data;
+  // nudgeMiddleware permits exactly one steer: timeout durability is more
+  // specific than the generic authoring-contract advice, which stays fallback.
+  return !r.ok && body?.error === "timeout" ? SCRIPT_RUN_TIMEOUT_NUDGE : scriptAuthoringNudge(r);
+};
+
+const workflowLongScriptTimeoutNudge = (r: SwarmToolResult): string | undefined => {
+  if (!r.ok) return undefined;
+  const hint = (r.data as { longScriptTimeoutHint?: unknown } | undefined)?.longScriptTimeoutHint;
+  return hint ? WORKFLOW_LONG_SCRIPT_TIMEOUT_NUDGE : undefined;
+};
+
 /**
  * Central conditional nudges, keyed by tool name. Applied by the finalize
  * pipeline when the tool did not set an explicit nudge. Keep entries to a
  * single sentence; derive only from already-scrubbed result fields.
  */
 export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefined> = {
-  "script-run": scriptAuthoringNudge,
+  "script-run": scriptRunNudge,
   "script-upsert": scriptAuthoringNudge,
   "launch-script-run": scriptAuthoringNudge,
   "get-script-run": scriptAuthoringNudge,
+  "create-workflow": workflowLongScriptTimeoutNudge,
+  "update-workflow": workflowLongScriptTimeoutNudge,
+  "patch-workflow": workflowLongScriptTimeoutNudge,
+  "patch-workflow-node": workflowLongScriptTimeoutNudge,
   "script-search": (r) => {
     if (!r.ok) return undefined;
     // proxyScriptsApi wraps the parsed HTTP body as data = { status, data },

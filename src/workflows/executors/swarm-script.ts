@@ -5,14 +5,18 @@ import {
 } from "../../be/script-connections";
 import { buildScriptCredentialBindingsWithFailures } from "../../be/script-credential-broker";
 import { getScript, getScriptVersion } from "../../be/scripts/db";
-import { DEFAULT_SCRIPT_RESOURCES } from "../../scripts-runtime/executors/types";
+import {
+  DEFAULT_SCRIPT_RESOURCES,
+  MAX_SCRIPT_WALL_CLOCK_MS,
+  MIN_SCRIPT_WALL_CLOCK_MS,
+} from "../../scripts-runtime/executors/types";
 import { runScript } from "../../scripts-runtime/loader";
 import type { ExecutorMeta } from "../../types";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
 export const SWARM_SCRIPT_DEFAULT_TIMEOUT_MS = DEFAULT_SCRIPT_RESOURCES.wallClockMs;
-export const SWARM_SCRIPT_MIN_TIMEOUT_MS = 1_000;
-export const SWARM_SCRIPT_MAX_TIMEOUT_MS = DEFAULT_SCRIPT_RESOURCES.cpuTimeSec * 1_000;
+export const SWARM_SCRIPT_MIN_TIMEOUT_MS = MIN_SCRIPT_WALL_CLOCK_MS;
+export const SWARM_SCRIPT_MAX_TIMEOUT_MS = MAX_SCRIPT_WALL_CLOCK_MS;
 
 export const SwarmScriptConfigSchema = z.object({
   scriptName: z.string().min(1),

@@ -13,6 +13,10 @@ import {
   getScriptById,
   recordScriptApiUsage,
 } from "../be/scripts/db";
+import {
+  MAX_SCRIPT_WALL_CLOCK_MS,
+  MIN_SCRIPT_WALL_CLOCK_MS,
+} from "../scripts-runtime/executors/types";
 import type { RunScriptOutput } from "../scripts-runtime/loader";
 import { runScript } from "../scripts-runtime/loader";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
@@ -38,8 +42,6 @@ import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError, parseBody } f
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DEFAULT_TIMEOUT_MS = 60_000;
-const MIN_TIMEOUT_MS = 1_000;
-const MAX_TIMEOUT_MS = 300_000;
 const TIMEOUT_HEADER = "x-swarm-timeout-ms";
 // Args are a JSON payload, not a file upload — 1MB matches the sandbox's own
 // stdout cap. Applies even to authMode: 'none' endpoints, where the caller is
@@ -90,7 +92,7 @@ function resolveTimeoutMs(req: IncomingMessage): number {
   if (!val) return DEFAULT_TIMEOUT_MS;
   const n = Number(val);
   if (!Number.isFinite(n)) return DEFAULT_TIMEOUT_MS;
-  return Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, Math.floor(n)));
+  return Math.min(MAX_SCRIPT_WALL_CLOCK_MS, Math.max(MIN_SCRIPT_WALL_CLOCK_MS, Math.floor(n)));
 }
 
 type ExternalError = { type: string; message: string; details?: string[] };

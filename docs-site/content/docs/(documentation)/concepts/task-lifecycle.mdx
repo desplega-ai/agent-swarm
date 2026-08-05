@@ -151,6 +151,12 @@ store-progress(taskId: "...", status: "failed", failureReason: "Tests still fail
 
 For automatic or recurring tasks (schedules, heartbeat, monitors, digests), completion memories are skipped unless the task explicitly opts in with `persistMemory: true` on its final `store-progress` call.
 
+### Terminal result consistency
+
+Task results use first-call-wins semantics across both `store-progress` and `POST /api/tasks/{id}/finish`. An identical repeat is treated as an idempotent no-op. A later write that would change `output` or `failureReason` is rejected instead of silently reporting success (`store-progress` returns an error result and the REST finish endpoint returns HTTP 409), which makes competing agent and runner results visible while preserving the original `finishedAt` and completion side effects.
+
+To correct result text deliberately, pass `force: true`. A forced correction changes only the explicitly provided `output` and/or `failureReason`; it does not change terminal status or replay events, memory writes, follow-up creation, business-use instrumentation, or capacity updates. Structured output is validated again before an overwrite is accepted.
+
 ## Graceful Shutdown & Resume
 
 When a worker container receives SIGTERM:

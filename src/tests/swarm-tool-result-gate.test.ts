@@ -1,15 +1,19 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, getKv, initDb } from "../be/db";
+import { SCRIPT_LONG_TIMEOUT_HINT_MS } from "../scripts-runtime/executors/types";
 import { createServer } from "../server";
 import {
   finalizeSwarmToolResult,
+  findLongScriptTimeoutHint,
   MCP_OVERFLOW_TTL_MS,
   MCP_RESULT_WIRE_LIMIT_BYTES,
   mcpOverflowNamespace,
   SCRIPT_AUTHORING_NUDGE,
+  SCRIPT_RUN_TIMEOUT_NUDGE,
   type SwarmToolResult,
   type SwarmToolTruncation,
+  WORKFLOW_LONG_SCRIPT_TIMEOUT_NUDGE,
 } from "../tools/utils";
 import { clearVolatileSecretsForTesting, registerVolatileSecret } from "../utils/secret-scrubber";
 
@@ -152,6 +156,82 @@ describe("finalizeSwarmToolResult", () => {
     const text = (result.content?.[0] as { text: string }).text;
     expect(text).toContain(SCRIPT_AUTHORING_NUDGE);
     expect((result.structuredContent as { nudge?: string }).nudge).toBe(SCRIPT_AUTHORING_NUDGE);
+  });
+
+  test("NUDGES map: timed-out script-run prioritizes durable orchestration", () => {
+    const result = finalizeSwarmToolResult("script-run", {
+      ok: false,
+      message: "Script run failed: timeout",
+      data: { status: 200, data: { error: "timeout", durationMs: 30_001 } },
+    });
+    const text = (result.content?.[0] as { text: string }).text;
+    expect(text).toContain(SCRIPT_RUN_TIMEOUT_NUDGE);
+    expect(text).not.toContain(SCRIPT_AUTHORING_NUDGE);
+    expect((result.structuredContent as { nudge?: string }).nudge).toBe(SCRIPT_RUN_TIMEOUT_NUDGE);
+  });
+
+  test("NUDGES map: workflow timeout steer fires strictly above the named threshold", () => {
+    for (const [toolName, node] of [
+      [
+        "create-workflow",
+        {
+          id: "inline",
+          type: "script",
+          config: { runtime: "bash", script: "true", timeout: SCRIPT_LONG_TIMEOUT_HINT_MS + 1 },
+        },
+      ],
+      [
+        "update-workflow",
+        {
+          id: "catalog",
+          type: "swarm-script",
+          config: { scriptName: "report", timeoutMs: SCRIPT_LONG_TIMEOUT_HINT_MS + 1 },
+        },
+      ],
+    ] as const) {
+      const result = finalizeSwarmToolResult(toolName, {
+        ok: true,
+        message: "Workflow saved.",
+        data: { longScriptTimeoutHint: findLongScriptTimeoutHint([node]) },
+      });
+      expect((result.structuredContent as { nudge?: string }).nudge).toBe(
+        WORKFLOW_LONG_SCRIPT_TIMEOUT_NUDGE,
+      );
+    }
+
+    const atThreshold = finalizeSwarmToolResult("patch-workflow", {
+      ok: true,
+      message: "Workflow saved.",
+      data: {
+        longScriptTimeoutHint: findLongScriptTimeoutHint([
+          {
+            id: "catalog",
+            type: "swarm-script",
+            config: { scriptName: "report", timeoutMs: SCRIPT_LONG_TIMEOUT_HINT_MS },
+          },
+        ]),
+      },
+    });
+    expect((atThreshold.structuredContent as { nudge?: string }).nudge).toBeUndefined();
+
+    const belowThreshold = finalizeSwarmToolResult("patch-workflow-node", {
+      ok: true,
+      message: "Workflow saved.",
+      data: {
+        longScriptTimeoutHint: findLongScriptTimeoutHint([
+          {
+            id: "inline",
+            type: "script",
+            config: {
+              runtime: "bash",
+              script: "true",
+              timeout: SCRIPT_LONG_TIMEOUT_HINT_MS - 1,
+            },
+          },
+        ]),
+      },
+    });
+    expect((belowThreshold.structuredContent as { nudge?: string }).nudge).toBeUndefined();
   });
 
   test("NUDGES map: lookup/transport failures get no authoring nudge", () => {

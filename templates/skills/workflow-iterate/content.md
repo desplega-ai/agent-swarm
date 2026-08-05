@@ -23,6 +23,12 @@ Use this skill when you need to change an existing workflow without breaking liv
 - Scope parallel branches so they do not overwrite one another. Fan-out tasks should have separate context keys or branch-specific output fields.
 - Make retry paths idempotent. A rerun should detect existing artifacts, comments, PRs, or notifications and update or skip them rather than duplicating work.
 
+### `swarm-script` Timeout Limit
+
+- Keep `config.timeoutMs` at or below `300000` (5 minutes); the default remains `30000` (30 seconds).
+- Workflow create, update, bulk-patch, and single-node patch operations validate executor config and reject an oversized value before saving it.
+- For orchestration that needs more than 5 minutes, use a durable one-off script workflow run via `launch-script-run` and split the work into bounded, journaled `ctx.step.swarmScript` (or other durable) steps. Do not stretch a single `swarm-script` node beyond the cap.
+
 ## Common Failure Patterns
 
 | Symptom | Likely Cause | Fix |
