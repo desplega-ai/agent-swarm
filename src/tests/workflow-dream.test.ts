@@ -475,7 +475,14 @@ describe("Dreaming seeded workflow", () => {
     // The apply gets the idempotency runId and the gathered roster for its guards.
     expect(apply).toMatchObject({
       agentId: lead.id,
-      args: { deltas: approved, runId, agentIds: [lead.id, worker.id] },
+      // rotation rides along so apply can advance the shared cursor even when
+      // the hygiene review approved no HEARTBEAT edit (a clean PR is consumed).
+      args: {
+        deltas: approved,
+        runId,
+        agentIds: [lead.id, worker.id],
+        rotation: { available: true, key: "rotation-cursor", namespace: "dreaming" },
+      },
     });
     expect(receipt).toMatchObject({
       agentId: lead.id,

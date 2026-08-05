@@ -118,7 +118,10 @@ export const DREAM_WORKFLOW_DEFINITION: WorkflowDefinition = {
           "Review skill adoption using this current catalog: {{skills}}. " +
           "Daily compound evidence: {{compound}}. Activity counts: {{activity}}. " +
           `Return only an ApprovedDeltaSet JSON object such as ${EMPTY_DELTA_SET_EXAMPLE}. ` +
-          "Every delta must have kind `skill`; an empty deltas array is valid.",
+          "Every delta must have kind `skill`; an empty deltas array is valid. " +
+          "The catalog above is metadata only — before proposing an `update` delta, read the " +
+          "skill's CURRENT full SKILL.md (skill-get tool) and return the COMPLETE revised " +
+          "document (frontmatter + body) as content; never a partial edit or a reconstruction.",
         outputSchema: deltaSetSchemaForKind("skill"),
       },
       next: "critique",
@@ -201,6 +204,7 @@ export const DREAM_WORKFLOW_DEFINITION: WorkflowDefinition = {
         approved: "critique.taskOutput",
         leadAgentId: "gather-rich.result.leadAgentId",
         agentIds: "gather-rich.result.agentIds",
+        rotation: "gather-rich.result.blockers.rotation",
         runId: "run.id",
       },
       config: {
@@ -208,8 +212,15 @@ export const DREAM_WORKFLOW_DEFINITION: WorkflowDefinition = {
         scope: "global",
         agentId: "{{leadAgentId}}",
         // runId keys the per-delta idempotency receipts that make retries safe;
-        // agentIds is the gathered roster — agent-targeted deltas outside it are held.
-        args: { deltas: "{{approved}}", runId: "{{runId}}", agentIds: "{{agentIds}}" },
+        // agentIds is the gathered roster — agent-targeted deltas outside it are held;
+        // rotation lets apply advance the shared cursor even when the review of the
+        // rotation target approved no HEARTBEAT edit (a clean PR is still consumed).
+        args: {
+          deltas: "{{approved}}",
+          runId: "{{runId}}",
+          agentIds: "{{agentIds}}",
+          rotation: "{{rotation}}",
+        },
       },
       next: "receipt",
     },

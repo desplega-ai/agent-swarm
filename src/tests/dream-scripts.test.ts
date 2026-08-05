@@ -474,42 +474,54 @@ describe("dream scripts", () => {
     );
   });
 
-  test("receipt keeps the memory record when Slack posting fails", async () => {
+  test("receipt keeps the memory record but fails the step when Slack posting fails", async () => {
+    const kvStore = new Map<string, unknown>();
     const memories: string[] = [];
-    const result = await dreamReceipt(
-      { apply: { applied: [], held: [], deferred: [] }, date: "2026-08-03" },
-      {
-        stdlib: { Redacted: { value: () => "agent-1" } },
-        swarm: {
-          config: { agentId: "redacted-agent" },
-          async inject_learning({ learning }: { learning: string }) {
-            memories.push(learning);
-            return { success: true, data: { success: true } };
-          },
-          async config_get() {
-            return {
-              success: true,
-              data: {
-                configs: [
-                  { key: "SOME_OTHER_CHANNEL", value: "wrong-channel" },
-                  { key: "DREAMING_SLACK_CHANNEL", value: "dream-channel" },
-                ],
-              },
-            };
-          },
-          async slack_post({ channelId }: { channelId: string }) {
-            expect(channelId).toBe("dream-channel");
-            return { success: false, data: { error: "Slack unavailable" } };
-          },
+    const ctx = {
+      stdlib: { Redacted: { value: () => "agent-1" } },
+      swarm: {
+        config: { agentId: "redacted-agent" },
+        async inject_learning({ learning }: { learning: string }) {
+          memories.push(learning);
+          return { success: true, data: { success: true } };
+        },
+        async config_get() {
+          return {
+            success: true,
+            data: {
+              configs: [
+                { key: "SOME_OTHER_CHANNEL", value: "wrong-channel" },
+                { key: "DREAMING_SLACK_CHANNEL", value: "dream-channel" },
+              ],
+            },
+          };
+        },
+        async slack_post({ channelId }: { channelId: string }) {
+          expect(channelId).toBe("dream-channel");
+          return { success: false, data: { error: "Slack unavailable" } };
+        },
+        async kv_getOrNull({ key }: { key: string }) {
+          return kvStore.has(key) ? { key, value: kvStore.get(key) } : null;
+        },
+        async kv_set({ key, value }: { key: string; value: unknown }) {
+          kvStore.set(key, value);
+          return { success: true, data: { success: true } };
         },
       },
-    );
+    };
 
+    // A caught-and-returned Slack error would let the executor checkpoint this
+    // step as completed and the post would be skipped forever — the step must
+    // FAIL so a retry re-runs it.
+    await expect(
+      dreamReceipt(
+        { apply: { applied: [], held: [], deferred: [] }, date: "2026-08-03", runId: "run-s1" },
+        ctx,
+      ),
+    ).rejects.toThrow("Dreaming Slack post failed: Slack unavailable");
     expect(memories).toHaveLength(1);
-    expect(result).toMatchObject({
-      slackPosted: false,
-      slackError: "Dreaming Slack post failed: Slack unavailable",
-    });
+    // Marker stays at memory-written: the retry skips the memory, retries Slack.
+    expect(kvStore.get("receipt:run-s1")).toBe("memory-written");
   });
 
   test("agent slice reports workflow step retryCount instead of task-type guesses", async () => {
@@ -660,6 +672,85 @@ describe("dream-apply batches", () => {
     expect(result.deferred).toEqual([]);
   });
 
+  test("a consumed rotation target advances the cursor even with no approved deltas", async () => {
+    const kvStore = new Map<string, unknown>();
+    const increments: unknown[] = [];
+    const ctx = {
+      swarm: {
+        async kv_getOrNull({ key }: { key: string }) {
+          return kvStore.has(key) ? { key, value: kvStore.get(key) } : null;
+        },
+        async kv_set({ key, value }: { key: string; value: unknown }) {
+          kvStore.set(key, value);
+          return { success: true, data: { success: true } };
+        },
+        async kv_incr(request: unknown) {
+          increments.push(request);
+          return { success: true, data: { value: 1 } };
+        },
+      },
+    };
+    const rotation = { available: true, key: "rotation-cursor", namespace: "dreaming" };
+
+    // Clean review: no deltas at all, yet the target was consumed — the cursor
+    // must advance or the same PR is reselected every dream.
+    const clean = await dreamApply({ deltas: [], runId: "run-rot", rotation }, ctx);
+    expect(clean.rotationCursor).toEqual({ advanced: true });
+    expect(increments).toEqual([{ key: "rotation-cursor", namespace: "dreaming", by: 1 }]);
+
+    // A retried run must not advance twice: the per-run marker short-circuits.
+    const retried = await dreamApply({ deltas: [], runId: "run-rot", rotation }, ctx);
+    expect(retried.rotationCursor).toEqual({ advanced: true });
+    expect(increments).toHaveLength(1);
+
+    // No rotation target this run → nothing to consume, cursor untouched.
+    const noTarget = await dreamApply(
+      { deltas: [], runId: "run-rot-2", rotation: { available: false } },
+      ctx,
+    );
+    expect(noTarget.rotationCursor).toBeUndefined();
+    expect(increments).toHaveLength(1);
+  });
+
+  test("a hygiene delta that already advanced the cursor suppresses the run-level advance", async () => {
+    const increments: unknown[] = [];
+    const result = await dreamApply(
+      {
+        rotation: { available: true, key: "rotation-cursor", namespace: "dreaming" },
+        deltas: [
+          {
+            kind: "hygiene",
+            agentId: "agent-1",
+            op: "append-under",
+            anchor: "## Rotation",
+            content: "New rotation item.",
+            rotationCursorKey: "rotation-cursor",
+            rotationCursorNamespace: "dreaming",
+          },
+        ],
+      },
+      {
+        swarm: {
+          async db_query() {
+            return { success: true, data: { rows: [["## Rotation\nExisting.\n"]] } };
+          },
+          async profile_update() {
+            return { success: true, data: { success: true } };
+          },
+          async kv_incr(request: unknown) {
+            increments.push(request);
+            return { success: true, data: { value: 2 } };
+          },
+        },
+      },
+    );
+
+    expect(result.applied).toHaveLength(1);
+    // Exactly one advance: the delta's own, not a second run-level one.
+    expect(increments).toHaveLength(1);
+    expect(result.rotationCursor).toBeUndefined();
+  });
+
   test("a runId-keyed retry skips already-applied deltas instead of re-mutating", async () => {
     const kvStore = new Map<string, unknown>();
     const writes: string[] = [];
@@ -707,13 +798,13 @@ describe("dream-apply batches", () => {
     expect(writes).toEqual(["learned it", "learned it"]);
   });
 
-  test("a memory delete is held unless the memory belongs to the declared agent", async () => {
+  test("a memory delete is held unless it targets the declared agent's swarm-scoped memory", async () => {
     const deletes: unknown[] = [];
-    const makeCtx = (owner: unknown, found = true) => ({
+    const makeCtx = (owner: unknown, scope: unknown = "swarm", found = true) => ({
       swarm: {
         async db_query({ sql }: { sql: string }) {
           expect(sql).toContain("FROM agent_memory");
-          return { success: true, data: { rows: found ? [[owner]] : [] } };
+          return { success: true, data: { rows: found ? [[owner, scope]] : [] } };
         },
         async memory_delete(request: unknown) {
           deletes.push(request);
@@ -734,10 +825,21 @@ describe("dream-apply batches", () => {
       }),
     ]);
 
-    const missing = await dreamApply(deleteDelta("agent-1"), makeCtx(undefined, false));
+    const missing = await dreamApply(deleteDelta("agent-1"), makeCtx(undefined, "swarm", false));
     expect(deletes).toEqual([]);
     expect(missing.held).toEqual([
       expect.objectContaining({ reason: "memory mem-9 was not found" }),
+    ]);
+
+    // The owner check alone passes for the declared agent's own PRIVATE memory,
+    // but Dreaming only ever writes swarm-scoped rows — an agent-scoped target is
+    // outside anything the critique reviewed and must be held, not deleted.
+    const privateMemory = await dreamApply(deleteDelta("agent-1"), makeCtx("agent-1", "agent"));
+    expect(deletes).toEqual([]);
+    expect(privateMemory.held).toEqual([
+      expect.objectContaining({
+        reason: "memory mem-9 is agent-scoped, not a swarm memory Dreaming manages",
+      }),
     ]);
 
     const owned = await dreamApply(deleteDelta("agent-1"), makeCtx("agent-1"));
@@ -794,8 +896,9 @@ describe("dream-apply batches", () => {
         },
       },
     });
+    const fullSkillMd = "---\nname: sk-one\ndescription: playbook\n---\n\n# v2\n\nSteps.";
     const updateDelta = {
-      deltas: [{ kind: "skill", action: "update", skillId: "sk-1", content: "# v2" }],
+      deltas: [{ kind: "skill", action: "update", skillId: "sk-1", content: fullSkillMd }],
     };
 
     // A stale/hallucinated skillId pointing at an agent-personal skill must not
@@ -812,9 +915,23 @@ describe("dream-apply batches", () => {
     expect(updates).toEqual([]);
     expect(missing.held).toEqual([expect.objectContaining({ reason: "skill sk-1 was not found" })]);
 
+    // skill_update replaces the WHOLE SKILL.md — a delta authored from catalog
+    // metadata alone (no frontmatter, partial body) would wipe the playbook.
+    const partial = await dreamApply(
+      { deltas: [{ kind: "skill", action: "update", skillId: "sk-1", content: "# v2 only" }] },
+      makeCtx("swarm"),
+    );
+    expect(updates).toEqual([]);
+    expect(partial.held).toEqual([
+      expect.objectContaining({
+        reason:
+          "skill update content must be a complete SKILL.md (frontmatter with name + body) — partial content would replace the entire skill",
+      }),
+    ]);
+
     const catalog = await dreamApply(updateDelta, makeCtx("swarm"));
     expect(catalog.applied).toHaveLength(1);
-    expect(updates).toEqual([{ skillId: "sk-1", content: "# v2", scope: undefined }]);
+    expect(updates).toEqual([{ skillId: "sk-1", content: fullSkillMd, scope: undefined }]);
   });
 
   test("agent-targeted deltas outside the gathered roster are held", async () => {

@@ -22,6 +22,12 @@ export const argsSchema = z.object({
     .describe(
       "Roster of agent IDs gathered for this run — agent-targeted deltas outside it are held",
     ),
+  rotation: z
+    .unknown()
+    .optional()
+    .describe(
+      "Gather's rotation blob — when a target was available this run, the cursor advances even if no hygiene delta carried it",
+    ),
 });
 
 const IDEMPOTENCY_NAMESPACE = "dreaming";
@@ -217,7 +223,9 @@ export default async function dreamApply(args: any, ctx: any) {
     applied: Record<string, unknown>[];
     held: Record<string, unknown>[];
     deferred: Array<{ delta: ReflectionDelta; reason: string }>;
+    rotationCursor?: { advanced: boolean; error?: string; receiptError?: string };
   } = { applied: [], held: [], deferred: [] };
+  let cursorAdvancedByDelta = false;
 
   for (const candidate of deltas) {
     const validationError = validateReflectionDelta(candidate);
@@ -240,7 +248,9 @@ export default async function dreamApply(args: any, ctx: any) {
       ? `apply:${runId}:${await contentHash(stableStringify(delta))}`
       : null;
     if (idempotencyKey && (await alreadyApplied(ctx, idempotencyKey))) {
-      // A previous attempt of this run already applied this exact delta.
+      // A previous attempt of this run already applied this exact delta —
+      // including its cursor advance, so the run-level fallback must not re-fire.
+      if (delta.kind === "hygiene" && delta.rotationCursorKey) cursorAdvancedByDelta = true;
       result.applied.push({ ...(await auditEntry(delta)), idempotentSkip: true });
       continue;
     }
@@ -278,6 +288,7 @@ export default async function dreamApply(args: any, ctx: any) {
               }
             }
             if (cursorFailure) entry.cursorError = cursorFailure;
+            else cursorAdvancedByDelta = true;
           }
         }
         if (idempotencyKey) await markApplied(ctx, idempotencyKey, entry);
@@ -293,11 +304,13 @@ export default async function dreamApply(args: any, ctx: any) {
           // delete ANOTHER agent's memory while the receipt attributes it to the
           // declared agent. Verify ownership first; anything unverifiable is held.
           const ownerResponse = await ctx.swarm.db_query({
-            sql: "SELECT agentId FROM agent_memory WHERE id = ?",
+            sql: "SELECT agentId, scope FROM agent_memory WHERE id = ?",
             params: [memoryId],
           });
           assertSucceeded(ownerResponse, "memory owner check");
-          const owner = firstCell(ownerResponse);
+          const ownerRow = ((ownerResponse?.data ?? ownerResponse)?.rows?.[0] ?? []) as unknown[];
+          const owner = ownerRow[0];
+          const memoryScope = ownerRow[1];
           if (owner === undefined) {
             result.held.push(await auditEntry(delta, `memory ${memoryId} was not found`));
             continue;
@@ -307,6 +320,18 @@ export default async function dreamApply(args: any, ctx: any) {
               await auditEntry(
                 delta,
                 `memory ${memoryId} belongs to agent ${owner ?? "(none)"}, not the declared agent`,
+              ),
+            );
+            continue;
+          }
+          // Dreaming only ever writes swarm-scoped memories, so a delete pointed at
+          // an agent-private memory is outside anything the critique reviewed — the
+          // owner check alone would still pass for the declared agent's own rows.
+          if (memoryScope !== "swarm") {
+            result.held.push(
+              await auditEntry(
+                delta,
+                `memory ${memoryId} is ${String(memoryScope ?? "(none)")}-scoped, not a swarm memory Dreaming manages`,
               ),
             );
             continue;
@@ -357,6 +382,19 @@ export default async function dreamApply(args: any, ctx: any) {
           );
           continue;
         }
+        // skill_update replaces the WHOLE SKILL.md — a delta authored from catalog
+        // metadata alone (or a partial diff) would wipe the existing playbook.
+        // Require a plausible complete document: frontmatter with a name field.
+        const replacement = String(delta.content ?? "");
+        if (!replacement.trimStart().startsWith("---") || !/^\s*name\s*:/m.test(replacement)) {
+          result.held.push(
+            await auditEntry(
+              delta,
+              "skill update content must be a complete SKILL.md (frontmatter with name + body) — partial content would replace the entire skill",
+            ),
+          );
+          continue;
+        }
         const updated = await ctx.swarm.skill_update({
           skillId: delta.skillId,
           content: delta.content,
@@ -374,5 +412,45 @@ export default async function dreamApply(args: any, ctx: any) {
       });
     }
   }
+
+  // Reviewing the rotation target IS consuming it: advance the shared cursor even
+  // when the review approved no HEARTBEAT edit, otherwise a clean PR would be
+  // reselected every dream and later PRs would never enter the rotation. Skipped
+  // when a hygiene delta already advanced it (directly or in a prior attempt).
+  const rotation = parsed.data.rotation as
+    | { available?: boolean; key?: string; namespace?: string }
+    | undefined;
+  if (rotation?.available === true && !cursorAdvancedByDelta) {
+    const cursorIdempotencyKey = runId ? `apply:${runId}:rotation-cursor` : null;
+    if (cursorIdempotencyKey && (await alreadyApplied(ctx, cursorIdempotencyKey))) {
+      result.rotationCursor = { advanced: true };
+    } else {
+      // Same retry/report posture as the per-delta advance: KV offers no
+      // transaction, so a persistent failure is surfaced on the receipt (worst
+      // case a repeat review of the same PR, never a silent stall).
+      let cursorFailure: string | undefined;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const increment = await ctx.swarm.kv_incr({
+            key: rotation.key ?? "rotation-cursor",
+            namespace: rotation.namespace ?? "dreaming",
+            by: 1,
+          });
+          assertSucceeded(increment, "rotation cursor advance");
+          cursorFailure = undefined;
+          break;
+        } catch (error) {
+          cursorFailure = errorMessage(error);
+        }
+      }
+      result.rotationCursor = cursorFailure
+        ? { advanced: false, error: cursorFailure }
+        : { advanced: true };
+      if (!cursorFailure && cursorIdempotencyKey) {
+        await markApplied(ctx, cursorIdempotencyKey, result.rotationCursor);
+      }
+    }
+  }
+
   return result;
 }

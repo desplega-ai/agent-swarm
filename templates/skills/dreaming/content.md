@@ -117,7 +117,7 @@ Fields: `kind`, `action`, `content`, `skillId`, `scope`, `reason`. **No `agentId
 }
 ```
 
-`action: "create"` needs `content` only; `action: "update"` needs `skillId` too. `content` is the **whole** skill body, not a patch.
+`action: "create"` needs `content` only; `action: "update"` needs `skillId` too. `content` is the **whole** skill body, not a patch — for an update, read the skill's current SKILL.md first (the catalog you were given is metadata-only) and return the complete revised document; content without frontmatter is held.
 
 `scope` may only be `swarm` (or omitted — same thing). The apply runs as the Lead and a skill delta names no agent, so an `"agent"`-scoped skill would silently become a Lead-personal skill instead of a catalog entry; such a delta is **held**.
 
@@ -140,7 +140,7 @@ Fields: `kind`, `agentId`, `op`, `anchor`, `content`, `rotationCursorKey`, `rota
 }
 ```
 
-Rotation-cursor fields are optional; include them only when the delta advances a rotation you actually consumed.
+Rotation-cursor fields are optional; include them only when the delta advances a rotation you actually consumed. If no hygiene delta carries them, the apply still advances the cursor automatically whenever a rotation target was reviewed this run — a clean PR is consumed, not re-queued.
 
 `HEARTBEAT` is a runbook, not a log. A line recording what happened belongs in a `memory`; a line telling you to do something *again* belongs here. Once a file has filled with incident detail, resolved watches, and merged PRs, the useful delta is a removal — not another addition.
 

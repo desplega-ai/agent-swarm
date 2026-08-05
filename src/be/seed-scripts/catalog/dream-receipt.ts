@@ -5,6 +5,9 @@ export const argsSchema = z.object({
     applied: z.array(z.unknown()).optional(),
     held: z.array(z.unknown()).optional(),
     deferred: z.array(z.unknown()).optional(),
+    rotationCursor: z
+      .object({ advanced: z.boolean().optional(), error: z.string().optional() })
+      .optional(),
   }),
   date: z.string().optional().describe("Receipt date (default: current ISO date)"),
   runId: z.string().optional().describe("Dream workflow run ID"),
@@ -48,6 +51,11 @@ export function renderDreamReceipt(apply: any, date: string, runId?: string): st
   for (const [label, entries] of groups) {
     lines.push(`\n${label} (${entries.length})`);
     lines.push(...(entries.length ? entries.map(oneLine) : ["- none"]));
+  }
+  // Same posture as the per-delta cursorError: a stalled rotation cursor means
+  // the same PR gets re-reviewed next run — say so on the durable receipt.
+  if (apply?.rotationCursor?.error) {
+    lines.push(`\n⚠ rotation cursor: ${String(apply.rotationCursor.error)}`);
   }
   return lines.join("\n");
 }
@@ -126,18 +134,15 @@ export default async function dreamReceipt(args: any, ctx: any) {
   const configs = configRows(configResponse);
   const channelId = configs.find((config) => config?.key === "DREAMING_SLACK_CHANNEL")?.value;
   let slackPosted = false;
-  let slackError: string | undefined;
   if (typeof channelId === "string" && channelId.length > 0) {
-    try {
-      const slack = await ctx.swarm.slack_post({ channelId, message: receipt });
-      assertSucceeded(slack, "Dreaming Slack post");
-      slackPosted = true;
-    } catch (error) {
-      slackError = error instanceof Error ? error.message : String(error);
-    }
+    // A Slack failure must FAIL the step: returning it as data would let the
+    // executor checkpoint the step as completed and the retry would never
+    // happen. The marker stays at "memory-written", so a retried run skips the
+    // memory write above and re-attempts only this post.
+    const slack = await ctx.swarm.slack_post({ channelId, message: receipt });
+    assertSucceeded(slack, "Dreaming Slack post");
+    slackPosted = true;
   }
-  // A transient Slack error intentionally does NOT reach "done": the next
-  // recovery attempt retries only the post (memory stays deduped above).
-  if (!slackError) await setMarker("done");
-  return { date, receipt, slackPosted, ...(slackError ? { slackError } : {}) };
+  await setMarker("done");
+  return { date, receipt, slackPosted };
 }
