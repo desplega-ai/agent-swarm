@@ -6,7 +6,11 @@ export const argsSchema = z.object({
     held: z.array(z.unknown()).optional(),
     deferred: z.array(z.unknown()).optional(),
     rotationCursor: z
-      .object({ advanced: z.boolean().optional(), error: z.string().optional() })
+      .object({
+        advanced: z.boolean().optional(),
+        error: z.string().optional(),
+        reason: z.string().optional(),
+      })
       .optional(),
   }),
   date: z.string().optional().describe("Receipt date (default: current ISO date)"),
@@ -56,6 +60,10 @@ export function renderDreamReceipt(apply: any, date: string, runId?: string): st
   // the same PR gets re-reviewed next run — say so on the durable receipt.
   if (apply?.rotationCursor?.error) {
     lines.push(`\n⚠ rotation cursor: ${String(apply.rotationCursor.error)}`);
+  } else if (apply?.rotationCursor?.reason) {
+    // Deliberately held, not failed — no ⚠, but the operator should still see
+    // why the rotation did not move tonight.
+    lines.push(`\nrotation cursor held: ${String(apply.rotationCursor.reason)}`);
   }
   return lines.join("\n");
 }

@@ -142,7 +142,7 @@ Fields: `kind`, `agentId`, `op`, `anchor`, `content`, `rotationCursorKey`, `rota
 }
 ```
 
-Rotation-cursor fields are optional; include them only when the delta advances a rotation you actually consumed. If no hygiene delta carries them, the apply still advances the cursor automatically whenever a rotation target was reviewed this run — a clean PR is consumed, not re-queued.
+Rotation-cursor fields are optional; include them only when the delta advances a rotation you actually consumed. If no hygiene delta carries them, the apply still advances the cursor automatically whenever a rotation target was reviewed this run — a clean PR is consumed, not re-queued. If this lane fails outright, nothing advances: an unreviewed pull request is never skipped.
 
 `HEARTBEAT` is a runbook, not a log. A line recording what happened belongs in a `memory`; a line telling you to do something *again* belongs here. Once a file has filled with incident detail, resolved watches, and merged PRs, the useful delta is a removal — not another addition.
 

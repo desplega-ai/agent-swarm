@@ -207,6 +207,7 @@ export const DREAM_WORKFLOW_DEFINITION: WorkflowDefinition = {
         leadAgentId: "gather-rich.result.leadAgentId",
         agentIds: "gather-rich.result.agentIds",
         rotation: "gather-rich.result.blockers.rotation",
+        hygieneReview: "hygiene.taskOutput",
         runId: "run.id",
       },
       config: {
@@ -217,11 +218,16 @@ export const DREAM_WORKFLOW_DEFINITION: WorkflowDefinition = {
         // agentIds is the gathered roster — agent-targeted deltas outside it are held;
         // rotation lets apply advance the shared cursor even when the review of the
         // rotation target approved no HEARTBEAT edit (a clean PR is still consumed).
+        // hygieneReview is the proof that the review actually happened: under
+        // onNodeFailure "continue" a failed hygiene lane still lets critique and
+        // apply run, and an unresolved input interpolates to "" — so without this
+        // a flaky lane would consume an unreviewed PR.
         args: {
           deltas: "{{approved}}",
           runId: "{{runId}}",
           agentIds: "{{agentIds}}",
           rotation: "{{rotation}}",
+          hygieneReview: "{{hygieneReview}}",
         },
       },
       next: "receipt",

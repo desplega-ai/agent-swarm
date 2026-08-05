@@ -61,7 +61,7 @@ The unit of change is a **ReflectionDelta**. There are four kinds:
 | `profile-op` | `SOUL` / `IDENTITY` / `CLAUDE` / `TOOLS` / `HEARTBEAT` | Anchored section edit: `append-under`, `replace-section`, or `remove-section`. |
 | `memory` | Swarm memory | `write` (needs content) or `delete` (needs the memory id). `scope` may only be `swarm` — the write path stores swarm-scoped memory, so an agent-scoped request is held rather than silently published. A `delete` only applies when the memory actually belongs to the delta's `agentId`; a mismatched or unknown id is held. |
 | `skill` | Skills catalog | `create` or `update`; content is the whole skill body. `scope` may only be `swarm` — the apply runs as the Lead, so an agent-scoped skill would bind to the Lead identity instead of the lane that proposed it. Updates only touch targets that are already swarm-scoped. |
-| `hygiene` | `HEARTBEAT` | Same anchored ops, plus an optional rotation-cursor advance. When a rotation target was reviewed this run, apply advances the cursor automatically even if no delta carried it — a clean PR is still consumed. |
+| `hygiene` | `HEARTBEAT` | Same anchored ops, plus an optional rotation-cursor advance. When a rotation target was reviewed this run, apply advances the cursor automatically even if no delta carried it — a clean PR is still consumed. If the hygiene lane itself failed, the cursor is held and the receipt says so, so an unreviewed PR is never skipped. |
 
 Agents learn how to produce these from the seeded **`dreaming` skill**, which is the runtime playbook for a reflection lane: evidence rules, the field contract, anchor discipline, and which file a given piece of knowledge belongs in.
 

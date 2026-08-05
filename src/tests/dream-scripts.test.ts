@@ -711,25 +711,64 @@ describe("dream-apply batches", () => {
       },
     };
     const rotation = { available: true, key: "rotation-cursor", namespace: "dreaming" };
+    const hygieneReview = JSON.stringify({ deltas: [] });
 
     // Clean review: no deltas at all, yet the target was consumed — the cursor
     // must advance or the same PR is reselected every dream.
-    const clean = await dreamApply({ deltas: [], runId: "run-rot", rotation }, ctx);
+    const clean = await dreamApply({ deltas: [], runId: "run-rot", rotation, hygieneReview }, ctx);
     expect(clean.rotationCursor).toEqual({ advanced: true });
     expect(increments).toEqual([{ key: "rotation-cursor", namespace: "dreaming", by: 1 }]);
 
     // A retried run must not advance twice: the per-run marker short-circuits.
-    const retried = await dreamApply({ deltas: [], runId: "run-rot", rotation }, ctx);
+    const retried = await dreamApply(
+      { deltas: [], runId: "run-rot", rotation, hygieneReview },
+      ctx,
+    );
     expect(retried.rotationCursor).toEqual({ advanced: true });
     expect(increments).toHaveLength(1);
 
     // No rotation target this run → nothing to consume, cursor untouched.
     const noTarget = await dreamApply(
-      { deltas: [], runId: "run-rot-2", rotation: { available: false } },
+      { deltas: [], runId: "run-rot-2", rotation: { available: false }, hygieneReview },
       ctx,
     );
     expect(noTarget.rotationCursor).toBeUndefined();
     expect(increments).toHaveLength(1);
+  });
+
+  test("an available target is NOT consumed when the hygiene lane produced no review", async () => {
+    const increments: unknown[] = [];
+    const ctx = {
+      swarm: {
+        async kv_getOrNull() {
+          return null;
+        },
+        async kv_set() {
+          return { success: true, data: { success: true } };
+        },
+        async kv_incr(request: unknown) {
+          increments.push(request);
+          return { success: true, data: { value: 1 } };
+        },
+      },
+    };
+    const rotation = { available: true, key: "rotation-cursor", namespace: "dreaming" };
+
+    // onNodeFailure "continue" lets critique and apply run with the hygiene lane
+    // absent, and an unresolved {{hygieneReview}} arg interpolates to "". The
+    // target was available but nobody reviewed it — consuming it would skip an
+    // unreviewed PR until the cursor wrapped all the way around.
+    for (const hygieneReview of ["", "   ", undefined, {}, []]) {
+      const result = await dreamApply(
+        { deltas: [], runId: `run-unreviewed-${String(hygieneReview)}`, rotation, hygieneReview },
+        ctx,
+      );
+      expect(increments).toEqual([]);
+      expect(result.rotationCursor).toEqual({
+        advanced: false,
+        reason: "hygiene lane produced no review — rotation target left for the next dream",
+      });
+    }
   });
 
   test("a hygiene delta that already advanced the cursor suppresses the run-level advance", async () => {

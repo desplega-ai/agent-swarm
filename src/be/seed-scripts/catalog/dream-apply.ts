@@ -28,7 +28,29 @@ export const argsSchema = z.object({
     .describe(
       "Gather's rotation blob — when a target was available this run, the cursor advances even if no hygiene delta carried it",
     ),
+  hygieneReview: z
+    .unknown()
+    .optional()
+    .describe(
+      "The hygiene lane's raw output — proof the rotation target was actually reviewed; empty when that lane failed under onNodeFailure continue",
+    ),
 });
+
+/**
+ * Whether the hygiene lane produced a review this run.
+ *
+ * A failed lane still lets critique and apply run (onNodeFailure "continue"),
+ * and its unresolved `{{hygieneReview}}` arg interpolates to `""` — so an empty
+ * value means "not reviewed", and consuming the rotation target on it would skip
+ * an unreviewed pull request until the cursor wrapped all the way around.
+ */
+function hygieneLaneReviewed(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value as object).length > 0;
+  return true;
+}
 
 const IDEMPOTENCY_NAMESPACE = "dreaming";
 const IDEMPOTENCY_TTL_SEC = 7 * 24 * 60 * 60;
@@ -223,7 +245,7 @@ export default async function dreamApply(args: any, ctx: any) {
     applied: Record<string, unknown>[];
     held: Record<string, unknown>[];
     deferred: Array<{ delta: ReflectionDelta; reason: string }>;
-    rotationCursor?: { advanced: boolean; error?: string; receiptError?: string };
+    rotationCursor?: { advanced: boolean; error?: string; reason?: string; receiptError?: string };
   } = { applied: [], held: [], deferred: [] };
   let cursorAdvancedByDelta = false;
 
@@ -435,7 +457,16 @@ export default async function dreamApply(args: any, ctx: any) {
   const rotation = parsed.data.rotation as
     | { available?: boolean; key?: string; namespace?: string }
     | undefined;
-  if (rotation?.available === true && !cursorAdvancedByDelta) {
+  const reviewed = hygieneLaneReviewed(parsed.data.hygieneReview);
+  if (rotation?.available === true && !cursorAdvancedByDelta && !reviewed) {
+    // Availability alone is not consumption: the lane that reviews the target
+    // failed this run, so leave the cursor for the next dream rather than
+    // skipping a pull request nobody looked at.
+    result.rotationCursor = {
+      advanced: false,
+      reason: "hygiene lane produced no review — rotation target left for the next dream",
+    };
+  } else if (rotation?.available === true && !cursorAdvancedByDelta) {
     const cursorIdempotencyKey = runId ? `apply:${runId}:rotation-cursor` : null;
     if (cursorIdempotencyKey && (await alreadyApplied(ctx, cursorIdempotencyKey))) {
       result.rotationCursor = { advanced: true };
