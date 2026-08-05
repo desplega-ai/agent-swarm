@@ -865,6 +865,11 @@ describe("dream-apply batches", () => {
         rotationCursorNamespace: "prod-billing",
       }),
     ).toContain('rotationCursorNamespace must be "dreaming"');
+    // Omitting the namespace is NOT a pass: kv_incr would fall back to the agent
+    // namespace and the shared rotation cursor would silently never advance.
+    expect(validateReflectionDelta({ ...base, rotationCursorKey: "rotation-cursor" })).toContain(
+      "requires rotationCursorNamespace",
+    );
     expect(
       validateReflectionDelta({
         ...base,
@@ -881,6 +886,90 @@ describe("dream-apply batches", () => {
         rotationCursorBy: 1,
       }),
     ).toBeNull();
+  });
+
+  test("a crash between the memory write and the Slack post resumes Slack on recovery", async () => {
+    for (const priorStage of ["memory-written", "written"]) {
+      const kvStore = new Map<string, unknown>([["receipt:run-9", priorStage]]);
+      const memories: string[] = [];
+      const slackPosts: unknown[] = [];
+      const ctx = {
+        stdlib: { Redacted: { value: (value: unknown) => value } },
+        swarm: {
+          config: { agentId: "lead-1" },
+          async inject_learning({ learning }: { learning: string }) {
+            memories.push(learning);
+            return { success: true, data: { success: true } };
+          },
+          async config_get() {
+            return {
+              success: true,
+              data: { configs: [{ key: "DREAMING_SLACK_CHANNEL", value: "C123" }] },
+            };
+          },
+          async slack_post(request: unknown) {
+            slackPosts.push(request);
+            return { success: true, data: { ok: true } };
+          },
+          async kv_getOrNull({ key }: { key: string }) {
+            return kvStore.has(key) ? { key, value: kvStore.get(key) } : null;
+          },
+          async kv_set({ key, value }: { key: string; value: unknown }) {
+            kvStore.set(key, value);
+            return { success: true, data: { success: true } };
+          },
+        },
+      };
+      const args = { apply: { applied: [], held: [], deferred: [] }, runId: "run-9" };
+
+      const resumed = await dreamReceipt(args, ctx);
+      expect(memories).toHaveLength(0);
+      expect(slackPosts).toHaveLength(1);
+      expect(resumed.slackPosted).toBe(true);
+      expect(kvStore.get("receipt:run-9")).toBe("done");
+
+      const third = await dreamReceipt(args, ctx);
+      expect(third).toMatchObject({ duplicateOfRun: "run-9", slackPosted: false });
+      expect(memories).toHaveLength(0);
+      expect(slackPosts).toHaveLength(1);
+    }
+  });
+
+  test("the agent slice fails loud when an evidence query fails", async () => {
+    await expect(
+      dreamAgentSlice(
+        { agentId: "agent-1" },
+        {
+          swarm: {
+            async db_query() {
+              return { success: false, data: { error: "no such column: t.bogus" } };
+            },
+          },
+        },
+      ),
+    ).rejects.toThrow("evidence query failed");
+  });
+
+  test("a snapshot fetch outage returns an error result instead of throwing", async () => {
+    const result = await ghPrSnapshot(
+      { repo: "desplega-ai/agent-swarm", number: 1 },
+      {
+        stdlib: {
+          async fetchJson() {
+            throw new Error("ECONNRESET");
+          },
+        },
+        swarm: {
+          async config_get() {
+            return { success: true, data: { configs: [] } };
+          },
+          async secret_get() {
+            return { success: true, data: {} };
+          },
+        },
+      },
+    );
+    expect(result.error).toContain("snapshot fetch failed");
   });
 
   test("a recovered receipt re-run does not duplicate the memory or the Slack post", async () => {

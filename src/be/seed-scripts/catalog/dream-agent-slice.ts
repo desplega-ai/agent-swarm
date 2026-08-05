@@ -8,6 +8,12 @@ export const argsSchema = z.object({
 
 function rowsToObjects(response: any): any[] {
   const payload = response?.data ?? response;
+  // A failed db_query must not read as a quiet day — an empty-but-successful
+  // slice and an errored one are different facts, and reflection may only
+  // reason over the former.
+  if (response?.success === false || payload?.success === false) {
+    throw new Error(`evidence query failed: ${payload?.error ?? response?.error ?? "unknown error"}`);
+  }
   const columns: string[] = payload?.columns ?? [];
   return (payload?.rows ?? []).map((row: any) =>
     Array.isArray(row) ? Object.fromEntries(columns.map((column, index) => [column, row[index]])) : row,

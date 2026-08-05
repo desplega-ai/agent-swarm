@@ -171,12 +171,21 @@ export function resolveExecutionIdentity(
     };
   }
 
-  const lead = db.getLeadAgent();
-  const requestedAgentId = config.agentId === "$lead" ? lead?.id : config.agentId;
-  if (!lead || requestedAgentId !== lead.id || !["idle", "busy"].includes(lead.status)) {
+  // Validate the requested agent ITSELF as a live Lead. getLeadAgent() returns the
+  // first non-offline lead, which with multiple Lead rows can be an unusable
+  // `waiting_for_credentials` one — equality with that lookup would reject the
+  // live Lead the trusted gather actually selected.
+  const liveLeads = db
+    .getAllAgents()
+    .filter((agent) => agent.isLead && ["idle", "busy"].includes(agent.status));
+  const requestedAgent =
+    config.agentId === "$lead"
+      ? liveLeads[0]
+      : liveLeads.find((agent) => agent.id === config.agentId);
+  if (!requestedAgent) {
     return {
       ok: false,
-      error: "swarm-script: add-on identity override must resolve to the live Lead agent",
+      error: "swarm-script: add-on identity override must resolve to a live Lead agent",
     };
   }
   const trustedScriptHash = getSeedScriptContentHash(config.scriptName);
@@ -186,7 +195,7 @@ export function resolveExecutionIdentity(
       error: `swarm-script: trusted add-on script '${config.scriptName}' is absent from the seeded catalog`,
     };
   }
-  return { ok: true, agentId: lead.id, trustedScriptHash };
+  return { ok: true, agentId: requestedAgent.id, trustedScriptHash };
 }
 
 /** Verify that this exact script node belongs to the unchanged definition the engine executed. */
@@ -198,11 +207,14 @@ export function isTrustedAddonIdentityNode(
   runDefinitionHash: string | undefined,
   db: ExecutorDependencies["db"],
 ): boolean {
+  // Match on definition identity ONLY — canonical JSON + both executed hashes. The
+  // workflow NAME is mutable display metadata: a renamed-but-unmodified seeded
+  // workflow keeps its schedule and its workflowId-based activity exclusion, so it
+  // must keep trusted execution too instead of failing only at identity steps.
   const shipped = ADDONS.flatMap((addon) => addon.workflows).find((candidate) => {
     const shippedCanonical = canonicalJson(candidate.definition);
     const shippedHash = db.computeContentHash(shippedCanonical);
     return (
-      candidate.name === workflow.name &&
       shippedCanonical === canonicalJson(workflow.definition) &&
       executedDefinitionHash === shippedHash &&
       runDefinitionHash === shippedHash

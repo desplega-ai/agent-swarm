@@ -370,6 +370,8 @@ function validateHygiene(value: Record<string, unknown>): string | null {
   // must be held, not applied against an unrelated application counter.
   if (value.rotationCursorKey !== undefined && value.rotationCursorKey !== "rotation-cursor")
     return 'rotationCursorKey must be "rotation-cursor" (the only cursor Dreaming owns)';
+  if (value.rotationCursorKey !== undefined && value.rotationCursorNamespace === undefined)
+    return 'rotationCursorKey requires rotationCursorNamespace "dreaming" — without it kv_incr would fall back to the agent namespace and the shared cursor would never advance';
   if (value.rotationCursorNamespace !== undefined && value.rotationCursorNamespace !== "dreaming")
     return 'rotationCursorNamespace must be "dreaming" (the only cursor Dreaming owns)';
   if (value.rotationCursorBy !== undefined && value.rotationCursorBy !== 1)

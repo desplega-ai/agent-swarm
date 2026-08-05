@@ -31,7 +31,10 @@ function oneLine(value: any): string {
     .filter((detail) => detail[1] !== undefined)
     .map(([label, nested]) => `${label}=${String(nested)}`);
   const audit = details.length > 0 ? ` [${details.join(", ")}]` : "";
-  return `${agent}: ${kind}${reason}${audit}`;
+  // A swallowed cursor failure means the same PR gets re-reviewed next run —
+  // surface it on the receipt instead of hiding it in the raw apply output.
+  const cursorError = value?.cursorError ? ` ⚠ cursor: ${String(value.cursorError)}` : "";
+  return `${agent}: ${kind}${reason}${audit}${cursorError}`;
 }
 
 /** Render the durable memory/Slack body for a Dreaming apply result. */
@@ -72,11 +75,19 @@ export default async function dreamReceipt(args: any, ctx: any) {
   // memory write and the step checkpoint — a per-run KV marker keeps the
   // duplicate receipt memory and duplicate Slack post from landing. Read fails
   // open (an unreachable KV must not silence a fresh receipt).
+  // The marker is STAGED so the two side effects dedupe independently: value
+  // "memory-written" gates only the memory write (Slack still pending after a
+  // crash between them), "done" gates the whole step. Legacy "written" markers
+  // are treated as memory-written — resuming Slack beats suppressing it forever.
   const dedupeKey = runId ? `receipt:${runId}` : null;
+  let priorStage: string | null = null;
   if (dedupeKey) {
     try {
       const existing = await ctx.swarm.kv_getOrNull({ key: dedupeKey, namespace: "dreaming" });
-      if (existing != null) {
+      const value =
+        existing && typeof existing === "object" ? (existing as any).value : existing;
+      if (typeof value === "string") priorStage = value;
+      if (priorStage === "done") {
         return { date, receipt: null, slackPosted: false, duplicateOfRun: runId };
       }
     } catch {
@@ -84,24 +95,30 @@ export default async function dreamReceipt(args: any, ctx: any) {
     }
   }
 
-  const receipt = renderDreamReceipt(parsed.data.apply, date, runId);
-  const memory = await ctx.swarm.inject_learning({
-    agentId: ctx.stdlib.Redacted.value(ctx.swarm.config.agentId),
-    learning: receipt,
-    category: "best-practice",
-  });
-  assertSucceeded(memory, "receipt memory write");
-  if (dedupeKey) {
+  const setMarker = async (stage: string) => {
+    if (!dedupeKey) return;
     try {
       await ctx.swarm.kv_set({
         key: dedupeKey,
-        value: "written",
+        value: stage,
         namespace: "dreaming",
         expiresInSec: 7 * 24 * 60 * 60,
       });
     } catch {
       // best-effort — a failed marker write only risks a duplicate on recovery
     }
+  };
+
+  const memoryAlreadyWritten = priorStage === "memory-written" || priorStage === "written";
+  const receipt = renderDreamReceipt(parsed.data.apply, date, runId);
+  if (!memoryAlreadyWritten) {
+    const memory = await ctx.swarm.inject_learning({
+      agentId: ctx.stdlib.Redacted.value(ctx.swarm.config.agentId),
+      learning: receipt,
+      category: "best-practice",
+    });
+    assertSucceeded(memory, "receipt memory write");
+    await setMarker("memory-written");
   }
 
   const configResponse = await ctx.swarm.config_get({ key: "DREAMING_SLACK_CHANNEL" });
@@ -119,5 +136,8 @@ export default async function dreamReceipt(args: any, ctx: any) {
       slackError = error instanceof Error ? error.message : String(error);
     }
   }
+  // A transient Slack error intentionally does NOT reach "done": the next
+  // recovery attempt retries only the post (memory stays deduped above).
+  if (!slackError) await setMarker("done");
   return { date, receipt, slackPosted, ...(slackError ? { slackError } : {}) };
 }

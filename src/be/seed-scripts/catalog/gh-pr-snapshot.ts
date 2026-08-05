@@ -36,6 +36,20 @@ async function resolveSecret(ctx: any, key: string, override: unknown): Promise<
 
 /** One-call GitHub PR snapshot: state, draft, mergeable, CI checks and review tallies. */
 export default async function ghPrSnapshot(args: any, ctx: any) {
+  // NEVER throw: this snapshot is optional enrichment inside the Dreaming DAG, and
+  // an instant-node failure is not softened by onNodeFailure:"continue" — a
+  // transient GitHub/network outage must degrade to an { error } result, not take
+  // the reflection/skills/hygiene lanes down with it.
+  try {
+    return await ghPrSnapshotInner(args, ctx);
+  } catch (error) {
+    return {
+      error: `snapshot fetch failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+async function ghPrSnapshotInner(args: any, ctx: any) {
   const parsed = argsSchema.safeParse(args);
   if (!parsed.success) return { error: "invalid args: " + parsed.error.message };
   const { repo, number } = parsed.data;

@@ -31,6 +31,7 @@ import { CodeMatchExecutor } from "../workflows/executors/code-match";
 import { ExecutorRegistry } from "../workflows/executors/registry";
 import {
   isTrustedAddonIdentityNode,
+  resolveExecutionIdentity,
   SWARM_SCRIPT_DEFAULT_TIMEOUT_MS,
   SWARM_SCRIPT_MAX_TIMEOUT_MS,
   SWARM_SCRIPT_MIN_TIMEOUT_MS,
@@ -306,6 +307,81 @@ describe("SwarmScriptExecutor", () => {
     // Seeds the real script + workflow catalogs and spawns sandboxed subprocesses; the
     // 5s bun default is not enough headroom on a loaded CI runner, and a timeout here
     // interleaves the retry's beforeEach cleanup with the still-running attempt.
+  }, 60_000);
+
+  test("a renamed but unmodified seeded add-on keeps trusted execution", async () => {
+    const workflowSeed = await runSeeder(workflowsSeeder, { quiet: true });
+    expect(workflowSeed.failed).toEqual([]);
+    const seeded = getWorkflowByName("dream");
+    if (!seeded) throw new Error("dream workflow was not seeded");
+
+    // The name is mutable display metadata: renaming keeps the schedule binding
+    // and the workflowId-based activity exclusion, so trust must survive too.
+    getDb().prepare("UPDATE workflows SET name = ? WHERE id = ?").run("dream-renamed", seeded.id);
+    const renamed = getWorkflowByName("dream-renamed");
+    if (!renamed) throw new Error("renamed workflow disappeared");
+    const engineHash = computeWorkflowDefinitionHash(renamed.definition);
+
+    expect(
+      isTrustedAddonIdentityNode(renamed, "apply", "dream-apply", engineHash, engineHash, deps.db),
+    ).toBe(true);
+  }, 60_000);
+
+  test("identity override validates the requested Lead itself, not getLeadAgent()'s pick", async () => {
+    const workflowSeed = await runSeeder(workflowsSeeder, { quiet: true });
+    expect(workflowSeed.failed).toEqual([]);
+    const wf = getWorkflowByName("dream");
+    if (!wf) throw new Error("dream workflow was not seeded");
+    const engineHash = computeWorkflowDefinitionHash(wf.definition);
+
+    // "aaa…" sorts before the live lead, so a first-non-offline lookup would pick
+    // the unusable waiting_for_credentials row and reject the live Lead.
+    const staleLead = createAgent({
+      name: "aaa-stale-lead",
+      status: "waiting_for_credentials",
+      isLead: true,
+    });
+    const liveLead = createAgent({ name: "zzz-live-lead", status: "idle", isLead: true });
+    const meta = {
+      runId: crypto.randomUUID(),
+      stepId: crypto.randomUUID(),
+      nodeId: "apply",
+      workflowId: wf.id,
+      workflowDefinitionHash: engineHash,
+      workflowRunDefinitionHash: engineHash,
+      dryRun: false,
+    };
+    const config = { scriptName: "dream-apply", scope: "global" as const, args: {} };
+
+    const direct = resolveExecutionIdentity(
+      { ...config, agentId: liveLead.id },
+      wf,
+      meta,
+      {},
+      deps.db,
+    );
+    expect(direct).toMatchObject({ ok: true, agentId: liveLead.id });
+
+    const stale = resolveExecutionIdentity(
+      { ...config, agentId: staleLead.id },
+      wf,
+      meta,
+      {},
+      deps.db,
+    );
+    expect(stale.ok).toBe(false);
+
+    const viaSentinel = resolveExecutionIdentity(
+      { ...config, agentId: "$lead" },
+      wf,
+      meta,
+      {},
+      deps.db,
+    );
+    // $lead picks the first LIVE lead (the shared fixture lead also qualifies) —
+    // the invariant is that it can never resolve to the unusable stale one.
+    expect(viaSentinel.ok).toBe(true);
+    if (viaSentinel.ok) expect(viaSentinel.agentId).not.toBe(staleLead.id);
   }, 60_000);
 
   test("the engine hash trusts a canonically equivalent real seeded add-on definition", async () => {

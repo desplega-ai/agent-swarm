@@ -253,15 +253,31 @@ export default async function dreamApply(args: any, ctx: any) {
         }
         const entry = await auditEntry(delta);
         if (delta.kind === "hygiene" && delta.rotationCursorKey) {
-          try {
-            const increment = await ctx.swarm.kv_incr({
-              key: delta.rotationCursorKey,
-              namespace: delta.rotationCursorNamespace,
-              by: delta.rotationCursorBy ?? 1,
-            });
-            assertSucceeded(increment, "rotation cursor advance");
-          } catch (error) {
-            entry.cursorError = errorMessage(error);
+          // Belt to the validator: without the namespace, kv_incr silently falls
+          // back to the CALLER's agent namespace and the shared cursor never moves.
+          const cursorNamespace = delta.rotationCursorNamespace;
+          if (!cursorNamespace) {
+            entry.cursorError = "rotationCursorNamespace missing — cursor not advanced";
+          } else {
+            // One retry, then surface: KV offers no cross-mutation transaction, so a
+            // persistently failing advance is reported on the receipt (the worst
+            // case is a repeat review of the same PR, never a silent stall).
+            let cursorFailure: string | undefined;
+            for (let attempt = 0; attempt < 2; attempt++) {
+              try {
+                const increment = await ctx.swarm.kv_incr({
+                  key: delta.rotationCursorKey,
+                  namespace: cursorNamespace,
+                  by: delta.rotationCursorBy ?? 1,
+                });
+                assertSucceeded(increment, "rotation cursor advance");
+                cursorFailure = undefined;
+                break;
+              } catch (error) {
+                cursorFailure = errorMessage(error);
+              }
+            }
+            if (cursorFailure) entry.cursorError = cursorFailure;
           }
         }
         if (idempotencyKey) await markApplied(ctx, idempotencyKey, entry);
