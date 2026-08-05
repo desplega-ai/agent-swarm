@@ -527,6 +527,32 @@ describe("getBasePrompt — installed skills section", () => {
     expect(result).not.toContain("You have 2 skills installed");
   });
 
+  // Remote providers (devin, claude-managed) have no skills tree on disk and
+  // don't use the `/name` trigger, so neither branch may point them at a local
+  // directory — skill-get is their only route to a skill's content.
+  test("remote non-native provider gets skill-get, no local directory, no slash prefix", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      traits: { hasMcp: true, nativeSkillDiscovery: false, hasLocalEnvironment: false },
+      skillsSummary: twoSkills,
+    });
+    expect(result).toContain("- commit: Create a commit");
+    expect(result).toContain("read its content with the `skill-get` MCP tool");
+    expect(result).not.toContain("- /commit");
+    expect(result).not.toContain("skills directory");
+  });
+
+  test("remote native provider is not told it has a local skills directory", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      traits: { hasMcp: true, hasLocalEnvironment: false },
+      skillsSummary: twoSkills,
+    });
+    expect(result).toContain("You have 2 skills installed");
+    expect(result).toContain("no local skills directory");
+    expect(result).not.toContain("~/.claude/skills/");
+  });
+
   test("omits the section when no skills are installed", async () => {
     const result = await getBasePrompt({ ...minimalArgs, skillsSummary: [] });
     expect(result).not.toContain("Installed Skills");

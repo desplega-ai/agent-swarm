@@ -249,13 +249,26 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
       // natively, so enumerating here is pure duplication that grows linearly
       // with the installed count — emit a bounded count + discovery pointers.
       const count = args.skillsSummary.length;
-      prompt += `\n\n## Installed Skills\n\nYou have ${count} skill${count === 1 ? "" : "s"} installed. Your harness loads them from its skills directory (each skill is a folder with a SKILL.md — e.g. ~/.claude/skills/, ~/.codex/skills/, ~/.pi/agent/skills/, ~/.opencode/skills/) and most harnesses surface them natively. ${discovery}\n`;
+      const where = hasLocalEnv
+        ? "Your harness loads them from its skills directory (each skill is a folder with a SKILL.md — e.g. ~/.claude/skills/, ~/.codex/skills/, ~/.pi/agent/skills/, ~/.opencode/skills/) and most harnesses surface them natively."
+        : "This session has no local skills directory, so reach them through the MCP tools.";
+      prompt += `\n\n## Installed Skills\n\nYou have ${count} skill${count === 1 ? "" : "s"} installed. ${where} ${discovery}\n`;
     } else {
       // Codex and opencode have no native skill system — we only inline a
       // SKILL.md when a turn prompt opens with `/name`. Without this list they
       // have zero ambient awareness that any skill exists.
-      const summaries = args.skillsSummary.map((s) => `- /${s.name}: ${s.description}`).join("\n");
-      prompt += `\n\n## Installed Skills\n\nThe following skills are available. To use one, read its SKILL.md from your skills directory and follow its instructions.\n\n${summaries}\n\n${discovery}\n`;
+      //
+      // Remote providers (devin) take this branch too, but have no skills tree
+      // to read and don't use the `/name` trigger, so neither the slash prefix
+      // nor the directory instruction applies to them — `skill-get` is their
+      // only route to a skill's content.
+      const summaries = args.skillsSummary
+        .map((s) => `- ${hasLocalEnv ? "/" : ""}${s.name}: ${s.description}`)
+        .join("\n");
+      const howTo = hasLocalEnv
+        ? "To use one, read its SKILL.md from your skills directory and follow its instructions."
+        : "To use one, read its content with the `skill-get` MCP tool and follow its instructions.";
+      prompt += `\n\n## Installed Skills\n\nThe following skills are available. ${howTo}\n\n${summaries}\n\n${discovery}\n`;
     }
   }
 
