@@ -10,5 +10,6 @@
   "placeholders": ["ATTIO_API_KEY"],
   "runAllSeedersCandidate": true,
   "systemDefault": true,
+  "userInvocable": false,
   "tags": ["attio", "crm", "sales"]
 }

@@ -190,7 +190,7 @@ describe("Task Pause/Resume", () => {
       });
 
       // Start the task first
-      startTask(task.id, workerAgent.id);
+      startTask(task.id);
       const startedTask = getTaskById(task.id);
       expect(startedTask?.status).toBe("in_progress");
 
@@ -278,7 +278,7 @@ describe("Task Pause/Resume", () => {
       });
 
       // Start and then pause the task
-      startTask(task.id, workerAgent.id);
+      startTask(task.id);
       pauseTask(task.id);
 
       const pausedTask = getTaskById(task.id);
@@ -306,7 +306,7 @@ describe("Task Pause/Resume", () => {
       });
 
       // Start but don't pause
-      startTask(task.id, workerAgent.id);
+      startTask(task.id);
 
       const runningTask = getTaskById(task.id);
       expect(runningTask?.status).toBe("in_progress");
@@ -360,9 +360,9 @@ describe("Task Pause/Resume", () => {
       });
 
       // Start and pause both tasks
-      startTask(task1.id, agentId);
+      startTask(task1.id);
       pauseTask(task1.id);
-      startTask(task2.id, agentId);
+      startTask(task2.id);
       pauseTask(task2.id);
 
       const pausedTasks = getPausedTasksForAgent(agentId);
@@ -399,9 +399,9 @@ describe("Task Pause/Resume", () => {
         agentId: agentB,
       });
 
-      startTask(taskA.id, agentA);
+      startTask(taskA.id);
       pauseTask(taskA.id);
-      startTask(taskB.id, agentB);
+      startTask(taskB.id);
       pauseTask(taskB.id);
 
       const pausedForA = getPausedTasksForAgent(agentA);
@@ -430,9 +430,9 @@ describe("Task Pause/Resume", () => {
         agentId: agentId,
       });
 
-      startTask(task1.id, agentId);
+      startTask(task1.id);
       pauseTask(task1.id);
-      startTask(task2.id, agentId);
+      startTask(task2.id);
       pauseTask(task2.id);
 
       const pausedTasks = getPausedTasksForAgent(agentId);
@@ -477,7 +477,7 @@ describe("Task Pause/Resume", () => {
       });
 
       // Start the task - agent should be busy
-      startTask(task.id, agentId);
+      startTask(task.id);
       let agent = getAgentById(agentId);
       expect(agent?.status).toBe("busy");
 
@@ -522,7 +522,7 @@ describe("Task Pause/Resume", () => {
         agentId: agentId,
       });
 
-      startTask(task.id, agentId);
+      startTask(task.id);
       pauseTask(task.id);
 
       const response = await fetch(`${baseUrl}/api/paused-tasks`, {
@@ -556,7 +556,7 @@ describe("Task Pause/Resume", () => {
         agentId: agentId,
       });
 
-      startTask(task.id, agentId);
+      startTask(task.id);
 
       const response = await fetch(`${baseUrl}/api/tasks/${task.id}/pause`, {
         method: "POST",
@@ -621,7 +621,7 @@ describe("Task Pause/Resume", () => {
         agentId: agentId,
       });
 
-      startTask(task.id, agentId);
+      startTask(task.id);
       pauseTask(task.id);
 
       const response = await fetch(`${baseUrl}/api/tasks/${task.id}/resume`, {
@@ -659,7 +659,7 @@ describe("Task Pause/Resume", () => {
         agentId: agentId,
       });
 
-      startTask(task.id, agentId);
+      startTask(task.id);
       // Don't pause the task - it's still in_progress
 
       const response = await fetch(`${baseUrl}/api/tasks/${task.id}/resume`, {
@@ -689,7 +689,7 @@ describe("Task Pause/Resume", () => {
         agentId: agentId,
       });
 
-      startTask(task.id, agentId);
+      startTask(task.id);
       let currentTask = getTaskById(task.id);
       expect(currentTask?.status).toBe("in_progress");
 

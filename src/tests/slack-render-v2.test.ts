@@ -17,6 +17,7 @@ import {
   getTaskById,
   initDb,
   isPendingSlackMessage,
+  markTaskSlackReplySent,
   startTask,
 } from "../be/db";
 import { getTaskLink, MAX_SECTION_LENGTH } from "../slack/blocks";
@@ -28,6 +29,7 @@ import {
   isSlackRenderV2Enabled,
   processSlackRenderV2,
   renderThreadTree,
+  streamOutcomeCard,
 } from "../slack/render-v2";
 import { slackContextKey } from "../tasks/context-key";
 
@@ -1302,6 +1304,141 @@ describe("Slack renderer v2", () => {
     expect(calls.some((call) => call.method === "chat.startStream")).toBe(false);
     expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
     expect(calls.some((call) => call.method === "chat.stopStream")).toBe(true);
+    expect(getSlackOutcomeMessage(ask.id)?.finalizedAt).toBeDefined();
+  });
+
+  test("collapses the outcome card to a minimal form when the agent already replied", async () => {
+    const lead = createAgent({ name: "Reply Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REPLY_SENT");
+    const ask = createTaskExtended("ask with an inline reply", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    markTaskSlackReplySent(ask.id);
+    completeTask(ask.id, "PRIVATE OUTPUT ALREADY POSTED VIA SLACK-REPLY, MUST NOT REPEAT");
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toBe(`✅ ${lead.name} completed`);
+    expect(started?.payload.markdown_text).not.toContain("PRIVATE OUTPUT");
+    const stopped = calls.find((call) => call.method === "chat.stopStream")!;
+    const completedAsk = getTaskById(ask.id)!;
+    const duration = formatV2Duration(
+      new Date(completedAsk.createdAt),
+      new Date(completedAsk.finishedAt ?? completedAsk.lastUpdatedAt),
+    );
+    expect(stopped.payload.blocks).toEqual([
+      {
+        type: "context",
+        elements: [{ type: "mrkdwn", text: `${duration} · ${lead.name} · ${getTaskLink(ask.id)}` }],
+      },
+    ]);
+    expect(getSlackOutcomeMessage(ask.id)?.finalizedAt).toBeDefined();
+  });
+
+  test("keeps the full outcome body when the agent has not replied inline", async () => {
+    const lead = createAgent({ name: "No Reply Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_NO_REPLY");
+    const ask = createTaskExtended("ask without an inline reply", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    completeTask(ask.id, "This output must reach Slack since no slack-reply was sent.");
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toBe(
+      "✅\n\nThis output must reach Slack since no slack-reply was sent.",
+    );
+  });
+
+  test("re-reads slackReplySent inside streamOutcomeCard to avoid a stale caller snapshot", async () => {
+    const lead = createAgent({ name: "Stale Snapshot Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_STALE_SNAPSHOT");
+    const ask = createTaskExtended("ask observed before its reply landed", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    startTask(ask.id);
+    const tree = await ensureSlackThreadTree([ask.id]);
+    completeTask(ask.id, "PRIVATE OUTPUT THAT MUST NOT LEAK IF THE REPLY LANDS LATER");
+    // Simulate a stale snapshot: the caller fetched this task before slack-reply committed.
+    const staleSnapshot = { ...getTaskById(ask.id)!, slackReplySent: false };
+    markTaskSlackReplySent(ask.id);
+    calls.length = 0;
+
+    const outcome = await streamOutcomeCard(staleSnapshot, tree!);
+
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toBe(`✅ ${lead.name} completed`);
+    expect(started?.payload.markdown_text).not.toContain("PRIVATE OUTPUT");
+    expect(outcome?.finalizedAt).toBeDefined();
+  });
+
+  test("refreshes a stream started with stale content before finalizing it", async () => {
+    const lead = createAgent({ name: "Refresh Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REFRESH_STALE");
+    const ask = createTaskExtended("ask whose reply lands mid-stream", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    completeTask(ask.id, "PRIVATE OUTPUT THAT MUST NOT SURVIVE A LATE SLACK-REPLY");
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+    // The stream starts with the full (pre-reply) output, then the process fails
+    // before chat.stopStream — leaving an unfinalized stream with stale content.
+    stopCallsUntilFailure = 0;
+
+    await processSlackRenderV2();
+
+    const interrupted = getSlackOutcomeMessage(ask.id);
+    expect(interrupted?.finalizedAt).toBeUndefined();
+    const startedFirst = calls.find((call) => call.method === "chat.startStream");
+    expect(startedFirst?.payload.markdown_text).toContain("PRIVATE OUTPUT");
+    expect(remoteMessages.get(remoteKey(channelId, interrupted!.ts))?.text).toContain(
+      "PRIVATE OUTPUT",
+    );
+
+    // The agent's slack-reply lands after the stream started but before the retry.
+    markTaskSlackReplySent(ask.id);
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+
+    await processSlackRenderV2();
+
+    expect(calls.some((call) => call.method === "chat.startStream")).toBe(false);
+    const refreshed = calls.find(
+      (call) => call.method === "chat.update" && call.payload.ts === interrupted?.ts,
+    );
+    expect(refreshed?.payload.text).toBe(`✅ ${lead.name} completed`);
+    expect(refreshed?.payload.text).not.toContain("PRIVATE OUTPUT");
+    expect(remoteMessages.get(remoteKey(channelId, interrupted!.ts))?.text).not.toContain(
+      "PRIVATE OUTPUT",
+    );
     expect(getSlackOutcomeMessage(ask.id)?.finalizedAt).toBeDefined();
   });
 });

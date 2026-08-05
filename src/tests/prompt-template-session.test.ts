@@ -191,6 +191,8 @@ describe("Session templates — individual resolution", () => {
     expect(result.text).toContain("slack-read");
     expect(result.text).toContain("slack-list-channels");
     expect(result.text).toContain("Do not relay worker output");
+    expect(result.text).toContain("prefer one reply per task over several");
+    expect(result.text).toContain("match its length to what the user asked for");
     expect(result.text).not.toContain("post the result back to the originating thread");
   });
 
@@ -199,8 +201,21 @@ describe("Session templates — individual resolution", () => {
       slackChannelId: "C123",
       slackThreadTs: "123.456",
     });
-    expect(result.text).toContain("Do not post routine start, completion, or failure receipts");
+    expect(result.text).toContain("Do not post progress, start, completion, failure");
+    expect(result.text).toContain("prefer one reply per task over several");
+    expect(result.text).toContain("match its length to what the user asked for");
     expect(result.text).not.toContain("You MUST keep the originating Slack thread informed");
+  });
+
+  test("scripts-only Slack worker guidance has the same restraint", () => {
+    const result = resolveTemplate("system.agent.scripts_only_mode.slack", {
+      slackChannelId: "C123",
+      slackThreadTs: "123.456",
+    });
+    expect(result.text).toContain("Do not post progress, start, completion, failure");
+    expect(result.text).toContain("prefer one reply per task over several");
+    expect(result.text).toContain("match its length to what the user asked for");
+    expect(result.text).toContain("ctx.swarm.slack_reply");
   });
 
   test("system.agent.worker contains worker tools", () => {

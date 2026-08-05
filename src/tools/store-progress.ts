@@ -17,10 +17,13 @@ import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { getRetrievalsForTask } from "@/be/memory/raters/retrieval";
 import { runServerRaters } from "@/be/memory/raters/run-server-raters";
 import { shouldPersistTaskCompletionMemory } from "@/memory/automatic-task-gate";
+import {
+  getTaskOutputValidationError,
+  guardTerminalTaskResultWrite,
+} from "@/tasks/terminal-result-guard";
 import { createWorkerTaskFollowUp } from "@/tasks/worker-follow-up";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AgentTaskStatusSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
-import { validateJsonSchema } from "@/workflows/json-schema-validator";
 
 // Phase 11: the `cost` / `costData` field was removed from this tool's input
 // schema. Adapters (claude/codex/pi/opencode/devin/claude-managed) are the
@@ -50,6 +53,12 @@ export const storeProgressOutputSchema = swarmToolOutputSchema({
     .describe(
       "True when the call was a no-op because the task was already in a terminal state (completed/failed/cancelled). First-call-wins.",
     ),
+  wasForcedOverwrite: z
+    .boolean()
+    .optional()
+    .describe(
+      "True when force: true replaced output and/or failureReason on an already-terminal task without replaying completion side effects.",
+    ),
 });
 
 export const registerStoreProgressTool = (server: McpServer) => {
@@ -68,7 +77,12 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .enum(["completed", "failed"])
           .optional()
           .describe("Set to 'completed' or 'failed' to finish the task."),
-        output: z.string().optional().describe("The output of the task (used when completing)."),
+        output: z
+          .string()
+          .optional()
+          .describe(
+            "The task result (used when completing). For Slack-originated tasks, this is published verbatim in the thread's outcome card: provide a concrete summary scaled to what was asked, including only the outcome and any links or IDs the human needs—not process narration, a transcript, or a restatement of the brief.",
+          ),
         failureReason: z
           .string()
           .optional()
@@ -86,6 +100,12 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .describe(
             "Opt in to task_completion memory persistence for automatic/recurring tasks. Manual tasks are persisted by default; scheduled, system, heartbeat/boot-triage, monitor, and digest tasks are skipped unless this is true.",
           ),
+        force: z
+          .boolean()
+          .optional()
+          .describe(
+            "On an already-terminal task, overwrite explicitly provided output and/or failureReason text while preserving status and finishedAt and without replaying events, memory writes, follow-up creation, business-use ensure, or capacity updates. Differing terminal text is otherwise discarded and reported as a failure.",
+          ),
         // Phase 11: `costData` removed. The harness adapter is the sole
         // writer of `session_costs` (see POST /api/session-costs in the
         // runner). If a payload still includes the field, Zod's
@@ -94,7 +114,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
       outputSchema: storeProgressOutputSchema,
     },
     async (
-      { taskId, progress, status, output, failureReason, attachments, persistMemory },
+      { taskId, progress, status, output, failureReason, attachments, persistMemory, force },
       requestInfo,
       _meta,
     ) => {
@@ -191,16 +211,18 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // BEFORE any side-effects fire (event emission, memory write, follow-up task,
         // business-use ensure). Without this, a multi-session race causes duplicate
         // follow-up tasks to lead, vector index pollution, and spurious BU events.
-        // First-call-wins: existing output / finishedAt are preserved.
-        if (status && isTerminal) {
-          return {
-            success: true,
-            message:
-              `Task "${taskId}" is already ${existingTask.status}; treating as no-op. ` +
-              `Existing output preserved (first-call-wins).`,
-            task: existingTask,
-            wasNoOp: true,
-          };
+        // First-call-wins by default: existing result text / finishedAt are preserved.
+        // A caller may explicitly force a text-only correction; that path returns
+        // before every terminal side effect and deliberately leaves all lifecycle
+        // fields untouched.
+        const terminalResultGuard = guardTerminalTaskResultWrite(existingTask, {
+          status,
+          output,
+          failureReason,
+          force,
+        });
+        if (terminalResultGuard.handled) {
+          return terminalResultGuard;
         }
 
         // Update progress if provided (with deduplication)
@@ -219,35 +241,13 @@ export const registerStoreProgressTool = (server: McpServer) => {
         }
 
         // Validate structured output against outputSchema if present
-        if (
-          status === "completed" &&
-          existingTask.outputSchema &&
-          typeof existingTask.outputSchema === "object"
-        ) {
-          const schema = existingTask.outputSchema as Record<string, unknown>;
-          if (!output) {
-            return {
-              success: false,
-              message: `Task has an outputSchema but no output was provided. You must call store-progress with a valid JSON output matching this schema:\n${JSON.stringify(schema, null, 2)}`,
-            };
-          }
-
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(output);
-          } catch {
-            return {
-              success: false,
-              message: `Task output must be valid JSON matching the outputSchema. Got invalid JSON. Schema:\n${JSON.stringify(schema, null, 2)}`,
-            };
-          }
-
-          const validationErrors = validateJsonSchema(schema, parsed);
-          if (validationErrors.length > 0) {
-            return {
-              success: false,
-              message: `Task output does not match the outputSchema. Errors:\n${validationErrors.join("\n")}\n\nExpected schema:\n${JSON.stringify(schema, null, 2)}\n\nPlease fix your output and retry.`,
-            };
+        if (status === "completed") {
+          const outputValidationError = getTaskOutputValidationError(
+            existingTask.outputSchema,
+            output,
+          );
+          if (outputValidationError) {
+            return { success: false, message: outputValidationError };
           }
         }
 
@@ -334,7 +334,8 @@ export const registerStoreProgressTool = (server: McpServer) => {
         (status === "completed" || status === "failed") &&
         result.success &&
         result.task &&
-        !("wasNoOp" in result && result.wasNoOp);
+        !("wasNoOp" in result && result.wasNoOp) &&
+        !("wasForcedOverwrite" in result && result.wasForcedOverwrite);
 
       // Index completed and failed tasks as memory (async, non-blocking).
       // Skip on no-op (idempotent re-call on terminal task) to avoid duplicate
@@ -446,7 +447,8 @@ export const registerStoreProgressTool = (server: McpServer) => {
         result.success &&
         result.task &&
         !result.task.workflowRunId &&
-        !("wasNoOp" in result && result.wasNoOp)
+        !("wasNoOp" in result && result.wasNoOp) &&
+        !("wasForcedOverwrite" in result && result.wasForcedOverwrite)
       ) {
         try {
           const followUp = createWorkerTaskFollowUp({
@@ -478,6 +480,9 @@ export const registerStoreProgressTool = (server: McpServer) => {
         yourAgentId: requestInfo.agentId,
         ...(task ? { task } : {}),
         ...("wasNoOp" in result && result.wasNoOp ? { wasNoOp: true } : {}),
+        ...("wasForcedOverwrite" in result && result.wasForcedOverwrite
+          ? { wasForcedOverwrite: true }
+          : {}),
       };
       return success ? toolOk(message, { data }) : toolErr(message, { data });
     },

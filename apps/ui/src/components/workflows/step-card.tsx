@@ -14,7 +14,9 @@ import { AgentLink } from "@/components/shared/agent-link";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { effectiveChildStatus } from "@/components/workflows/graph-utils";
 import { JsonTree } from "@/components/workflows/json-tree";
+import { foreachParentIds, parseSyntheticStepId } from "@/lib/synthetic-step-id";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 export interface StepCardProps {
@@ -24,6 +26,8 @@ export interface StepCardProps {
   isExpanded: boolean;
   onClick: () => void;
   onToggleExpand: () => void;
+  /** Rendered inside a `foreach` group — the parent label is already on the group header. */
+  inGroup?: boolean;
 }
 
 /** Format a byte count as a human-readable string (B, KB, MB). */
@@ -53,14 +57,35 @@ function parseDiagnostics(raw: string | undefined): { unresolvedTokens?: string[
 }
 
 export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
-  ({ step, workflowNodes, isSelected, isExpanded, onClick, onToggleExpand }, ref) => {
-    const node = workflowNodes?.find((n) => n.id === step.nodeId);
-    const label = node?.label || step.nodeId;
+  ({ step, workflowNodes, isSelected, isExpanded, onClick, onToggleExpand, inGroup }, ref) => {
+    // `foreach` children carry synthetic `<parentNodeId>#<itemKey>` ids — the definition only holds
+    // the parent node, so label and config always resolve against the parent.
+    const { parentNodeId, itemKey } = parseSyntheticStepId(
+      step.nodeId,
+      foreachParentIds(workflowNodes),
+    );
+    const node = workflowNodes?.find((n) => n.id === parentNodeId);
+    const label = node?.label || parentNodeId;
     const duration =
       step.startedAt && step.finishedAt ? formatElapsed(step.startedAt, step.finishedAt) : null;
 
     const diagnostics = parseDiagnostics(step.diagnostics);
     const unresolvedTokens = diagnostics?.unresolvedTokens;
+
+    // An onNodeFailure:"continue" child completes WITH a persisted error — badge it as failed,
+    // matching the graph's classification and the group's ok/failed chip.
+    const displayStatus = itemKey ? effectiveChildStatus(step) : step.status;
+
+    // Foreach children carry their zero-based iteration in step.input — badge them as
+    // `foreach #<iteration>` instead of the (always agent-task) executor type.
+    const iteration =
+      itemKey && typeof step.input === "object" && step.input !== null
+        ? (step.input as Record<string, unknown>).index
+        : undefined;
+    const typeBadge =
+      itemKey != null
+        ? `foreach ${typeof iteration === "number" ? `#${iteration}` : "item"}`
+        : step.nodeType;
 
     return (
       <div
@@ -68,15 +93,38 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
         onClick={onClick}
         className={cn(
           "rounded-md border bg-background transition-colors cursor-pointer",
-          isSelected && "border-l-2 border-l-status-active",
+          // Same selection language as the graph nodes: a primary ring + soft glow
+          // (scaled down for list density) instead of a barely-visible left border.
+          isSelected &&
+            "ring-2 ring-primary ring-offset-1 ring-offset-background shadow-md shadow-primary/30",
         )}
       >
         {/* Header row - always visible */}
         <div className="w-full flex items-center gap-2 px-3 py-2">
-          <span className="text-sm font-medium truncate">{label}</span>
+          {inGroup && itemKey ? (
+            <span className="text-sm font-medium font-mono truncate">{itemKey}</span>
+          ) : (
+            <>
+              <span className="text-sm font-medium truncate">{label}</span>
 
-          <Badge variant="outline" size="tag" className="shrink-0">
-            {step.nodeType}
+              {itemKey && (
+                <span className="text-xs text-muted-foreground font-mono truncate">
+                  &middot; {itemKey}
+                </span>
+              )}
+            </>
+          )}
+
+          <Badge
+            variant="outline"
+            size="tag"
+            className={cn(
+              "shrink-0",
+              (itemKey != null || step.nodeType === "foreach") &&
+                "border-action-foreach/40 text-action-foreach",
+            )}
+          >
+            {typeBadge}
           </Badge>
 
           {step.nextPort && step.nextPort !== "default" && (
@@ -89,7 +137,7 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
             </Badge>
           )}
 
-          <StatusBadge status={step.status} className="shrink-0" />
+          <StatusBadge status={displayStatus} className="shrink-0" />
 
           <div className="ml-auto flex items-center gap-1.5 shrink-0">
             {duration && (

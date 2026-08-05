@@ -1,10 +1,11 @@
+
 # Kapso WhatsApp
 
-Kapso (https://kapso.ai) is a WhatsApp platform vendor for the Meta Cloud API. A swarm can provision one or more phone numbers and use either native inbound handlers or workflows to dispatch a task per inbound message.
+Kapso (https://kapso.ai) is a WhatsApp platform vendor that fronts the Meta Cloud API. A swarm provisions one or more WhatsApp phone numbers and wires each one to either the native inbound handler or a workflow that dispatches a task per inbound message.
 
 ## When to use MCP tools vs this skill's REST recipes
 
-Some deployments expose **thin MCP-tool wrappers for the common case only**:
+The integration ships **thin MCP-tool wrappers for the common case only**:
 
 | Tool | Use for |
 |---|---|
@@ -32,8 +33,17 @@ Swarm config keys (resolve with `get-config key:<NAME> includeSecrets:true` — 
 |---|---|
 | `KAPSO_API_BASE_URL` | `https://api.kapso.ai` (host only, no `/platform/v1`) |
 | `KAPSO_API_KEY` | API key (`X-API-Key` header) |
-| `KAPSO_PHONE_NUMBER_ID` | Provisioned number's Meta ID |
+| `KAPSO_PHONE_NUMBER_ID` | The swarm's provisioned number's Meta phone-number ID |
 | `KAPSO_WEBHOOK_HMAC_SECRET` | Shared HMAC secret. Kapso signs every webhook request with `X-Webhook-Signature: <hex>` |
+
+The curl recipes below assume `$API_BASE`, `$API_KEY`, and `$PHONE_NUMBER_ID` are set in your shell. `get-config` is an MCP tool, not a shell command — call it as a tool first, then export the values it returns:
+
+```bash
+# Values from the `get-config` MCP tool (key:<NAME> includeSecrets:true):
+API_BASE=https://api.kapso.ai        # KAPSO_API_BASE_URL
+API_KEY=<value of KAPSO_API_KEY>
+PHONE_NUMBER_ID=<value of KAPSO_PHONE_NUMBER_ID>
+```
 
 The Kapso CLI is NOT installed in worker containers. Use direct HTTP or clone the `gokapso/agent-skills` repo for fallback scripts.
 
@@ -42,11 +52,11 @@ git clone --depth=1 https://github.com/gokapso/agent-skills /tmp/kapso-skills
 cd /tmp/kapso-skills/skills/integrate-whatsapp && npm i  # or observe-whatsapp / automate-whatsapp
 ```
 
-The Meta Cloud API is proxied at `$KAPSO_API_BASE_URL/meta/whatsapp/v24.0/...` (auth: `X-API-Key`). Kapso's own platform endpoints live at `$KAPSO_API_BASE_URL/platform/v1/...`.
+The Meta Cloud API is proxied at `$API_BASE/meta/whatsapp/v24.0/...` (auth: `X-API-Key`). Kapso's own platform endpoints live at `$API_BASE/platform/v1/...`.
 
 ## Inbound webhook payload (v2)
 
-Your inbound workflow receives `whatsapp.message.*` and `whatsapp.conversation.*` events at `POST <SWARM_API_BASE_URL>/api/webhooks/<workflow-id>`.
+When inbound events are routed through a workflow, the workflow's webhook trigger receives `whatsapp.message.*` and `whatsapp.conversation.*` events at `POST https://<your-swarm-host>/api/webhooks/<workflow-id>`.
 
 Shape (top-level keys):
 
@@ -54,11 +64,11 @@ Shape (top-level keys):
 {
   "message": {
     "id": "wamid.HBgL...",            // Meta message id (WAMID)
-    "from": "15550100000",            // dummy E.164 without +
-    "from_user_id": "ES.26772...",    // Meta-internal user id
-    "timestamp": "1779281573",        // unix seconds (string)
+    "from": "15551234567",            // E.164 without + (sender)
+    "from_user_id": "XX.00000...",    // Meta-internal user id
+    "timestamp": "1700000000",        // unix seconds (string)
     "type": "text",                   // text | image | audio | video | document | sticker | location | contacts | reaction | ...
-    "text": { "body": "ola" },        // only for type=text
+    "text": { "body": "hi" },         // only for type=text
     "context": null,                  // present when the user quote-replied another message
     "kapso": {
       "direction": "inbound|outbound",
@@ -66,31 +76,31 @@ Shape (top-level keys):
       "processing_status": "pending|completed",
       "origin": "cloud_api",
       "has_media": false,
-      "content": "ola"                // text representation (caption / filename / body)
+      "content": "hi"                 // text representation (caption / filename / body)
     }
   },
   "conversation": {
-    "id": "bd7e888e-...",
-    "phone_number": "15550100000",
-    "phone_number_id": "<phone-number-id>",
-    "contact_name": "Example Contact",
+    "id": "<conversation-uuid>",
+    "phone_number": "15551234567",
+    "phone_number_id": "<PHONE_NUMBER_ID>",
+    "contact_name": "Jane Doe",
     "status": "active",
     "last_active_at": "...",
     "created_at": "...",
     "kapso": {
       "messages_count": 10,
       "last_message_id": "wamid...",
-      "last_message_text": "ola",
+      "last_message_text": "hi",
       "last_inbound_at": "...",
       "last_outbound_at": "..."
     }
   },
   "is_new_conversation": false,
-  "phone_number_id": "<phone-number-id>"
+  "phone_number_id": "<PHONE_NUMBER_ID>"
 }
 ```
 
-**ALWAYS filter on `message.kapso.direction == "inbound"`** — Kapso fires the webhook for our own outbound sends, deliveries, reads, and failures too. Only inbound events from real humans warrant a task.
+**ALWAYS filter on `message.kapso.direction == "inbound"`** — Kapso fires the webhook for the swarm's own outbound sends, deliveries, reads, and failures too. Only inbound events from real humans warrant a task.
 
 Test payloads include `"test": true` and `wamid.TEST_...` ids — handle gracefully (treat as a real inbound but mark it test in your reply; do not send a real WhatsApp reply to test payloads).
 
@@ -117,48 +127,48 @@ Media messages carry a Meta **media id** (`message.<type>.id`), not a URL. Two-s
 
 1. Resolve the media id to a temporary URL + metadata:
    ```bash
-   curl -s -H "X-API-Key: $KAPSO_API_KEY" \
-     "$KAPSO_API_BASE_URL/meta/whatsapp/v24.0/<MEDIA_ID>"
+   curl -s -H "X-API-Key: $API_KEY" \
+     "$API_BASE/meta/whatsapp/v24.0/<MEDIA_ID>"
    # → { "url": "https://lookaside.fbsbx.com/...", "mime_type": "...", "file_size": ..., "id": "...", "sha256": "..." }
    ```
 2. Download the binary from that `url` (Meta lookaside URLs expire fast — download immediately):
    ```bash
-   curl -sL -H "X-API-Key: $KAPSO_API_KEY" "<url>" -o /tmp/media.bin
+   curl -sL -H "X-API-Key: $API_KEY" "<url>" -o /tmp/media.bin
    ```
 
-NB: verify the exact proxy path against a real media message — the swarm has only received `text` inbound so far. If the lookaside `url` 403s with `X-API-Key`, retry through `$KAPSO_API_BASE_URL/meta/whatsapp/...`.
+NB: verify the exact proxy path against a real media message if your swarm has only handled `text` inbound so far. If the lookaside `url` 403s with `X-API-Key`, retry through `$API_BASE/meta/whatsapp/...`.
 
-### Recommended handling per type
+### Recommended handling per type (proposal — adapt to what your swarm has installed)
 
-- **audio / voice notes** → download, then transcribe with ElevenLabs Scribe. Workers should NOT call ElevenLabs directly — the Lead owns audio (see `TOOLS.md`); ask the Lead to transcribe, or escalate. Feed the transcript into the conversation as if it were a text message.
-- **image** → download, then describe / answer with a Claude vision model. A screenshot captioned "debug this" should get a real answer, not "I can't read images".
+- **audio / voice notes** → download the media. If the swarm has a speech-to-text capability (e.g. ElevenLabs Scribe, Whisper, or a transcription skill/tool installed on some role), transcribe via that path and feed the transcript into the conversation as if it were a text message. If no STT capability is available, download and process the raw media, or acknowledge and ask the sender to send text. Check which role owns audio/transcription in your swarm before assuming it exists.
+- **image** → download, then describe / answer with a vision-capable model if one is available. A screenshot captioned "debug this" should get a real answer, not "I can't read images".
 - **document** → download; read the text content (PDF/txt/etc.) and act on it.
 - **video** → acknowledge + ask for specifics unless there is a clear transcription need.
 - **location** → use `latitude` / `longitude` directly.
 - **sticker** → treat as a lightweight reaction; usually no substantive reply needed.
-- **reaction** → a user reacting to one of OUR messages. Usually acknowledge silently — do NOT trigger a full reply loop. (The inbound-demo workflow's `debounce` node naturally drops reaction-only events.)
+- **reaction** → a user reacting to one of the swarm's messages. Usually acknowledge silently — do NOT trigger a full reply loop. (A debounce node, where present, naturally drops reaction-only events.)
 - **contacts** → extract the shared contact info; act per the conversation.
 
 ## Resolve a contact to a swarm user
 
-Two paths in order:
+The goal is to map an inbound Kapso contact (`conversation.contact_name` + `message.from` phone) to whatever user identity your swarm tracks. Two paths in order:
 
-1. By name: `resolve-user name:"<contact_name>"` (fuzzy substring match). Returns the canonical profile if there's one. Useful for known team members.
+1. By name: `resolve-user name:"<contact_name>"` (fuzzy substring match). Returns the canonical profile if there's one. Useful for contacts already registered in the swarm's user registry.
 2. If no match — the contact is unknown. Lead can run `manage-user create name:"<contact_name>" notes:"WhatsApp +<phone>"` to register them. Workers should NOT create users autonomously; ask Lead.
 
-Always quote the phone number in `manage-user notes` so future lookups by phone work (until we add a `phone` column to the user registry).
+Always quote the phone number in `manage-user notes` so future lookups by phone work (until the user registry has a dedicated `phone` column).
 
 ## Read conversation context
 
 Use the Kapso platform endpoints via curl (no CLI needed):
 
 ```bash
-API_BASE=$(get-config KAPSO_API_BASE_URL)   # https://api.kapso.ai
-API_KEY=$(get-config KAPSO_API_KEY)
+# Values from the `get-config` MCP tool, exported as in Setup above:
+# API_BASE, API_KEY, PHONE_NUMBER_ID
 
-# List conversations for our number
+# List conversations for the swarm's number
 curl -s -H "X-API-Key: $API_KEY" \
-  "$API_BASE/platform/v1/whatsapp/conversations?phone_number_id=$KAPSO_PHONE_NUMBER_ID&status=active" | jq
+  "$API_BASE/platform/v1/whatsapp/conversations?phone_number_id=$PHONE_NUMBER_ID&status=active" | jq
 
 # Get a single conversation
 curl -s -H "X-API-Key: $API_KEY" \
@@ -183,8 +193,8 @@ Per WhatsApp policy, free-form text is only allowed within 24h of the last inbou
 **Common case shortcut:** call the `send-whatsapp-message` MCP tool — it wraps exactly this REST call. The recipe below is the canonical reference and the fallback when you need fields the tool doesn't expose.
 
 ```bash
-TO="15550100000"
-TEXT="Hi there"
+TO="15551234567"
+TEXT="Hi 👋"
 
 curl -s -X POST -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
   -d "{
@@ -194,7 +204,7 @@ curl -s -X POST -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
     \"type\": \"text\",
     \"text\": { \"preview_url\": false, \"body\": \"$TEXT\" }
   }" \
-  "$API_BASE/meta/whatsapp/v24.0/$KAPSO_PHONE_NUMBER_ID/messages" | jq
+  "$API_BASE/meta/whatsapp/v24.0/$PHONE_NUMBER_ID/messages" | jq
 ```
 
 Returns `{ "messages": [{ "id": "wamid..." }] }` on success. Log the wamid.
@@ -218,7 +228,7 @@ Prefer quote-replies when answering a specific question — it keeps long conver
 
 ## Sending media (image, document, audio, video)
 
-Two-step pipeline through Kapso's Meta proxy: **upload, then send by id**. Sending by `id` is more reliable than `link` because it does not require the media to be hosted at a public URL.
+Two-step pipeline through Kapso's Meta proxy: **upload, then send by id**. Sending by `id` is more reliable than `link` (no public-host requirement) — validated 2026-05-20.
 
 ### 1. Upload
 
@@ -227,7 +237,7 @@ curl -s -X POST -H "X-API-Key: $API_KEY" \
   -F "messaging_product=whatsapp" \
   -F "type=<mime>" \
   -F "file=@/path/to/file.ext;type=<mime>" \
-  "$API_BASE/meta/whatsapp/v24.0/$KAPSO_PHONE_NUMBER_ID/media"
+  "$API_BASE/meta/whatsapp/v24.0/$PHONE_NUMBER_ID/media"
 # → {"id":"<media-id>"}
 ```
 
@@ -242,7 +252,7 @@ curl -s -X POST -H "X-API-Key: $API_KEY" \
 
 Quote-reply works on media too — add `"context": { "message_id": "<wamid>" }` at the top level.
 
-### Wide images: pad to ~square, send as image
+### Wide images: pad to ~square, send as image (validated 2026-05-20)
 
 WhatsApp scales `type:image` to bubble width + recompresses, so a wide 1200×630 social card renders as a tiny shrunken strip. **The fix is NOT `type:document`** — a `.png` sent as a document shows a plain file card with NO inline preview (must tap+download). Bad UX both ways.
 
@@ -280,7 +290,7 @@ curl -s -X POST -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
     "message_id": "<inbound_wamid>",
     "typing_indicator": { "type": "text" }
   }' \
-  "$API_BASE/meta/whatsapp/v24.0/$KAPSO_PHONE_NUMBER_ID/messages"
+  "$API_BASE/meta/whatsapp/v24.0/$PHONE_NUMBER_ID/messages"
 # → {"success":true}
 ```
 
@@ -297,7 +307,7 @@ curl -s -X POST -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
     "type": "reaction",
     "reaction": { "message_id": "<wamid>", "emoji": "👀" }
   }' \
-  "$API_BASE/meta/whatsapp/v24.0/$KAPSO_PHONE_NUMBER_ID/messages"
+  "$API_BASE/meta/whatsapp/v24.0/$PHONE_NUMBER_ID/messages"
 ```
 
 A user can have only ONE reaction per message — sending a new emoji REPLACES the previous one (no explicit remove needed). Send `"emoji": ""` to clear a reaction entirely.
@@ -310,21 +320,21 @@ If `send-whatsapp-message` returns `sessionWindowExpired: true`, fall through to
 curl -s -X POST -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
   -d '{
     "messaging_product": "whatsapp",
-    "to": "15550100000",
+    "to": "<phone>",
     "type": "template",
     "template": {
       "name": "<template_name>",
       "language": { "code": "en_US" }
     }
   }' \
-  "$API_BASE/meta/whatsapp/v24.0/$KAPSO_PHONE_NUMBER_ID/messages"
+  "$API_BASE/meta/whatsapp/v24.0/$PHONE_NUMBER_ID/messages"
 ```
 
-List approved templates first: `GET $API_BASE/platform/v1/whatsapp/templates?phone_number_id=$KAPSO_PHONE_NUMBER_ID`.
+List approved templates first: `GET $API_BASE/platform/v1/whatsapp/templates?phone_number_id=$PHONE_NUMBER_ID`.
 
 ## Webhook signature verification
 
-Every Kapso webhook delivery includes `X-Webhook-Signature: <hex>` (HMAC-SHA256 of the raw body using `KAPSO_WEBHOOK_HMAC_SECRET`). Native handlers and workflow webhook triggers should verify the signature automatically; if you configure a custom trigger, set its HMAC header to `X-Webhook-Signature` and resolve the secret from swarm config.
+Every Kapso webhook delivery includes `X-Webhook-Signature: <hex>` (HMAC-SHA256 of the raw body using `KAPSO_WEBHOOK_HMAC_SECRET`). The native handler (`/api/integrations/kapso/webhook`) and the workflow webhook trigger both verify automatically — the trigger's `hmacHeader` is `X-Webhook-Signature` and `hmacSecret` resolves from swarm config.
 
 To verify manually:
 
@@ -335,21 +345,21 @@ echo -n "$RAW_BODY" | openssl dgst -sha256 -hmac "$HMAC_SECRET" -hex | awk '{pri
 
 ## Reply etiquette
 
-- Same language as the inbound message (Spanish/English/Catalan — match what they wrote).
+- Same language as the inbound message — match whatever the human wrote in.
 - Brief. WhatsApp is not Slack — 1-3 short messages max.
-- Identify yourself if it's a first interaction in the conversation: "Hi! This is the agent handling this WhatsApp inbox."
+- Identify yourself if it's a first interaction in the conversation, e.g. "Hi! This is the swarm's WhatsApp assistant."
 - Quote-reply (`context.message_id`) when answering a specific question.
-- If you can't help (no skill for the request, out of scope) — say so and either escalate to Lead or ask the human to use Slack instead.
+- If you can't help (no skill for the request, out of scope) — say so and either escalate to Lead or ask the human to use another channel.
 - Always log the outbound wamid in your task output so it's traceable.
 
 ## Where this fits in the swarm
 
-Two common inbound paths exist:
+Two inbound paths can exist (the native handler, or a workflow path as the alternative):
 
-- **Native handler** (`/api/integrations/kapso/webhook`) — fires for any phone number registered via `register-kapso-number`. Verifies HMAC, dedupes by message id, reads the routing mapping, and either dispatches an inbound-message task or delegates to a workflow trigger.
-- **Workflow trigger** (`<workflow-id>`) — useful when you want custom routing, batching, triage, or approval steps before a reply is sent. A typical pipeline marks the message read, debounces rapid-fire bursts, routes to an agent task, and optionally sends a final reaction or status update.
+- **Native handler** (`/api/integrations/kapso/webhook`) — fires for any phone number registered via `register-kapso-number`. Verifies HMAC, dedupes by message id (KV `integrations:kapso:dedupe`, 24h TTL), reads the routing mapping from KV (`integrations:kapso:numbers`), and either dispatches a `kapso-inbound` task or delegates to a workflow trigger (advanced override). Also emits a `kapso.message.received` event on the workflow event bus.
+- **Workflow path** — fires for unregistered numbers (or numbers whose mapping points at a workflow). A typical inbound-handling workflow chains: a react-eyes step (mark read + typing + 👀) → a debounce step (collapse rapid-fire bursts) → a gate → an agent-task triage step → a finalize step (✅/❌ reaction).
 
-**Debounce / batching:** the demo workflow's `debounce` node waits ~8s after each message and only the LAST message of a burst proceeds to the agent task — so a user firing 3 quick messages produces ONE task, not three. The agent is told the `batchSize` and should read trailing history and answer the whole burst in one reply. When >1 messages are collapsed, the user sees a "🧵 Got your N messages" note.
+**Debounce / batching:** a debounce step waits a few seconds after each message and only the LAST message of a burst proceeds to the agent task — so a user firing 3 quick messages produces ONE task, not three. The agent is told the `batchSize` and should read trailing history and answer the whole burst in one reply. When >1 messages are collapsed, the user can be shown a "🧵 Got your N messages" note.
 
 The agent-task triages like any other interaction; route heavier work to specialists via `send-task` (always include the WhatsApp source context so they can reply back).
 
@@ -357,12 +367,12 @@ HMAC verification is enforced (signed mode) on both paths.
 
 ## Common gotchas
 
-- Phone numbers from Kapso are E.164 **without `+`** (e.g. `15550100000`). Add `+` when displaying to humans, drop it when calling the API.
+- Phone numbers from Kapso are E.164 **without `+`** (e.g. `15551234567`). Add `+` when displaying to humans, drop it when calling the API.
 - `message.text.body` is only present for `type:"text"`. For other types read `message.<type>` (see the table above) or `message.kapso.content` for a text representation.
 - Outbound status events (`delivered`, `read`) are NOT a customer interaction — skip them. Filter by `message.kapso.direction == "inbound"`.
-- Real inbound messages commonly arrive with `status: "delivered"` (delivered to us). Do NOT skip on status — only `direction` signals inbound vs outbound.
+- Real inbound messages commonly arrive with `status: "delivered"` (delivered to the swarm). Do NOT skip on status — only `direction` signals inbound vs outbound.
 - Kapso sometimes sends test payloads with `"test": true` and `wamid.TEST_*` ids. Don't reply to test payloads — just complete the task with a note.
-- The provisioned phone number id is your sender number, not the recipient's. The recipient is in `message.from` / `conversation.phone_number`.
+- `KAPSO_PHONE_NUMBER_ID` is the **swarm's own** number, not the recipient's. The recipient is in `message.from` / `conversation.phone_number`.
 - The message-list endpoint is `/platform/v1/whatsapp/messages?conversation_id=X` — the conversation-scoped `/conversations/<id>/messages` path 404s.
 - **Wide images shrink — pad them, don't send as document.** `type:image` scales to bubble width; a wide social card becomes a strip. Sending it as `type:document` removes the preview entirely. Fix: pad onto a ~1:1/4:5 canvas and send as `type:image`. See "Sending media".
 - **MCP tools cover text-only.** `send-whatsapp-message` and `reply-whatsapp-message` are deliberately thin — templates / media / reactions / typing / mark-as-read are NOT in the tool surface. For those, use the REST recipes in this skill directly.

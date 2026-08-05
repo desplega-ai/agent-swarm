@@ -111,6 +111,8 @@ Since v1.106.0, per-agent `setupScript` / `/workspace/start-up.*` hooks run as t
 
 Use per-agent setup for project-local work such as `bun install`, generated config, cache warmup, repo bootstrap, or worker-owned global installs like `bun i -g`. For npm global installs, set an npm prefix under `$HOME` before installing. Move root-requiring steps such as Debian/Ubuntu package installs, writes under `/usr/lib`, service ownership changes, or local database bootstrap into the worker image, the admin-controlled global `SETUP_SCRIPT` config, or the built-in optional service toggles.
 
+During the privileged bootstrap stage, the entrypoint may seed credentials, settings, and skills under `/home/worker/.claude`. Before launching the harness it recursively restores ownership of that directory to the `worker` user so the harness can create and write `.claude/session-env`; operators do not need a separate ownership workaround for those generated files.
+
 `STARTUP_SCRIPT_STRICT` defaults to `false`, so a failed per-agent startup script logs a migration warning and the worker continues booting. Set `STARTUP_SCRIPT_STRICT=true` if you want startup-script failures to stop the container.
 
 <Callout type="info">

@@ -6,9 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.128.0] - 2026-08-05
+
+### Added
+- **Workflow script nodes support validated wall-clock budgets up to five minutes** (#1089) — inline and catalog-backed scripts share their configured timeout with the workflow watchdog, authoring APIs reject out-of-range values, and longer orchestration is directed to durable journaled script runs.
+
+### Fixed
+- **Live task transcripts render current Claude, Codex, and OpenCode events consistently** (#1092) — provider-specific tool, progress, error, file, and collaboration events remain readable while sessions run, with a lifecycle waterfall for recognized Claude and OpenCode sub-agents.
+- **Slack reactions now acknowledge only messages the swarm has accepted** (#1094) — task creation, queuing, and steering add a best-effort :eyes: reaction after acceptance, while duplicate reactions are harmless and failed ingestion is not falsely acknowledged.
+
+## [1.127.1] - 2026-08-04
+
+### Changed
+- **Image releases are reported to both production and development intake endpoints** (#1085) — production delivery remains authoritative while the best-effort development leg keeps golden-image metadata fresh without masking production failures.
+
+### Fixed
+- **HTTP task completion now matches MCP's first-call-wins result guard** (#1084) — conflicting late result text is rejected while identical retries remain idempotent.
+
+## [1.127.0] - 2026-08-03
+
+### Added
+- **Tasks can be filtered by requester in the dashboard and API** (#1080) — the URL-backed single-select facet supports a specific user, the current dashboard identity, or unattributed tasks while keeping list and count queries aligned.
+
+### Changed
+- **Documentation metadata uses the canonical `agent-swarm.dev` identity** (#1077) — public titles, descriptions, and social metadata now name the domain consistently without changing the npm package name.
+
+### Fixed
+- **Terminal task results are consistently first-call-wins in MCP** (#1082) — conflicting late writes are reported instead of silently discarded, identical retries remain idempotent, and an explicit `force` correction can replace result text without replaying completion side effects.
+- **Slack task threads avoid duplicate status and outcome messages** (#1079, #1081) — routine lifecycle receipts stay in the task tree, and a completed task that already used `slack-reply` receives only a compact outcome card.
+- **Worker bootstrap keeps Claude session state writable after privileged setup** (#1078) — the entrypoint restores ownership of `/home/worker/.claude` before starting the non-root harness, preventing `session-env` permission failures.
+
 ## [1.126.1] - 2026-08-03
 
 ### Changed
+- **Repository and package metadata use the canonical `agent-swarm.dev` identity** (#1076) — public descriptions and installable-app surfaces now name the domain consistently without changing the npm package name.
 - **Bundled KV guidance now documents concurrency-safe state layouts** (#1068) — `kv_set` is an unconditional overwrite without compare-and-swap, so the guide recommends per-writer keys, assemble-on-read fan-in, and concurrent testing.
 - **Worker harness pins now track Pi 0.83.0 and OpenCode 1.18.11** (#1071) — the worker image and runtime dependencies move to the latest compatible weekly releases.
 

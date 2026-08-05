@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.126.1",
+    "version": "1.128.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -15724,6 +15724,15 @@
           {
             "schema": {
               "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "requestedByUserId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "enum": [
                 "lastUpdatedAt",
                 "createdAt"
@@ -16485,6 +16494,9 @@
                   },
                   "failureReason": {
                     "type": "string"
+                  },
+                  "force": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -16506,6 +16518,9 @@
           },
           "404": {
             "description": "Task not found"
+          },
+          "409": {
+            "description": "Differing terminal result text was discarded"
           }
         }
       }
@@ -18267,7 +18282,7 @@
                             "config": {
                               "type": "object",
                               "additionalProperties": {},
-                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                             },
                             "next": {
                               "anyOf": [
@@ -18692,7 +18707,7 @@
                             "config": {
                               "type": "object",
                               "additionalProperties": {},
-                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                             },
                             "next": {
                               "anyOf": [
@@ -19091,7 +19106,7 @@
                             "config": {
                               "type": "object",
                               "additionalProperties": {},
-                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                             },
                             "next": {
                               "anyOf": [
@@ -19246,7 +19261,7 @@
                         "config": {
                           "type": "object",
                           "additionalProperties": {},
-                          "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                          "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                         },
                         "next": {
                           "anyOf": [
@@ -19487,7 +19502,7 @@
                   "config": {
                     "type": "object",
                     "additionalProperties": {},
-                    "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                    "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                   },
                   "next": {
                     "anyOf": [

@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "composio-google-calendar",
+  "displayName": "Composio Google Calendar",
+  "slug": "composio-google-calendar",
+  "title": "Composio Google Calendar",
+  "description": "Per-app playbook for driving Google Calendar through Composio (toolkit slug `googlecalendar`). Verified GOOGLECALENDAR_* tool slugs and argument shapes for listing, finding, creating, and updating events plus free/busy. Use alongside the `composio` hub skill. CRITICAL — covers the \"events from a year ago\" trap: GOOGLECALENDAR_EVENTS_LIST has no default timeMin, so you MUST pass timeMin/orderBy/singleEvents to get upcoming events.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["composio", "google-calendar", "calendar"]
+}

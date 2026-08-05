@@ -11,6 +11,7 @@ import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { workflowEventBus } from "../workflows/event-bus";
+import { ackSlackMessage } from "./ack";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
 import { enrichSlackUserEmail, resolveSlackUserId, rewriteSlackMentions } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
@@ -548,15 +549,12 @@ export function registerMessageHandler(app: App): void {
         console.log(
           `[Slack] Additive buffer: ${threadKey} (message #${count}, reaction: ${count === 1 ? "eyes" : "heavy_plus_sign"})`,
         );
-        try {
-          await client.reactions.add({
-            channel: msg.channel,
-            name: count === 1 ? "eyes" : "heavy_plus_sign",
-            timestamp: msg.ts,
-          });
-        } catch (e) {
-          console.log(`[Slack] Reaction failed: ${e instanceof Error ? e.message : e}`);
-        }
+        await ackSlackMessage(
+          client,
+          msg.channel,
+          msg.ts,
+          count === 1 ? "eyes" : "heavy_plus_sign",
+        );
 
         return; // Don't process further — buffer will flush
       }
@@ -630,6 +628,7 @@ export function registerMessageHandler(app: App): void {
         requestedByUserId,
         contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
       });
+      await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
 
       if (isSlackRenderV2Enabled()) {
         await ensureSlackThreadTree([task.id]);
@@ -712,13 +711,7 @@ export function registerMessageHandler(app: App): void {
               })
             : null;
           if (steering) {
-            try {
-              await client.reactions.add({ channel: msg.channel, name: "eyes", timestamp: msg.ts });
-            } catch (error) {
-              console.log(
-                `[Slack] Steering reaction failed: ${error instanceof Error ? error.message : error}`,
-              );
-            }
+            await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
             results.steered.push({
               agentName: agent.name,
               acknowledgement: formatSlackSteeringAck(steering.result),
@@ -737,6 +730,7 @@ export function registerMessageHandler(app: App): void {
             requestedByUserId,
             contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
           });
+          await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
           results.assigned.push({ agentName: agent.name, taskId: task.id });
           continue;
         }
@@ -752,6 +746,7 @@ export function registerMessageHandler(app: App): void {
           requestedByUserId,
           contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
         });
+        await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
 
         // Check if agent has an in-progress task in this thread (queued follow-up)
         const agentTasks = getTasksByAgentId(agent.id);

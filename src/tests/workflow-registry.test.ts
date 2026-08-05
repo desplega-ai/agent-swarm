@@ -16,6 +16,7 @@ import {
   type ExecutorResult,
 } from "../workflows/executors/base";
 import { ExecutorRegistry } from "../workflows/executors/registry";
+import { SwarmScriptExecutor } from "../workflows/executors/swarm-script";
 
 const TEST_DB_PATH = "./test-workflow-registry.sqlite";
 
@@ -399,8 +400,8 @@ describe("Workflow Registry & Definition (Phase 1)", () => {
     test("passes with registered types", () => {
       const def: WorkflowDefinition = {
         nodes: [
-          { id: "a", type: "test-instant", config: {}, next: "b" },
-          { id: "b", type: "test-branch", config: {} },
+          { id: "a", type: "test-instant", config: { message: "go" }, next: "b" },
+          { id: "b", type: "test-branch", config: { value: 1 } },
         ],
       };
       const registry = new ExecutorRegistry();
@@ -409,6 +410,44 @@ describe("Workflow Registry & Definition (Phase 1)", () => {
 
       const result = validateDefinition(def, registry);
       expect(result.valid).toBe(true);
+    });
+
+    test("rejects executor config with node, field, value, and maximum", () => {
+      const def: WorkflowDefinition = {
+        nodes: [
+          {
+            id: "run-report",
+            type: "swarm-script",
+            config: { scriptName: "report", timeoutMs: 300_001 },
+          },
+        ],
+      };
+      const registry = new ExecutorRegistry();
+      registry.register(new SwarmScriptExecutor(mockDeps));
+
+      const result = validateDefinition(def, registry);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContainEqual(
+        expect.stringMatching(
+          /Node "run-report" \(swarm-script\) config\.timeoutMs has invalid value 300001:.*300000/,
+        ),
+      );
+    });
+
+    test("defers interpolated config values to execution-time validation", () => {
+      const def: WorkflowDefinition = {
+        nodes: [
+          {
+            id: "dynamic-branch",
+            type: "test-branch",
+            config: { value: "{{input.value}}" },
+          },
+        ],
+      };
+      const registry = new ExecutorRegistry();
+      registry.register(new TestBranchExecutor(mockDeps));
+
+      expect(validateDefinition(def, registry)).toEqual({ valid: true, errors: [] });
     });
 
     test("single-node workflow is valid", () => {

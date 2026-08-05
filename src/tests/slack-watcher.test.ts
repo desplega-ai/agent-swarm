@@ -6,6 +6,7 @@ import {
   completeTask,
   createAgent,
   createTaskExtended,
+  failTask,
   getChildTasks,
   getCompletedSlackTasks,
   getInProgressSlackTasks,
@@ -494,6 +495,8 @@ describe("buildTreeNodes", () => {
 const mockChatUpdate = mock(() => Promise.resolve({ ok: true }));
 const mockChatPostMessage = mock(() => Promise.resolve({ ok: true, ts: "mock.dm.tree.000001" }));
 const mockSetStatus = mock(() => Promise.resolve({ ok: true }));
+const mockReactionAdd = mock(() => Promise.resolve({ ok: true }));
+const mockReactionRemove = mock(() => Promise.resolve({ ok: true }));
 
 mock.module("../slack/app", () => ({
   getSlackApp: () => ({
@@ -506,6 +509,10 @@ mock.module("../slack/app", () => ({
         threads: {
           setStatus: mockSetStatus,
         },
+      },
+      reactions: {
+        add: mockReactionAdd,
+        remove: mockReactionRemove,
       },
     },
   }),
@@ -589,6 +596,7 @@ describe("processTreeMessages", () => {
       source: "slack",
       slackChannelId: "C_TERM1",
       slackThreadTs: "4040404040.000001",
+      slackTriggerMessageTs: "4040404040.000003",
       slackUserId: "U_TERM1",
     });
 
@@ -601,14 +609,23 @@ describe("processTreeMessages", () => {
     // Clear rate limit state
     _getTreeLastUpdateTime().delete(messageTs);
     _getLastRenderedTree().delete(messageTs);
+    mockReactionAdd.mockClear();
+    mockReactionRemove.mockClear();
 
     await processTreeMessages();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Tree should be cleaned up since it's fully terminal
     expect(_getTreeMessages().has(messageTs)).toBe(false);
     expect(_getTaskToTree().has(task.id)).toBe(false);
     expect(_getLastRenderedTree().has(messageTs)).toBe(false);
     expect(_getTreeLastUpdateTime().has(messageTs)).toBe(false);
+    expect(mockReactionRemove).toHaveBeenCalledTimes(3);
+    expect(mockReactionAdd).toHaveBeenCalledWith({
+      channel: "C_TERM1",
+      name: "white_check_mark",
+      timestamp: "4040404040.000003",
+    });
   });
 
   test("posts truncated terminal output in full before cleaning up the tree", async () => {
@@ -653,7 +670,7 @@ describe("processTreeMessages", () => {
     expect(_getTreeMessages().has(messageTs)).toBe(false);
   });
 
-  test("cleans up tree with root + children when all terminal", async () => {
+  test("uses x when any task for the trigger failed", async () => {
     const lead = createAgent({ name: "TermLead", isLead: true, status: "idle" });
     const worker = createAgent({ name: "TermWorker", isLead: false, status: "idle" });
 
@@ -662,6 +679,7 @@ describe("processTreeMessages", () => {
       source: "slack",
       slackChannelId: "C_TERM2",
       slackThreadTs: "5050505050.000001",
+      slackTriggerMessageTs: "5050505050.000003",
       slackUserId: "U_TERM2",
     });
 
@@ -669,11 +687,14 @@ describe("processTreeMessages", () => {
       agentId: worker.id,
       source: "slack",
       parentTaskId: parent.id,
+      slackChannelId: "C_TERM2",
+      slackThreadTs: "5050505050.000001",
+      slackTriggerMessageTs: "5050505050.000003",
     });
 
     startTask(parent.id);
     startTask(child.id);
-    completeTask(child.id, "Child done");
+    failTask(child.id, "Child failed");
     completeTask(parent.id, "Parent done");
 
     const messageTs = "5050505050.000002";
@@ -681,13 +702,20 @@ describe("processTreeMessages", () => {
 
     _getTreeLastUpdateTime().delete(messageTs);
     _getLastRenderedTree().delete(messageTs);
+    mockReactionAdd.mockClear();
 
     await processTreeMessages();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Both parent and child should be cleaned up
     expect(_getTreeMessages().has(messageTs)).toBe(false);
     expect(_getTaskToTree().has(parent.id)).toBe(false);
     expect(_getTaskToTree().has(child.id)).toBe(false);
+    expect(mockReactionAdd).toHaveBeenCalledWith({
+      channel: "C_TERM2",
+      name: "x",
+      timestamp: "5050505050.000003",
+    });
   });
 
   test("does NOT clean up tree when some tasks still active", async () => {

@@ -51,6 +51,7 @@ type StoreProgressResult = {
       finishedAt?: string;
     };
     wasNoOp?: boolean;
+    wasForcedOverwrite?: boolean;
     yourAgentId?: string;
   };
 };
@@ -477,8 +478,10 @@ describe("store-progress handler — attachments insert path", () => {
       buildMeta(),
     )) as StoreProgressResult;
 
-    expect(result.structuredContent.success).toBe(true);
-    expect(result.structuredContent.wasNoOp).toBe(true);
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("Discarded write");
+    expect(result.structuredContent.message).toContain("force: true");
+    expect(result.structuredContent.wasNoOp).toBeUndefined();
     const rows = getTaskAttachments(task.id);
     expect(rows.length).toBe(1);
     expect(rows[0].url).toBe("https://example.com/retry");

@@ -1,8 +1,7 @@
 ---
 name: attio-interaction
-description: "How to read and write your Attio CRM via the REST API v2: query/filter records, upsert companies/people/deals with matching_attribute, write notes and tasks, manage list entries, and handle webhooks. Auth via ATTIO_API_KEY (Bearer token). Use this skill whenever you need to interact with Attio CRM data from the swarm."
+description: Generic Attio CRM REST API v2 recipes for querying records, upserting companies/people/deals, writing notes/tasks/comments, managing lists, and handling webhooks.
 user-invocable: false
-agentAutoTrigger: When asked to read from, write to, search, query, or update Attio CRM records, deals, companies, people, notes, tasks, or lists. Also when a task references Attio data such as pipeline, ICP scoring, lead enrichment, stale deals, CRM hygiene, deal handoffs, or logging an interaction to Attio.
 ---
 
 # Attio Interaction (Read + Write)

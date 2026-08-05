@@ -6,9 +6,10 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import type { RetryPolicy } from "../types";
-import { checkpointStep, checkpointStepFailure } from "./checkpoint";
+import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { getSuccessors } from "./definition";
-import { interpolateNodeConfig, walkGraph } from "./engine";
+import { buildNodeInterpolationCtx, interpolateNodeConfig, walkGraph } from "./engine";
+import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
 import { runStepValidation } from "./validation";
 
@@ -59,9 +60,18 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
           });
 
           const ctx = (run.context ?? {}) as Record<string, unknown>;
+          // A step can fail before ANY checkpoint persisted the walkGraph-hydrated
+          // context, so `run.id` may be absent here — mirror the hydration or the
+          // builtin resolves to "" on every retry.
+          if (!("run" in ctx)) ctx.run = { id: run.id };
 
-          // Deep-interpolate config
-          const { value: interpolatedValue } = interpolateNodeConfig(node, ctx);
+          // Deep-interpolate config against the node's declared-inputs context —
+          // the raw run context has no `inputs` aliases, so interpolating against
+          // it directly resolves every {{alias}} to "" and (e.g.) a retried
+          // foreach with `over: "{{items}}"` burns all its retries on schema
+          // rejections without ever re-dispatching.
+          const inputCtx = buildNodeInterpolationCtx(node, ctx);
+          const { value: interpolatedValue } = interpolateNodeConfig(node, inputCtx);
           const interpolatedConfig = interpolatedValue as Record<string, unknown>;
 
           // Get executor and re-run
@@ -72,6 +82,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
             nodeId: step.nodeId,
             workflowId: workflow.id,
             dryRun: false,
+            inputCtx,
           };
 
           try {
@@ -93,6 +104,14 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
                 step.retryCount,
                 retryPolicy,
               );
+            } else if ("async" in result && (result as AsyncExecutorResult).async) {
+              // An async executor (agent-task, foreach) re-dispatched its work —
+              // the step is waiting on task events again, exactly like the
+              // executeStep async path. Checkpointing the async marker as a
+              // completed output would route successors while the re-dispatched
+              // work is still running, and the eventual completion/join would
+              // find the parent already advanced.
+              checkpointStepWaiting(run.id, step.id, ctx);
             } else {
               // Success! Re-run validation if configured before checkpointing.
               if (node.validation) {

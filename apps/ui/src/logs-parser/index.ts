@@ -21,6 +21,8 @@ import type {
 } from "./types";
 
 export { pairItems, resultPayloadText, unwrapResult } from "./helpers";
+export type { SubagentRun, SubagentRunStatus } from "./subagent-lifecycle";
+export { extractSubagentRuns } from "./subagent-lifecycle";
 export type {
   ContentBlock,
   NormalizedItem,
@@ -126,7 +128,7 @@ function itemToBlock(item: NormalizedItem): ContentBlock | null {
       return metaBlock(item, "parse_error", { raw: item.raw });
     }
     case "unknown": {
-      return metaBlock(item, "unknown", { raw: item.raw });
+      return metaBlock(item, "unknown", unknownEventData(item.raw));
     }
   }
 }
@@ -154,6 +156,15 @@ function lifecycleBlock(item: NormalizedItem): ProviderMetaBlock {
   }
   if (data.type === "turn.completed") {
     return metaBlock(item, "helper", { helperType: "turn_usage", ...data });
+  }
+  if (data.type === "tool_progress") {
+    return metaBlock(item, "helper", {
+      ...data,
+      helperType: "tool_progress",
+      toolName: data.tool_name,
+      parentToolUseId: data.parent_tool_use_id ?? data.tool_use_id,
+      elapsedSeconds: data.elapsed_time_seconds,
+    });
   }
   if (
     data.type === "thread.started" ||
@@ -198,6 +209,18 @@ function metaBlock(
 function asDataRecord(value: unknown): Record<string, unknown> {
   if (isRecord(value)) return value;
   return { value };
+}
+
+function unknownEventData(raw: unknown): Record<string, unknown> {
+  if (!isRecord(raw)) return { type: "untyped event", raw };
+  const eventType = typeof raw.type === "string" ? raw.type : undefined;
+  const nested = isRecord(raw.item) ? raw.item : undefined;
+  const itemType = typeof nested?.type === "string" ? nested.type : undefined;
+  const type =
+    eventType && itemType
+      ? `${eventType} · ${itemType}`
+      : (eventType ?? itemType ?? "untyped event");
+  return { type, eventType, itemType, raw };
 }
 
 function chooseCli(ordered: ReturnType<typeof orderDecodedRecords>): string {

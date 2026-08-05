@@ -465,6 +465,23 @@ describe("ScriptExecutor", () => {
     expect(result.timeout).toBe(30_000);
   });
 
+  test("config schema accepts the 5m timeout ceiling and rejects larger values", () => {
+    expect(
+      executor.configSchema.safeParse({
+        runtime: "bash",
+        script: "echo hi",
+        timeout: 300_000,
+      }).success,
+    ).toBe(true);
+    expect(
+      executor.configSchema.safeParse({
+        runtime: "bash",
+        script: "echo hi",
+        timeout: 300_001,
+      }).success,
+    ).toBe(false);
+  });
+
   test("runs bash script and captures stdout", async () => {
     const result = await executor.run(input({ runtime: "bash", script: "echo 'hello world'" }, {}));
     expect(result.status).toBe("success");
@@ -734,7 +751,7 @@ describe("ValidateExecutor", () => {
 // ─── Registry Wiring ─────────────────────────────────────────
 
 describe("createExecutorRegistry", () => {
-  test("registers all 11 executors (8 instant + 3 async)", () => {
+  test("registers all 12 executors (8 instant + 4 async)", () => {
     const registry = createExecutorRegistry(mockDeps);
     const types = registry.types();
 
@@ -747,9 +764,10 @@ describe("createExecutorRegistry", () => {
     expect(types).toContain("vcs");
     expect(types).toContain("validate");
     expect(types).toContain("agent-task");
+    expect(types).toContain("foreach");
     expect(types).toContain("human-in-the-loop");
     expect(types).toContain("wait");
-    expect(types).toHaveLength(11);
+    expect(types).toHaveLength(12);
   });
 
   test("instant executors have mode instant, async executors have mode async", () => {
@@ -768,6 +786,7 @@ describe("createExecutorRegistry", () => {
       expect(registry.get(type).mode).toBe("instant");
     }
     expect(registry.get("agent-task").mode).toBe("async");
+    expect(registry.get("foreach").mode).toBe("async");
     expect(registry.get("human-in-the-loop").mode).toBe("async");
     expect(registry.get("wait").mode).toBe("async");
   });

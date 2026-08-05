@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Small-scope plan+implement in one session. Assess the prompt, optionally one bundled round of questions, maintain a lightweight yolo plan while implementing, verify, quick code review, commit. Use when the user invokes /one-shot, or asks to \"just build/fix/add\" something small without the full create-plan → implement-plan pipeline. Small means ≤ ~3 phases inside one subsystem — anything bigger escalates to /desplega:create-plan.",
+  "displayName": "One Shot",
+  "kind": "skill",
+  "name": "one-shot",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "one-shot",
+  "systemDefault": true,
+  "tags": [
+    "implementation",
+    "workflow",
+    "planning"
+  ],
+  "title": "One Shot",
+  "version": "1.0.0"
+}

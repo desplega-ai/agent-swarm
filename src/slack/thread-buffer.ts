@@ -166,19 +166,6 @@ async function slackFlush(
 
     const app = getSlackApp();
     if (app) {
-      const lastItem = items.at(-1)!;
-      try {
-        await app.client.reactions.add({
-          channel: channelId,
-          name: "eyes",
-          timestamp: lastItem.ts,
-        });
-      } catch (error) {
-        console.log(
-          `[Slack] Steering reaction failed: ${error instanceof Error ? error.message : error}`,
-        );
-      }
-
       if (!isSlackRenderV2Enabled()) {
         try {
           await app.client.chat.postMessage({

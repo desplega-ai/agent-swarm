@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import "@xyflow/react/dist/style.css";
 import type { WorkflowDefinition, WorkflowRunStep } from "@/api/types";
 import { useTheme } from "@/hooks/use-theme";
+import { foreachParentIds, parseSyntheticStepId } from "@/lib/synthetic-step-id";
 import { cn } from "@/lib/utils";
 import { ActionNode } from "./action-node";
 import { ConditionNode } from "./condition-node";
@@ -33,15 +34,19 @@ export function WorkflowGraph({
   const { theme } = useTheme();
   const { nodes, edges } = useMemo(() => {
     const graph = toReactFlowGraph(definition, steps);
-    if (selectedNodeId) {
+    // A selected synthetic `foreach` child step highlights the parent node it fanned out from.
+    const selectedParentNodeId = selectedNodeId
+      ? parseSyntheticStepId(selectedNodeId, foreachParentIds(definition.nodes)).parentNodeId
+      : null;
+    if (selectedParentNodeId) {
       for (const node of graph.nodes) {
-        if (node.id === selectedNodeId) {
+        if (node.id === selectedParentNodeId) {
           node.data = { ...node.data, selected: true };
         }
       }
       // Highlight adjacent edges with animated marching-ants style
       for (const edge of graph.edges) {
-        if (edge.source === selectedNodeId || edge.target === selectedNodeId) {
+        if (edge.source === selectedParentNodeId || edge.target === selectedParentNodeId) {
           edge.animated = true;
           edge.style = {
             ...edge.style,

@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Post-implementation plan verification. Cross-references plans against actual changes for completeness and accuracy.",
+  "displayName": "Verifying",
+  "kind": "skill",
+  "name": "verifying",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "verifying",
+  "systemDefault": true,
+  "tags": [
+    "verification",
+    "planning",
+    "quality"
+  ],
+  "title": "Verifying",
+  "version": "1.0.0"
+}

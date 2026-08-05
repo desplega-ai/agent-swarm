@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Conventions for asking the user questions during a workflow via the AskUserQuestion tool. Other skills reference this to keep prompts consistent and structured.",
+  "displayName": "Ask User",
+  "kind": "skill",
+  "name": "ask-user",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "ask-user",
+  "systemDefault": true,
+  "tags": [
+    "workflow",
+    "user-input",
+    "questions"
+  ],
+  "title": "Ask User",
+  "version": "1.0.0"
+}

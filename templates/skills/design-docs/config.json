@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Create and maintain living per-system design docs at thoughts/*/design-docs/<system-slug>.md — Purpose, Glossary, numbered testable Invariants (normative for the code-reviewing Spec axis), Boundaries & Non-goals, Interfaces, Decision log, Amendment log. Use when the user says \"create a design doc\", \"write down the invariants\", \"document the design/contract of X\", or when researching/planning/one-shot finds a design doc for the touched system and needs the read-and-abide rules.",
+  "displayName": "Design Docs",
+  "kind": "skill",
+  "name": "design-docs",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "design-docs",
+  "systemDefault": true,
+  "tags": [
+    "documentation",
+    "architecture",
+    "design"
+  ],
+  "title": "Design Docs",
+  "version": "1.0.0"
+}

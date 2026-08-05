@@ -93,6 +93,8 @@ import type {
   SessionLogsResponse,
   SessionsListResponse,
   Skill,
+  SkillFile,
+  SkillFilesResponse,
   SkillsResponse,
   Stats,
   SteeringMessage,
@@ -317,6 +319,8 @@ class ApiClient {
     orderBy?: "lastUpdatedAt" | "createdAt";
     /** Filter to tasks whose `source` is in this list. Empty/undefined → all. */
     source?: string[];
+    /** Exact requester user id, or the sentinel `none` for unattributed (NULL) rows. */
+    requestedByUserId?: string;
   }): Promise<TasksResponse> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
@@ -333,6 +337,7 @@ class ApiClient {
     if (filters?.orderBy) params.set("orderBy", filters.orderBy);
     if (filters?.source && filters.source.length > 0)
       params.set("source", filters.source.join(","));
+    if (filters?.requestedByUserId) params.set("requestedByUserId", filters.requestedByUserId);
     const queryString = params.toString();
     const url = `${this.getBaseUrl()}/api/tasks${queryString ? `?${queryString}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
@@ -1680,6 +1685,23 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/skills/${id}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch skill: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchSkillFiles(id: string): Promise<SkillFilesResponse> {
+    const url = `${this.getBaseUrl()}/api/skills/${id}/files`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch skill files: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchSkillFile(id: string, path: string): Promise<{ file: SkillFile }> {
+    // The route matches segments after /files/, so encode each segment
+    // individually and keep the slashes literal.
+    const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+    const url = `${this.getBaseUrl()}/api/skills/${id}/files/${encodedPath}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch skill file: ${res.status}`);
     return res.json();
   }
 

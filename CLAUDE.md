@@ -20,7 +20,7 @@ Prefer portable `modelTier` (`smol` / `regular` / `smart` / `ultra`) for cross-h
 
 <important if="you are modifying scripts-runtime code (src/scripts-runtime/*, src/be/scripts/*, src/tools/script-*.ts, src/http/scripts.ts)">
 
-Architecture: API server owns the `scripts` + `script_versions` tables. Workers + the runtime invoke via HTTP. The runtime evaluates user-supplied TS in a `Bun.spawn` subprocess wrapped in `ulimit -v 524288 -t 60 -u 32 -f 65536 -n 64`, 30s AbortController, 1 MB stdout cap.
+Architecture: API server owns the `scripts` + `script_versions` tables. Workers + the runtime invoke via HTTP. The runtime evaluates user-supplied TS in a `Bun.spawn` subprocess wrapped in `ulimit -v 524288 -t 60 -u 32 -f 65536 -n 64`, a wall-clock AbortController (30s default; up to 5m where exposed), and a 1 MB stdout cap.
 
 Config injection: agent identity + bearer + mcpBaseUrl flow as a JSON `SwarmConfigPayload` over the subprocess **stdin** — NOT env vars. Bearer is wrapped in `Redacted<string>` inside the script; user code never unwraps. `process.env` carries only Node/Bun defaults. Loader reads the bearer via `getApiKey()` from `src/utils/api-key.ts` (never raw env).
 
@@ -126,11 +126,11 @@ Test against a fresh DB (`rm agent-swarm-db.sqlite && bun run start:http`) **and
 
 </important>
 
-<important if="you are adding or editing an agent skill (templates/skills/, plugin/skills/, or src/be/seed-skills/)">
+<important if="you are adding or editing an agent skill (templates/skills/ or src/be/seed-skills/)">
 
 Full authoring guide, the three delivery paths, versioning semantics, and every enforced rule: [runbooks/skills.md](./runbooks/skills.md).
 
-**The rule that matters: one skill name must not be both seeded and baked.** `templates/skills/<name>/` (DB-seeded) and `plugin/skills/<name>/` (baked into the worker image) both write `~/.claude/skills/<name>/SKILL.md`. The DB copy wins, the baked content is silently discarded, and the FS writer then prunes any bundled file with no `skill_files` row. That truncated `artifacts` / `kv-storage` / `pages` and deleted their examples in production.
+**The rule that matters: one skill name must not be both seeded and baked.** `templates/skills/<name>/` (DB-seeded) and an image-baked skill (such as a pinned `npx skills` install) both write `~/.claude/skills/<name>/SKILL.md`. The DB copy wins, the baked content is silently discarded, and the FS writer then prunes any bundled file with no `skill_files` row. That truncated `artifacts` / `kv-storage` / `pages` and deleted their examples in production. `plugin/skills/` is retired for skills; `plugin/commands/`, `plugin/agents/`, and `plugin/pi-skills/` remain baked.
 
 **Prefer `templates/skills/`** — seeded skills are live-updatable (no image rebuild), listed by the skills API, editable in the UI, per-agent toggleable, and version-tracked with user-edit preservation.
 
@@ -143,8 +143,9 @@ templates/skills/<name>/
 
 - New skill → add **static** `config.json` + `content.md` text-imports to `BUILT_IN_SKILL_SOURCES` in `src/be/seed-skills/index.ts`. Static because the API runs from a compiled binary and `templates/` only exists in the Dockerfile builder stage.
 - Touched `files/`? → `bun run build:seed-skill-files`, commit `bundled-files.generated.json` (never hand-edit it).
-- A `SKILL.md` beside a `content.md` is **not** a mistake — the seeder reads `content.md`, while `skill-install-remote` serves `SKILL.md` to the integrations catalog.
-- Verify: `bun run check:skill-sources && bun run check:seed-skill-files` (both CI-enforced via the **Seeded Skills Check** job).
+- A `SKILL.md` beside a `content.md` is a generated artifact of `config.json` + `content.md`; never hand-edit it. `bun run build:skill-md` regenerates it and CI rejects drift via `check:skill-md`.
+- Edited `content.md` or `config.json` in a directory with a `SKILL.md`? → `bun run build:skill-md` and commit the generated file.
+- Verify: `bun run check:skill-sources && bun run check:skill-md && bun run check:seed-skill-files` (all CI-enforced via the **Seeded Skills Check** job).
 
 </important>
 
@@ -293,6 +294,7 @@ bun run check:dep-graph
 Drift checks — run only if you touched the trigger files, MUST commit any regenerated output:
 
 - Edited `plugin/commands/*.md`? → `bun run build:pi-skills`
+- Edited `content.md` or `config.json` under `templates/skills/` in a directory with a `SKILL.md`? → `bun run build:skill-md` and commit the generated file
 - Added/edited a file under `templates/skills/*/files/`? → `bun run build:seed-skill-files` and commit `src/be/seed-skills/bundled-files.generated.json` (NEVER hand-edit that JSON)
 - Edited `src/be/scripts/typecheck.ts` or `src/scripts-runtime/sdk-allowlist.ts`? → `bun run build:script-types` and commit `src/scripts-runtime/types/*.d.ts` (NEVER edit those `.d.ts` files directly — they're generated from `typecheck.ts`)
 - Edited an HTTP route OR bumped `package.json` `version`? → `bun run docs:openapi` (regenerates `openapi.json` AND `docs-site/content/docs/api-reference/**`)

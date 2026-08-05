@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "composio-google-docs",
+  "displayName": "Composio Google Docs",
+  "slug": "composio-google-docs",
+  "title": "Composio Google Docs",
+  "description": "Per-app playbook for driving Google Docs through Composio (toolkit slug `googledocs`). Verified GOOGLEDOCS_* tool slugs and argument shapes for searching, reading plaintext, creating (incl. from markdown), and editing documents. Use alongside the `composio` hub skill whenever a task reads or writes Google Docs for a connected user.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["composio", "google-docs", "documents"]
+}

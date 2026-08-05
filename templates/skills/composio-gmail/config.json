@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "composio-gmail",
+  "displayName": "Composio Gmail",
+  "slug": "composio-gmail",
+  "title": "Composio Gmail",
+  "description": "Per-app playbook for driving Gmail through Composio (toolkit slug `gmail`). Verified GMAIL_* tool slugs and argument shapes for reading, searching, sending, drafts, labels, and threads. Use alongside the `composio` hub skill whenever a task reads or sends Gmail for a connected user. Covers the metadata-first reads, the GMAIL_SEND_EMAIL HTML flag, and reply-to-thread.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["composio", "gmail", "email"]
+}

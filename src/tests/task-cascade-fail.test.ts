@@ -71,7 +71,7 @@ describe("getDependentTasks", () => {
       dependsOn: [parent.id],
     });
 
-    startTask(child1.id, agent.id);
+    startTask(child1.id);
     completeTask(child1.id, "done");
 
     const nonTerminalDeps = getDependentTasks(parent.id);
@@ -112,7 +112,7 @@ describe("cascadeFailDependents", () => {
       dependsOn: [parent.id],
     });
 
-    startTask(parent.id, agent.id);
+    startTask(parent.id);
     failTask(parent.id, "parent failed");
 
     const childAfter = getTaskById(child.id);
@@ -139,7 +139,7 @@ describe("cascadeFailDependents", () => {
       dependsOn: [taskB.id],
     });
 
-    startTask(taskA.id, agent.id);
+    startTask(taskA.id);
     failTask(taskA.id, "root failure");
 
     const bAfter = getTaskById(taskB.id);
@@ -172,7 +172,7 @@ describe("cascadeFailDependents", () => {
     ]);
 
     // This should not infinite-loop — the visited set protects us
-    startTask(taskA.id, agent.id);
+    startTask(taskA.id);
     const results = cascadeFailDependents(taskA.id, "failed");
 
     // taskB should be cascade-failed
@@ -198,10 +198,10 @@ describe("cascadeFailDependents", () => {
       dependsOn: [parent.id],
     });
 
-    startTask(child.id, agent.id);
+    startTask(child.id);
     completeTask(child.id, "finished before parent failed");
 
-    startTask(parent.id, agent.id);
+    startTask(parent.id);
     failTask(parent.id, "parent failed late");
 
     const childAfter = getTaskById(child.id);
@@ -244,7 +244,7 @@ describe("cascadeFailDependents", () => {
       dependsOn: [parent.id],
     });
 
-    startTask(parent.id, agent.id);
+    startTask(parent.id);
     supersedeTask(parent.id, { reason: "context limit", resumeTaskId: null });
 
     const childAfter = getTaskById(child.id);
@@ -268,7 +268,7 @@ describe("cascadeFailDependents", () => {
       }),
     );
 
-    startTask(parent.id, agent.id);
+    startTask(parent.id);
     failTask(parent.id, "parent gone");
 
     for (const child of children) {
@@ -293,7 +293,7 @@ describe("cascadeFailDependents", () => {
       dependsOn: [taskA.id, taskB.id],
     });
 
-    startTask(taskA.id, agent.id);
+    startTask(taskA.id);
     failTask(taskA.id, "A failed");
 
     // C should be cascade-failed because one of its dependencies failed

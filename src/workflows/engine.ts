@@ -17,8 +17,10 @@ import { shouldSkipCooldown } from "./cooldown";
 import { findEntryNodes, getNextTargets, getSuccessors } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
+import { FOREACH_TERMINAL_STEP_STATUSES, resolveForeachParent } from "./foreach-join";
 import { getSecretInputKeys, redactSecretsForStorage, resolveInputs } from "./input";
 import { validateJsonSchema } from "./json-schema-validator";
+import { getMaxWorkflowStepsPerRun } from "./limits";
 import { deepInterpolate } from "./template";
 import { runStepValidation, type ValidationRunResult } from "./validation";
 
@@ -29,9 +31,6 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 // limits. Functions let a config reload take effect without a restart.
 function maxIterations(): number {
   return Number(process.env.WORKFLOW_MAX_ITERATIONS) || 100;
-}
-function maxStepsPerRun(): number {
-  return Number(process.env.WORKFLOW_MAX_STEPS_PER_RUN) || 500;
 }
 
 export interface WorkflowExecutionOptions {
@@ -162,6 +161,13 @@ export async function walkGraph(
   options: WorkflowExecutionOptions = {},
 ): Promise<void> {
   let nodeExecutionCount = 0;
+  // `run.id` is a context builtin (like `trigger` / `input`) so nodes can reference
+  // their own run — e.g. an audit/receipt node correlating its output with the run
+  // that produced it. Hydrated here so every path (initial walk, resume, retry,
+  // recovery) resolves it even when the stored context predates the builtin.
+  if (!("run" in ctx)) {
+    ctx.run = { id: runId };
+  }
   const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
 
   // Track active edges: "sourceId→targetId" — only edges on actually-taken
@@ -174,6 +180,10 @@ export async function walkGraph(
   // multiple completed steps from different iterations).
   if (completedNodeIds.size > 0) {
     for (const nodeId of completedNodeIds) {
+      // Synthetic foreach children persist their own step output for the join,
+      // but only the parent aggregate belongs in workflow context or routing.
+      if (resolveForeachParent(def, nodeId)) continue;
+
       const step = getLatestStepForNode(runId, nodeId);
       if (step?.output !== undefined) {
         // Bug 5 fix: Validate stored output against executor schema on recovery
@@ -207,10 +217,10 @@ export async function walkGraph(
   // unbounded resources. Checked here so it covers initial walks AND async
   // resumes (resumeFromTaskCompletion, handleTaskFailure, retry-poller).
   const allSteps = getWorkflowRunStepsByRunId(runId);
-  if (allSteps.length >= maxStepsPerRun()) {
+  if (allSteps.length >= getMaxWorkflowStepsPerRun()) {
     updateWorkflowRun(runId, {
       status: "failed",
-      error: `Circuit breaker: run exceeded ${maxStepsPerRun()} total steps (WORKFLOW_MAX_STEPS_PER_RUN)`,
+      error: `Circuit breaker: run exceeded ${getMaxWorkflowStepsPerRun()} total steps (WORKFLOW_MAX_STEPS_PER_RUN)`,
       finishedAt: new Date().toISOString(),
     });
     return;
@@ -449,51 +459,31 @@ async function executeStep(
   // references) don't leak through `get-workflow-run` or any other reader of
   // the `workflow_run_steps` table. The live `ctx` is untouched — executors
   // still see real values.
-  const stepId = crypto.randomUUID();
-  createWorkflowRunStep({
-    id: stepId,
-    runId,
-    nodeId: node.id,
-    nodeType: node.type,
-    input: redactSecretsForStorage(ctx, secretKeys),
-  });
+  const latestForeachStep =
+    node.type === "foreach" ? getLatestStepForNode(runId, node.id) : undefined;
+  const reusableForeachStep =
+    latestForeachStep && !FOREACH_TERMINAL_STEP_STATUSES.has(latestForeachStep.status)
+      ? latestForeachStep
+      : undefined;
+  const stepId = reusableForeachStep?.id ?? crypto.randomUUID();
+  if (!reusableForeachStep) {
+    createWorkflowRunStep({
+      id: stepId,
+      runId,
+      nodeId: node.id,
+      nodeType: node.type,
+      input: redactSecretsForStorage(ctx, secretKeys),
+    });
 
-  // Set idempotency key
-  updateWorkflowRunStep(stepId, { idempotencyKey });
+    // Set idempotency key
+    updateWorkflowRunStep(stepId, { idempotencyKey });
+  }
 
   // 3. Get executor
   const executor = registry.get(node.type);
 
   // 3b. Build local interpolation context from explicit inputs mapping
-  let interpolationCtx: Record<string, unknown>;
-  if (node.inputs) {
-    interpolationCtx = {};
-    // Always include built-in sources
-    if (ctx.trigger !== undefined) interpolationCtx.trigger = ctx.trigger;
-    if (ctx.input !== undefined) interpolationCtx.input = ctx.input;
-    if (ctx.workflow !== undefined) interpolationCtx.workflow = ctx.workflow;
-    if (ctx.swarm !== undefined) interpolationCtx.swarm = ctx.swarm;
-    // Resolve declared inputs
-    for (const [localName, sourcePath] of Object.entries(node.inputs)) {
-      const keys = sourcePath.split(".");
-      let value: unknown = ctx;
-      for (const key of keys) {
-        if (value == null || typeof value !== "object") {
-          value = undefined;
-          break;
-        }
-        value = (value as Record<string, unknown>)[key];
-      }
-      interpolationCtx[localName] = value;
-    }
-  } else {
-    // No inputs declared — only built-in sources available
-    interpolationCtx = {};
-    if (ctx.trigger !== undefined) interpolationCtx.trigger = ctx.trigger;
-    if (ctx.input !== undefined) interpolationCtx.input = ctx.input;
-    if (ctx.workflow !== undefined) interpolationCtx.workflow = ctx.workflow;
-    if (ctx.swarm !== undefined) interpolationCtx.swarm = ctx.swarm;
-  }
+  const interpolationCtx = buildNodeInterpolationCtx(node, ctx);
 
   // 3c. Validate resolved inputs against inputSchema if defined
   if (node.inputSchema) {
@@ -530,6 +520,7 @@ async function executeStep(
     workflowId: workflowId || "",
     dryRun: false,
     requestedByUserId: options.requestedByUserId,
+    inputCtx: interpolationCtx,
   };
 
   // Inline script nodes historically expose their wall-clock budget as
@@ -734,10 +725,62 @@ export function findReadyNodes(
   });
 }
 
+/**
+ * Build a node's interpolation context: the built-in sources plus its declared
+ * `inputs` aliases resolved against the run context. This is THE dataflow
+ * boundary for node config — every path that interpolates a node's config
+ * (initial execution AND the retry poller) must resolve aliases through this,
+ * or `{{alias}}` tokens silently resolve to empty strings on that path.
+ */
+export function buildNodeInterpolationCtx(
+  node: Pick<WorkflowNode, "inputs">,
+  ctx: Record<string, unknown>,
+): Record<string, unknown> {
+  const interpolationCtx: Record<string, unknown> = {};
+  // Always include built-in sources
+  if (ctx.trigger !== undefined) interpolationCtx.trigger = ctx.trigger;
+  if (ctx.input !== undefined) interpolationCtx.input = ctx.input;
+  if (ctx.workflow !== undefined) interpolationCtx.workflow = ctx.workflow;
+  if (ctx.swarm !== undefined) interpolationCtx.swarm = ctx.swarm;
+  if (ctx.run !== undefined) interpolationCtx.run = ctx.run;
+  if (!node.inputs) return interpolationCtx;
+  // Resolve declared inputs
+  for (const [localName, sourcePath] of Object.entries(node.inputs)) {
+    const keys = sourcePath.split(".");
+    let value: unknown = ctx;
+    for (const key of keys) {
+      if (value == null || typeof value !== "object") {
+        value = undefined;
+        break;
+      }
+      value = (value as Record<string, unknown>)[key];
+    }
+    interpolationCtx[localName] = value;
+  }
+  return interpolationCtx;
+}
+
 export function interpolateNodeConfig(
   node: Pick<WorkflowNode, "type" | "config">,
   interpolationCtx: Record<string, unknown>,
 ): { value: unknown; unresolved: string[] } {
+  if (node.type === "foreach" && Object.hasOwn(node.config, "over")) {
+    const { over, body, ...configWithoutOverAndBody } = node.config;
+    const configResult = deepInterpolate(configWithoutOverAndBody, interpolationCtx);
+    const overResult = deepInterpolate(over, interpolationCtx, { preserveRawTokens: true });
+
+    return {
+      value: {
+        ...(configResult.value as Record<string, unknown>),
+        over: overResult.value,
+        // {{item.*}} and {{index}} do not exist until the foreach executor
+        // materializes a child, so preserve the body for that per-item pass.
+        body,
+      },
+      unresolved: [...configResult.unresolved, ...overResult.unresolved],
+    };
+  }
+
   if (node.type !== "swarm-script" || !Object.hasOwn(node.config, "args")) {
     return deepInterpolate(node.config, interpolationCtx);
   }

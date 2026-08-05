@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Executor routing policy for ALL delegated work — pick the right model for every sub-agent and the right Codex variant for every implementation slice. Use whenever you are about to spawn a sub-agent/Task (research, review, QA, UI, search), whenever a desplega skill (implement-plan, v-implement, run-phase, run-step, research) is choosing executors for phases/steps, or when the user says \"implement with codex\", \"delegate this\", \"which model should do this\", or similar. Supersedes codex-implement (its worktree/exec mechanics live here).",
+  "displayName": "Delegate Work",
+  "kind": "skill",
+  "name": "delegate-work",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "delegate-work",
+  "systemDefault": true,
+  "tags": [
+    "delegation",
+    "agents",
+    "orchestration"
+  ],
+  "title": "Delegate Work",
+  "version": "1.0.0"
+}

@@ -10,6 +10,8 @@
 import { join } from "node:path";
 import artifactsConfig from "../../../templates/skills/artifacts/config.json" with { type: "text" };
 import artifactsContent from "../../../templates/skills/artifacts/content.md" with { type: "text" };
+import askUserConfig from "../../../templates/skills/ask-user/config.json" with { type: "text" };
+import askUserContent from "../../../templates/skills/ask-user/content.md" with { type: "text" };
 import assetNamespacesConfig from "../../../templates/skills/asset-namespaces/config.json" with {
   type: "text",
 };
@@ -22,18 +24,126 @@ import attioInteractionConfig from "../../../templates/skills/attio-interaction/
 import attioInteractionContent from "../../../templates/skills/attio-interaction/content.md" with {
   type: "text",
 };
+import brainstormingConfig from "../../../templates/skills/brainstorming/config.json" with {
+  type: "text",
+};
+import brainstormingContent from "../../../templates/skills/brainstorming/content.md" with {
+  type: "text",
+};
+import codeReviewingConfig from "../../../templates/skills/code-reviewing/config.json" with {
+  type: "text",
+};
+import codeReviewingContent from "../../../templates/skills/code-reviewing/content.md" with {
+  type: "text",
+};
+import composioConfig from "../../../templates/skills/composio/config.json" with { type: "text" };
+import composioContent from "../../../templates/skills/composio/content.md" with { type: "text" };
+import composioGmailConfig from "../../../templates/skills/composio-gmail/config.json" with {
+  type: "text",
+};
+import composioGmailContent from "../../../templates/skills/composio-gmail/content.md" with {
+  type: "text",
+};
+import composioGoogleCalendarConfig from "../../../templates/skills/composio-google-calendar/config.json" with {
+  type: "text",
+};
+import composioGoogleCalendarContent from "../../../templates/skills/composio-google-calendar/content.md" with {
+  type: "text",
+};
+import composioGoogleDocsConfig from "../../../templates/skills/composio-google-docs/config.json" with {
+  type: "text",
+};
+import composioGoogleDocsContent from "../../../templates/skills/composio-google-docs/content.md" with {
+  type: "text",
+};
+import delegateWorkConfig from "../../../templates/skills/delegate-work/config.json" with {
+  type: "text",
+};
+import delegateWorkContent from "../../../templates/skills/delegate-work/content.md" with {
+  type: "text",
+};
+import designDocsConfig from "../../../templates/skills/design-docs/config.json" with {
+  type: "text",
+};
+import designDocsContent from "../../../templates/skills/design-docs/content.md" with {
+  type: "text",
+};
+import downloadTaskAttachmentConfig from "../../../templates/skills/download-task-attachment/config.json" with {
+  type: "text",
+};
+import downloadTaskAttachmentContent from "../../../templates/skills/download-task-attachment/content.md" with {
+  type: "text",
+};
+import engineeringStandardsConfig from "../../../templates/skills/engineering-standards/config.json" with {
+  type: "text",
+};
+import engineeringStandardsContent from "../../../templates/skills/engineering-standards/content.md" with {
+  type: "text",
+};
+import implementingConfig from "../../../templates/skills/implementing/config.json" with {
+  type: "text",
+};
+import implementingContent from "../../../templates/skills/implementing/content.md" with {
+  type: "text",
+};
+import improveAgentsMdConfig from "../../../templates/skills/improve-agents-md/config.json" with {
+  type: "text",
+};
+import improveAgentsMdContent from "../../../templates/skills/improve-agents-md/content.md" with {
+  type: "text",
+};
 import kvStorageConfig from "../../../templates/skills/kv-storage/config.json" with {
   type: "text",
 };
 import kvStorageContent from "../../../templates/skills/kv-storage/content.md" with {
   type: "text",
 };
+import learningConfig from "../../../templates/skills/learning/config.json" with { type: "text" };
+import learningContent from "../../../templates/skills/learning/content.md" with { type: "text" };
+import oneShotConfig from "../../../templates/skills/one-shot/config.json" with { type: "text" };
+import oneShotContent from "../../../templates/skills/one-shot/content.md" with { type: "text" };
 import pagesConfig from "../../../templates/skills/pages/config.json" with { type: "text" };
 import pagesContent from "../../../templates/skills/pages/content.md" with { type: "text" };
+import phaseRunningConfig from "../../../templates/skills/phase-running/config.json" with {
+  type: "text",
+};
+import phaseRunningContent from "../../../templates/skills/phase-running/content.md" with {
+  type: "text",
+};
+import planningConfig from "../../../templates/skills/planning/config.json" with { type: "text" };
+import planningContent from "../../../templates/skills/planning/content.md" with { type: "text" };
+import qaConfig from "../../../templates/skills/qa/config.json" with { type: "text" };
+import qaContent from "../../../templates/skills/qa/content.md" with { type: "text" };
+import questioningConfig from "../../../templates/skills/questioning/config.json" with {
+  type: "text",
+};
+import questioningContent from "../../../templates/skills/questioning/content.md" with {
+  type: "text",
+};
+import researchingConfig from "../../../templates/skills/researching/config.json" with {
+  type: "text",
+};
+import researchingContent from "../../../templates/skills/researching/content.md" with {
+  type: "text",
+};
+import reviewingConfig from "../../../templates/skills/reviewing/config.json" with { type: "text" };
+import reviewingContent from "../../../templates/skills/reviewing/content.md" with { type: "text" };
+import scriptBuilderConfig from "../../../templates/skills/script-builder/config.json" with {
+  type: "text",
+};
+import scriptBuilderContent from "../../../templates/skills/script-builder/content.md" with {
+  type: "text",
+};
 import scriptWorkflowsConfig from "../../../templates/skills/script-workflows/config.json" with {
   type: "text",
 };
 import scriptWorkflowsContent from "../../../templates/skills/script-workflows/content.md" with {
+  type: "text",
+};
+import stepRunningConfig from "../../../templates/skills/step-running/config.json" with {
+  type: "text",
+};
+import stepRunningContent from "../../../templates/skills/step-running/content.md" with {
   type: "text",
 };
 import swarmScriptsConfig from "../../../templates/skills/swarm-scripts/config.json" with {
@@ -42,12 +152,38 @@ import swarmScriptsConfig from "../../../templates/skills/swarm-scripts/config.j
 import swarmScriptsContent from "../../../templates/skills/swarm-scripts/content.md" with {
   type: "text",
 };
+import tackleGhCommentsConfig from "../../../templates/skills/tackle-gh-comments/config.json" with {
+  type: "text",
+};
+import tackleGhCommentsContent from "../../../templates/skills/tackle-gh-comments/content.md" with {
+  type: "text",
+};
 import tasteMinimalistSkillConfig from "../../../templates/skills/taste-minimalist-skill/config.json" with {
   type: "text",
 };
 import tasteMinimalistSkillContent from "../../../templates/skills/taste-minimalist-skill/content.md" with {
   type: "text",
 };
+import tddPlanningConfig from "../../../templates/skills/tdd-planning/config.json" with {
+  type: "text",
+};
+import tddPlanningContent from "../../../templates/skills/tdd-planning/content.md" with {
+  type: "text",
+};
+import vImplementingConfig from "../../../templates/skills/v-implementing/config.json" with {
+  type: "text",
+};
+import vImplementingContent from "../../../templates/skills/v-implementing/content.md" with {
+  type: "text",
+};
+import vPlanningConfig from "../../../templates/skills/v-planning/config.json" with {
+  type: "text",
+};
+import vPlanningContent from "../../../templates/skills/v-planning/content.md" with {
+  type: "text",
+};
+import verifyingConfig from "../../../templates/skills/verifying/config.json" with { type: "text" };
+import verifyingContent from "../../../templates/skills/verifying/content.md" with { type: "text" };
 import workflowIterateConfig from "../../../templates/skills/workflow-iterate/config.json" with {
   type: "text",
 };
@@ -58,6 +194,12 @@ import workflowStructuredOutputConfig from "../../../templates/skills/workflow-s
   type: "text",
 };
 import workflowStructuredOutputContent from "../../../templates/skills/workflow-structured-output/content.md" with {
+  type: "text",
+};
+import wtsExpertConfig from "../../../templates/skills/wts-expert/config.json" with {
+  type: "text",
+};
+import wtsExpertContent from "../../../templates/skills/wts-expert/content.md" with {
   type: "text",
 };
 import {
@@ -72,13 +214,7 @@ import {
 } from "../db";
 import type { Seeder, SeedItem } from "../seed/types";
 import bundledFilesManifest from "./bundled-files.generated.json";
-
-type SkillTemplateConfig = {
-  name: string;
-  description: string;
-  runAllSeedersCandidate?: boolean;
-  systemDefault?: boolean;
-};
+import { buildSkillContent, type SkillTemplateConfig } from "./render";
 
 /** One bundled file shipped alongside a skill's SKILL.md. */
 export type SeedSkillFile = {
@@ -92,6 +228,7 @@ export type SeedSkill = {
   description: string;
   content: string;
   systemDefault: boolean;
+  userInvocable: boolean;
   /** Bundled files. Empty for simple (single-SKILL.md) skills. */
   files: SeedSkillFile[];
 };
@@ -114,21 +251,46 @@ export type SeedSkill = {
 const BUILT_IN_SKILL_FILES = bundledFilesManifest as Record<string, SeedSkillFile[]>;
 
 const BUILT_IN_SKILL_SOURCES = [
+  { config: artifactsConfig, body: artifactsContent },
+  { config: askUserConfig, body: askUserContent },
   { config: assetNamespacesConfig, body: assetNamespacesContent },
   { config: attioInteractionConfig, body: attioInteractionContent },
-  { config: artifactsConfig, body: artifactsContent },
+  { config: brainstormingConfig, body: brainstormingContent },
+  { config: codeReviewingConfig, body: codeReviewingContent },
+  { config: composioConfig, body: composioContent },
+  { config: composioGmailConfig, body: composioGmailContent },
+  { config: composioGoogleCalendarConfig, body: composioGoogleCalendarContent },
+  { config: composioGoogleDocsConfig, body: composioGoogleDocsContent },
+  { config: delegateWorkConfig, body: delegateWorkContent },
+  { config: designDocsConfig, body: designDocsContent },
+  { config: downloadTaskAttachmentConfig, body: downloadTaskAttachmentContent },
+  { config: engineeringStandardsConfig, body: engineeringStandardsContent },
+  { config: implementingConfig, body: implementingContent },
+  { config: improveAgentsMdConfig, body: improveAgentsMdContent },
   { config: kvStorageConfig, body: kvStorageContent },
+  { config: learningConfig, body: learningContent },
+  { config: oneShotConfig, body: oneShotContent },
   { config: pagesConfig, body: pagesContent },
+  { config: phaseRunningConfig, body: phaseRunningContent },
+  { config: planningConfig, body: planningContent },
+  { config: qaConfig, body: qaContent },
+  { config: questioningConfig, body: questioningContent },
+  { config: researchingConfig, body: researchingContent },
+  { config: reviewingConfig, body: reviewingContent },
+  { config: scriptBuilderConfig, body: scriptBuilderContent },
   { config: scriptWorkflowsConfig, body: scriptWorkflowsContent },
+  { config: stepRunningConfig, body: stepRunningContent },
   { config: swarmScriptsConfig, body: swarmScriptsContent },
+  { config: tackleGhCommentsConfig, body: tackleGhCommentsContent },
   { config: tasteMinimalistSkillConfig, body: tasteMinimalistSkillContent },
+  { config: tddPlanningConfig, body: tddPlanningContent },
+  { config: vImplementingConfig, body: vImplementingContent },
+  { config: vPlanningConfig, body: vPlanningContent },
+  { config: verifyingConfig, body: verifyingContent },
   { config: workflowIterateConfig, body: workflowIterateContent },
   { config: workflowStructuredOutputConfig, body: workflowStructuredOutputContent },
+  { config: wtsExpertConfig, body: wtsExpertContent },
 ];
-
-function buildSkillContent(config: SkillTemplateConfig, body: string): string {
-  return `---\nname: ${config.name}\ndescription: ${config.description}\n---\n\n${body.trim()}\n`;
-}
 
 /** Canonical, order-independent rendering of a bundled file set for hashing. */
 function canonicalFiles(files: SeedSkillFile[]): string {
@@ -158,8 +320,19 @@ function canonicalFiles(files: SeedSkillFile[]): string {
  * state (pristine) — while the source, which now carries files, hashes
  * differently and is therefore correctly seen as a changed source.
  */
-function skillSeedHash(content: string, systemDefault: boolean, files: SeedSkillFile[]): string {
-  const base = `${content}\n\n# seed:systemDefault=${systemDefault ? "1" : "0"}\n`;
+function skillSeedHash(
+  content: string,
+  systemDefault: boolean,
+  files: SeedSkillFile[],
+  userInvocable = true,
+): string {
+  // Same back-compat rule as the file section: the userInvocable segment is
+  // appended ONLY when the flag is false, so every skill with the default
+  // (true) keeps hashing byte-identically to the pre-flag scheme. Without the
+  // segment, a user flipping the column via the API would still hash as
+  // pristine and the next source update would silently revert their edit.
+  let base = `${content}\n\n# seed:systemDefault=${systemDefault ? "1" : "0"}\n`;
+  if (userInvocable === false) base += "# seed:userInvocable=0\n";
   if (files.length === 0) return computeContentHash(base);
   return computeContentHash(`${base}# seed:files\n${canonicalFiles(files)}\n`);
 }
@@ -176,6 +349,7 @@ function seedSkillFromSource(
     description: config.description,
     content: buildSkillContent(config, body),
     systemDefault: config.systemDefault === true,
+    userInvocable: config.userInvocable !== false,
     files: BUILT_IN_SKILL_FILES[config.name] ?? [],
   };
 }
@@ -246,6 +420,7 @@ export async function loadSeedSkills(templatesDir?: string): Promise<SeedSkill[]
       description: config.description,
       content: buildSkillContent(config, await contentFile.text()),
       systemDefault: config.systemDefault === true,
+      userInvocable: config.userInvocable !== false,
       files: await readSkillFilesDir(dir),
     });
   }
@@ -279,7 +454,12 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
     const skills = await loadSeedSkills();
     return skills.map((skill) => ({
       key: skill.name,
-      contentHash: skillSeedHash(skill.content, skill.systemDefault, skill.files),
+      contentHash: skillSeedHash(
+        skill.content,
+        skill.systemDefault,
+        skill.files,
+        skill.userInvocable,
+      ),
       skill,
     }));
   },
@@ -293,7 +473,12 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
       path: file.path,
       content: file.content,
     }));
-    return skillSeedHash(existing.content, existing.systemDefault, liveFiles);
+    return skillSeedHash(
+      existing.content,
+      existing.systemDefault,
+      liveFiles,
+      existing.userInvocable,
+    );
   },
 
   /**
@@ -321,6 +506,7 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
           content: skill.content,
           scope: "swarm",
           systemDefault: skill.systemDefault,
+          userInvocable: skill.userInvocable,
           isComplex: skill.files.length > 0,
         });
         syncSeededSkillFiles(existing.id, skill.files);
@@ -335,6 +521,7 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
         scope: "swarm",
         ownerAgentId: undefined,
         systemDefault: skill.systemDefault,
+        userInvocable: skill.userInvocable,
         isComplex: skill.files.length > 0,
       });
       syncSeededSkillFiles(created.id, skill.files);

@@ -6,11 +6,11 @@ user-invocable: false
 
 # Kapso WhatsApp
 
-Kapso (https://kapso.ai) is a WhatsApp platform vendor that fronts the Meta Cloud API. A swarm provisions one or more WhatsApp phone numbers and wires each one to either a native inbound handler (PR #560) or a workflow that dispatches a task per inbound message.
+Kapso (https://kapso.ai) is a WhatsApp platform vendor that fronts the Meta Cloud API. A swarm provisions one or more WhatsApp phone numbers and wires each one to either the native inbound handler or a workflow that dispatches a task per inbound message.
 
 ## When to use MCP tools vs this skill's REST recipes
 
-PR #560 ships **thin MCP-tool wrappers for the common case only**:
+The integration ships **thin MCP-tool wrappers for the common case only**:
 
 | Tool | Use for |
 |---|---|
@@ -41,12 +41,13 @@ Swarm config keys (resolve with `get-config key:<NAME> includeSecrets:true` — 
 | `KAPSO_PHONE_NUMBER_ID` | The swarm's provisioned number's Meta phone-number ID |
 | `KAPSO_WEBHOOK_HMAC_SECRET` | Shared HMAC secret. Kapso signs every webhook request with `X-Webhook-Signature: <hex>` |
 
-The curl recipes below assume `$KAPSO_API_KEY`, `$KAPSO_API_BASE_URL`, and `$KAPSO_PHONE_NUMBER_ID` are resolved into your shell, e.g.:
+The curl recipes below assume `$API_BASE`, `$API_KEY`, and `$PHONE_NUMBER_ID` are set in your shell. `get-config` is an MCP tool, not a shell command — call it as a tool first, then export the values it returns:
 
 ```bash
-API_BASE=$(get-config KAPSO_API_BASE_URL)        # https://api.kapso.ai
-API_KEY=$(get-config KAPSO_API_KEY)
-PHONE_NUMBER_ID=$(get-config KAPSO_PHONE_NUMBER_ID)
+# Values from the `get-config` MCP tool (key:<NAME> includeSecrets:true):
+API_BASE=https://api.kapso.ai        # KAPSO_API_BASE_URL
+API_KEY=<value of KAPSO_API_KEY>
+PHONE_NUMBER_ID=<value of KAPSO_PHONE_NUMBER_ID>
 ```
 
 The Kapso CLI is NOT installed in worker containers. Use direct HTTP or clone the `gokapso/agent-skills` repo for fallback scripts.
@@ -56,7 +57,7 @@ git clone --depth=1 https://github.com/gokapso/agent-skills /tmp/kapso-skills
 cd /tmp/kapso-skills/skills/integrate-whatsapp && npm i  # or observe-whatsapp / automate-whatsapp
 ```
 
-The Meta Cloud API is proxied at `$KAPSO_API_BASE_URL/meta/whatsapp/v24.0/...` (auth: `X-API-Key`). Kapso's own platform endpoints live at `$KAPSO_API_BASE_URL/platform/v1/...`.
+The Meta Cloud API is proxied at `$API_BASE/meta/whatsapp/v24.0/...` (auth: `X-API-Key`). Kapso's own platform endpoints live at `$API_BASE/platform/v1/...`.
 
 ## Inbound webhook payload (v2)
 
@@ -132,7 +133,7 @@ Media messages carry a Meta **media id** (`message.<type>.id`), not a URL. Two-s
 1. Resolve the media id to a temporary URL + metadata:
    ```bash
    curl -s -H "X-API-Key: $API_KEY" \
-     "$KAPSO_API_BASE_URL/meta/whatsapp/v24.0/<MEDIA_ID>"
+     "$API_BASE/meta/whatsapp/v24.0/<MEDIA_ID>"
    # → { "url": "https://lookaside.fbsbx.com/...", "mime_type": "...", "file_size": ..., "id": "...", "sha256": "..." }
    ```
 2. Download the binary from that `url` (Meta lookaside URLs expire fast — download immediately):
@@ -140,7 +141,7 @@ Media messages carry a Meta **media id** (`message.<type>.id`), not a URL. Two-s
    curl -sL -H "X-API-Key: $API_KEY" "<url>" -o /tmp/media.bin
    ```
 
-NB: verify the exact proxy path against a real media message if your swarm has only handled `text` inbound so far. If the lookaside `url` 403s with `X-API-Key`, retry through `$KAPSO_API_BASE_URL/meta/whatsapp/...`.
+NB: verify the exact proxy path against a real media message if your swarm has only handled `text` inbound so far. If the lookaside `url` 403s with `X-API-Key`, retry through `$API_BASE/meta/whatsapp/...`.
 
 ### Recommended handling per type (proposal — adapt to what your swarm has installed)
 
@@ -167,9 +168,8 @@ Always quote the phone number in `manage-user notes` so future lookups by phone 
 Use the Kapso platform endpoints via curl (no CLI needed):
 
 ```bash
-API_BASE=$(get-config KAPSO_API_BASE_URL)        # https://api.kapso.ai
-API_KEY=$(get-config KAPSO_API_KEY)
-PHONE_NUMBER_ID=$(get-config KAPSO_PHONE_NUMBER_ID)
+# Values from the `get-config` MCP tool, exported as in Setup above:
+# API_BASE, API_KEY, PHONE_NUMBER_ID
 
 # List conversations for the swarm's number
 curl -s -H "X-API-Key: $API_KEY" \
@@ -339,7 +339,7 @@ List approved templates first: `GET $API_BASE/platform/v1/whatsapp/templates?pho
 
 ## Webhook signature verification
 
-Every Kapso webhook delivery includes `X-Webhook-Signature: <hex>` (HMAC-SHA256 of the raw body using `KAPSO_WEBHOOK_HMAC_SECRET`). The native handler (`/api/integrations/kapso/webhook`, PR #560) and the workflow webhook trigger both verify automatically — the trigger's `hmacHeader` is `X-Webhook-Signature` and `hmacSecret` resolves from swarm config.
+Every Kapso webhook delivery includes `X-Webhook-Signature: <hex>` (HMAC-SHA256 of the raw body using `KAPSO_WEBHOOK_HMAC_SECRET`). The native handler (`/api/integrations/kapso/webhook`) and the workflow webhook trigger both verify automatically — the trigger's `hmacHeader` is `X-Webhook-Signature` and `hmacSecret` resolves from swarm config.
 
 To verify manually:
 
@@ -359,9 +359,9 @@ echo -n "$RAW_BODY" | openssl dgst -sha256 -hmac "$HMAC_SECRET" -hex | awk '{pri
 
 ## Where this fits in the swarm
 
-Two inbound paths can exist (PR #560 adds the native one; a workflow path is the alternative):
+Two inbound paths can exist (the native handler, or a workflow path as the alternative):
 
-- **Native handler** (`/api/integrations/kapso/webhook`, PR #560) — fires for any phone number registered via `register-kapso-number`. Verifies HMAC, dedupes by message id (KV `integrations:kapso:dedupe`, 24h TTL), reads the routing mapping from KV (`integrations:kapso:numbers`), and either dispatches a `kapso-inbound` task or delegates to a workflow trigger (advanced override). Also emits a `kapso.message.received` event on the workflow event bus.
+- **Native handler** (`/api/integrations/kapso/webhook`) — fires for any phone number registered via `register-kapso-number`. Verifies HMAC, dedupes by message id (KV `integrations:kapso:dedupe`, 24h TTL), reads the routing mapping from KV (`integrations:kapso:numbers`), and either dispatches a `kapso-inbound` task or delegates to a workflow trigger (advanced override). Also emits a `kapso.message.received` event on the workflow event bus.
 - **Workflow path** — fires for unregistered numbers (or numbers whose mapping points at a workflow). A typical inbound-handling workflow chains: a react-eyes step (mark read + typing + 👀) → a debounce step (collapse rapid-fire bursts) → a gate → an agent-task triage step → a finalize step (✅/❌ reaction).
 
 **Debounce / batching:** a debounce step waits a few seconds after each message and only the LAST message of a burst proceeds to the agent task — so a user firing 3 quick messages produces ONE task, not three. The agent is told the `batchSize` and should read trailing history and answer the whole burst in one reply. When >1 messages are collapsed, the user can be shown a "🧵 Got your N messages" note.

@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# What:    {{WHAT}}
+# When:    {{WHEN}}
+# Env:     {{ENV}}
+# Example: {{EXAMPLE}}
+#
+# Output convention:
+#   - stdout (default):  one PASS/FAIL line + path to /tmp log
+#   - stdout (--verbose): full log streamed via `tee`
+#   - exit code:         0 on PASS, non-zero on FAIL
+#
+# Generated/maintained via `/script-builder`.
+
+set -euo pipefail
+
+SCRIPT_NAME="{{SCRIPT_NAME}}"
+LOG_FILE="/tmp/${SCRIPT_NAME}-$(date +%Y%m%d-%H%M%S).log"
+VERBOSE=0
+STATUS="fail"
+SUMMARY="unknown error"
+
+usage() {
+  cat <<EOF
+Usage: ${SCRIPT_NAME} [--verbose|-v] [--help|-h]
+
+  --verbose, -v   Stream full log to stdout (default: only PASS/FAIL summary)
+  --help, -h      Show this message
+
+What:    {{WHAT}}
+When:    {{WHEN}}
+Env:     {{ENV}}
+Example: {{EXAMPLE}}
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -v|--verbose) VERBOSE=1; shift ;;
+    -h|--help)    usage; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+log() {
+  local line
+  line="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"
+  echo "$line" >>"$LOG_FILE"
+  if [[ "$VERBOSE" -eq 1 ]]; then
+    echo "$line"
+  fi
+}
+
+finish() {
+  local rc=$?
+  if [[ "$rc" -eq 0 && "$STATUS" == "pass" ]]; then
+    echo "PASS: ${SUMMARY} (log: ${LOG_FILE})"
+    exit 0
+  else
+    echo "FAIL: ${SUMMARY} (log: ${LOG_FILE})"
+    exit $(( rc == 0 ? 1 : rc ))
+  fi
+}
+trap finish EXIT
+
+log "Starting ${SCRIPT_NAME}"
+
+{{TEST_BODY}}
+
+STATUS="pass"
+SUMMARY="{{WHAT}}"

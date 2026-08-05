@@ -35,7 +35,7 @@ The engine includes 11 built-in executor types:
 
 Each executor has typed config and output schemas available via `GET /api/executor-types` (returns JSON Schemas via Zod v4 `z.toJSONSchema()`).
 
-`swarm-script` is the durable, reusable counterpart to inline `script` nodes. In workflow definitions it accepts `scriptName`, optional `scope` (`agent` or `global`), optional `pinHash`, JSON `args`, and `timeoutMs`. The timeout defaults to `30000` ms, accepts integers from `1000` through `60000`, and raises the script runtime's wall-clock budget for I/O-bound work while still respecting the separate 60-second CPU-time ceiling.
+`swarm-script` is the durable, reusable counterpart to inline `script` nodes. In workflow definitions it accepts `scriptName`, optional `scope` (`agent` or `global`), optional `pinHash`, JSON `args`, and `timeoutMs`. The timeout defaults to `30000` ms, accepts integers from `1000` through `300000` (5 minutes), and raises the script runtime's wall-clock budget for I/O-bound work while still respecting the separate 60-second CPU-time ceiling.
 
 For `config.args`, values written as an **exact single token** such as `{{input.payload}}` preserve the resolved JSON type, so objects, arrays, numbers, and booleans reach the script as native values. If you wrap a token with surrounding text, such as `"prefix-{{input.id}}"`, interpolation falls back to string output. Raw-token resolution is scoped to the node's local interpolation context, including any explicit `inputs` mapping on that node.
 
@@ -245,24 +245,24 @@ Backoff strategies: `exponential`, `linear`, `static`. The poller detects failed
 
 ### Per-Node Timeout
 
-Each node can set a custom `timeoutMs` to override the default step timeout:
+Timeouts live in each executor's config so the executor and the workflow watchdog use the same budget. For a `swarm-script` node:
 
 ```json
 {
-  "id": "slow-analysis",
-  "type": "agent-task",
-  "timeoutMs": 600000,
+  "id": "run-report",
+  "type": "swarm-script",
   "config": {
-    "template": "Perform a deep code analysis..."
+    "scriptName": "build-report",
+    "timeoutMs": 300000
   }
 }
 ```
 
-If the step exceeds its timeout, it is marked as failed and the retry/failure policy applies.
+For `swarm-script` nodes, set `config.timeoutMs` to raise or lower both the workflow watchdog and the spawned script's wall-clock budget within the allowed `1000`-`300000` ms range. Create, update, bulk-patch, and single-node patch operations reject an out-of-range executor config before saving the workflow.
 
-For `swarm-script` nodes there is a second timeout surface inside `config.timeoutMs`. Use the node-level `timeoutMs` for general step orchestration limits and the config-level `timeoutMs` to raise or lower the spawned script's own wall-clock budget within the allowed `1000`-`60000` ms range.
+Inline `script` nodes use `config.timeout` instead. That value is the wall-clock budget for both the inline executor and the workflow step watchdog, so a long-running script is not stopped by the default 30-second watchdog before its configured timeout. It accepts `1000` through `300000` ms and defaults to `30000` ms.
 
-Inline `script` nodes use `config.timeout` instead. That value is the wall-clock budget for both the inline executor and the workflow step watchdog, so a long-running script is not stopped by the default 30-second watchdog before its configured timeout. The minimum is `1000` ms and the default is `30000` ms.
+For orchestration that needs more than 5 minutes, launch a durable one-off script workflow with `launch-script-run` and split the operation into bounded, journaled `ctx.step.swarmScript` (or other durable) steps. Durable runs resume across process restarts, but an individual script step still uses its own bounded scripts-runtime window.
 
 ### Cancelling a Workflow Run
 

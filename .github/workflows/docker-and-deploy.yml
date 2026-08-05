@@ -79,7 +79,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Log in to Container Registry
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -120,7 +120,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Log in to Container Registry
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -159,7 +159,7 @@ jobs:
 
     steps:
       - name: Log in to Container Registry
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -203,7 +203,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Log in to Container Registry
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -245,7 +245,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Log in to Container Registry
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -285,7 +285,7 @@ jobs:
 
     steps:
       - name: Log in to Container Registry
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -332,7 +332,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Log in to Container Registry
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -377,7 +377,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Log in to Container Registry
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -419,7 +419,7 @@ jobs:
 
     steps:
       - name: Log in to Container Registry
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -466,7 +466,7 @@ jobs:
       packages: read
     steps:
       - name: Log in to Container Registry
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -566,9 +566,11 @@ jobs:
     env:
       SWARM_CLOUD_BASE_URL: ${{ secrets.SWARM_CLOUD_BASE_URL }}
       IMAGE_RELEASE_INTAKE_SECRET: ${{ secrets.IMAGE_RELEASE_INTAKE_SECRET }}
+      SWARM_CLOUD_DEV_BASE_URL: ${{ secrets.SWARM_CLOUD_DEV_BASE_URL }}
+      IMAGE_RELEASE_DEV_INTAKE_SECRET: ${{ secrets.IMAGE_RELEASE_DEV_INTAKE_SECRET }}
     steps:
       - name: Log in to Container Registry
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -577,6 +579,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
+      # Posts the SAME payload to every configured Swarm Cloud intake:
+      #   - prod (SWARM_CLOUD_BASE_URL)     : authoritative, a failure fails the release job
+      #   - dev  (SWARM_CLOUD_DEV_BASE_URL) : best-effort, can NEVER fail the release job
+      # Dev parity exists because the golden-image loop reads the latest release from the
+      # dev deployment too; without this the dev image_releases table goes stale and dev
+      # goldens pin old versions (DES-751).
       - name: Post manifest digests to Swarm Cloud
         env:
           API_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
@@ -589,13 +597,75 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "$IMAGE_RELEASE_INTAKE_SECRET" ]; then
-            echo "::warning::IMAGE_RELEASE_INTAKE_SECRET is not configured; skipping Swarm Cloud image-release callback"
-            exit 0
+          # Sign and POST payload.json to one intake.
+          #   $1 label     - human-readable target name, used in log lines only
+          #   $2 base_url  - intake base URL (secret); "" means "not configured"
+          #   $3 secret    - HMAC shared secret for THIS deployment
+          #   $4 required  - "true"  => return non-zero on failure (caller fails the job)
+          #                  "false" => always return 0 (best-effort)
+          # The signature is computed over the exact bytes of payload.json and the same
+          # bytes are sent with --data-binary; re-serializing would break the HMAC.
+          # Never echoes the secret or the signature.
+          post_release() {
+            local label="$1" base_url="$2" secret="$3" required="$4"
+            local signature http_status curl_rc response_file
+
+            if [ -z "$base_url" ] || [ -z "$secret" ]; then
+              echo "::warning::${label}: base URL or intake secret is not configured; skipping image-release callback"
+              return 0
+            fi
+
+            signature="$(openssl dgst -sha256 -hmac "$secret" payload.json | awk '{print $NF}')"
+            response_file="response-${label}.json"
+
+            # curl exits non-zero on transport failures (DNS, refused, timeout). Capture
+            # that instead of letting `set -e` abort the step, so the best-effort target
+            # can never take the job down.
+            curl_rc=0
+            http_status="$(
+              curl --silent --show-error --location \
+                --max-time 60 \
+                --output "$response_file" \
+                --write-out "%{http_code}" \
+                --header "content-type: application/json" \
+                --header "x-signature: sha256=${signature}" \
+                --data-binary @payload.json \
+                "${base_url%/}/image-releases"
+            )" || curl_rc=$?
+
+            echo "${label} image-release response (curl rc=${curl_rc}, HTTP ${http_status:-none}):"
+            if [ -f "$response_file" ]; then
+              cat "$response_file"
+              echo
+            fi
+
+            if [ "$curl_rc" -eq 0 ] && { [ "$http_status" = "200" ] || [ "$http_status" = "201" ]; }; then
+              echo "::notice::${label}: image-release callback succeeded (HTTP ${http_status})"
+              return 0
+            fi
+
+            if [ "$required" = "true" ]; then
+              echo "::error::${label}: image-release callback failed (curl rc=${curl_rc}, HTTP ${http_status:-none})"
+              return 1
+            fi
+
+            echo "::warning::${label}: best-effort image-release callback failed (curl rc=${curl_rc}, HTTP ${http_status:-none}); continuing"
+            return 0
+          }
+
+          # NOTE: written as explicit `if`s, not `[ .. ] && [ .. ] && var=true` — under
+          # `set -e` a false && chain is a non-zero command and would abort the step.
+          prod_configured=false
+          dev_configured=false
+          if [ -n "$SWARM_CLOUD_BASE_URL" ] && [ -n "$IMAGE_RELEASE_INTAKE_SECRET" ]; then
+            prod_configured=true
+          fi
+          if [ -n "$SWARM_CLOUD_DEV_BASE_URL" ] && [ -n "$IMAGE_RELEASE_DEV_INTAKE_SECRET" ]; then
+            dev_configured=true
           fi
 
-          if [ -z "$SWARM_CLOUD_BASE_URL" ]; then
-            echo "::warning::SWARM_CLOUD_BASE_URL is not configured; skipping Swarm Cloud image-release callback"
+          if [ "$prod_configured" = "false" ] && [ "$dev_configured" = "false" ]; then
+            echo "::warning::No Swarm Cloud intake is configured (prod or dev); skipping image-release callback"
             exit 0
           fi
 
@@ -640,31 +710,22 @@ jobs:
               }
             }' > payload.json
 
-          signature="$(openssl dgst -sha256 -hmac "$IMAGE_RELEASE_INTAKE_SECRET" payload.json | awk '{print $NF}')"
-
           echo "::notice::Posting image release for ${REPOSITORY}@${GIT_SHA}"
           echo "::notice::Image release version: ${VERSION}"
           echo "::notice::API image: ${api_ref}"
           echo "::notice::Worker image: ${worker_ref}"
           echo "::notice::Workflow run: ${WORKFLOW_RUN_URL}"
 
-          http_status="$(
-            curl --silent --show-error --location \
-              --output response.json \
-              --write-out "%{http_code}" \
-              --header "content-type: application/json" \
-              --header "x-signature: sha256=${signature}" \
-              --data-binary @payload.json \
-              "${SWARM_CLOUD_BASE_URL%/}/image-releases"
-          )"
+          # Capture the prod result rather than exiting immediately, so that a prod
+          # outage does not skip the dev post — keeping dev fresh is the entire point
+          # of the parity fix. The job still fails on a prod failure, just after dev.
+          prod_rc=0
+          post_release "prod" "$SWARM_CLOUD_BASE_URL" "$IMAGE_RELEASE_INTAKE_SECRET" "true" || prod_rc=$?
 
-          echo "Swarm Cloud image-release response (${http_status}):"
-          cat response.json
-          echo
+          post_release "dev" "$SWARM_CLOUD_DEV_BASE_URL" "$IMAGE_RELEASE_DEV_INTAKE_SECRET" "false"
 
-          if [ "$http_status" != "200" ] && [ "$http_status" != "201" ]; then
-            echo "::error::Swarm Cloud image-release callback failed with HTTP ${http_status}"
-            exit 1
+          if [ "$prod_rc" -ne 0 ]; then
+            exit "$prod_rc"
           fi
 
   publish-e2b-templates:

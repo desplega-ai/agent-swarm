@@ -3,7 +3,13 @@ import { z } from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { createWorkflow } from "@/be/db";
-import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import {
+  createToolRegistrar,
+  findLongScriptTimeoutHint,
+  swarmToolOutputSchema,
+  toolErr,
+  toolOk,
+} from "@/tools/utils";
 import {
   AssetKeySchema,
   CooldownConfigSchema,
@@ -11,6 +17,7 @@ import {
   TriggerConfigSchema,
   WorkflowDefinitionSchema,
 } from "@/types";
+import { getExecutorRegistry } from "@/workflows";
 import { validateDefinition } from "@/workflows/definition";
 
 export const registerCreateWorkflowTool = (server: McpServer) => {
@@ -28,6 +35,11 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         "- STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. " +
         "Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different.\n" +
         "- Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }.\n" +
+        "- FOREACH NODE: type 'foreach' fans out one agent-task per item. Config: " +
+        "{ over: <array or exact {{input}} token>, itemKey: <property name>, body: { type: 'agent-task', config: {...} } }. " +
+        "The body config is interpolated once per item with {{item.*}} and {{index}}. Child steps use synthetic IDs " +
+        "'<foreachNodeId>#<itemKey>'; the parent waits for every child and exposes one aggregate result to successors. " +
+        "concurrency is not supported in v1; use definition-level onNodeFailure: 'continue' to aggregate failed children.\n" +
         "- TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. " +
         "Supported keywords: type, required, properties, enum, const, items (recursive into arrays). " +
         "Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored.\n" +
@@ -109,7 +121,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
       }
       try {
         // Validate definition structure
-        const validation = validateDefinition(definition);
+        const validation = validateDefinition(definition, getExecutorRegistry());
         if (!validation.valid) {
           return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
         }
@@ -135,9 +147,14 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           },
           "mcp",
         );
+        const longScriptTimeoutHint = findLongScriptTimeoutHint(definition.nodes);
         return toolOk(`Created workflow "${workflow.name}".`, {
           details: `Created workflow "${workflow.name}" (${workflow.id}).`,
-          data: { yourAgentId: requestInfo.agentId, workflow },
+          data: {
+            yourAgentId: requestInfo.agentId,
+            workflow,
+            ...(longScriptTimeoutHint ? { longScriptTimeoutHint } : {}),
+          },
         });
       } catch (err) {
         return toolErr(String(err));

@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "One-shot question answering using the research process. Answers inline without generating documents, then offers handoff to brainstorm or research.",
+  "displayName": "Questioning",
+  "kind": "skill",
+  "name": "questioning",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "questioning",
+  "systemDefault": true,
+  "tags": [
+    "research",
+    "questions",
+    "analysis"
+  ],
+  "title": "Questioning",
+  "version": "1.0.0"
+}

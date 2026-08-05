@@ -32,6 +32,8 @@ export interface TaskFilters {
   orderBy?: "lastUpdatedAt" | "createdAt";
   /** Filter to tasks whose `source` is in this list. Empty/undefined → all. */
   source?: string[];
+  /** Exact requester user id, or the sentinel `none` for unattributed (NULL) rows. */
+  requestedByUserId?: string;
 }
 
 export interface UseTasksOptions {
@@ -144,6 +146,13 @@ function matchesTaskFilters(task: AgentTask, filters?: TaskFilters): boolean {
   if (filters.createdBefore && task.createdAt >= filters.createdBefore) return false;
   if (filters.source && filters.source.length > 0 && !filters.source.includes(task.source)) {
     return false;
+  }
+  if (filters.requestedByUserId) {
+    if (filters.requestedByUserId === "none") {
+      if (task.requestedByUserId) return false;
+    } else if (task.requestedByUserId !== filters.requestedByUserId) {
+      return false;
+    }
   }
   if (filters.search) {
     const needle = filters.search.toLowerCase();

@@ -4,10 +4,11 @@
   "displayName": "AgentMail Sending",
   "slug": "agentmail-sending",
   "title": "AgentMail Sending",
-  "description": "Generic rules for sending email through an agent-accessible mailbox API.",
+  "description": "Canonical AgentMail send-message API reference for swarm agents. Pins the base URL, required field names, text-only rendering workaround, BCC policy, and ready-to-copy curl / swarm-script examples so agents do not rediscover the API surface at runtime.",
   "version": "1.0.0",
   "category": "skills",
   "placeholders": ["COMPANY_SIGNATURE"],
   "runAllSeedersCandidate": false,
+  "userInvocable": false,
   "tags": ["email", "communications"]
 }

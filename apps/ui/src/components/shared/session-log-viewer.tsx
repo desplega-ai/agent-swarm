@@ -28,19 +28,32 @@ import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 
 import type { ContextSnapshot, SessionLog, SteeringMessage } from "@/api/types";
+import {
+  SubagentDetails,
+  SubagentDot,
+  SubagentStatus,
+  SubagentWaterfall,
+} from "@/components/shared/subagent-waterfall";
 import { QueuedSteeringBox } from "@/components/steering/queued-steering-box";
 import {
   SteeringLine,
   steeringMessageTimestamp,
 } from "@/components/steering/steering-message-chips";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { JsonTree } from "@/components/workflows/json-tree";
 import { useTheme } from "@/hooks/use-theme";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatTokens } from "@/lib/format-tokens";
 import { cn, normalizeNewlines } from "@/lib/utils";
-import { type ParsedMessage, type ProviderMetaBlock, parseSessionLogs } from "@/logs-parser";
+import {
+  extractSubagentRuns,
+  type ParsedMessage,
+  type ProviderMetaBlock,
+  parseSessionLogs,
+  type SubagentRun,
+} from "@/logs-parser";
 
 // --- Stream model ---
 
@@ -87,6 +100,14 @@ type StreamRow =
       time: string;
       iso: string;
       block: ProviderMetaBlock;
+      isNew: boolean;
+    }
+  | {
+      type: "subagent";
+      id: string;
+      time: string;
+      iso: string;
+      run: SubagentRun;
       isNew: boolean;
     }
   | {
@@ -388,6 +409,10 @@ function isThinkingTokensBlock(block: ProviderMetaBlock): boolean {
   return block.kind === "helper" && block.data.helperType === "thinking_tokens";
 }
 
+function isToolProgressBlock(block: ProviderMetaBlock): boolean {
+  return block.kind === "helper" && block.data.helperType === "tool_progress";
+}
+
 function appendProviderMetaRow(rows: StreamRow[], row: MetaRow) {
   if (isThinkingTokensBlock(row.block)) {
     appendThinkingTokenRow(rows, row);
@@ -509,6 +534,7 @@ function markLiveThinkingGroup(rows: StreamRow[], isRunning?: boolean) {
 
 function buildStream(
   messages: ParsedMessage[],
+  subagents: SubagentRun[],
   snapshots: ContextSnapshot[],
   newIds: Set<string>,
   isRunning?: boolean,
@@ -519,17 +545,36 @@ function buildStream(
    */
   steering: SteeringMessage[] = [],
 ): StreamRow[] {
+  const subagentById = new Map(subagents.map((run) => [run.id, run]));
+  const subagentSourceIds = new Set(subagents.flatMap((run) => run.sourceRecordIds));
   // Index every tool_result by the id of the call it answers (+ its timestamp).
   const resultById = new Map<string, { content: string; isError: boolean; at: number }>();
+  const progressById = new Map<
+    string,
+    { toolName?: string; elapsedSeconds?: number; at: number }
+  >();
   const callIds = new Set<string>();
   for (const m of messages) {
     const at = new Date(m.timestamp).getTime();
     for (const b of m.content) {
       if (b.type === "tool_use" && b.id) {
+        if (subagentById.has(b.id)) continue;
         callIds.add(b.id);
       }
       if (b.type === "tool_result" && b.tool_use_id) {
+        if (subagentById.has(b.tool_use_id)) continue;
         resultById.set(b.tool_use_id, { content: b.content, isError: b.isError === true, at });
+      }
+      if (b.type === "provider_meta" && isToolProgressBlock(b)) {
+        const parentId = stringValue(b.data.parentToolUseId);
+        const previous = parentId ? progressById.get(parentId) : undefined;
+        if (parentId && (!previous || at >= previous.at)) {
+          progressById.set(parentId, {
+            toolName: stringValue(b.data.toolName),
+            elapsedSeconds: numberValue(b.data.elapsedSeconds),
+            at,
+          });
+        }
       }
     }
   }
@@ -537,8 +582,13 @@ function buildStream(
   type TL =
     | { kind: "msg"; m: ParsedMessage; t: number }
     | { kind: "snap"; s: ContextSnapshot; t: number }
-    | { kind: "steer"; sm: SteeringMessage; iso: string; t: number };
+    | { kind: "steer"; sm: SteeringMessage; iso: string; t: number }
+    | { kind: "subagent"; run: SubagentRun; t: number };
   const tl: TL[] = messages.map((m) => ({ kind: "msg", m, t: new Date(m.timestamp).getTime() }));
+  for (const run of subagents) {
+    const t = Date.parse(run.startedAt);
+    if (Number.isFinite(t)) tl.push({ kind: "subagent", run, t });
+  }
   for (const s of snapshots) {
     if (s.eventType === "compaction")
       tl.push({ kind: "snap", s, t: new Date(s.createdAt).getTime() });
@@ -584,11 +634,25 @@ function buildStream(
       continue;
     }
 
+    if (item.kind === "subagent") {
+      closeGroup();
+      rows.push({
+        type: "subagent",
+        id: `subagent-${item.run.id}`,
+        time: fmtClock(item.run.startedAt),
+        iso: item.run.startedAt,
+        run: item.run,
+        isNew: item.run.sourceRecordIds.some((id) => newIds.has(id)),
+      });
+      continue;
+    }
+
     const m = item.m;
     const time = fmtClock(m.timestamp);
     m.content.forEach((b, i) => {
       const blockId = `${m.id}-${i}`;
       if (b.type === "tool_result") {
+        if (b.tool_use_id && subagentById.has(b.tool_use_id)) return;
         if (!b.tool_use_id || callIds.has(b.tool_use_id)) return; // folded into its tool_use group
         closeGroup();
         rows.push({
@@ -621,10 +685,15 @@ function buildStream(
       }
 
       if (b.type === "tool_use") {
+        if (b.id && subagentById.has(b.id)) return;
         const c = classifyTool(b.name, b.input);
         const res = b.id ? resultById.get(b.id) : undefined;
+        const progress = b.id ? progressById.get(b.id) : undefined;
         const body = res ? res.content : "";
         const durMs = res ? Math.max(0, res.at - item.t) : 0;
+        const progressDuration = progress?.elapsedSeconds
+          ? formatDur(progress.elapsedSeconds * 1000)
+          : "";
         const entry: ToolEntry = {
           id: `${blockId}:${b.id || "noid"}`,
           kind: c.kind,
@@ -633,7 +702,11 @@ function buildStream(
           title: c.title,
           detail: c.detail,
           input: prettyInput(b.input),
-          preview: res ? previewOf(body) : "running…",
+          preview: res
+            ? previewOf(body)
+            : progress
+              ? `${progress.toolName ?? c.title} — still running${progressDuration ? `, ${progressDuration}` : ""}`
+              : "running…",
           body,
           ok: res ? !res.isError : true,
           hasResult: !!res,
@@ -687,6 +760,9 @@ function buildStream(
           isNew,
         });
       } else if (b.type === "provider_meta") {
+        if (subagentSourceIds.has(m.id)) return;
+        const parentId = isToolProgressBlock(b) ? stringValue(b.data.parentToolUseId) : undefined;
+        if (parentId && callIds.has(parentId)) return; // folded into the parent tool row
         appendProviderMetaRow(rows, {
           type: "meta",
           id: blockId,
@@ -725,6 +801,8 @@ function rowSearchText(row: StreamRow): string {
       return JSON.stringify(row.block.data);
     case "toolgroup":
       return row.tools.map((t) => `${t.title} ${t.detail} ${t.preview} ${t.body}`).join(" ");
+    case "subagent":
+      return `${row.run.label} ${row.run.agentType} ${row.run.status} ${row.run.input} ${row.run.outcome ?? ""}`;
     case "steering":
       return `steering ${row.message.mode} ${row.message.status} ${row.message.body}`;
     case "compaction":
@@ -739,6 +817,8 @@ function outlineLabel(row: StreamRow): string {
       const names = groupHeader(row.names);
       return names ? `${count} · ${names}` : count;
     }
+    case "subagent":
+      return `${row.run.label} · ${row.run.status}`;
     case "agent":
       return truncate(row.md.replace(/\s+/g, " ").trim(), 72) || "…";
     case "thinking":
@@ -773,6 +853,11 @@ function metaOutlineLabel(block: ProviderMetaBlock): string {
       return `Context · ${formatPercent(numberValue(block.data.contextPercent)) ?? "usage"}`;
     }
     if (block.data.helperType === "turn_usage") return "Turn usage";
+    if (block.data.helperType === "tool_progress") {
+      const tool = stringValue(block.data.toolName) ?? "Tool";
+      const elapsed = numberValue(block.data.elapsedSeconds);
+      return `${tool} · still running${elapsed ? ` · ${formatDur(elapsed * 1000)}` : ""}`;
+    }
     return "Helper";
   }
   if (block.kind === "internal") {
@@ -788,12 +873,13 @@ function metaOutlineLabel(block: ProviderMetaBlock): string {
   }
   if (block.kind === "lifecycle") return stringValue(block.data.type) ?? "Lifecycle";
   const raw = recordValue(block.data.raw);
-  return stringValue(raw?.type) ?? block.kind.replaceAll("_", " ");
+  return stringValue(block.data.type) ?? stringValue(raw?.type) ?? block.kind.replaceAll("_", " ");
 }
 
 type TickTone = "agent" | "tool" | "user" | "muted";
 
 function rowTone(row: StreamRow): TickTone {
+  if (row.type === "subagent") return "agent";
   if (row.type === "toolgroup") return "tool";
   if (row.type === "agent") return row.role === "user" ? "user" : "agent";
   if (row.type === "steering") return "user";
@@ -1089,7 +1175,22 @@ function HelperMetaBubble({ block }: { block: ProviderMetaBlock }) {
   }
   if (block.data.helperType === "context_usage") return <ContextUsageMeta block={block} />;
   if (block.data.helperType === "turn_usage") return <TurnUsageMeta block={block} />;
+  if (block.data.helperType === "tool_progress") return <ToolProgressMeta block={block} />;
   return <GenericMetaBubble block={block} />;
+}
+
+function ToolProgressMeta({ block }: { block: ProviderMetaBlock }) {
+  const tool = stringValue(block.data.toolName) ?? "Tool";
+  const elapsed = numberValue(block.data.elapsedSeconds);
+  return (
+    <LowKeyMetaLine
+      icon={<Activity className="size-3" />}
+      title={tool}
+      detail={`still running${elapsed ? ` · ${formatDur(elapsed * 1000)}` : ""}`}
+      raw={block.data}
+      stats={<LowKeyStat label="Parent" value={shortId(stringValue(block.data.parentToolUseId))} />}
+    />
+  );
 }
 
 function InternalMetaBubble({ block }: { block: ProviderMetaBlock }) {
@@ -1921,6 +2022,12 @@ export function SessionLogViewer({
 }: SessionLogViewerProps) {
   const safeLogs = logs ?? [];
   const messages = useMemo(() => parseSessionLogs(safeLogs), [safeLogs]);
+  const subagents = useMemo(() => extractSubagentRuns(safeLogs), [safeLogs]);
+  const [activeView, setActiveView] = useState<"logs" | "agents">("logs");
+
+  useEffect(() => {
+    if (subagents.length === 0 && activeView === "agents") setActiveView("logs");
+  }, [activeView, subagents.length]);
 
   // Partition on status: `pending` has no session-entry timestamp yet, so it
   // can't be placed honestly in the stream and goes to the tail box instead.
@@ -1956,8 +2063,16 @@ export function SessionLogViewer({
   }, [messages, streamSteering]);
 
   const rows = useMemo(
-    () => buildStream(messages, compactionSnapshots ?? [], newIds, isRunning, streamSteering),
-    [messages, compactionSnapshots, newIds, isRunning, streamSteering],
+    () =>
+      buildStream(
+        messages,
+        subagents,
+        compactionSnapshots ?? [],
+        newIds,
+        isRunning,
+        streamSteering,
+      ),
+    [messages, subagents, compactionSnapshots, newIds, isRunning, streamSteering],
   );
 
   const { searchParams, setParam } = useUrlSearchState();
@@ -1975,6 +2090,7 @@ export function SessionLogViewer({
 
   // Per-id collapse state, keyed by stable id so it survives refetch + recycling.
   const [groupToggle, setGroupToggle] = useState<Map<string, boolean>>(new Map());
+  const [openSubagents, setOpenSubagents] = useState<Set<string>>(new Set());
   const [openTools, setOpenTools] = useState<Set<string>>(new Set());
   const [openOutputs, setOpenOutputs] = useState<Set<string>>(new Set());
   const [flashId, setFlashId] = useState<string | null>(null);
@@ -1997,6 +2113,14 @@ export function SessionLogViewer({
   const toggleTool = useCallback((id: string) => {
     setOpenTools((prev) => {
       const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSubagent = useCallback((id: string) => {
+    setOpenSubagents((previous) => {
+      const next = new Set(previous);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
@@ -2049,13 +2173,15 @@ export function SessionLogViewer({
           return 34;
         case "toolgroup":
           return 52;
+        case "subagent":
+          return openSubagents.has(r.id) ? 148 : 42;
         case "compaction":
           return 40;
         default:
           return 64;
       }
     },
-    [visibleRows],
+    [visibleRows, openSubagents],
   );
 
   const virtualizer = useVirtualizer({
@@ -2166,6 +2292,9 @@ export function SessionLogViewer({
   const jumpTo = useCallback(
     (index: number, row: StreamRow) => {
       if (row.type === "toolgroup") openGroup(row.id);
+      if (row.type === "subagent") {
+        setOpenSubagents((previous) => new Set(previous).add(row.id));
+      }
       if (virtualize) {
         virtualizer.scrollToIndex(index, { align: "center", behavior: "smooth" });
       } else {
@@ -2279,6 +2408,52 @@ export function SessionLogViewer({
           </RowShell>
         );
       }
+      if (row.type === "subagent") {
+        const open = openSubagents.has(row.id);
+        const duration = formatDur(row.run.durationMs);
+        return (
+          <RowShell
+            time={row.time}
+            iso={row.iso}
+            flash={flash}
+            isNew={row.isNew}
+            highlight={row.isNew && atBottomRef.current}
+            streamDelayMs={streamDelayMs}
+          >
+            <button
+              type="button"
+              onClick={() => toggleSubagent(row.id)}
+              className="flex min-h-6 w-full min-w-0 cursor-pointer items-center gap-2 text-left"
+              aria-expanded={open}
+            >
+              <ChevronRight
+                className={cn(
+                  "size-3 shrink-0 text-muted-foreground transition-transform",
+                  open && "rotate-90",
+                )}
+              />
+              <SubagentDot run={row.run} />
+              <span className="min-w-0 shrink truncate text-xs font-medium text-foreground">
+                {row.run.label}
+              </span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-muted-foreground max-sm:hidden">
+                {row.run.agentType}
+              </span>
+              <SubagentStatus run={row.run} />
+              {duration && (
+                <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+                  {duration}
+                </span>
+              )}
+            </button>
+            {open && (
+              <div className="mt-1.5 border-t border-border/40 py-2 pr-2 sm:ml-9">
+                <SubagentDetails run={row.run} />
+              </div>
+            )}
+          </RowShell>
+        );
+      }
       const open = isGroupOpen(row);
       const dur = formatDur(row.durMs);
       return (
@@ -2331,9 +2506,11 @@ export function SessionLogViewer({
       flashId,
       isGroupOpen,
       openOutputs,
+      openSubagents,
       openTools,
       toggleGroup,
       toggleOutput,
+      toggleSubagent,
       toggleTool,
       staggerById,
     ],
@@ -2349,97 +2526,123 @@ export function SessionLogViewer({
           className,
         )}
       >
-        {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
-          <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-            Session Logs
-          </span>
-          <div className="relative ml-auto">
-            <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Filter…"
-              aria-label="Filter session log"
-              className="h-[30px] w-40 pl-7 text-xs sm:w-52"
-            />
-          </div>
-        </div>
-
-        {/* Body */}
-        <div className="relative flex min-h-0 flex-1">
-          <div
-            ref={parentRef}
-            className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-3 [overflow-anchor:none]"
-          >
-            <div ref={contentRef}>
-              {visibleRows.length === 0 ? (
-                <div className="flex h-full items-center justify-center py-12 text-sm text-muted-foreground">
-                  {rows.length === 0 ? "No session data" : "No matching events"}
-                </div>
-              ) : virtualize ? (
-                <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
-                  {virtualItems.map((vi) => {
-                    const row = visibleRows[vi.index];
-                    if (!row) return null;
-                    const style: CSSProperties = {
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      transform: `translateY(${vi.start}px)`,
-                    };
-                    return (
-                      <div
-                        key={vi.key}
-                        ref={virtualizer.measureElement}
-                        data-index={vi.index}
-                        data-row-id={row.id}
-                        style={style}
-                      >
-                        {renderRow(row)}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="flex flex-col">
-                  {visibleRows.map((row) => (
-                    <div key={row.id} data-row-id={row.id}>
-                      {renderRow(row)}
-                    </div>
-                  ))}
-                </div>
+        <Tabs
+          value={activeView}
+          onValueChange={(value) => setActiveView(value === "agents" ? "agents" : "logs")}
+          className="min-h-0 flex-1 gap-0"
+        >
+          {/* Toolbar */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
+            <TabsList variant="line" className="h-[30px] shrink-0 rounded-none p-0">
+              <TabsTrigger value="logs" className="h-7 flex-none rounded-none px-2 text-xs">
+                Logs
+              </TabsTrigger>
+              {subagents.length > 0 && (
+                <TabsTrigger value="agents" className="h-7 flex-none rounded-none px-2 text-xs">
+                  Agents <span className="font-mono text-[10px]">({subagents.length})</span>
+                </TabsTrigger>
               )}
-            </div>
+            </TabsList>
+            {activeView === "logs" && (
+              <div className="relative ml-auto">
+                <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Filter…"
+                  aria-label="Filter session log"
+                  className="h-[30px] w-40 pl-7 text-xs sm:w-52"
+                />
+              </div>
+            )}
           </div>
 
-          {/* Minimap rail */}
-          {visibleRows.length > 0 && <MinimapRail rows={visibleRows} onJump={jumpTo} />}
-
-          {/* Jump-to-latest pill */}
-          <button
-            type="button"
-            onClick={stickToBottom}
-            aria-label="Scroll to latest"
-            className={cn(
-              "absolute bottom-4 left-1/2 z-10 inline-flex -translate-x-1/2 cursor-pointer items-center gap-2 rounded-full bg-primary px-3.5 py-[7px] text-[12.5px] font-semibold text-primary-foreground shadow-lg transition-all",
-              atBottom
-                ? "pointer-events-none translate-y-3 opacity-0"
-                : "translate-y-0 opacity-100",
-            )}
+          <TabsContent
+            value="logs"
+            forceMount
+            className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
           >
-            <ArrowDown className="size-3.5" />
-            {pending > 0 ? `${pending} new message${pending === 1 ? "" : "s"}` : null}
-          </button>
-        </div>
+            {/* Body */}
+            <div className="relative flex min-h-0 flex-1">
+              <div
+                ref={parentRef}
+                className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-3 [overflow-anchor:none]"
+              >
+                <div ref={contentRef}>
+                  {visibleRows.length === 0 ? (
+                    <div className="flex h-full items-center justify-center py-12 text-sm text-muted-foreground">
+                      {rows.length === 0 ? "No session data" : "No matching events"}
+                    </div>
+                  ) : virtualize ? (
+                    <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+                      {virtualItems.map((vi) => {
+                        const row = visibleRows[vi.index];
+                        if (!row) return null;
+                        const style: CSSProperties = {
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          transform: `translateY(${vi.start}px)`,
+                        };
+                        return (
+                          <div
+                            key={vi.key}
+                            ref={virtualizer.measureElement}
+                            data-index={vi.index}
+                            data-row-id={row.id}
+                            style={style}
+                          >
+                            {renderRow(row)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col">
+                      {visibleRows.map((row) => (
+                        <div key={row.id} data-row-id={row.id}>
+                          {renderRow(row)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
 
-        {/* Queued steering — pinned between the stream and the footer. Rows
-            leave this box on their own as soon as the worker delivers them. */}
-        <QueuedSteeringBox messages={pendingSteering} />
+              {/* Minimap rail */}
+              {visibleRows.length > 0 && <MinimapRail rows={visibleRows} onJump={jumpTo} />}
 
-        {/* Footer */}
-        <RunningFooter count={visibleRows.length} isRunning={isRunning} />
+              {/* Jump-to-latest pill */}
+              <button
+                type="button"
+                onClick={stickToBottom}
+                aria-label="Scroll to latest"
+                className={cn(
+                  "absolute bottom-4 left-1/2 z-10 inline-flex -translate-x-1/2 cursor-pointer items-center gap-2 rounded-full bg-primary px-3.5 py-[7px] text-[12.5px] font-semibold text-primary-foreground shadow-lg transition-all",
+                  atBottom
+                    ? "pointer-events-none translate-y-3 opacity-0"
+                    : "translate-y-0 opacity-100",
+                )}
+              >
+                <ArrowDown className="size-3.5" />
+                {pending > 0 ? `${pending} new message${pending === 1 ? "" : "s"}` : null}
+              </button>
+            </div>
+
+            {/* Queued steering — pinned between the stream and the footer. Rows
+                  leave this box on their own as soon as the worker delivers them. */}
+            <QueuedSteeringBox messages={pendingSteering} />
+
+            {/* Footer */}
+            <RunningFooter count={visibleRows.length} isRunning={isRunning} />
+          </TabsContent>
+          {subagents.length > 0 && (
+            <TabsContent value="agents" className="min-h-0 flex-1">
+              <SubagentWaterfall runs={subagents} />
+            </TabsContent>
+          )}
+        </Tabs>
       </div>
     </TooltipProvider>
   );

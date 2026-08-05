@@ -57,6 +57,24 @@ describe("generateCompose", () => {
     expect(yaml).not.toContain("  lead:");
   });
 
+  test("preset install attribution is passed through to the API service", () => {
+    const yaml = generateCompose(soloState);
+    const apiService = yaml.split("\n  worker-coder:")[0];
+    const workerService = yaml.slice(apiService.length);
+
+    expect(apiService).toMatch(/ {6}- INSTALL_METHOD=\$\{INSTALL_METHOD\}/);
+    expect(apiService).toMatch(/ {6}- INSTALL_PRESET=\$\{INSTALL_PRESET:-\}/);
+    expect(workerService).not.toContain("INSTALL_METHOD");
+    expect(workerService).not.toContain("INSTALL_PRESET");
+  });
+
+  test("missing preset uses an empty Compose default", () => {
+    const yaml = generateCompose(makeState({ presetId: undefined }));
+
+    expect(yaml).toMatch(/ {6}- INSTALL_METHOD=\$\{INSTALL_METHOD\}/);
+    expect(yaml).toMatch(/ {6}- INSTALL_PRESET=\$\{INSTALL_PRESET:-\}/);
+  });
+
   // ── All integrations enabled ──
 
   const allIntegrationsState = makeState({

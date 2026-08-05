@@ -1417,6 +1417,13 @@ export const taskQueries = {
        WHERE id = ? RETURNING *`,
     ),
 
+  setTerminalResultText: () =>
+    getDb().prepare<AgentTaskRow, [string | null, string | null, string]>(
+      `UPDATE agent_tasks SET output = ?, failureReason = ?
+       WHERE id = ? AND status IN ('completed', 'failed', 'cancelled', 'superseded')
+       RETURNING *`,
+    ),
+
   setCancelled: () =>
     getDb().prepare<AgentTaskRow, [string, string, string]>(
       `UPDATE agent_tasks SET status = 'cancelled', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -2217,6 +2224,8 @@ export interface TaskFilters {
   createdBefore?: string;
   /** Only return tasks requested by this canonical user. NULL rows are excluded. */
   requestedByUserId?: string;
+  /** When set, restrict to rows where `requestedByUserId` IS NULL. Takes priority over `requestedByUserId`. */
+  requestedByUserIdIsNull?: boolean;
   /** Sort list rows for either table freshness or timeline paging. */
   orderBy?: "lastUpdatedAt" | "createdAt";
   limit?: number;
@@ -2315,7 +2324,9 @@ export function getAllTasks(
     params.push(filters.createdBefore);
   }
 
-  if (filters?.requestedByUserId) {
+  if (filters?.requestedByUserIdIsNull) {
+    conditions.push("requestedByUserId IS NULL");
+  } else if (filters?.requestedByUserId) {
     conditions.push("requestedByUserId = ?");
     params.push(filters.requestedByUserId);
   }
@@ -2449,7 +2460,9 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
     params.push(filters.createdBefore);
   }
 
-  if (filters?.requestedByUserId) {
+  if (filters?.requestedByUserIdIsNull) {
+    conditions.push("requestedByUserId IS NULL");
+  } else if (filters?.requestedByUserId) {
     conditions.push("requestedByUserId = ?");
     params.push(filters.requestedByUserId);
   }
@@ -3036,6 +3049,28 @@ export function failTask(id: string, reason: string): AgentTask | null {
     }
   }
   return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Replace result text on an already-terminal task without replaying terminal
+ * side effects or moving any lifecycle timestamps. Callers must opt in to
+ * this narrow escape hatch; ordinary completion remains first-call-wins.
+ */
+export function overwriteTerminalTaskResultText(
+  id: string,
+  patch: { output?: string; failureReason?: string },
+): AgentTask | null {
+  const task = getTaskById(id);
+  if (!task || !isTerminalTaskStatus(task.status)) return null;
+
+  const output = patch.output !== undefined ? scrubSecrets(patch.output) : (task.output ?? null);
+  const failureReason =
+    patch.failureReason !== undefined
+      ? scrubSecrets(patch.failureReason)
+      : (task.failureReason ?? null);
+  const row = taskQueries.setTerminalResultText().get(output, failureReason, id) ?? null;
+
+  return row ? rowToAgentTask(row) : task;
 }
 
 export function cancelTask(id: string, reason?: string): AgentTask | null {
@@ -9104,7 +9139,7 @@ export function updateWorkflowRun(
   data: {
     status?: WorkflowRunStatus;
     context?: Record<string, unknown>;
-    error?: string;
+    error?: string | null;
     finishedAt?: string;
   },
 ): WorkflowRun | null {
@@ -9310,7 +9345,7 @@ export function updateWorkflowRunStep(
   data: {
     status?: WorkflowRunStepStatus;
     output?: unknown;
-    error?: string;
+    error?: string | null;
     finishedAt?: string;
     retryCount?: number;
     maxRetries?: number;
@@ -9387,6 +9422,7 @@ export interface StuckWorkflowRun {
   runId: string;
   stepId: string;
   nodeId: string;
+  taskId: string;
   taskStatus: string;
   taskOutput: string | null;
   workflowId: string;
@@ -9399,6 +9435,7 @@ export function getStuckWorkflowRuns(): StuckWorkflowRun[] {
         wr.id as runId,
         wrs.id as stepId,
         wrs.nodeId,
+        at.id as taskId,
         at.status as taskStatus,
         at.output as taskOutput,
         wr.workflowId
@@ -9406,7 +9443,8 @@ export function getStuckWorkflowRuns(): StuckWorkflowRun[] {
       JOIN workflow_run_steps wrs ON wrs.runId = wr.id AND wrs.status = 'waiting'
       JOIN agent_tasks at ON at.workflowRunStepId = wrs.id
       WHERE wr.status = 'waiting'
-        AND at.status IN ('completed', 'failed', 'cancelled')`,
+        AND at.status IN ('completed', 'failed', 'cancelled')
+      ORDER BY at.createdAt ASC, at.rowid ASC`,
     )
     .all();
 }
@@ -9466,6 +9504,10 @@ export function getTaskByWorkflowRunStepId(stepId: string): AgentTask | null {
     )
     .get(stepId);
   return row ? rowToAgentTask(row) : null;
+}
+
+export function detachTaskFromWorkflowRunStep(taskId: string): void {
+  getDb().run("UPDATE agent_tasks SET workflowRunStepId = NULL WHERE id = ?", [taskId]);
 }
 
 export function getStepByIdempotencyKey(key: string): WorkflowRunStep | null {

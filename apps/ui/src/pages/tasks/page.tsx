@@ -2,9 +2,11 @@ import { ChevronLeft, ChevronRight, Clock, Plus, Search, X } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
+import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useScheduledTasks } from "@/api/hooks/use-schedules";
 import { useTaskTemplates } from "@/api/hooks/use-task-templates";
 import { useCreateTask, useTasks } from "@/api/hooks/use-tasks";
+import { useUsers } from "@/api/hooks/use-users";
 import { type AgentTask, REASONING_EFFORT_LEVELS } from "@/api/types";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
@@ -317,6 +319,7 @@ export default function TasksPage() {
   const statusFilter = searchParams.get("status") ?? "all";
   const agentFilter = searchParams.get("agent") ?? "all";
   const scheduleFilter = searchParams.get("schedule") ?? "all";
+  const requesterFilter = searchParams.get("requester") ?? "all";
   const searchParam = searchParams.get("search") ?? "";
   const includeHeartbeat = searchParams.get("heartbeat") === "true";
   const page = searchParams.has("page") ? Number(searchParams.get("page")) : 0;
@@ -337,6 +340,7 @@ export default function TasksPage() {
           status: "all",
           agent: "all",
           schedule: "all",
+          requester: "all",
           search: "",
           page: "0",
           pageSize: String(DEFAULT_PAGE_SIZE),
@@ -356,6 +360,9 @@ export default function TasksPage() {
 
   const { data: agents } = useAgents();
   const { data: schedules } = useScheduledTasks();
+  const { data: users } = useUsers();
+  const { userId: currentUserId, state: currentUserState } = useCurrentUser();
+  const { supported: requesterFacetSupported } = useFeatureGate("1.127.0");
   const agentMapRef = useRef(new Map<string, string>());
   useMemo(() => {
     const m = new Map<string, string>();
@@ -365,6 +372,10 @@ export default function TasksPage() {
     agentMapRef.current = m;
   }, [agents]);
 
+  // "me" resolves client-side to the current identity's user id before it
+  // hits the API — the server only understands an exact user id or the
+  // `none` sentinel (IS NULL). If identity isn't ready yet, "me" sends
+  // nothing rather than an empty/invalid id.
   const filters = useMemo(() => {
     const f: {
       status?: string;
@@ -372,6 +383,7 @@ export default function TasksPage() {
       scheduleId?: string;
       search?: string;
       includeHeartbeat?: boolean;
+      requestedByUserId?: string;
       limit: number;
       offset: number;
     } = {
@@ -383,12 +395,26 @@ export default function TasksPage() {
     if (scheduleFilter !== "all") f.scheduleId = scheduleFilter;
     if (searchParam) f.search = searchParam;
     if (includeHeartbeat) f.includeHeartbeat = true;
+    if (requesterFilter === "me") {
+      if (currentUserId) f.requestedByUserId = currentUserId;
+    } else if (requesterFilter !== "all") {
+      f.requestedByUserId = requesterFilter;
+    }
     return f;
-  }, [statusFilter, agentFilter, scheduleFilter, searchParam, includeHeartbeat, page, pageSize]);
+  }, [
+    statusFilter,
+    agentFilter,
+    scheduleFilter,
+    requesterFilter,
+    currentUserId,
+    searchParam,
+    includeHeartbeat,
+    page,
+    pageSize,
+  ]);
 
   const { data: tasksData, isLoading } = useTasks(filters);
   const createTask = useCreateTask();
-  const { userId: currentUserId } = useCurrentUser();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogInitialValues, setDialogInitialValues] = useState<Partial<TaskFormData> | undefined>(
     undefined,
@@ -464,6 +490,7 @@ export default function TasksPage() {
     statusFilter !== "all" ||
     agentFilter !== "all" ||
     scheduleFilter !== "all" ||
+    requesterFilter !== "all" ||
     searchParam !== "" ||
     includeHeartbeat ||
     page !== 0;
@@ -551,6 +578,27 @@ export default function TasksPage() {
             })),
           ]}
         />
+        {requesterFacetSupported && (
+          <SearchableSelect
+            value={requesterFilter}
+            onChange={(v) => setParam("requester", v)}
+            triggerClassName="w-[200px]"
+            placeholder="Requested by"
+            searchPlaceholder="Search requesters…"
+            options={[
+              { value: "all", label: "All requesters" },
+              ...(currentUserState === "ready" && currentUserId
+                ? [{ value: "me", label: "Me" }]
+                : []),
+              { value: "none", label: "Unattributed" },
+              ...(users ?? []).map((u) => ({
+                value: u.id,
+                label: u.name?.trim() || u.email?.trim() || u.id,
+                hint: u.role,
+              })),
+            ]}
+          />
+        )}
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
           <Switch
             size="sm"

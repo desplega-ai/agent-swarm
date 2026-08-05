@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import crypto from "node:crypto";
 import { unlinkSync } from "node:fs";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   cancelTask,
   closeDb,
@@ -7,6 +9,7 @@ import {
   createAgent,
   createTaskExtended,
   failTask,
+  getAgentById,
   getDb,
   getLeadAgent,
   getLogsByTaskId,
@@ -15,6 +18,8 @@ import {
   startTask,
 } from "../be/db";
 import { createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
+import { registerStoreProgressTool } from "../tools/store-progress";
+import { workflowEventBus } from "../workflows/event-bus";
 
 const TEST_DB_PATH = "./test-task-completion-idempotency.sqlite";
 
@@ -43,7 +48,7 @@ describe("completeTask idempotency", () => {
     });
 
     const task = createTaskExtended("Task A", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
 
     const first = completeTask(task.id, "first output");
     expect(first).not.toBeNull();
@@ -72,7 +77,7 @@ describe("completeTask idempotency", () => {
     });
 
     const task = createTaskExtended("Task B", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
 
     completeTask(task.id, "done");
     const logsAfterFirst = getLogsByTaskId(task.id);
@@ -99,7 +104,7 @@ describe("completeTask idempotency", () => {
     });
 
     const task = createTaskExtended("Task C", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     failTask(task.id, "boom");
 
     const result = completeTask(task.id, "trying to complete a failed task");
@@ -120,7 +125,7 @@ describe("completeTask idempotency", () => {
     });
 
     const task = createTaskExtended("Task D", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     cancelTask(task.id, "user cancelled");
 
     const result = completeTask(task.id, "trying to complete a cancelled task");
@@ -146,7 +151,7 @@ describe("failTask idempotency", () => {
     });
 
     const task = createTaskExtended("Fail Task A", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
 
     const first = failTask(task.id, "original reason");
     expect(first).not.toBeNull();
@@ -173,7 +178,7 @@ describe("failTask idempotency", () => {
     });
 
     const task = createTaskExtended("Fail Task B", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
 
     failTask(task.id, "boom");
     const logsAfterFirst = getLogsByTaskId(task.id);
@@ -199,7 +204,7 @@ describe("failTask idempotency", () => {
     });
 
     const task = createTaskExtended("Fail Task C", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     completeTask(task.id, "all good");
 
     const result = failTask(task.id, "now fail it");
@@ -219,7 +224,7 @@ describe("failTask idempotency", () => {
     });
 
     const task = createTaskExtended("Fail Task D", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     cancelTask(task.id, "user cancelled");
 
     const result = failTask(task.id, "now fail it");
@@ -251,7 +256,7 @@ describe("store-progress idempotency on terminal status (integration via DB laye
     });
 
     const task = createTaskExtended("SP Task A", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     completeTask(task.id, "first output");
 
     // Snapshot the row state
@@ -281,7 +286,7 @@ describe("store-progress idempotency on terminal status (integration via DB laye
     });
 
     const task = createTaskExtended("SP Task B", { agentId: agent.id });
-    startTask(task.id, agent.id);
+    startTask(task.id);
     failTask(task.id, "first reason");
 
     const snapshot = getTaskById(task.id);
@@ -342,6 +347,280 @@ function listFollowUpTasks(parentTaskId: string): FollowUpRow[] {
     )
     .all(parentTaskId);
 }
+
+type StoreProgressResult = {
+  structuredContent: {
+    success: boolean;
+    message: string;
+    task?: { id: string; status: string; finishedAt?: string };
+    wasNoOp?: boolean;
+    wasForcedOverwrite?: boolean;
+  };
+};
+
+type RegisteredTool = {
+  handler: (args: unknown, extra: unknown) => Promise<unknown>;
+};
+
+function buildStoreProgressHandler(): RegisteredTool {
+  const server = new McpServer({ name: "store-progress-idempotency-test", version: "1.0.0" });
+  registerStoreProgressTool(server);
+  const registered = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })
+    ._registeredTools;
+  const tool = registered["store-progress"];
+  if (!tool) throw new Error("store-progress tool not registered");
+  return tool;
+}
+
+function storeProgressMeta(agentId: string) {
+  return {
+    sessionId: `session-${crypto.randomUUID()}`,
+    requestInfo: { headers: { "x-agent-id": agentId } },
+  };
+}
+
+function countTaskCompletionMemories(taskId: string): number {
+  return getDb()
+    .prepare<{ count: number }, [string]>(
+      "SELECT COUNT(*) AS count FROM agent_memory WHERE sourceTaskId = ?",
+    )
+    .get(taskId)!.count;
+}
+
+describe("store-progress terminal result reporting", () => {
+  test("identical and content-free retries remain benign no-ops", async () => {
+    const agent = createAgent({
+      name: "terminal-handler-identical",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const task = createTaskExtended("terminal identical retry", { agentId: agent.id });
+    startTask(task.id);
+    const completed = completeTask(task.id, "stable output");
+    const handler = buildStoreProgressHandler();
+
+    for (const args of [
+      { taskId: task.id, status: "completed", output: "stable output" },
+      { taskId: task.id, status: "completed" },
+    ]) {
+      const result = (await handler.handler(
+        args,
+        storeProgressMeta(agent.id),
+      )) as StoreProgressResult;
+      expect(result.structuredContent.success).toBe(true);
+      expect(result.structuredContent.wasNoOp).toBe(true);
+      expect(result.structuredContent.wasForcedOverwrite).toBeUndefined();
+    }
+
+    const fresh = getTaskById(task.id);
+    expect(fresh!.output).toBe("stable output");
+    expect(fresh!.finishedAt).toBe(completed!.finishedAt);
+  });
+
+  test("differing terminal text is refused honestly without force", async () => {
+    const agent = createAgent({
+      name: "terminal-handler-refusal",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const task = createTaskExtended("terminal differing retry", { agentId: agent.id });
+    startTask(task.id);
+    const completed = completeTask(task.id, "first output")!;
+    const before = getTaskById(task.id)!;
+
+    const result = (await buildStoreProgressHandler().handler(
+      { taskId: task.id, status: "completed", output: "discard me" },
+      storeProgressMeta(agent.id),
+    )) as StoreProgressResult;
+
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("Discarded write");
+    expect(result.structuredContent.message).toContain("force: true");
+    expect(result.structuredContent.wasNoOp).toBeUndefined();
+    const fresh = getTaskById(task.id)!;
+    expect(fresh.output).toBe("first output");
+    expect(fresh.status).toBe("completed");
+    expect(fresh.finishedAt).toBe(completed.finishedAt);
+    expect(fresh.lastUpdatedAt).toBe(before.lastUpdatedAt);
+  });
+
+  test("force overwrites only explicit terminal text and replays no side effects", async () => {
+    getLeadAgent() ??
+      createAgent({
+        name: "terminal-force-lead",
+        isLead: true,
+        status: "idle",
+        capabilities: [],
+      });
+    const agent = createAgent({
+      name: "terminal-handler-force",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const task = createTaskExtended("terminal forced overwrite", { agentId: agent.id });
+    startTask(task.id);
+    completeTask(task.id, "first output");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const before = getTaskById(task.id)!;
+    const logsBefore = getLogsByTaskId(task.id).length;
+    const memoriesBefore = countTaskCompletionMemories(task.id);
+    const followUpsBefore = listFollowUpTasks(task.id).length;
+    const agentStatusBefore = getAgentById(agent.id)!.status;
+    let terminalEvents = 0;
+    const onTerminalEvent = () => {
+      terminalEvents += 1;
+    };
+    workflowEventBus.on("task.completed", onTerminalEvent);
+    workflowEventBus.on("task.failed", onTerminalEvent);
+
+    try {
+      const result = (await buildStoreProgressHandler().handler(
+        {
+          taskId: task.id,
+          status: "completed",
+          output: "corrected output",
+          failureReason: "corrected reason",
+          force: true,
+        },
+        storeProgressMeta(agent.id),
+      )) as StoreProgressResult;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(result.structuredContent.success).toBe(true);
+      expect(result.structuredContent.wasForcedOverwrite).toBe(true);
+      expect(result.structuredContent.wasNoOp).toBeUndefined();
+      const fresh = getTaskById(task.id)!;
+      expect(fresh.output).toBe("corrected output");
+      expect(fresh.failureReason).toBe("corrected reason");
+      expect(fresh.status).toBe(before.status);
+      expect(fresh.finishedAt).toBe(before.finishedAt);
+      expect(fresh.lastUpdatedAt).toBe(before.lastUpdatedAt);
+      expect(getLogsByTaskId(task.id)).toHaveLength(logsBefore);
+      expect(countTaskCompletionMemories(task.id)).toBe(memoriesBefore);
+      expect(listFollowUpTasks(task.id)).toHaveLength(followUpsBefore);
+      expect(getAgentById(agent.id)!.status).toBe(agentStatusBefore);
+      expect(terminalEvents).toBe(0);
+
+      const forceWithoutStatus = (await buildStoreProgressHandler().handler(
+        { taskId: task.id, failureReason: "second correction", force: true },
+        storeProgressMeta(agent.id),
+      )) as StoreProgressResult;
+      expect(forceWithoutStatus.structuredContent.success).toBe(true);
+      expect(forceWithoutStatus.structuredContent.wasForcedOverwrite).toBe(true);
+      expect(getTaskById(task.id)!.failureReason).toBe("second correction");
+      expect(getTaskById(task.id)!.finishedAt).toBe(before.finishedAt);
+      expect(getLogsByTaskId(task.id)).toHaveLength(logsBefore);
+      expect(countTaskCompletionMemories(task.id)).toBe(memoriesBefore);
+      expect(listFollowUpTasks(task.id)).toHaveLength(followUpsBefore);
+      expect(terminalEvents).toBe(0);
+    } finally {
+      workflowEventBus.off("task.completed", onTerminalEvent);
+      workflowEventBus.off("task.failed", onTerminalEvent);
+    }
+  });
+
+  test("force preserves outputSchema validation before overwriting terminal output", async () => {
+    const agent = createAgent({
+      name: "terminal-handler-output-schema",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const task = createTaskExtended("terminal structured output", {
+      agentId: agent.id,
+      outputSchema: {
+        type: "object",
+        properties: { value: { type: "string" } },
+        required: ["value"],
+        additionalProperties: false,
+      },
+    });
+    startTask(task.id);
+    const originalOutput = JSON.stringify({ value: "first" });
+    const completed = completeTask(task.id, originalOutput)!;
+    const handler = buildStoreProgressHandler();
+
+    const invalid = (await handler.handler(
+      { taskId: task.id, output: "not json", force: true },
+      storeProgressMeta(agent.id),
+    )) as StoreProgressResult;
+    expect(invalid.structuredContent.success).toBe(false);
+    expect(invalid.structuredContent.message).toContain("must be valid JSON");
+    expect(getTaskById(task.id)!.output).toBe(originalOutput);
+    expect(getTaskById(task.id)!.finishedAt).toBe(completed.finishedAt);
+
+    const correctedOutput = JSON.stringify({ value: "corrected" });
+    const valid = (await handler.handler(
+      { taskId: task.id, output: correctedOutput, force: true },
+      storeProgressMeta(agent.id),
+    )) as StoreProgressResult;
+    expect(valid.structuredContent.success).toBe(true);
+    expect(valid.structuredContent.wasForcedOverwrite).toBe(true);
+    expect(getTaskById(task.id)!.output).toBe(correctedOutput);
+    expect(getTaskById(task.id)!.finishedAt).toBe(completed.finishedAt);
+  });
+
+  test("an identical retry still blocks duplicate events, memory, and follow-ups", async () => {
+    getLeadAgent() ??
+      createAgent({
+        name: "terminal-race-lead",
+        isLead: true,
+        status: "idle",
+        capabilities: [],
+      });
+    const agent = createAgent({
+      name: "terminal-handler-race",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const task = createTaskExtended("terminal race guard", {
+      agentId: agent.id,
+      taskType: "heartbeat",
+    });
+    startTask(task.id);
+    let completedEvents = 0;
+    const onCompleted = () => {
+      completedEvents += 1;
+    };
+    workflowEventBus.on("task.completed", onCompleted);
+
+    try {
+      const handler = buildStoreProgressHandler();
+      const args = { taskId: task.id, status: "completed", output: "one result" };
+      const first = (await handler.handler(
+        args,
+        storeProgressMeta(agent.id),
+      )) as StoreProgressResult;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(first.structuredContent.success).toBe(true);
+      const logsAfterFirst = getLogsByTaskId(task.id).length;
+      const memoriesAfterFirst = countTaskCompletionMemories(task.id);
+      const followUpsAfterFirst = listFollowUpTasks(task.id).length;
+      const eventsAfterFirst = completedEvents;
+
+      const second = (await handler.handler(
+        args,
+        storeProgressMeta(agent.id),
+      )) as StoreProgressResult;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(second.structuredContent.success).toBe(true);
+      expect(second.structuredContent.wasNoOp).toBe(true);
+      expect(getLogsByTaskId(task.id)).toHaveLength(logsAfterFirst);
+      expect(countTaskCompletionMemories(task.id)).toBe(memoriesAfterFirst);
+      expect(listFollowUpTasks(task.id)).toHaveLength(followUpsAfterFirst);
+      expect(completedEvents).toBe(eventsAfterFirst);
+      expect(followUpsAfterFirst).toBe(1);
+      expect(eventsAfterFirst).toBe(1);
+    } finally {
+      workflowEventBus.off("task.completed", onCompleted);
+    }
+  });
+});
 
 describe("worker task follow-up creation", () => {
   test("creates lead follow-up for completed worker task", () => {

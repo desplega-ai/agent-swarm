@@ -154,6 +154,8 @@ export {
   useInstallRemoteSkill,
   useInstallSkill,
   useSkill,
+  useSkillFile,
+  useSkillFiles,
   useSkills,
   useSyncRemoteSkills,
   useUninstallSkill,

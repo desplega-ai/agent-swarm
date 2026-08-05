@@ -1,0 +1,18 @@
+{
+  "category": "skills",
+  "description": "Plan implementation skill. Executes approved technical plans phase by phase with verification checkpoints.",
+  "displayName": "Implementing",
+  "kind": "skill",
+  "name": "implementing",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "implementing",
+  "systemDefault": true,
+  "tags": [
+    "implementation",
+    "planning",
+    "workflow"
+  ],
+  "title": "Implementing",
+  "version": "1.0.0"
+}

@@ -6,16 +6,19 @@ import {
   getStuckWorkflowRuns,
   getWorkflow,
   getWorkflowRun,
+  getWorkflowRunStep,
   resolveApprovalRequest,
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
 import { checkpointStep } from "./checkpoint";
+import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
 import { getSuccessors } from "./definition";
 import { findReadyNodes, walkGraph } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
 import { getSecretInputKeys } from "./input";
 import { finalizeOrWait, resumeWaitState } from "./resume";
+import { completeTaskStepAndResolveSuccessors } from "./task-step-routing";
 
 /**
  * Recover incomplete workflow runs on server startup.
@@ -111,29 +114,11 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
     try {
       const run = getWorkflowRun(stuck.runId);
       const workflow = getWorkflow(stuck.workflowId);
-      if (!run || !workflow) continue;
+      if (!run || run.status !== "waiting" || !workflow) continue;
 
-      if (stuck.taskStatus === "completed") {
-        // Task finished while we were down — checkpoint and resume
-        const ctx = (run.context ?? {}) as Record<string, unknown>;
-        const stepOutput = { taskId: stuck.stepId, taskOutput: stuck.taskOutput };
-
-        checkpointStep(stuck.runId, stuck.stepId, stuck.nodeId, { output: stepOutput }, ctx);
-        updateWorkflowRun(stuck.runId, { status: "running" });
-
-        const successors = getSuccessors(workflow.definition, stuck.nodeId, "default");
-        const secretKeys = getSecretInputKeys(workflow.input);
-        await walkGraph(
-          workflow.definition,
-          stuck.runId,
-          ctx,
-          successors,
-          registry,
-          workflow.id,
-          secretKeys,
-        );
-      } else {
-        // Task failed or cancelled — mark run failed
+      const taskCompleted = stuck.taskStatus === "completed";
+      if (!taskCompleted && (workflow.definition.onNodeFailure ?? "fail") === "fail") {
+        // Preserve the fail-fast recovery policy for failed/cancelled tasks.
         const reason =
           stuck.taskStatus === "failed" ? "Task failed (recovered)" : "Task cancelled (recovered)";
         const now = new Date().toISOString();
@@ -147,6 +132,45 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
           error: reason,
           finishedAt: now,
         });
+        recovered++;
+        continue;
+      }
+
+      const ctx = (run.context ?? {}) as Record<string, unknown>;
+      const reason =
+        stuck.taskStatus === "failed" ? "Task failed (recovered)" : "Task cancelled (recovered)";
+      const stepOutput = {
+        taskId: stuck.taskId,
+        taskOutput: taskCompleted
+          ? parseRecoveredTaskOutput(stuck.taskOutput)
+          : `${FAILED_TASK_OUTPUT_PREFIX} ${reason}] This node failed or was cancelled.`,
+      };
+      const step = getWorkflowRunStep(stuck.stepId);
+      if (!step) continue;
+      const routing = completeTaskStepAndResolveSuccessors(
+        workflow.definition,
+        stuck.runId,
+        step,
+        stepOutput,
+        ctx,
+        taskCompleted ? undefined : reason,
+      );
+      if (routing.foreachChild && !routing.joined) {
+        // The parent remains waiting until another child closes the join.
+        finalizeOrWait(stuck.runId);
+      } else {
+        // Always walk normal-task successors, even when empty, so walkGraph's
+        // finalization tail persists context and partial/retry failure state.
+        const secretKeys = getSecretInputKeys(workflow.input);
+        await walkGraph(
+          workflow.definition,
+          stuck.runId,
+          ctx,
+          routing.successors,
+          registry,
+          workflow.id,
+          secretKeys,
+        );
       }
       recovered++;
     } catch (err) {
@@ -155,6 +179,17 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
   }
 
   return recovered;
+}
+
+function parseRecoveredTaskOutput(output: string | null): unknown {
+  // Keep recovery output parsing aligned with the live task-completion path.
+  if (output === null) return null;
+  try {
+    const parsed = JSON.parse(output);
+    return typeof parsed === "object" && parsed !== null ? parsed : output;
+  } catch {
+    return output;
+  }
 }
 
 /**

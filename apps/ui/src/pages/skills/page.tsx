@@ -1,5 +1,5 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
-import { RefreshCw, ShieldCheck } from "lucide-react";
+import { FolderTree, RefreshCw, ShieldCheck } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -80,7 +81,22 @@ export default function SkillsPage() {
         flex: 1,
         minWidth: 150,
         cellRenderer: (params: ICellRendererParams<Skill>) => (
-          <span className="font-medium">{params.value}</span>
+          <span className="inline-flex items-center gap-1.5 font-medium">
+            {params.value}
+            {params.data?.isComplex && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <FolderTree
+                    className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                    aria-label="Complex skill"
+                  />
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  Complex skill — ships bundled files alongside SKILL.md.
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </span>
         ),
       },
       {
