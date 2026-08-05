@@ -24,12 +24,12 @@ const SLIM_GATHER_RESULT = {
 
 function gatherHarness({
   configValue,
-  activity = { completedTasks: 1, failedTasks: 0 },
+  activity = { completedTasks: 1, failedTasks: 0 } as Record<string, number>,
   roster = [],
   compoundProvenance = ["hash-seeded", "hash-seeded"] as [unknown, unknown] | null,
 }: {
   configValue?: string;
-  activity?: { completedTasks: number; failedTasks: number };
+  activity?: Record<string, number>;
   roster?: Array<Record<string, unknown>>;
   compoundProvenance?: [unknown, unknown] | null;
 } = {}) {
@@ -140,6 +140,28 @@ describe("dream-gather gates", () => {
     expect(harness.calls).toContain("compound_insights");
   });
 
+  test("a stale in-progress task alone counts as activity", async () => {
+    // The retired daily-blocker-digest is absorbed into Dreaming, so an otherwise
+    // silent day whose only signal is stuck work must still reach the blocker
+    // query — counting completed/failed only would short-circuit to no-activity
+    // and nobody would ever hear about the stuck task.
+    const harness = gatherHarness({
+      activity: { completedTasks: 0, failedTasks: 0, stuckTasks: 1 },
+      roster: [{ id: "lead-1", name: "Lead", isLead: 1 }],
+    });
+
+    const result = await dreamGather({ preflightOnly: true }, harness.ctx);
+    expect(result).toMatchObject({ enabled: true, hasActivity: true, leadAgentId: "lead-1" });
+
+    // The gate's staleness predicate must match the blockers query's, or the two
+    // disagree about what "stuck" means.
+    const activityQuery = harness.queries.find((query) => query.sql.includes("AS stuckTasks"))!;
+    expect(activityQuery.sql).toContain("t.status = 'in_progress'");
+    expect(activityQuery.sql).toContain(
+      "julianday(t.lastUpdatedAt) < julianday('now', '-2 hours')",
+    );
+  });
+
   test("no activity returns the exact slim shape before roster or expensive reads", async () => {
     const harness = gatherHarness({
       activity: { completedTasks: 0, failedTasks: 0 },
@@ -161,7 +183,7 @@ describe("dream-gather gates", () => {
     // Dream's own reflection/critique tasks carry the run id; excluding them is what keeps
     // a quiet swarm quiet instead of re-arming the gate off last night's dream.
     expect(activityQuery!.sql).toContain("t.workflowRunId NOT IN");
-    expect(activityQuery!.params).toEqual(["-1 days", "dream", "-1 days", "dream"]);
+    expect(activityQuery!.params).toEqual(["-1 days", "dream", "-1 days", "dream", "dream"]);
     // Memory writes are unattributable (inject_learning records no provenance) and the
     // receipt writes one every run, so they are deliberately not part of the signal.
     expect(activityQuery!.sql).not.toContain("agent_memory");
@@ -170,7 +192,7 @@ describe("dream-gather gates", () => {
     await dreamGather({ preflightOnly: true, selfWorkflowName: "nightly-dream" }, renamed.ctx);
     expect(
       renamed.queries.find((query) => query.sql.includes("AS completedTasks"))!.params,
-    ).toEqual(["-1 days", "nightly-dream", "-1 days", "nightly-dream"]);
+    ).toEqual(["-1 days", "nightly-dream", "-1 days", "nightly-dream", "nightly-dream"]);
 
     // With the workflow's own runId available (the seeded workflow passes it),
     // exclusion pivots to the durable workflow ID — an operator renaming the
@@ -181,7 +203,7 @@ describe("dream-gather gates", () => {
     const byIdQuery = byId.queries.find((query) => query.sql.includes("AS completedTasks"))!;
     expect(byIdQuery.sql).toContain("SELECT workflowId FROM workflow_runs WHERE id = ?");
     expect(byIdQuery.sql).not.toContain("w.name = ?");
-    expect(byIdQuery.params).toEqual(["-1 days", "run-42", "-1 days", "run-42"]);
+    expect(byIdQuery.params).toEqual(["-1 days", "run-42", "-1 days", "run-42", "run-42"]);
   });
 
   test("a non-pristine compound-insights is never dispatched under the Lead identity", async () => {
@@ -1199,6 +1221,35 @@ describe("dream-apply batches", () => {
       expect(memories).toHaveLength(0);
       expect(slackPosts).toHaveLength(1);
     }
+  });
+
+  test("the agent slice excludes Dreaming's own tasks when given the run id", async () => {
+    // The reflection prompt says to use ONLY this slice, so the add-on's own
+    // reflection/critique tasks must not become evidence an agent reflects on.
+    const queries: Array<{ sql: string; params: unknown[] }> = [];
+    const ctx = {
+      swarm: {
+        async db_query({ sql, params }: { sql: string; params: unknown[] }) {
+          queries.push({ sql, params });
+          return { success: true, columns: [], rows: [] };
+        },
+      },
+    };
+
+    await dreamAgentSlice({ agentId: "agent-1", runId: "run-77" }, ctx);
+    const tasksQuery = queries.find((query) => query.sql.includes("FROM agent_tasks"))!;
+    expect(tasksQuery.sql).toContain("t.workflowRunId NOT IN");
+    // Excluded by durable workflow ID — every run of the dream workflow, not just
+    // this one, so last night's bookkeeping is filtered too.
+    expect(tasksQuery.sql).toContain("SELECT workflowId FROM workflow_runs WHERE id = ?");
+    expect(tasksQuery.params).toEqual(["agent-1", "-1 days", "run-77"]);
+
+    // Without a runId there is nothing to exclude by, and the slice stays valid.
+    queries.length = 0;
+    await dreamAgentSlice({ agentId: "agent-1" }, ctx);
+    const noRun = queries.find((query) => query.sql.includes("FROM agent_tasks"))!;
+    expect(noRun.sql).not.toContain("t.workflowRunId NOT IN");
+    expect(noRun.params).toEqual(["agent-1", "-1 days"]);
   });
 
   test("the agent slice fails loud when an evidence query fails", async () => {

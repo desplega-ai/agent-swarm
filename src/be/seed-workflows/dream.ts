@@ -82,7 +82,7 @@ export const DREAM_WORKFLOW_DEFINITION: WorkflowDefinition = {
       id: "reflect",
       type: "foreach",
       label: "Agent reflections",
-      inputs: { agents: "gather-rich.result.agents" },
+      inputs: { agents: "gather-rich.result.agents", runId: "run.id" },
       config: {
         over: "{{agents}}",
         itemKey: "id",
@@ -92,7 +92,8 @@ export const DREAM_WORKFLOW_DEFINITION: WorkflowDefinition = {
             agentId: "{{item.id}}",
             template:
               "Run the `dreaming` skill for yourself. Call the global `dream-agent-slice` script with " +
-              '`{"agentId":"{{item.id}}","days":1}` and use only that evidence. Return one JSON ' +
+              '`{"agentId":"{{item.id}}","days":1,"runId":"{{runId}}"}` and use only that evidence. ' +
+              "Return one JSON " +
               `ReflectionDelta set such as ${EMPTY_DELTA_SET_EXAMPLE} containing only evidence-backed ` +
               "improvements (an empty deltas array is valid on a quiet day). Quote any profile H2 " +
               "anchor exactly; do not invent evidence or an anchor.",

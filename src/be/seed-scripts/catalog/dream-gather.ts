@@ -189,14 +189,25 @@ export default async function dreamGather(args: any, ctx: any) {
              WHERE t.status = 'failed'
                AND julianday(t.lastUpdatedAt) > julianday('now', ?)
                AND (t.workflowRunId IS NULL OR t.workflowRunId NOT IN (
-                 ${selfRunsSubquery}))) AS failedTasks`,
-    params: [windowModifier, selfParam, windowModifier, selfParam],
+                 ${selfRunsSubquery}))) AS failedTasks,
+            (SELECT count(*) FROM agent_tasks t
+             WHERE t.status = 'in_progress'
+               AND julianday(t.lastUpdatedAt) < julianday('now', '-2 hours')
+               AND (t.workflowRunId IS NULL OR t.workflowRunId NOT IN (
+                 ${selfRunsSubquery}))) AS stuckTasks`,
+    params: [windowModifier, selfParam, windowModifier, selfParam, selfParam],
   });
   assertSucceeded(activityResponse, "Dreaming activity query");
   const activity = rowsToObjects(activityResponse)[0] ?? {};
+  // A stale in_progress task is the ONLY signal on an otherwise silent day, and
+  // it is exactly what the retired daily-blocker-digest existed to report — now
+  // absorbed into this add-on. Counting only completed/failed would short-circuit
+  // to "no-activity" and the blocker query that finds stuck work would never run.
+  // Predicate mirrors the blockers query below so the gate and the list agree.
   const activityCounts = {
     completedTasks: Number(activity.completedTasks) || 0,
     failedTasks: Number(activity.failedTasks) || 0,
+    stuckTasks: Number(activity.stuckTasks) || 0,
   };
   if (!Object.values(activityCounts).some((count) => count > 0)) {
     return slimGatherResult("no-activity");

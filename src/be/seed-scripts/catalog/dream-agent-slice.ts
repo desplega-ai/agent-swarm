@@ -4,6 +4,12 @@ import { getH2Anchors } from "../dream-schemas";
 export const argsSchema = z.object({
   agentId: z.string().min(1).describe("Agent ID to reflect on"),
   days: z.number().int().positive().optional().describe("Lookback window in days (default 1)"),
+  runId: z
+    .string()
+    .optional()
+    .describe(
+      "This dream run's workflow-run ID — excludes Dreaming's own tasks from the slice so reflection never reasons over the add-on's bookkeeping",
+    ),
 });
 
 function rowsToObjects(response: any): any[] {
@@ -36,6 +42,18 @@ export default async function dreamAgentSlice(args: any, ctx: any) {
   const query = (sql: string, params: unknown[] = [agentId, windowModifier]) =>
     ctx.swarm.db_query({ sql, params }).then(rowsToObjects);
 
+  // The reflection prompt says to use ONLY this slice as evidence, so Dreaming's
+  // own reflection/critique tasks must not appear in it — otherwise a quiet agent
+  // reflects on last night's bookkeeping and proposes changes from it. Excluded by
+  // durable workflow ID (every run of the dream workflow, not just this one), the
+  // same identity dream-gather's activity gate uses.
+  const runId = parsed.data.runId;
+  const excludeSelfRuns = runId
+    ? `AND (t.workflowRunId IS NULL OR t.workflowRunId NOT IN (
+         SELECT r.id FROM workflow_runs r
+         WHERE r.workflowId = (SELECT workflowId FROM workflow_runs WHERE id = ?)))`
+    : "";
+
   // julianday() on BOTH operands: stored timestamps are ISO ("...T12:00:00Z")
   // while datetime('now', ?) renders space-separated — lexicographic comparison
   // of the two formats sorts 'T' after ' ' and silently widens the window.
@@ -46,7 +64,9 @@ export default async function dreamAgentSlice(args: any, ctx: any) {
        FROM agent_tasks t
        LEFT JOIN workflow_run_steps wrs ON wrs.id = t.workflowRunStepId
        WHERE t.agentId = ? AND julianday(t.createdAt) > julianday('now', ?)
+             ${excludeSelfRuns}
        ORDER BY t.createdAt DESC LIMIT 40`,
+      [agentId, windowModifier, ...(runId ? [runId] : [])],
     ),
     query(
       `SELECT json_extract(data, '$.toolName') AS tool, count(*) AS calls
