@@ -805,7 +805,22 @@ describe("dream-apply batches", () => {
     // absent, and an unresolved {{hygieneReview}} arg interpolates to "". The
     // target was available but nobody reviewed it — consuming it would skip an
     // unreviewed PR until the cursor wrapped all the way around.
-    for (const hygieneReview of ["", "   ", undefined, {}, []]) {
+    // "" is the unresolved-input case; the [FAILED: …] sentinel is what the
+    // engine actually checkpoints for a failed/cancelled lane under
+    // onNodeFailure "continue" (src/workflows/resume.ts, recovery.ts) — a
+    // non-empty string, so emptiness alone would have missed the very case
+    // this gate exists for. Prose and non-delta-set JSON are unreviewed too.
+    for (const hygieneReview of [
+      "",
+      "   ",
+      undefined,
+      {},
+      "[FAILED: Task failed (recovered)] This node failed or was cancelled.",
+      "[FAILED: Task cancelled (recovered)] This node failed or was cancelled.",
+      "I could not review the pull request.",
+      { error: "lane crashed" },
+      42,
+    ]) {
       const result = await dreamApply(
         { deltas: [], runId: `run-unreviewed-${String(hygieneReview)}`, rotation, hygieneReview },
         ctx,
@@ -816,6 +831,21 @@ describe("dream-apply batches", () => {
         reason: "hygiene lane produced no review — rotation target left for the next dream",
       });
     }
+
+    // A real review consumes the target, including the quiet-day empty set,
+    // whether the lane's output arrives parsed or as a JSON string.
+    for (const [index, hygieneReview] of [
+      { deltas: [] },
+      JSON.stringify({ deltas: [] }),
+      [],
+    ].entries()) {
+      const result = await dreamApply(
+        { deltas: [], runId: `run-reviewed-${index}`, rotation, hygieneReview },
+        ctx,
+      );
+      expect(result.rotationCursor).toEqual({ advanced: true });
+    }
+    expect(increments).toHaveLength(3);
   });
 
   test("a hygiene delta that already advanced the cursor suppresses the run-level advance", async () => {

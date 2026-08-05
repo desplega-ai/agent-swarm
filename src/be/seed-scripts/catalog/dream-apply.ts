@@ -39,17 +39,33 @@ export const argsSchema = z.object({
 /**
  * Whether the hygiene lane produced a review this run.
  *
- * A failed lane still lets critique and apply run (onNodeFailure "continue"),
- * and its unresolved `{{hygieneReview}}` arg interpolates to `""` — so an empty
- * value means "not reviewed", and consuming the rotation target on it would skip
- * an unreviewed pull request until the cursor wrapped all the way around.
+ * Non-emptiness is NOT the test. Under `onNodeFailure: "continue"` a failed or
+ * cancelled lane is checkpointed with a non-empty sentinel output
+ * (`"[FAILED: …] This node failed or was cancelled."` — see
+ * `src/workflows/resume.ts` and `recovery.ts`), and an unresolved input
+ * interpolates to `""`. So this asks for POSITIVE evidence instead: the lane was
+ * asked for an ApprovedDeltaSet, and only a value actually shaped like one counts
+ * as a review. A quiet day still qualifies — that is `{"deltas": []}`.
+ *
+ * Deliberately conservative in one direction: an output this fails to recognize
+ * only holds the rotation cursor for a day, whereas a false "reviewed" skips a
+ * pull request nobody looked at until the cursor wraps all the way around.
  */
 function hygieneLaneReviewed(value: unknown): boolean {
-  if (value === undefined || value === null) return false;
-  if (typeof value === "string") return value.trim().length > 0;
-  if (Array.isArray(value)) return value.length > 0;
-  if (typeof value === "object") return Object.keys(value as object).length > 0;
-  return true;
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text.length === 0) return false;
+    try {
+      return hygieneLaneReviewed(JSON.parse(text));
+    } catch {
+      return false;
+    }
+  }
+  if (Array.isArray(value)) return true;
+  if (typeof value === "object" && value !== null) {
+    return Array.isArray((value as Record<string, unknown>).deltas);
+  }
+  return false;
 }
 
 const IDEMPOTENCY_NAMESPACE = "dreaming";
