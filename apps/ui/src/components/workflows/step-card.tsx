@@ -76,6 +76,17 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
     // matching the graph's classification and the group's ok/failed chip.
     const displayStatus = itemKey ? effectiveChildStatus(step) : step.status;
 
+    // Foreach children carry their zero-based iteration in step.input — badge them as
+    // `foreach #<iteration>` instead of the (always agent-task) executor type.
+    const iteration =
+      itemKey && typeof step.input === "object" && step.input !== null
+        ? (step.input as Record<string, unknown>).index
+        : undefined;
+    const typeBadge =
+      itemKey != null
+        ? `foreach ${typeof iteration === "number" ? `#${iteration}` : "item"}`
+        : step.nodeType;
+
     return (
       <div
         ref={ref}
@@ -102,7 +113,7 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
           )}
 
           <Badge variant="outline" size="tag" className="shrink-0">
-            {step.nodeType}
+            {typeBadge}
           </Badge>
 
           {step.nextPort && step.nextPort !== "default" && (
