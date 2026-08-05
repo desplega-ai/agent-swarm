@@ -165,10 +165,25 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
         fi
     fi
 
-    # Auth path 1: Seed slot 0 from swarm config store at boot (backwards-compat).
-    # Tries codex_oauth_0 first (post-migration 071), then legacy codex_oauth key.
-    # Runner handles per-task materialization for multi-slot pools; this is only a
-    # boot-time seed so the credential-wait loop sees auth.json on fresh containers.
+    # Auth path 1: Seed slot 0 from swarm config store at boot (backwards-compat),
+    # falling back to a plain CODEX_OAUTH container env var when the config
+    # store has nothing. Tries codex_oauth_0 first (post-migration 071), then
+    # legacy codex_oauth key, then $CODEX_OAUTH. Runner handles per-task
+    # materialization for multi-slot pools; this is only a boot-time seed so
+    # the credential-wait loop sees auth.json on fresh containers.
+    #
+    # `checkCodexCredentials` (codex-adapter.ts) treats a bare CODEX_OAUTH env
+    # var as `satisfiedBy: 'side-effect-pending'` — i.e. it trusts THIS block
+    # to materialise ~/.codex/auth.json from it. Previously nothing did: this
+    # block only ever queried the config store, so a container-only
+    # CODEX_OAUTH was never written to disk and every task auth-errored
+    # (issue #1102 bug 1, repro 2). Resolving into a *different* local
+    # variable (not reusing the `CODEX_OAUTH` name) also fixes a second,
+    # compounding bug: the old code did `CODEX_OAUTH=$(curl ... )`, which
+    # clobbered the container-provided $CODEX_OAUTH with an empty string
+    # whenever the config store had no row — destroying the very env var the
+    # boot gate said was present, which is why the boot loop kept reporting
+    # it "missing" despite it genuinely being set and valid.
     #
     # The refresh token is deliberately blanked below (matching the
     # runner/adapter pool auth.json — see credentialsToAuthJson in
@@ -177,20 +192,27 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
     # run against it before the runner's first per-task overwrite
     # (credential-wait probes, manual runs, crash loops) would self-refresh
     # outside the /api/oauth/refresh-locks lock — an unlocked rotation that
-    # can revoke the whole token family.
+    # can revoke the whole token family. A container-provided CODEX_OAUTH is
+    # single-slot/non-pool, so this is a one-time seed same as the
+    # config-store path — the runner never refreshes it back to a
+    # `codex_oauth_<n>` config-store slot.
     if [ ! -f "$WORKER_CODEX_HOME/auth.json" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
-        CODEX_OAUTH=$(curl -sf -H "Authorization: Bearer ${API_KEY}" \
+        CODEX_OAUTH_SEED=$(curl -sf -H "Authorization: Bearer ${API_KEY}" \
             "${MCP_BASE_URL}/api/config/resolved?includeSecrets=true" \
             2>/dev/null | jq -r '
               (.configs[] | select(.key == "codex_oauth_0") | .value // empty),
               (.configs[] | select(.key == "codex_oauth") | .value // empty)
             ' 2>/dev/null | head -1)
-        if [ -n "$CODEX_OAUTH" ]; then
-            if ! echo "$CODEX_OAUTH" | jq '.' >/dev/null 2>&1; then
-                echo "Warning: codex_oauth from config store is not valid JSON, skipping" >&2
+        if [ -z "$CODEX_OAUTH_SEED" ] && [ -n "${CODEX_OAUTH:-}" ]; then
+            CODEX_OAUTH_SEED="$CODEX_OAUTH"
+            echo "[entrypoint] No codex_oauth_0/codex_oauth in config store; seeding from CODEX_OAUTH env var"
+        fi
+        if [ -n "$CODEX_OAUTH_SEED" ]; then
+            if ! echo "$CODEX_OAUTH_SEED" | jq '.' >/dev/null 2>&1; then
+                echo "Warning: codex_oauth source is not valid JSON, skipping" >&2
             else
                 mkdir -p "$WORKER_CODEX_HOME"
-                if ! echo "$CODEX_OAUTH" | jq '
+                if ! echo "$CODEX_OAUTH_SEED" | jq '
                     if .auth_mode == "chatgpt" then
                       .tokens.refresh_token = ""
                     elif (.access and .refresh and .accountId and .expires) then
@@ -209,12 +231,12 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
                       error("codex_oauth value is neither auth.json format nor flat credential format")
                     end
                 ' > "$WORKER_CODEX_HOME/auth.json"; then
-                    echo "Warning: codex_oauth from config store could not be converted to auth.json, skipping" >&2
+                    echo "Warning: codex_oauth source could not be converted to auth.json, skipping" >&2
                     rm -f "$WORKER_CODEX_HOME/auth.json"
                 else
                 chown worker:worker "$WORKER_CODEX_HOME/auth.json" 2>/dev/null || true
                 chmod 600 "$WORKER_CODEX_HOME/auth.json"
-                echo "[entrypoint] Seeded codex OAuth credentials from config store (slot 0)"
+                echo "[entrypoint] Seeded codex OAuth credentials (slot 0)"
                 fi
             fi
         fi
