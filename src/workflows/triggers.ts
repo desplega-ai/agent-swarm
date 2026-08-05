@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { getWorkflow, getWorkflowsByScheduleId } from "../be/db";
+import { getWorkflow, getWorkflowsByScheduleId, listWorkflows } from "../be/db";
 import type { ScheduledTask, TriggerConfig } from "../types";
 import { startWorkflowExecution } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
@@ -72,7 +72,18 @@ export function verifyWebhookRequest(
         500,
       );
     }
-    return;
+    // A bare `{type:"webhook"}` trigger (no hmacSecret, no verification) used
+    // to be accepted as "intentionally unauthenticated". That let anyone who
+    // learned the workflow UUID start a run with fully attacker-controlled
+    // trigger data — chained with trigger data flowing into workflow nodes,
+    // this is unauthenticated remote code execution (superagent.sh report
+    // c27edfd7, findings b132d7c5/4cedfead). Fail closed instead: every
+    // webhook trigger must configure `hmacSecret` (optionally with
+    // `verification`) before it will accept requests.
+    throw new WebhookError(
+      "Webhook trigger has no `hmacSecret` configured; unauthenticated webhook triggers are no longer accepted. Set `hmacSecret` (and optionally `verification`) on this trigger.",
+      401,
+    );
   }
 
   const secret = resolveHmacSecret(trigger.hmacSecret);
@@ -149,16 +160,12 @@ export async function handleWebhookTrigger(
   // Find webhook trigger in triggers[]
   const webhookTrigger = workflow.triggers.find((t: TriggerConfig) => t.type === "webhook");
 
-  // If the workflow has a webhook trigger with an hmacSecret or a verification format
-  // configured, verify against the RAW body bytes — re-serializing would change
-  // whitespace / key order and break HMAC formats. Also run when only `verification`
-  // is set (no `hmacSecret`) so that misconfiguration fails closed instead of being
-  // silently skipped.
-  if (
-    webhookTrigger &&
-    webhookTrigger.type === "webhook" &&
-    (webhookTrigger.hmacSecret || webhookTrigger.verification)
-  ) {
+  // Always verify when the workflow declares a webhook trigger — against the RAW
+  // body bytes, since re-serializing would change whitespace / key order and break
+  // HMAC formats. verifyWebhookRequest itself fails closed (throws) when the
+  // trigger has neither `hmacSecret` nor `verification` configured, so there is no
+  // conditional gate here to accidentally skip verification.
+  if (webhookTrigger && webhookTrigger.type === "webhook") {
     verifyWebhookRequest(
       webhookTrigger,
       typeof payload === "string" ? payload : JSON.stringify(payload),
@@ -189,6 +196,34 @@ function parseTriggerPayload(payload: unknown): unknown {
     return JSON.parse(payload);
   } catch {
     return payload;
+  }
+}
+
+/**
+ * Boot-time, non-blocking audit: log every enabled workflow whose webhook
+ * trigger has neither `hmacSecret` nor `verification` configured. These
+ * workflows now reject webhook calls outright (see `verifyWebhookRequest`)
+ * instead of silently accepting unauthenticated requests, so this surfaces
+ * which existing workflows need an operator to add `hmacSecret` before their
+ * webhook trigger works again. Never throws — a scan failure must not block
+ * server startup.
+ */
+export function warnUnprotectedWebhookTriggers(): void {
+  try {
+    const affected = listWorkflows({ enabled: true }).filter((workflow) =>
+      workflow.triggers.some(
+        (trigger) => trigger.type === "webhook" && !trigger.hmacSecret && !trigger.verification,
+      ),
+    );
+    if (affected.length === 0) return;
+    console.warn(
+      `[workflows] ${affected.length} enabled workflow(s) have a webhook trigger with no hmacSecret configured. ` +
+        "As of this release, unauthenticated webhook triggers are rejected (401) instead of silently accepted — " +
+        "add `hmacSecret` to these triggers to restore webhook delivery: " +
+        affected.map((workflow) => `${workflow.name} (${workflow.id})`).join(", "),
+    );
+  } catch (err) {
+    console.error("[workflows] Failed to scan for unprotected webhook triggers:", err);
   }
 }
 

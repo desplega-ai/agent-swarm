@@ -13,7 +13,11 @@ export {
 export { startRetryPoller, stopRetryPoller } from "./retry-poller";
 export { interpolate } from "./template";
 export { instantiateTemplate, validateTemplateVariables } from "./templates";
-export { handleScheduleTrigger, handleWebhookTrigger } from "./triggers";
+export {
+  handleScheduleTrigger,
+  handleWebhookTrigger,
+  warnUnprotectedWebhookTriggers,
+} from "./triggers";
 export { snapshotWorkflow } from "./version";
 export { startWaitPoller, stopWaitPoller } from "./wait-poller";
 
@@ -25,6 +29,7 @@ import { recoverIncompleteRuns } from "./recovery";
 import { initWaitBusSubscriptions, setupWorkflowResumeListener } from "./resume";
 import { startRetryPoller } from "./retry-poller";
 import { interpolate } from "./template";
+import { warnUnprotectedWebhookTriggers } from "./triggers";
 import { startWaitPoller } from "./wait-poller";
 
 // ─── Module-level singleton ────────────────────────────────
@@ -77,4 +82,8 @@ export function initWorkflows(): void {
   // 6. Initialize wait-bus subscriptions for event-mode waits (Phase 3).
   // Re-attaches one bus listener per distinct pending eventName from the DB.
   initWaitBusSubscriptions(_registry);
+
+  // 7. Log (non-blocking) which existing enabled workflows have an
+  // unprotected webhook trigger now that those are rejected at request time.
+  warnUnprotectedWebhookTriggers();
 }

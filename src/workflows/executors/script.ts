@@ -1,7 +1,11 @@
 import { z } from "zod";
 import { MAX_SCRIPT_WALL_CLOCK_MS } from "../../scripts-runtime/executors/types";
 import type { ExecutorMeta } from "../../types";
+import { buildSandboxedCommand, readStreamCapped } from "../../utils/sandboxed-process";
 import { BaseExecutor, type ExecutorResult } from "./base";
+
+/** Matches the inline scripts-runtime cap (src/scripts-runtime/executors/types.ts). */
+const MAX_OUTPUT_BYTES = 1_048_576;
 
 // ─── Schemas ────────────────────────────────────────────────
 
@@ -111,19 +115,52 @@ export class ScriptExecutor extends BaseExecutor<
         break;
     }
 
-    const proc = Bun.spawn(cmd, {
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: cwd ?? undefined,
-    });
+    // Workflow-authored scripts run with attacker-influenceable data available
+    // via {{...}} interpolation into `args` (trigger/webhook payloads etc — the
+    // `script` string itself is never interpolated, see engine.ts
+    // interpolateNodeConfig). Sandbox the same way as every other
+    // spawn-user-code path: ulimits + a clean minimal env (never the server's
+    // full process.env, which carries operator secrets) + a scoped tmpdir
+    // when the workflow author didn't pin an explicit `cwd`.
+    const scopedTmpdir = cwd
+      ? undefined
+      : `${process.env.TMPDIR ?? "/tmp"}/workflow-script-${crypto.randomUUID()}`;
+    if (scopedTmpdir) await Bun.$`mkdir -p ${scopedTmpdir}`;
+    const workdir = cwd ?? scopedTmpdir;
 
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
+    const env = {
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      HOME: process.env.HOME ?? "/tmp",
+      LANG: process.env.LANG ?? "C.UTF-8",
+      LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
+      TMPDIR: workdir ?? process.env.TMPDIR ?? "/tmp",
+    };
 
-    return { exitCode, stdout: stdout.trimEnd(), stderr: stderr.trimEnd() };
+    try {
+      const proc = Bun.spawn(buildSandboxedCommand(cmd, env), {
+        stdout: "pipe",
+        stderr: "pipe",
+        cwd: workdir,
+        // Bun.spawn still needs PATH to locate `sh` for argv[0] — the
+        // sandboxed command's `env -i` prelude scrubs the child down to
+        // `env` above, so the server's secrets never reach it either way.
+        env: { PATH: env.PATH },
+      });
+
+      const [stdout, stderr, exitCode] = await Promise.all([
+        readStreamCapped(proc.stdout, MAX_OUTPUT_BYTES),
+        readStreamCapped(proc.stderr, MAX_OUTPUT_BYTES),
+        proc.exited,
+      ]);
+
+      return {
+        exitCode,
+        stdout: stdout.text.trimEnd(),
+        stderr: (stderr.truncated ? `${stderr.text}\n…[stderr truncated]` : stderr.text).trimEnd(),
+      };
+    } finally {
+      if (scopedTmpdir) await Bun.$`rm -rf ${scopedTmpdir}`.catch(() => {});
+    }
   }
 
   private timeoutPromise(ms: number): Promise<never> {

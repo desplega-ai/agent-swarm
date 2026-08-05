@@ -6,6 +6,27 @@ function requiredEnv(name: string): string {
   return value;
 }
 
+/**
+ * The bearer travels over stdin, not an env var (see executor.ts) — this
+ * process dynamically `import()`s the user's module into itself below, so
+ * anything left in `process.env` would be directly readable by
+ * attacker-influenced script content via a bracket-notation env lookup.
+ */
+async function readApiKeyFromStdin(): Promise<string> {
+  const text = await new Response(Bun.stdin.stream()).text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("Malformed stdin config payload (expected JSON)");
+  }
+  const apiKey = (parsed as { apiKey?: unknown } | null)?.apiKey;
+  if (typeof apiKey !== "string" || !apiKey) {
+    throw new Error("Missing apiKey on stdin config payload");
+  }
+  return apiKey;
+}
+
 async function postStatus(
   runId: string,
   baseUrl: string,
@@ -29,7 +50,7 @@ async function postStatus(
 
 const runId = requiredEnv("SCRIPT_RUN_ID");
 const agentId = requiredEnv("SCRIPT_RUN_AGENT_ID");
-const apiKey = requiredEnv("AGENT_SWARM_API_KEY");
+const apiKey = await readApiKeyFromStdin();
 const baseUrl = requiredEnv("MCP_BASE_URL").replace(/\/$/, "");
 const sourceFile = requiredEnv("SCRIPT_RUN_SOURCE_FILE");
 const argsFile = requiredEnv("SCRIPT_RUN_ARGS_FILE");

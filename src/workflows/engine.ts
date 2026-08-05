@@ -781,6 +781,32 @@ export function interpolateNodeConfig(
     };
   }
 
+  if (node.type === "script" && typeof node.config.script === "string") {
+    const { script, ...configWithoutScript } = node.config;
+    const restResult = deepInterpolate(configWithoutScript, interpolationCtx);
+
+    // Trigger data (webhook payloads, schedule metadata — attacker-influenceable
+    // when the workflow has a webhook trigger) must NEVER be string-substituted
+    // into an executable script body: the interpolated result is handed
+    // straight to `bash -c` / `bun -e` / `python3 -c` (ScriptExecutor.runScript),
+    // so splicing untrusted text into it is a direct shell/code injection
+    // vector. Interpolate the script body against every OTHER builtin source
+    // (input/workflow/swarm/run — operator- or system-authored, not
+    // attacker-controlled) but never `trigger`. Dynamic per-run values should
+    // flow through `args` instead, which are passed as separate argv
+    // elements (data), not spliced into the source text.
+    const { trigger: _trigger, ...scriptSafeCtx } = interpolationCtx;
+    const scriptResult = deepInterpolate(script, scriptSafeCtx);
+
+    return {
+      value: {
+        ...(restResult.value as Record<string, unknown>),
+        script: scriptResult.value,
+      },
+      unresolved: [...restResult.unresolved, ...scriptResult.unresolved],
+    };
+  }
+
   if (node.type !== "swarm-script" || !Object.hasOwn(node.config, "args")) {
     return deepInterpolate(node.config, interpolationCtx);
   }

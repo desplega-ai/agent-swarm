@@ -561,6 +561,50 @@ describe("ScriptExecutor", () => {
     expect(out.stdout).toBe("");
     expect(out.stderr).toContain("Script timed out after 1000ms");
   });
+
+  // ─── Sandbox regression tests (superagent.sh c27edfd7, finding b132d7c5) ──
+
+  test("child process never inherits the server's secrets — env is scrubbed, not passed through", async () => {
+    const savedKey = process.env.AGENT_SWARM_API_KEY;
+    process.env.AGENT_SWARM_API_KEY = "super-secret-operator-bearer";
+    process.env.SOME_OTHER_SERVER_SECRET = "also-should-not-leak";
+    try {
+      const result = await executor.run(
+        input(
+          {
+            runtime: "bash",
+            script: 'printf \'[%s][%s]\' "$AGENT_SWARM_API_KEY" "$SOME_OTHER_SERVER_SECRET"',
+          },
+          {},
+        ),
+      );
+      expect(result.status).toBe("success");
+      const out = result.output as { stdout: string };
+      // Neither var exists in the child's env at all — bash prints empty strings.
+      expect(out.stdout).toBe("[][]");
+    } finally {
+      if (savedKey === undefined) delete process.env.AGENT_SWARM_API_KEY;
+      else process.env.AGENT_SWARM_API_KEY = savedKey;
+      delete process.env.SOME_OTHER_SERVER_SECRET;
+    }
+  });
+
+  test("resource ulimits actually apply to the spawned process (not just documented)", async () => {
+    const result = await executor.run(input({ runtime: "bash", script: "ulimit -v" }, {}));
+    expect(result.status).toBe("success");
+    const out = result.output as { stdout: string };
+    // "unlimited" means no cap took effect; any other value is a real (finite) ulimit.
+    expect(out.stdout).not.toBe("unlimited");
+    expect(Number(out.stdout)).toBeGreaterThan(0);
+  });
+
+  test("no explicit cwd: runs in a scoped tmpdir, not the server's working directory", async () => {
+    const result = await executor.run(input({ runtime: "bash", script: "pwd" }, {}));
+    expect(result.status).toBe("success");
+    const out = result.output as { stdout: string };
+    expect(out.stdout).not.toBe(process.cwd());
+    expect(out.stdout).toContain("workflow-script-");
+  });
 });
 
 // ─── VCS Executor ────────────────────────────────────────────

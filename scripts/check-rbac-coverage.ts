@@ -298,7 +298,6 @@ const ROUTE_RBAC_BACKLOG: Record<string, string> = {
   "POST /api/repos": BACKLOG_REASON,
   "POST /api/schedules": BACKLOG_REASON,
   "POST /api/schedules/{id}/run": BACKLOG_REASON,
-  "POST /api/script-runs": BACKLOG_REASON,
   "POST /api/scripts/run": BACKLOG_REASON,
   "POST /api/session-costs": BACKLOG_REASON,
   "POST /api/session-logs": BACKLOG_REASON,

