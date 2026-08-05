@@ -4,7 +4,7 @@
   "displayName": "Workflow Structured Output",
   "slug": "workflow-structured-output",
   "title": "Workflow Structured Output",
-  "description": "Ensure agent workflow steps satisfy exact JSON output contracts.",
+  "description": "When task details contain an actual `outputSchema`, complete with a stringified JSON `store-progress.output` that matches it exactly. Also honor an explicit JSON Output Format or interface as a user contract. Workflow origin and deterministic/validation tags are only cues to inspect task details — never invent a schema. Worker-side counterpart to `workflow-iterate`.",
   "version": "1.0.0",
   "category": "skills",
   "placeholders": [],

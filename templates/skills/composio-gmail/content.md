@@ -8,8 +8,11 @@ authorized account) — you usually don't need to set it.
 ```bash
 # Direct execute (reliable path — pin the ACTIVE ca_… from the hub Recipe B)
 agent-swarm x composio POST /tools/execute/<SLUG> \
-  --body '{"user_id":"t@desplega.ai","connected_account_id":"ca_…","arguments":{ … }}'
+  --body '{"user_id":"<connected-account-email>","connected_account_id":"<active-connected-account-id>","arguments":{ … }}'
 ```
+
+Follow the hub's **Resolve the user and connected account** procedure, then
+select the resolved user's `gmail` account whose status is `ACTIVE`.
 
 ## Headline tools
 
