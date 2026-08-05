@@ -250,7 +250,16 @@ export default async function dreamGather(args: any, ctx: any) {
     assertSucceeded(response, action);
   }
 
-  const skills = payload(skillsResponse)?.skills ?? [];
+  // Projected, not raw: skill-list returns every column but `content`, and since
+  // the baked-skills→DB migration the swarm catalog is ~40 rows — the raw shape
+  // would spend most of the lane's prompt on timestamps and hashes. `systemDefault`
+  // stays because it is what tells the lane a skill cannot be edited.
+  const skills = (payload(skillsResponse)?.skills ?? []).map((skill: any) => ({
+    id: skill?.id,
+    name: skill?.name,
+    description: skill?.description,
+    systemDefault: skill?.systemDefault === true || skill?.systemDefault === 1,
+  }));
   // kv_getOrNull returns its value directly, unlike tool responses unwrapped by payload().
   const cursor = Number(cursorResponse?.value ?? 0) || 0;
   const profileEvidence = roster.map((agent) => ({

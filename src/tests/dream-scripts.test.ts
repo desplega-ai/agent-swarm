@@ -67,7 +67,22 @@ function gatherHarness({
         },
         async skill_list() {
           calls.push("skill_list");
-          return { success: true, data: { skills: [] } };
+          return {
+            success: true,
+            data: {
+              skills: [
+                {
+                  id: "sk-1",
+                  name: "seeded-one",
+                  description: "d",
+                  systemDefault: 1,
+                  content: "# body",
+                  sourceHash: "abc",
+                  createdAt: "now",
+                },
+              ],
+            },
+          };
         },
         async kv_getOrNull() {
           calls.push("kv_getOrNull");
@@ -218,6 +233,11 @@ describe("dream-gather gates", () => {
     });
     expect(result.blockers.rotation.target).toBeNull();
     expect(result.blockers.rotation.snapshotArgs).toEqual({ skipIfMissing: true });
+    // The catalog is projected to what the skills lane reasons about — the raw
+    // rows carry every column but content, which is ~40 rows of noise post-#1083.
+    expect(result.insights.skills).toEqual([
+      { id: "sk-1", name: "seeded-one", description: "d", systemDefault: true },
+    ]);
   });
 
   test("PR snapshot skips truly absent optional coordinates", async () => {
