@@ -287,6 +287,7 @@ bun run lint           # NOT lint:fix — CI runs `lint` (read-only)
 bun run tsc:check
 bun run test:root
 bash scripts/check-db-boundary.sh
+bash scripts/check-audit-columns.sh   # new tables need created_by/updated_by or a .non-audit-tables entry
 bun run check:dep-graph
 ```
 

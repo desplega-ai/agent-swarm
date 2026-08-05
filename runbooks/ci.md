@@ -22,7 +22,7 @@ CI detects what changed and runs the matching jobs:
 
 | Job | Local equivalent | Common failure |
 |---|---|---|
-| **Lint and Type Check** | `bun run lint && bun run tsc:check && bash scripts/check-db-boundary.sh && bash scripts/check-rbac-boundary.sh && bun run check:dep-graph` | Worker code imported `bun:sqlite` or `src/be/db` — DB boundary violation (grep + dependency-cruiser graph rules); or an inline `isLead` authz check in `src/tools/`/`src/http/` — RBAC boundary violation (use `can()` from `src/rbac/`) |
+| **Lint and Type Check** | `bun run lint && bun run tsc:check && bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bash scripts/check-rbac-boundary.sh && bash scripts/check-audit-columns.sh && bun run check:dep-graph` | Worker code imported `bun:sqlite` or `src/be/db` — DB boundary violation (grep + dependency-cruiser graph rules); an inline `isLead` authz check in `src/tools/`/`src/http/` — RBAC boundary violation (use `can()` from `src/rbac/`); or a new table without `created_by`/`updated_by` — add the columns or list the table in `.non-audit-tables` with a reason |
 | **Run Tests** | `bun run test:root` | New test or test that depends on undocumented setup |
 | **Pi-Skills Freshness** | `bun run build:pi-skills` (must produce zero diff in `plugin/pi-skills/`) | Edited `plugin/commands/*.md` without rebuilding |
 | **Script SDK Types Freshness** | `bun run check:script-types` (regenerates `src/scripts-runtime/types/*.d.ts`, must produce zero diff) | Edited `src/be/scripts/typecheck.ts` (the source of truth) without `bun run build:script-types`, or edited the generated `.d.ts` files directly (never do that) |
@@ -51,7 +51,9 @@ bun run lint            # NOT lint:fix — CI fails on warnings, not just errors
 bun run tsc:check
 bun run test:root
 bash scripts/check-db-boundary.sh
+bash scripts/check-api-key-boundary.sh
 bash scripts/check-rbac-boundary.sh
+bash scripts/check-audit-columns.sh
 bun run check:rbac-coverage
 bun run check:dep-graph
 
@@ -82,6 +84,8 @@ docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worke
 7. **RBAC coverage failure.** You added an MCP tool file or a non-GET route without an explicit RBAC decision (DES-445). Tools: reach `can()` or add the file to `UNGATED_TOOL_FILES` in `scripts/check-rbac-coverage.ts` with a reason. Routes: put `rbac: { permission: "<verb>" }` or `rbac: { ungated: "<reason>" }` on the `route()` def. Stale allowlist/backlog entries also fail — delete them when a surface gains a gate.
 8. **`tsc --noEmit` passed locally but `tsc -b` failed in ui.** The build-mode check catches project-reference issues `--noEmit` misses. Use `tsc -b` locally.
 9. **Docker build cache mismatch.** Local Docker pulled a cached layer that CI doesn't have. Run `docker build --no-cache -f Dockerfile.worker .` if a clean local build is suspicious.
+10. **Audit-column failure.** You added a migration creating a table without `created_by`/`updated_by` (`scripts/check-audit-columns.sh`). Add the columns, or register the table in `.non-audit-tables` with a comment naming where attribution actually lives.
+11. **Tool classification failure.** You registered a new MCP tool without adding it to `CORE_TOOLS`/`DEFERRED_TOOLS` in `src/tools/tool-config.ts` (`src/tests/tool-annotations.test.ts` fails in `test:root`).
 
 ## Lockfile discipline
 
