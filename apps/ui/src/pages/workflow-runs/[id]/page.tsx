@@ -1,7 +1,8 @@
 import { ArrowLeft, ChevronsDownUp, ChevronsUpDown, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useRetryWorkflowRun, useWorkflow, useWorkflowRun } from "@/api/hooks/use-workflows";
+import type { WorkflowRunStep } from "@/api/types";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -10,12 +11,18 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ForeachStepGroup, foreachDefaultOpen } from "@/components/workflows/foreach-step-group";
 import { JsonTree } from "@/components/workflows/json-tree";
 import { StepCard } from "@/components/workflows/step-card";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { foreachParentIds, parseSyntheticStepId } from "@/lib/synthetic-step-id";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
+
+/** A row in the Steps panel: a plain step, or a `foreach` parent with its fanned-out children. */
+type StepListEntry =
+  | { kind: "step"; step: WorkflowRunStep }
+  | { kind: "foreach"; parent: WorkflowRunStep; children: WorkflowRunStep[] };
 
 export default function WorkflowRunDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -37,6 +44,83 @@ export default function WorkflowRunDetailPage() {
     () => foreachParentIds(workflow?.definition.nodes),
     [workflow?.definition.nodes],
   );
+
+  // Synthetic `foreach` children (`<parentNodeId>#<itemKey>`) collapse under their parent step so a
+  // wide fan-out doesn't flood the panel. Order is preserved; an orphan child still renders flat.
+  const stepEntries = useMemo(() => {
+    const entries: StepListEntry[] = [];
+    const groups = new Map<
+      string,
+      { kind: "foreach"; parent: WorkflowRunStep; children: WorkflowRunStep[] }
+    >();
+    for (const step of steps) {
+      const { parentNodeId, itemKey } = parseSyntheticStepId(step.nodeId, foreachIds);
+      if (itemKey === null) {
+        if (foreachIds.has(step.nodeId)) {
+          const group = { kind: "foreach" as const, parent: step, children: [] };
+          groups.set(step.nodeId, group);
+          entries.push(group);
+        } else {
+          entries.push({ kind: "step", step });
+        }
+        continue;
+      }
+      const group = groups.get(parentNodeId);
+      if (group) {
+        group.children.push(step);
+      } else {
+        entries.push({ kind: "step", step });
+      }
+    }
+    return entries;
+  }, [steps, foreachIds]);
+
+  // Children-list open state is UI-only (not in the URL). Each group is seeded once with its
+  // default — open when anything failed or is still in flight — and user toggles then win.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+
+  const setGroupOpen = useCallback((nodeId: string, open: boolean) => {
+    setOpenGroups((prev) => ({ ...prev, [nodeId]: open }));
+  }, []);
+
+  // Seed each group once (polling must not re-close a group the user opened), and drop the previous
+  // run's toggles when navigating between runs without unmounting.
+  const seededRunId = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const isNewRun = seededRunId.current !== id;
+    seededRunId.current = id;
+    setOpenGroups((prev) => {
+      const base = isNewRun ? {} : prev;
+      let next = base;
+      for (const entry of stepEntries) {
+        if (entry.kind !== "foreach" || entry.parent.nodeId in base) continue;
+        if (next === base) next = { ...base };
+        next[entry.parent.nodeId] = foreachDefaultOpen(entry.children);
+      }
+      return next;
+    });
+  }, [stepEntries, id]);
+
+  const setAllGroupsOpen = useCallback(
+    (open: boolean) => {
+      setOpenGroups(
+        Object.fromEntries(
+          stepEntries
+            .filter((entry) => entry.kind === "foreach")
+            .map((entry) => [entry.parent.nodeId, open]),
+        ),
+      );
+    },
+    [stepEntries],
+  );
+
+  const registerStepRef = useCallback((nodeId: string, el: HTMLDivElement | null) => {
+    if (el) {
+      stepRefs.current.set(nodeId, el);
+    } else {
+      stepRefs.current.delete(nodeId);
+    }
+  }, []);
 
   const setSelectedNodeId = useCallback(
     (nodeId: string | null) => setParam("node", nodeId),
@@ -72,6 +156,7 @@ export default function WorkflowRunDetailPage() {
   const handleGraphNodeClick = useCallback(
     (nodeId: string) => {
       setSelectedNodeId(nodeId);
+      if (foreachIds.has(nodeId)) setGroupOpen(nodeId, true);
       const ownStepIds = steps
         .map((step) => step.nodeId)
         .filter(
@@ -88,7 +173,7 @@ export default function WorkflowRunDetailPage() {
         el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       });
     },
-    [expandedStepIds, setExpandedSteps, setSelectedNodeId, steps, foreachIds],
+    [expandedStepIds, setExpandedSteps, setSelectedNodeId, setGroupOpen, steps, foreachIds],
   );
 
   // When a step card is clicked, highlight the node in the graph (don't toggle expand)
@@ -147,6 +232,22 @@ export default function WorkflowRunDetailPage() {
   if (!run) {
     return <p className="text-muted-foreground">Workflow run not found.</p>;
   }
+
+  const renderStepCard = (step: WorkflowRunStep) => (
+    <StepCard
+      key={step.id}
+      step={step}
+      workflowNodes={workflow?.definition.nodes}
+      isSelected={
+        selectedNodeId === step.nodeId ||
+        selectedNodeId === parseSyntheticStepId(step.nodeId, foreachIds).parentNodeId
+      }
+      isExpanded={expandedStepIds.has(step.nodeId)}
+      onClick={() => handleStepClick(step.nodeId)}
+      onToggleExpand={() => toggleStep(step.nodeId)}
+      ref={(el) => registerStepRef(step.nodeId, el)}
+    />
+  );
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
@@ -266,7 +367,10 @@ export default function WorkflowRunDetailPage() {
                   variant="ghost"
                   size="sm"
                   className="h-6 px-1.5 text-xs text-muted-foreground"
-                  onClick={() => setExpandedSteps(steps.map((s) => s.nodeId))}
+                  onClick={() => {
+                    setExpandedSteps(steps.map((s) => s.nodeId));
+                    setAllGroupsOpen(true);
+                  }}
                   title="Expand all"
                 >
                   <ChevronsUpDown className="h-3.5 w-3.5" />
@@ -275,7 +379,10 @@ export default function WorkflowRunDetailPage() {
                   variant="ghost"
                   size="sm"
                   className="h-6 px-1.5 text-xs text-muted-foreground"
-                  onClick={() => setExpandedSteps([])}
+                  onClick={() => {
+                    setExpandedSteps([]);
+                    setAllGroupsOpen(false);
+                  }}
                   title="Collapse all"
                 >
                   <ChevronsDownUp className="h-3.5 w-3.5" />
@@ -285,27 +392,27 @@ export default function WorkflowRunDetailPage() {
           </div>
           <ScrollArea className="flex-1 min-h-0">
             <div className="p-2 space-y-1.5">
-              {steps.map((step) => (
-                <StepCard
-                  key={step.id}
-                  step={step}
-                  workflowNodes={workflow?.definition.nodes}
-                  isSelected={
-                    selectedNodeId === step.nodeId ||
-                    selectedNodeId === parseSyntheticStepId(step.nodeId, foreachIds).parentNodeId
-                  }
-                  isExpanded={expandedStepIds.has(step.nodeId)}
-                  onClick={() => handleStepClick(step.nodeId)}
-                  onToggleExpand={() => toggleStep(step.nodeId)}
-                  ref={(el) => {
-                    if (el) {
-                      stepRefs.current.set(step.nodeId, el);
-                    } else {
-                      stepRefs.current.delete(step.nodeId);
+              {stepEntries.map((entry) =>
+                entry.kind === "foreach" && entry.children.length > 0 ? (
+                  <ForeachStepGroup
+                    key={entry.parent.id}
+                    parent={entry.parent}
+                    childSteps={entry.children}
+                    workflowNodes={workflow?.definition.nodes}
+                    selectedNodeId={selectedNodeId}
+                    isOpen={openGroups[entry.parent.nodeId] ?? false}
+                    onToggleOpen={() =>
+                      setGroupOpen(entry.parent.nodeId, !openGroups[entry.parent.nodeId])
                     }
-                  }}
-                />
-              ))}
+                    expandedStepIds={expandedStepIds}
+                    onStepClick={handleStepClick}
+                    onToggleStepExpand={toggleStep}
+                    registerStepRef={registerStepRef}
+                  />
+                ) : (
+                  renderStepCard(entry.kind === "foreach" ? entry.parent : entry.step)
+                ),
+              )}
               {steps.length === 0 && (
                 <p className="text-sm text-muted-foreground p-4 text-center">
                   No steps executed yet.

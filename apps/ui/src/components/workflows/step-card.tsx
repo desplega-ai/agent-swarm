@@ -14,6 +14,7 @@ import { AgentLink } from "@/components/shared/agent-link";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { effectiveChildStatus } from "@/components/workflows/graph-utils";
 import { JsonTree } from "@/components/workflows/json-tree";
 import { foreachParentIds, parseSyntheticStepId } from "@/lib/synthetic-step-id";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
@@ -25,6 +26,8 @@ export interface StepCardProps {
   isExpanded: boolean;
   onClick: () => void;
   onToggleExpand: () => void;
+  /** Rendered inside a `foreach` group — the parent label is already on the group header. */
+  inGroup?: boolean;
 }
 
 /** Format a byte count as a human-readable string (B, KB, MB). */
@@ -54,7 +57,7 @@ function parseDiagnostics(raw: string | undefined): { unresolvedTokens?: string[
 }
 
 export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
-  ({ step, workflowNodes, isSelected, isExpanded, onClick, onToggleExpand }, ref) => {
+  ({ step, workflowNodes, isSelected, isExpanded, onClick, onToggleExpand, inGroup }, ref) => {
     // `foreach` children carry synthetic `<parentNodeId>#<itemKey>` ids — the definition only holds
     // the parent node, so label and config always resolve against the parent.
     const { parentNodeId, itemKey } = parseSyntheticStepId(
@@ -69,6 +72,10 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
     const diagnostics = parseDiagnostics(step.diagnostics);
     const unresolvedTokens = diagnostics?.unresolvedTokens;
 
+    // An onNodeFailure:"continue" child completes WITH a persisted error — badge it as failed,
+    // matching the graph's classification and the group's ok/failed chip.
+    const displayStatus = itemKey ? effectiveChildStatus(step) : step.status;
+
     return (
       <div
         ref={ref}
@@ -80,12 +87,18 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
       >
         {/* Header row - always visible */}
         <div className="w-full flex items-center gap-2 px-3 py-2">
-          <span className="text-sm font-medium truncate">{label}</span>
+          {inGroup && itemKey ? (
+            <span className="text-sm font-medium font-mono truncate">{itemKey}</span>
+          ) : (
+            <>
+              <span className="text-sm font-medium truncate">{label}</span>
 
-          {itemKey && (
-            <span className="text-xs text-muted-foreground font-mono truncate">
-              &middot; {itemKey}
-            </span>
+              {itemKey && (
+                <span className="text-xs text-muted-foreground font-mono truncate">
+                  &middot; {itemKey}
+                </span>
+              )}
+            </>
           )}
 
           <Badge variant="outline" size="tag" className="shrink-0">
@@ -102,7 +115,7 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
             </Badge>
           )}
 
-          <StatusBadge status={step.status} className="shrink-0" />
+          <StatusBadge status={displayStatus} className="shrink-0" />
 
           <div className="ml-auto flex items-center gap-1.5 shrink-0">
             {duration && (

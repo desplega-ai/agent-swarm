@@ -62,7 +62,7 @@ function aggregateStepStatus(statuses: WorkflowRunStepStatus[]): WorkflowRunStep
  * (Classification uses that explicit metadata, not the `[FAILED: …]` output text, which a
  * successful child could legitimately produce.)
  */
-function effectiveChildStatus(step: WorkflowRunStep): WorkflowRunStepStatus {
+export function effectiveChildStatus(step: WorkflowRunStep): WorkflowRunStepStatus {
   if (step.status === "completed" && step.error) return "failed";
   return step.status;
 }
