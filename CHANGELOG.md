@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.128.0] - 2026-08-05
+
+### Added
+- **Workflow script nodes support validated wall-clock budgets up to five minutes** (#1089) — inline and catalog-backed scripts share their configured timeout with the workflow watchdog, authoring APIs reject out-of-range values, and longer orchestration is directed to durable journaled script runs.
+
+### Fixed
+- **Live task transcripts render current Claude, Codex, and OpenCode events consistently** (#1092) — provider-specific tool, progress, error, file, and collaboration events remain readable while sessions run, with a lifecycle waterfall for recognized Claude and OpenCode sub-agents.
+- **Slack reactions now acknowledge only messages the swarm has accepted** (#1094) — task creation, queuing, and steering add a best-effort :eyes: reaction after acceptance, while duplicate reactions are harmless and failed ingestion is not falsely acknowledged.
+
 ## [1.127.1] - 2026-08-04
 
 ### Changed
