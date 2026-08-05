@@ -80,6 +80,24 @@ describe("get-config operator env overlay", () => {
     expect(overlayOperatorEnvValue<Entry>([], "API_KEY")).toEqual([]);
   });
 
+  test("a scoped row wins over env — the overlay never inverts repo > agent > global", () => {
+    // getResolvedConfig already collapses to ONE row per key, so an agent- or
+    // repo-scoped row here means it beat global. Consumers apply the returned
+    // rows in array order (fetchResolvedEnv assigns each into env, last write
+    // wins), so appending a synthetic global row would silently clobber the
+    // more specific value for keys like SCRIPTS_ONLY_MCP or HARNESS_PROVIDER.
+    process.env.DREAMING_ENABLED = "false";
+    for (const scope of ["agent", "repo"]) {
+      const scoped = row({ id: `${scope}-row`, scope, scopeId: "target-1", value: "true" });
+      const result = overlayOperatorEnvValue([scoped], "DREAMING_ENABLED");
+      expect(result).toEqual([scoped]);
+      expect(result.filter((c) => c.key === "DREAMING_ENABLED")).toHaveLength(1);
+    }
+    // The all-keys path (REST route) must hold the same line.
+    const scoped = row({ id: "agent-row", scope: "agent", scopeId: "agent-1", value: "true" });
+    expect(overlayOperatorEnvValues([scoped])).toEqual([scoped]);
+  });
+
   test("the all-keys overlay (REST /api/config/resolved path) surfaces env-only operator values", () => {
     // Scripts' ctx.swarm.config_get hits the REST route, which returns ALL
     // resolved configs and lets the SDK filter client-side — so the env overlay

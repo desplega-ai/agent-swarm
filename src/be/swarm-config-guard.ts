@@ -221,7 +221,14 @@ export function overlayOperatorEnvValue<
   if (!isOperatorConfigKey(key) || envValue === undefined || envValue === "") {
     return configs;
   }
-  const stored = configs.find((c) => c.key === key && c.scope === "global");
+  // A repo- or agent-scoped row already won this key in getResolvedConfig, and
+  // the server's process.env is global by nature. Consumers apply the returned
+  // rows in array order (`fetchResolvedEnv` in src/commands/runner.ts assigns
+  // each into env, last write wins), so appending a synthetic global row here
+  // would clobber the specific value and invert repo > agent > global.
+  const rows = configs.filter((c) => c.key === key);
+  if (rows.some((c) => c.scope !== "global")) return configs;
+  const stored = rows.find((c) => c.scope === "global");
   if (!stored) {
     const synthetic = {
       id: `env:${key}`,
