@@ -3,12 +3,14 @@ import {
   getChildTasks,
   getCompletedSlackTasks,
   getInProgressSlackTasks,
+  getSlackTasksInThread,
   getSteeringMessagesForTask,
   getTaskAttachments,
   getTaskById,
   setSlackMessageTracking,
 } from "../be/db";
-import type { AgentTask } from "../types";
+import { type AgentTask, isTerminalTaskStatus } from "../types";
+import { finalizeSlackMessageReaction } from "./ack";
 import { getSlackApp } from "./app";
 import type { TreeNode } from "./blocks";
 import { buildTreeBlocks, formatDuration } from "./blocks";
@@ -241,6 +243,40 @@ function isTreeFullyTerminal(nodes: TreeNode[]): boolean {
   return true;
 }
 
+function finalizeTerminalSlackReactions(tasks: AgentTask[]): void {
+  const app = getSlackApp();
+  if (!app) return;
+
+  const triggers = new Map<string, { channelId: string; threadTs: string; timestamp: string }>();
+  for (const task of tasks) {
+    if (!task.slackChannelId || !task.slackThreadTs || !task.slackTriggerMessageTs) continue;
+    const key = `${task.slackChannelId}\0${task.slackTriggerMessageTs}`;
+    triggers.set(key, {
+      channelId: task.slackChannelId,
+      threadTs: task.slackThreadTs,
+      timestamp: task.slackTriggerMessageTs,
+    });
+  }
+
+  for (const { channelId, threadTs, timestamp } of triggers.values()) {
+    const linkedTasks = getSlackTasksInThread(channelId, threadTs).filter(
+      (task) => task.slackTriggerMessageTs === timestamp,
+    );
+    if (
+      linkedTasks.length === 0 ||
+      linkedTasks.some((task) => !isTerminalTaskStatus(task.status))
+    ) {
+      continue;
+    }
+    const outcome = linkedTasks.every((task) => task.status === "completed")
+      ? "white_check_mark"
+      : "x";
+    void finalizeSlackMessageReaction(app.client, channelId, timestamp, outcome).catch((error) =>
+      console.error(`[Slack] Failed to finalize reaction for ${channelId}/${timestamp}:`, error),
+    );
+  }
+}
+
 /**
  * Clean up tracking for a completed tree.
  * Removes tree from treeMessages, removes all task IDs from taskToTree,
@@ -257,6 +293,10 @@ function cleanupCompletedTree(messageTs: string, _tree: TreeMessageState, nodes:
       allTaskIds.push(child.taskId);
     }
   }
+
+  finalizeTerminalSlackReactions(
+    allTaskIds.map((taskId) => getTaskById(taskId)).filter((task): task is AgentTask => !!task),
+  );
 
   // Add all to notifiedCompletions so flat processing doesn't re-process
   for (const taskId of allTaskIds) {
@@ -780,6 +820,7 @@ export function startTaskWatcher(intervalMs = 3000): void {
           }
           // Clean up progress tracking
           sentProgress.delete(task.id);
+          finalizeTerminalSlackReactions([task]);
           console.log(`[Slack] Sent ${task.status} response for task ${task.id.slice(0, 8)}`);
         } catch (error) {
           // If send fails, remove from notified so we can retry
