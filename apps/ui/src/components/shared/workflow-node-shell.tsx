@@ -70,7 +70,10 @@ export function WorkflowNodeShell({
       className={cn(
         "bg-card border-2 rounded-lg shadow-sm px-3 py-2 min-w-[240px] max-w-[280px]",
         borderClass,
-        selected && "ring-2 ring-status-active ring-offset-1 ring-offset-background",
+        // Run-view borders already carry status colors, so selection needs its own layer: a
+        // thick offset primary ring plus a soft glow reads as "selected" against any border.
+        selected &&
+          "ring-[3px] ring-primary ring-offset-2 ring-offset-background shadow-lg shadow-primary/40",
         className,
       )}
     >
