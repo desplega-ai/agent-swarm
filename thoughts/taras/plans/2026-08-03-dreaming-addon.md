@@ -730,7 +730,7 @@ at the gate with a single gather execution; zero-activity window short-circuits 
       through reload; workflow detail page renders the full DAG.
       **Review-round outcome (4 reviewers + QA)**: two-stage gather (cheap unprivileged preflight
       → lead-identity `gather-rich`), trust hash canonicalized both sides + hoisted per-run
-      (persisted as `workflow_runs.definitionHash`, migration 126), receipt audit records
+      (persisted as `workflow_runs.definitionHash`, migration 127), receipt audit records
       file/anchor/op/content-hash, bounded profile evidence, fan-out node dropped, fence-masking
       newline fix. Security verdict: no gate bypass — all probed paths fail closed.
 
@@ -802,7 +802,7 @@ content — not seeded; verified.)
 ### Success Criteria:
 
 #### Automated Verification:
-- [x] Migration applies on a fresh DB (`127_retire_daily_evolution_monolith.sql` — 126 was taken
+- [x] Migration applies on a fresh DB (`128_retire_daily_evolution_monolith.sql` — 126/127 were taken
       by Phase 4's `workflow_runs.definitionHash`): boots clean, `_migrations` includes 127.
 - [x] Migration disables both rows on a DB copy containing them (verified: prod-shaped rows
       inserted → re-boot → both `enabled = 0`, `dream-daily` untouched).
