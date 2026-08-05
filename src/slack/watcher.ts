@@ -3,6 +3,7 @@ import {
   getChildTasks,
   getCompletedSlackTasks,
   getInProgressSlackTasks,
+  getLogsByTaskIdChronological,
   getSlackTasksInThread,
   getSteeringMessagesForTask,
   getTaskAttachments,
@@ -16,6 +17,8 @@ import type { TreeNode } from "./blocks";
 import { buildTreeBlocks, formatDuration } from "./blocks";
 import { isSlackRenderV2Enabled, processSlackRenderV2 } from "./render-v2";
 import {
+  getAgentDisplayName,
+  getAgentEmoji,
   sendInlineTaskOutput,
   sendProgressUpdate,
   sendTaskResponse,
@@ -275,6 +278,20 @@ function finalizeTerminalSlackReactions(tasks: AgentTask[]): void {
       console.error(`[Slack] Failed to finalize reaction for ${channelId}/${timestamp}:`, error),
     );
   }
+
+  for (const task of tasks) {
+    const outcome = task.status === "completed" ? "white_check_mark" : "x";
+    for (const log of getLogsByTaskIdChronological(task.id)) {
+      if (log.eventType !== "task_steering" || log.newValue !== "slack_reaction") continue;
+      const { slackChannelId: channelId, slackMessageTs: timestamp } = JSON.parse(log.metadata!);
+      void finalizeSlackMessageReaction(app.client, channelId, timestamp, outcome).catch((error) =>
+        console.error(
+          `[Slack] Failed to finalize steer reaction for ${channelId}/${timestamp}:`,
+          error,
+        ),
+      );
+    }
+  }
 }
 
 /**
@@ -502,13 +519,14 @@ async function postInitialDMTreeMessage(task: AgentTask): Promise<string | undef
   const fallbackText = `Task in progress: ${agent.name}`;
 
   try {
-    // DM channels skip persona overrides (handled by sendWithPersona / postMessage)
     const result = await app.client.chat.postMessage({
       channel: task.slackChannelId,
       thread_ts: task.slackThreadTs,
       text: fallbackText,
       unfurl_links: false,
       unfurl_media: false,
+      username: getAgentDisplayName(agent),
+      icon_emoji: getAgentEmoji(agent),
       // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
       blocks: blocks as any,
     });

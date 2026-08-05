@@ -4,7 +4,7 @@ import { getAgentById, getTaskById, recordSlackMessage } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
 import { withAutoJoin } from "@/slack/channel-join";
-import { markdownToSlack } from "@/slack/responses";
+import { getAgentDisplayName, getAgentEmoji, markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerSlackStartThreadTool = (server: McpServer) => {
@@ -74,8 +74,8 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
             text: slackMessage, // Fallback for notifications
             unfurl_links: false,
             unfurl_media: false,
-            username: agent.name,
-            icon_emoji: ":crown:",
+            username: getAgentDisplayName(agent),
+            icon_emoji: getAgentEmoji(agent),
             // biome-ignore lint/suspicious/noExplicitAny: MCP accepts arbitrary valid Block Kit JSON
             blocks: messageBlocks as any,
           }),

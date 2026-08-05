@@ -1,7 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { MAX_SECTION_LENGTH } from "../slack/blocks";
 import {
   formatInlineCompletionOutputChunks,
+  sendWithPersona,
   shouldPostInlineCompletionOutput,
 } from "../slack/responses";
 import type { AgentTask } from "../types";
@@ -22,6 +23,20 @@ function task(overrides: Partial<AgentTask> = {}): AgentTask {
 }
 
 describe("Slack inline completion output", () => {
+  test("keeps the requested persona in DMs", async () => {
+    const postMessage = mock(async () => ({ ts: "1" }));
+    await sendWithPersona({ chat: { postMessage } } as never, {
+      channel: "D123",
+      thread_ts: "1",
+      text: "done",
+      username: "Literal Lead",
+      icon_emoji: ":crown:",
+    });
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ username: "Literal Lead", icon_emoji: ":crown:" }),
+    );
+  });
+
   test("posts only truncated completed Slack output that has not already been replied", () => {
     const longOutput = `Here is the answer. ${"Detailed finding ".repeat(20)}`;
     expect(shouldPostInlineCompletionOutput(task({ output: longOutput }))).toBe(true);
