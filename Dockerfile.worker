@@ -193,7 +193,7 @@ USER worker
 # plugin). The Claude/Codex plugin installs (worker-full-base) provide the
 # hooks; this provides the CLI binary + package importability. Disable
 # per-worker via CONTEXT_MODE_DISABLED=true (read by the adapters at runtime).
-ARG CONTEXT_MODE_VERSION=1.0.151
+ARG CONTEXT_MODE_VERSION=1.0.169
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g context-mode@${CONTEXT_MODE_VERSION} \
