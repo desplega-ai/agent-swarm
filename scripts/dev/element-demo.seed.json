@@ -1,0 +1,131 @@
+{
+  "contacts": {
+    "models": {
+      "contact": {
+        "columns": {
+          "name": { "kind": "string", "required": true },
+          "email": { "kind": "string" },
+          "city": { "kind": "string" }
+        }
+      }
+    },
+    "queries": {
+      "allContacts": {
+        "model": "contact",
+        "sort": { "column": "name", "dir": "asc" }
+      }
+    },
+    "elements": {
+      "contactsTable": {
+        "mode": "bound",
+        "export": true,
+        "props": {
+          "search": { "kind": "string", "default": "" }
+        },
+        "root": "table",
+        "elements": {
+          "table": {
+            "type": "Table",
+            "props": {
+              "data": { "$state": "/queries/allContacts/data" },
+              "loading": { "$state": "/queries/allContacts/loading" },
+              "error": { "$state": "/queries/allContacts/error" },
+              "search": { "$state": "/props/search" },
+              "emptyMessage": "No contacts found.",
+              "columns": [
+                { "key": "name", "label": "Name" },
+                { "key": "email", "label": "Email" },
+                { "key": "city", "label": "City", "width": 160 }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "pages": {
+      "main": {
+        "root": "root",
+        "elements": {
+          "root": {
+            "type": "Container",
+            "props": { "direction": "column", "gap": "lg" },
+            "children": ["title", "card"]
+          },
+          "title": {
+            "type": "Heading",
+            "props": { "text": "Contacts", "level": "h1" }
+          },
+          "card": {
+            "type": "Card",
+            "props": {
+              "title": "All contacts",
+              "description": "This app exports the contactsTable element (search prop included) for other apps to embed."
+            },
+            "children": ["table"]
+          },
+          "table": {
+            "type": "Table",
+            "props": {
+              "data": { "$state": "/queries/allContacts/data" },
+              "loading": { "$state": "/queries/allContacts/loading" },
+              "columns": [
+                { "key": "name", "label": "Name" },
+                { "key": "email", "label": "Email" },
+                { "key": "city", "label": "City" }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "defaultPage": "main"
+  },
+  "directory": {
+    "models": {},
+    "pages": {
+      "main": {
+        "root": "root",
+        "elements": {
+          "root": {
+            "type": "Container",
+            "props": { "direction": "column", "gap": "lg" },
+            "children": ["title", "hint", "searchBox", "tableRef"]
+          },
+          "title": {
+            "type": "Heading",
+            "props": { "text": "Directory", "level": "h1" }
+          },
+          "hint": {
+            "type": "Text",
+            "props": {
+              "content": "The search box is local to this app; the table below is the Contacts app's contactsTable element, embedded via ElementRef with the search value passed as a prop."
+            }
+          },
+          "searchBox": {
+            "type": "SearchInput",
+            "props": { "id": "searchBox", "placeholder": "Search contacts…" }
+          },
+          "tableRef": {
+            "type": "ElementRef",
+            "props": {
+              "app": "__CONTACTS_APP_ID__",
+              "element": "contactsTable",
+              "props": {
+                "search": { "$state": "/ui/searchBox/value" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "defaultPage": "main"
+  },
+  "rows": [
+    { "values": { "name": "Ada Lovelace", "email": "ada@computing.dev", "city": "London" } },
+    { "values": { "name": "Alan Turing", "email": "alan@bletchley.uk", "city": "London" } },
+    { "values": { "name": "Grace Hopper", "email": "grace@navy.mil", "city": "Arlington" } },
+    { "values": { "name": "Katherine Johnson", "email": "katherine@nasa.gov", "city": "Hampton" } },
+    { "values": { "name": "Linus Torvalds", "email": "linus@kernel.org", "city": "Helsinki" } },
+    { "values": { "name": "Margaret Hamilton", "email": "margaret@mit.edu", "city": "Boston" } }
+  ]
+}
