@@ -63,7 +63,7 @@ export const registerAppUpsertTool = (server: McpServer) => {
           isLead: agent?.isLead ?? false,
         },
         verb: "app.manage",
-        resource: { kind: "none" },
+        resource: input.appId ? { kind: "app", appId: input.appId } : { kind: "none" },
         source: "mcp",
       });
       if (!decision.allow) return toolErr(decision.reason);
@@ -86,6 +86,8 @@ export const registerAppUpsertTool = (server: McpServer) => {
           const parsed = parseAppDefinition(input.definition, {
             currentAppId: appId,
             resolveApp: getApp,
+            writerAgentId: requestInfo.agentId,
+            existingDefinition: lockedExisting.definition,
           });
           if (!parsed.success) {
             return toolErr("Invalid app definition.", {
@@ -148,7 +150,10 @@ export const registerAppUpsertTool = (server: McpServer) => {
         return toolErr("migration requires appId; new apps have no rows to migrate.");
       if (input.forceElementBreak)
         return toolErr("forceElementBreak requires appId; new apps have no consumers to break.");
-      const parsed = parseAppDefinition(input.definition, { resolveApp: getApp });
+      const parsed = parseAppDefinition(input.definition, {
+        resolveApp: getApp,
+        writerAgentId: requestInfo.agentId,
+      });
       if (!parsed.success) {
         return toolErr("Invalid app definition.", {
           details: JSON.stringify({ issues: parsed.issues }, null, 2),

@@ -1308,6 +1308,66 @@ describe("apps spike 5 lifecycle", () => {
     expect(invalidStored.updatedBy).toBe(invalid.updatedBy);
   });
 
+  test("coerce to a required column fills missing rows from else or fails loudly", async () => {
+    const appId = await createApp(migrationDefinition);
+    const present = await createRow(appId, { title: "12", status: "open" });
+    const absent = await createRow(appId, { status: "open" });
+    const requiredNumber = {
+      models: { note: { columns: { title: { kind: "number", required: true } } } },
+    };
+
+    // Without else the missing row must surface as unresolved, not be skipped.
+    const withoutElse = await request<{ issues: Array<{ path: string; message: string }> }>(
+      `/api/apps/${appId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          definition: requiredNumber,
+          migration: { title: { coerce: true } },
+        }),
+      },
+    );
+    expect(withoutElse.status).toBe(400);
+    expect(
+      withoutElse.body.issues.some(
+        (issue) => issue.path === "migration.title" && issue.message.includes("provide an else"),
+      ),
+    ).toBe(true);
+    expect(getAppRow(appId, "note", absent.id)).not.toHaveProperty("title");
+
+    // With else the missing row is filled, so required holds on every row.
+    const applied = await request<{
+      migration: { coerced: number; elsed: number; scanned: number };
+    }>(`/api/apps/${appId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        definition: requiredNumber,
+        migration: { title: { coerce: true, else: 0 } },
+      }),
+    });
+    expect(applied.status).toBe(200);
+    expect(applied.body.migration).toMatchObject({ coerced: 1, elsed: 1, scanned: 2 });
+    expect(getAppRow(appId, "note", present.id)).toMatchObject({ title: 12 });
+    expect(getAppRow(appId, "note", absent.id)).toMatchObject({ title: 0 });
+
+    // An optional target still leaves absent rows absent (no materialized else).
+    const optionalApp = await createApp(migrationDefinition);
+    const optionalAbsent = await createRow(optionalApp, { status: "open" });
+    const optionalApplied = await request<{ migration: { elsed: number } }>(
+      `/api/apps/${optionalApp}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          definition: { models: { note: { columns: { title: { kind: "number" } } } } },
+          migration: { title: { coerce: true, else: 0 } },
+        }),
+      },
+    );
+    expect(optionalApplied.status).toBe(200);
+    expect(optionalApplied.body.migration.elsed).toBe(0);
+    expect(getAppRow(optionalApp, "note", optionalAbsent.id)).not.toHaveProperty("title");
+  });
+
   test("accepts migration directives through HTTP PUT", async () => {
     const appId = await createApp(migrationDefinition);
     const row = await createRow(appId, { title: "42", status: "open" });

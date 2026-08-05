@@ -1,5 +1,6 @@
 import * as z from "zod";
 import { getScriptById } from "../be/scripts/db";
+import { getSavedScriptOwnerAgentId } from "../be/scripts/run-saved";
 import catalog from "./catalog.generated.json";
 import {
   crossPageDefinitionIssues,
@@ -180,7 +181,9 @@ const AppActionDefSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("task"),
     prompt: z.string().min(1),
-    agentId: z.string().uuid().optional(),
+    // Agent ids come verbatim from X-Agent-ID at registration and may be
+    // non-UUID (custom stable ids), so no format pin here.
+    agentId: z.string().min(1).optional(),
   }),
 ]);
 
@@ -438,9 +441,39 @@ export function appDefinitionIssues(error: z.ZodError): AppValidationIssue[] {
   return error.issues.flatMap((issue) => flattenIssue(issue));
 }
 
+export type AppDefinitionParseContext = ElementReferenceContext & {
+  /**
+   * Agent performing this definition write, when the writer is an agent.
+   * Script actions run with the script OWNER's bindings at invoke time, so an
+   * agent may only wire its own agent-scoped scripts (or global ones) into an
+   * app. Omit / null for trusted writers (operator, snapshot restore).
+   */
+  writerAgentId?: string | null;
+  /**
+   * The app's current stored definition, for grandfathering: script ids already
+   * wired into the app stay referenceable so an agent can keep editing an app
+   * that legitimately carries another owner's script action.
+   */
+  existingDefinition?: unknown;
+};
+
+/** Defensively collect script action ids from a possibly-broken definition. */
+function collectScriptActionIds(definition: unknown): Set<string> {
+  const ids = new Set<string>();
+  if (!isMergePatchObject(definition)) return ids;
+  const actions = definition.actions;
+  if (!isMergePatchObject(actions)) return ids;
+  for (const action of Object.values(actions)) {
+    if (isMergePatchObject(action) && typeof action.scriptId === "string") {
+      ids.add(action.scriptId);
+    }
+  }
+  return ids;
+}
+
 export function parseAppDefinition(
   input: unknown,
-  elementContext: ElementReferenceContext = {},
+  elementContext: AppDefinitionParseContext = {},
 ): { success: true; definition: AppDefinition } | { success: false; issues: AppValidationIssue[] } {
   if (isMergePatchObject(input) && Object.hasOwn(input, "page")) {
     return {
@@ -477,11 +510,30 @@ export function parseAppDefinition(
     ...crossPageDefinitionIssues(parsed.data, catalog),
     ...elementDefinitionIssues(parsed.data, catalog, elementContext),
   ];
+  const grandfatheredScriptIds = collectScriptActionIds(elementContext.existingDefinition);
   for (const [name, action] of Object.entries(parsed.data.actions ?? {})) {
-    if (action.kind === "script" && !getScriptById(action.scriptId)) {
+    if (action.kind !== "script") continue;
+    const script = getScriptById(action.scriptId);
+    if (!script) {
       issues.push({
         path: `actions.${name}.scriptId`,
         message: `script "${action.scriptId}" not found`,
+      });
+      continue;
+    }
+    // Invoke-time runs the script with the OWNER's bindings, so an agent writer
+    // may only wire scripts it owns (or global ones). Script ids already present
+    // in the stored definition are grandfathered so foreign-authored apps stay
+    // editable.
+    if (
+      elementContext.writerAgentId &&
+      script.scope === "agent" &&
+      getSavedScriptOwnerAgentId(script) !== elementContext.writerAgentId &&
+      !grandfatheredScriptIds.has(action.scriptId)
+    ) {
+      issues.push({
+        path: `actions.${name}.scriptId`,
+        message: `script "${action.scriptId}" is agent-scoped to another agent — reference a script you own or a global script`,
       });
     }
   }

@@ -49,7 +49,7 @@ export const registerAppDiffTool = (server: McpServer) => {
       const decision = can({
         principal: { kind: "agent", agentId: requestInfo.agentId, isLead: agent?.isLead ?? false },
         verb: "app.manage",
-        resource: { kind: "none" },
+        resource: { kind: "app", appId },
         source: "mcp",
       });
       if (!decision.allow) return toolErr(decision.reason);

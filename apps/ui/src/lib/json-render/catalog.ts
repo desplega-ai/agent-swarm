@@ -274,7 +274,9 @@ const tableRowActionSchema = z.object({
    * MUST confirm — no click-again patterns). Omitted → confirmation is implied
    * for `destructive` / `destructive-outline` variants and skipped otherwise,
    * so a JSON author cannot accidentally ship a one-click delete. `false`
-   * opts a destructive-looking-but-reversible action out.
+   * opts a destructive-looking-but-reversible action out — but never a chain
+   * containing `app.mutate` with `op: "delete"`: row deletes are unrecoverable,
+   * so they always confirm.
    */
   confirm: z
     .union([

@@ -535,6 +535,22 @@ describe("apps spike", () => {
     expect(result.status).toBe(404);
   });
 
+  test("DELETE succeeds for an app whose stored definition is broken", async () => {
+    const appId = await createIdeasApp();
+    await request(`/api/apps/${appId}/models/idea/rows`, {
+      method: "POST",
+      body: JSON.stringify({ values: { title: "Orphaned by corruption" } }),
+    });
+    // Simulate a legacy/manually corrupted row: DELETE is the recovery path and
+    // must not depend on the definition parsing.
+    getDb().run("UPDATE apps SET definition = ? WHERE id = ?", ["{not json", appId]);
+
+    const deleted = await request<{ ok: boolean }>(`/api/apps/${appId}`, { method: "DELETE" });
+    expect(deleted).toEqual({ status: 200, body: { ok: true } });
+    expect(countKv(appsNamespace(appId), {})).toBe(0);
+    expect((await request(`/api/apps/${appId}`)).status).toBe(404);
+  });
+
   test("deleting an app purges every row and index key", async () => {
     const appId = await createIdeasApp();
     await Promise.all(

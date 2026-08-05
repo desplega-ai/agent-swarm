@@ -14,7 +14,10 @@ import { resolveHttpRequestAuth } from "../http/auth";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { clearAuditSink, LEGACY_POLICY, type LegacyRule, setAuditSink } from "../rbac";
 import type { RbacCheck } from "../rbac/types";
+import { registerAppDiffTool } from "../tools/app-diff";
 import { registerAppGetTool, registerAppQueryTool } from "../tools/app-get";
+import { registerAppHistoryTool } from "../tools/app-history";
+import { registerAppPatchTool } from "../tools/app-patch";
 import { setRequestAuth } from "../utils/request-auth-context";
 
 const TEST_DB_PATH = `/private/tmp/test-apps-rbac-${process.pid}.sqlite`;
@@ -123,6 +126,9 @@ function registeredTools(): Record<string, RegisteredTool> {
   const toolServer = new McpServer({ name: "apps-rbac-test", version: "1.0.0" });
   registerAppGetTool(toolServer);
   registerAppQueryTool(toolServer);
+  registerAppHistoryTool(toolServer);
+  registerAppDiffTool(toolServer);
+  registerAppPatchTool(toolServer);
   return (toolServer as unknown as { _registeredTools: Record<string, RegisteredTool> })
     ._registeredTools;
 }
@@ -270,6 +276,22 @@ describe("app.use and app.manage plumbing", () => {
     const appUseChecks = checks.filter((check) => check.verb === "app.use");
     expect(appUseChecks).toHaveLength(2);
     for (const check of appUseChecks) {
+      expect(check.source).toBe("mcp");
+      expect(check.resource).toEqual({ kind: "app", appId });
+    }
+  });
+
+  test("MCP app-manage tools use app.manage with the app resource", async () => {
+    const checks: RbacCheck[] = [];
+    setAuditSink((check) => checks.push(check));
+
+    await callTool("app-history", { appId });
+    await callTool("app-diff", { appId });
+    await callTool("app-patch", { appId, definition: {} });
+
+    const manageChecks = checks.filter((check) => check.verb === "app.manage");
+    expect(manageChecks).toHaveLength(3);
+    for (const check of manageChecks) {
       expect(check.source).toBe("mcp");
       expect(check.resource).toEqual({ kind: "app", appId });
     }

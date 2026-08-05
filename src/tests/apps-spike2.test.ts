@@ -572,7 +572,7 @@ describe("server page validation", () => {
     }
   });
 
-  test("validates action script references and task agent UUIDs at write time", () => {
+  test("validates action script references and task agent ids at write time", () => {
     expectIssue(
       {
         ...baseDefinition,
@@ -582,11 +582,20 @@ describe("server page validation", () => {
       },
       "actions.broken.scriptId",
     );
+    // Agent ids come verbatim from X-Agent-ID at registration and may be
+    // non-UUID custom stable ids — only empty is rejected.
+    const custom = parseAppDefinition({
+      ...baseDefinition,
+      actions: {
+        assign: { kind: "task", prompt: "Do it", agentId: "custom-stable-agent" },
+      },
+    });
+    expect(custom.success).toBe(true);
     expectIssue(
       {
         ...baseDefinition,
         actions: {
-          assign: { kind: "task", prompt: "Do it", agentId: "not-a-uuid" },
+          assign: { kind: "task", prompt: "Do it", agentId: "" },
         },
       },
       "actions.assign.agentId",
@@ -965,6 +974,71 @@ describe("custom app actions", () => {
     expect(stale.body.issues.some((issue) => issue.path === "actions.calculate.scriptId")).toBe(
       true,
     );
+  });
+
+  test("agent writers cannot wire another agent's script; operator wiring is grandfathered", async () => {
+    const OTHER_AGENT_ID = crypto.randomUUID();
+    const foreign = await upsertScriptByName({
+      name: `app_action_foreign_${crypto.randomUUID().replaceAll("-", "")}`,
+      scope: "agent",
+      scopeId: OTHER_AGENT_ID,
+      source: "export default function run() { return { ok: true }; }",
+      description: "Foreign-owned action fixture",
+      intent: "Prove the script ownership gate",
+      signatureJson: JSON.stringify({ args: { type: "object" }, result: { type: "object" } }),
+      agentId: OTHER_AGENT_ID,
+      typeChecked: true,
+    });
+
+    try {
+      // An agent writer referencing a foreign agent-scoped script is rejected.
+      const denied = await request<{ issues: Array<{ path: string; message: string }> }>(
+        "/api/apps",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: "Foreign wire",
+            definition: {
+              ...baseDefinition,
+              actions: { steal: { kind: "script", scriptId: foreign.script.id } },
+            },
+          }),
+        },
+      );
+      expect(denied.status).toBe(400);
+      expect(
+        denied.body.issues.some(
+          (issue) =>
+            issue.path === "actions.steal.scriptId" &&
+            issue.message.includes("agent-scoped to another agent"),
+        ),
+      ).toBe(true);
+
+      // The operator (no X-Agent-ID) may wire any existing script.
+      const operatorCreate = await fetch(`${base}/api/apps`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Operator wired",
+          definition: {
+            ...baseDefinition,
+            actions: { run: { kind: "script", scriptId: foreign.script.id } },
+          },
+        }),
+      });
+      expect(operatorCreate.status).toBe(201);
+      const operatorAppId = ((await operatorCreate.json()) as { app: { id: string } }).app.id;
+
+      // Grandfathering: an agent can still edit the app that already carries the
+      // foreign script action.
+      const patched = await request<{ app: { description: string } }>(
+        `/api/apps/${operatorAppId}`,
+        { method: "PATCH", body: JSON.stringify({ description: "agent touched" }) },
+      );
+      expect(patched.status).toBe(200);
+    } finally {
+      deleteScript({ name: foreign.script.name, scope: "agent", scopeId: OTHER_AGENT_ID });
+    }
   });
 
   test("returns 404 for an unknown action and creates a lead-owned task action", async () => {

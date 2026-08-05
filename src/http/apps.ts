@@ -767,7 +767,10 @@ export async function handleApps(
       );
       return true;
     }
-    const definition = parseAppDefinition(parsed.body.definition, { resolveApp: getApp });
+    const definition = parseAppDefinition(parsed.body.definition, {
+      resolveApp: getApp,
+      writerAgentId: myAgentId ?? null,
+    });
     if (!definition.success) {
       invalidDefinition(res, definition.issues);
       return true;
@@ -1094,8 +1097,11 @@ export async function handleApps(
         return true;
       }
 
-      // Spike tradeoff: app users currently run saved scripts with the owner's bindings; revisit
-      // with invoker-rights checks or invoker-brokered credentials before productization.
+      // Script actions run with the OWNER's bindings by design: wiring a script
+      // into an app is the owner's delegation. parseAppDefinition enforces at
+      // write time that an agent may only wire scripts it owns (or global ones),
+      // so a foreign script id cannot be smuggled in here. Invoker-brokered
+      // credentials remain a possible future tightening.
       const runAsAgentId = getSavedScriptOwnerAgentId(script);
       if (!runAsAgentId) {
         jsonError(res, "agentId is required: this script has no owning agent to run as", 400);
@@ -1176,6 +1182,8 @@ export async function handleApps(
         const definition = parseAppDefinition(patch.definition, {
           currentAppId: parsed.params.id,
           resolveApp: getApp,
+          writerAgentId: myAgentId ?? null,
+          existingDefinition: existing.definition,
         });
         if (!definition.success) {
           invalidDefinition(res, definition.issues);
@@ -1251,6 +1259,8 @@ export async function handleApps(
           const parsedDefinition = parseAppDefinition(parsed.body.definition, {
             currentAppId: parsed.params.id,
             resolveApp: getApp,
+            writerAgentId: myAgentId ?? null,
+            existingDefinition: existing.definition,
           });
           if (!parsedDefinition.success) {
             invalidDefinition(res, parsedDefinition.issues);
@@ -1319,7 +1329,11 @@ export async function handleApps(
     let deleted = false;
     // Intentional float-model asymmetry: DELETE bypasses the ElementRef compatibility
     // gate; consumers of the removed app degrade to the Phase 6 error card.
-    await purgeAppRows(app.id, Object.keys(app.definition.models), () => {
+    // A broken definition (definitionError) must not block deletion — DELETE is the
+    // recovery path. The model list only picks purge lock names; the purge itself
+    // sweeps the whole app namespace, so an empty list is safe.
+    const purgeModels = app.definitionError ? [] : Object.keys(app.definition.models);
+    await purgeAppRows(app.id, purgeModels, () => {
       deleted = deleteApp(app.id);
     });
     if (!deleted) {

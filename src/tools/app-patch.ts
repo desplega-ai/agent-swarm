@@ -69,7 +69,7 @@ export const registerAppPatchTool = (server: McpServer) => {
           isLead: agent?.isLead ?? false,
         },
         verb: "app.manage",
-        resource: { kind: "none" },
+        resource: { kind: "app", appId: input.appId },
         source: "mcp",
       });
       if (!decision.allow) return toolErr(decision.reason);
@@ -95,6 +95,8 @@ export const registerAppPatchTool = (server: McpServer) => {
         const parsed = parseAppDefinition(patch.definition, {
           currentAppId: input.appId,
           resolveApp: getApp,
+          writerAgentId: requestInfo.agentId,
+          existingDefinition: lockedExisting.definition,
         });
         if (!parsed.success) {
           return toolErr("Invalid app definition.", {

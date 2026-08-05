@@ -619,17 +619,29 @@ function useStableBySignature<T>(value: T, signature: string): T {
 
 const DESTRUCTIVE_VARIANTS = new Set(["destructive", "destructive-outline"]);
 
+/** Row deletes are unrecoverable (rows have no version history), so `confirm:
+ * false` cannot opt an `app.mutate` delete out of the dialog. */
+function chainDeletesRows(rowAction: TableRowAction): boolean {
+  return rowAction.actions.some(
+    (action) => action.action === "app.mutate" && action.params?.op === "delete",
+  );
+}
+
 /**
  * Whether a row action must go through an `AlertDialog` first, and with what
  * copy. `apps/ui/CLAUDE.md` makes confirmation a hard rule for destructive actions,
  * so destructive variants default to confirming even when the JSON author says
- * nothing — an app definition cannot ship a one-click delete by omission.
+ * nothing — an app definition cannot ship a one-click delete by omission. The
+ * `confirm: false` opt-out exists for destructive-looking-but-reversible
+ * actions; a chain that actually deletes rows always confirms.
  */
 function confirmConfigFor(rowAction: TableRowAction): TableRowActionConfirm | null {
   const confirm = rowAction.confirm;
-  if (confirm === false) return null;
+  if (confirm === false) return chainDeletesRows(rowAction) ? {} : null;
   if (confirm === undefined)
-    return DESTRUCTIVE_VARIANTS.has(rowAction.variant ?? "outline") ? {} : null;
+    return DESTRUCTIVE_VARIANTS.has(rowAction.variant ?? "outline") || chainDeletesRows(rowAction)
+      ? {}
+      : null;
   if (confirm === true) return {};
   if (typeof confirm === "string") return { description: confirm };
   return confirm;

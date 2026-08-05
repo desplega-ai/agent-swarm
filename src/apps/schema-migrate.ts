@@ -558,7 +558,16 @@ function applyDirective(
   const unresolved = new Map<string, number>();
   const hasExplicitElse = "else" in directive && Object.hasOwn(directive, "else");
   for (const row of rows) {
-    if ("coerce" in directive && !Object.hasOwn(row, columnName)) continue;
+    // A row that omits the column stays absent when the target permits absence.
+    // When the target is (newly) required, fall through so the row fills from
+    // `else` or lands in the unresolved report — never silently violates required.
+    if (
+      "coerce" in directive &&
+      !Object.hasOwn(row, columnName) &&
+      (nextColumn.hidden === true || nextColumn.required !== true)
+    ) {
+      continue;
+    }
     let value: unknown;
     let resolved = false;
     if ("from" in directive) {

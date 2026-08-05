@@ -3,16 +3,9 @@ import { getApiKey } from "../../src/utils/api-key";
 
 const seedPath = new URL("./ideas-app.seed.json", import.meta.url);
 
-const fallbackPage = {
-  root: "root",
-  elements: {
-    root: { type: "Container", props: {}, children: ["heading", "description"] },
-    heading: { type: "Heading", props: { text: "Ideas", level: "h1" } },
-    description: { type: "Text", props: { text: "Ideas tracker seed loaded." } },
-  },
-};
-
-const baseDefinition = {
+// Minimal stand-in when the authored seed JSON is missing. Uses the current
+// pages+defaultPage shape (legacy singular `page` is rejected by the server).
+const fallbackDefinition = {
   models: {
     idea: {
       columns: {
@@ -26,12 +19,22 @@ const baseDefinition = {
   queries: {
     allIdeas: { model: "idea", sort: { column: "createdAt", dir: "desc" } },
   },
+  pages: {
+    main: {
+      root: "root",
+      elements: {
+        root: { type: "Container", props: {}, children: ["heading", "description"] },
+        heading: { type: "Heading", props: { text: "Ideas", level: "h1" } },
+        description: { type: "Text", props: { content: "Ideas tracker seed loaded." } },
+      },
+    },
+  },
+  defaultPage: "main",
 };
 
-let definition: Record<string, unknown> = { ...baseDefinition, page: fallbackPage };
+let definition: Record<string, unknown> = fallbackDefinition;
 if (await Bun.file(seedPath).exists()) {
-  const authored = (await Bun.file(seedPath).json()) as Record<string, unknown>;
-  definition = authored.models && authored.page ? authored : { ...baseDefinition, page: authored };
+  definition = (await Bun.file(seedPath).json()) as Record<string, unknown>;
 }
 
 const baseUrl = (process.env.MCP_BASE_URL ?? "http://localhost:3013").replace(/\/$/, "");
