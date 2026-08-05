@@ -26,6 +26,9 @@ script_embeddings
 seed_state
 session_costs
 session_logs
+slack_reaction_groups   # internal Slack feedback lifecycle; attribution is on linked task/steering rows (126)
+slack_reaction_steering # joins reaction groups to attributed task_steering_messages rows (126)
+slack_reaction_tasks    # joins reaction groups to attributed agent_tasks rows (126)
 task_context_snapshots
 task_steering_messages # attribution via created_by_kind/created_by_user_id/created_by_agent_id (121)
 tracker_agent_mapping
