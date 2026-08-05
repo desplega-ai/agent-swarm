@@ -31,7 +31,7 @@ export default function WorkflowRunDetailPage() {
   const { data: workflow } = useWorkflow(run?.workflowId ?? "");
   const retryRun = useRetryWorkflowRun();
 
-  const { searchParams, setParam } = useUrlSearchState();
+  const { searchParams, setParam, setParams } = useUrlSearchState();
   const selectedNodeId = readStringParam(searchParams, "node") || null;
   const expandedStepsParam = readStringParam(searchParams, "steps");
   const expandedStepIds = useMemo(
@@ -153,9 +153,15 @@ export default function WorkflowRunDetailPage() {
 
   // When a graph node is clicked, expand and scroll to that step. A `foreach` node owns several
   // synthetic child steps (`<nodeId>#<itemKey>`) — expand all of them and scroll to the first.
+  // Clicking the already-selected node deselects it. NOTE: `node` and `steps` must go through ONE
+  // setParams call — two setSearchParams calls in the same tick both start from the same stale
+  // params, so the second silently drops the first's update.
   const handleGraphNodeClick = useCallback(
     (nodeId: string) => {
-      setSelectedNodeId(nodeId);
+      if (selectedNodeId === nodeId) {
+        setSelectedNodeId(null);
+        return;
+      }
       if (foreachIds.has(nodeId)) setGroupOpen(nodeId, true);
       const ownStepIds = steps
         .map((step) => step.nodeId)
@@ -166,22 +172,34 @@ export default function WorkflowRunDetailPage() {
       for (const stepNodeId of ownStepIds.length > 0 ? ownStepIds : [nodeId]) {
         next.add(stepNodeId);
       }
-      setExpandedSteps(next);
+      setParams({
+        node: nodeId,
+        steps: Array.from(next).filter(Boolean).join(","),
+      });
       // Scroll to the step card after a tick (to allow expansion to render)
       requestAnimationFrame(() => {
         const el = stepRefs.current.get(ownStepIds[0] ?? nodeId);
         el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       });
     },
-    [expandedStepIds, setExpandedSteps, setSelectedNodeId, setGroupOpen, steps, foreachIds],
+    [
+      expandedStepIds,
+      selectedNodeId,
+      setParams,
+      setSelectedNodeId,
+      setGroupOpen,
+      steps,
+      foreachIds,
+    ],
   );
 
-  // When a step card is clicked, highlight the node in the graph (don't toggle expand)
+  // When a step card is clicked, highlight the node in the graph (don't toggle expand);
+  // clicking the selected card again clears the selection.
   const handleStepClick = useCallback(
     (nodeId: string) => {
-      setSelectedNodeId(nodeId);
+      setSelectedNodeId(selectedNodeId === nodeId ? null : nodeId);
     },
-    [setSelectedNodeId],
+    [selectedNodeId, setSelectedNodeId],
   );
 
   const statusCounts = useMemo(() => {
