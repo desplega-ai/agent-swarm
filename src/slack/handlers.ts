@@ -11,7 +11,14 @@ import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { workflowEventBus } from "../workflows/event-bus";
-import { ackSlackMessage } from "./ack";
+import {
+  ackSlackMessage,
+  ackSlackTaskMessage,
+  failSlackTaskMessage,
+  linkSlackSteeringMessage,
+  linkSlackTaskMessage,
+  sealSlackTaskMessage,
+} from "./ack";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
 import { enrichSlackUserEmail, resolveSlackUserId, rewriteSlackMentions } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
@@ -23,7 +30,7 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { extractSlackMessageText } from "./message-text";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
-import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
+import { bufferThreadMessage, instantFlush, isThreadBuffered } from "./thread-buffer";
 import { registerTreeMessage } from "./watcher";
 
 // User filtering configuration from environment variables
@@ -497,24 +504,31 @@ export function registerMessageHandler(app: App): void {
       if (stripped.startsWith("!now")) {
         const nowMessage = stripped.replace(/^!now\s*/, "").trim();
         const threadKey = `${msg.channel}:${msg.thread_ts}`;
+        const hadBufferedMessages = isThreadBuffered(msg.channel, msg.thread_ts);
 
         console.log(
           `[Slack] !now command detected in thread ${threadKey}${nowMessage ? ` with message: "${nowMessage}"` : ""}`,
         );
 
-        if (nowMessage) {
-          bufferThreadMessage(msg.channel, msg.thread_ts, nowMessage, msg.user, msg.ts);
-        }
+        const buffered =
+          nowMessage || hadBufferedMessages
+            ? bufferThreadMessage(
+                msg.channel,
+                msg.thread_ts,
+                nowMessage,
+                msg.user,
+                msg.ts,
+                "zap",
+                !!nowMessage,
+              )
+            : null;
+
+        if (!nowMessage && !hadBufferedMessages) return;
+
+        if (buffered?.tracked) await ackSlackMessage(client, msg.channel, msg.ts, "zap");
 
         // Instant flush — no dependency
         await instantFlush(threadKey);
-
-        try {
-          await client.reactions.add({ channel: msg.channel, name: "zap", timestamp: msg.ts });
-        } catch (e) {
-          console.log(`[Slack] Reaction failed: ${e instanceof Error ? e.message : e}`);
-        }
-
         return;
       }
     }
@@ -542,19 +556,25 @@ export function registerMessageHandler(app: App): void {
 
       if (hasSwarmActivity) {
         const threadKey = `${msg.channel}:${msg.thread_ts}`;
-        bufferThreadMessage(msg.channel, msg.thread_ts, effectiveText, msg.user, msg.ts);
-
         // Slack feedback: react with :eyes: on first buffer, :heavy_plus_sign: on appends
-        const count = getBufferMessageCount(threadKey);
-        console.log(
-          `[Slack] Additive buffer: ${threadKey} (message #${count}, reaction: ${count === 1 ? "eyes" : "heavy_plus_sign"})`,
-        );
-        await ackSlackMessage(
-          client,
+        const buffered = bufferThreadMessage(
           msg.channel,
+          msg.thread_ts,
+          effectiveText,
+          msg.user,
           msg.ts,
-          count === 1 ? "eyes" : "heavy_plus_sign",
         );
+        console.log(
+          `[Slack] Additive buffer: ${threadKey} (message #${buffered.count}, reaction: ${buffered.count === 1 ? "eyes" : "heavy_plus_sign"})`,
+        );
+        if (buffered.tracked) {
+          await ackSlackMessage(
+            client,
+            msg.channel,
+            msg.ts,
+            buffered.count === 1 ? "eyes" : "heavy_plus_sign",
+          );
+        }
 
         return; // Don't process further — buffer will flush
       }
@@ -628,7 +648,12 @@ export function registerMessageHandler(app: App): void {
         requestedByUserId,
         contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
       });
-      await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
+      await ackSlackTaskMessage(client, {
+        channel: msg.channel,
+        timestamp: msg.ts,
+        name: "eyes",
+        taskId: task.id,
+      });
 
       if (isSlackRenderV2Enabled()) {
         await ensureSlackThreadTree([task.id]);
@@ -690,6 +715,7 @@ export function registerMessageHandler(app: App): void {
       steered: Array<{ agentName: string; acknowledgement: string }>;
       failed: Array<{ agentName: string; reason: string }>;
     } = { assigned: [], queued: [], steered: [], failed: [] };
+    let reactionLinkFailed = false;
 
     for (const match of matches) {
       const agent = getAgentById(match.agent.id);
@@ -711,7 +737,15 @@ export function registerMessageHandler(app: App): void {
               })
             : null;
           if (steering) {
-            await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
+            const steeringMessageId = steering.result.steeringMessageId;
+            if (!steeringMessageId) throw new Error("Slack steering result missing message ID");
+            reactionLinkFailed =
+              !linkSlackSteeringMessage({
+                channel: msg.channel,
+                timestamp: msg.ts,
+                name: "eyes",
+                steeringMessageId,
+              }) || reactionLinkFailed;
             results.steered.push({
               agentName: agent.name,
               acknowledgement: formatSlackSteeringAck(steering.result),
@@ -730,7 +764,13 @@ export function registerMessageHandler(app: App): void {
             requestedByUserId,
             contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
           });
-          await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
+          reactionLinkFailed =
+            !linkSlackTaskMessage({
+              channel: msg.channel,
+              timestamp: msg.ts,
+              name: "eyes",
+              taskId: task.id,
+            }) || reactionLinkFailed;
           results.assigned.push({ agentName: agent.name, taskId: task.id });
           continue;
         }
@@ -746,7 +786,13 @@ export function registerMessageHandler(app: App): void {
           requestedByUserId,
           contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
         });
-        await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
+        reactionLinkFailed =
+          !linkSlackTaskMessage({
+            channel: msg.channel,
+            timestamp: msg.ts,
+            name: "eyes",
+            taskId: task.id,
+          }) || reactionLinkFailed;
 
         // Check if agent has an in-progress task in this thread (queued follow-up)
         const agentTasks = getTasksByAgentId(agent.id);
@@ -761,6 +807,16 @@ export function registerMessageHandler(app: App): void {
         }
       } catch {
         results.failed.push({ agentName: agent.name, reason: "error" });
+      }
+    }
+
+    const acceptedCount = results.assigned.length + results.queued.length + results.steered.length;
+    if (acceptedCount > 0) {
+      if (reactionLinkFailed || results.failed.length > 0) {
+        failSlackTaskMessage(msg.channel, msg.ts);
+      }
+      if (sealSlackTaskMessage(msg.channel, msg.ts)) {
+        await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
       }
     }
 

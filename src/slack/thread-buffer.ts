@@ -1,7 +1,19 @@
-import { getLatestActiveTaskInThread, getLeadAgent, getMostRecentTaskInThread } from "../be/db";
+import {
+  getLatestActiveTaskInThread,
+  getLeadAgent,
+  getMostRecentTaskInThread,
+  type SlackAcceptanceReaction,
+} from "../be/db";
 import { createAdditiveBuffer } from "../tasks/additive-buffer";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import {
+  failSlackTaskMessage,
+  linkSlackSteeringMessage,
+  linkSlackTaskMessage,
+  openSlackTaskMessage,
+  sealSlackTaskMessage,
+} from "./ack";
 import { getSlackApp } from "./app";
 import { buildBufferFlushBlocks } from "./blocks";
 import { rewriteSlackMentions } from "./enrich";
@@ -16,6 +28,9 @@ interface BufferedMessage {
   ts: string;
   channelId: string;
   threadTs: string;
+  acceptanceReaction: SlackAcceptanceReaction;
+  includeInTaskText: boolean;
+  attributed: boolean;
 }
 
 const BUFFER_TIMEOUT_MS = Number(process.env.ADDITIVE_SLACK_BUFFER_MS) || 10_000;
@@ -34,7 +49,14 @@ const slackBuffer = createAdditiveBuffer<BufferedMessage>({
   timeoutMs: BUFFER_TIMEOUT_MS,
   label: "slack-thread",
   onFlush: async (items, key, reason) => {
-    await slackFlush(items, key, reason === "manual");
+    try {
+      await slackFlush(items, key, reason === "manual");
+    } catch (error) {
+      for (const item of items) {
+        if (!item.attributed) failSlackTaskMessage(item.channelId, item.ts);
+      }
+      throw error;
+    }
   },
 });
 
@@ -47,14 +69,24 @@ export function bufferThreadMessage(
   text: string,
   userId: string,
   ts: string,
-): void {
-  slackBuffer.enqueue(makeKey(channelId, threadTs), {
+  acceptanceReaction?: SlackAcceptanceReaction,
+  includeInTaskText = true,
+): { count: number; tracked: boolean } {
+  const key = makeKey(channelId, threadTs);
+  const count = slackBuffer.count(key) + 1;
+  const reaction = acceptanceReaction ?? (count === 1 ? "eyes" : "heavy_plus_sign");
+  const tracked = openSlackTaskMessage({ channel: channelId, timestamp: ts, name: reaction });
+  slackBuffer.enqueue(key, {
     text,
     userId,
     ts,
     channelId,
     threadTs,
+    acceptanceReaction: reaction,
+    includeInTaskText,
+    attributed: false,
   });
+  return { count, tracked };
 }
 
 /**
@@ -137,14 +169,16 @@ async function slackFlush(
   // Buffer is guaranteed to have at least one item — the first carries the
   // original requester's userId (same semantics as the pre-refactor version).
   const originalRequesterId = items[0]!.userId;
+  const taskItems = items.filter((item) => item.includeInTaskText);
+  if (taskItems.length === 0) return;
 
   console.log(`[Slack] Flushing buffer: ${key} (${items.length} messages, immediate=${immediate})`);
 
   // Build combined task description. Any in-body `<@U…>` mentions the
   // requester typed are rewritten via the identity primitive so the agent
   // sees a name or the explicit UNKNOWN sentinel — never a raw Slack ID.
-  const combinedText = rewriteSlackMentions(items.map((m) => m.text).join("\n---\n"));
-  const description = `[Thread follow-up — ${items.length} message(s) buffered]\n\n${combinedText}`;
+  const combinedText = rewriteSlackMentions(taskItems.map((m) => m.text).join("\n---\n"));
+  const description = `[Thread follow-up — ${taskItems.length} message(s) buffered]\n\n${combinedText}`;
 
   // Find the latest active task in this thread for dependency chaining
   const latestActiveTask = getLatestActiveTaskInThread(channelId, threadTs);
@@ -160,6 +194,19 @@ async function slackFlush(
     message: combinedText,
   });
   if (steering) {
+    const steeringMessageId = steering.result.steeringMessageId;
+    if (!steeringMessageId) throw new Error("Slack steering result missing message ID");
+    for (const item of items) {
+      const linked = linkSlackSteeringMessage({
+        channel: item.channelId,
+        timestamp: item.ts,
+        name: item.acceptanceReaction,
+        steeringMessageId,
+      });
+      if (!linked) failSlackTaskMessage(item.channelId, item.ts);
+      sealSlackTaskMessage(item.channelId, item.ts);
+      item.attributed = linked;
+    }
     console.log(
       `[Slack] Buffer flushed → steering ${steering.result.outcome} for task ${steering.task.id}`,
     );
@@ -207,6 +254,17 @@ async function slackFlush(
     parentTaskId: mostRecentTask?.id,
     contextKey: slackContextKey({ channelId, threadTs }),
   });
+  for (const item of items) {
+    const linked = linkSlackTaskMessage({
+      channel: item.channelId,
+      timestamp: item.ts,
+      name: item.acceptanceReaction,
+      taskId: task.id,
+    });
+    if (!linked) failSlackTaskMessage(item.channelId, item.ts);
+    sealSlackTaskMessage(item.channelId, item.ts);
+    item.attributed = linked;
+  }
 
   console.log(
     `[Slack] Buffer flushed → task ${task.id} (dependsOn: ${dependsOn ? dependsOn.join(", ") : "none"})`,

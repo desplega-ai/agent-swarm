@@ -9,6 +9,8 @@ import {
   setSlackMessageTracking,
 } from "../be/db";
 import type { AgentTask } from "../types";
+import { scrubSecrets } from "../utils/secret-scrubber";
+import { processSlackTerminalReactions } from "./ack";
 import { getSlackApp } from "./app";
 import type { TreeNode } from "./blocks";
 import { buildTreeBlocks, formatDuration } from "./blocks";
@@ -549,10 +551,18 @@ export function startTaskWatcher(intervalMs = 3000): void {
 
   watcherInterval = setInterval(async () => {
     // Prevent overlapping processing cycles
-    if (isProcessing || !getSlackApp()) return;
+    const app = getSlackApp();
+    if (isProcessing || !app) return;
     isProcessing = true;
 
     try {
+      try {
+        await processSlackTerminalReactions(app.client);
+      } catch (error) {
+        console.error(
+          `[Slack] Terminal reaction reconciliation failed: ${scrubSecrets(error instanceof Error ? error.message : String(error))}`,
+        );
+      }
       if (isSlackRenderV2Enabled()) {
         await processSlackRenderV2();
         return;

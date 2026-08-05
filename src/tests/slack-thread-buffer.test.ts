@@ -5,6 +5,7 @@ import {
   createAgent,
   createTaskExtended,
   createUser,
+  getDb,
   getLatestActiveTaskInThread,
   initDb,
 } from "../be/db";
@@ -131,6 +132,22 @@ describe("Slack thread buffer", () => {
       expect(task!.slackChannelId).toBe(channelId);
       expect(task!.slackThreadTs).toBe(threadTs);
       expect(task!.slackTriggerMessageTs).toBe("6000.0020");
+      expect(
+        getDb()
+          .query(
+            `SELECT link.message_ts, reaction.acceptance_reaction
+             FROM slack_reaction_tasks link
+             JOIN slack_reaction_groups reaction
+               ON reaction.channel_id = link.channel_id
+              AND reaction.message_ts = link.message_ts
+             WHERE link.task_id = ?
+             ORDER BY link.message_ts`,
+          )
+          .all(task!.id),
+      ).toEqual([
+        { message_ts: "6000.0010", acceptance_reaction: "eyes" },
+        { message_ts: "6000.0020", acceptance_reaction: "heavy_plus_sign" },
+      ]);
     });
 
     test("in-body <@U…> mentions are rewritten via the identity primitive — resolved and unknown", async () => {

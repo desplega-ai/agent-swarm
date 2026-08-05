@@ -402,6 +402,7 @@ describe("isSwarmThreadRoot", () => {
 });
 
 describe("Slack accepted-message acknowledgements", () => {
+  const testRunId = crypto.randomUUID();
   const previousEnv = {
     ADDITIVE_SLACK: process.env.ADDITIVE_SLACK,
     SLACK_RENDER_V2: process.env.SLACK_RENDER_V2,
@@ -427,6 +428,8 @@ describe("Slack accepted-message acknowledgements", () => {
   const getAllAgentsSpy = spyOn(dbModule, "getAllAgents");
   const getLatestLeadTaskInThreadSpy = spyOn(dbModule, "getLatestLeadTaskInThread");
   const getMostRecentTaskInThreadSpy = spyOn(dbModule, "getMostRecentTaskInThread");
+  const recordSlackTaskReactionSpy = spyOn(dbModule, "recordSlackTaskReaction");
+  const sealSlackReactionGroupSpy = spyOn(dbModule, "sealSlackReactionGroup");
   const resolveSlackUserIdSpy = spyOn(slackEnrichModule, "resolveSlackUserId");
 
   const reactionsAdd = mock(async () => ({ ok: true }));
@@ -468,6 +471,8 @@ describe("Slack accepted-message acknowledgements", () => {
     getAllAgentsSpy.mockClear();
     getLatestLeadTaskInThreadSpy.mockClear();
     getMostRecentTaskInThreadSpy.mockClear();
+    recordSlackTaskReactionSpy.mockClear();
+    sealSlackReactionGroupSpy.mockClear();
     resolveSlackUserIdSpy.mockClear();
     reactionsAdd.mockClear();
 
@@ -478,6 +483,8 @@ describe("Slack accepted-message acknowledgements", () => {
     getLatestLeadTaskInThreadSpy.mockImplementation(() => completedTask as never);
     getMostRecentTaskInThreadSpy.mockImplementation(() => completedTask as never);
     resolveSlackUserIdSpy.mockImplementation(async () => undefined);
+    recordSlackTaskReactionSpy.mockImplementation(() => {});
+    sealSlackReactionGroupSpy.mockImplementation(() => true);
   });
 
   afterAll(() => {
@@ -500,7 +507,7 @@ describe("Slack accepted-message acknowledgements", () => {
         text: "<@U_SWARM_BOT> one more follow-up",
         user: "U_HUMAN",
       },
-      body: { event_id: "evt_thread_ack_completed_001" },
+      body: { event_id: `evt_thread_ack_completed_${testRunId}` },
       client,
       say: mock(async () => {}),
     });
@@ -510,6 +517,12 @@ describe("Slack accepted-message acknowledgements", () => {
       channel: "D_THREAD_ACK_TEST",
       name: "eyes",
       timestamp: "2100000000.000002",
+    });
+    expect(recordSlackTaskReactionSpy).toHaveBeenCalledWith({
+      channelId: "D_THREAD_ACK_TEST",
+      messageTs: "2100000000.000002",
+      taskId: "new-follow-up-task",
+      acceptanceReaction: "eyes",
     });
   });
 
@@ -524,7 +537,7 @@ describe("Slack accepted-message acknowledgements", () => {
         text: "one more DM follow-up",
         user: "U_HUMAN",
       },
-      body: { event_id: "evt_assistant_ack_completed_001" },
+      body: { event_id: `evt_assistant_ack_completed_${testRunId}` },
       client,
       say: mock(async () => {}),
       setStatus: mock(async () => {}),
@@ -538,6 +551,36 @@ describe("Slack accepted-message acknowledgements", () => {
       name: "eyes",
       timestamp: "2200000000.000002",
     });
+    expect(recordSlackTaskReactionSpy).toHaveBeenCalledWith({
+      channelId: "D_ASSISTANT_ACK_TEST",
+      messageTs: "2200000000.000002",
+      taskId: "new-follow-up-task",
+      acceptanceReaction: "eyes",
+    });
+  });
+
+  test("bare !now with no buffered work is not acknowledged as accepted", async () => {
+    process.env.ADDITIVE_SLACK = "true";
+    try {
+      await messageHandler!({
+        event: {
+          type: "message",
+          channel: "D_NOW_NOOP_TEST",
+          thread_ts: "2250000000.000001",
+          ts: "2250000000.000002",
+          text: "!now",
+          user: "U_HUMAN",
+        },
+        body: { event_id: `evt_now_noop_${testRunId}` },
+        client,
+        say: mock(async () => {}),
+      });
+
+      expect(reactionsAdd).not.toHaveBeenCalled();
+      expect(createTaskSpy).not.toHaveBeenCalled();
+    } finally {
+      process.env.ADDITIVE_SLACK = "false";
+    }
   });
 
   test("already_reacted is a successful no-op", async () => {

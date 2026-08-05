@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import {
   closeDb,
@@ -7,13 +7,16 @@ import {
   createTaskExtended,
   getChildTasks,
   getLatestActiveTaskInThread,
+  getPendingSlackTaskReactionGroups,
   getSteeringMessagesForTask,
+  getTaskById,
   initDb,
   startTask,
 } from "../be/db";
 
 process.env.SLACK_RENDER_V2 = "false";
 
+import { processSlackTerminalReactions } from "../slack/ack";
 import { buildTreeBlocks } from "../slack/blocks";
 import { routeMessage } from "../slack/router";
 import { requestSlackThreadSteering } from "../slack/steering";
@@ -169,6 +172,49 @@ describe("Slack thread steering", () => {
     expect(messages).toHaveLength(1);
     expect(messages[0]?.body).toContain("first correction\n---\nsecond correction");
     expect(getChildTasks(leadTask.id)).toEqual([]);
+    expect(
+      getPendingSlackTaskReactionGroups()
+        .filter((group) => group.channelId === channelId)
+        .map((group) => ({
+          messageTs: group.messageTs,
+          taskIds: group.tasks.map((task) => task.id),
+        })),
+    ).toEqual([
+      { messageTs: "5000.0002", taskIds: [leadTask.id] },
+      { messageTs: "5000.0003", taskIds: [leadTask.id] },
+    ]);
+  });
+
+  test("a terminal-sweep promotion follows the promoted task outcome", async () => {
+    process.env.SLACK_THREAD_STEERING = "lead";
+    process.env.SLACK_THREAD_STEERING_MODE = "queue";
+    const channelId = "C_STEER_PROMOTED";
+    const threadTs = "5500.0001";
+    const leadTask = createRunningSlackTask(leadId, channelId, threadTs);
+
+    bufferThreadMessage(channelId, threadTs, "finish this as a follow-up", "U1", "5500.0002");
+    await instantFlush(`${channelId}:${threadTs}`);
+    const steering = getSteeringMessagesForTask(leadTask.id)[0]!;
+
+    completeTask(leadTask.id, "original done");
+    const promoted = getSteeringMessagesForTask(leadTask.id)[0]!;
+    expect(promoted.status).toBe("promoted");
+    expect(promoted.promotedTaskId).toBeDefined();
+    expect(getTaskById(promoted.promotedTaskId!)?.status).toBe("pending");
+
+    const add = mock(async () => ({}));
+    const remove = mock(async () => ({}));
+    await processSlackTerminalReactions({ reactions: { add, remove } } as never);
+    expect(add).not.toHaveBeenCalled();
+
+    completeTask(promoted.promotedTaskId!, "follow-up done");
+    await processSlackTerminalReactions({ reactions: { add, remove } } as never);
+    expect(add).toHaveBeenCalledWith({
+      channel: channelId,
+      name: "white_check_mark",
+      timestamp: "5500.0002",
+    });
+    expect(steering.id).toBe(promoted.id);
   });
 
   test("all mode targets the latest active task", () => {

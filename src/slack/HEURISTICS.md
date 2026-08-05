@@ -116,5 +116,7 @@ Both are read from environment variables. `ADDITIVE_SLACK` must be exactly `"tru
 | First non-mention message buffered | :eyes: reaction | Acknowledges the message was captured |
 | Additional message appended to buffer | :heavy_plus_sign: reaction | Indicates the message was added to existing buffer |
 | `!now` command used | :zap: reaction | Confirms instant flush was triggered |
+| All tasks attributable to an accepted message complete | Replace the bot's acceptance reaction with :white_check_mark: | Resolves that exact human message only after its full task fan-out succeeds |
+| Any attributable task fails, is cancelled, or is superseded | Replace the bot's acceptance reaction with :x: | Resolves that exact human message once its full task fan-out is terminal without reporting a non-success as completed |
 | Buffer flushed (with dependency) | :satellite: thread message | "N follow-up message(s) queued pending completion of current task" |
 | Buffer flushed (no dependency / `!now`) | :satellite: thread message | "N follow-up message(s) batched into task" |

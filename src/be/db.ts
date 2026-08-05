@@ -321,6 +321,8 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     throw e;
   }
 
+  backfillSlackDirectMessageReactions(database);
+
   // Mandatory namespace invariant: structural corruption is fatal before the
   // API starts listening. Unknown personal users/provider drift remain
   // readable warnings so operators can repair them through the audit surface.
@@ -400,6 +402,55 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   }
 
   return db;
+}
+
+/**
+ * Recover direct channel/DM messages accepted between #1094 and migration 126.
+ * Some migration tests intentionally use a partial agent_tasks fixture, so the
+ * data backfill is guarded here rather than making the schema migration depend
+ * on columns that may not exist in those fixtures. Buffered and steering
+ * timestamps were not previously durable and cannot be reconstructed safely.
+ */
+function backfillSlackDirectMessageReactions(database: Database): void {
+  const columns = new Set(
+    database
+      .prepare<{ name: string }, []>(`PRAGMA table_info("agent_tasks")`)
+      .all()
+      .map((column) => column.name),
+  );
+  if (
+    !columns.has("slackChannelId") ||
+    !columns.has("slackTriggerMessageTs") ||
+    !columns.has("source") ||
+    !columns.has("task")
+  ) {
+    return;
+  }
+
+  const now = new Date().toISOString();
+  database.transaction(() => {
+    database.run(
+      `INSERT OR IGNORE INTO slack_reaction_groups (
+         channel_id, message_ts, acceptance_reaction, sealed_at, abandon_after
+       )
+       SELECT slackChannelId, slackTriggerMessageTs, 'eyes', ?, ?
+       FROM agent_tasks
+       WHERE source = 'slack'
+         AND slackChannelId IS NOT NULL
+         AND slackTriggerMessageTs IS NOT NULL
+         AND instr(task, '[Thread follow-up — ') = 0`,
+      [now, now],
+    );
+    database.run(
+      `INSERT OR IGNORE INTO slack_reaction_tasks (channel_id, message_ts, task_id)
+       SELECT slackChannelId, slackTriggerMessageTs, id
+       FROM agent_tasks
+       WHERE source = 'slack'
+         AND slackChannelId IS NOT NULL
+         AND slackTriggerMessageTs IS NOT NULL
+         AND instr(task, '[Thread follow-up — ') = 0`,
+    );
+  })();
 }
 
 export function getDb(path?: string): Database {
@@ -1608,6 +1659,194 @@ export function ensureSlackRenderV2Activation(): string {
   const persisted = getSlackRenderV2ActivatedAt();
   if (!persisted) throw new Error("Failed to persist Slack render v2 activation");
   return persisted;
+}
+
+export type SlackAcceptanceReaction = "eyes" | "heavy_plus_sign" | "zap";
+
+export interface SlackTaskReactionGroup {
+  channelId: string;
+  messageTs: string;
+  acceptanceReactions: SlackAcceptanceReaction[];
+  tasks: Array<{ id: string; status: AgentTaskStatus }>;
+}
+
+type SlackTaskReactionRow = {
+  channel_id: string;
+  message_ts: string;
+  task_id: string | null;
+  acceptance_reaction: SlackAcceptanceReaction;
+  status: AgentTaskStatus;
+};
+
+const SLACK_REACTION_ABANDON_MS = 5 * 60_000;
+
+export function openSlackReactionGroup(input: {
+  channelId: string;
+  messageTs: string;
+  acceptanceReaction: SlackAcceptanceReaction;
+}): void {
+  const now = new Date();
+  const abandonAfter = new Date(now.getTime() + SLACK_REACTION_ABANDON_MS).toISOString();
+  getDb().run(
+    `INSERT INTO slack_reaction_groups (
+       channel_id, message_ts, acceptance_reaction, abandon_after, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(channel_id, message_ts) DO UPDATE SET
+       acceptance_reaction = excluded.acceptance_reaction,
+       abandon_after = CASE
+         WHEN slack_reaction_groups.sealed_at IS NULL THEN excluded.abandon_after
+         ELSE slack_reaction_groups.abandon_after
+       END,
+       updated_at = excluded.updated_at`,
+    [
+      input.channelId,
+      input.messageTs,
+      input.acceptanceReaction,
+      abandonAfter,
+      now.toISOString(),
+      now.toISOString(),
+    ],
+  );
+}
+
+export function recordSlackTaskReaction(input: {
+  channelId: string;
+  messageTs: string;
+  taskId: string;
+  acceptanceReaction: SlackAcceptanceReaction;
+}): void {
+  openSlackReactionGroup(input);
+  getDb().run(
+    `INSERT OR IGNORE INTO slack_reaction_tasks (channel_id, message_ts, task_id)
+     VALUES (?, ?, ?)`,
+    [input.channelId, input.messageTs, input.taskId],
+  );
+}
+
+export function recordSlackSteeringReaction(input: {
+  channelId: string;
+  messageTs: string;
+  steeringMessageId: string;
+  acceptanceReaction: SlackAcceptanceReaction;
+}): void {
+  openSlackReactionGroup(input);
+  getDb().run(
+    `INSERT OR IGNORE INTO slack_reaction_steering (
+       channel_id, message_ts, steering_message_id
+     ) VALUES (?, ?, ?)`,
+    [input.channelId, input.messageTs, input.steeringMessageId],
+  );
+}
+
+export function sealSlackReactionGroup(channelId: string, messageTs: string): boolean {
+  const now = new Date().toISOString();
+  const result = getDb().run(
+    `UPDATE slack_reaction_groups
+     SET sealed_at = COALESCE(sealed_at, ?), updated_at = ?
+     WHERE channel_id = ? AND message_ts = ?`,
+    [now, now, channelId, messageTs],
+  );
+  return result.changes > 0;
+}
+
+export function failSlackReactionGroup(channelId: string, messageTs: string): boolean {
+  const now = new Date().toISOString();
+  const result = getDb().run(
+    `UPDATE slack_reaction_groups
+     SET sealed_at = COALESCE(sealed_at, ?), abandon_after = ?,
+         forced_failure = 1, updated_at = ?
+     WHERE channel_id = ? AND message_ts = ?`,
+    [now, now, now, channelId, messageTs],
+  );
+  return result.changes > 0;
+}
+
+export function getPendingSlackTaskReactionGroups(): SlackTaskReactionGroup[] {
+  const rows = getDb()
+    .prepare<SlackTaskReactionRow, []>(
+      `WITH pending_groups AS (
+         SELECT channel_id, message_ts, acceptance_reaction, forced_failure,
+                CASE WHEN sealed_at IS NULL THEN 1 ELSE 0 END AS abandoned,
+                created_at
+         FROM slack_reaction_groups
+         WHERE finalized_at IS NULL
+           AND (sealed_at IS NOT NULL OR abandon_after <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+       ), resolved AS (
+         SELECT g.channel_id, g.message_ts, g.acceptance_reaction,
+                link.task_id,
+                COALESCE(task.status, 'failed') AS status,
+                g.created_at
+         FROM pending_groups g
+         JOIN slack_reaction_tasks link
+           ON link.channel_id = g.channel_id AND link.message_ts = g.message_ts
+         LEFT JOIN agent_tasks task ON task.id = link.task_id
+         UNION ALL
+         SELECT g.channel_id, g.message_ts, g.acceptance_reaction,
+                CASE WHEN steering.status = 'promoted'
+                     THEN steering.promoted_task_id ELSE steering.task_id END AS task_id,
+                CASE
+                  WHEN steering.id IS NULL OR steering.status = 'cancelled' THEN 'failed'
+                  WHEN steering.status = 'pending'
+                   AND original.status IN ('completed','failed','cancelled','superseded') THEN 'pending'
+                  WHEN steering.status = 'promoted' THEN COALESCE(promoted.status, 'failed')
+                  ELSE COALESCE(original.status, 'failed')
+                END AS status,
+                g.created_at
+         FROM pending_groups g
+         JOIN slack_reaction_steering link
+           ON link.channel_id = g.channel_id AND link.message_ts = g.message_ts
+         LEFT JOIN task_steering_messages steering ON steering.id = link.steering_message_id
+         LEFT JOIN agent_tasks original ON original.id = steering.task_id
+         LEFT JOIN agent_tasks promoted ON promoted.id = steering.promoted_task_id
+       )
+       SELECT channel_id, message_ts, task_id, acceptance_reaction, status
+       FROM resolved
+       UNION ALL
+       SELECT g.channel_id, g.message_ts, NULL AS task_id, g.acceptance_reaction,
+              'failed' AS status
+       FROM pending_groups g
+       WHERE g.forced_failure = 1 OR g.abandoned = 1 OR (NOT EXISTS (
+         SELECT 1 FROM slack_reaction_tasks task_link
+         WHERE task_link.channel_id = g.channel_id AND task_link.message_ts = g.message_ts
+       ) AND NOT EXISTS (
+         SELECT 1 FROM slack_reaction_steering steering_link
+         WHERE steering_link.channel_id = g.channel_id AND steering_link.message_ts = g.message_ts
+       ))
+       ORDER BY channel_id, message_ts, task_id`,
+    )
+    .all();
+  const grouped = new Map<string, SlackTaskReactionGroup>();
+  for (const row of rows) {
+    const key = `${row.channel_id}\u0000${row.message_ts}`;
+    let group = grouped.get(key);
+    if (!group) {
+      group = {
+        channelId: row.channel_id,
+        messageTs: row.message_ts,
+        acceptanceReactions: [],
+        tasks: [],
+      };
+      grouped.set(key, group);
+    }
+    if (!group.acceptanceReactions.includes(row.acceptance_reaction)) {
+      group.acceptanceReactions.push(row.acceptance_reaction);
+    }
+    group.tasks.push({
+      id: row.task_id ?? `${row.channel_id}:${row.message_ts}`,
+      status: row.status,
+    });
+  }
+  return [...grouped.values()];
+}
+
+export function markSlackTaskReactionFinalized(channelId: string, messageTs: string): void {
+  const now = new Date().toISOString();
+  getDb().run(
+    `UPDATE slack_reaction_groups
+     SET finalized_at = COALESCE(finalized_at, ?), updated_at = ?
+     WHERE channel_id = ? AND message_ts = ?`,
+    [now, now, channelId, messageTs],
+  );
 }
 
 export type SlackMessageKind = "tree" | "outcome" | "agent";
