@@ -114,7 +114,9 @@ function importAliasFor(source: string, modulePath: string): string | null {
 /** Body of the BUILT_IN_SKILL_SOURCES array literal, or null if not found. */
 const catalogBody =
   seederSource.match(
-    /(?:export\s+)?const\s+BUILT_IN_SKILL_SOURCES(?:\s*:[^=]+)?\s*=\s*\[([\s\S]*?)\n\];/,
+    // The literal may be consumed directly (`];`) or piped through a parse
+    // step (`].map(...)`) — accept both terminators.
+    /(?:export\s+)?const\s+BUILT_IN_SKILL_SOURCES(?:\s*:[^=]+)?\s*=\s*\[([\s\S]*?)\n\](?:;|\.map\()/,
   )?.[1] ?? null;
 
 // ── 1. No name may exist in both delivery paths ─────────────────────────────
