@@ -1,0 +1,38 @@
+/* Glow derives from the brand token so it tracks theme presets and light/dark. */
+.hive-loading-glow {
+  background: radial-gradient(
+    circle at center,
+    color-mix(in oklab, var(--color-primary) 18%, transparent),
+    transparent 65%
+  );
+  /* Opacity-only, so it is reduced-motion safe and stays on unconditionally. */
+  animation: hive-loading-breathe 4s ease-in-out infinite;
+}
+
+/* The <300ms budget in DESIGN.md § Motion covers state transitions; an ambient
+   liveness loop on a blocking surface is an accepted exception like sheets. */
+@media (prefers-reduced-motion: no-preference) {
+  .hive-loading-float {
+    animation: hive-loading-float 6s ease-in-out infinite;
+  }
+}
+
+@keyframes hive-loading-float {
+  0%,
+  100% {
+    transform: translateY(-4px);
+  }
+  50% {
+    transform: translateY(4px);
+  }
+}
+
+@keyframes hive-loading-breathe {
+  0%,
+  100% {
+    opacity: 0.65;
+  }
+  50% {
+    opacity: 1;
+  }
+}

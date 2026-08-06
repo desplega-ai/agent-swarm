@@ -53,6 +53,9 @@ export interface SteerComposerProps {
   onValueChange?: (next: string) => void;
   placeholder?: string;
   autoFocus?: boolean;
+  /** Span the full available width (task-detail dock). Sessions chat omits it
+   * and keeps the centered chat column. */
+  fullWidth?: boolean;
   className?: string;
 }
 
@@ -87,6 +90,7 @@ export function SteerComposer({
   onValueChange,
   placeholder,
   autoFocus,
+  fullWidth,
   className,
 }: SteerComposerProps) {
   const { userId } = useCurrentUser();
@@ -149,7 +153,7 @@ export function SteerComposer({
 
   return (
     <ComposerDock
-      fullWidth
+      fullWidth={fullWidth}
       className={className}
       value={draft}
       onChange={setDraft}

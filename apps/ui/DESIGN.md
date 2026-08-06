@@ -130,16 +130,18 @@ A zinc-neutral field with one amber voice and a strictly named status vocabulary
 - **Border Subtle** (oklch(0.945 0.003 286) light / oklch(1 0 0 / 8%) dark): the quiet tier of the two-tier line system. Separators, row rules (`divide-y divide-border-subtle`), and data-grid row lines sit here so content reads in planes, not boxes. Card outlines and inputs stay on full `border` — the stronger stop is the affordance.
 
 ### Status vocabulary (semantic, tokenized)
-Eight canonical tones, each with a `-strong` text-emphasis variant and a `-foreground` for text on the fill. Light mode uses the 500 stop for fills and 600 for emphasis text; dark mode collapses both to the 400 stop.
+Eight canonical tones, each with a `-strong` text-emphasis variant and a `-foreground` for text on the fill. The palette is the **pale set** (2026-08-06): the original Tailwind hues at ~40% less chroma with lifted lightness, so status reads as a quiet annotation on the zinc field rather than a saturated shout. Fills are pale enough that `-foreground` is dark text in BOTH modes; `-strong` stays a darker contrast-safe stop in light and collapses to the canonical value in dark. Exact values live in `globals.css` (the single source of truth).
 
-- **Success** (emerald, oklch(0.696 0.17 162.48)): idle, completed, healthy, approved.
-- **Active** (amber, oklch(0.769 0.188 70.08)): busy, running, in progress — the working hive.
-- **Error** (red, oklch(0.637 0.237 25.331)): failed, unhealthy, rejected.
-- **Info** (sky, oklch(0.685 0.169 237.323)): informational chips.
-- **Pending** (yellow, oklch(0.795 0.184 86.047)): pending, waiting, starting.
-- **Warning** (orange, oklch(0.705 0.213 47.604)): timeouts, threshold warnings.
-- **Paused** (blue, oklch(0.623 0.214 259.815)): paused, reviewing.
-- **Neutral** (zinc, oklch(0.552 0.016 285.938)): offline, backlog, cancelled, skipped.
+- **Success** (green, oklch(0.74 0.1 163) light): idle, completed, healthy, approved.
+- **Active** (amber, oklch(0.81 0.11 75) light): busy, running, in progress — the working hive.
+- **Error** (red, oklch(0.72 0.12 25) light): failed, unhealthy, rejected.
+- **Info** (blue, oklch(0.74 0.09 235) light): informational chips.
+- **Pending** (yellow, oklch(0.84 0.1 95) light): pending, waiting, starting.
+- **Warning** (orange, oklch(0.76 0.11 55) light): timeouts, threshold warnings.
+- **Paused** (violet-blue, oklch(0.71 0.1 262) light): paused, reviewing.
+- **Neutral** (zinc, oklch(0.62 0.014 286) light): offline, backlog, cancelled, skipped.
+
+Classic-theme presets (`src/lib/theme-classics.ts` — github, vscode, material, solarized, tokyo, monokai, gruvbox) are the ONLY presets allowed to override status tokens: their identity includes a status palette. Hue semantics never change.
 
 Eleven `action-*` tokens (violet, cyan, teal, orange, indigo, pink, purple, blue, amber, yellow, sky) color workflow node types the same way: colored border/text with a `/10` translucent fill. All defined in `src/styles/globals.css`.
 

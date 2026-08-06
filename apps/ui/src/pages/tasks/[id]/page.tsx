@@ -29,6 +29,7 @@ import {
   User,
   Zap,
 } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import "streamdown/styles.css";
@@ -938,6 +939,7 @@ export default function TaskDetailPage() {
         taskStatus={task.status}
         value={steerDraft}
         onValueChange={setSteerDraft}
+        fullWidth
         className="px-0 pt-0 pb-0"
       />
     </CollapsibleComposerDock>
@@ -1152,7 +1154,10 @@ export default function TaskDetailPage() {
           take the freed width. State persists in localStorage. */}
       <div
         className={cn(
+          // The rail collapse animates the grid track itself (browsers tween
+          // grid-template-columns) — swift, like every rail (DESIGN.md § Motion).
           "hidden lg:grid flex-1 min-h-0 overflow-hidden",
+          "transition-[grid-template-columns] duration-200 ease-swift motion-reduce:transition-none",
           railCollapsed ? "lg:grid-cols-[280px_1fr_36px]" : "lg:grid-cols-[280px_1fr_280px]",
         )}
       >
@@ -1243,7 +1248,20 @@ export default function TaskDetailPage() {
               {railCollapsed ? "Activity" : "Collapse activity"}
             </TooltipContent>
           </Tooltip>
-          {!railCollapsed && rightRailContent}
+          {/* Fade the timeline while the grid track tweens — without this the
+              content pops out a frame before the column starts shrinking. */}
+          <AnimatePresence initial={false}>
+            {!railCollapsed && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0, transition: { duration: 0.12 } }}
+                transition={{ duration: 0.15 }}
+              >
+                {rightRailContent}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </aside>
       </div>
     </div>

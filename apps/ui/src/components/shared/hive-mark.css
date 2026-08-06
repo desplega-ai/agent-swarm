@@ -1,0 +1,97 @@
+/* HiveMark ambient loops. Keyframes live in a stylesheet rather than an inline
+   <style> so they parse once for the app instead of once per instance; only the
+   index-derived durations/delays stay inline on the elements. */
+
+.hive-lead {
+  animation-name: hive-lead-breathe;
+  animation-duration: 2.6s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+
+.hive-ring {
+  animation-name: hive-ring-pulse;
+  animation-duration: 3s;
+  animation-timing-function: ease-out;
+  animation-iteration-count: infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+
+/* Duration + delay come from the element's inline style (per-cell stagger). */
+.hive-cell {
+  animation-name: hive-cell-flicker;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+.hive-line {
+  animation-name: hive-line-travel;
+  animation-duration: 4s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+@keyframes hive-lead-breathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(0.97);
+  }
+}
+
+@keyframes hive-cell-flicker {
+  0%,
+  15%,
+  100% {
+    stroke-opacity: 0.85;
+    fill-opacity: 0;
+  }
+  25%,
+  42% {
+    stroke-opacity: 1;
+    fill-opacity: 0.14;
+  }
+}
+
+@keyframes hive-line-travel {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@keyframes hive-ring-pulse {
+  0% {
+    r: 26;
+    opacity: 0.28;
+  }
+  100% {
+    r: 132;
+    opacity: 0;
+  }
+}
+
+/* Reduced motion is gentler, not zero (DESIGN.md § Motion): the lead cell keeps
+   its opacity breath and loses the scale. The movement-bearing variants (flow
+   dots, expanding rings) are SMIL and are gated in the component instead. */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes hive-lead-breathe {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.9;
+    }
+  }
+}

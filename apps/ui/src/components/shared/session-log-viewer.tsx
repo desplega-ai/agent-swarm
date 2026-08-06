@@ -2210,24 +2210,45 @@ export function SessionLogViewer({
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
-  const stickToBottom = useCallback(() => {
-    const el = parentRef.current;
-    if (!el) return;
-    // In virtualized mode getTotalSize() is an estimate until rows measure, so a
-    // bare scrollTop can undershoot the real bottom. scrollToIndex forces the
-    // tail to render + measure; the scrollTop assignment then lands flush.
-    if (virtualize && visibleRows.length > 0) {
-      virtualizer.scrollToIndex(visibleRows.length - 1, { align: "end" });
-    }
-    el.scrollTop = el.scrollHeight;
-    setPending(0);
-  }, [virtualize, virtualizer, visibleRows.length]);
+  const stickToBottom = useCallback(
+    (behavior: ScrollBehavior = "auto") => {
+      const el = parentRef.current;
+      if (!el) return;
+      // User-initiated jumps glide; the auto-follow callers stay instant (they
+      // fire per content-growth frame — animating those would fight the
+      // stream). Reduced motion keeps everything instant.
+      if (
+        behavior === "smooth" &&
+        !(
+          typeof window !== "undefined" &&
+          window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+        )
+      ) {
+        // No scrollToIndex first — it snaps instantly and defeats the glide.
+        // The estimate can undershoot in virtualized mode; once the scroll
+        // lands, the keep-pinned effect snaps the last few px after the tail
+        // rows measure.
+        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+        setPending(0);
+        return;
+      }
+      // In virtualized mode getTotalSize() is an estimate until rows measure, so a
+      // bare scrollTop can undershoot the real bottom. scrollToIndex forces the
+      // tail to render + measure; the scrollTop assignment then lands flush.
+      if (virtualize && visibleRows.length > 0) {
+        virtualizer.scrollToIndex(visibleRows.length - 1, { align: "end" });
+      }
+      el.scrollTop = el.scrollHeight;
+      setPending(0);
+    },
+    [virtualize, virtualizer, visibleRows.length],
+  );
 
   // Keep pinned to the bottom as content grows/measures (only when already there).
   const totalSize = virtualize ? virtualizer.getTotalSize() : 0;
   // biome-ignore lint/correctness/useExhaustiveDependencies: totalSize + visibleRows.length are intentional re-stick triggers — the effect reacts to content growth without reading them in the body.
   useEffect(() => {
-    if (atBottomRef.current) requestAnimationFrame(stickToBottom);
+    if (atBottomRef.current) requestAnimationFrame(() => stickToBottom());
   }, [totalSize, visibleRows.length, stickToBottom]);
 
   // Land at the newest event when the viewer first populates, and re-pin across
@@ -2617,7 +2638,7 @@ export function SessionLogViewer({
               {/* Jump-to-latest pill */}
               <button
                 type="button"
-                onClick={stickToBottom}
+                onClick={() => stickToBottom("smooth")}
                 aria-label="Scroll to latest"
                 className={cn(
                   "absolute bottom-4 left-1/2 z-10 inline-flex -translate-x-1/2 cursor-pointer items-center gap-2 rounded-full bg-primary px-3.5 py-[7px] text-[12.5px] font-semibold text-primary-foreground shadow-lg transition-all",

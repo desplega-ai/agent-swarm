@@ -13,9 +13,11 @@
  * - `hive` (the Mission Control identity from DESIGN.md) is the base — it has
  *   no override block. `data-theme="hive"` and no attribute are equivalent,
  *   which is also what lets an app "inherit the dashboard theme" by default.
- * - Status (`--color-status-*`), action (`--color-action-*`) and destructive
- *   tokens are NEVER themed. Status is a semantic language, not decoration —
- *   a failed task chip must read identically under every preset.
+ * - Action (`--color-action-*`) and destructive tokens are NEVER themed.
+ *   Status (`--color-status-*`) is themed ONLY by the classic-theme presets
+ *   (theme-classics.ts) whose identity includes a status palette; hue
+ *   SEMANTICS stay fixed everywhere (success=green, error=red, …) so a failed
+ *   task chip reads as "failed" under every preset.
  * - Light and dark values are both declared per preset; the global `.dark`
  *   class keeps choosing the mode, so scoped themes follow the mode switch
  *   for free.
@@ -31,6 +33,8 @@
  * itself (inheritance), NOT `.dark *` (per-element stamping) — do not
  * reintroduce the descendant form there.
  */
+
+import { CLASSIC_THEME_PRESETS } from "./theme-classics";
 
 export interface ThemePreset {
   id: string;
@@ -293,6 +297,10 @@ export const THEME_PRESETS: ThemePreset[] = [
       },
     },
   },
+  // Classic editor/platform themes — the only presets that override
+  // `--color-status-*` (their identity includes a status palette; hue
+  // semantics stay fixed). See theme-classics.ts.
+  ...CLASSIC_THEME_PRESETS,
 ];
 
 const PRESETS_BY_ID = new Map(THEME_PRESETS.map((preset) => [preset.id, preset]));

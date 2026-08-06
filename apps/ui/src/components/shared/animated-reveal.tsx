@@ -17,8 +17,9 @@ const TIMINGS = {
 } as const;
 
 export type RevealSpeed = keyof typeof TIMINGS;
+export type RevealAxis = "y" | "x";
 
-export function useRevealMotion(speed: RevealSpeed = "default") {
+export function useRevealMotion(speed: RevealSpeed = "default", axis: RevealAxis = "y") {
   const reduceMotion = useReducedMotion();
   const { enter, exit } = TIMINGS[speed];
   if (reduceMotion) {
@@ -29,10 +30,13 @@ export function useRevealMotion(speed: RevealSpeed = "default") {
       transition: { duration: enter },
     };
   }
+  const closed = axis === "y" ? { height: 0, opacity: 0 } : { width: 0, opacity: 0 };
+  const opened =
+    axis === "y" ? { height: "auto" as const, opacity: 1 } : { width: "auto" as const, opacity: 1 };
   return {
-    initial: { height: 0, opacity: 0 },
-    animate: { height: "auto", opacity: 1 },
-    exit: { height: 0, opacity: 0, transition: { duration: exit, ease: SNAPPY } },
+    initial: closed,
+    animate: opened,
+    exit: { ...closed, transition: { duration: exit, ease: SNAPPY } },
     transition: { duration: enter, ease: SNAPPY },
   };
 }
@@ -40,15 +44,20 @@ export function useRevealMotion(speed: RevealSpeed = "default") {
 export function AnimatedReveal({
   open,
   speed = "default",
+  axis = "y",
   className,
   children,
 }: {
   open: boolean;
   speed?: RevealSpeed;
+  /** "y" = height reveal (sections, log rows); "x" = width reveal (side
+   * rails — the CHILD carries the fixed width, e.g. `w-48`, so "auto"
+   * measures it). */
+  axis?: RevealAxis;
   className?: string;
   children: React.ReactNode;
 }) {
-  const revealMotion = useRevealMotion(speed);
+  const revealMotion = useRevealMotion(speed, axis);
   return (
     <AnimatePresence initial={false}>
       {open && (

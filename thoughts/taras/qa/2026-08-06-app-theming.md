@@ -71,6 +71,24 @@ out already solved (runtime passes `w-full`, twMerge overrides the sheet's
 | [`22-hover-visible-light.png`](./2026-08-06-app-theming/22-hover-visible-light.png) | Light hover fix (Taras: "too lowkey"): `--color-accent` split off muted, zinc-100 → ~zinc-150 (0.943), sidebar-accent + cobalt/ember light accents bumped the same step — hovered Workflows row now clearly filled. Dark untouched. |
 | [`24-steer-composer-fullwidth.png`](./2026-08-06-app-theming/24-steer-composer-fullwidth.png) | Task-detail steering dock now spans the full log column (`ComposerDock fullWidth` drops the chat-style `max-w-3xl mx-auto`; sessions chat unchanged). Verified on a seeded pending task with steering enabled (`STEERING_ENABLED=true` global config row in the QA DB). |
 
+## Round 6 — approved theme ship + polish batch (same day)
+
+| File | What it shows |
+|---|---|
+| [`25-pale-statuses-light.png`](./2026-08-06-app-theming/25-pale-statuses-light.png) | Swarm base with the PALE status set live (globals.css light+dark replaced; `-foreground` flipped to dark text on the pale fills). |
+| [`26-appearance-classics.png`](./2026-08-06-app-theming/26-appearance-classics.png) | Settings → Appearance now lists the 7 classic presets (github/vscode/material/solarized/tokyo/monokai/gruvbox) from `theme-classics.ts`. |
+| [`27-tokyo-light.png`](./2026-08-06-app-theming/27-tokyo-light.png) / [`28-tokyo-dark.png`](./2026-08-06-app-theming/28-tokyo-dark.png) | Tokyo Night applied on `<html>` — full field swap AND its own status palette on the chips (first presets to theme `--color-status-*`; hue semantics fixed). |
+
+Also in this round (code-verified, gates green): global clickable=pointer rule in
+globals.css; `AnimatedReveal` gained `axis="x"` (settings rail refactored onto it);
+task-detail activity rail animates via `transition-[grid-template-columns]` +
+content fade; session-log go-to-bottom pill glides (`scrollTo smooth`, auto-follow
+paths stay instant, reduced-motion instant); `SteerComposer` `fullWidth` is now a
+prop — task detail passes it, sessions chat keeps the centered `max-w-3xl` column
+(regression from round 5 fixed); HiveMark + HiveLoadingScreen ported from
+agent-swarm-internal (token-driven, reduced-motion-gated) and wired as the lazy-route
+Suspense fallback.
+
 Computed-style probes at capture time: `[data-slot="button"]` shows
 `transition-property: color, background-color, border-color, transform`,
 `transition-duration: 0.2s`, `transition-delay: 0.05s ×3, 0s` at rest (the
