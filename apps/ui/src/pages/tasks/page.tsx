@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { MODEL_TIER_OPTIONS } from "@/lib/model-tiers";
 
@@ -511,18 +512,7 @@ export default function TasksPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader
-        title="Tasks"
-        action={
-          <Button
-            onClick={() => setDialogOpen(true)}
-            size="sm"
-            className="gap-1 bg-primary hover:bg-primary/90"
-          >
-            <Plus className="h-3.5 w-3.5" /> Create Task
-          </Button>
-        }
-      />
+      <PageHeader title="Tasks" />
 
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-sm">
@@ -620,6 +610,21 @@ export default function TasksPage() {
             </Button>
           )}
           <TasksColumnsMenu state={tasksColumns} />
+          {/* Create lives in the toolbar as a bare "+" — the lone header
+              action row it used to occupy wasted a full row of chrome. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                className="size-8"
+                onClick={() => setDialogOpen(true)}
+                aria-label="Create task"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Create task</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 

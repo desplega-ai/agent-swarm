@@ -190,80 +190,83 @@ export default function ApprovalRequestsPage() {
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       <PageHeader title="Approval Requests" />
 
-      <ListFilterBar
-        searchValue={search}
-        onSearchChange={(value) =>
-          setParam("search", value, {
-            replace: false,
-            reset: ["approvalRequestsPage"],
-          })
-        }
-        searchPlaceholder="Search title, ID, resolver, or source ID…"
-        hasActiveFilters={hasActiveFilters}
-        onClear={clearFilters}
-      >
-        <Select
-          value={statusFilter}
-          onValueChange={(value) =>
-            setParam("status", value, {
-              defaultValue: "all",
+      {/* No filter chrome over a first-run empty state — nothing to filter. */}
+      {isEmpty ? null : (
+        <ListFilterBar
+          searchValue={search}
+          onSearchChange={(value) =>
+            setParam("search", value, {
               replace: false,
               reset: ["approvalRequestsPage"],
             })
           }
+          searchPlaceholder="Search title, ID, resolver, or source ID…"
+          hasActiveFilters={hasActiveFilters}
+          onClear={clearFilters}
         >
-          <SelectTrigger className="w-[150px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {STATUS_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={sourceFilter}
-          onValueChange={(value) =>
-            setParam("source", value, {
-              defaultValue: "all",
-              replace: false,
-              reset: ["approvalRequestsPage"],
-            })
-          }
-        >
-          <SelectTrigger className="w-[150px]">
-            <SelectValue placeholder="Source" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All sources</SelectItem>
-            <SelectItem value="workflow">Workflow</SelectItem>
-            <SelectItem value="agent">Agent</SelectItem>
-            <SelectItem value="manual">Manual</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={ageFilter}
-          onValueChange={(value) =>
-            setParam("age", value, {
-              defaultValue: "all",
-              replace: false,
-              reset: ["approvalRequestsPage"],
-            })
-          }
-        >
-          <SelectTrigger className="w-[150px]">
-            <SelectValue placeholder="Age" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All ages</SelectItem>
-            <SelectItem value="24h">Last 24 hours</SelectItem>
-            <SelectItem value="7d">Last 7 days</SelectItem>
-            <SelectItem value="30d">Last 30 days</SelectItem>
-          </SelectContent>
-        </Select>
-      </ListFilterBar>
+          <Select
+            value={statusFilter}
+            onValueChange={(value) =>
+              setParam("status", value, {
+                defaultValue: "all",
+                replace: false,
+                reset: ["approvalRequestsPage"],
+              })
+            }
+          >
+            <SelectTrigger className="w-[150px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={sourceFilter}
+            onValueChange={(value) =>
+              setParam("source", value, {
+                defaultValue: "all",
+                replace: false,
+                reset: ["approvalRequestsPage"],
+              })
+            }
+          >
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Source" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All sources</SelectItem>
+              <SelectItem value="workflow">Workflow</SelectItem>
+              <SelectItem value="agent">Agent</SelectItem>
+              <SelectItem value="manual">Manual</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={ageFilter}
+            onValueChange={(value) =>
+              setParam("age", value, {
+                defaultValue: "all",
+                replace: false,
+                reset: ["approvalRequestsPage"],
+              })
+            }
+          >
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Age" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All ages</SelectItem>
+              <SelectItem value="24h">Last 24 hours</SelectItem>
+              <SelectItem value="7d">Last 7 days</SelectItem>
+              <SelectItem value="30d">Last 30 days</SelectItem>
+            </SelectContent>
+          </Select>
+        </ListFilterBar>
+      )}
 
       {isEmpty ? (
         <EmptyState

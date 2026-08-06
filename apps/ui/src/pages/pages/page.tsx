@@ -259,89 +259,92 @@ export default function PagesListingPage() {
         description="DB-backed static artifacts created by agents via the create_page MCP tool."
       />
 
-      <ListFilterBar
-        searchValue={search}
-        onSearchChange={(value) =>
-          setParam("search", value, { replace: false, reset: ["pagesPage"] })
-        }
-        searchPlaceholder="Search title, description, slug, or agent…"
-        hasActiveFilters={hasActiveFilters}
-        onClear={clearFilters}
-      >
-        <Select
-          value={authFilter}
-          onValueChange={(value) =>
-            setParam("auth", value, {
-              defaultValue: "all",
-              replace: false,
-              reset: ["pagesPage"],
-            })
+      {/* No filter chrome over a first-run empty state — nothing to filter. */}
+      {isEmpty ? null : (
+        <ListFilterBar
+          searchValue={search}
+          onSearchChange={(value) =>
+            setParam("search", value, { replace: false, reset: ["pagesPage"] })
           }
+          searchPlaceholder="Search title, description, slug, or agent…"
+          hasActiveFilters={hasActiveFilters}
+          onClear={clearFilters}
         >
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="Auth" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All auth modes</SelectItem>
-            <SelectItem value="public">Public</SelectItem>
-            <SelectItem value="authed">Authenticated</SelectItem>
-            <SelectItem value="password">Password</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={contentTypeFilter}
-          onValueChange={(value) =>
-            setParam("contentType", value, {
-              defaultValue: "all",
-              replace: false,
-              reset: ["pagesPage"],
-            })
-          }
-        >
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Content type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All content types</SelectItem>
-            <SelectItem value="text/html">HTML</SelectItem>
-            <SelectItem value="application/json">JSON</SelectItem>
-          </SelectContent>
-        </Select>
-        <SearchableSelect
-          value={agentFilter}
-          onChange={(value) =>
-            setParam("agent", value, {
-              defaultValue: "all",
-              replace: false,
-              reset: ["pagesPage"],
-            })
-          }
-          triggerClassName="w-[200px]"
-          placeholder="Agent"
-          searchPlaceholder="Search agents…"
-          options={[
-            { value: "all", label: "All agents" },
-            ...(agents ?? []).map((agent) => ({ value: agent.id, label: agent.name })),
-          ]}
-        />
-        <Select
-          value={favoritesOnly ? "favorites" : "all"}
-          onValueChange={(value) =>
-            setParam("favorites", value === "favorites" ? "true" : "", {
-              replace: false,
-              reset: ["pagesPage"],
-            })
-          }
-        >
-          <SelectTrigger className="w-[150px]">
-            <SelectValue placeholder="Favorites" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All pages</SelectItem>
-            <SelectItem value="favorites">Favorites only</SelectItem>
-          </SelectContent>
-        </Select>
-      </ListFilterBar>
+          <Select
+            value={authFilter}
+            onValueChange={(value) =>
+              setParam("auth", value, {
+                defaultValue: "all",
+                replace: false,
+                reset: ["pagesPage"],
+              })
+            }
+          >
+            <SelectTrigger className="w-[140px]">
+              <SelectValue placeholder="Auth" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All auth modes</SelectItem>
+              <SelectItem value="public">Public</SelectItem>
+              <SelectItem value="authed">Authenticated</SelectItem>
+              <SelectItem value="password">Password</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={contentTypeFilter}
+            onValueChange={(value) =>
+              setParam("contentType", value, {
+                defaultValue: "all",
+                replace: false,
+                reset: ["pagesPage"],
+              })
+            }
+          >
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="Content type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All content types</SelectItem>
+              <SelectItem value="text/html">HTML</SelectItem>
+              <SelectItem value="application/json">JSON</SelectItem>
+            </SelectContent>
+          </Select>
+          <SearchableSelect
+            value={agentFilter}
+            onChange={(value) =>
+              setParam("agent", value, {
+                defaultValue: "all",
+                replace: false,
+                reset: ["pagesPage"],
+              })
+            }
+            triggerClassName="w-[200px]"
+            placeholder="Agent"
+            searchPlaceholder="Search agents…"
+            options={[
+              { value: "all", label: "All agents" },
+              ...(agents ?? []).map((agent) => ({ value: agent.id, label: agent.name })),
+            ]}
+          />
+          <Select
+            value={favoritesOnly ? "favorites" : "all"}
+            onValueChange={(value) =>
+              setParam("favorites", value === "favorites" ? "true" : "", {
+                replace: false,
+                reset: ["pagesPage"],
+              })
+            }
+          >
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Favorites" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All pages</SelectItem>
+              <SelectItem value="favorites">Favorites only</SelectItem>
+            </SelectContent>
+          </Select>
+        </ListFilterBar>
+      )}
 
       {isEmpty ? (
         <EmptyState

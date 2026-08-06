@@ -3055,18 +3055,7 @@ export default function ConnectionsPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader
-        title="Connections"
-        icon={Link2}
-        action={
-          addTarget && addLabel ? (
-            <Button onClick={() => setNewParam(addTarget)}>
-              <Plus className="size-4" />
-              {addLabel}
-            </Button>
-          ) : undefined
-        }
-      />
+      <PageHeader title="Connections" icon={Link2} />
 
       <Tabs
         value={activeTab}
@@ -3138,6 +3127,23 @@ export default function ConnectionsPage() {
                     </SelectContent>
                   </Select>
                 </div>
+              ) : null}
+              {/* Per-tab add action rides the toolbar as a bare "+" — no
+                  lone header action row. */}
+              {addTarget && addLabel ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="icon"
+                      className="size-8 shrink-0"
+                      onClick={() => setNewParam(addTarget)}
+                      aria-label={addLabel}
+                    >
+                      <Plus className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{addLabel}</TooltipContent>
+                </Tooltip>
               ) : null}
             </div>
           ) : null}

@@ -127,3 +127,23 @@ workflow-runs/[id] ("Run of <workflow>" link), templates/[id] (+ history),
 connections/oauth-apps/[id]. Grid-overlay empties (`emptyMessage` on DataGrid
 filter-misses) left as-is — they're filter feedback, not first-run states.
 Gates: `bun run lint`, `bunx tsc -b` green.
+
+## Round 8 — toolbar-resident actions + empty-state filter chrome (2026-08-06, late)
+
+Follow-up: with titles gone, the lone header action row (Create Task / Sync
+Remote / Add Server / per-tab Add) wasted a full row. Those actions moved into
+the filter/toolbar row below as bare icon buttons with tooltips (`size="icon"
+className="size-8"`, primary for create, outline for sync — spinner state
+kept). First-run empty states no longer render filter chrome above them
+(pages + approvals `ListFilterBar`, scripts tab filter row — all three
+conditions are first-run-only, so active filters can always be cleared).
+
+| File | What it shows |
+|---|---|
+| [`36-tasks-toolbar-plus.png`](./2026-08-06-app-theming/36-tasks-toolbar-plus.png) | Tasks: "+" rides the toolbar's right cluster next to Columns; header row gone. |
+| [`37-mcp-toolbar-plus.png`](./2026-08-06-app-theming/37-mcp-toolbar-plus.png) | MCP Servers: search + filters + "+" on one row. |
+| [`38-connections-toolbar-plus.png`](./2026-08-06-app-theming/38-connections-toolbar-plus.png) | Connections: tabs + search + kind/scope filters + per-tab "+" all on ONE row. |
+| [`39-pages-empty-nofilters.png`](./2026-08-06-app-theming/39-pages-empty-nofilters.png) | Pages first-run empty: no filter bar — description, centered indicator, CTA only. |
+| [`40-skills-toolbar-sync.png`](./2026-08-06-app-theming/40-skills-toolbar-sync.png) | Skills: sync icon (outline) at the toolbar's right end. |
+
+Gates: `bun run lint`, `bunx tsc -b` green.

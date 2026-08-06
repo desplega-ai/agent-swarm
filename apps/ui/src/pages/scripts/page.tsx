@@ -22,7 +22,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
-import { formatSmartTime } from "@/lib/utils";
+import { cn, formatSmartTime } from "@/lib/utils";
 
 const SCOPE_OPTIONS: Array<ScriptScope | "all"> = ["all", "agent", "global"];
 
@@ -144,7 +144,9 @@ export default function ScriptsPage() {
         </TabsList>
 
         <TabsContent value="scripts" className="flex flex-col flex-1 min-h-0 mt-2 gap-3">
-          <div className="flex flex-wrap items-center gap-3">
+          {/* No filter chrome over a first-run empty state — nothing to filter.
+              (showEmptyState is already false whenever a filter is active.) */}
+          <div className={cn("flex flex-wrap items-center gap-3", showEmptyState && "hidden")}>
             <div className="relative w-full max-w-sm">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input

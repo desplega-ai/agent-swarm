@@ -168,21 +168,7 @@ export default function SkillsPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader
-        className="shrink-0"
-        title="Skills"
-        action={
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => syncRemote.mutate({})}
-            disabled={syncRemote.isPending}
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${syncRemote.isPending ? "animate-spin" : ""}`} />
-            Sync Remote
-          </Button>
-        }
-      />
+      <PageHeader className="shrink-0" title="Skills" />
 
       <div className="flex items-center gap-3 shrink-0">
         <Input
@@ -222,6 +208,22 @@ export default function SkillsPage() {
             <SelectItem value="agent">Agent</SelectItem>
           </SelectContent>
         </Select>
+        {/* Sync lives in the toolbar as a bare icon — no lone header action row. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              className="size-8 ml-auto"
+              onClick={() => syncRemote.mutate({})}
+              disabled={syncRemote.isPending}
+              aria-label="Sync remote skills"
+            >
+              <RefreshCw className={`h-4 w-4 ${syncRemote.isPending ? "animate-spin" : ""}`} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Sync remote skills</TooltipContent>
+        </Tooltip>
       </div>
       {skills.some((skill) => skill.systemDefault) && (
         <p className="text-xs text-muted-foreground shrink-0">

@@ -233,7 +233,7 @@ Pages and composed components are built from primitives. Raw `<div>` layouts tha
 | `InfoRow`, `DefinitionList` | uppercase-label + value pair, used in detail pages | `<DefinitionList><InfoRow label="Role">Engineer</InfoRow></DefinitionList>` |
 | `Input` | text input | `<Input id="name" value={v} onChange={...} />` |
 | `Label` | form-control label (use inside `SettingsRow`) | `<Label htmlFor="name">Name</Label>` |
-| `PageHeader` | route-page description + action row. Plain-string `title`s are NOT rendered (the breadcrumb owns page identity) — keep passing them anyway; only ReactNode titles render (badges, back buttons, editable names) | `<PageHeader title="Tasks" action={<Button>New</Button>} />` |
+| `PageHeader` | route-page description + action row. Plain-string `title`s are NOT rendered (the breadcrumb owns page identity) — keep passing them anyway; only ReactNode titles render (badges, back buttons, editable names). On LIST pages with a filter/toolbar row, don't park a lone action here — render it as an icon Button + Tooltip at the toolbar's right end (see tasks/skills/mcp-servers/connections) | `<PageHeader title="Pages" description="…" />` |
 | `Progress` | linear progress bar | `<Progress value={75} />` |
 | `ScrollArea`, `ScrollBar` | scrollable container with custom scrollbar | `<ScrollArea className="h-72">...</ScrollArea>` |
 | `Select`, `SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem` | dropdown select | `<Select value={v} onValueChange={...}><SelectTrigger>...</SelectTrigger>...` |
