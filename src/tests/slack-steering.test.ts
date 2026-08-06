@@ -122,10 +122,15 @@ describe("Slack thread steering", () => {
       result: { outcome: "steered", effectiveMode: "steer" },
     });
     expect(getSteeringMessagesForTask(leadTask.id)).toHaveLength(1);
-    expect(JSON.parse(getLogsByTaskId(leadTask.id)[0]!.metadata!)).toMatchObject({
-      slackChannelId: channelId,
-      slackMessageTs: "2000.0002",
-    });
+    // Several logs land in the same millisecond, so `ORDER BY createdAt DESC`
+    // leaves their relative order up to SQLite — index 0 is not stable across
+    // test-file orderings. Assert the log exists rather than where it sits.
+    const steerLogs = getLogsByTaskId(leadTask.id).map((log) =>
+      log.metadata ? JSON.parse(log.metadata) : {},
+    );
+    expect(steerLogs).toContainEqual(
+      expect.objectContaining({ slackChannelId: channelId, slackMessageTs: "2000.0002" }),
+    );
     expect(getChildTasks(leadTask.id)).toEqual([]);
   });
 

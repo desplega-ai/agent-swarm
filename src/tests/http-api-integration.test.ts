@@ -12,7 +12,9 @@ import { Webhook } from "svix";
 import { slackContextKey } from "../tasks/context-key";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
 
-const TEST_PORT = 19876;
+const TEST_PORT = Number(
+  process.env.HTTP_API_INTEGRATION_TEST_PORT ?? 30000 + Math.floor(Math.random() * 20000),
+);
 const TEST_DB_PATH = `/tmp/test-http-integration-${Date.now()}.sqlite`;
 // Keep local-fs uploads out of the repo's ./data/fs (the provider default —
 // the attachment test was leaking data/fs/tasks/<id>/ into the worktree).
@@ -1800,7 +1802,9 @@ describe("AgentMail Webhooks (disabled)", () => {
 });
 
 describe("AgentMail Webhooks (with filters)", () => {
-  const AGENTMAIL_PORT = 19877 + 8; // avoid colliding with page-proxy route tests
+  const AGENTMAIL_PORT = Number(
+    process.env.AGENTMAIL_INTEGRATION_TEST_PORT ?? 30000 + Math.floor(Math.random() * 20000),
+  );
   const AGENTMAIL_DB = `/tmp/test-agentmail-${Date.now()}.sqlite`;
   const AGENTMAIL_BASE = `http://localhost:${AGENTMAIL_PORT}`;
   const WEBHOOK_SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"; // test-only secret

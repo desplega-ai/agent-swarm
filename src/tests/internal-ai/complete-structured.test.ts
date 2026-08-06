@@ -69,12 +69,133 @@ describe("completeStructured", () => {
     expect(result).toEqual({ summary: "ok", count: 7 });
   });
 
+  for (const { label, text, expected } of [
+    {
+      label: "bare JSON",
+      text: '{"summary":"bare","count":1}',
+      expected: { summary: "bare", count: 1 },
+    },
+    {
+      label: "json-fenced JSON",
+      text: '```json\n{"summary":"json fenced","count":2}\n```',
+      expected: { summary: "json fenced", count: 2 },
+    },
+    {
+      label: "untagged-fenced JSON",
+      text: '```\n{"summary":"untagged fenced","count":3}\n```',
+      expected: { summary: "untagged fenced", count: 3 },
+    },
+  ]) {
+    test(`assistant text fallback: ${label} returns without retrying`, async () => {
+      let invocations = 0;
+      const result = await completeStructured({
+        zodSchema: ResultZodSchema,
+        toolSchema: ResultToolSchema,
+        toolName: "record_result",
+        toolDescription: "Record the result.",
+        systemPrompt: "sys",
+        userPrompt: "user",
+        _credentialOverride: {
+          kind: "openrouter",
+          apiKey: "test",
+          modelDefault: "openrouter/google/gemini-3-flash-preview",
+        },
+        _complete: async () => {
+          invocations++;
+          return makeMsg([{ type: "text", text }]);
+        },
+      });
+
+      expect(invocations).toBe(1);
+      expect(result).toEqual(expected);
+    });
+  }
+
+  test("passes a provider-compatible forced tool choice", async () => {
+    const credentials: ResolvedCredential[] = [
+      {
+        kind: "openrouter",
+        apiKey: "test",
+        modelDefault: "openrouter/google/gemini-3-flash-preview",
+      },
+      { kind: "openai", apiKey: "test", modelDefault: "openai/gpt-5.4-mini" },
+      {
+        kind: "openai-codex",
+        apiKey: "test",
+        modelDefault: "openai-codex/gpt-5.4-mini",
+      },
+      {
+        kind: "anthropic",
+        apiKey: "test",
+        modelDefault: "anthropic/claude-haiku-4-5",
+      },
+    ];
+
+    for (const credential of credentials) {
+      let receivedToolChoice: unknown;
+      await completeStructured({
+        zodSchema: ResultZodSchema,
+        toolSchema: ResultToolSchema,
+        toolName: "record_result",
+        toolDescription: "Record the result.",
+        systemPrompt: "sys",
+        userPrompt: "user",
+        _credentialOverride: credential,
+        _complete: async (_model, _context, options) => {
+          receivedToolChoice = options?.toolChoice;
+          return makeMsg([
+            {
+              type: "toolCall",
+              id: "call_1",
+              name: "record_result",
+              arguments: { summary: "ok", count: 1 },
+            },
+          ]);
+        },
+      });
+
+      expect(receivedToolChoice).toEqual(
+        credential.kind === "anthropic" ? { type: "tool", name: "record_result" } : "required",
+      );
+    }
+  });
+
+  test("assistant text fallback retries when JSON does not match the schema", async () => {
+    let invocations = 0;
+    const result = await completeStructured({
+      zodSchema: ResultZodSchema,
+      toolSchema: ResultToolSchema,
+      toolName: "record_result",
+      toolDescription: "Record the result.",
+      systemPrompt: "sys",
+      userPrompt: "user",
+      _credentialOverride: {
+        kind: "openrouter",
+        apiKey: "test",
+        modelDefault: "openrouter/google/gemini-3-flash-preview",
+      },
+      _complete: async () => {
+        invocations++;
+        return makeMsg([
+          {
+            type: "text",
+            text:
+              invocations === 1 ? '{"summary":"missing count"}' : '{"summary":"valid","count":2}',
+          },
+        ]);
+      },
+    });
+
+    expect(invocations).toBe(2);
+    expect(result).toEqual({ summary: "valid", count: 2 });
+  });
+
   test("no tool call for 3 attempts → returns null, exactly retries invocations", async () => {
     let invocations = 0;
     const original = console.error;
-    let errLines = 0;
-    console.error = () => {
-      errLines++;
+    const errors: unknown[][] = [];
+    console.error = (...args: unknown[]) => {
+      errors.push(args);
     };
     try {
       const result = await completeStructured({
@@ -85,6 +206,7 @@ describe("completeStructured", () => {
         systemPrompt: "sys",
         userPrompt: "user",
         retries: 3,
+        callerTag: "session-summary:test",
         _credentialOverride: {
           kind: "openrouter",
           apiKey: "test",
@@ -97,7 +219,11 @@ describe("completeStructured", () => {
       });
       expect(invocations).toBe(3);
       expect(result).toBeNull();
-      expect(errLines).toBeGreaterThanOrEqual(1);
+      expect(errors).toEqual([
+        [
+          "internal-ai: structured output failed after 3 retries (callerTag=session-summary:test kind=openrouter): no tool call in response",
+        ],
+      ]);
     } finally {
       console.error = original;
     }
@@ -216,6 +342,41 @@ describe("completeStructured", () => {
     });
     expect(spawnCalls).toBe(3);
     expect(result).toEqual({ summary: "third time", count: 99 });
+  });
+
+  test("claude-cli exhaustion logs one scrubbed line", async () => {
+    const original = console.error;
+    const errors: unknown[][] = [];
+    const secret = "sk-proj-abcdefghijklmnopqrstuvwxyz012345";
+    console.error = (...args: unknown[]) => {
+      errors.push(args);
+    };
+    try {
+      const result = await completeStructured({
+        zodSchema: ResultZodSchema,
+        toolSchema: ResultToolSchema,
+        toolName: "record_result",
+        toolDescription: "Record the result.",
+        systemPrompt: "sys",
+        userPrompt: "user",
+        retries: 1,
+        callerTag: "session-summary:test",
+        _credentialOverride: { kind: "claude-cli", modelDefault: "haiku" },
+        _spawnClaudeCli: async () => {
+          throw new Error(`provider failed with ${secret}`);
+        },
+      });
+
+      expect(result).toBeNull();
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toHaveLength(1);
+      expect(errors[0]?.[0]).toBeString();
+      expect(errors[0]?.[0]).toContain("callerTag=session-summary:test kind=claude-cli");
+      expect(errors[0]?.[0]).toContain("provider failed with [REDACTED:");
+      expect(errors[0]?.[0]).not.toContain(secret);
+    } finally {
+      console.error = original;
+    }
   });
 
   test("cred === null short-circuits and returns null without calling complete", async () => {

@@ -114,6 +114,8 @@ function logDotColor(eventType: string, newValue?: string): string {
       case "failed":
       case "cancelled":
         return "bg-status-error";
+      case "superseded":
+        return "bg-status-neutral";
       case "in_progress":
         return "bg-status-active";
       default:
@@ -576,7 +578,7 @@ export default function TaskDetailPage() {
     return <p className="text-muted-foreground">Task not found.</p>;
   }
 
-  const terminalStatuses = ["completed", "failed", "cancelled"];
+  const terminalStatuses = ["completed", "failed", "cancelled", "superseded"];
   const canCancel = !terminalStatuses.includes(task.status) && task.status !== "paused";
   const canPause = task.status === "in_progress";
   const canResume = task.status === "paused";
