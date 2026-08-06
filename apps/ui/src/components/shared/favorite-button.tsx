@@ -21,7 +21,7 @@ export function FavoriteButton({
           type="button"
           variant="ghost"
           size="icon"
-          className={cn("h-7 w-7", favorite && "text-status-warning", className)}
+          className={cn("h-7 w-7", favorite && "text-status-warning-strong", className)}
           disabled={disabled}
           aria-label={favorite ? "Remove favorite" : "Add favorite"}
           onClick={(event) => {

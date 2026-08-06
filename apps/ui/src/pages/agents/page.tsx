@@ -151,7 +151,7 @@ export default function AgentsPage() {
           }
           return (
             <span className="inline-flex items-baseline gap-1 tabular-nums">
-              <span className={atCapacity ? "text-status-error" : "text-muted-foreground"}>
+              <span className={atCapacity ? "text-status-error-strong" : "text-muted-foreground"}>
                 {current ?? "–"}
               </span>
               <span className="text-muted-foreground/60">/</span>

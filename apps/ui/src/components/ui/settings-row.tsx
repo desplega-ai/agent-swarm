@@ -35,7 +35,7 @@ export function SettingsRow({
     <div className={cn("space-y-2", className)}>
       <Label htmlFor={htmlFor}>
         {label}
-        {required ? <span className="text-status-error ml-0.5">*</span> : null}
+        {required ? <span className="text-status-error-strong ml-0.5">*</span> : null}
       </Label>
       {children}
       {helper ? <p className="text-xs text-muted-foreground">{helper}</p> : null}

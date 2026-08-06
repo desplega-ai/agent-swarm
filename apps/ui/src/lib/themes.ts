@@ -10,9 +10,16 @@
  * `definition.theme` / the viewer's `$theme` override).
  *
  * Deliberate constraints:
- * - `hive` (the Mission Control identity from DESIGN.md) is the base — it has
- *   no override block. `data-theme="hive"` and no attribute are equivalent,
- *   which is also what lets an app "inherit the dashboard theme" by default.
+ * - `hive` (the Mission Control identity from DESIGN.md) is the base: its
+ *   values ARE the globals.css defaults. An app inherits the dashboard theme
+ *   by carrying NO `data-theme` attribute; `data-theme="hive"` is an explicit
+ *   reset back to the stock look (meaningful inside a themed dashboard).
+ * - Every emitted preset block is SELF-CONTAINED: the builder spreads the
+ *   stock base values (`BASE_SCOPE_VARS`) under each preset's own overrides,
+ *   so a scoped preset fully resets the canvas instead of blending with
+ *   whatever full-field preset the surrounding dashboard runs (an accent
+ *   preset under an Ember dashboard must deliver its promised zinc field,
+ *   and a classic dashboard's status palette must not leak into an app).
  * - Action (`--color-action-*`) and destructive tokens are NEVER themed.
  *   Status (`--color-status-*`) is themed ONLY by the classic-theme presets
  *   (theme-classics.ts) whose identity includes a status palette; hue
@@ -35,6 +42,127 @@
  */
 
 import { CLASSIC_THEME_PRESETS } from "./theme-classics";
+
+/**
+ * Stock (Hive) values for every custom property that ANY preset overrides —
+ * copied from the `@theme` / `.dark` blocks in `styles/globals.css` (keep in
+ * sync when a base token there changes). Spread under each preset's own
+ * overrides at emit time so every `[data-theme]` block is self-contained:
+ * tokens a preset doesn't override reset to stock instead of inheriting the
+ * surrounding dashboard preset. Tokens NO preset touches (destructive,
+ * action-*, chart-2…5) are deliberately absent — inheriting those is always
+ * inheriting the base.
+ */
+const BASE_SCOPE_VARS: { light: Record<string, string>; dark: Record<string, string> } = {
+  light: {
+    "--color-background": "oklch(1 0 0)",
+    "--color-foreground": "oklch(0.141 0.005 285.823)",
+    "--color-card": "oklch(1 0 0)",
+    "--color-card-foreground": "oklch(0.141 0.005 285.823)",
+    "--color-surface": "oklch(0.985 0.0015 286)",
+    "--color-popover": "oklch(1 0 0)",
+    "--color-popover-foreground": "oklch(0.141 0.005 285.823)",
+    "--color-primary": "oklch(0.555 0.163 48.998)",
+    "--color-primary-foreground": "oklch(0.985 0 0)",
+    "--color-secondary": "oklch(0.967 0.001 286.375)",
+    "--color-secondary-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-muted": "oklch(0.967 0.001 286.375)",
+    "--color-muted-foreground": "oklch(0.552 0.016 285.938)",
+    "--color-accent": "oklch(0.943 0.003 286.375)",
+    "--color-accent-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-border": "oklch(0.92 0.004 286.32)",
+    "--color-border-subtle": "oklch(0.945 0.003 286)",
+    "--color-input": "oklch(0.92 0.004 286.32)",
+    "--color-ring": "oklch(0.555 0.163 48.998)",
+    "--color-chart-1": "oklch(0.646 0.222 41.116)",
+    "--color-sidebar": "oklch(0.985 0 0)",
+    "--color-sidebar-foreground": "oklch(0.141 0.005 285.823)",
+    "--color-sidebar-primary": "oklch(0.555 0.163 48.998)",
+    "--color-sidebar-primary-foreground": "oklch(0.985 0 0)",
+    "--color-sidebar-accent": "oklch(0.943 0.003 286.375)",
+    "--color-sidebar-accent-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-sidebar-border": "oklch(0.945 0.003 286)",
+    "--color-sidebar-ring": "oklch(0.555 0.163 48.998)",
+    "--color-status-success": "oklch(0.74 0.1 163)",
+    "--color-status-success-strong": "oklch(0.5 0.09 163)",
+    "--color-status-success-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-status-active": "oklch(0.81 0.11 75)",
+    "--color-status-active-strong": "oklch(0.55 0.1 68)",
+    "--color-status-active-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-status-error": "oklch(0.72 0.12 25)",
+    "--color-status-error-strong": "oklch(0.51 0.14 25)",
+    "--color-status-error-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-status-info": "oklch(0.74 0.09 235)",
+    "--color-status-info-strong": "oklch(0.5 0.09 240)",
+    "--color-status-info-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-status-pending": "oklch(0.84 0.1 95)",
+    "--color-status-pending-strong": "oklch(0.55 0.09 90)",
+    "--color-status-pending-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-status-warning": "oklch(0.76 0.11 55)",
+    "--color-status-warning-strong": "oklch(0.53 0.11 50)",
+    "--color-status-warning-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-status-paused": "oklch(0.71 0.1 262)",
+    "--color-status-paused-strong": "oklch(0.5 0.1 262)",
+    "--color-status-paused-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-status-neutral": "oklch(0.62 0.014 286)",
+    "--color-status-neutral-strong": "oklch(0.48 0.014 286)",
+    "--color-status-neutral-foreground": "oklch(0.21 0.006 285.885)",
+  },
+  dark: {
+    "--color-background": "oklch(0.141 0.005 285.823)",
+    "--color-foreground": "oklch(0.985 0 0)",
+    "--color-card": "oklch(0.21 0.006 285.885)",
+    "--color-card-foreground": "oklch(0.985 0 0)",
+    "--color-surface": "oklch(0.185 0.006 286)",
+    "--color-popover": "oklch(0.21 0.006 285.885)",
+    "--color-popover-foreground": "oklch(0.985 0 0)",
+    "--color-primary": "oklch(0.769 0.188 70.08)",
+    "--color-primary-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-secondary": "oklch(0.274 0.006 286.033)",
+    "--color-secondary-foreground": "oklch(0.985 0 0)",
+    "--color-muted": "oklch(0.274 0.006 286.033)",
+    "--color-muted-foreground": "oklch(0.705 0.015 286.067)",
+    "--color-accent": "oklch(0.274 0.006 286.033)",
+    "--color-accent-foreground": "oklch(0.985 0 0)",
+    "--color-border": "oklch(1 0 0 / 10%)",
+    "--color-border-subtle": "oklch(1 0 0 / 8%)",
+    "--color-input": "oklch(1 0 0 / 15%)",
+    "--color-ring": "oklch(0.769 0.188 70.08)",
+    "--color-chart-1": "oklch(0.488 0.243 264.376)",
+    "--color-sidebar": "oklch(0.21 0.006 285.885)",
+    "--color-sidebar-foreground": "oklch(0.985 0 0)",
+    "--color-sidebar-primary": "oklch(0.769 0.188 70.08)",
+    "--color-sidebar-primary-foreground": "oklch(0.985 0 0)",
+    "--color-sidebar-accent": "oklch(0.274 0.006 286.033)",
+    "--color-sidebar-accent-foreground": "oklch(0.985 0 0)",
+    "--color-sidebar-border": "oklch(1 0 0 / 8%)",
+    "--color-sidebar-ring": "oklch(0.769 0.188 70.08)",
+    "--color-status-success": "oklch(0.78 0.1 163)",
+    "--color-status-success-strong": "oklch(0.78 0.1 163)",
+    "--color-status-success-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-status-active": "oklch(0.84 0.1 80)",
+    "--color-status-active-strong": "oklch(0.84 0.1 80)",
+    "--color-status-active-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-status-error": "oklch(0.74 0.11 22)",
+    "--color-status-error-strong": "oklch(0.74 0.11 22)",
+    "--color-status-error-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-status-info": "oklch(0.78 0.09 235)",
+    "--color-status-info-strong": "oklch(0.78 0.09 235)",
+    "--color-status-info-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-status-pending": "oklch(0.86 0.09 95)",
+    "--color-status-pending-strong": "oklch(0.86 0.09 95)",
+    "--color-status-pending-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-status-warning": "oklch(0.79 0.1 55)",
+    "--color-status-warning-strong": "oklch(0.79 0.1 55)",
+    "--color-status-warning-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-status-paused": "oklch(0.74 0.09 260)",
+    "--color-status-paused-strong": "oklch(0.74 0.09 260)",
+    "--color-status-paused-foreground": "oklch(0.21 0.006 285.885)",
+    "--color-status-neutral": "oklch(0.72 0.012 286)",
+    "--color-status-neutral-strong": "oklch(0.72 0.012 286)",
+    "--color-status-neutral-foreground": "oklch(0.21 0.006 285.885)",
+  },
+};
 
 export interface ThemePreset {
   id: string;
@@ -108,8 +236,11 @@ export const THEME_PRESETS: ThemePreset[] = [
     description: "The stock Mission Control look: zinc field, one amber voice.",
     accent: { light: "oklch(0.555 0.163 48.998)", dark: "oklch(0.769 0.188 70.08)" },
     field: { light: "oklch(1 0 0)", dark: "oklch(0.141 0.005 285.823)" },
-    // The base theme IS globals.css — no overrides, so `hive` also means
-    // "inherit the surrounding theme" when set on a scoped wrapper.
+    // The base theme IS globals.css — no overrides of its own. The builder
+    // still emits a `[data-theme="hive"]` block (the BASE_SCOPE_VARS spread)
+    // so an explicit Hive selection resets a canvas inside a themed
+    // dashboard; "inherit the surrounding theme" is the ABSENCE of the
+    // attribute, not this preset.
     vars: { light: {}, dark: {} },
   },
   accentPreset(
@@ -311,9 +442,11 @@ export function getThemePreset(id: string | null | undefined): ThemePreset | nul
 }
 
 /**
- * Resolves an untrusted id (app definition, stored override) to a known
- * preset id, or null. Unknown ids mean "a preset this dashboard build does
- * not ship" — callers fall back to inheriting the surrounding theme.
+ * DASHBOARD-ROOT normalization of an untrusted stored id: a known preset id,
+ * or null for unknown ids AND for `hive` (at the `<html>` level the base
+ * needs no attribute — there is nothing outer to reset from). Scoped app
+ * canvases must NOT use this: there `hive` is a meaningful explicit reset —
+ * see the resolution in `app-surface.tsx`.
  */
 export function resolveThemeId(id: string | null | undefined): string | null {
   const preset = getThemePreset(id);
@@ -329,10 +462,14 @@ function declarations(vars: Record<string, string>, indent: string): string {
 export function buildThemePresetCss(): string {
   const blocks: string[] = [];
   for (const preset of THEME_PRESETS) {
-    if (preset.id === DEFAULT_THEME_ID) continue;
+    // Self-contained blocks: base values under the preset's own overrides,
+    // so a scoped canvas resets fully instead of blending with the outer
+    // dashboard preset. `hive` emits the bare base — the explicit reset.
+    const light = { ...BASE_SCOPE_VARS.light, ...preset.vars.light };
+    const dark = { ...BASE_SCOPE_VARS.dark, ...preset.vars.dark };
     blocks.push(
-      `html[data-theme="${preset.id}"],\n[data-theme="${preset.id}"] {\n${declarations(preset.vars.light, "  ")}\n}`,
-      `html.dark[data-theme="${preset.id}"],\n.dark [data-theme="${preset.id}"] {\n${declarations(preset.vars.dark, "  ")}\n}`,
+      `html[data-theme="${preset.id}"],\n[data-theme="${preset.id}"] {\n${declarations(light, "  ")}\n}`,
+      `html.dark[data-theme="${preset.id}"],\n.dark [data-theme="${preset.id}"] {\n${declarations(dark, "  ")}\n}`,
     );
   }
   return blocks.join("\n\n");

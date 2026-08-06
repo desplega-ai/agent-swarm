@@ -73,7 +73,7 @@ function PaneLabel({ children }: { children: ReactNode }) {
 function InlineError({ error }: { error?: unknown }) {
   if (!error) return null;
   return (
-    <p className="text-sm text-status-error">
+    <p className="text-sm text-status-error-strong">
       {error instanceof Error ? error.message : String(error)}
     </p>
   );
@@ -92,7 +92,11 @@ function IconCopyButton({ value, tip }: { value: string; tip: string }) {
           disabled={!value}
           aria-label={tip}
         >
-          {copied ? <Check className="size-3 text-status-success" /> : <Copy className="size-3" />}
+          {copied ? (
+            <Check className="size-3 text-status-success-strong" />
+          ) : (
+            <Copy className="size-3" />
+          )}
         </Button>
       </TooltipTrigger>
       <TooltipContent>{copied ? "Copied" : tip}</TooltipContent>
@@ -103,10 +107,10 @@ function IconCopyButton({ value, tip }: { value: string; tip: string }) {
 // ── JSON pretty view (cheap token colorizer over JSON.stringify output) ──
 
 const JSON_TOKEN_CLASSES = {
-  key: "text-status-info",
-  string: "text-status-success",
-  number: "text-status-active",
-  literal: "text-status-warning",
+  key: "text-status-info-strong",
+  string: "text-status-success-strong",
+  number: "text-status-active-strong",
+  literal: "text-status-warning-strong",
 } as const;
 
 const JSON_TOKEN_RE =
@@ -205,7 +209,7 @@ function OutputPanel({
                   <PaneLabel>Stderr</PaneLabel>
                   <IconCopyButton value={result.stderr} tip="Copy stderr" />
                 </div>
-                <pre className="max-h-24 overflow-auto rounded-md border border-status-error/40 bg-muted/30 p-2 text-xs text-status-error">
+                <pre className="max-h-24 overflow-auto rounded-md border border-status-error/40 bg-muted/30 p-2 text-xs text-status-error-strong">
                   {result.stderr}
                 </pre>
               </div>

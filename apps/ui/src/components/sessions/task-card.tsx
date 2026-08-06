@@ -226,7 +226,7 @@ export function TaskCard({
                         <Button
                           size="icon"
                           variant="ghost"
-                          className="h-6 w-6 hover:text-status-error hover:bg-status-error/10"
+                          className="h-6 w-6 hover:text-status-error-strong hover:bg-status-error/10"
                           aria-label="Cancel task"
                         >
                           <Ban className="h-3 w-3" />

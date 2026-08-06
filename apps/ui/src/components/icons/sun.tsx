@@ -21,8 +21,8 @@ interface SunIconProps extends HTMLAttributes<HTMLDivElement> {
 // ray-step lands on a pixel-identical glyph — it reads as a spin, and an
 // interrupted hover just eases back.
 const SVG_VARIANTS: Variants = {
-  normal: { rotate: 0, transition: { duration: 0.3, ease: "easeOut" } },
-  animate: { rotate: 45, transition: { duration: 0.35, ease: "easeOut" } },
+  normal: { rotate: 0, transition: { duration: 0.25, ease: "easeOut" } },
+  animate: { rotate: 45, transition: { duration: 0.3, ease: "easeOut" } },
 };
 
 const SunIcon = forwardRef<SunIconHandle, SunIconProps>(

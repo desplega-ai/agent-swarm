@@ -63,7 +63,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           <Card className="max-w-md w-full border-status-error/20">
             <CardContent className="p-8 text-center space-y-4">
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-status-error/10">
-                <AlertTriangle className="h-7 w-7 text-status-error" />
+                <AlertTriangle className="h-7 w-7 text-status-error-strong" />
               </div>
               <div>
                 <h2 className="text-lg font-semibold">Something went wrong</h2>

@@ -255,7 +255,7 @@ export default function DebugPage() {
             )}
 
             {dbQuery.error && (
-              <span className="text-sm text-status-error ml-auto truncate">
+              <span className="text-sm text-status-error-strong ml-auto truncate">
                 {dbQuery.error instanceof Error ? dbQuery.error.message : "Query failed"}
               </span>
             )}

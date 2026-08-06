@@ -103,7 +103,10 @@ function SpendBar({ spend, budget }: { spend: number; budget: number | null }) {
           {formatUsd(spend)} / {formatUsd(budget)}
         </span>
         <span
-          className={cn("font-medium", ratio >= 1 ? "text-status-error" : "text-muted-foreground")}
+          className={cn(
+            "font-medium",
+            ratio >= 1 ? "text-status-error-strong" : "text-muted-foreground",
+          )}
         >
           {pct}%
         </span>
@@ -307,7 +310,7 @@ function AddPricingDialog({
                 required
               />
             </div>
-            {error ? <p className="text-xs text-status-error">{error}</p> : null}
+            {error ? <p className="text-xs text-status-error-strong">{error}</p> : null}
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
@@ -328,13 +331,21 @@ function AddPricingDialog({
 function refusalCauseBadge(cause: BudgetRefusalNotification["cause"]) {
   if (cause === "global") {
     return (
-      <Badge variant="outline" size="tag" className="border-status-error/30 text-status-error">
+      <Badge
+        variant="outline"
+        size="tag"
+        className="border-status-error/30 text-status-error-strong"
+      >
         GLOBAL
       </Badge>
     );
   }
   return (
-    <Badge variant="outline" size="tag" className="border-status-active/30 text-status-active">
+    <Badge
+      variant="outline"
+      size="tag"
+      className="border-status-active/30 text-status-active-strong"
+    >
       AGENT
     </Badge>
   );
@@ -674,7 +685,11 @@ export default function BudgetsPage() {
         headerName: "Token class",
         width: 130,
         cellRenderer: (params: ICellRendererParams<PricingRow>) => (
-          <Badge variant="outline" size="tag" className="border-status-info/30 text-status-info">
+          <Badge
+            variant="outline"
+            size="tag"
+            className="border-status-info/30 text-status-info-strong"
+          >
             {params.value}
           </Badge>
         ),

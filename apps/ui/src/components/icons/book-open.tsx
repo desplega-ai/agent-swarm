@@ -74,7 +74,7 @@ const BookOpenIcon = forwardRef<BookOpenIconHandle, BookOpenIconProps>(
       animate: {
         scale: [1, 1.05, 0.97, 1],
         rotate: [0, -2, 2, 0],
-        transition: { duration: 0.9 * duration, ease: "easeInOut" },
+        transition: { duration: 0.3 * duration, ease: [0.2, 0, 0, 1] },
       },
     };
 
@@ -83,7 +83,7 @@ const BookOpenIcon = forwardRef<BookOpenIconHandle, BookOpenIconProps>(
       animate: {
         scale: [1, 1.05, 0.98, 1],
         opacity: [0.9, 1, 1],
-        transition: { duration: 0.8 * duration, ease: "easeInOut", delay: 0.2 },
+        transition: { duration: 0.24 * duration, ease: [0.2, 0, 0, 1], delay: 0.06 },
       },
     };
 

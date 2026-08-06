@@ -86,7 +86,7 @@ export function CodexOAuthSection() {
               className="shrink-0"
             >
               {copied ? (
-                <Check className="h-3.5 w-3.5 text-status-success" />
+                <Check className="h-3.5 w-3.5 text-status-success-strong" />
               ) : (
                 <Copy className="h-3.5 w-3.5" />
               )}

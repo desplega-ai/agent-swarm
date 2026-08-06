@@ -203,10 +203,13 @@ function TimelineRow({
             {index + 1}
           </span>
           <Icon
-            className={cn("h-3.5 w-3.5 shrink-0", failed ? "text-status-error" : meta.accent)}
+            className={cn(
+              "h-3.5 w-3.5 shrink-0",
+              failed ? "text-status-error-strong" : meta.accent,
+            )}
           />
           <span className="truncate font-mono text-xs font-medium">{entry.stepKey}</span>
-          {failed && <CircleAlert className="h-3.5 w-3.5 shrink-0 text-status-error" />}
+          {failed && <CircleAlert className="h-3.5 w-3.5 shrink-0 text-status-error-strong" />}
           <div className="ml-auto flex shrink-0 items-center gap-2">
             {hasTiming && (
               <span className="font-mono text-[11px] tabular-nums text-muted-foreground">

@@ -79,11 +79,11 @@ const GlobeIcon = forwardRef<GlobeIconHandle, GlobeIconProps>(
         rotate: 360,
         transition: {
           rotate: {
-            duration: 1.4 * duration,
+            duration: 0.3 * duration,
             ease: "easeOut",
           },
           scale: {
-            duration: 0.25 * duration,
+            duration: 0.22 * duration,
             ease: "easeOut",
           },
         },

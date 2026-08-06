@@ -76,7 +76,7 @@ const ContactIcon = forwardRef<ContactIconHandle, ContactIconProps>(
       normal: { scale: 1 },
       animate: {
         scale: [1, 1.18, 1],
-        transition: { duration: 0.4 * duration, ease: "easeOut" },
+        transition: { duration: 0.24 * duration, ease: "easeOut" },
       },
     };
 
@@ -84,7 +84,7 @@ const ContactIcon = forwardRef<ContactIconHandle, ContactIconProps>(
       normal: { y: 0 },
       animate: {
         y: [0, -0.75, 0],
-        transition: { duration: 0.4 * duration, ease: "easeOut", delay: 0.1 * duration },
+        transition: { duration: 0.24 * duration, ease: "easeOut", delay: 0.06 * duration },
       },
     };
 

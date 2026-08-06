@@ -36,7 +36,7 @@ const statusConfig: Record<string, StatusConfig> = {
     text: "text-status-active-strong",
     spinner: true,
   },
-  offline: { label: "OFFLINE", dot: "bg-status-neutral", text: "text-status-neutral" },
+  offline: { label: "OFFLINE", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
   waiting_for_credentials: {
     label: "WAITING FOR CREDS",
     dot: "bg-status-warning",
@@ -44,8 +44,8 @@ const statusConfig: Record<string, StatusConfig> = {
   },
 
   // Task statuses
-  backlog: { label: "BACKLOG", dot: "bg-status-neutral", text: "text-status-neutral" },
-  unassigned: { label: "UNASSIGNED", dot: "bg-status-neutral", text: "text-status-neutral" },
+  backlog: { label: "BACKLOG", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
+  unassigned: { label: "UNASSIGNED", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
   offered: {
     label: "OFFERED",
     dot: "bg-status-active",
@@ -67,8 +67,8 @@ const statusConfig: Record<string, StatusConfig> = {
     text: "text-status-success-strong",
   },
   failed: { label: "FAILED", dot: "bg-status-error", text: "text-status-error-strong" },
-  cancelled: { label: "CANCELLED", dot: "bg-status-neutral", text: "text-status-neutral" },
-  superseded: { label: "SUPERSEDED", dot: "bg-status-neutral", text: "text-status-neutral" },
+  cancelled: { label: "CANCELLED", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
+  superseded: { label: "SUPERSEDED", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
   aborted_limit: {
     label: "ABORTED LIMIT",
     dot: "bg-status-warning",
@@ -87,7 +87,7 @@ const statusConfig: Record<string, StatusConfig> = {
     text: "text-status-success-strong",
   },
   unhealthy: { label: "UNHEALTHY", dot: "bg-status-error", text: "text-status-error-strong" },
-  stopped: { label: "STOPPED", dot: "bg-status-neutral", text: "text-status-neutral" },
+  stopped: { label: "STOPPED", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
 
   // Workflow run statuses
   running: {
@@ -99,7 +99,7 @@ const statusConfig: Record<string, StatusConfig> = {
   waiting: { label: "WAITING", dot: "bg-status-pending", text: "text-status-pending-strong" },
 
   // Workflow step statuses
-  skipped: { label: "SKIPPED", dot: "bg-status-neutral", text: "text-status-neutral" },
+  skipped: { label: "SKIPPED", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
 
   // Approval request statuses
   approved: {
@@ -121,7 +121,7 @@ export function StatusBadge({ status, size = "sm", className }: StatusBadgeProps
   const config = statusConfig[status] ?? {
     label: status,
     dot: "bg-status-neutral",
-    text: "text-status-neutral",
+    text: "text-status-neutral-strong",
   };
 
   return (

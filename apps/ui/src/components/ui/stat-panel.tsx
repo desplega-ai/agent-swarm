@@ -11,11 +11,11 @@ import { cn } from "@/lib/utils";
 //   <Card>
 //     <CardContent className="p-3 flex items-center gap-3">
 //       <div className="rounded-md bg-status-success/10 p-2">
-//         <ShieldCheck className="h-4 w-4 text-status-success" />
+//         <ShieldCheck className="h-4 w-4 text-status-success-strong" />
 //       </div>
 //       <div>
 //         <p className="text-xs text-muted-foreground">{label}</p>
-//         <p className="text-lg font-semibold text-status-success">{value}</p>
+//         <p className="text-lg font-semibold text-status-success-strong">{value}</p>
 //       </div>
 //     </CardContent>
 //   </Card>
@@ -43,38 +43,38 @@ const TONE_CLASSES: Record<StatPanelTone, ToneClasses> = {
   neutral: { iconBg: "bg-muted", iconText: "text-muted-foreground" },
   success: {
     iconBg: "bg-status-success/10",
-    iconText: "text-status-success",
-    valueText: "text-status-success",
+    iconText: "text-status-success-strong",
+    valueText: "text-status-success-strong",
   },
   active: {
     iconBg: "bg-status-active/10",
-    iconText: "text-status-active",
-    valueText: "text-status-active",
+    iconText: "text-status-active-strong",
+    valueText: "text-status-active-strong",
   },
   error: {
     iconBg: "bg-status-error/10",
-    iconText: "text-status-error",
-    valueText: "text-status-error",
+    iconText: "text-status-error-strong",
+    valueText: "text-status-error-strong",
   },
   warning: {
     iconBg: "bg-status-warning/10",
-    iconText: "text-status-warning",
-    valueText: "text-status-warning",
+    iconText: "text-status-warning-strong",
+    valueText: "text-status-warning-strong",
   },
   info: {
     iconBg: "bg-status-info/10",
-    iconText: "text-status-info",
-    valueText: "text-status-info",
+    iconText: "text-status-info-strong",
+    valueText: "text-status-info-strong",
   },
   pending: {
     iconBg: "bg-status-pending/10",
-    iconText: "text-status-pending",
-    valueText: "text-status-pending",
+    iconText: "text-status-pending-strong",
+    valueText: "text-status-pending-strong",
   },
   paused: {
     iconBg: "bg-status-paused/10",
-    iconText: "text-status-paused",
-    valueText: "text-status-paused",
+    iconText: "text-status-paused-strong",
+    valueText: "text-status-paused-strong",
   },
 };
 

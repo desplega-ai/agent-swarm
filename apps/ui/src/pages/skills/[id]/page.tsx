@@ -199,9 +199,9 @@ export default function SkillDetailPage() {
               size="tag"
               className={`${
                 skill.scope === "global"
-                  ? "border-status-success/30 text-status-success"
+                  ? "border-status-success/30 text-status-success-strong"
                   : skill.scope === "swarm"
-                    ? "border-status-active/30 text-status-active"
+                    ? "border-status-active/30 text-status-active-strong"
                     : ""
               }`}
             >
@@ -212,8 +212,8 @@ export default function SkillDetailPage() {
               size="tag"
               className={`${
                 skill.isEnabled
-                  ? "border-status-success/30 text-status-success"
-                  : "border-status-error/30 text-status-error"
+                  ? "border-status-success/30 text-status-success-strong"
+                  : "border-status-error/30 text-status-error-strong"
               }`}
             >
               {skill.isEnabled ? "Enabled" : "Disabled"}
@@ -222,7 +222,7 @@ export default function SkillDetailPage() {
               <Badge
                 variant="outline"
                 size="tag"
-                className="border-status-info/30 text-status-info inline-flex items-center gap-1"
+                className="border-status-info/30 text-status-info-strong inline-flex items-center gap-1"
               >
                 <ShieldCheck className="h-3 w-3" />
                 System Default

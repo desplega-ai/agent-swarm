@@ -61,7 +61,7 @@ function KeyStatusBadge({ status }: { status: ApiKeyStatusType }) {
   const config = statusConfig[status] ?? {
     label: status,
     dot: "bg-status-neutral",
-    text: "text-status-neutral",
+    text: "text-status-neutral-strong",
   };
   return (
     <Badge
@@ -139,7 +139,9 @@ function RateLimitWindowsCell({
       {entries.map(([type, info]) => (
         <div key={type} className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight">
           <span className="font-mono text-muted-foreground">{type}</span>
-          <span className={cn("font-medium", info.status === "rejected" && "text-status-error")}>
+          <span
+            className={cn("font-medium", info.status === "rejected" && "text-status-error-strong")}
+          >
             {info.status}
           </span>
           {typeof info.utilization === "number" && (
@@ -343,7 +345,7 @@ export default function ApiKeysPage() {
           if (params.data?.status !== "rate_limited")
             return <span className="text-muted-foreground">-</span>;
           return (
-            <span className="text-xs font-mono text-status-error">
+            <span className="text-xs font-mono text-status-error-strong">
               {formatExpiry(params.value)}
             </span>
           );
@@ -371,7 +373,7 @@ export default function ApiKeysPage() {
         headerName: "Rate Limits",
         width: 110,
         cellRenderer: (params: { value: number }) => (
-          <span className={cn("font-mono text-xs", params.value > 0 && "text-status-error")}>
+          <span className={cn("font-mono text-xs", params.value > 0 && "text-status-error-strong")}>
             {params.value}
           </span>
         ),
@@ -632,7 +634,7 @@ export default function ApiKeysPage() {
                 {clearingKey.rateLimitedUntil && (
                   <div>
                     Current expiry:{" "}
-                    <span className="font-mono text-status-error">
+                    <span className="font-mono text-status-error-strong">
                       {formatExpiry(clearingKey.rateLimitedUntil)}
                     </span>
                   </div>

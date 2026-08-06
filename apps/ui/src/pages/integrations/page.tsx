@@ -116,7 +116,7 @@ export default function IntegrationsPage() {
               <span className="inline-flex items-center gap-1">
                 <StatusChip
                   label="Configured"
-                  colorClass="border-status-success/30 text-status-success"
+                  colorClass="border-status-success/30 text-status-success-strong"
                 />
                 <span>— every required value is present; integration will load on reload.</span>
               </span>
@@ -125,7 +125,7 @@ export default function IntegrationsPage() {
               <span className="inline-flex items-center gap-1">
                 <StatusChip
                   label="Partial"
-                  colorClass="border-status-active/30 text-status-active"
+                  colorClass="border-status-active/30 text-status-active-strong"
                 />
                 <span>— some required values set, but not all.</span>
               </span>
@@ -134,7 +134,7 @@ export default function IntegrationsPage() {
               <span className="inline-flex items-center gap-1">
                 <StatusChip
                   label="Disabled"
-                  colorClass="border-status-neutral/30 text-status-neutral"
+                  colorClass="border-status-neutral/30 text-status-neutral-strong"
                 />
                 <span>
                   — <code className="font-mono text-[11px]">&lt;PREFIX&gt;_DISABLE</code> is truthy
@@ -155,7 +155,7 @@ export default function IntegrationsPage() {
             <li>
               <SourceChip
                 label="db+env"
-                colorClass="bg-status-success/10 text-status-success border-status-success/30"
+                colorClass="bg-status-success/10 text-status-success-strong border-status-success/30"
               />{" "}
               — stored in DB and loaded into the server's{" "}
               <code className="font-mono text-[11px]">process.env</code>. Live.
@@ -163,7 +163,7 @@ export default function IntegrationsPage() {
             <li>
               <SourceChip
                 label="env (deploy)"
-                colorClass="bg-status-info/10 text-status-info border-status-info/30"
+                colorClass="bg-status-info/10 text-status-info-strong border-status-info/30"
               />{" "}
               — set via deployment env only (<code className="font-mono text-[11px]">.env</code>,
               docker). No DB row; saving here creates one that takes over on reload.
@@ -171,7 +171,7 @@ export default function IntegrationsPage() {
             <li>
               <SourceChip
                 label="db (pending reload)"
-                colorClass="bg-status-active/10 text-status-active border-status-active/30"
+                colorClass="bg-status-active/10 text-status-active-strong border-status-active/30"
               />{" "}
               — persisted in DB but not yet in{" "}
               <code className="font-mono text-[11px]">process.env</code>. Save or reload to apply.

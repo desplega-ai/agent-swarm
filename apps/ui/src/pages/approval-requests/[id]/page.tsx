@@ -222,7 +222,7 @@ export default function ApprovalRequestDetailPage() {
                         <Streamdown>{normalizeNewlines(question.label)}</Streamdown>
                       </span>
                       {question.required && (
-                        <span className="text-status-error text-xs shrink-0">*</span>
+                        <span className="text-status-error-strong text-xs shrink-0">*</span>
                       )}
                       <Badge variant="outline" size="tag" className="ml-auto shrink-0">
                         {question.type}
@@ -261,7 +261,7 @@ export default function ApprovalRequestDetailPage() {
 
             {isPending && (
               <div className="space-y-2">
-                {error && <p className="text-sm text-status-error">{error}</p>}
+                {error && <p className="text-sm text-status-error-strong">{error}</p>}
                 <Button onClick={handleSubmit} disabled={respondMutation.isPending}>
                   {respondMutation.isPending ? "Submitting..." : "Submit Response"}
                 </Button>

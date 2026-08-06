@@ -151,11 +151,11 @@ function renderLogContent(log: AgentLog): React.ReactNode {
     case "task_offered":
       return <span className="text-xs font-medium">Offered to agent</span>;
     case "task_accepted":
-      return <span className="text-xs font-medium text-status-success">Accepted</span>;
+      return <span className="text-xs font-medium text-status-success-strong">Accepted</span>;
     case "task_rejected":
-      return <span className="text-xs font-medium text-status-error">Rejected</span>;
+      return <span className="text-xs font-medium text-status-error-strong">Rejected</span>;
     case "task_claimed":
-      return <span className="text-xs font-medium text-status-success">Claimed</span>;
+      return <span className="text-xs font-medium text-status-success-strong">Claimed</span>;
     case "task_released":
       return <span className="text-xs font-medium">Released</span>;
     default:
@@ -856,12 +856,12 @@ export default function TaskDetailPage() {
           variant="card"
           title="Failure Reason"
           icon={AlertTriangle}
-          iconColor="text-status-error"
+          iconColor="text-status-error-strong"
           borderColor="border-status-error/30"
           bgColor="bg-status-error/5"
           defaultOpen
         >
-          <div className="text-sm text-status-error/80 leading-relaxed max-h-64 overflow-auto">
+          <div className="text-sm text-status-error-strong/80 leading-relaxed max-h-64 overflow-auto">
             <MarkdownView text={task.failureReason ?? ""} />
           </div>
         </CollapsibleSection>
@@ -872,7 +872,7 @@ export default function TaskDetailPage() {
           variant="card"
           title="Output"
           icon={isCompleted ? CheckCircle2 : Terminal}
-          iconColor={isCompleted ? "text-status-success" : "text-muted-foreground"}
+          iconColor={isCompleted ? "text-status-success-strong" : "text-muted-foreground"}
           borderColor={isCompleted ? "border-status-success/30" : "border-border"}
           bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
           defaultOpen
@@ -1181,11 +1181,11 @@ export default function TaskDetailPage() {
                 variant="card"
                 title="Failure Reason"
                 icon={AlertTriangle}
-                iconColor="text-status-error"
+                iconColor="text-status-error-strong"
                 borderColor="border-status-error/30"
                 bgColor="bg-status-error/5"
               >
-                <div className="text-sm text-status-error/80 leading-relaxed max-h-48 overflow-auto">
+                <div className="text-sm text-status-error-strong/80 leading-relaxed max-h-48 overflow-auto">
                   <MarkdownView text={task.failureReason ?? ""} />
                 </div>
               </CollapsibleSection>
@@ -1196,7 +1196,7 @@ export default function TaskDetailPage() {
                 variant="card"
                 title="Output"
                 icon={isCompleted ? CheckCircle2 : Terminal}
-                iconColor={isCompleted ? "text-status-success" : "text-muted-foreground"}
+                iconColor={isCompleted ? "text-status-success-strong" : "text-muted-foreground"}
                 borderColor={isCompleted ? "border-status-success/30" : "border-border"}
                 bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
               >

@@ -43,7 +43,7 @@ import { formatRelativeTime } from "@/lib/utils";
 
 function AuthMethodBadge({ method }: { method: McpServer["authMethod"] }) {
   const colors: Record<string, string> = {
-    static: "border-status-neutral/30 text-status-neutral",
+    static: "border-status-neutral/30 text-status-neutral-strong",
     oauth: "border-action-delegate-to-agent/30 text-action-delegate-to-agent",
     auto: "border-action-raw-llm/30 text-action-raw-llm",
   };
@@ -56,10 +56,10 @@ function AuthMethodBadge({ method }: { method: McpServer["authMethod"] }) {
 
 function OAuthStatusBadge({ status }: { status: McpOAuthStatus }) {
   const colors: Record<McpOAuthStatus, string> = {
-    connected: "border-status-success/30 text-status-success",
-    expired: "border-status-active/30 text-status-active",
-    revoked: "border-status-neutral/30 text-status-neutral",
-    error: "border-status-error/30 text-status-error",
+    connected: "border-status-success/30 text-status-success-strong",
+    expired: "border-status-active/30 text-status-active-strong",
+    revoked: "border-status-neutral/30 text-status-neutral-strong",
+    error: "border-status-error/30 text-status-error-strong",
   };
   return (
     <Badge variant="outline" size="tag" className={`${colors[status] || ""}`}>
@@ -285,12 +285,12 @@ export function McpOAuthPanel({ server }: { server: McpServer }) {
               <p className="flex items-center gap-2 mt-0.5">
                 {connected ? (
                   <>
-                    <CheckCircle2 className="h-3.5 w-3.5 text-status-success" />
+                    <CheckCircle2 className="h-3.5 w-3.5 text-status-success-strong" />
                     Connected
                   </>
                 ) : token ? (
                   <>
-                    <AlertCircle className="h-3.5 w-3.5 text-status-active" />
+                    <AlertCircle className="h-3.5 w-3.5 text-status-active-strong" />
                     {token.status}
                   </>
                 ) : (

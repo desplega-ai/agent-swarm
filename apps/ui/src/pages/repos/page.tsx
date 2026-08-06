@@ -272,7 +272,7 @@ export default function ReposPage() {
             variant="outline"
             className={
               params.value
-                ? "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center bg-status-success/15 text-status-success border-status-success/30"
+                ? "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center bg-status-success/15 text-status-success-strong border-status-success/30"
                 : "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center"
             }
           >
@@ -289,7 +289,7 @@ export default function ReposPage() {
             variant="outline"
             className={
               params.value
-                ? "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center bg-status-success/15 text-status-success border-status-success/30"
+                ? "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center bg-status-success/15 text-status-success-strong border-status-success/30"
                 : "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center"
             }
           >

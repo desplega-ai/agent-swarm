@@ -117,7 +117,7 @@ export function JiraOAuthSection() {
                     aria-label="Copy site URL"
                   >
                     {copiedKey === "site" ? (
-                      <Check className="h-3 w-3 text-status-success" />
+                      <Check className="h-3 w-3 text-status-success-strong" />
                     ) : (
                       <Copy className="h-3 w-3" />
                     )}
@@ -162,7 +162,7 @@ export function JiraOAuthSection() {
             className="shrink-0"
           >
             {copiedKey === "authorize" ? (
-              <Check className="h-3.5 w-3.5 text-status-success" />
+              <Check className="h-3.5 w-3.5 text-status-success-strong" />
             ) : (
               <Copy className="h-3.5 w-3.5" />
             )}
@@ -203,7 +203,7 @@ export function JiraOAuthSection() {
               className="shrink-0"
             >
               {copiedKey === "redirect" ? (
-                <Check className="h-3.5 w-3.5 text-status-success" />
+                <Check className="h-3.5 w-3.5 text-status-success-strong" />
               ) : (
                 <Copy className="h-3.5 w-3.5" />
               )}
@@ -234,7 +234,7 @@ export function JiraOAuthSection() {
               className="shrink-0"
             >
               {copiedKey === "webhook" ? (
-                <Check className="h-3.5 w-3.5 text-status-success" />
+                <Check className="h-3.5 w-3.5 text-status-success-strong" />
               ) : (
                 <Copy className="h-3.5 w-3.5" />
               )}

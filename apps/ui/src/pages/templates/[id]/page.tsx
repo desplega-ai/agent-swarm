@@ -501,7 +501,7 @@ export default function TemplateDetailPage() {
                           key={v}
                           variant="outline"
                           size="tag"
-                          className="border-status-active/30 text-status-active"
+                          className="border-status-active/30 text-status-active-strong"
                         >
                           {v}
                         </Badge>

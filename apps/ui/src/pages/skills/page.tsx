@@ -31,9 +31,9 @@ function TypeBadge({ type }: { type: string }) {
 
 function ScopeBadge({ scope }: { scope: string }) {
   const colors: Record<string, string> = {
-    global: "border-status-success/30 text-status-success",
-    swarm: "border-status-active/30 text-status-active",
-    agent: "border-status-neutral/30 text-status-neutral",
+    global: "border-status-success/30 text-status-success-strong",
+    swarm: "border-status-active/30 text-status-active-strong",
+    agent: "border-status-neutral/30 text-status-neutral-strong",
   };
   return (
     <Badge variant="outline" size="tag" className={`${colors[scope] || ""}`}>
@@ -47,7 +47,7 @@ function SystemDefaultBadge() {
     <Badge
       variant="outline"
       size="tag"
-      className="border-status-info/30 text-status-info inline-flex items-center gap-1"
+      className="border-status-info/30 text-status-info-strong inline-flex items-center gap-1"
     >
       <ShieldCheck className="h-3 w-3" />
       System
@@ -141,8 +141,8 @@ export default function SkillsPage() {
             size="tag"
             className={`${
               params.value
-                ? "border-status-success/30 text-status-success"
-                : "border-status-error/30 text-status-error"
+                ? "border-status-success/30 text-status-success-strong"
+                : "border-status-error/30 text-status-error-strong"
             }`}
           >
             {params.value ? "Enabled" : "Disabled"}

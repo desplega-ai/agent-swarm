@@ -81,7 +81,7 @@ Use `variant="destructive-outline"` on `Button` for red-outlined destructive act
 <Button variant="destructive-outline" size="sm">Delete</Button>
 ```
 
-Do not re-inline the underlying classes (`border-status-error/30 text-status-error hover:bg-status-error/10`) or — worse — raw palette literals (`border-red-500/30 text-red-400 hover:bg-red-500/10`); the lint gate fails the build on the latter. Pair with `AlertDialog` for confirmation.
+Do not re-inline the underlying classes (`border-status-error/30 text-status-error-strong hover:bg-status-error/10`) or — worse — raw palette literals (`border-red-500/30 text-red-400 hover:bg-red-500/10`); the lint gate fails the build on the latter. Pair with `AlertDialog` for confirmation.
 
 </important>
 
@@ -105,7 +105,7 @@ Brand-kit divergences are tracked in [`thoughts/taras/research/2026-05-06-design
 - **Status colors come from named semantic tokens** — `bg-status-success`, `text-status-error`, `bg-status-active`, etc. — defined in `src/styles/globals.css` (light + dark). Action-type colors (workflow nodes) come from `bg-action-*` tokens. **Do not** use raw Tailwind palette literals (`bg-emerald-500`, `text-amber-400`, `border-red-500/30`, etc.) in app code. Translucent fills use the standard Tailwind opacity syntax: `bg-status-success/10`, `border-action-script/50`.
 - **Color literal lint gate.** `bun run check:tokens` (also runs in CI via `merge-gate.yml`'s `ui-lint` job) fails the build on any raw Tailwind color palette literal, `dark:` palette variant, arbitrary color literal (e.g. `bg-[#0d1117]`), or hardcoded hex in `src/`. To use a new color, add a token to `src/styles/globals.css`. Monaco editor themes are exempt and live in `src/lib/monaco-themes.ts`.
 - CSS variables defined in `src/styles/globals.css`; AG Grid themed via `src/styles/ag-grid.css`.
-- **Theme presets** live in `src/lib/themes.ts` (+ `src/lib/theme-classics.ts` for the classic editor themes): named bundles of token overrides emitted as `[data-theme="<id>"]` rules (light + dark), applied on `<html>` (Settings → Appearance, localStorage) or scoped to one swarm-app canvas (`definition.theme` + the viewer's reserved `$theme` user-config override). Action/destructive tokens are never themed; status tokens are themed ONLY by the classic presets (hue semantics fixed).
+- **Theme presets** live in `src/lib/themes.ts` (+ `src/lib/theme-classics.ts` for the classic editor themes): named bundles of token overrides emitted as `[data-theme="<id>"]` rules (light + dark), applied on `<html>` (Settings → Appearance, localStorage) or scoped to one swarm-app canvas (`definition.theme` + the viewer's reserved `$theme` user-config override). Emitted blocks are SELF-CONTAINED (the builder spreads the stock base under each preset's overrides), so a scoped preset fully resets its canvas instead of blending with the dashboard preset; `hive` scoped = explicit reset to stock, NO attribute = inherit the dashboard. Action/destructive tokens are never themed; status tokens are themed ONLY by the classic presets (hue semantics fixed). The preset id list is duplicated in two agent-facing texts — `templates/skills/apps/content.md` and the `app-upsert` tool description — update them when the catalog changes.
 - **Clickable = pointer** is enforced globally in `globals.css` (`button:not(:disabled)`, `[role="button"]`, `summary`, …) — never add per-component `cursor-pointer` again; disabled controls keep the default cursor. Exception: buttons inside the global sidebar (`[data-slot="sidebar-container"]`) keep the default arrow (Taras's call — nav-rail feel); its nav anchors stay pointer natively.
 - **Colorless borders are themed.** A base rule defaults `border-color` to `var(--color-border)` (Tailwind v4 otherwise leaves bare `border`/`border-r` utilities on `currentColor` — near-black in light, and blind to theme presets). Explicit `border-<color>` utilities still win; anything needing a text-colored border must say `border-current`. Dark overrides in `globals.css` MUST stay on `.dark` alone (never `.dark *`) or scoped wrappers break; portalled content inside an app canvas re-stamps `data-theme` via `useJsonRenderThemeAttr()` from `src/lib/json-render/theme-scope.tsx`.
 - Use `cn()` from `@/lib/utils` for conditional class merging.
@@ -132,7 +132,8 @@ Status tokens (cover the 18 statuses in `status-badge.tsx`'s `statusConfig` map 
 | `status-warning-strong` | warning-state text emphasis | orange-600 | orange-400 |
 | `status-paused` | paused, reviewing (fill) | blue-500 | blue-400 |
 | `status-paused-strong` | paused-state text emphasis | blue-600 | blue-400 |
-| `status-neutral` | offline, backlog, unassigned, cancelled, stopped, skipped | zinc-500 | zinc-400 |
+| `status-neutral` | offline, backlog, unassigned, cancelled, stopped, skipped (fill) | zinc-500 | zinc-400 |
+| `status-neutral-strong` | neutral-state text emphasis | zinc-600 | zinc-400 |
 
 Action-type tokens (workflow node types from `components/workflows/action-node.tsx` and `condition-node.tsx`):
 

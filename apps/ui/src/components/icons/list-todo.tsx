@@ -84,7 +84,7 @@ const ListTodoIcon = forwardRef<ListTodoIconHandle, ListTodoIconProps>(
           <motion.path
             d="m3 17 2 2 4-4"
             style={{ transformBox: "view-box", originX: "6px", originY: "17px" }}
-            transition={{ duration: 0.35, ease: "easeOut" }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
             variants={{
               normal: { scale: 1 },
               animate: { scale: [1, 1.25, 1] },

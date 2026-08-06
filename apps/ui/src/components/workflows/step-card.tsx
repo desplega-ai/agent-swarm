@@ -131,7 +131,7 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
             <Badge
               variant="outline"
               size="tag"
-              className="shrink-0 border-status-info/30 text-status-info"
+              className="shrink-0 border-status-info/30 text-status-info-strong"
             >
               port: {step.nextPort}
             </Badge>
@@ -344,10 +344,10 @@ function HitlOutput({ step, node }: { step: WorkflowRunStep; node?: WorkflowNode
 
   const statusBadgeClass =
     output.status === "approved"
-      ? "border-status-success/30 text-status-success"
+      ? "border-status-success/30 text-status-success-strong"
       : output.status === "rejected"
-        ? "border-status-error/30 text-status-error"
-        : "border-status-active/30 text-status-active";
+        ? "border-status-error/30 text-status-error-strong"
+        : "border-status-active/30 text-status-active-strong";
   const statusLabel =
     output.status === "approved"
       ? "Approved"
@@ -403,7 +403,11 @@ function HitlOutput({ step, node }: { step: WorkflowRunStep; node?: WorkflowNode
                   {answer !== undefined && (
                     <div className="text-xs font-medium pl-0.5">
                       {typeof answer === "boolean" ? (
-                        <span className={answer ? "text-status-success" : "text-status-error"}>
+                        <span
+                          className={
+                            answer ? "text-status-success-strong" : "text-status-error-strong"
+                          }
+                        >
                           {answer ? "Yes" : "No"}
                         </span>
                       ) : typeof answer === "string" ? (
@@ -605,7 +609,7 @@ function HighlightedTemplate({ text }: { text: string }) {
     <p className="text-xs leading-relaxed rounded-md bg-muted px-3 py-2 font-mono whitespace-pre-wrap">
       {parts.map((part, i) =>
         /^{{[^}]*}}$/.test(part) ? (
-          <span key={i} className="text-status-active">
+          <span key={i} className="text-status-active-strong">
             {part}
           </span>
         ) : (

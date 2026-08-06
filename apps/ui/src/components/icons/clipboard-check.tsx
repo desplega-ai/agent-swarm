@@ -23,13 +23,14 @@ const CHECK_VARIANTS: Variants = {
   normal: {
     scale: 1,
     transition: {
-      duration: 0.3,
+      duration: 0.25,
+      ease: "easeOut",
     },
   },
   animate: {
     scale: [1, 1.25, 1],
     transition: {
-      duration: 0.35,
+      duration: 0.3,
       ease: "easeOut",
     },
   },

@@ -4,6 +4,7 @@ import { useAgent } from "@/api/hooks/use-agents";
 import { useApprovalRequest } from "@/api/hooks/use-approval-requests";
 import { useApp } from "@/api/hooks/use-apps";
 import { useMcpServer } from "@/api/hooks/use-mcp-servers";
+import { useMetricDefinition } from "@/api/hooks/use-metric-definitions";
 import { usePage } from "@/api/hooks/use-pages";
 import { useRepo } from "@/api/hooks/use-repos";
 import { useScheduledTask } from "@/api/hooks/use-schedules";
@@ -82,7 +83,17 @@ const HEX32_REGEX = /^[0-9a-f]{32}$/i;
  * to register every new path here; routeLabels stays for names automatic
  * casing can't produce ("mcp-servers" → "MCP Servers", "keys" → "API Keys"). */
 function humanizeSegment(segment: string): string {
-  return decodeURIComponent(segment)
+  // Malformed percent escapes ("/%", "/apps/%ZZ") make decodeURIComponent
+  // throw — and the header renders OUTSIDE the route error boundary, so an
+  // uncaught URIError here would take down the whole shell. Show the raw
+  // segment instead.
+  let decoded = segment;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    // keep the raw segment
+  }
+  return decoded
     .split("-")
     .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : word))
     .join(" ");
@@ -152,6 +163,13 @@ export function Breadcrumbs() {
   const { data: approvalMeta } = useApprovalRequest(idFor("approval-requests"));
   const { data: connectionMeta } = useScriptConnection(idFor("connections") || undefined);
 
+  // `/usage/metrics/:id` — the one detail id at segment index 2. Resolved
+  // here (like the index-1 entities above) because `PageHeader` drops string
+  // titles: without this the dashboard's name would appear nowhere.
+  const metricId =
+    parent === "usage" && segments[1] === "metrics" && segments[2] ? segments[2] : undefined;
+  const { data: metricMeta } = useMetricDefinition(metricId);
+
   if (segments.length === 0) {
     return (
       <span className="min-w-0 truncate text-sm font-medium text-foreground">
@@ -218,6 +236,9 @@ export function Breadcrumbs() {
       }
       if (index === 3 && appPageTitle) {
         label = appPageTitle.trim();
+      }
+      if (index === 2 && metricId && segment === metricId && metricMeta?.title) {
+        label = metricMeta.title.trim();
       }
       const isLast = index === segments.length - 1;
 

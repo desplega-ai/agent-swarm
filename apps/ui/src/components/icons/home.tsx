@@ -17,7 +17,7 @@ interface HomeIconProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 const DEFAULT_TRANSITION: Transition = {
-  duration: 0.35,
+  duration: 0.3,
   ease: "easeOut",
 };
 

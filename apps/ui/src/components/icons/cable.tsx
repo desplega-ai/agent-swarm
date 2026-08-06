@@ -81,7 +81,7 @@ const CableIcon = forwardRef<CableIconHandle, CableIconProps>(
           <path d="M17 21v-2" />
           <motion.path
             d="M19 14V6.5a1 1 0 0 0-7 0v11a1 1 0 0 1-7 0V10"
-            transition={{ duration: 0.5, ease: "easeInOut" }}
+            transition={{ duration: 0.3, ease: [0.2, 0, 0, 1] }}
             variants={{
               normal: { x: 0 },
               animate: { x: [0, -0.9, 0.9, 0] },

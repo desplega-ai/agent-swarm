@@ -136,7 +136,7 @@ export function WelcomeCard() {
                 disabled={!apiKey}
               >
                 {copied ? (
-                  <Check className="h-4 w-4 text-status-success" />
+                  <Check className="h-4 w-4 text-status-success-strong" />
                 ) : (
                   <Copy className="h-4 w-4" />
                 )}
@@ -152,7 +152,7 @@ export function WelcomeCard() {
           )}
 
           {status === "success" && (
-            <Alert className="border-status-success/30 bg-status-success/10 text-status-success">
+            <Alert className="border-status-success/30 bg-status-success/10 text-status-success-strong">
               <CheckCircle2 className="h-4 w-4" />
               <AlertDescription>Connected! Redirecting to dashboard...</AlertDescription>
             </Alert>

@@ -38,7 +38,7 @@ export function UserStatusPill({ status }: { status: User["status"] }) {
   const config = STATUS_STYLES[status] ?? {
     label: status,
     dot: "bg-status-neutral",
-    text: "text-status-neutral",
+    text: "text-status-neutral-strong",
   };
   return (
     <Badge

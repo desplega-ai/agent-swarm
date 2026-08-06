@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 //
 // Pre-Phase-9 canonical form:
 //
-//   <div className="flex items-start gap-2 rounded-md border border-status-error/30 bg-status-error/5 p-3 text-status-error">
+//   <div className="flex items-start gap-2 rounded-md border border-status-error/30 bg-status-error/5 p-3 text-status-error-strong">
 //     <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
 //     <span>{message}</span>
 //   </div>

@@ -90,18 +90,18 @@ export function FieldRenderer({
     ? inEnv
       ? {
           label: "db+env",
-          className: "bg-status-success/10 text-status-success border-status-success/30",
+          className: "bg-status-success/10 text-status-success-strong border-status-success/30",
           title: "Set in DB and loaded into process.env. Live on the server.",
         }
       : {
           label: "db (pending reload)",
-          className: "bg-status-active/10 text-status-active border-status-active/30",
+          className: "bg-status-active/10 text-status-active-strong border-status-active/30",
           title: "Saved to DB but not yet in process.env — reload or restart the API to apply.",
         }
     : inEnv
       ? {
           label: "env (deploy)",
-          className: "bg-status-info/10 text-status-info border-status-info/30",
+          className: "bg-status-info/10 text-status-info-strong border-status-info/30",
           title:
             "Set via deployment env (.env / docker). No DB row — save here to persist across DB reloads.",
         }
@@ -112,7 +112,7 @@ export function FieldRenderer({
       <div className="flex items-center gap-2">
         <Label htmlFor={inputId} className="flex items-center gap-1">
           <span>{field.label}</span>
-          {field.required && <span className="text-status-error text-xs">*</span>}
+          {field.required && <span className="text-status-error-strong text-xs">*</span>}
         </Label>
         <code
           className="text-[10px] font-mono text-muted-foreground select-text"
@@ -130,7 +130,7 @@ export function FieldRenderer({
           title={`Copy ${field.key}`}
         >
           {copied ? (
-            <Check className="h-3 w-3 text-status-success" />
+            <Check className="h-3 w-3 text-status-success-strong" />
           ) : (
             <Copy className="h-3 w-3" />
           )}
@@ -184,7 +184,7 @@ export function FieldRenderer({
               <button
                 type="button"
                 onClick={onClearExisting}
-                className="text-xs text-status-error/80 underline hover:text-status-error"
+                className="text-xs text-status-error-strong/80 underline hover:text-status-error-strong"
               >
                 Clear value
               </button>
@@ -201,7 +201,7 @@ export function FieldRenderer({
         </div>
       )}
 
-      {warningText && <p className="text-xs text-status-active/90">{warningText}</p>}
+      {warningText && <p className="text-xs text-status-active-strong/90">{warningText}</p>}
 
       {field.helpText && (
         <p id={`${inputId}-help`} className="text-xs text-muted-foreground">

@@ -168,11 +168,16 @@ export function AppSettingsDrawer({
   const schema = useMemo<UserConfigSchema>(() => data?.schema ?? {}, [data]);
   const serverDraft = useMemo(() => toDraft(schema, data?.values ?? {}), [schema, data]);
   const draft = edits ?? serverDraft;
-  // A stored id this build's catalog doesn't know reads as "App default" —
-  // same degradation the renderer applies.
-  const serverThemeRaw = data?.values?.$theme;
-  const serverTheme =
-    getThemePreset(typeof serverThemeRaw === "string" ? serverThemeRaw : null)?.id ?? null;
+  // The RAW stored slug is the working value, known to this build or not: the
+  // server deliberately accepts unknown ids for version portability, so an
+  // untouched save must round-trip the raw value (normalizing to null here
+  // would silently DELETE the preference on the wholesale PUT), and clearing
+  // an unknown id must still send the explicit `$theme: null`. An unknown
+  // slug renders as its own select entry so it stays distinguishable from
+  // "App default" (the renderer meanwhile degrades it to the dashboard theme).
+  const rawTheme = data?.values?.$theme;
+  const serverTheme = typeof rawTheme === "string" && rawTheme !== "" ? rawTheme : null;
+  const unknownServerTheme = serverTheme && !getThemePreset(serverTheme) ? serverTheme : null;
   const themeChoice = themeEdit === undefined ? serverTheme : themeEdit;
   const themeDirty = themeEdit !== undefined && themeEdit !== serverTheme;
   const appDefaultPreset = getThemePreset(appDefaultTheme ?? null);
@@ -275,6 +280,11 @@ export function AppSettingsDrawer({
                       {preset.name}
                     </SelectItem>
                   ))}
+                  {unknownServerTheme && (
+                    <SelectItem value={unknownServerTheme}>
+                      {`Unknown preset (${unknownServerTheme})`}
+                    </SelectItem>
+                  )}
                 </SelectContent>
               </Select>
             </SettingsRow>

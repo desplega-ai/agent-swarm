@@ -197,7 +197,7 @@ function TransportBadge({ transport }: { transport: string }) {
 
 function AuthMethodBadge({ method }: { method: string }) {
   const colors: Record<string, string> = {
-    static: "border-status-neutral/30 text-status-neutral",
+    static: "border-status-neutral/30 text-status-neutral-strong",
     oauth: "border-action-delegate-to-agent/30 text-action-delegate-to-agent",
     auto: "border-action-raw-llm/30 text-action-raw-llm",
   };
@@ -210,9 +210,9 @@ function AuthMethodBadge({ method }: { method: string }) {
 
 function ScopeBadge({ scope }: { scope: string }) {
   const colors: Record<string, string> = {
-    global: "border-status-success/30 text-status-success",
-    swarm: "border-status-active/30 text-status-active",
-    agent: "border-status-neutral/30 text-status-neutral",
+    global: "border-status-success/30 text-status-success-strong",
+    swarm: "border-status-active/30 text-status-active-strong",
+    agent: "border-status-neutral/30 text-status-neutral-strong",
   };
   return (
     <Badge variant="outline" size="tag" className={`${colors[scope] || ""}`}>
@@ -299,8 +299,8 @@ export default function McpServersPage() {
             size="tag"
             className={`${
               params.value
-                ? "border-status-success/30 text-status-success"
-                : "border-status-error/30 text-status-error"
+                ? "border-status-success/30 text-status-success-strong"
+                : "border-status-error/30 text-status-error-strong"
             }`}
           >
             {params.value ? "Enabled" : "Disabled"}

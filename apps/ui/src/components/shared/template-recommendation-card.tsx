@@ -94,7 +94,7 @@ function RecommendationCardInner({
       <CardContent className="p-5 flex flex-col gap-3">
         {!compact ? (
           <div className="flex items-center gap-2">
-            <Sparkles className="h-3.5 w-3.5 text-status-active" aria-hidden="true" />
+            <Sparkles className="h-3.5 w-3.5 text-status-active-strong" aria-hidden="true" />
             <span className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">
               {eyebrow}
             </span>

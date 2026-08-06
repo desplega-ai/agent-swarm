@@ -79,9 +79,12 @@
   --color-status-paused-strong: oklch(0.5 0.1 262);
   --color-status-paused-foreground: oklch(0.21 0.006 285.885);
   /* Neutral doubles as small text in places, so it stays a touch darker than
-     the board sketch (0.65) for contrast on white. */
+     the board sketch (0.65) for contrast on white. Like every pale fill it
+     takes the dark foreground; the near-white one it launched with sat at
+     ~2:1 over a light field. */
   --color-status-neutral: oklch(0.62 0.014 286);
-  --color-status-neutral-foreground: oklch(0.985 0 0);
+  --color-status-neutral-strong: oklch(0.48 0.014 286);
+  --color-status-neutral-foreground: oklch(0.21 0.006 285.885);
 
   /* Action-type tokens — light mode
      Source: components/workflows/action-node.tsx L18-L72 and
@@ -191,6 +194,7 @@
   --color-status-paused-strong: oklch(0.74 0.09 260);
   --color-status-paused-foreground: oklch(0.21 0.006 285.885);
   --color-status-neutral: oklch(0.72 0.012 286);
+  --color-status-neutral-strong: oklch(0.72 0.012 286);
   --color-status-neutral-foreground: oklch(0.21 0.006 285.885);
 
   /* Action-type tokens — dark mode (lighter *-400 stops for legibility) */

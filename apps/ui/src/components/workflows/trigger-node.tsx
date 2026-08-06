@@ -34,7 +34,7 @@ export function TriggerNode({ data }: NodeProps) {
       nodeType={d.nodeType}
       borderClass={borderClass}
       iconBgClass="bg-status-success/10"
-      iconClass="text-status-success"
+      iconClass="text-status-success-strong"
       handleClass="!bg-status-success"
       selected={d.selected}
       showTargetHandle={false}

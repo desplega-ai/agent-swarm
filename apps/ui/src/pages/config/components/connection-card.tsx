@@ -63,9 +63,9 @@ export function ConnectionCard({
             {testStatus === "loading" ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : testStatus === "success" ? (
-              <CheckCircle2 className="h-3.5 w-3.5 text-status-success" />
+              <CheckCircle2 className="h-3.5 w-3.5 text-status-success-strong" />
             ) : testStatus === "error" ? (
-              <XCircle className="h-3.5 w-3.5 text-status-error" />
+              <XCircle className="h-3.5 w-3.5 text-status-error-strong" />
             ) : (
               <Signal className="h-3.5 w-3.5" />
             )}

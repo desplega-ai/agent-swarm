@@ -195,7 +195,9 @@ export function ScriptRunsGrid({
           params.value ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="block truncate text-xs text-status-error">{params.value}</span>
+                <span className="block truncate text-xs text-status-error-strong">
+                  {params.value}
+                </span>
               </TooltipTrigger>
               <TooltipContent className="max-w-md">{params.value}</TooltipContent>
             </Tooltip>

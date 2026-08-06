@@ -1164,3 +1164,68 @@ describe("app MCP iteration tools", () => {
     ).toEqual({ count: 0 });
   });
 });
+
+describe("page-validator guards", () => {
+  test("cross-checks busyWith against declared actions and reserves $-prefixed form field names", () => {
+    const withButton = (busyWith: string) =>
+      parseAppDefinition({
+        ...baseDefinition,
+        actions: { notify: { kind: "task", prompt: "Ping the owner" } },
+        pages: {
+          main: {
+            root: "root",
+            elements: {
+              root: {
+                type: "Button",
+                props: { label: "Notify", busyWith },
+                on: { press: [{ action: "app.action", params: { name: "notify" } }] },
+              },
+            },
+          },
+        },
+        defaultPage: "main",
+      });
+
+    // A typo'd busyWith watches a slot nothing writes — rejected like an
+    // unknown app.action name.
+    const typo = withButton("notfy");
+    expect(typo.success).toBe(false);
+    if (!typo.success) {
+      expect(typo.issues).toContainEqual({
+        path: "pages.main.elements.root.props.busyWith",
+        message: 'unknown app action "notfy"',
+      });
+    }
+    expect(withButton("notify").success).toBe(true);
+
+    // `$`-prefixed form field names collide with reserved runtime slots
+    // (`/forms/<id>/$error` carries the inline mutate failure).
+    const reservedField = parseAppDefinition({
+      ...baseDefinition,
+      pages: {
+        main: {
+          root: "root",
+          elements: {
+            root: {
+              type: "Form",
+              props: {
+                id: "f",
+                fields: [{ name: "$error" }],
+                onSubmit: [{ action: "app.mutate", params: { op: "create", model: "idea" } }],
+              },
+            },
+          },
+        },
+      },
+      defaultPage: "main",
+    });
+    expect(reservedField.success).toBe(false);
+    if (!reservedField.success) {
+      expect(
+        reservedField.issues.some(
+          (issue) => issue.path === "pages.main.elements.root.props.fields.0.name",
+        ),
+      ).toBe(true);
+    }
+  });
+});

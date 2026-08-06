@@ -462,7 +462,7 @@ export default function MemoryPage() {
             </>
           )}
           {error && (
-            <span className="text-sm text-status-error truncate max-w-[280px]">
+            <span className="text-sm text-status-error-strong truncate max-w-[280px]">
               {error instanceof Error ? error.message : "Search failed"}
             </span>
           )}

@@ -38,12 +38,12 @@ function deriveSourceChip(inDb: boolean, inEnv: boolean): SourceChip | null {
     return inEnv
       ? {
           label: "db+env",
-          className: "bg-status-success/10 text-status-success border-status-success/30",
+          className: "bg-status-success/10 text-status-success-strong border-status-success/30",
           title: "Saved here and loaded into process.env. Live on the server.",
         }
       : {
           label: "db (pending reload)",
-          className: "bg-status-active/10 text-status-active border-status-active/30",
+          className: "bg-status-active/10 text-status-active-strong border-status-active/30",
           title:
             "Saved here but not yet in process.env — reload or restart the API server to apply.",
         };
@@ -51,7 +51,7 @@ function deriveSourceChip(inDb: boolean, inEnv: boolean): SourceChip | null {
   return inEnv
     ? {
         label: "env",
-        className: "bg-status-info/10 text-status-info border-status-info/30",
+        className: "bg-status-info/10 text-status-info-strong border-status-info/30",
         title:
           "Set via deployment env (.env / docker) only. No saved value — saving here creates one that takes over on reload.",
       }

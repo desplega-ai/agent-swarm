@@ -195,8 +195,8 @@ export default function ScheduleDetailPage() {
           size="tag"
           className={`${
             schedule.scheduleType === "one_time"
-              ? "border-status-active/30 text-status-active"
-              : "border-status-success/30 text-status-success"
+              ? "border-status-active/30 text-status-active-strong"
+              : "border-status-success/30 text-status-success-strong"
           }`}
         >
           {schedule.scheduleType === "one_time" ? "One-time" : "Recurring"}

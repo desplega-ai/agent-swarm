@@ -21,7 +21,7 @@ const RECT_1_VARIANTS: Variants = {
   animate: {
     translateX: [0, 11, 11, 0],
     translateY: [0, 0, 0, 0],
-    transition: { duration: 0.8, ease: "easeInOut", times: [0, 0.4, 0.6, 1] },
+    transition: { duration: 0.3, ease: [0.2, 0, 0, 1], times: [0, 0.4, 0.6, 1] },
   },
 };
 
@@ -30,7 +30,7 @@ const RECT_2_VARIANTS: Variants = {
   animate: {
     translateX: [0, 0, 0, 0],
     translateY: [0, 11, 11, 0],
-    transition: { duration: 0.8, ease: "easeInOut", times: [0, 0.4, 0.6, 1] },
+    transition: { duration: 0.3, ease: [0.2, 0, 0, 1], times: [0, 0.4, 0.6, 1] },
   },
 };
 
@@ -39,7 +39,7 @@ const RECT_3_VARIANTS: Variants = {
   animate: {
     translateX: [0, -11, -11, 0],
     translateY: [0, 0, 0, 0],
-    transition: { duration: 0.8, ease: "easeInOut", times: [0, 0.4, 0.6, 1] },
+    transition: { duration: 0.3, ease: [0.2, 0, 0, 1], times: [0, 0.4, 0.6, 1] },
   },
 };
 
@@ -48,7 +48,7 @@ const RECT_4_VARIANTS: Variants = {
   animate: {
     translateX: [0, 0, 0, 0],
     translateY: [0, -11, -11, 0],
-    transition: { duration: 0.8, ease: "easeInOut", times: [0, 0.4, 0.6, 1] },
+    transition: { duration: 0.3, ease: [0.2, 0, 0, 1], times: [0, 0.4, 0.6, 1] },
   },
 };
 

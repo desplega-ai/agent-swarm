@@ -80,7 +80,7 @@ const FileClockIcon = forwardRef<FileClockIconHandle, FileClockIconProps>(
       animate: {
         scale: [1, 1.1, 1],
         transition: {
-          duration: 0.4 * duration,
+          duration: 0.22 * duration,
           ease: [0.34, 1.4, 0.64, 1],
         },
       },
@@ -91,8 +91,8 @@ const FileClockIcon = forwardRef<FileClockIconHandle, FileClockIconProps>(
       animate: {
         rotate: [0, -40, 12, 0],
         transition: {
-          duration: 0.55 * duration,
-          delay: 0.1 * duration,
+          duration: 0.24 * duration,
+          delay: 0.06 * duration,
           ease: [0.34, 1.4, 0.64, 1],
         },
       },

@@ -52,7 +52,7 @@ export function ConfigDetailDialog({
                 <Badge
                   variant="outline"
                   size="tag"
-                  className="border-status-active/30 text-status-active"
+                  className="border-status-active/30 text-status-active-strong"
                 >
                   secret
                 </Badge>
@@ -91,7 +91,7 @@ export function ConfigDetailDialog({
                   )}
                   <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleCopy}>
                     {copied ? (
-                      <Check className="h-3.5 w-3.5 text-status-success" />
+                      <Check className="h-3.5 w-3.5 text-status-success-strong" />
                     ) : (
                       <Copy className="h-3.5 w-3.5" />
                     )}

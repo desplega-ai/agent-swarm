@@ -308,7 +308,7 @@ export default function OAuthAppDetailPage() {
                             authorization.lastErrorMessage ? (
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <AlertTriangle className="size-3.5 shrink-0 text-status-error" />
+                                  <AlertTriangle className="size-3.5 shrink-0 text-status-error-strong" />
                                 </TooltipTrigger>
                                 <TooltipContent className="max-w-xs whitespace-normal">
                                   {authorization.lastErrorMessage}

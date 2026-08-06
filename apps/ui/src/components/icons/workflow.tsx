@@ -17,7 +17,7 @@ interface WorkflowIconProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 const TRANSITION: Transition = {
-  duration: 0.3,
+  duration: 0.24,
   ease: "easeOut",
 };
 
@@ -32,7 +32,7 @@ const VARIANTS: Variants = {
     scale: [1, 1.15, 1],
     transition: {
       ...TRANSITION,
-      delay: 0.12 * custom,
+      delay: 0.06 * custom,
     },
   }),
 };

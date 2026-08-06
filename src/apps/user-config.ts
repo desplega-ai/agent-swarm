@@ -72,7 +72,12 @@ export function userConfigValueIssues(
 ): Array<{ path: string; message: string }> {
   const issues: Array<{ path: string; message: string }> = [];
   for (const [name, value] of Object.entries(values)) {
-    const reservedPattern = RESERVED_KEY_PATTERNS[name];
+    // Own-key lookup only: a prototype-named field ("toString", …) must fall
+    // through to unknown-field validation, not resolve an inherited function
+    // that `.test()` then throws on (turning bad client input into a 500).
+    const reservedPattern = Object.hasOwn(RESERVED_KEY_PATTERNS, name)
+      ? RESERVED_KEY_PATTERNS[name]
+      : undefined;
     if (reservedPattern) {
       // `null` is the explicit "clear" form — PUT replaces wholesale, but a
       // schema-less app rejects an empty body, so clearing needs a value.
@@ -84,7 +89,7 @@ export function userConfigValueIssues(
       }
       continue;
     }
-    const field = schema[name];
+    const field = Object.hasOwn(schema, name) ? schema[name] : undefined;
     if (!field) {
       issues.push({ path: `values.${name}`, message: `unknown userConfig field "${name}"` });
     } else if (!accepts(field, value)) {

@@ -153,7 +153,7 @@ export default function WorkflowDetailPage() {
         flex: 1,
         cellRenderer: (params: { value?: string }) =>
           params.value ? (
-            <span className="text-status-error truncate text-xs">{params.value}</span>
+            <span className="text-status-error-strong truncate text-xs">{params.value}</span>
           ) : null,
       },
     ],
@@ -443,7 +443,7 @@ function NodeInspector({ node, allNodes }: { node: WorkflowNode; allNodes: Workf
               {node.type}
             </Badge>
             {executorInfo && (
-              <Badge variant="outline" size="tag" className="text-status-info">
+              <Badge variant="outline" size="tag" className="text-status-info-strong">
                 {executorInfo.mode}
               </Badge>
             )}
@@ -459,7 +459,7 @@ function NodeInspector({ node, allNodes }: { node: WorkflowNode; allNodes: Workf
                 <div key={key} className="flex items-center gap-2 text-xs font-mono">
                   <span className="text-foreground">{key}</span>
                   <span className="text-muted-foreground">&rarr;</span>
-                  <span className="text-status-active">{value}</span>
+                  <span className="text-status-active-strong">{value}</span>
                 </div>
               ))}
             </div>
@@ -550,7 +550,7 @@ function HighlightedTemplate({ text }: { text: string }) {
     <div className="bg-muted rounded-md p-3 font-mono text-xs whitespace-pre-wrap">
       {parts.map((part, i) =>
         /^{{[^}]*}}$/.test(part) ? (
-          <span key={i} className="text-status-active">
+          <span key={i} className="text-status-active-strong">
             {part}
           </span>
         ) : (
@@ -919,7 +919,7 @@ function PropertyMatchConfig({ config }: { config: Record<string, unknown> }) {
                 className="rounded-md bg-muted px-3 py-2 font-mono text-xs flex items-center gap-2 flex-wrap"
               >
                 <span className="text-foreground">{cond.field ?? "?"}</span>
-                <span className="text-status-active">{cond.op ?? "?"}</span>
+                <span className="text-status-active-strong">{cond.op ?? "?"}</span>
                 {cond.value !== undefined && (
                   <span className="text-muted-foreground">{JSON.stringify(cond.value)}</span>
                 )}
@@ -1723,7 +1723,7 @@ function TriggerCard({ workflowId, trigger }: { workflowId: string; trigger: Tri
     return (
       <div className="rounded-lg border bg-card p-4 space-y-3">
         <div className="flex items-center gap-2">
-          <Webhook className="h-4 w-4 text-status-success" />
+          <Webhook className="h-4 w-4 text-status-success-strong" />
           <Badge variant="outline" size="tag" className="font-mono">
             webhook
           </Badge>

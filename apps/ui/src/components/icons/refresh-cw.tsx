@@ -60,7 +60,8 @@ const RefreshCWIcon = forwardRef<RefreshCCWIconWIcon, RefreshCCWIcoWIcon>(
           strokeLinecap="round"
           strokeLinejoin="round"
           strokeWidth="2"
-          transition={{ type: "spring", stiffness: 250, damping: 25 }}
+          // Was a spring — its settle ran well past the 300ms budget.
+          transition={{ duration: 0.28, ease: [0.2, 0, 0, 1] }}
           variants={{
             normal: { rotate: "0deg" },
             animate: { rotate: "50deg" },

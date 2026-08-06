@@ -14,9 +14,9 @@ interface StatItemProps {
 
 const variantStyles = {
   default: "text-foreground",
-  success: "text-status-success",
-  warning: "text-status-active",
-  danger: "text-status-error",
+  success: "text-status-success-strong",
+  warning: "text-status-active-strong",
+  danger: "text-status-error-strong",
 } as const;
 
 function StatItem({ icon: Icon, label, value, variant = "default", to }: StatItemProps) {

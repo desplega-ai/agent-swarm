@@ -78,7 +78,9 @@ function WaterfallRow({
         <span className="w-4 shrink-0 text-right font-mono text-[10px] text-muted-foreground/70">
           {index + 1}
         </span>
-        <Icon className={cn("h-3.5 w-3.5 shrink-0", failed ? "text-status-error" : meta.accent)} />
+        <Icon
+          className={cn("h-3.5 w-3.5 shrink-0", failed ? "text-status-error-strong" : meta.accent)}
+        />
         <span className="truncate font-mono text-xs">{entry.stepKey}</span>
       </div>
 

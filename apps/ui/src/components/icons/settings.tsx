@@ -67,7 +67,8 @@ const SettingsIcon = forwardRef<SettingsIconHandle, SettingsIconProps>(
           strokeLinecap="round"
           strokeLinejoin="round"
           strokeWidth="2"
-          transition={{ type: "spring", stiffness: 50, damping: 10 }}
+          // Was a spring — its settle ran well past the 300ms budget.
+          transition={{ duration: 0.3, ease: [0.2, 0, 0, 1] }}
           variants={{
             normal: {
               rotate: 0,

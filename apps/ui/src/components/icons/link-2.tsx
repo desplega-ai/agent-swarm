@@ -21,9 +21,9 @@ const LEFT_VARIANTS: Variants = {
   animate: {
     x: [0, -0.7, 0.3, 0],
     transition: {
-      duration: 0.6,
+      duration: 0.3,
       times: [0, 0.4, 0.75, 1],
-      ease: "easeInOut",
+      ease: [0.2, 0, 0, 1],
     },
   },
 };
@@ -33,9 +33,9 @@ const RIGHT_VARIANTS: Variants = {
   animate: {
     x: [0, 0.7, -0.3, 0],
     transition: {
-      duration: 0.6,
+      duration: 0.3,
       times: [0, 0.4, 0.75, 1],
-      ease: "easeInOut",
+      ease: [0.2, 0, 0, 1],
     },
   },
 };

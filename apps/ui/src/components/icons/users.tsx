@@ -16,22 +16,22 @@ interface UsersIconProps extends HTMLAttributes<HTMLDivElement> {
   size?: number;
 }
 
+// Both legs were springs — their default settle ran well past the 300ms
+// budget; retimed as tweens so the whole slide-in lands in 300ms.
 const PATH_VARIANTS: Variants = {
   normal: {
     translateX: 0,
     transition: {
-      type: "spring",
-      stiffness: 200,
-      damping: 13,
+      duration: 0.2,
+      ease: "easeOut",
     },
   },
   animate: {
     translateX: [-6, 0],
     transition: {
-      delay: 0.1,
-      type: "spring",
-      stiffness: 200,
-      damping: 13,
+      delay: 0.06,
+      duration: 0.24,
+      ease: "easeOut",
     },
   },
 };

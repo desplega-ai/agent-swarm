@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import { Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -31,10 +32,15 @@ export function EmptyState({
   fullPage,
   className,
 }: EmptyStateProps) {
-  // `?seed=` is the NewSessionView composer-prefill contract.
-  const askHref = entity
-    ? `/sessions?seed=${encodeURIComponent(`Hey, help me set up my first ${entity}`)}`
-    : null;
+  // `?seed=` is the NewSessionView composer-prefill contract. `/sessions`
+  // itself is version-gated (it renders UpgradeRequired below 1.76.0), so the
+  // CTA only appears once the connected API confirms support — otherwise it
+  // would be a dead action on compatibility deployments.
+  const sessionsGate = useFeatureGate("1.76.0");
+  const askHref =
+    entity && sessionsGate.supported
+      ? `/sessions?seed=${encodeURIComponent(`Hey, help me set up my first ${entity}`)}`
+      : null;
 
   return (
     <div

@@ -43,7 +43,7 @@ function authStatusTone(status: string): string {
   if (status === "refresh-failed" || status === "revoked" || status === "expired") {
     return "border-status-error/30 text-status-error-strong";
   }
-  return "border-status-neutral/30 text-status-neutral";
+  return "border-status-neutral/30 text-status-neutral-strong";
 }
 
 /**

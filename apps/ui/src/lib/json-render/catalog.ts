@@ -352,7 +352,10 @@ const tableProps = z.object({
 });
 
 const formFieldSchema = z.object({
-  name: z.string(),
+  /** `$`-prefixed names are reserved runtime slots under `/forms/<id>/` —
+   * `$error` holds the inline mutate failure, and a field stored there would
+   * render as (and be clobbered by) the failure state. */
+  name: z.string().regex(/^[^$]/, "field names must not start with '$' (reserved)"),
   label: z.string().optional(),
   /** `text` is a multi-line variant of `string` (textarea). */
   kind: z.enum(["string", "text", "number", "boolean", "date", "enum"]).optional(),

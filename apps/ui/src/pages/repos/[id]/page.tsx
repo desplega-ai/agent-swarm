@@ -167,17 +167,17 @@ function GuidelinesSection({ guidelines }: { guidelines: RepoGuidelines }) {
     {
       title: "PR Checks",
       items: guidelines.prChecks,
-      icon: <ShieldCheck className="h-4 w-4 text-status-active" />,
+      icon: <ShieldCheck className="h-4 w-4 text-status-active-strong" />,
     },
     {
       title: "Merge Checks",
       items: guidelines.mergeChecks,
-      icon: <GitBranch className="h-4 w-4 text-status-success" />,
+      icon: <GitBranch className="h-4 w-4 text-status-success-strong" />,
     },
     {
       title: "Review Guidelines",
       items: guidelines.review,
-      icon: <Check className="h-4 w-4 text-status-paused" />,
+      icon: <Check className="h-4 w-4 text-status-paused-strong" />,
     },
   ];
 
@@ -190,8 +190,8 @@ function GuidelinesSection({ guidelines }: { guidelines: RepoGuidelines }) {
           size="tag"
           className={
             guidelines.allowMerge
-              ? "bg-status-success/15 text-status-success border-status-success/30"
-              : "bg-status-error/15 text-status-error border-status-error/30"
+              ? "bg-status-success/15 text-status-success-strong border-status-success/30"
+              : "bg-status-error/15 text-status-error-strong border-status-error/30"
           }
         >
           {guidelines.allowMerge ? "Merge allowed" : "Merge not allowed"}
@@ -289,7 +289,7 @@ export default function RepoDetailPage() {
               size="tag"
               className={
                 repo.autoClone
-                  ? "bg-status-success/15 text-status-success border-status-success/30"
+                  ? "bg-status-success/15 text-status-success-strong border-status-success/30"
                   : ""
               }
             >
@@ -300,7 +300,7 @@ export default function RepoDetailPage() {
               size="tag"
               className={
                 repo.hooks.enabled
-                  ? "bg-status-success/15 text-status-success border-status-success/30"
+                  ? "bg-status-success/15 text-status-success-strong border-status-success/30"
                   : ""
               }
             >

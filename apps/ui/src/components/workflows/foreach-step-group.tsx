@@ -97,7 +97,7 @@ export function ForeachStepGroup({
           </Badge>
           <span>&middot; {summary.ok} ok</span>
           {summary.failed > 0 && (
-            <span className="text-status-error">&middot; {summary.failed} failed</span>
+            <span className="text-status-error-strong">&middot; {summary.failed} failed</span>
           )}
         </button>
 

@@ -553,7 +553,7 @@ function AttachmentRow({
             type="button"
             size="icon"
             variant="ghost"
-            className="h-7 w-7 text-status-error hover:text-status-error"
+            className="h-7 w-7 text-status-error-strong hover:text-status-error-strong"
             onClick={() => onDelete?.(attachment)}
             disabled={deleting}
             aria-label={`Delete ${attachment.name}`}

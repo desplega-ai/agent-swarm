@@ -62,15 +62,27 @@ export function ClaudeManagedSection({ def, configs, envPresence }: ClaudeManage
 
   const statusBadge =
     status === "configured" ? (
-      <Badge variant="outline" size="tag" className="border-status-success/30 text-status-success">
+      <Badge
+        variant="outline"
+        size="tag"
+        className="border-status-success/30 text-status-success-strong"
+      >
         Connected
       </Badge>
     ) : status === "partial" ? (
-      <Badge variant="outline" size="tag" className="border-status-active/30 text-status-active">
+      <Badge
+        variant="outline"
+        size="tag"
+        className="border-status-active/30 text-status-active-strong"
+      >
         Partial
       </Badge>
     ) : (
-      <Badge variant="outline" size="tag" className="border-status-neutral/30 text-status-neutral">
+      <Badge
+        variant="outline"
+        size="tag"
+        className="border-status-neutral/30 text-status-neutral-strong"
+      >
         Not configured
       </Badge>
     );
@@ -102,7 +114,7 @@ export function ClaudeManagedSection({ def, configs, envPresence }: ClaudeManage
             className="shrink-0"
           >
             {copied ? (
-              <Check className="h-3.5 w-3.5 text-status-success" />
+              <Check className="h-3.5 w-3.5 text-status-success-strong" />
             ) : (
               <Copy className="h-3.5 w-3.5" />
             )}
@@ -141,7 +153,7 @@ export function ClaudeManagedSection({ def, configs, envPresence }: ClaudeManage
                     aria-hidden
                   />
                   <div className="space-y-0.5">
-                    <div className="font-medium text-status-success">
+                    <div className="font-medium text-status-success-strong">
                       Connected to managed agent
                     </div>
                     <div className="text-muted-foreground">
@@ -158,7 +170,7 @@ export function ClaudeManagedSection({ def, configs, envPresence }: ClaudeManage
                 <div className="flex items-start gap-2">
                   <div className="mt-1 h-2 w-2 rounded-full bg-status-error shrink-0" aria-hidden />
                   <div className="space-y-0.5">
-                    <div className="font-medium text-status-error">Connection failed</div>
+                    <div className="font-medium text-status-error-strong">Connection failed</div>
                     <div className="text-muted-foreground break-words">
                       {lastResult.error ?? "Unknown error"}
                     </div>

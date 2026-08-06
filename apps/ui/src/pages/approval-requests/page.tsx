@@ -171,9 +171,12 @@ export default function ApprovalRequestsPage() {
     },
     [navigate],
   );
-  const isEmpty = !isLoading && (requests?.length ?? 0) === 0;
   const hasActiveFilters =
     search !== "" || statusFilter !== "all" || sourceFilter !== "all" || ageFilter !== "all";
+  // First-run only: the status filter is applied SERVER-side, so an empty
+  // filtered result must keep the filter bar (and its Clear) on screen —
+  // hiding it would strand the user on an unfiltered-looking empty state.
+  const isEmpty = !isLoading && (requests?.length ?? 0) === 0 && !hasActiveFilters;
 
   const clearFilters = useCallback(() => {
     setParams(

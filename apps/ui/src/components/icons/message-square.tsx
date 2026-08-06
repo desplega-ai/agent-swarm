@@ -26,13 +26,13 @@ const ICON_VARIANTS: Variants = {
     rotate: [0, -7, 7, 0],
     transition: {
       rotate: {
-        duration: 0.5,
-        ease: "easeInOut",
+        duration: 0.3,
+        ease: [0.2, 0, 0, 1],
       },
+      // Was a spring — its default settle ran well past the 300ms budget.
       scale: {
-        type: "spring",
-        stiffness: 400,
-        damping: 10,
+        duration: 0.25,
+        ease: "easeOut",
       },
     },
   },

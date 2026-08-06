@@ -544,8 +544,8 @@ export default function AgentDetailPage() {
                         size="tag"
                         className={`${
                           skill.isActive
-                            ? "border-status-success/30 text-status-success"
-                            : "border-status-neutral/30 text-status-neutral"
+                            ? "border-status-success/30 text-status-success-strong"
+                            : "border-status-neutral/30 text-status-neutral-strong"
                         }`}
                       >
                         {skill.isActive ? "Active" : "Inactive"}
@@ -600,8 +600,8 @@ export default function AgentDetailPage() {
                         size="tag"
                         className={`${
                           server.isActive
-                            ? "border-status-success/30 text-status-success"
-                            : "border-status-neutral/30 text-status-neutral"
+                            ? "border-status-success/30 text-status-success-strong"
+                            : "border-status-neutral/30 text-status-neutral-strong"
                         }`}
                       >
                         {server.isActive ? "Active" : "Inactive"}

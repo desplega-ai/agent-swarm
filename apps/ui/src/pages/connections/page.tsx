@@ -197,7 +197,11 @@ function CopyButton({ value, label = "Copy" }: { value: string; label?: string }
           onClick={() => copy(value)}
           disabled={!value}
         >
-          {copied ? <Check className="size-3 text-status-success" /> : <Copy className="size-3" />}
+          {copied ? (
+            <Check className="size-3 text-status-success-strong" />
+          ) : (
+            <Copy className="size-3" />
+          )}
         </Button>
       </TooltipTrigger>
       <TooltipContent>{copied ? "Copied" : label}</TooltipContent>
@@ -265,11 +269,11 @@ export function KindBadge({ kind }: { kind: ScriptConnectionKind }) {
 export function TokenStatusBadge({ status }: { status?: OAuthBindingTokenStatus }) {
   if (!status) return <span className="text-muted-foreground">-</span>;
   const colors: Record<OAuthBindingTokenStatus, string> = {
-    ok: "border-status-success/30 text-status-success",
-    expiring: "border-status-active/30 text-status-active",
-    "refresh-failed": "border-status-error/30 text-status-error",
-    revoked: "border-status-neutral/30 text-status-neutral",
-    missing: "border-status-error/30 text-status-error",
+    ok: "border-status-success/30 text-status-success-strong",
+    expiring: "border-status-active/30 text-status-active-strong",
+    "refresh-failed": "border-status-error/30 text-status-error-strong",
+    revoked: "border-status-neutral/30 text-status-neutral-strong",
+    missing: "border-status-error/30 text-status-error-strong",
   };
   return (
     <Badge variant="outline" size="tag" className={colors[status]}>
@@ -279,10 +283,10 @@ export function TokenStatusBadge({ status }: { status?: OAuthBindingTokenStatus 
 }
 
 const AUTHORIZATION_STATUS_COLORS: Record<OAuthAuthorizationStatus, string> = {
-  active: "border-status-success/30 text-status-success",
-  "refresh-failed": "border-status-error/30 text-status-error",
+  active: "border-status-success/30 text-status-success-strong",
+  "refresh-failed": "border-status-error/30 text-status-error-strong",
   expired: "border-status-warning/30 text-status-warning-strong",
-  revoked: "border-status-neutral/30 text-status-neutral",
+  revoked: "border-status-neutral/30 text-status-neutral-strong",
 };
 
 // Worst-first severity so the app grid can surface the most urgent state across
@@ -316,7 +320,7 @@ export function worstAuthorizationStatus(
 }
 
 const OAUTH_SOURCE_COLORS: Record<OAuthAppSummary["source"], string> = {
-  manual: "border-status-neutral/30 text-status-neutral",
+  manual: "border-status-neutral/30 text-status-neutral-strong",
   "curated-prefill": "border-status-info/30 text-status-info-strong",
   dcr: "border-status-paused/30 text-status-paused-strong",
 };
@@ -408,7 +412,7 @@ export function LegacyCallbackWarning({
           onClick={(event) => event.stopPropagation()}
           aria-label="Legacy OAuth callback — migration required"
           className={cn(
-            "inline-flex shrink-0 text-status-warning-strong hover:text-status-warning",
+            "inline-flex shrink-0 text-status-warning-strong hover:text-status-warning-strong",
             className,
           )}
         >
@@ -425,7 +429,7 @@ export function LegacyCallbackWarning({
 }
 
 const CONFIG_SCOPE_BADGE_CLASSES: Record<SwarmConfigScope, string> = {
-  global: "border-status-neutral/30 text-status-neutral",
+  global: "border-status-neutral/30 text-status-neutral-strong",
   agent: "border-status-info/30 text-status-info-strong",
   repo: "border-status-paused/30 text-status-paused-strong",
 };
@@ -564,7 +568,7 @@ function ConfigKeyCombobox({
 
 function AuthKindBadge({ kind }: { kind: CredentialAuthKind }) {
   const colors: Record<CredentialAuthKind, string> = {
-    config: "border-status-neutral/30 text-status-neutral",
+    config: "border-status-neutral/30 text-status-neutral-strong",
     oauth: "border-action-script/30 text-action-script",
   };
   return (
@@ -609,11 +613,11 @@ function TemplateCell({ value }: { value?: string }) {
 }
 
 const TOKEN_STATUS_TEXT: Record<OAuthBindingTokenStatus, string> = {
-  ok: "text-status-success",
-  expiring: "text-status-active",
-  "refresh-failed": "text-status-error",
-  revoked: "text-status-neutral",
-  missing: "text-status-error",
+  ok: "text-status-success-strong",
+  expiring: "text-status-active-strong",
+  "refresh-failed": "text-status-error-strong",
+  revoked: "text-status-neutral-strong",
+  missing: "text-status-error-strong",
 };
 
 // A binding whose token is `missing`, `refresh-failed`, or `revoked` can no
@@ -701,7 +705,7 @@ function CredentialChip({
             <Badge
               variant="outline"
               size="tag"
-              className="gap-1 border-status-error/30 text-status-error"
+              className="gap-1 border-status-error/30 text-status-error-strong"
             >
               <AlertTriangle className="size-3" />
               {summary.oauthProvider ?? "auth"}
@@ -722,7 +726,7 @@ function CredentialChip({
 export function InlineError({ error }: { error?: unknown }) {
   if (!error) return null;
   return (
-    <p className="text-sm text-status-error">
+    <p className="text-sm text-status-error-strong">
       {error instanceof Error ? error.message : String(error)}
     </p>
   );
@@ -824,7 +828,7 @@ function SurfaceCredentialHelp({
         <Badge variant="outline" size="tag">
           {credential.type}
         </Badge>
-        {applied ? <Check className="size-3.5 shrink-0 text-status-success" /> : null}
+        {applied ? <Check className="size-3.5 shrink-0 text-status-success-strong" /> : null}
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {credential.generateUrl ? (
             <a

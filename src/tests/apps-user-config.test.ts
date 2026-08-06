@@ -261,6 +261,12 @@ describe("userConfig HTTP storage", () => {
     expect((await put({ density: "spacious" })).status).toBe(400);
     expect((await put({ pageSize: "20" })).status).toBe(400);
     expect((await put({ absent: true })).status).toBe(400);
+    // Prototype-named fields are ordinary unknown fields (400) — the reserved-
+    // key map lookup must not resolve inherited Object.prototype members
+    // (`.test()` on a function threw, turning bad input into a 500; a null
+    // value even skipped validation and was stored).
+    expect((await put({ toString: "x" })).status).toBe(400);
+    expect((await put({ hasOwnProperty: null })).status).toBe(400);
     expect((await put({ title: "x".repeat(16 * 1024) })).status).toBe(413);
     expect(
       (

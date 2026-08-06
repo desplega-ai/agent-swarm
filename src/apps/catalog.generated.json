@@ -675,7 +675,8 @@
               "type": "object",
               "properties": {
                 "name": {
-                  "type": "string"
+                  "type": "string",
+                  "pattern": "^[^$]"
                 },
                 "label": {
                   "type": "string"

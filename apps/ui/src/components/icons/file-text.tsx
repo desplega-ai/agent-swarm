@@ -96,7 +96,7 @@ const FILE_TEXT = forwardRef<FileTextIconHandle, FileTextIconProps>(
               normal: { x: 0 },
               animate: {
                 x: [0, 1.25, 0],
-                transition: { duration: 0.35, ease: "easeOut", delay: 0.1 },
+                transition: { duration: 0.18, ease: "easeOut", delay: 0.04 },
               },
             }}
           />
@@ -108,7 +108,7 @@ const FILE_TEXT = forwardRef<FileTextIconHandle, FileTextIconProps>(
               normal: { x: 0 },
               animate: {
                 x: [0, 1.25, 0],
-                transition: { duration: 0.35, ease: "easeOut", delay: 0.2 },
+                transition: { duration: 0.18, ease: "easeOut", delay: 0.08 },
               },
             }}
           />
@@ -120,7 +120,7 @@ const FILE_TEXT = forwardRef<FileTextIconHandle, FileTextIconProps>(
               normal: { x: 0 },
               animate: {
                 x: [0, 1.25, 0],
-                transition: { duration: 0.35, ease: "easeOut", delay: 0.3 },
+                transition: { duration: 0.18, ease: "easeOut", delay: 0.12 },
               },
             }}
           />

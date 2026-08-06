@@ -281,7 +281,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       </div>
 
       {disabledChoice ? (
-        <p className="flex items-center gap-1.5 text-xs text-status-warning">
+        <p className="flex items-center gap-1.5 text-xs text-status-warning-strong">
           <AlertTriangle className="h-3.5 w-3.5" />
           This model requires a missing provider key. Enable custom mode to save it anyway.
         </p>
@@ -462,7 +462,7 @@ function UnsupportedApiNotice({
   return (
     <div className="space-y-3">
       <div className="flex items-start gap-2 rounded-md border border-status-info/30 bg-status-info/5 p-3 text-xs">
-        <ArrowUpCircle className="mt-0.5 h-4 w-4 shrink-0 text-status-info" />
+        <ArrowUpCircle className="mt-0.5 h-4 w-4 shrink-0 text-status-info-strong" />
         <div className="space-y-1">
           <p className="font-medium text-foreground">Runtime editor disabled</p>
           <p className="text-muted-foreground">

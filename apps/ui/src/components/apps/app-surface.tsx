@@ -101,7 +101,7 @@ import {
 } from "@/lib/json-render/assemble";
 import { getAppStoreView, getAppsStoreSnapshot } from "@/lib/json-render/store-registry";
 import { JsonRenderThemeProvider } from "@/lib/json-render/theme-scope";
-import { DEFAULT_THEME_ID, getThemePreset } from "@/lib/themes";
+import { getThemePreset } from "@/lib/themes";
 import { cn } from "@/lib/utils";
 
 const EMPTY_ROWS: AppRow[] = [];
@@ -848,16 +848,20 @@ export function AppSurface({
     store.set("/user", mirrorValues);
   }, [userConfigSignature, mirrorValues, store]);
 
-  // App-scope theme preset. The viewer's per-app override (any KNOWN preset
-  // id — "hive" means "explicitly back to default") beats the definition's
-  // `theme`; unknown ids from either source are ignored, so a definition
-  // written against a newer preset catalog degrades to inheriting the
-  // dashboard theme instead of breaking.
+  // App-scope theme preset. A PRESENT viewer override (`$theme`) always wins
+  // over the definition's `theme` — even when this build doesn't know the
+  // slug: the viewer overrode the author's default, so an unknown id degrades
+  // to the surrounding dashboard theme, never back to `definition.theme`.
+  // Only an ABSENT override falls through to the definition (whose own
+  // unknown ids degrade the same way). "hive" is an explicit reset to the
+  // stock look — the emitted `[data-theme="hive"]` block carries the full
+  // base token set, so it holds inside a themed dashboard too.
   const viewerThemeRaw = userConfigValues?.$theme;
-  const viewerPreset = getThemePreset(typeof viewerThemeRaw === "string" ? viewerThemeRaw : null);
-  const activePreset = viewerPreset ?? getThemePreset(definition.theme ?? null);
-  const appThemeAttr =
-    activePreset && activePreset.id !== DEFAULT_THEME_ID ? activePreset.id : undefined;
+  const viewerOverridePresent = typeof viewerThemeRaw === "string" && viewerThemeRaw !== "";
+  const activePreset = viewerOverridePresent
+    ? getThemePreset(viewerThemeRaw)
+    : getThemePreset(definition.theme ?? null);
+  const appThemeAttr = activePreset?.id;
 
   const compiled = useMemo(() => {
     const swarmActions = createSwarmActionHandlers({

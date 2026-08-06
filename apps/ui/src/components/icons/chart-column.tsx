@@ -78,14 +78,14 @@ const ChartColumnIcon = forwardRef<ChartColumnIconHandle, ChartColumnIconProps>(
     const barVariants: Variants = {
       normal: {
         scaleY: 1,
-        transition: { duration: 0.2 * duration },
+        transition: { duration: 0.15 * duration, ease: "easeOut" },
       },
       animate: (custom: number) => ({
         scaleY: [1, 0.55, 1],
         transition: {
-          duration: 0.4 * duration,
+          duration: 0.22 * duration,
           ease: "easeOut",
-          delay: 0.08 * custom,
+          delay: 0.04 * custom,
         },
       }),
     };
@@ -93,13 +93,13 @@ const ChartColumnIcon = forwardRef<ChartColumnIconHandle, ChartColumnIconProps>(
     const chartVariants: Variants = {
       normal: {
         scale: 1,
-        transition: { duration: 0.2 * duration },
+        transition: { duration: 0.15 * duration, ease: "easeOut" },
       },
       animate: {
         scale: [1, 1.05, 1],
         transition: {
-          duration: 0.4 * duration,
-          ease: "easeInOut",
+          duration: 0.22 * duration,
+          ease: [0.2, 0, 0, 1],
         },
       },
     };

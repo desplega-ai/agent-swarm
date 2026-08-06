@@ -160,7 +160,7 @@ const badgeToneDot: Record<BadgeTone, string> = {
 };
 
 const badgeToneText: Record<BadgeTone, string> = {
-  neutral: "text-status-neutral",
+  neutral: "text-status-neutral-strong",
   success: "text-status-success-strong",
   active: "text-status-active-strong",
   error: "text-status-error-strong",
@@ -1081,7 +1081,10 @@ function TableComponent({ props }: { props: TableProps }) {
  * Standalone action button. `emit` is fire-and-forget (the renderer runs the
  * `on.press` chain detached), so the busy affordance reads the runtime's
  * `/actions/<busyWith>/status` slot instead of awaiting the dispatch — the
- * same state the `app.action` handler already maintains.
+ * same state the `app.action` handler already maintains. Inside a BORROWED
+ * bound element the assembler rewrites `busyWith` to the defining app's full
+ * `/refs/<app>/actions/<name>` path (where the `$app`-tagged dispatch
+ * actually writes), so a path-shaped value is used as-is.
  */
 function ActionButtonComponent({
   props,
@@ -1091,9 +1094,13 @@ function ActionButtonComponent({
   emit: (event: string) => void;
 }) {
   const { state } = useStateStore();
-  const busy =
-    props.busyWith !== undefined &&
-    getByPath(state, `/actions/${props.busyWith}/status`) === "running";
+  const busySlot =
+    props.busyWith === undefined
+      ? null
+      : props.busyWith.startsWith("/")
+        ? props.busyWith
+        : `/actions/${props.busyWith}`;
+  const busy = busySlot !== null && getByPath(state, `${busySlot}/status`) === "running";
   return (
     <Button
       variant={props.variant ?? "default"}
@@ -1190,6 +1197,14 @@ function FormComponent({ props }: { props: FormProps }) {
         }
         if (binding.action === "app.mutate") mutated = true;
         await execute({ ...binding, params });
+        // A failed mutate resolves normally (its error lands in the form's
+        // `$error` slot, not a throw) — stop the chain here, or a following
+        // `app.navigate` would tear down the form that is displaying the
+        // failure and later side effects would run against a failed save.
+        if (binding.action === "app.mutate") {
+          const failure = get(`${basePath}/$error`);
+          if (typeof failure === "string" && failure !== "") return;
+        }
       }
       // Positive feedback for a successful save: the form clearing itself is
       // too easy to miss. Only for chains that actually wrote data (a

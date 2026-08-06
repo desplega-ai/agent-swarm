@@ -470,6 +470,13 @@ function rewriteValue(value: unknown, scope: Scope, state: AssemblyState): unkno
   for (const [key, child] of Object.entries(value)) {
     if ((key === "statePath" || key === "clearStatePath") && typeof child === "string") {
       out[key] = rewriteStatePath(child, scope, state);
+    } else if (key === "busyWith" && typeof child === "string" && scope.foreign) {
+      // A borrowed Button's action state lives under the defining app's
+      // mirror (`app.action` gets `$app` injected below and writes
+      // `/refs/<app>/actions/<name>`), so the busy affordance must watch the
+      // same slot. Expanded to a full path — the component accepts both
+      // shapes (bare name for same-app buttons, path for borrowed ones).
+      out[key] = `/refs/${scope.definingAppId}/actions/${child}`;
     } else if (key === "$bindState" && typeof child === "string") {
       out[key] = rewriteStatePath(child, scope, state);
     } else if (key === "$template" && typeof child === "string") {

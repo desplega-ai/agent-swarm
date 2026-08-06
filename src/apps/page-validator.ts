@@ -1261,6 +1261,21 @@ export function validatePage(
     }
 
     if (isPlainObject(rawElement.props)) {
+      // `busyWith` names a custom action whose `/actions/<name>/status` slot
+      // drives the busy affordance — a typo'd name silently watches a slot
+      // nothing writes (button never disables, duplicate invocations), so
+      // cross-check it like `app.action` names.
+      if (
+        typeof rawElement.props.busyWith === "string" &&
+        !Object.hasOwn(definition.actions ?? {}, rawElement.props.busyWith)
+      ) {
+        issues.push(
+          issue(
+            `${elementPath}.props.busyWith`,
+            `unknown app action "${rawElement.props.busyWith}"`,
+          ),
+        );
+      }
       if (type === "Table") {
         const queryModel = queryModelFromDataBinding(definition, rawElement.props.data);
         if (queryModel) {
@@ -1313,6 +1328,24 @@ export function validatePage(
           }
         }
       } else if (type === "Form") {
+        // `$`-prefixed names are reserved runtime slots under `/forms/<id>/`
+        // (`$error` carries the inline mutate failure) — a field stored there
+        // would render as the failure state and be cleared on submit. The
+        // catalog schema also carries this as a JSON-schema `pattern`, which
+        // this validator does not evaluate — hence the explicit check.
+        if (Array.isArray(rawElement.props.fields)) {
+          for (const [index, field] of rawElement.props.fields.entries()) {
+            if (!isPlainObject(field) || typeof field.name !== "string") continue;
+            if (field.name.startsWith("$")) {
+              issues.push(
+                issue(
+                  `${elementPath}.props.fields.${index}.name`,
+                  "field names must not start with '$' (reserved form slots)",
+                ),
+              );
+            }
+          }
+        }
         const mutateModel = literalMutateModel(definition, rawElement.props.onSubmit);
         if (mutateModel && Array.isArray(rawElement.props.fields)) {
           for (const [index, field] of rawElement.props.fields.entries()) {

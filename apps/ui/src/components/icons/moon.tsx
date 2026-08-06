@@ -21,13 +21,13 @@ const SVG_VARIANTS: Variants = {
     rotate: 0,
   },
   animate: {
-    rotate: [0, -10, 10, -5, 5, 0],
+    rotate: [0, -8, 8, 0],
   },
 };
 
 const SVG_TRANSITION: Transition = {
-  duration: 1.2,
-  ease: "easeInOut",
+  duration: 0.28,
+  ease: [0.2, 0, 0, 1],
 };
 
 const MoonIcon = forwardRef<MoonIconHandle, MoonIconProps>(

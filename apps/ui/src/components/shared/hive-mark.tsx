@@ -103,18 +103,14 @@ export function HiveMark({ size = 320, pulses = false, dataFlow = false }: HiveM
       {flow &&
         RING.map((cell, i) => (
           <circle key={`dot-${cell.x},${cell.y}`} r="2.2" fill="currentColor">
-            <animate
-              attributeName="cx"
-              from="0"
-              to={cell.x}
-              dur={FLOW_DUR}
-              begin={`${i * FLOW_STAGGER}s`}
-              repeatCount="indefinite"
-            />
-            <animate
-              attributeName="cy"
-              from="0"
-              to={cell.y}
+            {/* Travel is a transform, not cx/cy — animating geometry repaints
+                the whole surface every frame for the entire loading interval
+                (the motion doctrine's transform/opacity-only rule). */}
+            <animateTransform
+              attributeName="transform"
+              type="translate"
+              from="0 0"
+              to={`${cell.x} ${cell.y}`}
               dur={FLOW_DUR}
               begin={`${i * FLOW_STAGGER}s`}
               repeatCount="indefinite"
