@@ -276,6 +276,25 @@ body {
   transition-delay: 0s;
 }
 
+/* Sidebar menu-button motion — same per-property split as Button, tuned for
+ * the icon-collapse gesture. `.hover-linger` must NOT sit on these buttons:
+ * their transition list includes width/height/padding, and the linger's 50ms
+ * rest delay made every row trail the rail's width animation ("laggy").
+ * Colors keep the linger feel; layout properties ride the rail — same 200ms
+ * and the same swift curve as the sidebar container, zero delay. */
+[data-sidebar="menu-button"] {
+  transition-property: color, background-color, width, height, padding;
+  transition-duration: 200ms;
+  transition-timing-function: var(--ease-snappy), var(--ease-snappy), var(--ease-swift),
+    var(--ease-swift), var(--ease-swift);
+  transition-delay: 50ms, 50ms, 0s, 0s, 0s;
+}
+
+[data-sidebar="menu-button"]:hover {
+  transition-duration: 0s, 0s, 200ms, 200ms, 200ms;
+  transition-delay: 0s;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
