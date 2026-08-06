@@ -441,11 +441,11 @@ export async function runStopHookSessionSummary(
  */
 export async function runStopHookSessionSummarySubprocess(
   opts: RunStopHookSessionSummaryOpts,
-  deps: { spawn?: typeof Bun.spawn } = {},
+  deps: { spawn?: typeof Bun.spawn; execPath?: string; argv?: string[] } = {},
 ): Promise<void> {
   const env = opts.env ?? process.env;
   const proc = (deps.spawn ?? Bun.spawn)({
-    cmd: [process.execPath, import.meta.path, "--session-summary-stdin"],
+    cmd: resolveSessionSummaryRunnerArgv(deps),
     env: { ...(env as Record<string, string>) },
     stdin: "pipe",
     stdout: "inherit",
@@ -462,6 +462,34 @@ export async function runStopHookSessionSummarySubprocess(
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
     console.error(`session_summary failed (claude): summary subprocess exited ${exitCode}`);
+  }
+}
+
+/**
+ * Resolve the argv used to re-launch agent-swarm for session summarization.
+ * Dev mode must preserve the interpreted entry-point path; compiled mode can
+ * dispatch the internal CLI subcommand directly through the executable.
+ */
+export function resolveSessionSummaryRunnerArgv(
+  runtime: { execPath?: string; argv?: string[] } = {},
+): string[] {
+  const execPath = runtime.execPath ?? process.execPath;
+  const argv = runtime.argv ?? process.argv;
+  const scriptArg = argv[1];
+  if (scriptArg && /\.(t|j)sx?$/.test(scriptArg)) {
+    return [execPath, scriptArg, "session-summary-stdin"];
+  }
+  return [execPath, "session-summary-stdin"];
+}
+
+/** Handle the internal CLI mode that receives a summary request over stdin. */
+export async function runSessionSummaryFromStdin(): Promise<void> {
+  try {
+    const opts = JSON.parse(await Bun.stdin.text()) as RunStopHookSessionSummaryOpts;
+    await runStopHookSessionSummary({ ...opts, env: process.env });
+  } catch (err) {
+    console.error("session_summary failed (claude):", scrubSecrets(String(err)));
+    process.exitCode = 1;
   }
 }
 
@@ -1343,14 +1371,11 @@ export async function handleHook(): Promise<void> {
 // Run directly when executed as a script
 const isMainModule = import.meta.main;
 if (isMainModule) {
-  if (process.argv.includes("--session-summary-stdin")) {
-    try {
-      const opts = JSON.parse(await Bun.stdin.text()) as RunStopHookSessionSummaryOpts;
-      await runStopHookSessionSummary({ ...opts, env: process.env });
-    } catch (err) {
-      console.error("session_summary failed (claude):", scrubSecrets(String(err)));
-      process.exitCode = 1;
-    }
+  if (
+    process.argv.includes("session-summary-stdin") ||
+    process.argv.includes("--session-summary-stdin")
+  ) {
+    await runSessionSummaryFromStdin();
   } else {
     await handleHook();
   }

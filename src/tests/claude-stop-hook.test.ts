@@ -20,7 +20,11 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { RunStopHookSessionSummaryDeps } from "../hooks/hook";
-import { runStopHookSessionSummary, runStopHookSessionSummarySubprocess } from "../hooks/hook";
+import {
+  resolveSessionSummaryRunnerArgv,
+  runStopHookSessionSummary,
+  runStopHookSessionSummarySubprocess,
+} from "../hooks/hook";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -135,10 +139,18 @@ describe("runStopHookSessionSummary", () => {
         transcript: "User: inspect\nAssistant: durable result",
         env,
       },
-      { spawn },
+      {
+        spawn,
+        execPath: "/usr/local/bin/agent-swarm",
+        argv: ["/usr/local/bin/agent-swarm", "worker"],
+      },
     );
 
     expect(spawnOptions).toBeDefined();
+    expect((spawnOptions as { cmd?: string[] }).cmd).toEqual([
+      "/usr/local/bin/agent-swarm",
+      "session-summary-stdin",
+    ]);
     expect((spawnOptions as { env?: NodeJS.ProcessEnv }).env?.CLAUDE_CODE_OAUTH_TOKEN).toBe(
       "test-oauth-token",
     );
@@ -149,6 +161,15 @@ describe("runStopHookSessionSummary", () => {
       agentId: "agent-claude-memory",
       transcript: "User: inspect\nAssistant: durable result",
     });
+  });
+
+  test("summary subprocess preserves the CLI script path in local dev", () => {
+    expect(
+      resolveSessionSummaryRunnerArgv({
+        execPath: "/home/worker/.bun/bin/bun",
+        argv: ["bun", "/repo/src/cli.tsx", "worker"],
+      }),
+    ).toEqual(["/home/worker/.bun/bin/bun", "/repo/src/cli.tsx", "session-summary-stdin"]);
   });
 
   test("in-memory transcript bypasses a missing harness transcript file", async () => {
