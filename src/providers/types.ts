@@ -1,3 +1,14 @@
+/** Per-model usage reported by a harness for session cost tracking. */
+export type CostModelUsage = {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  webSearchRequests?: number;
+  harnessCostUsd?: number;
+};
+
 /** Data for session cost tracking. Shared across all provider adapters. */
 export interface CostData {
   sessionId: string;
@@ -12,10 +23,15 @@ export interface CostData {
    * Codex SDK has no cache-write field). Zero is reserved for "really zero".
    */
   cacheWriteTokens?: number;
+  /** Claude cache writes split by the TTL the harness reports. */
+  cacheWrite5mTokens?: number;
+  cacheWrite1hTokens?: number;
   /** Migration 063: codex reasoning_output_tokens (and similar) for reasoning models. */
   reasoningOutputTokens?: number;
   /** Migration 063: claude extended-thinking tokens from CLI's `usage.thinking_input_tokens`. */
   thinkingTokens?: number;
+  /** Complete per-model usage, including sidechain/subagent tokens when available. */
+  models?: CostModelUsage[];
   durationMs: number;
   /**
    * Migration 063: nullable — some adapters (claude when `num_turns` is absent)

@@ -306,6 +306,203 @@ describe("ClaudeSession processStreams — ProviderResult.output capture", () =>
 
     expect(result.output).toBeUndefined();
   });
+
+  test("result cost includes Claude cache TTL split and complete per-model usage", async () => {
+    const lines = [
+      JSON.stringify({
+        type: "result",
+        total_cost_usd: 1.23,
+        duration_ms: 100,
+        num_turns: 1,
+        usage: {
+          input_tokens: 10,
+          output_tokens: 20,
+          cache_read_input_tokens: 30,
+          cache_creation_input_tokens: 300,
+          cache_creation: {
+            ephemeral_5m_input_tokens: 100,
+            ephemeral_1h_input_tokens: 200,
+          },
+        },
+        modelUsage: {
+          "claude-opus-5": {
+            inputTokens: 11,
+            outputTokens: 22,
+            cacheReadInputTokens: 33,
+            cacheCreationInputTokens: 44,
+            webSearchRequests: 2,
+            costUSD: 1.1,
+          },
+          "claude-haiku-4-5": {
+            inputTokens: 55,
+            outputTokens: 66,
+            cacheReadInputTokens: 77,
+            cacheCreationInputTokens: 88,
+            costUSD: 0.13,
+          },
+        },
+      }),
+    ];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter();
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const result = await session.waitForCompletion();
+
+    expect(result.cost).toMatchObject({
+      cacheWrite5mTokens: 100,
+      cacheWrite1hTokens: 200,
+      models: [
+        {
+          model: "claude-opus-5",
+          inputTokens: 11,
+          outputTokens: 22,
+          cacheReadTokens: 33,
+          cacheWriteTokens: 44,
+          webSearchRequests: 2,
+          harnessCostUsd: 1.1,
+        },
+        {
+          model: "claude-haiku-4-5",
+          inputTokens: 55,
+          outputTokens: 66,
+          cacheReadTokens: 77,
+          cacheWriteTokens: 88,
+          harnessCostUsd: 0.13,
+        },
+      ],
+    });
+  });
+
+  test("malformed modelUsage values fall back without fabricating numbers", async () => {
+    const lines = [
+      JSON.stringify({
+        type: "result",
+        total_cost_usd: 0.7,
+        duration_ms: 100,
+        num_turns: 1,
+        usage: {
+          input_tokens: 10,
+          output_tokens: 20,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_creation: {
+            ephemeral_5m_input_tokens: null,
+            ephemeral_1h_input_tokens: "not-a-number",
+          },
+        },
+        modelUsage: {
+          "claude-opus-5": {
+            inputTokens: "not-a-number",
+            outputTokens: 22,
+            cacheReadInputTokens: 33,
+            cacheCreationInputTokens: 44,
+            webSearchRequests: null,
+            costUSD: null,
+          },
+          "claude-haiku-4-5": "not-an-object",
+        },
+      }),
+    ];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter();
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const result = await session.waitForCompletion();
+
+    // null/garbage TTL values must not become 0 (Number(null) === 0 hazard).
+    expect(result.cost?.cacheWrite5mTokens).toBeUndefined();
+    expect(result.cost?.cacheWrite1hTokens).toBeUndefined();
+    expect(result.cost?.models).toEqual([
+      {
+        model: "claude-opus-5",
+        inputTokens: 0,
+        outputTokens: 22,
+        cacheReadTokens: 33,
+        cacheWriteTokens: 44,
+      },
+      {
+        model: "claude-haiku-4-5",
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+    ]);
+    const opus = result.cost?.models?.[0];
+    expect(opus?.webSearchRequests).toBeUndefined();
+    expect(opus?.harnessCostUsd).toBeUndefined();
+  });
+
+  test("old Claude result lines omit unavailable cache split and model usage", async () => {
+    const lines = [
+      JSON.stringify({
+        type: "result",
+        total_cost_usd: 0.5,
+        duration_ms: 100,
+        num_turns: 1,
+        usage: {
+          input_tokens: 10,
+          output_tokens: 20,
+          cache_read_input_tokens: 30,
+          cache_creation_input_tokens: 40,
+        },
+      }),
+    ];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter();
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const result = await session.waitForCompletion();
+
+    expect(result.cost).toMatchObject({
+      totalCostUsd: 0.5,
+      inputTokens: 10,
+      outputTokens: 20,
+      cacheReadTokens: 30,
+      cacheWriteTokens: 40,
+    });
+    expect(result.cost?.cacheWrite5mTokens).toBeUndefined();
+    expect(result.cost?.cacheWrite1hTokens).toBeUndefined();
+    expect(result.cost?.models).toBeUndefined();
+  });
+
+  test("prod aef117fe result preserves the all-1h cache write split", async () => {
+    const lines = [
+      JSON.stringify({
+        type: "result",
+        total_cost_usd: 9.4629795,
+        usage: {
+          input_tokens: 138,
+          output_tokens: 53185,
+          cache_read_input_tokens: 12276769,
+          cache_creation_input_tokens: 199428,
+          cache_creation: {
+            ephemeral_5m_input_tokens: 0,
+            ephemeral_1h_input_tokens: 199428,
+          },
+        },
+        modelUsage: {
+          "claude-opus-5": {
+            inputTokens: 138,
+            outputTokens: 53185,
+            cacheReadInputTokens: 12276769,
+            cacheCreationInputTokens: 199428,
+            costUSD: 9.4629795,
+          },
+        },
+      }),
+    ];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter();
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const result = await session.waitForCompletion();
+
+    expect(result.cost?.cacheWrite1hTokens).toBe(199428);
+    expect(result.cost?.cacheWrite5mTokens).toBe(0);
+    expect(result.cost?.totalCostUsd).toBe(9.4629795);
+  });
 });
 
 describe("mergeMcpConfig (issue #369)", () => {

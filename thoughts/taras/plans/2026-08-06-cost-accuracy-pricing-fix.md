@@ -153,13 +153,13 @@ Claude's `CostData` carries the cache-TTL split and the complete per-model token
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] New test in `src/tests/claude-adapter.test.ts` (processStreams style, mocked `Bun.spawn` streaming NDJSON per the comment at `:188-194`): a result line with `cache_creation` split + 2-model `modelUsage` → `CostData` carries split + both model entries with exact token numbers
-- [ ] Old-CLI compat test: result line WITHOUT `cache_creation`/`modelUsage` → fields undefined, no throw
-- [ ] `bun run test:root -- src/tests/claude-adapter.test.ts src/tests/claude-adapter-otel.test.ts`
-- [ ] `bun run tsc:check && bun run lint`
+- [x] New test in `src/tests/claude-adapter.test.ts` (processStreams style, mocked `Bun.spawn` streaming NDJSON per the comment at `:188-194`): a result line with `cache_creation` split + 2-model `modelUsage` → `CostData` carries split + both model entries with exact token numbers
+- [x] Old-CLI compat test: result line WITHOUT `cache_creation`/`modelUsage` → fields undefined, no throw
+- [x] `bun run test:root -- src/tests/claude-adapter.test.ts src/tests/claude-adapter-otel.test.ts` (55 pass)
+- [x] `bun run tsc:check && bun run lint`
 
 #### Automated QA:
-- [ ] Replay the prod `aef117fe` result line (fixture from the research doc) through the adapter; assert `cacheWrite1hTokens === 199428`, `cacheWrite5mTokens === 0`
+- [x] Replay the prod `aef117fe` result line (fixture from the research doc) through the adapter; assert `cacheWrite1hTokens === 199428`, `cacheWrite5mTokens === 0` — landed as a permanent test case (also pins `totalCostUsd === 9.4629795`)
 
 #### Manual Verification:
 - [ ] None (covered by automated)

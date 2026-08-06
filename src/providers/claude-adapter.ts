@@ -936,12 +936,45 @@ class ClaudeSession implements ProviderSession {
               output_tokens?: number;
               cache_read_input_tokens?: number;
               cache_creation_input_tokens?: number;
+              cache_creation?: {
+                ephemeral_5m_input_tokens?: unknown;
+                ephemeral_1h_input_tokens?: unknown;
+              };
               // Phase 4: claude extended-thinking flows surface this — the
               // CLI emits `thinking_input_tokens` when the model produced
               // thinking content during the turn.
               thinking_input_tokens?: number;
             }
           | undefined;
+        // Rejects non-numbers outright: Number(null) is 0, and a null costUSD
+        // must surface as "unknown", never "$0".
+        const toFiniteNumber = (value: unknown): number | undefined =>
+          typeof value === "number" && Number.isFinite(value) ? value : undefined;
+        const cacheCreation = usage?.cache_creation;
+        const cacheWrite5mTokens = cacheCreation
+          ? toFiniteNumber(cacheCreation.ephemeral_5m_input_tokens)
+          : undefined;
+        const cacheWrite1hTokens = cacheCreation
+          ? toFiniteNumber(cacheCreation.ephemeral_1h_input_tokens)
+          : undefined;
+        const models =
+          json.modelUsage && typeof json.modelUsage === "object" && !Array.isArray(json.modelUsage)
+            ? Object.entries(json.modelUsage as Record<string, unknown>).map(([model, entry]) => {
+                const modelUsage =
+                  entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+                const webSearchRequests = toFiniteNumber(modelUsage.webSearchRequests);
+                const harnessCostUsd = toFiniteNumber(modelUsage.costUSD);
+                return {
+                  model,
+                  inputTokens: toFiniteNumber(modelUsage.inputTokens) ?? 0,
+                  outputTokens: toFiniteNumber(modelUsage.outputTokens) ?? 0,
+                  cacheReadTokens: toFiniteNumber(modelUsage.cacheReadInputTokens) ?? 0,
+                  cacheWriteTokens: toFiniteNumber(modelUsage.cacheCreationInputTokens) ?? 0,
+                  ...(webSearchRequests === undefined ? {} : { webSearchRequests }),
+                  ...(harnessCostUsd === undefined ? {} : { harnessCostUsd }),
+                };
+              })
+            : undefined;
 
         const cost: CostData = {
           sessionId: "", // Set by the runner with the appropriate runner session ID
@@ -952,8 +985,11 @@ class ClaudeSession implements ProviderSession {
           outputTokens: usage?.output_tokens ?? 0,
           cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
           cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
+          cacheWrite5mTokens,
+          cacheWrite1hTokens,
           // Phase 4: surface thinking tokens; previously dropped on the floor.
           thinkingTokens: usage?.thinking_input_tokens ?? 0,
+          models,
           durationMs: json.duration_ms || 0,
           // Phase 4: honest null when the CLI omits num_turns instead of a
           // faked `1` (would have under-counted in dashboards).
