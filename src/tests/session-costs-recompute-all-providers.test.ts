@@ -101,6 +101,7 @@ interface CostResponse {
       cacheReadTokens: number;
       cacheWriteTokens: number;
       harnessCostUsd?: number;
+      costUsd?: number;
     }> | null;
     costSource: "harness" | "pricing-table" | "unpriced";
   };
@@ -135,6 +136,23 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
   ] as const) {
     test(`provider=${provider} with seeded rows → costSource='pricing-table'`, async () => {
       seedTwoClassRates(provider, `${provider}-test-model`, 2, 10);
+      // The payload below explicitly says 75% of writes used a 1h TTL. Phase 3
+      // treats a missing 1h row as unpriced, so seed both cache classes at a
+      // zero rate to keep this test focused on provider coverage.
+      insertPricingRow({
+        provider,
+        model: `${provider}-test-model`,
+        tokenClass: "cache_write",
+        effectiveFrom: 1,
+        pricePerMillionUsd: 0,
+      });
+      insertPricingRow({
+        provider,
+        model: `${provider}-test-model`,
+        tokenClass: "cache_write_1h",
+        effectiveFrom: 1,
+        pricePerMillionUsd: 0,
+      });
 
       const res = await authedFetch(`/api/session-costs`, {
         method: "POST",
@@ -158,7 +176,9 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
           ],
           model: `${provider}-test-model`,
           provider,
-          durationMs: 1_000,
+          // 0 keeps the claude-managed runtime fee out of the $7 assertion;
+          // fee coverage lives in session-costs-golden.test.ts.
+          durationMs: 0,
           numTurns: 1,
         }),
       });
@@ -178,6 +198,7 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
           cacheReadTokens: 0,
           cacheWriteTokens: 100,
           harnessCostUsd: 999.99,
+          costUsd: 7,
         },
       ]);
     });

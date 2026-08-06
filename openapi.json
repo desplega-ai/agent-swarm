@@ -10102,6 +10102,8 @@
                               "cached_input",
                               "output",
                               "cache_write",
+                              "cache_write_1h",
+                              "web_search",
                               "runtime_hour",
                               "acu"
                             ]
@@ -10189,6 +10191,8 @@
                 "cached_input",
                 "output",
                 "cache_write",
+                "cache_write_1h",
+                "web_search",
                 "runtime_hour",
                 "acu"
               ]
@@ -10249,6 +10253,8 @@
                 "cached_input",
                 "output",
                 "cache_write",
+                "cache_write_1h",
+                "web_search",
                 "runtime_hour",
                 "acu"
               ]
@@ -10310,6 +10316,8 @@
                         "cached_input",
                         "output",
                         "cache_write",
+                        "cache_write_1h",
+                        "web_search",
                         "runtime_hour",
                         "acu"
                       ]
@@ -10397,6 +10405,8 @@
                 "cached_input",
                 "output",
                 "cache_write",
+                "cache_write_1h",
+                "web_search",
                 "runtime_hour",
                 "acu"
               ]
@@ -10436,6 +10446,8 @@
                         "cached_input",
                         "output",
                         "cache_write",
+                        "cache_write_1h",
+                        "web_search",
                         "runtime_hour",
                         "acu"
                       ]
@@ -10520,6 +10532,8 @@
                 "cached_input",
                 "output",
                 "cache_write",
+                "cache_write_1h",
+                "web_search",
                 "runtime_hour",
                 "acu"
               ]
@@ -14494,19 +14508,23 @@
                     "type": "string"
                   },
                   "inputTokens": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0
                   },
                   "outputTokens": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0
                   },
                   "cacheReadTokens": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0
                   },
                   "cacheWriteTokens": {
                     "type": [
                       "integer",
                       "null"
-                    ]
+                    ],
+                    "minimum": 0
                   },
                   "cacheWrite5mTokens": {
                     "type": [
@@ -14551,16 +14569,20 @@
                           "type": "string"
                         },
                         "inputTokens": {
-                          "type": "integer"
+                          "type": "integer",
+                          "minimum": 0
                         },
                         "outputTokens": {
-                          "type": "integer"
+                          "type": "integer",
+                          "minimum": 0
                         },
                         "cacheReadTokens": {
-                          "type": "integer"
+                          "type": "integer",
+                          "minimum": 0
                         },
                         "cacheWriteTokens": {
-                          "type": "integer"
+                          "type": "integer",
+                          "minimum": 0
                         },
                         "webSearchRequests": {
                           "type": [

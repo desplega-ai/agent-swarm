@@ -1164,10 +1164,10 @@ export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
 
 export const SessionCostModelBreakdownSchema = z.object({
   model: z.string(),
-  inputTokens: z.number().int(),
-  outputTokens: z.number().int(),
-  cacheReadTokens: z.number().int(),
-  cacheWriteTokens: z.number().int(),
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  cacheReadTokens: z.number().int().nonnegative(),
+  cacheWriteTokens: z.number().int().nonnegative(),
   webSearchRequests: z.number().int().nullable().optional(),
   costUsd: z.number().nullable().optional(),
   harnessCostUsd: z.number().nullable().optional(),
@@ -2565,6 +2565,8 @@ export const PricingTokenClassSchema = z.enum([
   "output",
   // Migration 063 additions:
   "cache_write", // claude / claude-managed cache creation
+  "cache_write_1h", // Anthropic 1-hour cache creation
+  "web_search", // provider-billed web search request units
   "runtime_hour", // claude-managed runtime fee per hour
   "acu", // devin Agent Compute Unit
 ]);

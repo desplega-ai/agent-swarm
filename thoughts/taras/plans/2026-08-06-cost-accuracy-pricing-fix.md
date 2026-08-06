@@ -194,20 +194,20 @@ The recompute reproduces provider billing math exactly: TTL-aware cache writes, 
 **File**: new `src/tests/session-costs-golden.test.ts` (real-HTTP-server pattern from `session-costs-codex-recompute.test.ts`, rates via `insertPricingRow`):
 - `aef117fe` (opus-5, single model, all-1h writes): expect `totalCostUsd === 9.4629795` exactly
 - `f9769315` (opus-4-8 + haiku breakdown): per-model pricing; totals = sum of both models' tokens
-- `28943d8a` (sonnet-5 at intro rates 2/10/0.2, 1h write 4.0): expect `20.610840…` (compute in-test) — and `harnessCostUsd` stores 30.9174
+- `28943d8a` (sonnet-5 at intro rates 2/10/0.2, 1h write 4.0): expect `20.6115904` (compute in-test; the plan's earlier `20.610840…` literal was a hand-arithmetic slip) — and `harnessCostUsd` stores 30.9174
 - codex row: input-inclusive subtraction unchanged
 - claude-managed row: token cost + runtime fee ≈ adapter's own arithmetic (`claude-managed-adapter.test.ts:895-961` parity)
 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/session-costs-golden.test.ts` — golden numbers exact (no toBeCloseTo; string/epsilon ≤ 1e-9)
-- [ ] Full cost suite: `bun run test:root -- src/tests/session-costs.test.ts src/tests/session-costs-codex-recompute.test.ts src/tests/session-costs-recompute-all-providers.test.ts src/tests/session-costs-model-key-normalize.test.ts src/tests/pricing-refresh.test.ts src/tests/pricing-routes.test.ts src/tests/otel-session-cost-metrics.test.ts`
-- [ ] `bun run tsc:check && bun run lint`
-- [ ] Fresh-DB boot seeds `cache_write_1h` rows: `rm -f agent-swarm-db.sqlite* && timeout 15 bun run start:http`, then `sqlite3 agent-swarm-db.sqlite "SELECT COUNT(*) FROM pricing WHERE token_class='cache_write_1h'"` > 0
+- [x] `bun run test:root -- src/tests/session-costs-golden.test.ts` — golden numbers exact (no toBeCloseTo; string/epsilon ≤ 1e-9) — 12 pass
+- [x] Full cost suite: `bun run test:root -- src/tests/session-costs.test.ts src/tests/session-costs-codex-recompute.test.ts src/tests/session-costs-recompute-all-providers.test.ts src/tests/session-costs-model-key-normalize.test.ts src/tests/pricing-refresh.test.ts src/tests/pricing-routes.test.ts src/tests/otel-session-cost-metrics.test.ts` — 118 pass across 8 files (incl. golden)
+- [x] `bun run tsc:check && bun run lint`
+- [x] Fresh-DB boot seeds `cache_write_1h` rows: 140 rows (+ 2 `web_search` rows); opus-5 1h = $10/M = 2× input confirmed
 
 #### Automated QA:
-- [ ] End-to-end POST replay of all three prod fixtures via curl against a locally seeded server; assert stored rows match golden values
+- [x] End-to-end POST replay of all three prod fixtures against a locally seeded server (REAL models.dev seeded rates, not test-injected): `aef117fe` → 9.4629795 EXACT; `28943d8a` → 20.6115904 at intro rates with harness 30.9173856 preserved; `f9769315` → 12.491706 without web searches, and EXACTLY 13.051706 (== harness) once `webSearchRequests: 56` is included — the $0.56 gap in the audit was 56 web searches at $0.01, now priced
 
 #### Manual Verification:
 - [ ] None
