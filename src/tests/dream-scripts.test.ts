@@ -576,6 +576,28 @@ describe("dream scripts", () => {
     );
   });
 
+  test("a failed idempotency marker is visible on the receipt", () => {
+    // Without the marker a crash-recovered retry re-applies this exact delta;
+    // the receipt is the only durable place an operator would notice.
+    const receipt = renderDreamReceipt(
+      {
+        applied: [
+          {
+            agentId: "agent-1",
+            kind: "memory",
+            action: "write",
+            receiptError: "idempotency receipt write failed: KV unavailable",
+          },
+        ],
+        held: [],
+        deferred: [],
+      },
+      "2026-08-07",
+    );
+    expect(receipt).toContain("⚠ idempotency receipt: idempotency receipt write failed");
+    expect(receipt).toContain("a retry may re-apply this delta");
+  });
+
   test("receipt keeps the memory record but fails the step when Slack posting fails", async () => {
     const kvStore = new Map<string, unknown>();
     const memories: string[] = [];
@@ -1427,6 +1449,48 @@ describe("dream-apply batches", () => {
     // A bounded body, not just the title: the skill asks agents to retire stale
     // or contradicted memories, and inject_learning's name is a 60-char prefix.
     expect(memoryQuery.sql).toContain("substr(content, 1, 400) AS excerpt");
+  });
+
+  test("the PR snapshot asks for full pages and flags truncated evidence", async () => {
+    // Default page size is 30 — a busy PR would report only its first page of
+    // checks/reviews and look healthier to the hygiene lane than it is.
+    const urls: string[] = [];
+    const result = await ghPrSnapshot(
+      { repo: "owner/repo", number: 42 },
+      {
+        stdlib: {
+          Redacted: { value: (v: unknown) => v },
+          async fetchJson(url: string) {
+            urls.push(url);
+            if (url.includes("check-runs")) {
+              return {
+                total_count: 250,
+                check_runs: [{ status: "completed", conclusion: "failure" }],
+              };
+            }
+            if (url.includes("/reviews")) {
+              return Array.from({ length: 100 }, () => ({
+                state: "APPROVED",
+                user: { login: "reviewer" },
+              }));
+            }
+            return { number: 42, title: "t", head: { sha: "abc" }, state: "open" };
+          },
+        },
+        swarm: {
+          config: { mcpBaseUrl: "http://localhost:3013", apiKey: "k" },
+          async config_get() {
+            return { success: true, data: { configs: [] } };
+          },
+        },
+      },
+    );
+
+    expect(urls.some((url) => url.includes("check-runs?per_page=100"))).toBe(true);
+    expect(urls.some((url) => url.includes("/reviews?per_page=100"))).toBe(true);
+    // total_count beyond the page, and a full page of reviews, are both declared.
+    expect(result.checks.truncated).toBe(true);
+    expect(result.reviews.truncated).toBe(true);
   });
 
   test("the PR snapshot bounds its network calls below the script deadline", async () => {

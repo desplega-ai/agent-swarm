@@ -41,7 +41,13 @@ function oneLine(value: any): string {
   // A swallowed cursor failure means the same PR gets re-reviewed next run —
   // surface it on the receipt instead of hiding it in the raw apply output.
   const cursorError = value?.cursorError ? ` ⚠ cursor: ${String(value.cursorError)}` : "";
-  return `${agent}: ${kind}${reason}${audit}${cursorError}`;
+  // A missing idempotency marker means a crash-recovered retry can re-apply this
+  // exact mutation (duplicate profile text, duplicate memory). That is the one
+  // failure the audit trail must not swallow.
+  const receiptError = value?.receiptError
+    ? ` ⚠ idempotency receipt: ${String(value.receiptError)} — a retry may re-apply this delta`
+    : "";
+  return `${agent}: ${kind}${reason}${audit}${cursorError}${receiptError}`;
 }
 
 /** Render the durable memory/Slack body for a Dreaming apply result. */

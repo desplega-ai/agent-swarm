@@ -96,14 +96,20 @@ async function ghPrSnapshotInner(args: any, ctx: any) {
     return { error: "PR " + repo + "#" + number + ": " + why };
   }
 
-  const checks = { passed: 0, failed: 0, pending: 0 };
+  const checks: any = { passed: 0, failed: 0, pending: 0 };
   const sha = pr.head && pr.head.sha ? pr.head.sha : null;
   if (sha) {
-    const runs: any = await ctx.stdlib.fetchJson(api + "/commits/" + sha + "/check-runs", {
-      headers,
-      signal: deadline,
-    });
+    // Default page size is 30; a busy PR would silently report only its first
+    // page and look healthier than it is. 100 is the API maximum — following
+    // further pages would multiply requests against the shared fetch budget, so
+    // a full page is reported as `truncated` instead of quietly under-counting.
+    const runs: any = await ctx.stdlib.fetchJson(
+      api + "/commits/" + sha + "/check-runs?per_page=100",
+      { headers, signal: deadline },
+    );
     const list: any = runs && Array.isArray(runs.check_runs) ? runs.check_runs : [];
+    const total = runs && typeof runs.total_count === "number" ? runs.total_count : list.length;
+    if (total > list.length) checks.truncated = true;
     for (const run of list) {
       if (run.status !== "completed") checks.pending++;
       else if (run.conclusion === "success") checks.passed++;
@@ -118,10 +124,10 @@ async function ghPrSnapshotInner(args: any, ctx: any) {
     }
   }
 
-  const reviewsRaw: any = await ctx.stdlib.fetchJson(api + "/pulls/" + number + "/reviews", {
-    headers,
-    signal: deadline,
-  });
+  const reviewsRaw: any = await ctx.stdlib.fetchJson(
+    api + "/pulls/" + number + "/reviews?per_page=100",
+    { headers, signal: deadline },
+  );
   const reviewList: any = Array.isArray(reviewsRaw) ? reviewsRaw : [];
   const latestByUser: any = {};
   for (const r of reviewList) {
@@ -130,7 +136,10 @@ async function ghPrSnapshotInner(args: any, ctx: any) {
       latestByUser[user] = r.state;
     }
   }
-  const reviews = { approved: 0, changesRequested: 0, pending: 0 };
+  const reviews: any = { approved: 0, changesRequested: 0, pending: 0 };
+  // The reviews endpoint returns no total; a full page is the only signal that
+  // later reviews exist. Say so rather than under-reporting silently.
+  if (reviewList.length >= 100) reviews.truncated = true;
   for (const user of Object.keys(latestByUser)) {
     if (latestByUser[user] === "APPROVED") reviews.approved++;
     else reviews.changesRequested++;
