@@ -17,6 +17,7 @@ import {
   TOOLS_MD_PATH,
   WORKSPACE_CLAUDE_MD_PATH,
 } from "../commands/profile-sync";
+import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
 
 const MARKER_START = "# === Agent-managed setup (from DB) ===";
 const MARKER_END = "# === End agent-managed setup ===";
@@ -55,8 +56,16 @@ describe("extractSetupScriptContent (marker extraction)", () => {
   });
 
   test("returns null when content exceeds the max length", () => {
-    const raw = `${MARKER_START}\n${"a".repeat(65537)}\n${MARKER_END}`;
-    expect(extractSetupScriptContent(raw)).toBeNull();
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const raw = `${MARKER_START}\n${"a".repeat(MAX_PROFILE_FILE_LENGTH + 1)}\n${MARKER_END}`;
+      expect(extractSetupScriptContent(raw, "agent-setup")).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(
+        `[profile-sync] Skipping profile sync for agent agent-setup, field setupScript: ${MAX_PROFILE_FILE_LENGTH + 1} characters exceeds the ${MAX_PROFILE_FILE_LENGTH}-character cap.`,
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
 
@@ -88,11 +97,18 @@ describe("buildIdentityPayload (min-length guard)", () => {
     expect(payload.heartbeatMd).toBe("");
   });
 
-  test("skips files that exceed the max length", () => {
-    const huge = "z".repeat(65537);
-    const payload = buildIdentityPayload({ soulMd: huge, toolsMd: huge });
-    expect(payload.soulMd).toBeUndefined();
-    expect(payload.toolsMd).toBeUndefined();
+  test("logs the agent, field, actual length, and cap when a file is too large", () => {
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const huge = "z".repeat(MAX_PROFILE_FILE_LENGTH + 1);
+      const payload = buildIdentityPayload({ heartbeatMd: huge }, null, "agent-oversize");
+      expect(payload.heartbeatMd).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(
+        `[profile-sync] Skipping profile sync for agent agent-oversize, field heartbeatMd: ${MAX_PROFILE_FILE_LENGTH + 1} characters exceeds the ${MAX_PROFILE_FILE_LENGTH}-character cap.`,
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   test("absent files (undefined) produce no keys", () => {

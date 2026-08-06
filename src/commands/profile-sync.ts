@@ -27,6 +27,7 @@
  * but it must be VISIBLE.
  */
 
+import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 
 export const SOUL_MD_PATH = "/workspace/SOUL.md";
@@ -89,12 +90,44 @@ export const WORKSPACE_CLAUDE_MD_PATH = "/workspace/CLAUDE.md";
 // Mirrors `hook.ts` (raised from 100 to 500 after profile-corruption recurrences
 // where a short test sentinel synced into the real agent's DB row).
 const IDENTITY_FILE_MIN_LENGTH = 500;
-// Maximum file size we are willing to sync (>64KB is almost certainly not a
-// hand-edited identity/config file).
-const MAX_FILE_LENGTH = 65536;
-
 const SETUP_MARKER_START = "# === Agent-managed setup (from DB) ===";
 const SETUP_MARKER_END = "# === End agent-managed setup ===";
+
+export function warnProfileFileTooLarge(
+  agentId: string,
+  field: string,
+  actualLength: number,
+  source = "profile-sync",
+): void {
+  console.warn(
+    `[${source}] Skipping profile sync for agent ${agentId}, field ${field}: ${actualLength} characters exceeds the ${MAX_PROFILE_FILE_LENGTH}-character cap.`,
+  );
+}
+
+/**
+ * Preserve differing local profile content before replacing it with the DB
+ * value during boot. If the archive write fails, this throws before the
+ * original file is touched.
+ */
+export async function writeProfileFileFromDb(
+  filePath: string,
+  dbContent: string,
+  now: () => Date = () => new Date(),
+): Promise<string | null> {
+  const file = Bun.file(filePath);
+  let backupPath: string | null = null;
+
+  if (await file.exists()) {
+    const localContent = await file.text();
+    if (localContent !== dbContent) {
+      backupPath = `${filePath}.pre-boot-${now().toISOString()}.bak`;
+      await Bun.write(backupPath, localContent);
+    }
+  }
+
+  await Bun.write(filePath, dbContent);
+  return backupPath;
+}
 
 export type ProfileSyncField = "identity" | "claude" | "setup";
 export type ProfileChangeSource = "self_edit" | "session_sync";
@@ -147,7 +180,7 @@ interface ProfilePayload {
  * duplicated); otherwise treats the whole file (minus a leading shebang) as
  * agent-managed.
  */
-export function extractSetupScriptContent(raw: string): string | null {
+export function extractSetupScriptContent(raw: string, agentId = "unknown"): string | null {
   if (!raw.trim()) return null;
 
   const startIdx = raw.indexOf(SETUP_MARKER_START);
@@ -162,7 +195,11 @@ export function extractSetupScriptContent(raw: string): string | null {
     content = raw.replace(/^#!\/bin\/bash\n/, "").trim();
   }
 
-  if (!content || content.length > MAX_FILE_LENGTH) return null;
+  if (!content) return null;
+  if (content.length > MAX_PROFILE_FILE_LENGTH) {
+    warnProfileFileTooLarge(agentId, "setupScript", content.length);
+    return null;
+  }
   return content;
 }
 
@@ -184,6 +221,7 @@ export function buildIdentityPayload(
     heartbeatMd?: string;
   },
   baselines?: IdentityBaselines | null,
+  agentId = "unknown",
 ): Record<string, string> {
   const updates: Record<string, string> = {};
 
@@ -191,7 +229,9 @@ export function buildIdentityPayload(
     const content = files.soulMd;
     if (baselines?.soulMd && contentSha256(content) === baselines.soulMd) {
       // File unchanged during session — skip to preserve Lead's DB edits
-    } else if (content.trim() && content.length <= MAX_FILE_LENGTH) {
+    } else if (content.length > MAX_PROFILE_FILE_LENGTH) {
+      warnProfileFileTooLarge(agentId, "soulMd", content.length);
+    } else if (content.trim()) {
       if (content.length < IDENTITY_FILE_MIN_LENGTH) {
         console.error(
           `[profile-sync] Skipping SOUL.md sync: content too short (${content.length} chars, minimum ${IDENTITY_FILE_MIN_LENGTH}). This prevents accidental profile corruption.`,
@@ -206,7 +246,9 @@ export function buildIdentityPayload(
     const content = files.identityMd;
     if (baselines?.identityMd && contentSha256(content) === baselines.identityMd) {
       // File unchanged during session — skip to preserve Lead's DB edits
-    } else if (content.trim() && content.length <= MAX_FILE_LENGTH) {
+    } else if (content.length > MAX_PROFILE_FILE_LENGTH) {
+      warnProfileFileTooLarge(agentId, "identityMd", content.length);
+    } else if (content.trim()) {
       if (content.length < IDENTITY_FILE_MIN_LENGTH) {
         console.error(
           `[profile-sync] Skipping IDENTITY.md sync: content too short (${content.length} chars, minimum ${IDENTITY_FILE_MIN_LENGTH}). This prevents accidental profile corruption.`,
@@ -221,7 +263,9 @@ export function buildIdentityPayload(
     const content = files.toolsMd;
     if (baselines?.toolsMd && contentSha256(content) === baselines.toolsMd) {
       // File unchanged during session — skip
-    } else if (content.trim() && content.length <= MAX_FILE_LENGTH) {
+    } else if (content.length > MAX_PROFILE_FILE_LENGTH) {
+      warnProfileFileTooLarge(agentId, "toolsMd", content.length);
+    } else if (content.trim()) {
       updates.toolsMd = content;
     }
   }
@@ -230,7 +274,9 @@ export function buildIdentityPayload(
     const content = files.heartbeatMd;
     if (baselines?.heartbeatMd && contentSha256(content) === baselines.heartbeatMd) {
       // File unchanged during session — skip
-    } else if (content.length <= MAX_FILE_LENGTH) {
+    } else if (content.length > MAX_PROFILE_FILE_LENGTH) {
+      warnProfileFileTooLarge(agentId, "heartbeatMd", content.length);
+    } else {
       updates.heartbeatMd = content;
     }
   }
@@ -268,6 +314,7 @@ export async function collectProfilePayloads(
   changeSource: ProfileChangeSource,
   readFile: FileReader = readFileIfExists,
   claudeMdPath: string = CLAUDE_MD_PATH,
+  agentId = "unknown",
 ): Promise<ProfilePayload[]> {
   const payloads: ProfilePayload[] = [];
 
@@ -282,6 +329,7 @@ export async function collectProfilePayloads(
         heartbeatMd: await readFile(HEARTBEAT_MD_PATH),
       },
       baselines,
+      agentId,
     );
     if (Object.keys(updates).length > 0) {
       payloads.push({ label: "identity", body: { ...updates, changeSource } });
@@ -290,7 +338,9 @@ export async function collectProfilePayloads(
 
   if (fields.includes("claude")) {
     const raw = await readFile(claudeMdPath);
-    if (raw?.trim() && raw.length <= MAX_FILE_LENGTH) {
+    if (raw && raw.length > MAX_PROFILE_FILE_LENGTH) {
+      warnProfileFileTooLarge(agentId, "claudeMd", raw.length);
+    } else if (raw?.trim()) {
       if (baselines?.claudeMd && contentSha256(raw) === baselines.claudeMd) {
         // CLAUDE.md unchanged during session — skip to preserve Lead's DB edits
       } else {
@@ -302,7 +352,7 @@ export async function collectProfilePayloads(
   if (fields.includes("setup")) {
     const raw = await readFile(SETUP_SCRIPT_PATH);
     if (raw !== undefined) {
-      const content = extractSetupScriptContent(raw);
+      const content = extractSetupScriptContent(raw, agentId);
       if (content !== null) {
         payloads.push({ label: "setup", body: { setupScript: content, changeSource } });
       }
@@ -369,6 +419,7 @@ export async function syncProfileFilesToServer(opts: ProfileSyncOptions): Promis
     changeSource,
     readFileIfExists,
     opts.claudeMdPath ?? CLAUDE_MD_PATH,
+    opts.agentId,
   );
   for (const payload of payloads) {
     await postProfileUpdate(opts, payload);

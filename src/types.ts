@@ -1,5 +1,6 @@
 import * as z from "zod";
 import { normalizeAssetKey } from "./assets/key";
+import { MAX_PROFILE_FILE_LENGTH } from "./utils/constants";
 // ─── Asset namespaces ──────────────────────────────────────────────────────
 
 export const AssetKeySchema = z
@@ -846,19 +847,19 @@ export const AgentSchema = z.object({
   role: z.string().max(100).optional(), // Free-form, e.g., "frontend dev"
   capabilities: z.array(z.string()).default([]), // e.g., ["typescript", "react"]
 
-  // Personal CLAUDE.md content (max 64KB)
-  claudeMd: z.string().max(65536).optional(),
+  // Personal CLAUDE.md content (character cap, not a byte cap)
+  claudeMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
 
   // Soul: Persona, behavioral directives (injected via --append-system-prompt)
-  soulMd: z.string().max(65536).optional(),
+  soulMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
   // Identity: Expertise, working style, self-evolution notes (injected via --append-system-prompt)
-  identityMd: z.string().max(65536).optional(),
+  identityMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
   // Setup script: Runs at container start, agent-evolved (synced to /workspace/start-up.sh)
-  setupScript: z.string().max(65536).optional(),
+  setupScript: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
   // Tools/environment reference: Operational knowledge (synced to /workspace/TOOLS.md)
-  toolsMd: z.string().max(65536).optional(),
+  toolsMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
   // Heartbeat checklist: Standing orders checked periodically (synced to /workspace/HEARTBEAT.md)
-  heartbeatMd: z.string().max(65536).optional(),
+  heartbeatMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
 
   // Concurrency limit (defaults to 1 for backwards compatibility)
   maxTasks: z.number().int().min(1).max(100).optional(),
