@@ -546,6 +546,7 @@ export default function TasksPage() {
             { value: "completed", label: "Completed" },
             { value: "failed", label: "Failed" },
             { value: "cancelled", label: "Cancelled" },
+            { value: "superseded", label: "Superseded" },
           ]}
         />
         <SearchableSelect

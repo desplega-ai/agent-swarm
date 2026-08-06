@@ -28,7 +28,9 @@ import { applyRating } from "../be/memory/raters/store";
 import { REFERENCES_SOURCE_MAX_LENGTH, sanitizeReferencesSource } from "../be/memory/raters/types";
 import { registerMemoryRateTool } from "../tools/memory-rate";
 
-const TEST_PORT = 19127;
+const TEST_PORT = Number(
+  process.env.MEMORY_EDGES_TEST_PORT ?? 30000 + Math.floor(Math.random() * 20000),
+);
 const TEST_DB_PATH = `/tmp/test-memory-edges-${Date.now()}.sqlite`;
 const BASE = `http://localhost:${TEST_PORT}`;
 const API_KEY = "test-key";

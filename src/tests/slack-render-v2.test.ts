@@ -199,7 +199,15 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
 });
 
 mock.module("../slack/app", () => ({
-  getSlackApp: () => ({ client: { apiCall: mockApiCall } }),
+  getSlackApp: () => ({
+    client: {
+      apiCall: mockApiCall,
+      reactions: {
+        add: (payload: Record<string, unknown>) => mockApiCall("reactions.add", payload),
+        remove: (payload: Record<string, unknown>) => mockApiCall("reactions.remove", payload),
+      },
+    },
+  }),
 }));
 
 async function removeDbFiles() {
@@ -241,6 +249,33 @@ afterAll(async () => {
 });
 
 describe("Slack renderer v2", () => {
+  test("settles the accepted-message reaction after streaming a terminal outcome", async () => {
+    const lead = createAgent({ name: "Reaction Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REACTION");
+    const triggerTs = `${slackAddressSequence}.2`;
+    const ask = createTaskExtended("terminal reaction ask", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackTriggerMessageTs: triggerTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    completeTask(ask.id, "Done");
+    calls.length = 0;
+
+    await processSlackRenderV2();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(calls.filter((call) => call.method === "reactions.remove")).toHaveLength(4);
+    expect(calls).toContainEqual({
+      method: "reactions.add",
+      payload: { channel: channelId, name: "white_check_mark", timestamp: triggerTs },
+    });
+  });
+
   test("defaults off and accepts an explicit opt-in", () => {
     const previous = process.env.SLACK_RENDER_V2;
     delete process.env.SLACK_RENDER_V2;
