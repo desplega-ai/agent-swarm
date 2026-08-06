@@ -179,7 +179,7 @@ export default function ConnectionDetailPage() {
               <CardHeader>
                 <CardTitle className="text-base">Overview</CardTitle>
               </CardHeader>
-              <CardContent className="divide-y">
+              <CardContent className="divide-y divide-border-subtle">
                 <InfoRow
                   label="Target"
                   value={
@@ -279,7 +279,7 @@ export default function ConnectionDetailPage() {
               <CardContent>
                 {connection.kind === "mcp" ? (
                   connection.tools.length ? (
-                    <div className="divide-y rounded-md border">
+                    <div className="divide-y divide-border-subtle rounded-md border">
                       {connection.tools.map((tool) => (
                         <button
                           key={tool.name}

@@ -1,6 +1,7 @@
 import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
+import { MotionConfig } from "motion/react";
 import type { ReactNode } from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { IdentityModal } from "@/components/identity/identity-modal";
@@ -50,16 +51,21 @@ function IdentityGate() {
 
 export function Providers({ children }: { children: ReactNode }) {
   const content = (
-    <ThemeProvider>
-      <ConfigProvider>
-        <CurrentUserProvider>
-          <TooltipProvider>
-            {children}
-            <IdentityGate />
-          </TooltipProvider>
-        </CurrentUserProvider>
-      </ConfigProvider>
-    </ThemeProvider>
+    // `reducedMotion="user"`: every motion/react animation (animated icons
+    // included) drops transform/movement for prefers-reduced-motion users
+    // while keeping opacity fades — "gentler, not zero" (DESIGN.md § Motion).
+    <MotionConfig reducedMotion="user">
+      <ThemeProvider>
+        <ConfigProvider>
+          <CurrentUserProvider>
+            <TooltipProvider>
+              {children}
+              <IdentityGate />
+            </TooltipProvider>
+          </CurrentUserProvider>
+        </ConfigProvider>
+      </ThemeProvider>
+    </MotionConfig>
   );
 
   if (!localStoragePersister) {

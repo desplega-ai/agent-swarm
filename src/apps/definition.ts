@@ -267,6 +267,18 @@ const AppElementSchema = z
 
 export const AppElementsSchema = z.record(AppNameSchema, AppElementSchema);
 
+/**
+ * Preset theme id applied to the app's rendered surface. The catalog of
+ * presets lives in the dashboard (`apps/ui/src/lib/themes.ts`) — the server
+ * validates shape only, and the renderer resolves unknown ids to its default
+ * theme, so definitions stay portable across dashboard versions whose preset
+ * catalogs differ. Viewers can override it per-user via the reserved
+ * `$theme` user-config key (see `user-config.ts`).
+ */
+export const AppThemeIdSchema = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/, {
+  message: "must be a lowercase slug (letters, digits, dashes)",
+});
+
 export const AppDefinitionSchema = z
   .object({
     models: z.record(AppNameSchema, ModelDefSchema),
@@ -276,6 +288,7 @@ export const AppDefinitionSchema = z
     userConfig: UserConfigSchema.optional(),
     pages: z.record(AppNameSchema, AppPageSchema),
     defaultPage: AppNameSchema,
+    theme: AppThemeIdSchema.optional(),
   })
   .superRefine((definition, ctx) => {
     if (!Object.hasOwn(definition.pages, definition.defaultPage)) {
@@ -418,11 +431,15 @@ const APP_DEFINITION_TOP_LEVEL_KEYS = new Set([
   "pages",
   "defaultPage",
   "schemaVersion",
+  "theme",
 ]);
 
 const TOP_LEVEL_KEY_SUGGESTIONS: Record<string, string> = {
   element: "elements",
   userconfig: "userConfig",
+  themes: "theme",
+  appearance: "theme",
+  styling: "theme",
 };
 
 export type AppDefinitionPatchResult =

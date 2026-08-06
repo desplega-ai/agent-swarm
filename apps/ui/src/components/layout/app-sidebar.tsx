@@ -153,6 +153,7 @@ const footerNav: FooterItem[] = [
     icon: Settings,
     flyout: [
       { title: "Connections", path: "/settings/connections" },
+      { title: "Appearance", path: "/settings/appearance" },
       { title: "Secrets", path: "/settings/secrets" },
       { title: "API Keys", path: "/settings/api-keys" },
       { title: "Integrations", path: "/settings/integrations" },

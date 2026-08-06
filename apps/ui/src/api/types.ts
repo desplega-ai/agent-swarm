@@ -2619,6 +2619,12 @@ export interface AppDefinition {
   defaultPage?: string;
   /** Per-viewer preference SCHEMA; the values live outside the definition. */
   userConfig?: Record<string, AppUserConfigField>;
+  /**
+   * Preset theme id for the app's rendered surface (see `@/lib/themes`).
+   * Unknown ids fall back to inheriting the dashboard theme; a viewer's
+   * reserved `$theme` user-config value overrides it per-user.
+   */
+  theme?: string;
 }
 
 /**

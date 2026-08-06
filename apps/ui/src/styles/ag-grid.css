@@ -14,7 +14,7 @@
   --ag-selected-row-background-color: var(--color-accent);
   --ag-border-color: var(--color-border);
   --ag-secondary-border-color: var(--color-border);
-  --ag-row-border-color: var(--color-border);
+  --ag-row-border-color: var(--color-border-subtle);
   --ag-header-column-separator-color: var(--color-border);
   --ag-font-family: "Space Grotesk", system-ui, sans-serif;
   --ag-font-size: 13px;

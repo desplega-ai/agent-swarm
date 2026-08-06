@@ -5,6 +5,32 @@ export type UserConfigValue = string | number | boolean | null;
 export type UserConfigValues = Record<string, UserConfigValue>;
 export type UserConfigSchema = Record<string, UserConfigField>;
 
+/**
+ * Reserved, system-owned user-config keys. They ride the same per-(app, user)
+ * storage row as author-declared fields but are NOT part of the app's
+ * `userConfig` schema — `AppNameSchema` forbids `$`, so no declared field can
+ * ever collide. `$theme` holds the viewer's preset-theme override for the app
+ * (same slug shape as `definition.theme`; the dashboard resolves unknown ids
+ * to its default preset).
+ */
+export const USER_CONFIG_THEME_KEY = "$theme";
+const RESERVED_KEY_PATTERNS: Record<string, RegExp> = {
+  [USER_CONFIG_THEME_KEY]: /^[a-z][a-z0-9-]{0,39}$/,
+};
+
+export function isReservedUserConfigKey(key: string): boolean {
+  return Object.hasOwn(RESERVED_KEY_PATTERNS, key);
+}
+
+function acceptedReservedEntries(stored: Record<string, unknown>): UserConfigValues {
+  const entries: UserConfigValues = {};
+  for (const [key, pattern] of Object.entries(RESERVED_KEY_PATTERNS)) {
+    const value = stored[key];
+    if (typeof value === "string" && pattern.test(value)) entries[key] = value;
+  }
+  return entries;
+}
+
 interface AppUserConfigRow {
   storedValues: string;
 }
@@ -20,19 +46,24 @@ function accepts(field: UserConfigField, value: unknown): value is Exclude<UserC
 /**
  * Reconciles persisted preferences with the current definition. Definitions
  * intentionally evolve independently: removed keys disappear and malformed or
- * obsolete values fall back to their declared default (or null).
+ * obsolete values fall back to their declared default (or null). Reserved
+ * system keys (`$theme`) survive the merge regardless of the schema — they are
+ * never declared in it.
  */
 export function mergeUserConfigValues(schema: UserConfigSchema, stored: unknown): UserConfigValues {
   const source =
     typeof stored === "object" && stored !== null && !Array.isArray(stored)
       ? (stored as Record<string, unknown>)
       : {};
-  return Object.fromEntries(
-    Object.entries(schema).map(([name, field]) => {
-      const value = source[name];
-      return [name, accepts(field, value) ? value : (field.default ?? null)];
-    }),
-  );
+  return {
+    ...acceptedReservedEntries(source),
+    ...Object.fromEntries(
+      Object.entries(schema).map(([name, field]) => {
+        const value = source[name];
+        return [name, accepts(field, value) ? value : (field.default ?? null)];
+      }),
+    ),
+  };
 }
 
 export function userConfigValueIssues(
@@ -41,6 +72,18 @@ export function userConfigValueIssues(
 ): Array<{ path: string; message: string }> {
   const issues: Array<{ path: string; message: string }> = [];
   for (const [name, value] of Object.entries(values)) {
+    const reservedPattern = RESERVED_KEY_PATTERNS[name];
+    if (reservedPattern) {
+      // `null` is the explicit "clear" form — PUT replaces wholesale, but a
+      // schema-less app rejects an empty body, so clearing needs a value.
+      if (value !== null && (typeof value !== "string" || !reservedPattern.test(value))) {
+        issues.push({
+          path: `values.${name}`,
+          message: "must be a lowercase slug (letters, digits, dashes) or null to clear",
+        });
+      }
+      continue;
+    }
     const field = schema[name];
     if (!field) {
       issues.push({ path: `values.${name}`, message: `unknown userConfig field "${name}"` });

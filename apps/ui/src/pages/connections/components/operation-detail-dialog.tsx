@@ -112,7 +112,7 @@ function ParametersSection({ operation }: { operation: ScriptConnectionOperation
           <div>Required</div>
           <div>Type</div>
         </div>
-        <div className="divide-y">
+        <div className="divide-y divide-border-subtle">
           {parameters.map((parameter) => (
             <div
               key={`${parameter.in}:${parameter.name}`}

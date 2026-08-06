@@ -13,6 +13,7 @@ colors:
   muted: "oklch(0.967 0.001 286.375)"
   muted-foreground: "oklch(0.552 0.016 285.938)"
   border: "oklch(0.92 0.004 286.32)"
+  border-subtle: "oklch(0.945 0.003 286)"
   destructive: "oklch(0.577 0.245 27.325)"
   status-success: "oklch(0.696 0.17 162.48)"
   status-active: "oklch(0.769 0.188 70.08)"
@@ -125,6 +126,7 @@ A zinc-neutral field with one amber voice and a strictly named status vocabulary
 - **Muted / Accent** (oklch(0.967 0.001 286.375) light / oklch(0.274 0.006 286.033) dark): hover fills, secondary buttons, quiet panels.
 - **Muted Foreground** (oklch(0.552 0.016 285.938) light / oklch(0.705 0.015 286.067) dark): secondary text, labels, descriptions.
 - **Border** (oklch(0.92 0.004 286.32) light / oklch(1 0 0 / 10%) dark): the structural line that does the work shadows would do elsewhere. Dark-mode borders are white-alpha, so they layer on any surface.
+- **Border Subtle** (oklch(0.945 0.003 286) light / oklch(1 0 0 / 8%) dark): the quiet tier of the two-tier line system. Separators, row rules (`divide-y divide-border-subtle`), and data-grid row lines sit here so content reads in planes, not boxes. Card outlines and inputs stay on full `border` — the stronger stop is the affordance.
 
 ### Status vocabulary (semantic, tokenized)
 Eight canonical tones, each with a `-strong` text-emphasis variant and a `-foreground` for text on the fill. Light mode uses the 500 stop for fills and 600 for emphasis text; dark mode collapses both to the 400 stop.
@@ -183,7 +185,7 @@ Utilitarian and crisp: small radii (6–10px), 36px control heights, restrained 
 - **Primary:** Hive Amber fill, near-white text, `hover:bg-primary/90`.
 - **Outline:** background fill + border, `shadow-xs`, hovers to the muted accent; dark mode uses translucent input fills (`dark:bg-input/30`).
 - **Destructive-outline:** the canonical red-outlined action — `border-status-error/30 text-status-error hover:bg-status-error/10` — always paired with an `AlertDialog` confirmation.
-- **Focus:** 3px `ring-ring/50` ring with `border-ring` — amber, consistent everywhere.
+- **Focus:** 2px `ring-ring/60` ring with `border-ring` — amber, consistent everywhere.
 - **Ghost / Secondary / Link:** muted-fill hover, secondary-fill, and amber underline text respectively.
 
 ### Chips (Badge)
@@ -199,7 +201,7 @@ Utilitarian and crisp: small radii (6–10px), 36px control heights, restrained 
 
 ### Inputs / Fields
 - **Style:** transparent background (translucent `input/30` in dark), `border-input`, `rounded-md`, 36px tall, `shadow-xs`.
-- **Focus:** same 3px amber ring as buttons — one focus language across the app.
+- **Focus:** same 2px amber ring as buttons — one focus language across the app.
 - **Error / Disabled:** `aria-invalid` ring + destructive border; disabled at 50% opacity, cursor blocked.
 
 ### Navigation
@@ -215,7 +217,7 @@ Utilitarian and crisp: small radii (6–10px), 36px control heights, restrained 
 ### Do:
 - **Do** use named tokens for every color: `bg-status-success`, `text-status-error-strong`, `bg-action-script/10`. The lint gate enforces it.
 - **Do** compose from the primitives catalog (`Button`, `Badge size="tag"`, `StatusBadge`, `DataGrid`, `DetailPageBody`, `SettingsRow`, `EmptyState`) before writing a raw `<div>` layout.
-- **Do** keep one focus language: 3px `ring-ring/50` amber ring on every focusable control.
+- **Do** keep one focus language: 2px `ring-ring/60` amber ring on every focusable control.
 - **Do** use skeletons (`Skeleton`, `PageSkeleton`) for loading and `EmptyState` (icon + title + description + action) for empty lists — empty states teach the interface.
 - **Do** hold WCAG 2.1 AA in both themes: ≥4.5:1 body contrast, keyboard access, `prefers-reduced-motion` alternatives (the shimmer must degrade to a static indicator).
 
@@ -226,3 +228,25 @@ Utilitarian and crisp: small radii (6–10px), 36px control heights, restrained 
 - **Don't** use HTML `<Table>` for data lists — `DataGrid` is a hard rule.
 - **Don't** spend Hive Amber on decoration or inactive states; if it's not actionable or alive, it isn't amber.
 - **Don't** animate anything that isn't conveying state. No orchestrated page loads, no decorative motion — the operator is in a task.
+
+## 7. Motion
+
+**Doctrine: speed beats delight.** The operator is in a task; motion exists to carry state, feedback, and continuity — never to perform. (Derived from animations.dev / Emil Kowalski's published rules, filtered through Mission Control restraint.)
+
+### Rules
+- **Budget:** every UI animation under 300ms. Enters ease-out at 150-250ms; exits FASTER than enters (the user is already moving on). Large gesture surfaces (sheets, drawers) are the one exception: 400ms open / 250ms close on the swift curve.
+- **Two named curves** (tokens in `globals.css`, utilities `ease-swift` / `ease-snappy`):
+  - `--ease-swift: cubic-bezier(0.32, 0.72, 0, 1)` — sheets, drawers, large surfaces.
+  - `--ease-snappy: cubic-bezier(0.2, 0, 0, 1)` — menus, popovers, small user-initiated reveals.
+  - Never `ease-in` on UI. Never linear except shimmer-class liveness loops.
+- **Animate `transform` and `opacity` only.** No layout properties, no box-shadow tweens. Popovers and menus scale from their trigger via `origin-(--radix-*-transform-origin)` (already wired in the primitives).
+- **Frequency rule:** the more often an interaction happens, the less motion it gets. Keyboard-initiated actions, table polls, list updates, and route changes get NO animation.
+- **Motivated or absent:** every animation names its job — state ("shimmer = an agent is working"), feedback (`active:scale-[0.98]` on buttons), hierarchy, or spatial continuity. "It looks cool" fails review.
+- **Interruptible:** rapidly-triggered motion must retarget from its current state (CSS transitions, springs) — never restarting keyframes on hot paths.
+- **Reduced motion is gentler, not zero:** `MotionConfig reducedMotion="user"` wraps the app (drops movement, keeps fades); handwritten CSS animations gate via `prefers-reduced-motion` blocks like the shimmer does.
+
+### Animated icons
+Vendored per-icon from **lucide-animated** (`pqoqubbw/icons`, MIT) into `src/components/icons/` via `bunx shadcn@latest add "https://lucide-animated.com/r/<icon>.json"` — we own the files; they run on `motion/react`. Current set: sun, moon, settings, refresh-cw.
+- Use ONLY on interactive controls as hover/state affordance (theme toggle, refresh, the app-settings gear).
+- Never decorative loops, never in table rows, nav lists, or any high-frequency surface.
+- Inside `Button`, pass `size={16}`/`size={14}`; the button's svg sizing rules keep them aligned with static lucide icons.

@@ -1,8 +1,10 @@
-import { Github, Moon, Sun } from "lucide-react";
+import { Github } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useHealth } from "@/api/hooks/use-stats";
 import type { StatusHealth } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
+import { MoonIcon } from "@/components/icons/moon";
+import { SunIcon } from "@/components/icons/sun";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -140,7 +142,9 @@ export function AppHeader() {
               className="size-8"
               aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
             >
-              {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+              {/* Animated icons (lucide-animated): rays fade in / moon tilts
+                  on hover — affordance feedback on an interactive control. */}
+              {theme === "dark" ? <SunIcon size={16} /> : <MoonIcon size={16} />}
               <span className="sr-only">Toggle theme</span>
             </Button>
           </TooltipTrigger>

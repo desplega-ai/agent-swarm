@@ -100,10 +100,12 @@ Brand-kit divergences are tracked in [`thoughts/taras/research/2026-05-06-design
 ## Theming
 
 - **Never hardcode dark-mode colors** (no `bg-zinc-950`, `text-zinc-400`, etc.). Use CSS variable classes: `bg-background`, `bg-muted`, `text-foreground`, `text-muted-foreground`, `border-border`, `bg-accent`.
+- **Two-tier lines.** Non-structural lines — `Separator`, `divide-y` row rules, data-grid row borders — sit on the subtle tier: `divide-border-subtle` / `bg-border-subtle` / `border-border-subtle`. Card outlines and inputs keep full `border-border` / `border-input` (the stronger stop is the affordance). See DESIGN.md § Elevation.
 - **Amber** is brand `--primary` — use it for interactive / active states only.
 - **Status colors come from named semantic tokens** — `bg-status-success`, `text-status-error`, `bg-status-active`, etc. — defined in `src/styles/globals.css` (light + dark). Action-type colors (workflow nodes) come from `bg-action-*` tokens. **Do not** use raw Tailwind palette literals (`bg-emerald-500`, `text-amber-400`, `border-red-500/30`, etc.) in app code. Translucent fills use the standard Tailwind opacity syntax: `bg-status-success/10`, `border-action-script/50`.
 - **Color literal lint gate.** `bun run check:tokens` (also runs in CI via `merge-gate.yml`'s `ui-lint` job) fails the build on any raw Tailwind color palette literal, `dark:` palette variant, arbitrary color literal (e.g. `bg-[#0d1117]`), or hardcoded hex in `src/`. To use a new color, add a token to `src/styles/globals.css`. Monaco editor themes are exempt and live in `src/lib/monaco-themes.ts`.
 - CSS variables defined in `src/styles/globals.css`; AG Grid themed via `src/styles/ag-grid.css`.
+- **Theme presets** live in `src/lib/themes.ts`: named bundles of token overrides emitted as `[data-theme="<id>"]` rules (light + dark), applied on `<html>` (Settings → Appearance, localStorage) or scoped to one swarm-app canvas (`definition.theme` + the viewer's reserved `$theme` user-config override). Status/action/destructive tokens are never themed. Dark overrides in `globals.css` MUST stay on `.dark` alone (never `.dark *`) or scoped wrappers break; portalled content inside an app canvas re-stamps `data-theme` via `useJsonRenderThemeAttr()` from `src/lib/json-render/theme-scope.tsx`.
 - Use `cn()` from `@/lib/utils` for conditional class merging.
 
 ### Semantic token reference
@@ -147,6 +149,16 @@ Action-type tokens (workflow node types from `components/workflows/action-node.t
 | `action-raw-llm` | `raw-llm` (condition) | sky-500 | sky-400 |
 
 Each status token has a paired `-foreground` for legible text on the colored fill (e.g. `text-status-success-foreground`). Action tokens do not — workflow nodes pair the colored token with `bg-action-X/10` (translucent fill) and `text-action-X` (text + border).
+
+</important>
+
+<important if="you are adding animation, transitions, easing, or an animated icon in ui">
+
+## Motion
+
+Doctrine lives in [DESIGN.md § Motion](./DESIGN.md) — read it first. Hard points: <300ms budget, exits faster than enters, `ease-swift`/`ease-snappy` tokens (never `ease-in`), transform/opacity only, no animation on keyboard-driven or high-frequency interactions, `MotionConfig reducedMotion="user"` is already mounted in `app/providers.tsx`.
+
+Animated icons are vendored from lucide-animated into `src/components/icons/` (`bunx shadcn@latest add "https://lucide-animated.com/r/<icon>.json"`, then move the file out of the literal `@/` directory the CLI creates). Interactive-control affordance only — never decorative, never in rows/lists.
 
 </important>
 

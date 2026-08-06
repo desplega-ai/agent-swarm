@@ -19,6 +19,13 @@
  * a value — an empty text/number/date input and an enum back on "Not set" are
  * omitted rather than sent as `null` (which the server would reject: no
  * userConfig field is nullable-by-value, only unset).
+ *
+ * On top of the declared fields, the drawer always offers the APPEARANCE
+ * section: the reserved `$theme` key (accepted on every app, schema or not)
+ * holds this viewer's preset override for the app's canvas. It must be
+ * re-included on every save (wholesale replace!), and clearing it back to
+ * "App default" sends an explicit `$theme: null` — the only nullable value
+ * the server accepts, because a schema-less app 400s an empty body.
  */
 
 import { AlertCircle, Settings2 } from "lucide-react";
@@ -46,6 +53,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
+import { getThemePreset, THEME_PRESETS } from "@/lib/themes";
 
 /**
  * Radix `Select` forbids an empty item value, so "unset" needs a sentinel.
@@ -129,11 +137,19 @@ function defaultHint(field: AppUserConfigField): string | undefined {
 export interface AppSettingsDrawerProps {
   appId: string;
   appName: string;
+  /** The definition's own `theme`, for the "App default" option label. */
+  appDefaultTheme?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-export function AppSettingsDrawer({ appId, appName, open, onOpenChange }: AppSettingsDrawerProps) {
+export function AppSettingsDrawer({
+  appId,
+  appName,
+  appDefaultTheme,
+  open,
+  onOpenChange,
+}: AppSettingsDrawerProps) {
   const { data, isLoading, error: loadError } = useAppUserConfig(appId, { enabled: open });
   const save = useSaveAppUserConfig(appId);
   // `null` = "follow the server". Set on the first edit and dropped again on
@@ -145,10 +161,21 @@ export function AppSettingsDrawer({ appId, appName, open, onOpenChange }: AppSet
   // would omit — silently resetting the field to its default on save. Tracked
   // here so the input carries an inline error and Save is blocked instead.
   const [badNumbers, setBadNumbers] = useState<Record<string, boolean>>({});
+  // Theme override edit: `undefined` = untouched (follow the server value),
+  // `null` = explicitly back to "App default", string = a chosen preset id.
+  const [themeEdit, setThemeEdit] = useState<string | null | undefined>(undefined);
 
   const schema = useMemo<UserConfigSchema>(() => data?.schema ?? {}, [data]);
   const serverDraft = useMemo(() => toDraft(schema, data?.values ?? {}), [schema, data]);
   const draft = edits ?? serverDraft;
+  // A stored id this build's catalog doesn't know reads as "App default" —
+  // same degradation the renderer applies.
+  const serverThemeRaw = data?.values?.$theme;
+  const serverTheme =
+    getThemePreset(typeof serverThemeRaw === "string" ? serverThemeRaw : null)?.id ?? null;
+  const themeChoice = themeEdit === undefined ? serverTheme : themeEdit;
+  const themeDirty = themeEdit !== undefined && themeEdit !== serverTheme;
+  const appDefaultPreset = getThemePreset(appDefaultTheme ?? null);
   const errorsByField = fieldErrors(save.error, schema);
   // A field-level issue is shown on its input; the flattened message is only
   // the fallback for everything else (403 agent scope, 413 size cap, 5xx).
@@ -168,16 +195,26 @@ export function AppSettingsDrawer({ appId, appName, open, onOpenChange }: AppSet
     if (!next) {
       setEdits(null);
       setBadNumbers({});
+      setThemeEdit(undefined);
       save.reset();
     }
     onOpenChange(next);
   }
 
   function handleSave() {
-    save.mutate(toPayload(schema, draft), {
+    const values: Record<string, AppUserConfigValue> = toPayload(schema, draft);
+    // Wholesale replace: an untouched-but-stored override must ride along or
+    // the save would silently drop it. Clearing sends the explicit null form.
+    if (themeChoice) {
+      values.$theme = themeChoice;
+    } else if (serverTheme) {
+      values.$theme = null;
+    }
+    save.mutate(values, {
       onSuccess: () => {
         setEdits(null);
         setBadNumbers({});
+        setThemeEdit(undefined);
         onOpenChange(false);
       },
     });
@@ -209,8 +246,38 @@ export function AppSettingsDrawer({ appId, appName, open, onOpenChange }: AppSet
             </AlertCallout>
           )}
           {isLoading && !data && <p className="text-xs text-muted-foreground">Loading…</p>}
-          {!isLoading && fields.length === 0 && !loadError && (
-            <p className="text-xs text-muted-foreground">This app declares no settings.</p>
+
+          {/* Appearance — offered on every app; rides the reserved $theme key. */}
+          {!isLoading && data && (
+            <SettingsRow
+              label="Theme"
+              htmlFor="app-user-config-theme"
+              helper={
+                appDefaultPreset
+                  ? `App default: ${appDefaultPreset.name}`
+                  : "App default: follows your dashboard theme"
+              }
+            >
+              <Select
+                value={themeChoice ?? UNSET}
+                onValueChange={(next) => {
+                  if (save.isError) save.reset();
+                  setThemeEdit(next === UNSET ? null : next);
+                }}
+              >
+                <SelectTrigger id="app-user-config-theme" className="w-full">
+                  <SelectValue placeholder="App default" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={UNSET}>App default</SelectItem>
+                  {THEME_PRESETS.map((preset) => (
+                    <SelectItem key={preset.id} value={preset.id}>
+                      {preset.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </SettingsRow>
           )}
 
           {fields.map(([name, field]) => {
@@ -303,8 +370,10 @@ export function AppSettingsDrawer({ appId, appName, open, onOpenChange }: AppSet
           <Button
             size="sm"
             // Blocked, not silently coerced: saving with an unparseable number
-            // would omit that field and reset it to its default.
-            disabled={save.isPending || fields.length === 0 || hasBadNumber}
+            // would omit that field and reset it to its default. A schema-less
+            // app saves only once the theme actually changed — an empty body
+            // is a server-side 400.
+            disabled={save.isPending || hasBadNumber || (fields.length === 0 && !themeDirty)}
             title={hasBadNumber ? "Fix the invalid number field first" : undefined}
             onClick={handleSave}
             data-testid="app-settings-save"

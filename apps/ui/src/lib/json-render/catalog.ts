@@ -49,8 +49,10 @@ export const swarmCallActionSchema = z.object({
 
 /**
  * `app.mutate` — server-native row CRUD against `/api/apps/:id/models/:model/rows`.
- * `formId` is optional in JSON: the `Form` component injects its own `id` when
- * it dispatches a `create`, so the originating form clears itself on success.
+ * `formId` is optional in JSON: the `Form` component injects its own `id` into
+ * every `app.mutate` of its submit chain, so the originating form clears itself
+ * on a successful `create` and receives mutate failures inline (the handler
+ * writes them to `/forms/<id>/$error` instead of the page-level banner).
  */
 export const appMutateActionSchema = z.object({
   model: z.string(),
@@ -196,12 +198,25 @@ const textProps = z.object({
 
 const buttonProps = z.object({
   label: z.string(),
-  variant: z.enum(["default", "secondary", "outline", "ghost", "destructive"]).optional(),
+  variant: z
+    .enum(["default", "secondary", "outline", "ghost", "destructive", "destructive-outline"])
+    .optional(),
+  /** Constant or bound (e.g. `{ "$state": "/queries/<name>/loading" }`). */
+  disabled: z.boolean().optional(),
+  /**
+   * Name of a custom action from the app definition's `actions` map. While
+   * `/actions/<name>/status` is `"running"` the button disables and shows a
+   * spinner — pair it with an `on.press` chain dispatching `app.action` for
+   * the same name.
+   */
+  busyWith: z.string().optional(),
 });
 
 const metricProps = z.object({
   label: z.string(),
   value: z.union([z.string(), z.number()]),
+  /** Usually `{ "$state": "/queries/<name>/loading" }` — skeleton while true. */
+  loading: z.boolean().optional(),
 });
 
 const alertProps = z.object({
@@ -372,6 +387,11 @@ const detailListProps = z.object({
   emptyMessage: z.string().optional(),
   /** Label/value pairs flow into 1 (default) or 2 columns. */
   columns: z.union([z.literal(1), z.literal(2)]).optional(),
+  /**
+   * Usually `{ "$state": "/queries/<name>/loading" }` — skeleton fields while
+   * true and `data` is still missing, instead of a premature `emptyMessage`.
+   */
+  loading: z.boolean().optional(),
 });
 
 const elementRefProps = z.object({
@@ -472,11 +492,13 @@ export const swarmCatalogSpec = {
     },
     Button: {
       props: buttonProps,
-      description: "Interactive button. Wire to actions via `on.press`.",
+      description:
+        'Interactive button. Wire to actions via `on.press`. `variant: "destructive-outline"` is the canonical red-outlined destructive look (standalone deletes should use it, not solid red). `disabled` accepts a constant or a bound boolean; `busyWith: "<actionName>"` disables the button and shows a spinner while that custom action is running.',
     },
     Metric: {
       props: metricProps,
-      description: "Single label/value tile for status pages.",
+      description:
+        'Single label/value tile for status pages. Bind `loading` to the backing query (`{ "$state": "/queries/<name>/loading" }`) to show a skeleton instead of a blank value while it loads.',
     },
     Alert: {
       props: alertProps,
@@ -494,7 +516,7 @@ export const swarmCatalogSpec = {
     Form: {
       props: formProps,
       description:
-        'Field form. Values live in state under `/forms/<id>/<field>`; `onSubmit` chains receive `$form` (all collected values) and `$form: "<field>"` for one.',
+        'Field form. Values live in state under `/forms/<id>/<field>`; `onSubmit` chains receive `$form` (all collected values) and `$form: "<field>"` for one. `app.mutate` failures in the chain surface inline under the fields (not the page banner), and the submit button shows a pending spinner while the chain runs.',
     },
     Drawer: {
       props: drawerProps,
@@ -505,7 +527,7 @@ export const swarmCatalogSpec = {
     DetailList: {
       props: detailListProps,
       description:
-        'Read-only label/value detail view for ONE record. Bind `data` to a single row — usually `{ "$state": "/queries/<name>/data/0" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `code` for raw/JSON values. Shows `emptyMessage` while the record is loading or missing.',
+        'Read-only label/value detail view for ONE record. Bind `data` to a single row — usually `{ "$state": "/queries/<name>/data/0" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `code` for raw/JSON values. Bind `loading` to the query (`/queries/<name>/loading`) for skeleton fields while it loads; `emptyMessage` shows when the record is genuinely missing.',
     },
     ElementRef: {
       props: elementRefProps,

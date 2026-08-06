@@ -67,8 +67,6 @@ import {
   LayoutGrid,
   Maximize2,
   Minimize2,
-  RefreshCw,
-  Settings,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -89,6 +87,8 @@ import {
 } from "@/api/hooks/use-apps";
 import type { AgentTaskStatus, AppDefinition, AppDetail, AppPageDef, AppRow } from "@/api/types";
 import { AppSettingsDrawer } from "@/components/apps/app-settings-drawer";
+import { RefreshCWIcon } from "@/components/icons/refresh-cw";
+import { SettingsIcon } from "@/components/icons/settings";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
@@ -100,6 +100,8 @@ import {
   DEFINING_APP_PARAM,
 } from "@/lib/json-render/assemble";
 import { getAppStoreView, getAppsStoreSnapshot } from "@/lib/json-render/store-registry";
+import { JsonRenderThemeProvider } from "@/lib/json-render/theme-scope";
+import { DEFAULT_THEME_ID, getThemePreset } from "@/lib/themes";
 import { cn } from "@/lib/utils";
 
 const EMPTY_ROWS: AppRow[] = [];
@@ -808,9 +810,20 @@ export function AppSurface({
   // schema disappears from the mirror too, and guarded by a content signature
   // because the whole subtree is replaced on every write.
   const hasUserConfig = Object.keys(definition.userConfig ?? {}).length > 0;
-  const userConfig = useAppUserConfig(app.id, { enabled: hasUserConfig });
+  // Always fetched, not just when a schema is declared: the same values row
+  // carries the viewer's reserved `$theme` preset override for EVERY app.
+  const userConfig = useAppUserConfig(app.id, { enabled: true });
   const userConfigValues = userConfig.data?.values;
-  const userConfigSignature = hasUserConfig ? JSON.stringify(userConfigValues ?? null) : null;
+  // Reserved system keys ($-prefixed) stay OUT of the `/user` mirror — pages
+  // can only bind declared fields, and the mirror contract is "the declared
+  // schema, tolerantly merged".
+  const mirrorValues = useMemo(() => {
+    if (!userConfigValues) return undefined;
+    return Object.fromEntries(
+      Object.entries(userConfigValues).filter(([key]) => !key.startsWith("$")),
+    );
+  }, [userConfigValues]);
+  const userConfigSignature = hasUserConfig ? JSON.stringify(mirrorValues ?? null) : null;
   useEffect(() => {
     if (userConfigSignature === null) {
       // App declares no userConfig: touch the store ONLY to clear a mirror an
@@ -828,12 +841,23 @@ export function AppSurface({
     }
     // Nothing fetched yet — leave the warm mirror alone rather than blanking
     // the values the page is already rendering.
-    if (!userConfigValues) return;
+    if (!mirrorValues) return;
     // Idempotent like the query mirror: re-mounting or a poll that changed
     // nothing must not churn the store (and re-render the page).
     if (JSON.stringify(store.get("/user") ?? null) === userConfigSignature) return;
-    store.set("/user", userConfigValues);
-  }, [userConfigSignature, userConfigValues, store]);
+    store.set("/user", mirrorValues);
+  }, [userConfigSignature, mirrorValues, store]);
+
+  // App-scope theme preset. The viewer's per-app override (any KNOWN preset
+  // id — "hive" means "explicitly back to default") beats the definition's
+  // `theme`; unknown ids from either source are ignored, so a definition
+  // written against a newer preset catalog degrades to inheriting the
+  // dashboard theme instead of breaking.
+  const viewerThemeRaw = userConfigValues?.$theme;
+  const viewerPreset = getThemePreset(typeof viewerThemeRaw === "string" ? viewerThemeRaw : null);
+  const activePreset = viewerPreset ?? getThemePreset(definition.theme ?? null);
+  const appThemeAttr =
+    activePreset && activePreset.id !== DEFAULT_THEME_ID ? activePreset.id : undefined;
 
   const compiled = useMemo(() => {
     const swarmActions = createSwarmActionHandlers({
@@ -888,7 +912,12 @@ export function AppSurface({
             }
             await ctx.refetchModel(targetAppId, params.model);
           } catch (e) {
-            setActionError(e instanceof Error ? e.message : String(e));
+            const message = e instanceof Error ? e.message : String(e);
+            // A mutate dispatched from a Form carries its formId — scope the
+            // failure to that form (`/forms/<id>/$error`, rendered inline
+            // under the fields) instead of the page-level banner.
+            if (params.formId) ctx.store.set(`/forms/${params.formId}/$error`, message);
+            else setActionError(message);
           }
         },
         "app.refresh": async (params) => {
@@ -1042,7 +1071,7 @@ export function AppSurface({
   ) : null;
 
   const surface = (
-    <>
+    <JsonRenderThemeProvider value={appThemeAttr ?? null}>
       {pageCrumbs}
       {actionError && (
         <AlertCallout tone="error" icon={AlertCircle} title="Action failed">
@@ -1054,7 +1083,7 @@ export function AppSurface({
           <ActionProvider handlers={compiled.handlers}>{renderedSpec}</ActionProvider>
         </VisibilityProvider>
       </StateProvider>
-    </>
+    </JsonRenderThemeProvider>
   );
 
   // Embed surface: the rendered page and nothing else — no SPA chrome, no
@@ -1066,6 +1095,7 @@ export function AppSurface({
         ref={scrollRef}
         className="fixed inset-0 z-50 flex flex-col gap-4 overflow-y-auto bg-background p-4"
         data-testid="app-runtime"
+        data-theme={appThemeAttr}
       >
         {surface}
       </div>
@@ -1075,7 +1105,11 @@ export function AppSurface({
   // Full: same overlay, plus a slim identity/exit bar (mirrors pages/:id).
   if (mode === "full") {
     return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-background" data-testid="app-runtime">
+      <div
+        className="fixed inset-0 z-50 flex flex-col bg-background"
+        data-testid="app-runtime"
+        data-theme={appThemeAttr}
+      >
         <div className="flex items-center justify-between gap-3 border-b border-border bg-card px-4 py-2">
           <div className="flex items-center gap-2 min-w-0">
             <LayoutGrid className="size-3.5 shrink-0 text-muted-foreground" />
@@ -1099,23 +1133,25 @@ export function AppSurface({
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4" data-testid="app-runtime">
       {/* The header (title, open-full/chromeless actions) stays fixed; ONLY
-          the app canvas below scrolls. */}
+          the app canvas below scrolls. The gear is unconditional: even a
+          schema-less app has the per-viewer theme override to offer. */}
       <PageHeader
         title={app.name}
         description={app.description ?? undefined}
-        action={
-          <AppHeaderActions
-            appIds={[...definitionsByApp.keys()]}
-            settingsApp={hasUserConfig ? app : null}
-          />
-        }
+        action={<AppHeaderActions appIds={[...definitionsByApp.keys()]} settingsApp={app} />}
       />
       {/* Bordered, self-scrolling canvas so the app's limits are visible
           against the dashboard chrome. Default view only — full/chromeless
           own the whole viewport and need no frame. */}
       <div
         ref={scrollRef}
-        className="flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto rounded-lg border border-border bg-card p-4"
+        className={cn(
+          "flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto rounded-lg border border-border p-4",
+          // A themed canvas shows its OWN field color so the preset reads at a
+          // glance; the unthemed canvas keeps the card step against the page.
+          appThemeAttr ? "bg-background" : "bg-card",
+        )}
+        data-theme={appThemeAttr}
       >
         {surface}
       </div>
@@ -1137,8 +1173,9 @@ export function AppSurface({
  * refresh without waiting for the 30s definition poll — for this app AND
  * every app it borrows elements from, so embeds refresh with the page.
  *
- * `settingsApp` is the app whose per-viewer `userConfig` the gear edits, or
- * `null` for an app that declares none — in which case no gear is rendered.
+ * `settingsApp` is the app whose per-viewer settings the gear edits. Every
+ * app gets the gear now: the drawer always offers the `$theme` appearance
+ * override, plus the declared `userConfig` fields when the app has any.
  */
 function AppHeaderActions({
   appIds,
@@ -1198,7 +1235,7 @@ function AppHeaderActions({
         disabled={refreshing}
         onClick={handleRefresh}
       >
-        <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+        <RefreshCWIcon size={14} className={cn(refreshing && "animate-spin")} />
         Refresh
       </Button>
       {settingsApp && (
@@ -1211,11 +1248,12 @@ function AppHeaderActions({
             data-testid="app-settings-open"
             onClick={() => setSettingsOpen(true)}
           >
-            <Settings className="size-3.5" />
+            <SettingsIcon size={14} />
           </Button>
           <AppSettingsDrawer
             appId={settingsApp.id}
             appName={settingsApp.name}
+            appDefaultTheme={settingsApp.definition.theme}
             open={settingsOpen}
             onOpenChange={setSettingsOpen}
           />

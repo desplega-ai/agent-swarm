@@ -43,6 +43,7 @@ import {
 } from "../apps/store";
 import {
   getAppUserConfigValues,
+  isReservedUserConfigKey,
   mergeUserConfigValues,
   upsertAppUserConfigValues,
   userConfigValueIssues,
@@ -116,7 +117,8 @@ const putUserConfigRoute = route({
   path: "/api/apps/{id}/user-config",
   pattern: ["api", "apps", null, "user-config"],
   summary: "Set app user configuration",
-  description: "Stores validated per-user values outside the versioned app definition.",
+  description:
+    "Stores validated per-user values outside the versioned app definition. The reserved `$theme` key (a preset-theme slug) is accepted on every app, even one that declares no userConfig schema.",
   tags: ["Apps"],
   params: appParamsSchema,
   body: userConfigBodySchema,
@@ -1386,8 +1388,17 @@ export async function handleApps(
       return true;
     }
     if (definitionNeedsRepair(res, app)) return true;
-    const schema = app.definition.userConfig;
-    if (!schema) {
+    // Reserved system keys (`$theme`) are writable on EVERY app — the drawer
+    // offers a theme override whether or not the author declared settings.
+    // Author-namespace keys still require a declared schema, and a write that
+    // carries nothing reserved keeps the historical 400.
+    const schema = app.definition.userConfig ?? {};
+    const valueKeys = Object.keys(parsed.body.values);
+    if (
+      !app.definition.userConfig &&
+      (valueKeys.some((key) => !isReservedUserConfigKey(key)) ||
+        !valueKeys.some(isReservedUserConfigKey))
+    ) {
       jsonError(res, "app does not define userConfig", 400);
       return true;
     }

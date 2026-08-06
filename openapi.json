@@ -356,7 +356,7 @@
       },
       "put": {
         "summary": "Set app user configuration",
-        "description": "Stores validated per-user values outside the versioned app definition.",
+        "description": "Stores validated per-user values outside the versioned app definition. The reserved `$theme` key (a preset-theme slug) is accepted on every app, even one that declares no userConfig schema.",
         "tags": [
           "Apps"
         ],

@@ -4,6 +4,7 @@ import {
   Key,
   KeyRound,
   type LucideIcon,
+  Palette,
   PanelLeftClose,
   PanelLeftOpen,
   Plug,
@@ -32,6 +33,7 @@ interface SettingsNavItem {
 
 const SETTINGS_NAV: SettingsNavItem[] = [
   { title: "Connections", path: "/settings/connections", icon: Cable },
+  { title: "Appearance", path: "/settings/appearance", icon: Palette },
   { title: "Secrets", path: "/settings/secrets", icon: KeyRound },
   { title: "API Keys", path: "/settings/api-keys", icon: Key },
   { title: "Integrations", path: "/settings/integrations", icon: Plug },

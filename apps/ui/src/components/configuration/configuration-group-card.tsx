@@ -26,7 +26,7 @@ export function ConfigurationGroupCard({
         </CardTitle>
         <CardDescription>{group.description}</CardDescription>
       </CardHeader>
-      <CardContent className="divide-y divide-border pt-0">
+      <CardContent className="divide-y divide-border-subtle pt-0">
         {entries.map((entry) => (
           <ConfigurationRow key={entry.key} entry={entry} inEnv={envPresence[entry.key] === true} />
         ))}

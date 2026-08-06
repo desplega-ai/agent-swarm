@@ -345,7 +345,7 @@
       }
     },
     "Button": {
-      "description": "Interactive button. Wire to actions via `on.press`.",
+      "description": "Interactive button. Wire to actions via `on.press`. `variant: \"destructive-outline\"` is the canonical red-outlined destructive look (standalone deletes should use it, not solid red). `disabled` accepts a constant or a bound boolean; `busyWith: \"<actionName>\"` disables the button and shows a spinner while that custom action is running.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -355,7 +355,20 @@
           },
           "variant": {
             "type": "string",
-            "enum": ["default", "secondary", "outline", "ghost", "destructive"]
+            "enum": [
+              "default",
+              "secondary",
+              "outline",
+              "ghost",
+              "destructive",
+              "destructive-outline"
+            ]
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "busyWith": {
+            "type": "string"
           }
         },
         "required": ["label"],
@@ -363,7 +376,7 @@
       }
     },
     "Metric": {
-      "description": "Single label/value tile for status pages.",
+      "description": "Single label/value tile for status pages. Bind `loading` to the backing query (`{ \"$state\": \"/queries/<name>/loading\" }`) to show a skeleton instead of a blank value while it loads.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -380,6 +393,9 @@
                 "type": "number"
               }
             ]
+          },
+          "loading": {
+            "type": "boolean"
           }
         },
         "required": ["label", "value"],
@@ -619,7 +635,7 @@
       }
     },
     "Form": {
-      "description": "Field form. Values live in state under `/forms/<id>/<field>`; `onSubmit` chains receive `$form` (all collected values) and `$form: \"<field>\"` for one.",
+      "description": "Field form. Values live in state under `/forms/<id>/<field>`; `onSubmit` chains receive `$form` (all collected values) and `$form: \"<field>\"` for one. `app.mutate` failures in the chain surface inline under the fields (not the page banner), and the submit button shows a pending spinner while the chain runs.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -720,7 +736,7 @@
       }
     },
     "DetailList": {
-      "description": "Read-only label/value detail view for ONE record. Bind `data` to a single row — usually `{ \"$state\": \"/queries/<name>/data/0\" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `code` for raw/JSON values. Shows `emptyMessage` while the record is loading or missing.",
+      "description": "Read-only label/value detail view for ONE record. Bind `data` to a single row — usually `{ \"$state\": \"/queries/<name>/data/0\" }` with a `$param`-filtered query. `fields` pick and format properties with the same kinds as Table columns (badge tones, relative dates) plus `code` for raw/JSON values. Bind `loading` to the query (`/queries/<name>/loading`) for skeleton fields while it loads; `emptyMessage` shows when the record is genuinely missing.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -793,6 +809,9 @@
                 "const": 2
               }
             ]
+          },
+          "loading": {
+            "type": "boolean"
           }
         },
         "required": ["fields"],
