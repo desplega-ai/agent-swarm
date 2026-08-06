@@ -106,7 +106,8 @@ export function useUsageSummary(filters?: {
   startDate?: string;
   endDate?: string;
   agentId?: string;
-  groupBy?: "day" | "agent" | "both";
+  userId?: string;
+  groupBy?: "day" | "agent" | "both" | "user";
 }) {
   return useQuery({
     queryKey: ["usage-summary", filters],

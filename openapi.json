@@ -14644,7 +14644,8 @@
               "enum": [
                 "day",
                 "agent",
-                "both"
+                "both",
+                "user"
               ]
             },
             "required": false,
@@ -14673,6 +14674,14 @@
             },
             "required": false,
             "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "userId",
             "in": "query"
           }
         ],

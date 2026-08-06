@@ -6793,6 +6793,8 @@ export interface SessionCostSummaryTotals {
   totalDurationMs: number;
   totalSessions: number;
   avgCostPerSession: number;
+  /** Share of `totalCostUsd` whose task carries a human requester. */
+  attributedCostUsd: number;
 }
 
 export interface SessionCostDailyRow {
@@ -6812,30 +6814,57 @@ export interface SessionCostByAgentRow {
   durationMs: number;
 }
 
+export interface SessionCostByUserRow {
+  /** `null` = no human requester (heartbeat, boot triage, other autonomous work). */
+  userId: string | null;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  tasks: number;
+  durationMs: number;
+}
+
+/** `opts.userId` sentinel selecting spend with no human requester. */
+export const UNATTRIBUTED_USER_ID = "unattributed";
+
 export function getSessionCostSummary(opts: {
   startDate?: string;
   endDate?: string;
   agentId?: string;
-  groupBy?: "day" | "agent" | "both";
+  /** A user id, or `UNATTRIBUTED_USER_ID` for spend with no human requester. */
+  userId?: string;
+  groupBy?: "day" | "agent" | "both" | "user";
 }): {
   totals: SessionCostSummaryTotals;
   daily: SessionCostDailyRow[];
   byAgent: SessionCostByAgentRow[];
+  byUser: SessionCostByUserRow[];
 } {
+  // `session_costs` deliberately carries no `userId` column — a task can be
+  // re-attributed after the fact, so the human requester is resolved by joining
+  // through the task (same shape as `getDailySpendForUser`). Every column is
+  // `sc.`-qualified because `createdAt`/`agentId` exist on both sides.
+  const from = "FROM session_costs sc LEFT JOIN agent_tasks t ON t.id = sc.taskId";
   const conditions: string[] = [];
   const params: string[] = [];
 
   if (opts.startDate) {
-    conditions.push("createdAt >= ?");
+    conditions.push("sc.createdAt >= ?");
     params.push(opts.startDate);
   }
   if (opts.endDate) {
-    conditions.push("createdAt <= ?");
+    conditions.push("sc.createdAt <= ?");
     params.push(opts.endDate);
   }
   if (opts.agentId) {
-    conditions.push("agentId = ?");
+    conditions.push("sc.agentId = ?");
     params.push(opts.agentId);
+  }
+  if (opts.userId === UNATTRIBUTED_USER_ID) {
+    conditions.push("t.requestedByUserId IS NULL");
+  } else if (opts.userId) {
+    conditions.push("t.requestedByUserId = ?");
+    params.push(opts.userId);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -6849,19 +6878,22 @@ export function getSessionCostSummary(opts: {
     totalCacheWriteTokens: number;
     totalDurationMs: number;
     totalSessions: number;
+    attributedCostUsd: number;
   };
 
   const totalsRow = getDb()
     .prepare<TotalsRow, string[]>(
       `SELECT
-        COALESCE(SUM(totalCostUsd), 0) as totalCostUsd,
-        COALESCE(SUM(inputTokens), 0) as totalInputTokens,
-        COALESCE(SUM(outputTokens), 0) as totalOutputTokens,
-        COALESCE(SUM(cacheReadTokens), 0) as totalCacheReadTokens,
-        COALESCE(SUM(cacheWriteTokens), 0) as totalCacheWriteTokens,
-        COALESCE(SUM(durationMs), 0) as totalDurationMs,
-        COUNT(*) as totalSessions
-      FROM session_costs ${where}`,
+        COALESCE(SUM(sc.totalCostUsd), 0) as totalCostUsd,
+        COALESCE(SUM(sc.inputTokens), 0) as totalInputTokens,
+        COALESCE(SUM(sc.outputTokens), 0) as totalOutputTokens,
+        COALESCE(SUM(sc.cacheReadTokens), 0) as totalCacheReadTokens,
+        COALESCE(SUM(sc.cacheWriteTokens), 0) as totalCacheWriteTokens,
+        COALESCE(SUM(sc.durationMs), 0) as totalDurationMs,
+        COUNT(*) as totalSessions,
+        COALESCE(SUM(CASE WHEN t.requestedByUserId IS NOT NULL THEN sc.totalCostUsd ELSE 0 END), 0)
+          as attributedCostUsd
+      ${from} ${where}`,
     )
     .get(...params);
 
@@ -6880,6 +6912,7 @@ export function getSessionCostSummary(opts: {
         totalDurationMs: 0,
         totalSessions: 0,
         avgCostPerSession: 0,
+        attributedCostUsd: 0,
       };
 
   // Daily breakdown
@@ -6898,13 +6931,13 @@ export function getSessionCostSummary(opts: {
         string[]
       >(
         `SELECT
-          DATE(createdAt) as date,
-          COALESCE(SUM(totalCostUsd), 0) as costUsd,
-          COALESCE(SUM(inputTokens), 0) as inputTokens,
-          COALESCE(SUM(outputTokens), 0) as outputTokens,
+          DATE(sc.createdAt) as date,
+          COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
+          COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
+          COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
           COUNT(*) as sessions
-        FROM session_costs ${where}
-        GROUP BY DATE(createdAt)
+        ${from} ${where}
+        GROUP BY DATE(sc.createdAt)
         ORDER BY date ASC`,
       )
       .all(...params);
@@ -6926,20 +6959,41 @@ export function getSessionCostSummary(opts: {
         string[]
       >(
         `SELECT
-          agentId,
-          COALESCE(SUM(totalCostUsd), 0) as costUsd,
-          COALESCE(SUM(inputTokens), 0) as inputTokens,
-          COALESCE(SUM(outputTokens), 0) as outputTokens,
+          sc.agentId as agentId,
+          COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
+          COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
+          COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
           COUNT(*) as sessions,
-          COALESCE(SUM(durationMs), 0) as durationMs
-        FROM session_costs ${where}
-        GROUP BY agentId
+          COALESCE(SUM(sc.durationMs), 0) as durationMs
+        ${from} ${where}
+        GROUP BY sc.agentId
         ORDER BY costUsd DESC`,
       )
       .all(...params);
   }
 
-  return { totals, daily, byAgent };
+  // Per-requester breakdown. The `userId IS NULL` bucket is a real row, not a
+  // gap: autonomous spend (heartbeat, boot triage) has no human requester and
+  // must stay visible rather than being folded into a person.
+  let byUser: SessionCostByUserRow[] = [];
+  if (groupBy === "user" || groupBy === "both") {
+    byUser = getDb()
+      .prepare<SessionCostByUserRow, string[]>(
+        `SELECT
+          t.requestedByUserId as userId,
+          COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
+          COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
+          COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
+          COUNT(DISTINCT sc.taskId) as tasks,
+          COALESCE(SUM(sc.durationMs), 0) as durationMs
+        ${from} ${where}
+        GROUP BY t.requestedByUserId
+        ORDER BY costUsd DESC`,
+      )
+      .all(...params);
+  }
+
+  return { totals, daily, byAgent, byUser };
 }
 
 // --- Dashboard cost summary (P4) ---
