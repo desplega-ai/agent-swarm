@@ -6,16 +6,37 @@
  *
  * Cookie payload: `{pageId, exp}` where `exp` is a unix seconds timestamp.
  * Wire shape: `${base64url(JSON.stringify(payload))}.${base64url(HMAC-SHA256(payload, secret))}`.
- * Secret resolution: `process.env.PAGE_SESSION_SECRET || getApiKey()`
- * — the swarm API-key fallback keeps existing dev setups working without
- * forcing a new env var. Verification is constant-time via
- * `crypto.timingSafeEqual` so we don't leak bits via signature-comparison
- * timing.
  *
- * Both functions are async because `crypto.subtle.sign` is async.
+ * Secret resolution (first match wins), mirroring `src/be/crypto/key-bootstrap.ts`:
+ *   1. `PAGE_SESSION_SECRET` env var
+ *   2. `PAGE_SESSION_SECRET_FILE` env var — path to a file containing the secret
+ *   3. `<dirname(DATABASE_PATH)>/.page-session-secret` on-disk file
+ *   4. Auto-generate 32 random bytes (base64), persist to the path from step 3
+ *      with mode 0600, and use it from then on.
+ *
+ * Deliberately does NOT fall back to the swarm API key: that key's default
+ * value is public (`123123`), so signing page-session cookies with it would
+ * let anyone holding the default key forge a session for any page.
+ *
+ * Verification is constant-time via `crypto.timingSafeEqual` so we don't leak
+ * bits via signature-comparison timing.
+ *
+ * Both `sign`/`verify` are async because `crypto.subtle.sign` is async;
+ * `getSecret` itself is sync (only touches env vars + local disk, no network).
  */
-import { timingSafeEqual } from "node:crypto";
-import { getApiKey } from "./api-key";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+const ENV_SECRET = "PAGE_SESSION_SECRET";
+const ENV_SECRET_FILE = "PAGE_SESSION_SECRET_FILE";
+const SECRET_FILENAME = ".page-session-secret";
+const GENERATED_SECRET_BYTES = 32;
+
+function defaultSecretFilePath(): string {
+  const dbPath = process.env.DATABASE_PATH || "./agent-swarm-db.sqlite";
+  return path.join(path.dirname(dbPath), SECRET_FILENAME);
+}
 
 export interface PageSessionPayload {
   pageId: string;
@@ -43,17 +64,58 @@ function base64urlDecode(input: string): Uint8Array {
   return new Uint8Array(Buffer.from(b64, "base64"));
 }
 
-/** Resolve the HMAC secret. */
+/**
+ * Resolve the HMAC secret per the precedence documented in the file header.
+ * Re-reads `PAGE_SESSION_SECRET` on every call (no in-process caching) so a
+ * rotated env var takes effect immediately — signing/verification are not
+ * hot-path operations (one call per page load / proxied API call).
+ */
 function getSecret(): string {
-  const secret = process.env.PAGE_SESSION_SECRET || getApiKey();
-  if (!secret) {
-    // Fail-closed: better to refuse to issue cookies than to mint with an
-    // empty key (any attacker who learns the implementation can forge).
+  const envSecret = process.env[ENV_SECRET];
+  if (envSecret) return envSecret;
+
+  const envSecretFile = process.env[ENV_SECRET_FILE];
+  if (envSecretFile) {
+    if (!existsSync(envSecretFile)) {
+      throw new Error(`page-session: ${ENV_SECRET_FILE} (${envSecretFile}) does not exist`);
+    }
+    const content = readFileSync(envSecretFile, "utf8").trim();
+    if (!content) {
+      throw new Error(`page-session: ${ENV_SECRET_FILE} (${envSecretFile}) is empty`);
+    }
+    return content;
+  }
+
+  const filePath = defaultSecretFilePath();
+  if (existsSync(filePath)) {
+    const content = readFileSync(filePath, "utf8").trim();
+    if (!content) {
+      throw new Error(`page-session: ${filePath} exists but is empty; refusing to sign/verify`);
+    }
+    return content;
+  }
+
+  // Auto-generate + persist on first use. `wx` flag for TOCTOU safety — if
+  // another process wins the race, fall through to reading its file instead
+  // of clobbering it.
+  const generated = randomBytes(GENERATED_SECRET_BYTES).toString("base64");
+  try {
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(filePath, generated, { flag: "wx", mode: 0o600 });
+    console.warn(
+      `[page-session] Generated new signing secret at ${filePath}. This secret signs page-session cookies — back it up alongside your database.`,
+    );
+    return generated;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EEXIST") {
+      const content = readFileSync(filePath, "utf8").trim();
+      if (content) return content;
+    }
     throw new Error(
-      "page-session: neither PAGE_SESSION_SECRET nor swarm API key is set; refusing to sign/verify",
+      `page-session: failed to persist generated secret at ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
-  return secret;
 }
 
 /** Import the HMAC key for crypto.subtle. */

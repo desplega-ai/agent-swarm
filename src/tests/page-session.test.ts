@@ -1,8 +1,34 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import type { PageSessionPayload } from "../utils/page-session";
 import { parseCookieHeader, signPageSession, verifyPageSession } from "../utils/page-session";
 
 const ORIGINAL_SECRET = process.env.PAGE_SESSION_SECRET;
 const ORIGINAL_API_KEY = process.env.API_KEY;
+const ORIGINAL_DATABASE_PATH = process.env.DATABASE_PATH;
+
+/**
+ * Replicates the page-session wire format (base64url(JSON payload) + "." +
+ * base64url(HMAC-SHA256(payload, secret))) with an ATTACKER-CHOSEN secret —
+ * used to simulate forging a cookie the way CWE-798 described (signing with
+ * the known default API key) without going through the real `getSecret()`
+ * resolution the module under test now uses.
+ */
+async function forgeToken(payload: PageSessionPayload, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const sigBuf = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payloadB64));
+  const sigB64 = Buffer.from(sigBuf).toString("base64url");
+  return `${payloadB64}.${sigB64}`;
+}
 
 beforeAll(() => {
   process.env.PAGE_SESSION_SECRET = "test-secret-fixed-vector-key";
@@ -13,6 +39,8 @@ afterAll(() => {
   else delete process.env.PAGE_SESSION_SECRET;
   if (ORIGINAL_API_KEY !== undefined) process.env.API_KEY = ORIGINAL_API_KEY;
   else delete process.env.API_KEY;
+  if (ORIGINAL_DATABASE_PATH !== undefined) process.env.DATABASE_PATH = ORIGINAL_DATABASE_PATH;
+  else delete process.env.DATABASE_PATH;
 });
 
 describe("page-session HMAC helpers", () => {
@@ -96,31 +124,70 @@ describe("page-session HMAC helpers", () => {
     }
   });
 
-  test("falls back to API_KEY when PAGE_SESSION_SECRET unset", async () => {
-    delete process.env.PAGE_SESSION_SECRET;
-    process.env.API_KEY = "fallback-api-key-for-test";
-    try {
-      const payload = { pageId: "fallback", exp: Math.floor(Date.now() / 1000) + 3600 };
-      const token = await signPageSession(payload);
-      const got = await verifyPageSession(token);
-      expect(got).toEqual(payload);
-    } finally {
-      process.env.PAGE_SESSION_SECRET = "test-secret-fixed-vector-key";
-    }
-  });
+  // Regression coverage for CWE-798 (critical-666a794a): `getSecret()` used to
+  // fall back to `getApiKey()` when PAGE_SESSION_SECRET was unset, and the
+  // swarm API key's documented default is the public value `123123` — so a
+  // default install signed page-session cookies with a value anyone could
+  // guess. The fix removes that fallback entirely in favor of an
+  // auto-generated, persisted-to-disk secret (mirrors `key-bootstrap.ts`).
+  describe("CWE-798 fix: no silent API-key inheritance", () => {
+    let tmpDir: string;
 
-  test("refuses to sign when both PAGE_SESSION_SECRET and API_KEY are unset", async () => {
-    delete process.env.PAGE_SESSION_SECRET;
-    const savedApiKey = process.env.API_KEY;
-    delete process.env.API_KEY;
-    try {
-      await expect(
-        signPageSession({ pageId: "x", exp: Math.floor(Date.now() / 1000) + 60 }),
-      ).rejects.toThrow(/PAGE_SESSION_SECRET|API_KEY/);
-    } finally {
-      process.env.PAGE_SESSION_SECRET = "test-secret-fixed-vector-key";
-      if (savedApiKey !== undefined) process.env.API_KEY = savedApiKey;
-    }
+    beforeAll(() => {
+      tmpDir = mkdtempSync(path.join(tmpdir(), "page-session-secret-test-"));
+    });
+
+    afterAll(() => {
+      rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    // Must-reject: a cookie forged with the API key (default "123123", the
+    // exact CWE-798 attack) must NOT verify once PAGE_SESSION_SECRET is unset.
+    test("a cookie forged with the (default) API key does not verify", async () => {
+      delete process.env.PAGE_SESSION_SECRET;
+      process.env.DATABASE_PATH = path.join(tmpDir, "reject-case", "db.sqlite");
+      process.env.API_KEY = "123123";
+      try {
+        const payload = { pageId: "forged", exp: Math.floor(Date.now() / 1000) + 3600 };
+        const forged = await forgeToken(payload, "123123");
+        expect(await verifyPageSession(forged)).toBeNull();
+      } finally {
+        process.env.PAGE_SESSION_SECRET = "test-secret-fixed-vector-key";
+      }
+    });
+
+    // Positive path: signing/verifying still works end-to-end when
+    // PAGE_SESSION_SECRET is unset — a distinct secret is generated and
+    // persisted to disk on first use instead of refusing to operate or
+    // reusing the API key.
+    test("generates and persists a distinct secret, and sign/verify still round-trips", async () => {
+      delete process.env.PAGE_SESSION_SECRET;
+      const dbDir = path.join(tmpDir, "generate-case");
+      process.env.DATABASE_PATH = path.join(dbDir, "db.sqlite");
+      process.env.API_KEY = "123123";
+      try {
+        const payload = { pageId: "generated", exp: Math.floor(Date.now() / 1000) + 3600 };
+        const token = await signPageSession(payload);
+        expect(await verifyPageSession(token)).toEqual(payload);
+
+        const secretFile = path.join(dbDir, ".page-session-secret");
+        expect(existsSync(secretFile)).toBe(true);
+
+        // The generated secret must not equal the (forgeable) API key — a
+        // token forged with "123123" still must not verify post-generation.
+        const forged = await forgeToken(payload, "123123");
+        expect(await verifyPageSession(forged)).toBeNull();
+
+        // Idempotent across calls within the same process: a second sign
+        // against the same DATABASE_PATH reuses the persisted file, so a
+        // token from the first call still verifies.
+        const token2 = await signPageSession({ ...payload, pageId: "generated-2" });
+        expect(await verifyPageSession(token2)).toEqual({ ...payload, pageId: "generated-2" });
+        expect(await verifyPageSession(token)).toEqual(payload);
+      } finally {
+        process.env.PAGE_SESSION_SECRET = "test-secret-fixed-vector-key";
+      }
+    });
   });
 
   test("known-vector regression: payload {pageId:'abc',exp:1893456000} with secret 'test-secret-fixed-vector-key' verifies", async () => {

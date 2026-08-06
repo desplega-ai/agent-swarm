@@ -1,5 +1,6 @@
 # Tests
 .encryption-key
+.page-session-secret
 
 .claude/scheduled_tasks.lock
 .claude/worktrees/

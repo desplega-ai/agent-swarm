@@ -419,7 +419,8 @@ Environment variables for the hosted Pages feature (DB-backed, agent-authored we
 
 | Variable | Description |
 |----------|-------------|
-| `PAGE_SESSION_SECRET` | Optional HMAC-SHA256 secret for signing the `page_session` cookie. Falls back to the swarm API key (`getApiKey()`) when unset; boot-time signing/verification refuses to run if both are unset |
+| `PAGE_SESSION_SECRET` | HMAC-SHA256 secret for signing the `page_session` cookie. **Reserved-like**: not read from `swarm_config`, and never falls back to the swarm API key (that key's documented default is public). When unset, resolved via `PAGE_SESSION_SECRET_FILE`, then `<dirname(DATABASE_PATH)>/.page-session-secret` on disk, then auto-generated and persisted there on first use — mirrors `SECRETS_ENCRYPTION_KEY`'s resolution order (see [Encryption Key](/docs/guides/deployment#encryption-key)). |
+| `PAGE_SESSION_SECRET_FILE` | Alternative to `PAGE_SESSION_SECRET`: absolute path to a file whose contents are the secret. Useful with Docker secrets or k8s `Secret` volume mounts. |
 
 ## x402 Payments
 

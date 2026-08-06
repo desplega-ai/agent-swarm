@@ -268,3 +268,82 @@ describe("/@swarm/api/* proxy", () => {
     expect(agent.id).toBe(agentId);
   });
 });
+
+// Regression coverage for CWE-284 (high-65dbf970): the proxy used to forward
+// ANY `/api/<rest>` suffix with the operator bearer attached — so a
+// page-session cookie holder (including a public/no-auth page viewer, or an
+// attacker with a forged cookie) was effectively an operator for the entire
+// API surface. The fix adds an explicit allowlist of the routes the injected
+// browser SDK actually uses (src/artifact-sdk/browser-sdk.ts).
+describe("/@swarm/api/* proxy — route allowlist", () => {
+  async function launchCookie(): Promise<string> {
+    const id = await createPage();
+    const launch = await fetch(`${BASE}/api/pages/${id}/launch`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${API_KEY}`, "X-Agent-ID": agentId },
+    });
+    const setCookie = launch.headers.get("set-cookie");
+    const cookieValue = /page_session=([^;]+)/.exec(setCookie!)?.[1];
+    if (!cookieValue) throw new Error("failed to mint test cookie");
+    return cookieValue;
+  }
+
+  // Must-reject: a route outside the documented SDK surface (e.g. the
+  // operator config/secrets API) must be rejected even with an otherwise
+  // valid cookie — this is the exact over-broad-forwarding bug.
+  test("rejects a non-allowlisted route (e.g. /api/config) with a valid cookie", async () => {
+    const cookie = await launchCookie();
+    const res = await fetch(`${BASE}/@swarm/api/config`, {
+      headers: { Cookie: `page_session=${cookie}` },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  test("rejects a non-allowlisted route (e.g. /api/mcp-servers) with a valid cookie", async () => {
+    const cookie = await launchCookie();
+    const res = await fetch(`${BASE}/@swarm/api/mcp-servers`, {
+      headers: { Cookie: `page_session=${cookie}` },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  // Must-reject: literal ".." path-traversal segment in the proxied suffix.
+  test("rejects a literal path-traversal segment", async () => {
+    const cookie = await launchCookie();
+    const res = await fetch(`${BASE}/@swarm/api/agents/../pages`, {
+      headers: { Cookie: `page_session=${cookie}` },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  // Must-reject: percent-encoded ".." must not sneak past the allowlist
+  // either (decode-then-check, not check-then-decode).
+  test("rejects a percent-encoded path-traversal segment", async () => {
+    const cookie = await launchCookie();
+    const res = await fetch(`${BASE}/@swarm/api/agents/%2e%2e/pages`, {
+      headers: { Cookie: `page_session=${cookie}` },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  // Must-reject: a percent-encoded slash must not smuggle an extra segment
+  // past the allowlist's segment-count check (e.g. faking a 2-segment
+  // "agents/:id" route out of what is really 3 real segments).
+  test("rejects a percent-encoded slash smuggled into a wildcard segment", async () => {
+    const cookie = await launchCookie();
+    const res = await fetch(`${BASE}/@swarm/api/agents/foo%2Fbar`, {
+      headers: { Cookie: `page_session=${cookie}` },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  // Positive path: an allowlisted route with an id param (:id in "tasks/:id")
+  // still resolves normally — the allowlist isn't over-broad.
+  test("still allows GET /@swarm/api/tasks (allowlisted, no id param)", async () => {
+    const cookie = await launchCookie();
+    const res = await fetch(`${BASE}/@swarm/api/tasks`, {
+      headers: { Cookie: `page_session=${cookie}` },
+    });
+    expect(res.status).toBe(200);
+  });
+});
