@@ -97,6 +97,51 @@ ${columns.join("\n")}
   };
 }
 
+type ParamType = { kind: "primitive"; name: string } | { kind: "literals"; values: string[] };
+
+function paramTypeForColumn(
+  column: Pick<ColumnDef, "kind" | "enum"> | undefined,
+  columnName: string,
+): ParamType {
+  if (!column) {
+    return Object.hasOwn(SYSTEM_COLUMN_KINDS, columnName)
+      ? { kind: "primitive", name: tsTypeForKind(SYSTEM_COLUMN_KINDS[columnName]!) }
+      : { kind: "primitive", name: "unknown" };
+  }
+  if (column.kind === "enum" && column.enum?.length) {
+    return { kind: "literals", values: column.enum };
+  }
+  return { kind: "primitive", name: tsTypeForColumn(column) };
+}
+
+/**
+ * The runtime validates one param value against EVERY filter column that
+ * references it (`resolveQueryFilters`), so a reused `$param` accepts only the
+ * intersection of the columns' inputs — never the union. Disjoint columns
+ * intersect to `never` (the specialized overload becomes uncallable; the loose
+ * fallback still compiles such calls, untyped).
+ */
+function intersectParamTypes(a: ParamType, b: ParamType): ParamType {
+  if (a.kind === "primitive" && a.name === "unknown") return b;
+  if (b.kind === "primitive" && b.name === "unknown") return a;
+  if (a.kind === "literals" && b.kind === "literals") {
+    return { kind: "literals", values: a.values.filter((value) => b.values.includes(value)) };
+  }
+  if (a.kind === "literals") {
+    return b.kind === "primitive" && b.name === "string" ? a : { kind: "literals", values: [] };
+  }
+  if (b.kind === "literals") {
+    return a.name === "string" ? b : { kind: "literals", values: [] };
+  }
+  return a.name === b.name ? a : { kind: "literals", values: [] };
+}
+
+function renderParamType(type: ParamType): string {
+  if (type.kind === "primitive") return type.name;
+  if (type.values.length === 0) return "never";
+  return type.values.map((value) => JSON.stringify(value)).join(" | ");
+}
+
 function renderQuery(
   app: AppRecord,
   namespace: string,
@@ -105,24 +150,18 @@ function renderQuery(
   modelInterfaceName: string,
 ): string {
   const model = app.definition.models[query.model]!;
-  const params = new Map<string, string[]>();
+  const params = new Map<string, ParamType>();
   for (const [columnName, value] of Object.entries(query.filter ?? {})) {
     if (typeof value !== "object" || value === null || !("$param" in value)) continue;
-    const column = model.columns[columnName];
-    const type = column
-      ? tsTypeForColumn(column)
-      : Object.hasOwn(SYSTEM_COLUMN_KINDS, columnName)
-        ? tsTypeForKind(SYSTEM_COLUMN_KINDS[columnName]!)
-        : "unknown";
-    const types = params.get(value.$param) ?? [];
-    if (!types.includes(type)) types.push(type);
-    params.set(value.$param, types);
+    const next = paramTypeForColumn(model.columns[columnName], columnName);
+    const prior = params.get(value.$param);
+    params.set(value.$param, prior ? intersectParamTypes(prior, next) : next);
   }
   const paramEntries = [...params.entries()];
   const paramsType =
     paramEntries.length === 0
       ? "params?: Record<string, never>;"
-      : `params: { ${paramEntries.map(([name, types]) => `${name}: ${types.join(" | ")}`).join("; ")} };`;
+      : `params: { ${paramEntries.map(([name, type]) => `${name}: ${renderParamType(type)}`).join("; ")} };`;
   const paramsComment =
     paramEntries.length === 0
       ? "No params."

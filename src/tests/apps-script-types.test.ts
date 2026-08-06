@@ -86,6 +86,47 @@ describe("renderAppTypes", () => {
     expect(rendered).toContain("params?: Record<string, never>;");
   });
 
+  test("types a reused $param as the intersection of its filter columns", () => {
+    const rendered = renderAppTypes([
+      app("Reuse", {
+        models: {
+          issue: {
+            columns: {
+              state: { kind: "enum", enum: ["open", "closed", "stale"] },
+              flag: { kind: "enum", enum: ["closed", "stale", "urgent"] },
+              priority: { kind: "enum", enum: ["high", "low"] },
+              label: { kind: "string" },
+              count: { kind: "number" },
+            },
+          },
+        },
+        queries: {
+          overlappingEnums: {
+            model: "issue",
+            filter: { state: { $param: "choice" }, flag: { $param: "choice" } },
+          },
+          enumAndString: {
+            model: "issue",
+            filter: { state: { $param: "pick" }, label: { $param: "pick" } },
+          },
+          disjointEnums: {
+            model: "issue",
+            filter: { state: { $param: "which" }, priority: { $param: "which" } },
+          },
+          disjointPrimitives: {
+            model: "issue",
+            filter: { label: { $param: "value" }, count: { $param: "value" } },
+          },
+        },
+      }),
+    ]);
+
+    expect(rendered).toContain('params: { choice: "closed" | "stale" };');
+    expect(rendered).toContain('params: { pick: "open" | "closed" | "stale" };');
+    expect(rendered).toContain("params: { which: never };");
+    expect(rendered).toContain("params: { value: never };");
+  });
+
   test("renders a documentation-grade action union", () => {
     const rendered = renderAppTypes([app("PM Inbox", issueDefinition())]);
     expect(rendered).toContain('export type ActionName = "closeIssue" | "notifyOwner";');
