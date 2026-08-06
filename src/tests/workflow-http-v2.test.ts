@@ -9,9 +9,11 @@ import {
 } from "node:http";
 import {
   closeDb,
+  createUser,
   createWorkflowRun,
   createWorkflowRunStep,
   getDb,
+  getWorkflowRun,
   getWorkflowVersions,
   initDb,
   updateWorkflowRun,
@@ -603,6 +605,24 @@ describe("Workflow HTTP API v2", () => {
         body: JSON.stringify({}),
       });
       expect(res.status).toBe(201);
+    });
+
+    test("falls back to the workflow author when the trigger has no user auth", async () => {
+      const author = createUser({
+        name: "Workflow Author",
+        email: `workflow-author-${crypto.randomUUID()}@example.com`,
+      });
+      const workflow = await createTestWorkflow();
+      getDb().run("UPDATE workflows SET created_by = ? WHERE id = ?", [author.id, workflow.id]);
+
+      const res = await fetch(`${baseUrl}/api/workflows/${workflow.id}/trigger`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(201);
+      const { runId } = (await res.json()) as { runId: string };
+      expect(getWorkflowRun(runId)?.context?.swarm).toEqual({ requestedByUserId: author.id });
     });
 
     test("returns 400 for disabled workflow", async () => {

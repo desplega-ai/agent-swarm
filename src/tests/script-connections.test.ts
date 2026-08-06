@@ -532,6 +532,7 @@ describe("script connections", () => {
       // and binding columns this intentionally partial fixture does not create.
       markMigrationApplied(database, "117_unified_oauth.sql");
       markMigrationApplied(database, "119_agent_avatar.sql");
+      markMigrationApplied(database, "127_backfill_user_attribution.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
