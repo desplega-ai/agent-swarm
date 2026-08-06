@@ -1,4 +1,7 @@
 import type { WebClient } from "@slack/web-api";
+import { getLogsByTaskIdChronological, getSlackTasksInThread } from "../be/db";
+import { type AgentTask, isTerminalTaskStatus } from "../types";
+import { getSlackApp } from "./app";
 
 type SlackReactionClient = Pick<WebClient, "reactions">;
 
@@ -52,4 +55,52 @@ export async function finalizeSlackMessageReaction(
   }
 
   await ackSlackMessage(client, channel, timestamp, outcome);
+}
+
+export function finalizeTerminalSlackReactions(tasks: AgentTask[]): void {
+  const app = getSlackApp();
+  if (!app) return;
+
+  const triggers = new Map<string, { channelId: string; threadTs: string; timestamp: string }>();
+  for (const task of tasks) {
+    if (!task.slackChannelId || !task.slackThreadTs || !task.slackTriggerMessageTs) continue;
+    const key = `${task.slackChannelId}\0${task.slackTriggerMessageTs}`;
+    triggers.set(key, {
+      channelId: task.slackChannelId,
+      threadTs: task.slackThreadTs,
+      timestamp: task.slackTriggerMessageTs,
+    });
+  }
+
+  for (const { channelId, threadTs, timestamp } of triggers.values()) {
+    const linkedTasks = getSlackTasksInThread(channelId, threadTs).filter(
+      (task) => task.slackTriggerMessageTs === timestamp,
+    );
+    if (
+      linkedTasks.length === 0 ||
+      linkedTasks.some((task) => !isTerminalTaskStatus(task.status))
+    ) {
+      continue;
+    }
+    const outcome = linkedTasks.every((task) => task.status === "completed")
+      ? "white_check_mark"
+      : "x";
+    void finalizeSlackMessageReaction(app.client, channelId, timestamp, outcome).catch((error) =>
+      console.error(`[Slack] Failed to finalize reaction for ${channelId}/${timestamp}:`, error),
+    );
+  }
+
+  for (const task of tasks) {
+    const outcome = task.status === "completed" ? "white_check_mark" : "x";
+    for (const log of getLogsByTaskIdChronological(task.id)) {
+      if (log.eventType !== "task_steering" || log.newValue !== "slack_reaction") continue;
+      const { slackChannelId: channelId, slackMessageTs: timestamp } = JSON.parse(log.metadata!);
+      void finalizeSlackMessageReaction(app.client, channelId, timestamp, outcome).catch((error) =>
+        console.error(
+          `[Slack] Failed to finalize steer reaction for ${channelId}/${timestamp}:`,
+          error,
+        ),
+      );
+    }
+  }
 }

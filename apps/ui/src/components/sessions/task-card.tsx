@@ -90,6 +90,7 @@ const SHOW_STATUS_PILL = new Set<string>([
   "pending",
   "failed",
   "cancelled",
+  "superseded",
   "paused",
   "reviewing",
   "offered",
@@ -133,7 +134,10 @@ export function TaskCard({
   const resumeTask = useResumeTask();
 
   const isTerminal =
-    task.status === "completed" || task.status === "failed" || task.status === "cancelled";
+    task.status === "completed" ||
+    task.status === "failed" ||
+    task.status === "cancelled" ||
+    task.status === "superseded";
   const canCancel = !isTerminal && task.status !== "paused";
   const canPause = task.status === "in_progress";
   const canResume = task.status === "paused";
@@ -196,7 +200,8 @@ export function TaskCard({
                 children finish), so the start time alone is misleading. */}
             {(task.status === "completed" ||
               task.status === "failed" ||
-              task.status === "cancelled") &&
+              task.status === "cancelled" ||
+              task.status === "superseded") &&
             task.lastUpdatedAt &&
             task.lastUpdatedAt !== task.createdAt ? (
               <>

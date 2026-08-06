@@ -108,9 +108,10 @@ export function getAgentFsDefaultDriveId(): string | undefined {
 
 /**
  * Resolve a public agent-fs live URL for an attachment when we have enough
- * info — `path` plus (`orgId` and `driveId`, falling back to env-var
- * defaults). Returns `null` when the path is missing or no org/drive pair is
- * available; callers fall back to the raw `agent-fs:<path>` display.
+ * info — `path` plus a matched `orgId`/`driveId` pair. When a row supplies
+ * neither ID, the pair may come from env-var defaults. A partial row never
+ * mixes its ID with a default; callers fall back to the raw
+ * `agent-fs:<path>` display instead.
  *
  * Shape:  ${liveHost}/file/~/<orgId>/<driveId>/<normalized-path>
  */
@@ -121,8 +122,11 @@ export function buildAgentFsLiveUrl(opts: {
 }): string | null {
   const path = opts.path?.trim();
   if (!path) return null;
-  const orgId = opts.orgId?.trim() || getAgentFsDefaultOrgId();
-  const driveId = opts.driveId?.trim() || getAgentFsDefaultDriveId();
+  const rowOrgId = opts.orgId?.trim();
+  const rowDriveId = opts.driveId?.trim();
+  const hasRowId = Boolean(rowOrgId || rowDriveId);
+  const orgId = hasRowId ? rowOrgId : getAgentFsDefaultOrgId();
+  const driveId = hasRowId ? rowDriveId : getAgentFsDefaultDriveId();
   if (!orgId || !driveId) return null;
   const host = getAgentFsLiveUrl();
   const normalizedPath = path.replace(/^\/+/, "");

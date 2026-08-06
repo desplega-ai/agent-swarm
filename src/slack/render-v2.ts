@@ -22,6 +22,7 @@ import { slackContextKey } from "../tasks/context-key";
 import type { AgentTask, TaskAttachment } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
+import { finalizeTerminalSlackReactions } from "./ack";
 import { getSlackApp } from "./app";
 import {
   getTaskLink,
@@ -878,6 +879,7 @@ export async function processSlackRenderV2(): Promise<void> {
       if (getSlackOutcomeMessage(task.id)?.finalizedAt) continue;
       try {
         const outcome = await streamOutcomeCard(task, tree);
+        if (outcome) finalizeTerminalSlackReactions([task]);
         outcomeCreated ||= !!outcome;
       } catch (error) {
         console.error(`[Slack] Failed to stream outcome for task ${task.id}:`, error);
