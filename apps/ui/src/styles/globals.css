@@ -216,6 +216,20 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Tailwind v4 leaves colorless `border-*` utilities on `currentColor`, which
+ * renders near-black hairlines in light mode and ignores theme presets.
+ * Default every border to the themed token instead (the standard shadcn v4
+ * base rule) — explicit `border-<color>` utilities still win. */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-border);
+  }
+}
+
 body {
   margin: 0;
   background: var(--color-background);
@@ -237,6 +251,14 @@ select:not(:disabled),
 label[for],
 summary {
   cursor: pointer;
+}
+
+/* Exception (Taras): the global sidebar keeps the pre-rule feel — nav
+ * anchors stay pointer natively, but its buttons (group labels, toggles,
+ * menu buttons) keep the default arrow. */
+[data-slot="sidebar-container"] button:not(:disabled),
+[data-slot="sidebar-container"] [role="button"] {
+  cursor: default;
 }
 
 /* Hover linger — the Linear hover: enter instantly, release softly. A pure
