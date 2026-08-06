@@ -144,6 +144,18 @@ describe("/api/fs REST", () => {
     );
     expect(attachmentContentDisposition('quote".txt')).not.toContain('quote".txt');
     expect(attachmentContentDisposition("newline\nname.txt")).not.toContain("\n");
+
+    const unsafeFilename = 'evil";part\\folder%/file\r\n\0Injected: yes.txt';
+    const unsafeHeader = attachmentContentDisposition(unsafeFilename);
+    expect(unsafeHeader).toBe(
+      "attachment; filename=\"evil;partfolder%/fileInjected: yes.txt\"; filename*=UTF-8''evil%22%3Bpart%5Cfolder%25%2FfileInjected%3A%20yes.txt",
+    );
+    expect(unsafeHeader).toContain("%22");
+    expect(unsafeHeader).toContain("%5C");
+    expect(unsafeHeader).toContain("%25");
+    expect(unsafeHeader).toContain("%2F");
+    expect(unsafeHeader).not.toMatch(/[\r\n\0]/);
+    expect(unsafeHeader.split(/\r\n|\r|\n/)).toHaveLength(1);
   });
 
   test("401 without Authorization header", async () => {
