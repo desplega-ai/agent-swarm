@@ -474,6 +474,7 @@ export default function AgentDetailPage() {
                 <SelectItem value="completed">Completed</SelectItem>
                 <SelectItem value="failed">Failed</SelectItem>
                 <SelectItem value="cancelled">Cancelled</SelectItem>
+                <SelectItem value="superseded">Superseded</SelectItem>
               </SelectContent>
             </Select>
             <div className="ml-auto">
