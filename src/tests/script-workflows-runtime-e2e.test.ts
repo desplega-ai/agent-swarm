@@ -168,4 +168,65 @@ describe("script workflow runtime", () => {
     expect(journal[0]?.stepKey).toBe("double");
     expect(journal[0]?.stepType).toBe("swarm-script");
   });
+
+  // ─── Sandbox regressions (superagent.sh c27edfd7, finding fd866ffe) ──────
+
+  test("the durable run's user code cannot read the operator bearer from process.env", async () => {
+    const source = `
+      export default async function main() {
+        return {
+          apiKeyEnv: typeof process !== "undefined" ? (process.env.AGENT_SWARM_API_KEY ?? null) : "no-process",
+        };
+      }
+    `;
+
+    const created = await api("/api/script-runs", {
+      method: "POST",
+      body: JSON.stringify({ source, background: true }),
+    });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+
+    const run = await waitForRun(id);
+    expect(run.status).toBe("completed");
+    // Not the real key, not any truthy value — the env var simply isn't set
+    // in the harness's process anymore (bearer travels over stdin instead).
+    expect((run.output as { apiKeyEnv: unknown }).apiKeyEnv).toBeNull();
+  });
+
+  test("resource ulimits actually apply to the durable run's process tree", async () => {
+    const source = `
+      export default async function main() {
+        const proc = Bun.spawnSync(["sh", "-c", "ulimit -v"]);
+        const out = new TextDecoder().decode(proc.stdout).trim();
+        return { ulimitV: out };
+      }
+    `;
+
+    const created = await api("/api/script-runs", {
+      method: "POST",
+      body: JSON.stringify({ source, background: true }),
+    });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+
+    const run = await waitForRun(id);
+    expect(run.status).toBe("completed");
+    const ulimitV = (run.output as { ulimitV: string }).ulimitV;
+    expect(ulimitV).not.toBe("unlimited");
+    expect(Number(ulimitV)).toBeGreaterThan(0);
+  });
+
+  test("POST /api/script-runs requires no bearer beyond normal auth — matches POST /api/scripts/run (any authenticated agent)", async () => {
+    const created = await api("/api/script-runs", {
+      method: "POST",
+      body: JSON.stringify({
+        source: "export default async () => ({ ok: true });",
+        background: true,
+      }),
+    });
+    // Not a 401/403 for an ordinary (non-lead) agent — RBAC posture is
+    // explicitly `ungated`, not silently missing.
+    expect(created.status).toBe(201);
+  });
 });

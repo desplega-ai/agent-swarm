@@ -626,7 +626,7 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
  * Falls back to baseEnv on any error (network, parse, etc).
  * Credential env vars with comma-separated values get one randomly selected.
  */
-interface ResolvedEnvResult {
+export interface ResolvedEnvResult {
   env: Record<string, string | undefined>;
   credentialSelections: CredentialSelection[];
   /** Raw config-row value, kept separate from the merged environment so an
@@ -641,7 +641,7 @@ interface ResolvedEnvResult {
   resolvedProvider: ProviderName;
 }
 
-async function fetchResolvedEnv(
+export async function fetchResolvedEnv(
   apiUrl: string,
   apiKey: string,
   agentId: string,
@@ -671,6 +671,32 @@ async function fetchResolvedEnv(
             (config) => config.key === "SCRIPTS_ONLY_MCP",
           )?.value;
           for (const config of data.configs) {
+            // A blank swarm_config value for a BLANK_ROW_IS_STRAY_KEYS entry
+            // (the model-control keys) must not silently blank out a
+            // genuinely-set container/boot env value — that key exists
+            // specifically so a container-provided value (e.g.
+            // `docker run -e MODEL_OVERRIDE=...`) survives config reloads.
+            // Nothing writes an intentionally-empty row through the
+            // dedicated tri-state endpoints (they use DELETE to clear), so an
+            // empty string here can only be a stray row (e.g. via the generic
+            // `PUT /api/config`, which accepts any value) — treat it the same
+            // as "no row" rather than as an explicit override (issue #1102
+            // bug 2). This is narrower than the full RELOADABLE_ENV_KEYS set:
+            // other reloadable keys (e.g. MEMORY_RATERS) are written through
+            // the generic config-page path where a blank row IS a meaningful,
+            // intentional value — see BLANK_ROW_IS_STRAY_KEYS above. Every
+            // other config key keeps today's behavior (empty string is a
+            // valid explicit value).
+            if (
+              config.value === "" &&
+              BLANK_ROW_IS_STRAY_KEYS.has(config.key) &&
+              baseEnv[config.key]
+            ) {
+              console.warn(
+                `[env-reload] Ignoring blank swarm_config value for ${config.key} — keeping container-provided value`,
+              );
+              continue;
+            }
             env[config.key] = config.value;
           }
           console.log(`[env-reload] Loaded ${data.configs.length} config entries from API`);
@@ -790,7 +816,7 @@ async function ensureAgentFsCredentials(
  * NOTE: SCRIPTS_ONLY_MCP and HARNESS_PROVIDER stay excluded on purpose — they
  * have paired adapter/prompt state and their own reconcile path above.
  */
-const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
+export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "MODEL_OVERRIDE",
   "REASONING_EFFORT_OVERRIDE",
   "AGENT_FS_SHARED_ORG_ID",
@@ -806,16 +832,51 @@ const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Subset of RELOADABLE_ENV_KEYS whose write path is the agent tri-state
+ * endpoint (`PATCH /api/agents/:id` — see src/http/agents.ts), which upserts
+ * a row for a concrete value and DELETEs the row to clear it. No path ever
+ * intentionally writes an empty-string row for these keys, so a blank row
+ * can only be a stray write via the generic `PUT /api/config` (which
+ * accepts any value) — safe to treat as "no row" and keep the
+ * container-provided value.
+ *
+ * Every other RELOADABLE_ENV_KEYS entry (e.g. MEMORY_RATERS, SLACK_DISABLE)
+ * is written through the generic config-page path where an explicit blank
+ * IS a meaningful value the UI lets an operator set on purpose — e.g.
+ * `MEMORY_RATERS=""` is the documented way to run no raters even when the
+ * container sets `MEMORY_RATERS=llm` (see getRegisteredRaters in
+ * src/be/memory/raters/registry.ts and the configuration-catalog
+ * description). Blank-guarding those would silently ignore a real operator
+ * override, so this set intentionally stays narrower than
+ * RELOADABLE_ENV_KEYS (issue #1102 bug 2 follow-up).
+ */
+const BLANK_ROW_IS_STRAY_KEYS: ReadonlySet<string> = new Set([
+  "MODEL_OVERRIDE",
+  "REASONING_EFFORT_OVERRIDE",
+]);
+
+/**
  * Apply a fresh resolved env to `process.env` for keys safe to mutate live.
  * Returns the list of keys that actually changed (useful for logging).
  */
-function applyResolvedEnvToProcessEnv(freshEnv: Record<string, string | undefined>): string[] {
+export function applyResolvedEnvToProcessEnv(
+  freshEnv: Record<string, string | undefined>,
+): string[] {
   const changed: string[] = [];
   for (const key of RELOADABLE_ENV_KEYS) {
     const next = freshEnv[key];
     if (next !== undefined && next !== process.env[key]) {
+      const previous = process.env[key];
       process.env[key] = next;
       changed.push(key);
+      // Make a reload that blanks a previously-set value loud — silently
+      // going from a real value to "" reads identically to "nothing
+      // changed" in the summary line below, and is exactly the shape of
+      // issue #1102 bug 2 (a container-provided value disappearing with no
+      // trace in the logs).
+      if (previous && !next) {
+        console.warn(`[env-reload] ${key} cleared: was set, swarm_config reload blanked it`);
+      }
     }
   }
   return changed;
@@ -1432,10 +1493,31 @@ async function reportKeyUsage(
   }
 }
 
-async function resolveCodexOAuthCredentialInfo(
+/**
+ * Result of {@link resolveCodexOAuthCredentialInfo}. `isPoolBacked` tells the
+ * caller whether `selection` came from an actual `swarm_config` pool slot
+ * (`codex_oauth_<n>`) or from the standalone-`auth.json` fallback below.
+ *
+ * This distinction matters because `codexSlot` (set from `selection.index`
+ * at the call site) flips `resolveCodexAuthMode` in codex-adapter.ts into
+ * "pool mode", which revalidates strictly against the config store and
+ * throws if the slot isn't there. The fallback branch defaults its
+ * `authJsonToCredentialSelection` call to `slot = 0` purely for bookkeeping
+ * (there is no real slot) — if that `0` were mistaken for a pool slot index,
+ * every standalone/local-dev `auth.json` deploy with zero config-store slots
+ * would revalidate against a nonexistent `codex_oauth_0` and fail every task
+ * with "no credentials found in config store" (issue #1102 bug 1). Only the
+ * pool branch may report `isPoolBacked: true`.
+ */
+export interface CodexOAuthCredentialInfo {
+  selection: CredentialSelection;
+  isPoolBacked: boolean;
+}
+
+export async function resolveCodexOAuthCredentialInfo(
   apiUrl?: string,
   apiKey?: string,
-): Promise<CredentialSelection | null> {
+): Promise<CodexOAuthCredentialInfo | null> {
   // Pool path: enumerate slots from the config store, pick one with rate-limit
   // awareness, materialise auth.json for the selected slot.
   if (apiUrl && apiKey) {
@@ -1495,7 +1577,7 @@ async function resolveCodexOAuthCredentialInfo(
           console.log(
             `[credentials] Selected CODEX_OAUTH slot ${selectedSlot + 1}/${slots.length} [...${sel.keySuffix}]`,
           );
-          return sel;
+          return { selection: sel, isPoolBacked: true };
         }
       }
     } catch (err) {
@@ -1503,7 +1585,10 @@ async function resolveCodexOAuthCredentialInfo(
     }
   }
 
-  // Fallback: read existing auth.json (single-credential or pre-pool deploy)
+  // Fallback: read existing auth.json (single-credential or pre-pool deploy).
+  // NOT pool-backed — `authJsonToCredentialSelection`'s default `slot = 0` is
+  // bookkeeping only, not a real `codex_oauth_0` config-store entry. Callers
+  // must not treat this as a pool slot (see `CodexOAuthCredentialInfo` above).
   try {
     const home = process.env.HOME;
     if (!home) return null;
@@ -1522,9 +1607,10 @@ async function resolveCodexOAuthCredentialInfo(
       return null;
     }
 
-    return authJsonToCredentialSelection(
+    const selection = authJsonToCredentialSelection(
       auth as Parameters<typeof authJsonToCredentialSelection>[0],
     );
+    return { selection, isPoolBacked: false };
   } catch {
     return null;
   }
@@ -3175,8 +3261,14 @@ async function spawnProviderProcess(
   // that if the OPENAI_API_KEY credential is rate-limited we can fail over to
   // a CODEX_OAUTH slot — even though the keyType differs.
   let oauthSelection: CredentialSelection | undefined;
+  // True only when `oauthSelection` came from an actual `codex_oauth_<n>`
+  // config-store slot — gates whether `codexSlot` is set below (see
+  // `CodexOAuthCredentialInfo`).
+  let oauthIsPoolBacked = false;
   if (adapter.name === "codex") {
-    oauthSelection = (await resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey)) ?? undefined;
+    const oauthInfo = await resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey);
+    oauthSelection = oauthInfo?.selection;
+    oauthIsPoolBacked = oauthInfo?.isPoolBacked ?? false;
     const oauthIsPrimary =
       credentialSelections.length === 0 ||
       (credentialSelections[0]?.isRateLimitFallback &&
@@ -3210,8 +3302,11 @@ async function spawnProviderProcess(
     iteration: opts.iteration,
     env: freshEnv as Record<string, string>,
     // Propagate the selected OAuth slot so the adapter refreshes back to the
-    // correct pool key. Undefined for non-codex providers and single-cred deploys.
-    codexSlot: oauthSelection?.index,
+    // correct pool key. Undefined for non-codex providers and single-cred
+    // deploys — only a real pool slot (isPoolBacked) may set this, otherwise
+    // the adapter's strict pool-revalidation path throws against a
+    // nonexistent config-store entry for a standalone auth.json (#1102).
+    codexSlot: oauthIsPoolBacked ? oauthSelection?.index : undefined,
     contextKey: opts.contextKey,
     reasoningEffort: reasoningEffortOverride,
   };

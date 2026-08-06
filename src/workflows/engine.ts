@@ -760,8 +760,42 @@ export function buildNodeInterpolationCtx(
   return interpolationCtx;
 }
 
+/**
+ * Context roots a `script` node's BODY may interpolate from. Everything here is
+ * operator- or system-authored: `input` comes from the workflow definition
+ * (resolving `secret.` / `${ENV}` refs), `workflow`/`run`/`swarm` are engine
+ * metadata. Deliberately excluded: `trigger` (webhook payloads — attacker
+ * controlled), upstream node outputs (`{{someNode.field}}` — LLM- or
+ * script-generated text), and any declared `inputs` alias rooted at one of
+ * those. See `buildScriptBodyCtx`.
+ */
+const SCRIPT_BODY_ALLOWED_SOURCES = new Set(["input", "workflow", "swarm", "run"]);
+
+/**
+ * Project `interpolationCtx` down to the sources a script body is allowed to
+ * read. Aliases are classified by the ROOT of their declared source path, not
+ * by their local name, so `inputs: { payload: "trigger.payload" }` is excluded
+ * even though it is called `payload`, and a builtin name shadowed by an unsafe
+ * alias (`inputs: { input: "trigger.body" }`) is excluded too.
+ */
+function buildScriptBodyCtx(
+  node: Pick<WorkflowNode, "inputs">,
+  interpolationCtx: Record<string, unknown>,
+): Record<string, unknown> {
+  const aliases = node.inputs ?? {};
+  const safe: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(interpolationCtx)) {
+    const sourcePath = aliases[key];
+    // A key with no declared alias is a builtin source and is judged by its own
+    // name; an aliased key is judged by the root of what it points at.
+    const root = sourcePath === undefined ? key : (sourcePath.split(".")[0] ?? "");
+    if (SCRIPT_BODY_ALLOWED_SOURCES.has(root)) safe[key] = value;
+  }
+  return safe;
+}
+
 export function interpolateNodeConfig(
-  node: Pick<WorkflowNode, "type" | "config">,
+  node: Pick<WorkflowNode, "type" | "config" | "inputs">,
   interpolationCtx: Record<string, unknown>,
 ): { value: unknown; unresolved: string[] } {
   if (node.type === "foreach" && Object.hasOwn(node.config, "over")) {
@@ -778,6 +812,32 @@ export function interpolateNodeConfig(
         body,
       },
       unresolved: [...configResult.unresolved, ...overResult.unresolved],
+    };
+  }
+
+  if (node.type === "script" && typeof node.config.script === "string") {
+    const { script, ...configWithoutScript } = node.config;
+    const restResult = deepInterpolate(configWithoutScript, interpolationCtx);
+
+    // The interpolated script body is handed straight to `bash -c` / `bun -e` /
+    // `python3 -c` (ScriptExecutor.runScript), so string-substituting untrusted
+    // text into it is a direct shell/code injection vector. Restrict the body to
+    // an ALLOWLIST of operator/system-authored sources rather than blocking
+    // `trigger` alone: excluding only the literal `trigger` key would still let
+    // a declared alias (`inputs: { payload: "trigger.payload" }` used as
+    // `{{payload}}`) carry webhook data into the body, and upstream node outputs
+    // (`{{someNode.stdout}}`) are LLM- or script-generated text with the same
+    // problem. Dynamic per-run values must flow through `args` instead, which
+    // are passed as separate argv elements (data), not spliced into source text.
+    // Excluded tokens resolve to "" and are reported in `unresolved`.
+    const scriptResult = deepInterpolate(script, buildScriptBodyCtx(node, interpolationCtx));
+
+    return {
+      value: {
+        ...(restResult.value as Record<string, unknown>),
+        script: scriptResult.value,
+      },
+      unresolved: [...restResult.unresolved, ...scriptResult.unresolved],
     };
   }
 

@@ -105,6 +105,16 @@ const createScriptRunRoute = route({
     409: { description: "Existing idempotent run returned" },
     429: { description: "Script run concurrency cap reached" },
   },
+  // Matches the inline `POST /api/scripts/run` route and the `launch-script-run`
+  // MCP tool (src/tools/script-runs.ts, UNGATED_TOOL_FILES pin): open to every
+  // authenticated agent by design, not a permission gate. Execution safety comes
+  // from the shared sandbox (ulimits, clean env, bearer over stdin — see
+  // buildSandboxedCommand / LocalProcessScriptExecutor.start), not from
+  // restricting who may launch a run.
+  rbac: {
+    ungated:
+      "matches POST /api/scripts/run — open to all authenticated agents; constrained by the script execution sandbox, not a permission gate",
+  },
 });
 
 const listScriptRunsRoute = route({

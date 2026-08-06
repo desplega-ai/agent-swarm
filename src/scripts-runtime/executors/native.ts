@@ -1,6 +1,9 @@
+import {
+  buildSandboxedCommand,
+  readStreamCapped,
+  sandboxSpawnEnv,
+} from "../../utils/sandboxed-process";
 import type { ExecutorInput, ExecutorOutput, ScriptExecutor, ScriptExecutorError } from "./types";
-
-type CappedText = { text: string; truncated: boolean };
 
 function makeUnsupportedOutput(stderr: string): ExecutorOutput {
   return {
@@ -12,33 +15,6 @@ function makeUnsupportedOutput(stderr: string): ExecutorOutput {
     exitCode: 1,
     error: "executor_error",
   };
-}
-
-async function readCapped(
-  stream: ReadableStream<Uint8Array> | null,
-  maxBytes: number,
-): Promise<CappedText> {
-  if (!stream) return { text: "", truncated: false };
-  const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  let truncated = false;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-
-    const remaining = maxBytes - total;
-    if (remaining > 0) {
-      const accepted = value.byteLength > remaining ? value.slice(0, remaining) : value;
-      chunks.push(accepted);
-      total += accepted.byteLength;
-    }
-    if (value.byteLength > remaining) truncated = true;
-  }
-
-  return { text: new TextDecoder().decode(Buffer.concat(chunks)), truncated };
 }
 
 function classifyExit(
@@ -110,29 +86,18 @@ async function writeBareImportShims(tmpdir: string): Promise<void> {
   await writeBareImportShim(tmpdir, "zod", new URL(`file://${zodEntry}`));
 }
 
-function harnessCommand(harnessPath: string, input: ExecutorInput): string[] {
-  if (process.platform === "win32") {
-    return ["bun", "run", harnessPath];
-  }
-
-  // Bun's Linux runtime reserves several GB of virtual address space at startup.
-  // A lower RLIMIT_AS kills the harness before user code runs, so keep vmem as
-  // a coarse guard and rely on the tighter CPU/proc/fd/file/output caps for v1.
-  const virtualMemoryMb = Math.max(input.resources.memoryMb, 4096);
-  const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-  const ulimits = [
-    `ulimit -v ${Math.floor(virtualMemoryMb * 1024)} 2>/dev/null || true`,
-    `ulimit -t ${input.resources.cpuTimeSec} 2>/dev/null || true`,
-    `ulimit -u ${input.resources.maxProcs} 2>/dev/null || true`,
-    `ulimit -f ${Math.floor(input.resources.maxFileBytes / 1024)} 2>/dev/null || true`,
-    `ulimit -n ${input.resources.maxFdCount} 2>/dev/null || true`,
-  ].join("; ");
-  const harness = shellQuote(harnessPath);
-  return [
-    "sh",
-    "-c",
-    `${ulimits}; exec env -i PATH="$PATH" HOME="$HOME" LANG="$LANG" LC_ALL="$LC_ALL" TMPDIR="$TMPDIR" SWARM_SCRIPT_TMPDIR="$SWARM_SCRIPT_TMPDIR" SWARM_SCRIPT_ARGS_FILE="$SWARM_SCRIPT_ARGS_FILE" SWARM_SCRIPT_SOURCE_FILE="$SWARM_SCRIPT_SOURCE_FILE" SWARM_SCRIPT_RESULT_FILE="$SWARM_SCRIPT_RESULT_FILE" SWARM_SCRIPT_ERROR_FILE="$SWARM_SCRIPT_ERROR_FILE" bun run ${harness}`,
-  ];
+function harnessCommand(
+  harnessPath: string,
+  input: ExecutorInput,
+  env: Record<string, string>,
+): string[] {
+  return buildSandboxedCommand(["bun", "run", harnessPath], env, {
+    virtualMemoryMb: input.resources.memoryMb,
+    cpuTimeSec: input.resources.cpuTimeSec,
+    maxProcs: input.resources.maxProcs,
+    maxFileKb: Math.floor(input.resources.maxFileBytes / 1024),
+    maxFdCount: input.resources.maxFdCount,
+  });
 }
 
 export class NativeScriptExecutor implements ScriptExecutor {
@@ -190,19 +155,27 @@ export class NativeScriptExecutor implements ScriptExecutor {
         controller.abort();
       }, input.resources.wallClockMs);
 
-      const proc = Bun.spawn(harnessCommand(harnessPath, input), {
-        env: {
-          PATH: process.env.PATH ?? "/usr/bin:/bin",
-          HOME: process.env.HOME ?? "/tmp",
-          LANG: process.env.LANG ?? "C.UTF-8",
-          LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
-          TMPDIR: tmpdir,
-          SWARM_SCRIPT_TMPDIR: tmpdir,
-          SWARM_SCRIPT_ARGS_FILE: argsFile,
-          SWARM_SCRIPT_SOURCE_FILE: sourceFile,
-          SWARM_SCRIPT_RESULT_FILE: resultFile,
-          SWARM_SCRIPT_ERROR_FILE: errorFile,
-        },
+      const harnessEnv = {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        HOME: process.env.HOME ?? "/tmp",
+        LANG: process.env.LANG ?? "C.UTF-8",
+        LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
+        TMPDIR: tmpdir,
+        SWARM_SCRIPT_TMPDIR: tmpdir,
+        SWARM_SCRIPT_ARGS_FILE: argsFile,
+        SWARM_SCRIPT_SOURCE_FILE: sourceFile,
+        SWARM_SCRIPT_RESULT_FILE: resultFile,
+        SWARM_SCRIPT_ERROR_FILE: errorFile,
+      };
+
+      const proc = Bun.spawn(harnessCommand(harnessPath, input, harnessEnv), {
+        // On POSIX, Bun.spawn only needs PATH itself to locate the `sh`
+        // binary for argv[0] — the sandboxed command's `env -i` prelude is
+        // what actually scrubs the child's environment down to `harnessEnv`
+        // above. On win32 there is no such prelude, so `sandboxSpawnEnv`
+        // passes `harnessEnv` through directly instead — see
+        // `buildSandboxedCommand`'s win32 doc comment.
+        env: sandboxSpawnEnv(harnessEnv),
         cwd: tmpdir,
         stdin: "pipe",
         stdout: "pipe",
@@ -214,8 +187,8 @@ export class NativeScriptExecutor implements ScriptExecutor {
       proc.stdin.end();
 
       const [stdout, stderr, exitCode] = await Promise.all([
-        readCapped(proc.stdout, input.resources.maxStdoutBytes),
-        readCapped(proc.stderr, input.resources.maxStdoutBytes),
+        readStreamCapped(proc.stdout, input.resources.maxStdoutBytes),
+        readStreamCapped(proc.stderr, input.resources.maxStdoutBytes),
         proc.exited.catch(() => (timedOut ? 124 : 1)),
       ]).finally(() => clearTimeout(timeout));
 

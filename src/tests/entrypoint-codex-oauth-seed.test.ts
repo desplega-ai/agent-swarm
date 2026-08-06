@@ -13,7 +13,15 @@ import { describe, expect, test } from "bun:test";
  * config value was written straight to the worker's auth.json at boot —
  * the exact unlocked worker-disk refresh path this hardening pass closes.
  * Both accepted shapes (chatgpt auth.json passthrough, flat credentials)
- * must blank refresh_token.
+ * must blank refresh_token for config-store (pool) credentials.
+ *
+ * Regression (PR #1114 review): a standalone container-provided CODEX_OAUTH
+ * env var is single-slot/non-pool and never gets a per-task overwrite from
+ * the runner, so blanking its refresh_token at boot would permanently strip
+ * the only copy the worker will ever have. The filter reads the standalone
+ * flag via jq's `env` builtin (CODEX_OAUTH_SEED_STANDALONE) rather than
+ * `--argjson` so this extraction — which anchors on a bare `jq '` prefix —
+ * still finds it verbatim.
  */
 
 const entrypointPath = `${import.meta.dir}/../../docker-entrypoint.sh`;
@@ -50,8 +58,9 @@ function extractCodexOauthSeedFilter(): string {
   return script.slice(filterStart, filterEnd);
 }
 
-function runJqFilter(filter: string, input: unknown): unknown {
+function runJqFilter(filter: string, input: unknown, standalone = false): unknown {
   const proc = Bun.spawnSync(["jq", filter], {
+    env: { ...process.env, CODEX_OAUTH_SEED_STANDALONE: standalone ? "true" : "false" },
     stdin: Buffer.from(JSON.stringify(input)),
     stdout: "pipe",
     stderr: "pipe",
@@ -120,5 +129,44 @@ describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
 
   test("errors on a value matching neither accepted shape", () => {
     expect(() => runJqFilter(filter, { foo: "bar" })).toThrow();
+  });
+
+  test("preserves refresh_token for an auth.json-shaped (chatgpt) input on the standalone path", () => {
+    const result = runJqFilter(
+      filter,
+      {
+        auth_mode: "chatgpt",
+        OPENAI_API_KEY: null,
+        tokens: {
+          id_token: "id-tok",
+          access_token: "access-tok",
+          refresh_token: "live-refresh-tok",
+          account_id: "acct-123",
+        },
+        last_refresh: "2026-07-01T00:00:00.000Z",
+      },
+      true,
+    ) as {
+      tokens: { refresh_token: string };
+    };
+
+    expect(result.tokens.refresh_token).toBe("live-refresh-tok");
+  });
+
+  test("preserves refresh_token (from the flat `refresh` field) for a flat input on the standalone path", () => {
+    const result = runJqFilter(
+      filter,
+      {
+        access: "access-tok",
+        refresh: "live-refresh-tok",
+        accountId: "acct-456",
+        expires: 1_800_000_000_000,
+      },
+      true,
+    ) as {
+      tokens: { refresh_token: string };
+    };
+
+    expect(result.tokens.refresh_token).toBe("live-refresh-tok");
   });
 });

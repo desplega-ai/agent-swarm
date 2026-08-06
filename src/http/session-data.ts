@@ -13,11 +13,12 @@ import {
   getSessionLogsByTaskId,
   getTaskById,
 } from "../be/db";
-import { normalizeModelKey } from "../be/pricing-normalize";
 import { recordSessionCost } from "../otel";
 import { incrementServerSessionsProcessed } from "../server-runtime-counters";
-import type { SessionCost, SessionCostSource } from "../types";
+import type { SessionCost } from "../types";
+import { SessionCostModelBreakdownSchema } from "../types";
 import { route } from "./route-def";
+import { recomputeSessionCost } from "./session-cost-recompute";
 import { json, jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -72,12 +73,18 @@ const createSessionCostRoute = route({
     agentId: z.string().min(1),
     totalCostUsd: z.number(),
     taskId: z.string().optional(),
-    inputTokens: z.number().int().optional(),
-    outputTokens: z.number().int().optional(),
-    cacheReadTokens: z.number().int().optional(),
+    // Phase 3: non-negative — the recompute no longer clamps, so negative
+    // token counts must be rejected at the wire instead of pricing below $0.
+    inputTokens: z.number().int().nonnegative().optional(),
+    outputTokens: z.number().int().nonnegative().optional(),
+    cacheReadTokens: z.number().int().nonnegative().optional(),
     // Migration 063: nullable — adapters that can't honestly report cache writes
     // (e.g. Codex SDK) prefer null over a faked 0.
-    cacheWriteTokens: z.number().int().nullable().optional(),
+    cacheWriteTokens: z.number().int().nonnegative().nullable().optional(),
+    // Same nullable rationale as cacheWriteTokens: adapters that can't report
+    // the TTL split send null/omit rather than a faked 0.
+    cacheWrite5mTokens: z.number().int().nonnegative().nullable().optional(),
+    cacheWrite1hTokens: z.number().int().nonnegative().nullable().optional(),
     // Migration 063: new token classes previously dropped on the floor.
     reasoningOutputTokens: z.number().int().nonnegative().optional(),
     thinkingTokens: z.number().int().nonnegative().optional(),
@@ -85,6 +92,9 @@ const createSessionCostRoute = route({
     // Migration 063: nullable for adapters that can't honestly report numTurns.
     numTurns: z.number().int().nullable().optional(),
     model: z.string().optional(),
+    // Reuses the canonical breakdown schema minus costUsd (server-computed,
+    // never accepted from the wire).
+    models: z.array(SessionCostModelBreakdownSchema.omit({ costUsd: true })).optional(),
     isError: z.boolean().optional(),
     /**
      * Phase 6 (extended migration 063): drives the API recompute path. After
@@ -212,79 +222,56 @@ export async function handleSessionData(
       // explode.
       const model = parsed.body.model || (parsed.body.provider ? "" : "opus");
 
-      // Phase 2: widen the recompute branch beyond codex. For any provider
-      // with a known model and seeded pricing rows, recompute `totalCostUsd`
-      // from tokens × DB prices and tag the row 'pricing-table'. When the
-      // (provider, model) pair has no pricing rows at all, tag 'unpriced' so
-      // the UI can flag it. When the provider isn't set, fall through with
-      // 'harness' (back-compat for older callers).
-      let totalCostUsd = parsed.body.totalCostUsd;
-      let costSource: SessionCostSource = "harness";
+      // Phase 3: when a per-model breakdown is present, the row's token totals
+      // come from it — the top-level usage block covers the main thread only
+      // (claude sidechain/subagent tokens live exclusively in models[]).
+      const bodyModels = parsed.body.models?.length ? parsed.body.models : null;
+      const rowInputTokens = bodyModels
+        ? bodyModels.reduce((sum, m) => sum + m.inputTokens, 0)
+        : inputTokens;
+      const rowOutputTokens = bodyModels
+        ? bodyModels.reduce((sum, m) => sum + m.outputTokens, 0)
+        : outputTokens;
+      const rowCacheReadTokens = bodyModels
+        ? bodyModels.reduce((sum, m) => sum + m.cacheReadTokens, 0)
+        : cachedInputTokens;
+      const rowCacheWriteTokens = bodyModels
+        ? bodyModels.reduce((sum, m) => sum + m.cacheWriteTokens, 0)
+        : (parsed.body.cacheWriteTokens ?? 0);
 
-      if (parsed.body.provider && model) {
-        const lookupTime = parsed.body.createdAt ?? Date.now();
-        // Phase 2 fix — different harnesses prepend routing prefixes
-        // (`openrouter/`, `github-copilot/`, …) to the same underlying model
-        // id. The pricing seed stores canonical (un-prefixed) keys, so we
-        // strip the prefix here before lookup. The original adapter-emitted
-        // string is still persisted to `session_costs.model` for debugging.
-        const lookupModel = normalizeModelKey(parsed.body.provider, model);
-        const inputRow = getActivePricingRow(
-          parsed.body.provider,
-          lookupModel,
-          "input",
-          lookupTime,
-        );
-        const cachedRow = getActivePricingRow(
-          parsed.body.provider,
-          lookupModel,
-          "cached_input",
-          lookupTime,
-        );
-        const outputRow = getActivePricingRow(
-          parsed.body.provider,
-          lookupModel,
-          "output",
-          lookupTime,
-        );
-        const cacheWriteRow = getActivePricingRow(
-          parsed.body.provider,
-          lookupModel,
-          "cache_write",
-          lookupTime,
-        );
-
-        if (inputRow && outputRow) {
-          // Mirror the legacy codex semantic: uncached input is billed at the
-          // full rate, cached input at the discounted rate. Cache writes are
-          // billed separately when the provider's pricing table carries that
-          // class (anthropic) and the adapter reports a non-zero value.
-          const uncachedInputTokens = Math.max(0, inputTokens - cachedInputTokens);
-          const cachedRate = cachedRow?.pricePerMillionUsd ?? 0;
-          const cacheWriteRate = cacheWriteRow?.pricePerMillionUsd ?? 0;
-          totalCostUsd =
-            (uncachedInputTokens * inputRow.pricePerMillionUsd +
-              cachedInputTokens * cachedRate +
-              cacheWriteTokens * cacheWriteRate +
-              outputTokens * outputRow.pricePerMillionUsd) /
-            1_000_000;
-          costSource = "pricing-table";
-        } else {
-          // Provider was tagged but we have no pricing rows for it; flag the
-          // row so the UI can show an "unpriced" badge instead of pretending.
-          costSource = "unpriced";
-        }
-      }
+      // Keep the adapter's report even when the pricing-table branch replaces
+      // totalCostUsd with the server's canonical recomputation.
+      const harnessCostUsd = parsed.body.totalCostUsd;
+      const recomputed = recomputeSessionCost(
+        {
+          provider: parsed.body.provider,
+          model,
+          harnessCostUsd,
+          inputTokens,
+          outputTokens,
+          cacheReadTokens: cachedInputTokens,
+          cacheWriteTokens,
+          cacheWrite5mTokens: parsed.body.cacheWrite5mTokens,
+          cacheWrite1hTokens: parsed.body.cacheWrite1hTokens,
+          models: parsed.body.models,
+          durationMs: parsed.body.durationMs,
+          atEpochMs: parsed.body.createdAt ?? Date.now(),
+        },
+        (provider, lookupModel, tokenClass, atEpochMs) =>
+          getActivePricingRow(provider, lookupModel, tokenClass, atEpochMs)?.pricePerMillionUsd ??
+          null,
+      );
+      const { totalCostUsd, costSource } = recomputed;
 
       const cost = createSessionCost({
         sessionId: parsed.body.sessionId,
         taskId: parsed.body.taskId || undefined,
         agentId: parsed.body.agentId,
         totalCostUsd,
-        inputTokens,
-        outputTokens,
-        cacheReadTokens: cachedInputTokens,
-        cacheWriteTokens: parsed.body.cacheWriteTokens ?? 0,
+        inputTokens: rowInputTokens,
+        outputTokens: rowOutputTokens,
+        cacheReadTokens: rowCacheReadTokens,
+        cacheWriteTokens: rowCacheWriteTokens,
         reasoningOutputTokens: parsed.body.reasoningOutputTokens ?? 0,
         thinkingTokens: parsed.body.thinkingTokens ?? 0,
         durationMs: parsed.body.durationMs ?? 0,
@@ -293,18 +280,23 @@ export async function handleSessionData(
         model,
         isError: parsed.body.isError ?? false,
         costSource,
+        harnessCostUsd,
+        cacheWrite5mTokens: parsed.body.cacheWrite5mTokens,
+        cacheWrite1hTokens: parsed.body.cacheWrite1hTokens,
+        modelBreakdown: recomputed.modelBreakdown,
       });
       recordSessionCost({
         totalCostUsd,
+        harnessCostUsd,
         harness: parsed.body.provider ?? "unknown",
         model,
         costSource,
         isError: parsed.body.isError ?? false,
         tokens: {
-          input: inputTokens,
-          output: outputTokens,
-          cacheRead: cachedInputTokens,
-          cacheWrite: parsed.body.cacheWriteTokens ?? 0,
+          input: rowInputTokens,
+          output: rowOutputTokens,
+          cacheRead: rowCacheReadTokens,
+          cacheWrite: rowCacheWriteTokens,
           reasoning: parsed.body.reasoningOutputTokens ?? 0,
           thinking: parsed.body.thinkingTokens ?? 0,
         },

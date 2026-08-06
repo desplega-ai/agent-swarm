@@ -272,7 +272,8 @@ describe("loadAllCodexOAuthSlots", () => {
             { id: "cfg-1", key: "codex_oauth_1", value: JSON.stringify(creds1) },
             // should be ignored — not a slot key
             { id: "cfg-other", key: "slack_token", value: "xoxb-123" },
-            // should also be ignored — legacy key is not included in loadAll
+            // ignored here — codex_oauth_0 already present, so the legacy
+            // fallback (see next test) does not apply
             { id: "cfg-legacy", key: "codex_oauth", value: JSON.stringify(mockCreds) },
           ],
         }),
@@ -287,6 +288,47 @@ describe("loadAllCodexOAuthSlots", () => {
     expect(result[1]?.creds.access).toBe("at_slot1");
     expect(result[2]).toMatchObject({ slot: 2 });
     expect(result[2]?.creds.access).toBe("at_slot2");
+  });
+
+  it("backwards-compat: treats legacy codex_oauth key as pool slot 0 when codex_oauth_0 is absent", async () => {
+    // Rolling-upgrade scenario: control plane still only has the legacy
+    // single-row key. Without this fallback, resolveCodexOAuthCredentialInfo
+    // (runner.ts) would see an empty slots array and mark the credential
+    // non-pool-backed, so codexSlot stays undefined and resolveCodexAuthMode
+    // (codex-adapter.ts) never revalidates/refreshes the boot-seeded,
+    // refresh-token-blanked auth.json — see the docstring on this function.
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          configs: [{ id: "cfg-legacy", key: "codex_oauth", value: JSON.stringify(mockCreds) }],
+        }),
+        { status: 200 },
+      );
+
+    const result = await loadAllCodexOAuthSlots(MOCK_API_URL, MOCK_API_KEY);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.slot).toBe(0);
+    expect(result[0]?.creds.access).toBe(mockCreds.access);
+    expect(result[0]?.creds.refresh).toBe(mockCreds.refresh);
+  });
+
+  it("prefers codex_oauth_0 over legacy codex_oauth when both exist", async () => {
+    const slotCreds = { ...mockCreds, access: "at_slot0_preferred" };
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          configs: [
+            { id: "cfg-legacy", key: "codex_oauth", value: JSON.stringify(mockCreds) },
+            { id: "cfg-slot0", key: "codex_oauth_0", value: JSON.stringify(slotCreds) },
+          ],
+        }),
+        { status: 200 },
+      );
+
+    const result = await loadAllCodexOAuthSlots(MOCK_API_URL, MOCK_API_KEY);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.slot).toBe(0);
+    expect(result[0]?.creds.access).toBe("at_slot0_preferred");
   });
 
   it("skips entries with invalid JSON values", async () => {

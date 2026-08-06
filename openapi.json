@@ -10102,6 +10102,8 @@
                               "cached_input",
                               "output",
                               "cache_write",
+                              "cache_write_1h",
+                              "web_search",
                               "runtime_hour",
                               "acu"
                             ]
@@ -10189,6 +10191,8 @@
                 "cached_input",
                 "output",
                 "cache_write",
+                "cache_write_1h",
+                "web_search",
                 "runtime_hour",
                 "acu"
               ]
@@ -10249,6 +10253,8 @@
                 "cached_input",
                 "output",
                 "cache_write",
+                "cache_write_1h",
+                "web_search",
                 "runtime_hour",
                 "acu"
               ]
@@ -10310,6 +10316,8 @@
                         "cached_input",
                         "output",
                         "cache_write",
+                        "cache_write_1h",
+                        "web_search",
                         "runtime_hour",
                         "acu"
                       ]
@@ -10397,6 +10405,8 @@
                 "cached_input",
                 "output",
                 "cache_write",
+                "cache_write_1h",
+                "web_search",
                 "runtime_hour",
                 "acu"
               ]
@@ -10436,6 +10446,8 @@
                         "cached_input",
                         "output",
                         "cache_write",
+                        "cache_write_1h",
+                        "web_search",
                         "runtime_hour",
                         "acu"
                       ]
@@ -10520,6 +10532,8 @@
                 "cached_input",
                 "output",
                 "cache_write",
+                "cache_write_1h",
+                "web_search",
                 "runtime_hour",
                 "acu"
               ]
@@ -14494,19 +14508,37 @@
                     "type": "string"
                   },
                   "inputTokens": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0
                   },
                   "outputTokens": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0
                   },
                   "cacheReadTokens": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0
                   },
                   "cacheWriteTokens": {
                     "type": [
                       "integer",
                       "null"
-                    ]
+                    ],
+                    "minimum": 0
+                  },
+                  "cacheWrite5mTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
+                  "cacheWrite1hTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
                   },
                   "reasoningOutputTokens": {
                     "type": "integer",
@@ -14527,6 +14559,53 @@
                   },
                   "model": {
                     "type": "string"
+                  },
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "model": {
+                          "type": "string"
+                        },
+                        "inputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheReadTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheWriteTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "webSearchRequests": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "minimum": 0
+                        },
+                        "harnessCostUsd": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "model",
+                        "inputTokens",
+                        "outputTokens",
+                        "cacheReadTokens",
+                        "cacheWriteTokens"
+                      ]
+                    }
                   },
                   "isError": {
                     "type": "boolean"
@@ -15896,7 +15975,7 @@
       "get": {
         "operationId": "scripts_type_defs",
         "summary": "Get script SDK and stdlib type definitions",
-        "description": "Static .d.ts blobs for editor integration (e.g. Monaco extraLibs). Cacheable.",
+        "description": "Generated .d.ts blobs for editor integration (e.g. Monaco extraLibs), including per-app types. Cacheable.",
         "tags": [
           "Scripts"
         ],

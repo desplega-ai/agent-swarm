@@ -1,7 +1,47 @@
 import { z } from "zod";
 import { MAX_SCRIPT_WALL_CLOCK_MS } from "../../scripts-runtime/executors/types";
 import type { ExecutorMeta } from "../../types";
+import {
+  buildSandboxedCommand,
+  createCappedStreamState,
+  readStreamCapped,
+  sandboxSpawnEnv,
+  snapshotCapped,
+} from "../../utils/sandboxed-process";
 import { BaseExecutor, type ExecutorResult } from "./base";
+
+/** Matches the inline scripts-runtime cap (src/scripts-runtime/executors/types.ts). */
+const MAX_OUTPUT_BYTES = 1_048_576;
+
+/**
+ * How long to keep draining stdout/stderr AFTER the child has exited. Normally
+ * both streams close immediately; the grace only matters when a killed script
+ * leaked a grandchild that still holds the pipe write end, which must not hang
+ * the workflow step forever.
+ */
+const STREAM_DRAIN_GRACE_MS = 5_000;
+
+function unrefTimer(id: ReturnType<typeof globalThis.setTimeout>): void {
+  if (typeof id === "object" && "unref" in id) (id as NodeJS.Timeout).unref();
+}
+
+/** Resolve `promise`, or fall back to `onDeadline()` if it takes longer than `ms`. */
+function withDeadline<T>(promise: Promise<T>, ms: number, onDeadline: () => T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const id = globalThis.setTimeout(() => resolve(onDeadline()), ms);
+    unrefTimer(id);
+    promise.then(
+      (value) => {
+        globalThis.clearTimeout(id);
+        resolve(value);
+      },
+      () => {
+        globalThis.clearTimeout(id);
+        resolve(onDeadline());
+      },
+    );
+  });
+}
 
 // ─── Schemas ────────────────────────────────────────────────
 
@@ -40,7 +80,12 @@ export class ScriptExecutor extends BaseExecutor<
     const timeoutMs = config.timeout ?? DEFAULT_TIMEOUT;
 
     try {
-      const result = await Promise.race([this.runScript(config), this.timeoutPromise(timeoutMs)]);
+      // The timeout lives INSIDE runScript so it can actually SIGKILL the child.
+      // Racing the timeout against the spawn promise out here (the previous
+      // shape) only abandoned the promise: a sleeping script kept running past
+      // the deadline — the CPU ulimit does not bound sleep — and its scoped
+      // tmpdir was deleted out from under a live process.
+      const result = await this.runScript(config, timeoutMs);
 
       // Non-zero exit code is a hard failure — mark the step failed so the
       // workflow engine stops the branch and operators can see what went wrong.
@@ -91,7 +136,10 @@ export class ScriptExecutor extends BaseExecutor<
     }
   }
 
-  private async runScript(config: z.infer<typeof ScriptConfigSchema>): Promise<{
+  private async runScript(
+    config: z.infer<typeof ScriptConfigSchema>,
+    timeoutMs: number,
+  ): Promise<{
     exitCode: number;
     stdout: string;
     stderr: string;
@@ -111,30 +159,103 @@ export class ScriptExecutor extends BaseExecutor<
         break;
     }
 
-    const proc = Bun.spawn(cmd, {
-      stdout: "pipe",
-      stderr: "pipe",
-      cwd: cwd ?? undefined,
-    });
+    // Workflow-authored scripts run with attacker-influenceable data available
+    // via {{...}} interpolation into `args` (trigger/webhook payloads etc — the
+    // `script` string itself is never interpolated, see engine.ts
+    // interpolateNodeConfig). Sandbox the same way as every other
+    // spawn-user-code path: ulimits + a clean minimal env (never the server's
+    // full process.env, which carries operator secrets) + a scoped tmpdir
+    // when the workflow author didn't pin an explicit `cwd`.
+    const scopedTmpdir = cwd
+      ? undefined
+      : `${process.env.TMPDIR ?? "/tmp"}/workflow-script-${crypto.randomUUID()}`;
+    if (scopedTmpdir) await Bun.$`mkdir -p ${scopedTmpdir}`;
+    const workdir = cwd ?? scopedTmpdir;
 
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
+    const env = {
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      HOME: process.env.HOME ?? "/tmp",
+      LANG: process.env.LANG ?? "C.UTF-8",
+      LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
+      TMPDIR: workdir ?? process.env.TMPDIR ?? "/tmp",
+    };
 
-    return { exitCode, stdout: stdout.trimEnd(), stderr: stderr.trimEnd() };
-  }
+    try {
+      const proc = Bun.spawn(buildSandboxedCommand(cmd, env), {
+        stdout: "pipe",
+        stderr: "pipe",
+        cwd: workdir,
+        // On POSIX, Bun.spawn only needs PATH to locate `sh` for argv[0] —
+        // the sandboxed command's `env -i` prelude scrubs the child down to
+        // `env` above, so the server's secrets never reach it either way. On
+        // win32 there is no such prelude, so `sandboxSpawnEnv` passes `env`
+        // through directly instead — see `buildSandboxedCommand`'s win32 doc
+        // comment.
+        env: sandboxSpawnEnv(env),
+      });
 
-  private timeoutPromise(ms: number): Promise<never> {
-    return new Promise((_resolve, reject) => {
-      const id = globalThis.setTimeout(() => {
-        reject(new Error(`Script timed out after ${ms}ms`));
-      }, ms);
-      // Ensure the timer doesn't keep the process alive
-      if (typeof id === "object" && "unref" in id) {
-        (id as NodeJS.Timeout).unref();
+      // Drain both pipes concurrently with the wait — a script producing more
+      // than a pipe buffer of output would otherwise block forever on write.
+      // Each gets its own progress state so the STREAM_DRAIN_GRACE_MS
+      // deadline below can snapshot whatever was captured so far instead of
+      // discarding it — see withDeadline usage.
+      const stdoutState = createCappedStreamState();
+      const stderrState = createCappedStreamState();
+      const stdoutPromise = readStreamCapped(proc.stdout, MAX_OUTPUT_BYTES, stdoutState);
+      const stderrPromise = readStreamCapped(proc.stderr, MAX_OUTPUT_BYTES, stderrState);
+
+      let timedOut = false;
+      const killTimer = globalThis.setTimeout(() => {
+        timedOut = true;
+        // SIGKILL, not SIGTERM: a shell script can trap and ignore SIGTERM.
+        try {
+          proc.kill("SIGKILL");
+        } catch {
+          // Already reaped — nothing to kill.
+        }
+      }, timeoutMs);
+      unrefTimer(killTimer);
+
+      let exitCode: number;
+      try {
+        exitCode = await proc.exited;
+      } finally {
+        globalThis.clearTimeout(killTimer);
       }
-    });
+
+      if (timedOut) {
+        // The child is dead and its output is discarded on timeout, so don't
+        // block on pipes a leaked grandchild may still hold open.
+        stdoutPromise.catch(() => {});
+        stderrPromise.catch(() => {});
+        throw new Error(`Script timed out after ${timeoutMs}ms`);
+      }
+
+      // The child exited on its own; bound the remaining drain so a leaked
+      // grandchild holding the pipe write end can't stall the step forever.
+      // On deadline, snapshot whatever each stream captured before giving up
+      // — the read promise may still be pending (a leaked descendant can
+      // hold the pipe open indefinitely), but the bytes already read are
+      // real output and must not be thrown away.
+      const [stdout, stderr] = await Promise.all([
+        withDeadline(stdoutPromise, STREAM_DRAIN_GRACE_MS, () => snapshotCapped(stdoutState)),
+        withDeadline(stderrPromise, STREAM_DRAIN_GRACE_MS, () => snapshotCapped(stderrState)),
+      ]);
+
+      // A `truncated` stream (whether from hitting MAX_OUTPUT_BYTES or from
+      // the drain deadline above) gets an explicit marker rather than being
+      // presented as complete — silently truncating a script's real stdout
+      // (e.g. mid-JSON) would otherwise look like a clean, complete result to
+      // downstream workflow nodes.
+      return {
+        exitCode,
+        stdout: (stdout.truncated ? `${stdout.text}\n…[stdout truncated]` : stdout.text).trimEnd(),
+        stderr: (stderr.truncated ? `${stderr.text}\n…[stderr truncated]` : stderr.text).trimEnd(),
+      };
+    } finally {
+      // Reached only after `await proc.exited` above, so the scoped dir is never
+      // deleted while a live child is still using it as its cwd/TMPDIR.
+      if (scopedTmpdir) await Bun.$`rm -rf ${scopedTmpdir}`.catch(() => {});
+    }
   }
 }

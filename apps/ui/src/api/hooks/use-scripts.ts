@@ -51,9 +51,11 @@ export function useScriptTypeDefs() {
   return useQuery({
     queryKey: ["script-type-defs"],
     queryFn: () => api.fetchScriptTypeDefs(),
-    // SDK/stdlib .d.ts are baked into the server build — static for the session.
-    // Opt out of the QueryClient's global 10s poll (providers.tsx).
-    staleTime: Number.POSITIVE_INFINITY,
+    // SDK/stdlib .d.ts are DB-derived (generated connection + per-app types),
+    // so refetch on remount once stale — but stay out of the QueryClient's
+    // global 10s poll (providers.tsx): the blob is tens of KB and apps
+    // change out-of-band.
+    staleTime: 60_000,
     refetchInterval: false,
     refetchOnWindowFocus: false,
   });

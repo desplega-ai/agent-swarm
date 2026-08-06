@@ -561,6 +561,107 @@ describe("ScriptExecutor", () => {
     expect(out.stdout).toBe("");
     expect(out.stderr).toContain("Script timed out after 1000ms");
   });
+
+  test("a timed-out script is TERMINATED, not just abandoned (Promise.race regression)", async () => {
+    // A `sleep` is not bounded by the CPU ulimit, so before this fix the
+    // wall-clock timeout only abandoned the promise and the child kept
+    // running — long enough to finish its side effect after the step failed.
+    const dir = `${process.env.TMPDIR ?? "/tmp"}/script-kill-${crypto.randomUUID()}`;
+    await Bun.$`mkdir -p ${dir}`;
+    const marker = `${dir}/still-alive`;
+    try {
+      const startedAt = Date.now();
+      const result = await executor.run(
+        input({ runtime: "bash", script: `sleep 6; touch ${marker}`, timeout: 1000, cwd: dir }, {}),
+      );
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("Script timed out after 1000ms");
+      // The executor must not return until the child has actually been reaped.
+      expect(Date.now() - startedAt).toBeLessThan(6_000);
+
+      // Wait past when the abandoned child would have created its marker.
+      await Bun.sleep(6_500);
+      expect(await Bun.file(marker).exists()).toBe(false);
+    } finally {
+      await Bun.$`rm -rf ${dir}`.catch(() => {});
+    }
+  }, 20_000);
+
+  // ─── Sandbox regression tests (superagent.sh c27edfd7, finding b132d7c5) ──
+
+  test("child process never inherits the server's secrets — env is scrubbed, not passed through", async () => {
+    const savedKey = process.env.AGENT_SWARM_API_KEY;
+    process.env.AGENT_SWARM_API_KEY = "super-secret-operator-bearer";
+    process.env.SOME_OTHER_SERVER_SECRET = "also-should-not-leak";
+    try {
+      const result = await executor.run(
+        input(
+          {
+            runtime: "bash",
+            script: 'printf \'[%s][%s]\' "$AGENT_SWARM_API_KEY" "$SOME_OTHER_SERVER_SECRET"',
+          },
+          {},
+        ),
+      );
+      expect(result.status).toBe("success");
+      const out = result.output as { stdout: string };
+      // Neither var exists in the child's env at all — bash prints empty strings.
+      expect(out.stdout).toBe("[][]");
+    } finally {
+      if (savedKey === undefined) delete process.env.AGENT_SWARM_API_KEY;
+      else process.env.AGENT_SWARM_API_KEY = savedKey;
+      delete process.env.SOME_OTHER_SERVER_SECRET;
+    }
+  });
+
+  test("resource ulimits actually apply to the spawned process (not just documented)", async () => {
+    const result = await executor.run(input({ runtime: "bash", script: "ulimit -v" }, {}));
+    expect(result.status).toBe("success");
+    const out = result.output as { stdout: string };
+    // "unlimited" means no cap took effect; any other value is a real (finite) ulimit.
+    expect(out.stdout).not.toBe("unlimited");
+    expect(Number(out.stdout)).toBeGreaterThan(0);
+  });
+
+  test("no explicit cwd: runs in a scoped tmpdir, not the server's working directory", async () => {
+    const result = await executor.run(input({ runtime: "bash", script: "pwd" }, {}));
+    expect(result.status).toBe("success");
+    const out = result.output as { stdout: string };
+    expect(out.stdout).not.toBe(process.cwd());
+    expect(out.stdout).toContain("workflow-script-");
+  });
+
+  // ─── Codex review follow-ups (PR #1112, review 4876200033) ──────────────
+
+  test("truncated stdout carries an explicit marker instead of silently presenting a partial result as complete (PRRT_kwDOQr3Tmc6XCRu1)", async () => {
+    const result = await executor.run(
+      input({ runtime: "bash", script: "head -c 2000000 /dev/zero | tr '\\0' 'a'" }, {}),
+    );
+    expect(result.status).toBe("success");
+    const out = result.output as { exitCode: number; stdout: string };
+    expect(out.exitCode).toBe(0);
+    expect(out.stdout).toContain("…[stdout truncated]");
+    // Capped at MAX_OUTPUT_BYTES (1 MiB), well short of the 2,000,000 'a's emitted.
+    expect(out.stdout.length).toBeGreaterThan(1_000_000);
+    expect(out.stdout.length).toBeLessThan(1_100_000);
+  });
+
+  test("drain-deadline snapshot keeps the partial output already read instead of discarding it as empty (PRRT_kwDOQr3Tmc6XCRuy)", async () => {
+    // The direct child prints known output, backgrounds a descendant that
+    // inherits its stdout pipe, then exits. `proc.exited` resolves
+    // immediately, but the descendant keeps the pipe's write end open past
+    // STREAM_DRAIN_GRACE_MS (5s) — the exact "successful script + surviving
+    // descendant holding the pipe" scenario the review comment described.
+    const result = await executor.run(
+      input({ runtime: "bash", script: "printf 'kept-output'; sleep 8 & disown; exit 0" }, {}),
+    );
+    expect(result.status).toBe("success");
+    const out = result.output as { exitCode: number; stdout: string };
+    expect(out.exitCode).toBe(0);
+    // The bytes read before the deadline fired must survive — not an empty string.
+    expect(out.stdout).toContain("kept-output");
+    expect(out.stdout).toContain("…[stdout truncated]");
+  }, 10_000);
 });
 
 // ─── VCS Executor ────────────────────────────────────────────

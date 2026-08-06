@@ -261,7 +261,7 @@ describe("known github sender", () => {
 });
 
 describe("self-authored review suppression", () => {
-  test("empty commented review from the bot is ignored when inline comments are unverifiable", async () => {
+  test("empty COMMENTED review from configured bot login is ignored when comments are unverifiable", async () => {
     const result = await handlePullRequestReview(
       makeReviewEvent(GITHUB_BOT_NAME, 2001, { body: null, state: "commented" }),
     );

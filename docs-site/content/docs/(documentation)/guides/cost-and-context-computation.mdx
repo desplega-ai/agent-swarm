@@ -10,13 +10,22 @@ The swarm tracks two related but separate numbers for every model run:
 
 This page is the single source of truth for how both numbers are produced.
 
+New `session_costs` rows keep two USD values:
+
+- `harnessCostUsd` is the adapter-reported number. It is useful for comparison,
+  but advisory: adapters can have stale local rates or incomplete usage.
+- `totalCostUsd` is the API's canonical stored total. For priced rows, the API
+  recomputes it from the active server-side pricing table at the row timestamp;
+  for the other `costSource` paths below, it intentionally equals the harness
+  report.
+
 ## How cost is computed
 
 Cost flows through three layers, each annotated with the path's `costSource` enum value (the dashboard renders this as a small badge next to every cost).
 
 ### 1. Adapter (worker-local)
 
-Every adapter emits a `CostData` event with `totalCostUsd`, token breakdowns (`inputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `outputTokens`, `reasoningOutputTokens`, `thinkingTokens`), and a `provider` tag. The dollar value comes from whatever the harness reports — Claude's stream-json carries it directly; Codex doesn't, so the adapter computes locally via `computeCodexCostUsd` (`src/providers/codex-models.ts`); pi-ai self-reports `stats.cost`; etc.
+Every adapter emits a `CostData` event with its advisory local total, token breakdowns (`inputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `outputTokens`, `reasoningOutputTokens`, `thinkingTokens`), and a `provider` tag. The dollar value comes from whatever the harness reports — Claude's stream-json carries it directly; Codex doesn't, so the adapter computes locally via `computeCodexCostUsd` (`src/providers/codex-models.ts`); pi-ai self-reports `stats.cost`; etc.
 
 The adapter writes via `POST /api/session-costs` with the `provider` field set.
 
@@ -24,17 +33,67 @@ The adapter writes via `POST /api/session-costs` with the `provider` field set.
 
 When the API receives a `POST /api/session-costs` with a `provider` tag, it does a synchronous lookup against the `pricing` table for `(provider, model, token_class)` at the row's `createdAt`. Three outcomes:
 
-| Outcome                                                                       | `costSource`     |
-|-------------------------------------------------------------------------------|-------------------|
-| Both `input` and `output` rates land — recompute the USD and overwrite the row | `'pricing-table'` |
-| No `provider` tag supplied at all (legacy callers)                            | `'harness'`       |
-| Tag supplied but the model has no pricing rows                                | `'unpriced'`      |
+| Outcome | `costSource` | Stored `totalCostUsd` |
+|---|---|---|
+| A tagged provider/model has the required pricing rows | `'pricing-table'` | Canonical server recompute |
+| No `provider` tag supplied (legacy caller) | `'harness'` | Adapter report |
+| A tag was supplied but pricing cannot be completed | `'unpriced'` | Adapter report |
 
-Cached-input and cache-write classes are billed at their own rates when present; uncached input is `max(0, input - cached)` for the codex-style "input includes cached" semantic.
+`harnessCostUsd` always preserves the adapter's submitted `totalCostUsd`, even
+when the server replaces `totalCostUsd` with the recomputed value.
+
+### Token classes, cache TTLs, and input semantics
+
+Cached reads and cache creation use their own pricing token classes. For
+Anthropic-billed models, `cache_write` is the 5-minute creation class (1.25×
+the base input rate) and `cache_write_1h` is the one-hour class (2× the base
+input rate). Claude reports both TTL totals. When a `modelBreakdown` entry
+does not have its own TTL split, the recompute distributes its writes using the
+session's 5m/1h ratio; this is an approximation for sidechains, not a claim
+that each sidechain independently exposed TTL data.
+
+Input counts have provider-specific cache-read semantics:
+
+| Provider family | Meaning of reported `inputTokens` | Uncached-input calculation |
+|---|---|---|
+| `claude`, `claude-managed`, `pi`, `opencode` | Excludes cache reads | `inputTokens` as reported |
+| `codex` | Includes cache reads | `max(0, inputTokens - cacheReadTokens)` |
+
+Although OpenCode can route to OpenAI models, the currently shipped recompute
+treats its input as disjoint from cache reads; production event evidence showed
+that subtracting cache reads would zero most OpenCode input.
+
+### Per-model and request-priced usage
+
+Claude's final `result.modelUsage` is preserved as `modelBreakdown`, including
+sidechain/subagent entries. The API prices every entry at that entry's own
+model rate, sums those totals, and stores the per-model computed `costUsd` in
+the breakdown. Top-level stored token totals are the corresponding breakdown
+sums when one exists, rather than only the main-thread usage. Because the
+breakdown takes precedence, the adapter refuses to zero-fill it: a missing,
+non-finite, or negative token counter on any entry drops the whole breakdown
+and the session falls back to top-level usage (advisory fields like
+`webSearchRequests` and per-model `costUSD` degrade per-field instead).
+
+`web_search` is a request-priced class, not a token rate. The manual rows for
+`claude` and `claude-managed` encode Anthropic's $10 per 1,000 requests
+($0.01/request); request counts in a model breakdown are added to that
+model's token cost. A missing web-search rate is treated as $0 so a small
+search fee cannot discard an otherwise complete token recompute.
+
+`claude-managed` also adds its $0.08/session-hour `runtime_hour` fee during
+the server recompute, using the session duration and the manual `runtime_hour`
+pricing row.
 
 ### 3. UI badge
 
 The task-detail and task-detail-sheet views render the `costSource` next to every cost via `<CostSourceBadge>`. Mixed sources within a task aggregate render as `HARNESS` (the weakest claim).
+
+When both USD values are available and differ, the badge tooltip shows harness
+and recomputed numbers. The task cost view adds a visible `Δ` hint above 2%.
+The OpenTelemetry counter `agentswarm.cost.drift.usd` records the absolute
+non-zero difference with a `drift_sign` attribute, making it the operational
+watchdog for stale adapter-local pricing or recompute drift.
 
 ## How the pricing table is populated
 
@@ -86,7 +145,7 @@ Fallback is 200k. Pre-Phase 4 the dated form fell to 200k unconditionally — wi
 ## Per-provider notes
 
 - **claude / claude-managed**: token rates from models.dev. claude-managed also has a per-session-hour runtime fee (`token_class='runtime_hour'`); the worker computes a preview locally via `claude-managed-pricing.ts`, and the API's recompute path overrides with the canonical value.
-- **codex**: `input_tokens` from the SDK is the SUM across every model call in a turn (cached + uncached). The unified formula uses it as-is, accepting that chatty turns can over-report (the percent clamps at 100%). Old rows tagged `peak-proxy` predate this change. Cache writes are NULL (the SDK doesn't surface them).
+- **codex**: `input_tokens` from the SDK is the SUM across every model call in a turn (cached + uncached), and each `turn.completed` payload is accumulated across the session before `CostData` is emitted. The unified formula uses the per-turn number as-is, accepting that chatty turns can over-report (the percent clamps at 100%). Old rows tagged `peak-proxy` predate this change. Cache writes are NULL in `CostData` because this adapter does not report them.
 - **pi-mono**: cost passes through verbatim from pi-ai's `stats.cost`. Context snapshots tag `contextFormula: 'pi-delegated'`. `durationMs` is now real wallclock (was hardcoded 0). Per-turn `outputTokens` are derived from session-stats delta.
 - **opencode**: passthrough through OpenRouter. The unified formula applies; `contextPercent` is clamped to [0, 100].
 - **devin**: ACU-based pricing (`token_class='acu'`, $2.25 per ACU). No per-token cost. No context events (the API doesn't report context info) — `peakContextTokens` remains `null` for devin tasks.

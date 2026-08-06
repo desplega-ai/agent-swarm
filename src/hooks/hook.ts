@@ -18,6 +18,7 @@ import type { Agent } from "../types";
 import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl, MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
@@ -252,7 +253,10 @@ export interface RunStopHookSessionSummaryDeps {
 
 export interface RunStopHookSessionSummaryOpts {
   agentId: string;
-  transcriptPath: string;
+  /** In-memory transcript supplied by an adapter that owns the event stream. */
+  transcript?: string;
+  /** Legacy fallback for standalone Claude hook installations. */
+  transcriptPath?: string;
   /** Defaulted to `process.env`; injectable for tests. */
   env?: NodeJS.ProcessEnv;
 }
@@ -264,7 +268,8 @@ export interface RunStopHookSessionSummaryOpts {
  * OpenRouter) keep working via the `claude -p` fallback inside the wrapper.
  *
  * Flow:
- *   1. Read tail of transcript file (last 20 KB).
+ *   1. Use the adapter-owned in-memory transcript when supplied; otherwise
+ *      read the tail of the legacy hook transcript file (last 20 KB).
  *   2. Resolve task context + (optionally) memory retrievals for ratings.
  *   3. Call `runSummarize` from `src/utils/internal-ai` — picks credentials
  *      out of env / codex OAuth / CLAUDE_CODE_OAUTH_TOKEN, returns structured
@@ -273,14 +278,17 @@ export interface RunStopHookSessionSummaryOpts {
  *   5. If `MEMORY_RATERS` includes `llm` AND ratings came back, POST them
  *      via `postRatings` (events-based).
  *
- * Non-blocking — any thrown error is swallowed so session shutdown never blocks.
+ * Non-blocking — any thrown error is logged and swallowed so session shutdown never blocks.
  */
 export async function runStopHookSessionSummary(
   opts: RunStopHookSessionSummaryOpts,
   deps: RunStopHookSessionSummaryDeps = {},
 ): Promise<void> {
   const env = opts.env ?? process.env;
-  if (env.SKIP_SESSION_SUMMARY) return;
+  if (env.SKIP_SESSION_SUMMARY) {
+    console.debug("session_summary skipped (claude): SKIP_SESSION_SUMMARY is set");
+    return;
+  }
 
   const _runSummarize = deps.runSummarize ?? runSummarize;
   const _fetchRetrievals = deps.fetchRetrievalsForTask ?? fetchRetrievalsForTask;
@@ -288,15 +296,27 @@ export async function runStopHookSessionSummary(
   const _buildRatings = deps.buildRatingsFromLlm ?? buildRatingsFromLlm;
 
   try {
-    let transcript = "";
-    try {
-      const fullTranscript = await Bun.file(opts.transcriptPath).text();
-      transcript = fullTranscript.length > 20000 ? fullTranscript.slice(-20000) : fullTranscript;
-    } catch {
-      /* no transcript */
+    let transcript = opts.transcript?.slice(-20_000) ?? "";
+    if (!transcript && opts.transcriptPath) {
+      try {
+        const fullTranscript = await Bun.file(opts.transcriptPath).text();
+        transcript =
+          fullTranscript.length > 20_000 ? fullTranscript.slice(-20_000) : fullTranscript;
+      } catch (err) {
+        console.warn(
+          scrubSecrets(
+            `session_summary skipped (claude): transcript file unavailable at ${opts.transcriptPath}: ${String(err)}`,
+          ),
+        );
+      }
     }
 
-    if (transcript.length <= 100) return;
+    if (transcript.length <= 100) {
+      console.warn(
+        `session_summary skipped (claude): transcript too short (${transcript.length} chars)`,
+      );
+      return;
+    }
 
     // Prefer AGENT_SWARM_TASK_ID env var; fall back to TASK_FILE on
     // disk. PR #444 gate-trace showed the file disappears mid-session
@@ -334,17 +354,23 @@ export async function runStopHookSessionSummary(
       },
       apiUrl,
       apiKey,
+      // Parent-owned adapter summaries carry per-task swarm_config overlays
+      // here; they are not guaranteed to exist on process.env.
+      env,
     });
     // null = no auth resolved (no OPENROUTER, ANTHROPIC, OPENAI, codex OAuth,
     // or CLAUDE_CODE_OAUTH_TOKEN) — silent skip, same as today's no-key behavior.
-    if (!result) return;
+    if (!result) {
+      console.warn("session_summary skipped (claude): summarizer returned no result");
+      return;
+    }
 
     const summary = result.summary.trim();
     const ratings = result.ratings ?? [];
 
     // Skip indexing if the session had no significant learnings.
     if (summary.length > 20 && !summary.toLowerCase().includes("no significant learnings")) {
-      await fetch(`${apiUrl}/api/memory/index`, {
+      const indexResp = await fetch(`${apiUrl}/api/memory/index`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -362,6 +388,18 @@ export async function runStopHookSessionSummary(
           ...(taskId ? { sourceTaskId: taskId } : {}),
         }),
       });
+      if (!indexResp.ok) {
+        const text = await indexResp.text().catch(() => "");
+        console.error(
+          "session_summary: /api/memory/index POST failed (claude):",
+          indexResp.status,
+          scrubSecrets(text),
+        );
+      }
+    } else {
+      console.debug(
+        `session_summary skipped (claude): summary failed quality gate (${summary.length} chars)`,
+      );
     }
 
     // Best-effort: post LLM ratings. Never blocks summary indexing.
@@ -390,8 +428,68 @@ export async function runStopHookSessionSummary(
         );
       }
     }
-  } catch {
+  } catch (err) {
     // Non-blocking — session summarization failure should never block shutdown
+    console.error("session_summary failed (claude):", scrubSecrets(String(err)));
+  }
+}
+
+/**
+ * Run the parent-owned Claude summary in a small child process. The transcript
+ * stays in memory and crosses stdin; the child inherits the resolved per-task
+ * environment so claude-cli OAuth fallback can read its token from process.env.
+ */
+export async function runStopHookSessionSummarySubprocess(
+  opts: RunStopHookSessionSummaryOpts,
+  deps: { spawn?: typeof Bun.spawn; execPath?: string; argv?: string[] } = {},
+): Promise<void> {
+  const env = opts.env ?? process.env;
+  const proc = (deps.spawn ?? Bun.spawn)({
+    cmd: resolveSessionSummaryRunnerArgv(deps),
+    env: { ...(env as Record<string, string>) },
+    stdin: "pipe",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  proc.stdin.write(
+    JSON.stringify({
+      agentId: opts.agentId,
+      transcript: opts.transcript,
+      transcriptPath: opts.transcriptPath,
+    }),
+  );
+  await proc.stdin.end();
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    console.error(`session_summary failed (claude): summary subprocess exited ${exitCode}`);
+  }
+}
+
+/**
+ * Resolve the argv used to re-launch agent-swarm for session summarization.
+ * Dev mode must preserve the interpreted entry-point path; compiled mode can
+ * dispatch the internal CLI subcommand directly through the executable.
+ */
+export function resolveSessionSummaryRunnerArgv(
+  runtime: { execPath?: string; argv?: string[] } = {},
+): string[] {
+  const execPath = runtime.execPath ?? process.execPath;
+  const argv = runtime.argv ?? process.argv;
+  const scriptArg = argv[1];
+  if (scriptArg && /\.(t|j)sx?$/.test(scriptArg)) {
+    return [execPath, scriptArg, "session-summary-stdin"];
+  }
+  return [execPath, "session-summary-stdin"];
+}
+
+/** Handle the internal CLI mode that receives a summary request over stdin. */
+export async function runSessionSummaryFromStdin(): Promise<void> {
+  try {
+    const opts = JSON.parse(await Bun.stdin.text()) as RunStopHookSessionSummaryOpts;
+    await runStopHookSessionSummary({ ...opts, env: process.env });
+  } catch (err) {
+    console.error("session_summary failed (claude):", scrubSecrets(String(err)));
+    process.exitCode = 1;
   }
 }
 
@@ -1238,11 +1336,19 @@ export async function handleHook(): Promise<void> {
       // credential resolution and returns null when nothing resolves, so Pro/Max
       // OAuth users keep working without OpenRouter (the working path PR #450
       // restored). Non-blocking — failures never block shutdown.
-      if (agentInfo?.id && msg.transcript_path) {
+      if (process.env.AGENT_SWARM_ADAPTER_SESSION_SUMMARY === "1") {
+        console.debug(
+          "session_summary skipped (claude hook): adapter owns the in-memory transcript",
+        );
+      } else if (agentInfo?.id && msg.transcript_path) {
         await runStopHookSessionSummary({
           agentId: agentInfo.id,
           transcriptPath: msg.transcript_path,
         });
+      } else {
+        console.warn(
+          `session_summary skipped (claude hook): ${!agentInfo?.id ? "agent id unavailable" : "transcript path unavailable"}`,
+        );
       }
 
       // Mark the agent as offline
@@ -1265,6 +1371,13 @@ export async function handleHook(): Promise<void> {
 // Run directly when executed as a script
 const isMainModule = import.meta.main;
 if (isMainModule) {
-  await handleHook();
-  process.exit(0);
+  if (
+    process.argv.includes("session-summary-stdin") ||
+    process.argv.includes("--session-summary-stdin")
+  ) {
+    await runSessionSummaryFromStdin();
+  } else {
+    await handleHook();
+  }
+  process.exit(process.exitCode ?? 0);
 }

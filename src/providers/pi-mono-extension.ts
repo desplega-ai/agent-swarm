@@ -10,6 +10,7 @@ import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
 import { checkToolLoop, clearToolHistory } from "../hooks/tool-loop-detection";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
+import { scrubSecrets } from "../utils/secret-scrubber";
 
 export interface SwarmHooksConfig {
   apiUrl: string;
@@ -300,7 +301,10 @@ export async function summarizeSessionForPi(
   sessionFile: string | undefined,
   deps: SummarizeSessionForPiDeps = {},
 ): Promise<void> {
-  if (!sessionFile) return;
+  if (!sessionFile) {
+    console.warn("session_summary skipped (pi): session transcript file unavailable");
+    return;
+  }
 
   const _runSummarize = deps.runSummarize ?? runSummarize;
   const _fetchRetrievals = deps.fetchRetrievalsForTask ?? fetchRetrievalsForTask;
@@ -312,15 +316,28 @@ export async function summarizeSessionForPi(
     try {
       const fullTranscript = await Bun.file(sessionFile).text();
       transcript = fullTranscript.length > 20000 ? fullTranscript.slice(-20000) : fullTranscript;
-    } catch {
+    } catch (err) {
+      console.warn(
+        scrubSecrets(`session_summary skipped (pi): cannot read ${sessionFile}: ${String(err)}`),
+      );
       return;
     }
 
-    if (transcript.length <= 100) return;
+    if (transcript.length <= 100) {
+      console.warn(
+        `session_summary skipped (pi): transcript too short (${transcript.length} chars)`,
+      );
+      return;
+    }
 
     const sourceTaskId = config.taskId;
     const agentId = config.agentId;
-    if (!sourceTaskId || !agentId) return;
+    if (!sourceTaskId || !agentId) {
+      console.warn(
+        `session_summary skipped (pi): ${!sourceTaskId ? "task id unavailable" : "agent id unavailable"}`,
+      );
+      return;
+    }
 
     const taskDetails = await fetchTaskDetails(config).catch(() => null);
 
@@ -354,10 +371,16 @@ export async function summarizeSessionForPi(
       env: config.env,
     });
     // null = no auth resolved or wrapper exhausted retries (already logged inside)
-    if (!result) return;
+    if (!result) {
+      console.warn("session_summary skipped (pi): summarizer returned no result");
+      return;
+    }
 
     const summary = result.summary.trim();
     if (summary.length <= 20 || summary.toLowerCase().includes("no significant learnings")) {
+      console.debug(
+        `session_summary skipped (pi): summary failed quality gate (${summary.length} chars)`,
+      );
       return;
     }
 
@@ -644,6 +667,8 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
       const sessionFile = ctx.sessionManager.getSessionFile?.();
       if (!process.env.SKIP_SESSION_SUMMARY) {
         await summarizeSessionForPi(config, sessionFile);
+      } else {
+        console.debug("session_summary skipped (pi): SKIP_SESSION_SUMMARY is set");
       }
 
       // Mark agent offline

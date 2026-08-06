@@ -2,7 +2,15 @@ import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ScriptRun } from "../types";
+import {
+  buildSandboxedCommand,
+  readStreamCapped,
+  sandboxSpawnEnv,
+} from "../utils/sandboxed-process";
 import { scriptRunMaxWallMs } from "./limits";
+
+/** Matches the inline scripts-runtime cap (src/scripts-runtime/executors/types.ts). */
+const MAX_STDERR_BYTES = 1_048_576;
 
 export type ScriptExecutionResult = {
   exitCode: number | null;
@@ -54,36 +62,63 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
     await Bun.write(sourceFile, run.source);
     await Bun.write(argsFile, JSON.stringify(run.args ?? null));
 
-    const proc = Bun.spawn(["bun", "run", getScriptWorkflowHarnessPath()], {
-      cwd: tmpdir,
-      stdin: "ignore",
-      stdout: "ignore",
-      stderr: "pipe",
-      env: {
-        PATH: process.env.PATH ?? "/usr/bin:/bin",
-        HOME: process.env.HOME ?? "/tmp",
-        LANG: process.env.LANG ?? "C.UTF-8",
-        LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
-        TMPDIR: tmpdir,
-        AGENT_SWARM_API_KEY: apiKey,
-        MCP_BASE_URL: baseUrl,
-        SCRIPT_RUN_ID: run.id,
-        SCRIPT_RUN_AGENT_ID: run.agentId,
-        SCRIPT_RUN_TMPDIR: tmpdir,
-        SCRIPT_RUN_SOURCE_FILE: sourceFile,
-        SCRIPT_RUN_ARGS_FILE: argsFile,
-        // Durable, restart-surviving reference for a shared absolute
-        // ctx.step.agentTask wait deadline — see workflow-ctx.ts. Sourced
-        // from the persisted run row (not Date.now() at spawn time) so a
-        // supervisor-restarted process computes the SAME deadline as the
-        // original one, and from the server's own limits.ts (not raw env
-        // passthrough) so the subprocess never re-interprets the env var.
-        SCRIPT_RUN_STARTED_AT: run.startedAt,
-        SCRIPT_RUN_MAX_WALL_MS: String(scriptRunMaxWallMs()),
-      },
-    });
+    // Non-secret env for the harness process. The bearer travels over stdin
+    // instead (see below) — the harness dynamically `import()`s the user's
+    // module INTO THIS SAME PROCESS (src/script-workflows/harness.ts), so
+    // anything in `process.env` here is directly readable by attacker-supplied
+    // code. `buildSandboxedCommand` also wraps the spawn in the shared
+    // ulimit sandbox and replaces the env with exactly this object (`env -i`),
+    // so the child never inherits the server's full process.env either.
+    const harnessEnv = {
+      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      HOME: process.env.HOME ?? "/tmp",
+      LANG: process.env.LANG ?? "C.UTF-8",
+      LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
+      TMPDIR: tmpdir,
+      MCP_BASE_URL: baseUrl,
+      SCRIPT_RUN_ID: run.id,
+      SCRIPT_RUN_AGENT_ID: run.agentId,
+      SCRIPT_RUN_TMPDIR: tmpdir,
+      SCRIPT_RUN_SOURCE_FILE: sourceFile,
+      SCRIPT_RUN_ARGS_FILE: argsFile,
+      // Durable, restart-surviving reference for a shared absolute
+      // ctx.step.agentTask wait deadline — see workflow-ctx.ts. Sourced
+      // from the persisted run row (not Date.now() at spawn time) so a
+      // supervisor-restarted process computes the SAME deadline as the
+      // original one, and from the server's own limits.ts (not raw env
+      // passthrough) so the subprocess never re-interprets the env var.
+      SCRIPT_RUN_STARTED_AT: run.startedAt,
+      SCRIPT_RUN_MAX_WALL_MS: String(scriptRunMaxWallMs()),
+    };
 
-    const stderrPromise = new Response(proc.stderr).text().catch(() => "");
+    const proc = Bun.spawn(
+      buildSandboxedCommand(["bun", "run", getScriptWorkflowHarnessPath()], harnessEnv),
+      {
+        cwd: tmpdir,
+        // On POSIX, Bun.spawn only needs PATH itself to find the `sh` binary
+        // — the sandboxed command's `env -i` prelude scrubs the child down
+        // to `harnessEnv` above, so no secret rides on this outer env
+        // either. On win32 there is no such prelude, so `sandboxSpawnEnv`
+        // passes `harnessEnv` through directly instead — see
+        // `buildSandboxedCommand`'s win32 doc comment.
+        env: sandboxSpawnEnv(harnessEnv),
+        stdin: "pipe",
+        stdout: "ignore",
+        stderr: "pipe",
+      },
+    );
+
+    // Bearer travels over stdin, never as an env var — matches the inline
+    // scripts-runtime convention (CLAUDE.md: config injection over stdin,
+    // not env). The harness reads this before doing anything else and never
+    // re-exposes it via process.env.
+    proc.stdin.write(JSON.stringify({ apiKey }));
+    proc.stdin.end();
+
+    const stderrPromise = readStreamCapped(proc.stderr, MAX_STDERR_BYTES).then(
+      ({ text, truncated }) => (truncated ? `${text}\n…[stderr truncated]` : text),
+      () => "",
+    );
 
     return {
       pid: proc.pid,

@@ -102,6 +102,34 @@ route({
 const PROXY_PREFIX = "/@swarm/api/";
 
 /**
+ * Reject a proxied suffix that smells like path traversal or an attempt to
+ * smuggle an extra path segment via percent-encoding (e.g. `%2e%2e`, `%2f`).
+ * This is a normalization guard, not a route allowlist — it doesn't track the
+ * browser-SDK surface as a second source of truth, it just refuses to
+ * forward anything that doesn't decode into a clean, traversal-free segment
+ * sequence.
+ */
+function isSafeProxySuffix(suffix: string): boolean {
+  if (suffix.length === 0) return true;
+  for (const raw of suffix.split("/")) {
+    let seg: string;
+    try {
+      seg = decodeURIComponent(raw);
+    } catch {
+      return false; // malformed percent-encoding
+    }
+    if (seg.length === 0) return false; // empty segment (e.g. "//") — reject
+    if (seg === "." || seg === "..") return false; // path traversal
+    // A decoded segment containing a slash or backslash means the raw
+    // segment smuggled an encoded separator (`%2F`, `%5C`) past the naive
+    // `split("/")` above — reject rather than let a segment boundary sneak
+    // past this check unaccounted for.
+    if (seg.includes("/") || seg.includes("\\")) return false;
+  }
+  return true;
+}
+
+/**
  * Handle `/@swarm/api/*` requests. Returns `true` if the request was handled
  * (response sent), `false` if not — caller continues to the next handler.
  *
@@ -118,6 +146,18 @@ export async function handlePageProxy(req: IncomingMessage, res: ServerResponse)
   const queryIdx = url.indexOf("?");
   const pathPart = queryIdx === -1 ? url : url.slice(0, queryIdx);
   const queryPart = queryIdx === -1 ? "" : url.slice(queryIdx);
+
+  // ─── Suffix normalization ─────────────────────────────────────────────────
+  // Reject path-traversal / percent-encoded segment-smuggling before doing
+  // any auth work. This does NOT restrict which `/api/*` routes may be
+  // forwarded — see the module comment for why a route allowlist was
+  // deliberately dropped here.
+  const method = (req.method ?? "GET").toUpperCase();
+  const suffix = pathPart.slice(PROXY_PREFIX.length);
+  if (!isSafeProxySuffix(suffix)) {
+    jsonError(res, "not found", 404);
+    return true;
+  }
 
   // ─── Cookie validation ────────────────────────────────────────────────────
   const payload = await extractAndVerifyCookie(req);
@@ -171,8 +211,8 @@ export async function handlePageProxy(req: IncomingMessage, res: ServerResponse)
 
   // Pull the body if there is one. We DO buffer here — page traffic is
   // expected to be small JSON payloads, and streaming would complicate cookie
-  // failure-mode handling.
-  const method = (req.method ?? "GET").toUpperCase();
+  // failure-mode handling. `method` was already resolved above for the
+  // allowlist check.
   let body: Buffer | undefined;
   if (method !== "GET" && method !== "HEAD") {
     const chunks: Buffer[] = [];

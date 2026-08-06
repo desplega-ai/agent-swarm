@@ -199,12 +199,41 @@ function applyPinnedEntries(prev: Cache | null, next: Cache): void {
   }
 }
 
+/**
+ * models.dev prunes delisted models, but delisting is not retirement — those
+ * models stay runnable behind provider APIs, and dropping them from the
+ * snapshot silently breaks context-window lookups, reasoning-effort gating,
+ * and pricing for anyone pinned to them (bit us 2026-08: gpt-5.1/5.2-codex +
+ * 12 legacy anthropic ids vanished in one refresh). Carry last-known entries
+ * forward; fresh upstream data still wins whenever the model is listed.
+ */
+export function carryForwardDelistedModels(prev: Cache | null, next: Cache): number {
+  if (!prev) return 0;
+  let carried = 0;
+  for (const [provider, block] of Object.entries(prev)) {
+    for (const [id, entry] of Object.entries(block?.models ?? {})) {
+      if (next[provider]?.models?.[id]) continue;
+      next[provider] ??= {};
+      next[provider].models ??= {};
+      next[provider].models[id] = entry;
+      carried += 1;
+    }
+  }
+  return carried;
+}
+
 async function main(): Promise<void> {
   console.log(`Fetching ${MODELSDEV_URL} ...`);
   const next = await fetchLatest();
   const prev = loadCurrent();
   applyPinnedEntries(prev, next);
+  // Summarize first so the log still shows what models.dev delisted, then
+  // carry those entries forward into the written snapshot.
   summarize(prev, next);
+  const carried = carryForwardDelistedModels(prev, next);
+  if (carried > 0) {
+    console.log(`Carried forward ${carried} delisted model entr${carried === 1 ? "y" : "ies"}.`);
+  }
   writeFileSync(CACHE_PATH, `${JSON.stringify(next, null, 2)}\n`);
   console.log(`Wrote ${CACHE_PATH}`);
 
@@ -213,7 +242,9 @@ async function main(): Promise<void> {
   console.log(`Wrote ${REASONING_SNAPSHOT_PATH}`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

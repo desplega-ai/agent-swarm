@@ -251,6 +251,12 @@ const COMMAND_HELP: Record<
     options: "  -h, --help             Show this help",
     examples: `  ${binName} codex-hook`,
   },
+  "session-summary-stdin": {
+    usage: `${binName} session-summary-stdin`,
+    description: "Generate a Claude session summary from a JSON request read over stdin.",
+    options: "  Internal command; no user-facing options",
+    examples: `  ${binName} session-summary-stdin`,
+  },
   artifact: {
     usage: `${binName} artifact <subcommand> [options]`,
     description: "Manage agent artifacts (serve, list, etc.).",
@@ -391,6 +397,7 @@ function printHelp(command?: string) {
     ["claude", "Run Claude CLI"],
     ["hook", "Handle Claude Code hook events (stdin)"],
     ["codex-hook", "Handle Codex CLI hook events (stdin, steering delivery)"],
+    ["session-summary-stdin", "Generate a Claude session summary (internal, stdin)"],
     ["artifact", "Manage agent artifacts"],
     ["x", "Execute external command routes"],
     ["scripts", "Reusable scripts maintenance"],
@@ -684,6 +691,10 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   const { handleCodexHook } = await import("./hooks/codex-hook.ts");
   await handleCodexHook();
   process.exit(0);
+} else if (args.command === "session-summary-stdin") {
+  const { runSessionSummaryFromStdin } = await import("./hooks/hook.ts");
+  await runSessionSummaryFromStdin();
+  process.exit(process.exitCode ?? 0);
 } else if (args.command === "artifact") {
   // Pass all args after "artifact" directly
   const artifactArgs = process.argv.slice(process.argv.indexOf("artifact") + 1);

@@ -3,6 +3,10 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { type Span, trace } from "@opentelemetry/api";
 import {
+  type RunStopHookSessionSummaryOpts,
+  runStopHookSessionSummarySubprocess,
+} from "../hooks/hook";
+import {
   CONTEXT_FORMULA,
   clampContextPercent,
   computeContextUsedUnified,
@@ -561,6 +565,8 @@ class ClaudeSession implements ProviderSession {
   private appliedReasoningEffort: ReasoningEffort | null;
   /** Last non-empty assistant text seen; surfaced as ProviderResult.output — same pattern as pi-mono/claude-managed. */
   private lastAssistantText = "";
+  /** Per-session stream-json transcript used by the parent-owned session summarizer. */
+  private transcript: string[];
   readonly deliverSteering?: (delivery: SteerDelivery) => Promise<SteerDeliveryResult>;
 
   constructor(
@@ -574,10 +580,14 @@ class ClaudeSession implements ProviderSession {
     private harnessVariant?: string,
     private harnessVariantMeta?: Record<string, unknown>,
     private readonly queueSteeringSupported = false,
+    private readonly runSessionSummary: (
+      opts: RunStopHookSessionSummaryOpts,
+    ) => Promise<void> = runStopHookSessionSummarySubprocess,
   ) {
     this.taskFilePid = taskFilePid;
     this.contextWindowSize = getContextWindowSize(model);
     this.systemPromptFile = systemPromptFile;
+    this.transcript = [`User: ${scrubSecrets(config.prompt)}`];
     const cmd = this.buildCommand();
 
     console.log(
@@ -614,6 +624,9 @@ class ClaudeSession implements ProviderSession {
         // rater. The hook prefers these env vars when present. See PR #444.
         AGENT_SWARM_TASK_ID: config.taskId,
         AGENT_SWARM_AGENT_ID: config.agentId,
+        // The parent adapter owns a reliable in-memory stream-json transcript.
+        // Prevent the child Stop hook from attempting the missing CLI artifact.
+        AGENT_SWARM_ADAPTER_SESSION_SUMMARY: "1",
         // claude CLI strips CLAUDE_CODE_OAUTH_TOKEN from hook subprocess env
         // (security: prevents OAuth-token leakage to user-written hooks).
         // Mirror it under a name claude doesn't recognize so the Stop hook
@@ -677,6 +690,7 @@ class ClaudeSession implements ProviderSession {
         }
 
         try {
+          this.transcript.push(`User: ${scrubSecrets(text)}`);
           await this.writeUserMessage(text);
           // Interrupt is SDK-only; raw CLI stream-json queues. Always report queue.
           return { delivered: true, mode: "queue" };
@@ -840,6 +854,29 @@ class ClaudeSession implements ProviderSession {
     await logFileHandle.end();
     const exitCode = await this.proc.exited;
 
+    const transcript = this.transcript.join("\n");
+    if (transcript.length <= 100) {
+      console.warn(
+        `session_summary skipped (claude): transcript too short (${transcript.length} chars)`,
+      );
+    } else {
+      try {
+        await this.runSessionSummary({
+          agentId: this.config.agentId,
+          transcript,
+          env: {
+            ...process.env,
+            ...this.config.env,
+            AGENT_SWARM_TASK_ID: this.config.taskId,
+            MCP_BASE_URL: this.config.apiUrl,
+            AGENT_SWARM_API_KEY: this.config.apiKey,
+          },
+        });
+      } catch (err) {
+        console.error("session_summary failed (claude):", scrubSecrets(String(err)));
+      }
+    }
+
     // Cleanup task file, per-session MCP config, and per-task system prompt
     await cleanupTaskFile(this.taskFilePid);
     if (this.sessionMcpConfig) {
@@ -936,12 +973,76 @@ class ClaudeSession implements ProviderSession {
               output_tokens?: number;
               cache_read_input_tokens?: number;
               cache_creation_input_tokens?: number;
+              cache_creation?: {
+                ephemeral_5m_input_tokens?: unknown;
+                ephemeral_1h_input_tokens?: unknown;
+              };
               // Phase 4: claude extended-thinking flows surface this — the
               // CLI emits `thinking_input_tokens` when the model produced
               // thinking content during the turn.
               thinking_input_tokens?: number;
             }
           | undefined;
+        // Rejects non-numbers outright: Number(null) is 0, and a null costUSD
+        // must surface as "unknown", never "$0".
+        const toFiniteNumber = (value: unknown): number | undefined =>
+          typeof value === "number" && Number.isFinite(value) ? value : undefined;
+        const cacheCreation = usage?.cache_creation;
+        const cacheWrite5mTokens = cacheCreation
+          ? toFiniteNumber(cacheCreation.ephemeral_5m_input_tokens)
+          : undefined;
+        const cacheWrite1hTokens = cacheCreation
+          ? toFiniteNumber(cacheCreation.ephemeral_1h_input_tokens)
+          : undefined;
+        // Token counters are load-bearing downstream: the server gives models[]
+        // precedence over top-level usage for BOTH row token totals and pricing,
+        // so a zero-filled counter would store a fabricated $0 'pricing-table'
+        // row. Negative counts would be rejected by the wire schema and void
+        // the whole cost write.
+        const toTokenCount = (value: unknown): number | undefined => {
+          const n = toFiniteNumber(value);
+          return n !== undefined && n >= 0 ? n : undefined;
+        };
+        const mappedModels =
+          json.modelUsage && typeof json.modelUsage === "object" && !Array.isArray(json.modelUsage)
+            ? Object.entries(json.modelUsage as Record<string, unknown>).map(([model, entry]) => {
+                const modelUsage =
+                  entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null;
+                if (!modelUsage) return null;
+                const inputTokens = toTokenCount(modelUsage.inputTokens);
+                const outputTokens = toTokenCount(modelUsage.outputTokens);
+                const cacheReadTokens = toTokenCount(modelUsage.cacheReadInputTokens);
+                const cacheWriteTokens = toTokenCount(modelUsage.cacheCreationInputTokens);
+                if (
+                  inputTokens === undefined ||
+                  outputTokens === undefined ||
+                  cacheReadTokens === undefined ||
+                  cacheWriteTokens === undefined
+                ) {
+                  return null;
+                }
+                // Advisory fields degrade per-field: a malformed value is
+                // omitted without invalidating the entry.
+                const webSearchRequests = toTokenCount(modelUsage.webSearchRequests);
+                const harnessCostUsd = toFiniteNumber(modelUsage.costUSD);
+                return {
+                  model,
+                  inputTokens,
+                  outputTokens,
+                  cacheReadTokens,
+                  cacheWriteTokens,
+                  ...(webSearchRequests === undefined ? {} : { webSearchRequests }),
+                  ...(harnessCostUsd === undefined ? {} : { harnessCostUsd }),
+                };
+              })
+            : undefined;
+        // One malformed entry poisons the whole breakdown — a partial list
+        // would silently undercount the session. Fall back to top-level usage
+        // (the pre-breakdown path) instead of manufacturing zeros.
+        const models =
+          mappedModels && mappedModels.length > 0 && mappedModels.every((m) => m !== null)
+            ? (mappedModels as NonNullable<CostData["models"]>)
+            : undefined;
 
         const cost: CostData = {
           sessionId: "", // Set by the runner with the appropriate runner session ID
@@ -952,8 +1053,11 @@ class ClaudeSession implements ProviderSession {
           outputTokens: usage?.output_tokens ?? 0,
           cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
           cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
+          cacheWrite5mTokens,
+          cacheWrite1hTokens,
           // Phase 4: surface thinking tokens; previously dropped on the floor.
           thinkingTokens: usage?.thinking_input_tokens ?? 0,
+          models,
           durationMs: json.duration_ms || 0,
           // Phase 4: honest null when the CLI omits num_turns instead of a
           // faked `1` (would have under-counted in dashboards).
@@ -1007,11 +1111,15 @@ class ClaudeSession implements ProviderSession {
         // main thread's text should win the `ProviderResult.output` fallback.
         if (text && !json.parent_tool_use_id) {
           this.lastAssistantText = text;
+          this.transcript.push(`Assistant: ${scrubSecrets(text)}`);
         }
 
         if (message.content) {
           for (const block of message.content) {
             if (block.type === "tool_use" && block.name) {
+              this.transcript.push(
+                `Tool[${block.name}] started: ${scrubSecrets(JSON.stringify(block.input ?? {}))}`,
+              );
               this.emit({
                 type: "tool_start",
                 toolCallId: block.id || "",
@@ -1043,6 +1151,15 @@ class ClaudeSession implements ProviderSession {
             outputTokens: usage.output_tokens ?? 0,
             contextFormula: CONTEXT_FORMULA,
           });
+        }
+      }
+
+      if (json.type === "user" && Array.isArray(json.message?.content)) {
+        for (const block of json.message.content) {
+          if (block?.type !== "tool_result") continue;
+          const content =
+            typeof block.content === "string" ? block.content : JSON.stringify(block.content ?? "");
+          this.transcript.push(`Tool result: ${scrubSecrets(content)}`);
         }
       }
 
@@ -1089,6 +1206,12 @@ export class ClaudeAdapter implements ProviderAdapter {
     hasLocalEnvironment: true,
     steerModes: ["queue"],
   };
+
+  constructor(
+    private readonly runSessionSummary: (
+      opts: RunStopHookSessionSummaryOpts,
+    ) => Promise<void> = runStopHookSessionSummarySubprocess,
+  ) {}
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     // Native resume is deprecated. Follow-up continuity is delivered via the
@@ -1265,6 +1388,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       harnessVariant,
       harnessVariantMeta,
       queueSteeringSupported,
+      this.runSessionSummary,
     );
   }
 

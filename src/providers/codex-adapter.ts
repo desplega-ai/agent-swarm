@@ -547,7 +547,7 @@ export class CodexSession implements ProviderSession {
   private readonly abortRef: { current: AbortController | null } = { current: null };
   private _sessionId: string | undefined;
   private numTurns = 0;
-  private lastUsage: Usage | null = null;
+  private accumulatedUsage: Usage | null = null;
   private aborted = false;
   private settled = false;
   private readonly errorTracker = new SessionErrorTracker();
@@ -688,14 +688,14 @@ export class CodexSession implements ProviderSession {
     this.pendingResult = { ...result, appliedReasoningEffort: this.appliedReasoningEffort };
   }
 
-  /** Build CostData from the most recent turn usage. */
+  /** Build CostData from the usage accumulated across completed turns. */
   private buildCostData(usage: Usage | null, isError: boolean): CostData {
     const inputTokens = usage?.input_tokens ?? 0;
     const cachedInputTokens = usage?.cached_input_tokens ?? 0;
     const outputTokens = usage?.output_tokens ?? 0;
     // Phase 6: Codex SDK surfaces `reasoning_output_tokens` separately from
     // `output_tokens` for reasoning models (gpt-5.3-codex, gpt-5.4 thinking).
-    // Pre-fix this number was read into `lastUsage` but never reached
+    // Pre-fix this number was read into `accumulatedUsage` but never reached
     // `CostData`, so reasoning-heavy sessions silently under-billed.
     const reasoningOutputTokens = usage?.reasoning_output_tokens ?? 0;
     return {
@@ -704,9 +704,8 @@ export class CodexSession implements ProviderSession {
       taskId: this.config.taskId,
       agentId: this.config.agentId,
       // Codex SDK does not report dollar cost directly. We compute it from
-      // token counts × per-model pricing in `codex-models.ts`. The pricing
-      // table is sourced from developers.openai.com/api/docs/pricing — bump
-      // it whenever OpenAI updates published rates.
+      // token counts × per-model pricing in `codex-models.ts`. The API's
+      // canonical recompute uses its runtime-refreshed models.dev price table.
       totalCostUsd: computeCodexCostUsd(
         this.resolvedModel,
         inputTokens,
@@ -942,7 +941,29 @@ export class CodexSession implements ProviderSession {
         break;
       }
       case "turn.completed": {
-        this.lastUsage = event.usage;
+        // The Codex SDK declares Usage as tokens used "during a turn" and a
+        // Thread as having multiple consecutive turns. Preserve session-wide
+        // CostData by adding each completed turn, rather than retaining only
+        // the final turn's usage. Guarded like the block below: the SDK types
+        // usage as required, but a falsy runtime value must skip accumulation,
+        // not crash the session.
+        if (event.usage) {
+          this.accumulatedUsage = this.accumulatedUsage
+            ? {
+                input_tokens: this.accumulatedUsage.input_tokens + event.usage.input_tokens,
+                cached_input_tokens:
+                  this.accumulatedUsage.cached_input_tokens + event.usage.cached_input_tokens,
+                // CostData deliberately leaves cache writes undefined because
+                // this adapter does not emit the SDK's cache-write field; the
+                // server must not infer or bill it from an incomplete signal.
+                cache_write_input_tokens: event.usage.cache_write_input_tokens,
+                output_tokens: this.accumulatedUsage.output_tokens + event.usage.output_tokens,
+                reasoning_output_tokens:
+                  this.accumulatedUsage.reasoning_output_tokens +
+                  event.usage.reasoning_output_tokens,
+              }
+            : event.usage;
+        }
         if (event.usage) {
           // Phase 9: switch from the codex-specific "peak proxy" formula
           // (`uncached_input + output`) to the unified
@@ -1134,7 +1155,7 @@ export class CodexSession implements ProviderSession {
             typeof this.abortController?.signal.reason === "string"
               ? this.abortController.signal.reason
               : "cancelled";
-          const cost = this.buildCostData(this.lastUsage, true);
+          const cost = this.buildCostData(this.accumulatedUsage, true);
           this.emit({ type: "result", cost, isError: true, errorCategory: "cancelled" });
           this.settle({
             exitCode: 130,
@@ -1152,7 +1173,7 @@ export class CodexSession implements ProviderSession {
         // Preserve the structured error so the [usage-limit] prefix survives to
         // the runner's rate-limit resolver.
         if (terminalError) {
-          const cost = this.buildCostData(this.lastUsage, true);
+          const cost = this.buildCostData(this.accumulatedUsage, true);
           this.emit({
             type: "result",
             cost,
@@ -1174,7 +1195,7 @@ export class CodexSession implements ProviderSession {
       }
 
       const isError = Boolean(terminalError) || !sawTurnCompleted;
-      const cost = this.buildCostData(this.lastUsage, isError);
+      const cost = this.buildCostData(this.accumulatedUsage, isError);
       this.emit({
         type: "result",
         cost,
@@ -1194,7 +1215,7 @@ export class CodexSession implements ProviderSession {
       const message = err instanceof Error ? err.message : String(err);
       this.emit({ type: "raw_stderr", content: `[codex] Error: ${message}\n` });
       this.emit({ type: "error", message });
-      const cost = this.buildCostData(this.lastUsage, true);
+      const cost = this.buildCostData(this.accumulatedUsage, true);
       this.emit({ type: "result", cost, isError: true, errorCategory: "exception" });
       this.settle({
         exitCode: 1,
@@ -1228,6 +1249,8 @@ export class CodexSession implements ProviderSession {
         }
       } else if (sessionWasAborted) {
         console.debug("[codex] session aborted — skipping session_summary");
+      } else {
+        console.debug("session_summary skipped (codex): SKIP_SESSION_SUMMARY is set");
       }
 
       // Detach the abort controller now that the turn has settled.
@@ -1249,7 +1272,7 @@ export class CodexSession implements ProviderSession {
         ({
           exitCode: 1,
           sessionId: this._sessionId,
-          cost: this.buildCostData(this.lastUsage, true),
+          cost: this.buildCostData(this.accumulatedUsage, true),
           isError: true,
           failureReason: "session did not settle",
         } as ProviderResult);
@@ -1279,8 +1302,22 @@ export class CodexSession implements ProviderSession {
   private async summarizeAtEnd(): Promise<void> {
     const transcriptStr = this.transcript.join("\n").slice(-20_000);
     const { agentId, taskId, apiUrl, apiKey } = this.config;
-    if (!agentId || !taskId || !apiUrl || !apiKey) return;
-    if (transcriptStr.length <= 100) return;
+    if (!agentId || !taskId || !apiUrl || !apiKey) {
+      const missing = [
+        !agentId && "agent id",
+        !taskId && "task id",
+        !apiUrl && "API URL",
+        !apiKey && "API key",
+      ].filter(Boolean);
+      console.warn(`session_summary skipped (codex): missing ${missing.join(", ")}`);
+      return;
+    }
+    if (transcriptStr.length <= 100) {
+      console.warn(
+        `session_summary skipped (codex): transcript too short (${transcriptStr.length} chars)`,
+      );
+      return;
+    }
 
     const _runSummarize = this.summarizeDeps.runSummarize ?? runSummarize;
     const _fetchRetrievals = this.summarizeDeps.fetchRetrievalsForTask ?? fetchRetrievalsForTask;
@@ -1312,10 +1349,16 @@ export class CodexSession implements ProviderSession {
       env: this.config.env,
     });
     // null = no auth resolved or wrapper exhausted retries (already logged inside)
-    if (!result) return;
+    if (!result) {
+      console.warn("session_summary skipped (codex): summarizer returned no result");
+      return;
+    }
 
     const summary = result.summary.trim();
     if (summary.length <= 20 || summary.toLowerCase().includes("no significant learnings")) {
+      console.debug(
+        `session_summary skipped (codex): summary failed quality gate (${summary.length} chars)`,
+      );
       return;
     }
 

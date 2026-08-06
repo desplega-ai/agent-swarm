@@ -30,6 +30,7 @@
     "url": "https://github.com/desplega-ai/agent-swarm/issues"
   },
   "homepage": "https://agent-swarm.dev",
+  "mcpName": "io.github.desplega-ai/agent-swarm",
   "publishConfig": {
     "access": "public"
   },

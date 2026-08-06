@@ -16,10 +16,16 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import type { Counter } from "@opentelemetry/api";
 import { closeDb, createAgent, getDb, initDb, insertPricingRow } from "../be/db";
 import { handleCore } from "../http/core";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import type { SessionCostMetric } from "../otel";
+import { _injectCountersForTests, recordSessionCost as recordSessionCostImpl } from "../otel-impl";
+
+const driftCounterAddSpy = mock((..._args: unknown[]) => {});
+const driftCounter = { add: driftCounterAddSpy } as unknown as Counter;
+const metricCounter = { add: mock((..._args: unknown[]) => {}) } as unknown as Counter;
 
 // ── 1. Verify the otel.ts facade is a no-op when OTEL is disabled ────────────
 
@@ -45,6 +51,86 @@ describe("otel.ts recordSessionCost — no-op when OTEL_EXPORTER_OTLP_ENDPOINT i
         },
       }),
     ).not.toThrow();
+  });
+});
+
+describe("otel-impl cost drift metric", () => {
+  test("records absolute drift with direction and cost dimensions", () => {
+    driftCounterAddSpy.mockClear();
+    _injectCountersForTests(metricCounter, metricCounter, driftCounter);
+    recordSessionCostImpl({
+      totalCostUsd: 6,
+      harnessCostUsd: 5,
+      harness: "claude",
+      model: "claude-sonnet",
+      costSource: "pricing-table",
+      isError: false,
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, thinking: 0 },
+    });
+
+    expect(driftCounterAddSpy).toHaveBeenCalledWith(1, {
+      harness: "claude",
+      model: "claude-sonnet",
+      cost_source: "pricing-table",
+      is_error: false,
+      drift_sign: "over",
+    });
+  });
+
+  test("harness-reported $0 vs positive recompute is recorded (stale worker snapshot)", () => {
+    // codex workers deliberately report $0 for models missing from their local
+    // pricing snapshot; the server recompute succeeding against a positive
+    // total is exactly the divergence operators need to see.
+    driftCounterAddSpy.mockClear();
+    _injectCountersForTests(metricCounter, metricCounter, driftCounter);
+    recordSessionCostImpl({
+      totalCostUsd: 6,
+      harnessCostUsd: 0,
+      harness: "codex",
+      model: "gpt-5.7-codex",
+      costSource: "pricing-table",
+      isError: false,
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, thinking: 0 },
+    });
+
+    expect(driftCounterAddSpy).toHaveBeenCalledWith(6, {
+      harness: "codex",
+      model: "gpt-5.7-codex",
+      cost_source: "pricing-table",
+      is_error: false,
+      drift_sign: "over",
+    });
+  });
+
+  test("absent harnessCostUsd records no drift", () => {
+    driftCounterAddSpy.mockClear();
+    _injectCountersForTests(metricCounter, metricCounter, driftCounter);
+    recordSessionCostImpl({
+      totalCostUsd: 6,
+      harness: "claude",
+      model: "claude-sonnet",
+      costSource: "pricing-table",
+      isError: false,
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, thinking: 0 },
+    });
+
+    expect(driftCounterAddSpy).not.toHaveBeenCalled();
+  });
+
+  test("zero drift (harness/unpriced rows echo the harness number) is not recorded", () => {
+    driftCounterAddSpy.mockClear();
+    _injectCountersForTests(metricCounter, metricCounter, driftCounter);
+    recordSessionCostImpl({
+      totalCostUsd: 5,
+      harnessCostUsd: 5,
+      harness: "claude",
+      model: "claude-sonnet",
+      costSource: "harness",
+      isError: false,
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, thinking: 0 },
+    });
+
+    expect(driftCounterAddSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -165,6 +251,7 @@ describe("handleSessionData → recordSessionCost forwarding", () => {
     const arg = recordSessionCostSpy.mock.calls[0]![0];
     expect(arg.costSource).toBe("harness");
     expect(arg.totalCostUsd).toBeCloseTo(0.123, 6);
+    expect(arg.harnessCostUsd).toBeCloseTo(0.123, 6);
     expect(arg.harness).toBe("unknown"); // no provider → "unknown"
     expect(arg.isError).toBe(false);
   });
@@ -188,6 +275,7 @@ describe("handleSessionData → recordSessionCost forwarding", () => {
     const arg = recordSessionCostSpy.mock.calls[0]![0];
     expect(arg.costSource).toBe("pricing-table");
     expect(arg.totalCostUsd).toBeCloseTo(6, 4); // $1 + $5
+    expect(arg.harnessCostUsd).toBe(999);
     expect(arg.harness).toBe("claude");
   });
 

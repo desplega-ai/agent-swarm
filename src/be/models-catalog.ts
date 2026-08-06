@@ -36,6 +36,14 @@ export const PINNED_MODELSDEV_ENTRIES = [
   "anthropic/claude-mythos-5",
   "anthropic/claude-sonnet-5",
   "amazon-bedrock/anthropic.claude-sonnet-5",
+  // models.dev delisted these codex generations in 2026-08, but they remain
+  // selectable behind the API — dropping them from the snapshot broke
+  // context-window lookups and reasoning-effort gating for pinned configs.
+  "openai/gpt-5-codex",
+  "openai/gpt-5.1-codex",
+  "openai/gpt-5.1-codex-max",
+  "openai/gpt-5.1-codex-mini",
+  "openai/gpt-5.2-codex",
 ] as const;
 
 export interface CatalogReasoningOption {

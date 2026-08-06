@@ -106,6 +106,15 @@ function isAssistantMessage(msg: unknown): msg is AssistantMessage {
   );
 }
 
+type FinalizedMessageUsage = {
+  cost: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+};
+
 const DOCKER_PLUGIN_PATH = "/home/worker/.config/opencode/plugins/agent-swarm.ts";
 
 function defaultOpencodeSkillsDir(): string {
@@ -265,13 +274,10 @@ export class OpencodeSession implements ProviderSession {
   private aborted = false;
   private completed = false;
 
-  // Running cost accumulators
-  private totalCostUsd = 0;
-  private inputTokens = 0;
-  private outputTokens = 0;
-  private cacheReadTokens = 0;
-  private cacheWriteTokens = 0;
-  private numTurns = 0;
+  // Opencode can re-emit finalized snapshots for the same assistant message.
+  // Keep the latest snapshot per message so those replays do not double-count.
+  private finalizedMessages = new Map<string, FinalizedMessageUsage>();
+  private missingMessageIdCounter = 0;
   private startedAt = Date.now();
   private model: string;
   private agentId: string;
@@ -442,13 +448,22 @@ export class OpencodeSession implements ProviderSession {
         // paths see the same canonical "this turn is done" moment.
         const messageFinalized = msg.time?.completed != null;
         if (!messageFinalized) break;
-        // Accumulate cost from each completed assistant message ("step")
-        this.totalCostUsd += msg.cost;
-        this.inputTokens += msg.tokens?.input ?? 0;
-        this.outputTokens += msg.tokens?.output ?? 0;
-        this.cacheReadTokens += msg.tokens?.cache?.read ?? 0;
-        this.cacheWriteTokens += msg.tokens?.cache?.write ?? 0;
-        this.numTurns += 1;
+        // Keep the latest finalized snapshot for each assistant message.
+        // A missing/empty id must not collapse distinct messages into one
+        // entry (silent undercount) — degrade to counting them separately,
+        // which matches the pre-dedup over-count-safe behavior.
+        const messageKey =
+          typeof msg.id === "string" && msg.id.length > 0
+            ? msg.id
+            : `missing-id-${this.missingMessageIdCounter++}`;
+        this.finalizedMessages.set(messageKey, {
+          cost: msg.cost,
+          inputTokens: msg.tokens?.input ?? 0,
+          outputTokens: msg.tokens?.output ?? 0,
+          reasoningOutputTokens: msg.tokens?.reasoning ?? 0,
+          cacheReadTokens: msg.tokens?.cache?.read ?? 0,
+          cacheWriteTokens: msg.tokens?.cache?.write ?? 0,
+        });
         if (!this.model && msg.modelID) this.model = msg.modelID;
 
         // Emit context_usage so the runner can POST /api/tasks/:id/context
@@ -590,17 +605,33 @@ export class OpencodeSession implements ProviderSession {
   }
 
   private buildCostData(isError: boolean): CostData {
+    let totalCostUsd = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let reasoningOutputTokens = 0;
+    let cacheReadTokens = 0;
+    let cacheWriteTokens = 0;
+    for (const message of this.finalizedMessages.values()) {
+      totalCostUsd += message.cost;
+      inputTokens += message.inputTokens;
+      outputTokens += message.outputTokens;
+      reasoningOutputTokens += message.reasoningOutputTokens;
+      cacheReadTokens += message.cacheReadTokens;
+      cacheWriteTokens += message.cacheWriteTokens;
+    }
+
     return {
       sessionId: this._sessionId,
       taskId: this.taskId,
       agentId: this.agentId,
-      totalCostUsd: this.totalCostUsd,
-      inputTokens: this.inputTokens,
-      outputTokens: this.outputTokens,
-      cacheReadTokens: this.cacheReadTokens,
-      cacheWriteTokens: this.cacheWriteTokens,
+      totalCostUsd,
+      inputTokens,
+      outputTokens,
+      reasoningOutputTokens,
+      cacheReadTokens,
+      cacheWriteTokens,
       durationMs: Date.now() - this.startedAt,
-      numTurns: this.numTurns,
+      numTurns: this.finalizedMessages.size,
       model: this.model,
       isError,
       provider: "opencode",

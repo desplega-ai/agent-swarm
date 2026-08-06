@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { getScriptAppTypes } from "../apps/script-types";
 import { resolveHttpAuditUserId } from "../be/audit-user";
 import { getAgentById, recordInlineScriptRun, upsertKv } from "../be/db";
 import { createEvent } from "../be/events";
@@ -202,7 +203,8 @@ const typeDefsRoute = route({
   pattern: ["api", "scripts", "type-defs"],
   operationId: "scripts_type_defs",
   summary: "Get script SDK and stdlib type definitions",
-  description: "Static .d.ts blobs for editor integration (e.g. Monaco extraLibs). Cacheable.",
+  description:
+    "Generated .d.ts blobs for editor integration (e.g. Monaco extraLibs), including per-app types. Cacheable.",
   tags: ["Scripts"],
   responses: {
     200: { description: "SDK and stdlib type definition blobs" },
@@ -683,9 +685,10 @@ export async function handleScripts(
   if (typeDefsRoute.match(req.method, pathSegments)) {
     const apiTypes = getScriptApiTypes();
     const mcpTypes = getScriptMcpTypes();
+    const appTypes = getScriptAppTypes();
     json(res, {
-      sdkTypes: scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes),
-      stdlibTypes: scriptStdlibTypesWithGeneratedApis(apiTypes, mcpTypes),
+      sdkTypes: scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes),
+      stdlibTypes: scriptStdlibTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes),
     });
     return true;
   }
@@ -737,10 +740,12 @@ export async function handleScripts(
       sdkTypes: scriptSdkTypesWithGeneratedApis(
         getScriptApiTypes({ agentId: agent.id }),
         getScriptMcpTypes({ agentId: agent.id }),
+        getScriptAppTypes({ agentId: agent.id }),
       ),
       stdlibTypes: scriptStdlibTypesWithGeneratedApis(
         getScriptApiTypes({ agentId: agent.id }),
         getScriptMcpTypes({ agentId: agent.id }),
+        getScriptAppTypes({ agentId: agent.id }),
       ),
     });
     return true;

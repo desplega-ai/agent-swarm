@@ -154,7 +154,10 @@ export async function resolveSlackUserId(
       );
     }
 
-    return user.id;
+    // Re-read the alias after linking. If another webhook enrolled the same
+    // Slack ID between our fast-path read and `linkIdentity`, the external-ID
+    // row is authoritative even when it points at a different canonical user.
+    return findUserByExternalId("slack", slackUserId)?.id ?? user.id;
   }
 
   // 3. No email — track as unmapped.
@@ -169,8 +172,9 @@ export async function resolveSlackUserId(
  * message bodies — both are just this same token. Pure DB reads via
  * `resolveIdentity`; zero Slack API calls, no cache.
  */
-export function rewriteSlackMentions(text: string): string {
+export function rewriteSlackMentions(text: string, botUserId?: string): string {
   return text.replace(/<@([A-Z0-9]+)>/g, (_match, userId: string) => {
+    if (userId === botUserId) return `<@${userId}> (that's you)`;
     const resolution = resolveIdentity("slack", userId);
     return resolution.status === "resolved"
       ? `<@${userId}|${resolution.name}>`

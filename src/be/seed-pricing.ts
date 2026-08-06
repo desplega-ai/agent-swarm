@@ -6,10 +6,10 @@
  * `src/be/pricing-refresh.ts`, which fetches models.dev after boot and inserts
  * newer effective rows when prices change. We project both sources into rows keyed by
  * `(provider, model, token_class)` so the recompute path in
- * `src/http/session-data.ts` can rebuild USD from tokens regardless of which
- * adapter wrote the row.
+ * `src/http/session-cost-recompute.ts` can rebuild USD from tokens regardless
+ * of which adapter wrote the row.
  *
- * Manual overrides (Anthropic runtime fee, Cognition ACU) live in
+ * Manual overrides (Anthropic runtime/search fees, Cognition ACU) live in
  * {@link MANUAL_PRICING_OVERRIDES} — models.dev doesn't surface those.
  *
  * The seeder uses `INSERT OR IGNORE` keyed on the pricing PK
@@ -41,6 +41,24 @@ const MANUAL_PRICING_OVERRIDES: Array<{
   source: string;
   verified: string; // YYYY-MM-DD
 }> = [
+  {
+    provider: "claude",
+    model: "*",
+    tokenClass: "web_search",
+    // $10 / 1,000 requests = $0.01/request. Like `runtime_hour`, request
+    // units are stored per million so the shared price-book shape still fits.
+    pricePerMillionUsd: 10_000,
+    source: "https://docs.claude.com/en/docs/about-claude/pricing",
+    verified: "2026-08-06",
+  },
+  {
+    provider: "claude-managed",
+    model: "*",
+    tokenClass: "web_search",
+    pricePerMillionUsd: 10_000,
+    source: "https://docs.claude.com/en/docs/about-claude/pricing",
+    verified: "2026-08-06",
+  },
   {
     provider: "claude-managed",
     // '*' = applies regardless of which Claude model the managed run picks.
@@ -91,6 +109,7 @@ function projectCostBlock(
   provider: PricingProvider,
   model: string,
   cost: ModelsDevCostBlock,
+  opts: { anthropicBilled?: boolean } = {},
 ): PricingSeedRow[] {
   // Phase 2 fix — canonicalize the seed key with the same normalizer the
   // lookup path uses. Idempotent for keys models.dev already serves in
@@ -118,6 +137,21 @@ function projectCostBlock(
       tokenClass: "cache_write",
       pricePerMillionUsd: cost.cache_write,
     });
+    // The 2x rule is Anthropic billing. Callers projecting a mixed catalog
+    // (pi's OpenRouter/OpenAI passthrough) must say per-model whether the row
+    // is Anthropic-billed — a fabricated 1h rate on e.g. DeepSeek would be
+    // worse than an absent one.
+    const anthropicBilled =
+      opts.anthropicBilled ?? (provider === "claude" || provider === "claude-managed");
+    if (anthropicBilled && typeof cost.input === "number") {
+      rows.push({
+        provider,
+        model: key,
+        tokenClass: "cache_write_1h",
+        // Anthropic bills 1-hour cache creation at 2x the base input rate.
+        pricePerMillionUsd: cost.input * 2,
+      });
+    }
   }
   return rows;
 }
@@ -160,7 +194,7 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
   for (const [shortname, fullId] of Object.entries(ANTHROPIC_SHORTNAME_TO_MODELSDEV)) {
     const target = anthropic[fullId];
     if (!target?.cost) continue;
-    for (const row of projectCostBlock("pi", shortname, target.cost)) {
+    for (const row of projectCostBlock("pi", shortname, target.cost, { anthropicBilled: true })) {
       rows.push(row);
     }
   }
@@ -194,7 +228,9 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
     // against non-anthropic models (e.g. deepseek/deepseek-v4-flash) fall
     // through to costSource='unpriced' even though the model is in the
     // models.dev snapshot.
-    for (const row of projectCostBlock("pi", id, model.cost)) {
+    for (const row of projectCostBlock("pi", id, model.cost, {
+      anthropicBilled: id.startsWith("anthropic/"),
+    })) {
       rows.push(row);
     }
     // Gemini specifically: also project under the 'gemini' provider so

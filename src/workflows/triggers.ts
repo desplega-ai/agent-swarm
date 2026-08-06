@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { getWorkflow, getWorkflowsByScheduleId } from "../be/db";
+import { getWorkflow, getWorkflowsByScheduleId, listWorkflows } from "../be/db";
 import type { ScheduledTask, TriggerConfig } from "../types";
 import { startWorkflowExecution } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
@@ -72,6 +72,13 @@ export function verifyWebhookRequest(
         500,
       );
     }
+    // A bare `{type:"webhook"}` trigger (no hmacSecret, no verification) is an
+    // explicit operator opt-in to an open endpoint — the same posture as the
+    // open script-run endpoint we keep for analytics. Declaring a webhook
+    // trigger and leaving it unsigned is a deliberate choice, so accept it.
+    // What is NOT an opt-in is invoking `/api/webhooks/:workflowId` against a
+    // workflow that never declared a webhook trigger at all; `handleWebhookTrigger`
+    // rejects that case, which is what makes this opt-in meaningful.
     return;
   }
 
@@ -119,23 +126,38 @@ export function verifyWebhookRequest(
   }
 }
 
+export interface HandleWebhookTriggerOptions {
+  /**
+   * Skip the "workflow must declare a webhook trigger" gate. ONLY for callers
+   * that have already fully authenticated the request against their own
+   * integration secret before dispatching (today: the Kapso inbound webhook in
+   * `src/http/webhooks.ts`, which verifies the Kapso signature over the raw
+   * body first and then dispatches to an operator-registered workflow mapping).
+   * Never set this on a path that accepts an unauthenticated request.
+   */
+  alreadyAuthenticated?: boolean;
+}
+
 /**
  * Handle an incoming webhook trigger for a workflow.
  *
  * 1. Loads the workflow and finds a webhook trigger in `triggers[]`
- * 2. If `hmacSecret` is set, resolves the signature header + secret and
- *    verifies the HMAC-SHA256 signature against the raw body bytes
- * 3. Parses the raw body as JSON (falling back to the raw string when the
+ * 2. Rejects the request outright when the workflow declares NO webhook
+ *    trigger — being reachable over `/api/webhooks/:workflowId` is opt-in
+ * 3. If `hmacSecret` / `verification` is set, resolves the signature header +
+ *    secret and verifies the signature against the raw body bytes
+ * 4. Parses the raw body as JSON (falling back to the raw string when the
  *    body is non-JSON) so downstream `{{trigger.deep.path}}` interpolation
  *    can traverse the object — matches the shape produced by the
  *    `trigger-workflow` MCP tool.
- * 4. Starts the workflow execution with the parsed payload
+ * 5. Starts the workflow execution with the parsed payload
  */
 export async function handleWebhookTrigger(
   workflowId: string,
   payload: unknown,
   headers: HeaderBag,
   registry: ExecutorRegistry,
+  options: HandleWebhookTriggerOptions = {},
 ): Promise<{ runId: string }> {
   const workflow = getWorkflow(workflowId);
   if (!workflow) {
@@ -149,16 +171,23 @@ export async function handleWebhookTrigger(
   // Find webhook trigger in triggers[]
   const webhookTrigger = workflow.triggers.find((t: TriggerConfig) => t.type === "webhook");
 
-  // If the workflow has a webhook trigger with an hmacSecret or a verification format
-  // configured, verify against the RAW body bytes — re-serializing would change
-  // whitespace / key order and break HMAC formats. Also run when only `verification`
-  // is set (no `hmacSecret`) so that misconfiguration fails closed instead of being
-  // silently skipped.
-  if (
-    webhookTrigger &&
-    webhookTrigger.type === "webhook" &&
-    (webhookTrigger.hmacSecret || webhookTrigger.verification)
-  ) {
+  if (!webhookTrigger) {
+    // A schedule-only or manual-only workflow never opted into being startable
+    // from the internet. Previously the verification block was skipped entirely
+    // when no webhook trigger was found, so anyone who learned the workflow UUID
+    // could start a run with fully attacker-controlled trigger data (superagent.sh
+    // report c27edfd7, finding b132d7c5). Leaving a DECLARED webhook trigger
+    // unsigned stays a supported opt-in; being reachable without declaring one at
+    // all is not — that would make the opt-in meaningless.
+    if (!options.alreadyAuthenticated) {
+      throw new WebhookError("Workflow does not declare a webhook trigger", 404);
+    }
+  } else {
+    // Verify against the RAW body bytes — re-serializing would change whitespace /
+    // key order and break HMAC formats. `verifyWebhookRequest` returns early only
+    // for a trigger that declares neither `hmacSecret` nor `verification` (the
+    // explicit open-endpoint opt-in); a trigger with `verification` but no
+    // `hmacSecret` still fails closed there.
     verifyWebhookRequest(
       webhookTrigger,
       typeof payload === "string" ? payload : JSON.stringify(payload),
@@ -189,6 +218,34 @@ function parseTriggerPayload(payload: unknown): unknown {
     return JSON.parse(payload);
   } catch {
     return payload;
+  }
+}
+
+/**
+ * Boot-time, non-blocking inventory: list every enabled workflow that declares
+ * an OPEN webhook trigger (neither `hmacSecret` nor `verification`). That is a
+ * supported configuration — an intentionally public endpoint, like the open
+ * script-run endpoint — so this is informational, not a misconfiguration
+ * warning. It exists so an operator auditing a deployment can see, in one line
+ * at startup, exactly which workflows anyone holding the URL can start. Never
+ * throws — a scan failure must not block server startup.
+ */
+export function logOpenWebhookTriggers(): void {
+  try {
+    const open = listWorkflows({ enabled: true }).filter((workflow) =>
+      workflow.triggers.some(
+        (trigger) => trigger.type === "webhook" && !trigger.hmacSecret && !trigger.verification,
+      ),
+    );
+    if (open.length === 0) return;
+    console.log(
+      `[workflows] ${open.length} enabled workflow(s) expose an open (unsigned) webhook trigger — ` +
+        "anyone with the URL can start them, which is a supported opt-in. " +
+        "Set `hmacSecret` on a trigger to require a signature: " +
+        open.map((workflow) => `${workflow.name} (${workflow.id})`).join(", "),
+    );
+  } catch (err) {
+    console.error("[workflows] Failed to inventory open webhook triggers:", err);
   }
 }
 

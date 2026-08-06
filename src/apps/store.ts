@@ -140,6 +140,16 @@ export function listApps(): Array<Omit<AppRecord, "definition">> {
     }));
 }
 
+export function listAppRecords(): AppRecord[] {
+  return getDb()
+    .prepare<AppDbRow, []>(
+      `SELECT id, name, description, definition, created_at, updated_at
+       FROM apps ORDER BY created_at ASC, id ASC`,
+    )
+    .all()
+    .map(decodeApp);
+}
+
 export function updateApp(
   id: string,
   patch: { name?: string; description?: string | null; definition?: AppDefinition },
