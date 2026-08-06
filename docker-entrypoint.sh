@@ -196,9 +196,19 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
     # single-slot/non-pool, so this is a one-time seed same as the
     # config-store path — the runner never refreshes it back to a
     # `codex_oauth_<n>` config-store slot.
-    if [ ! -f "$WORKER_CODEX_HOME/auth.json" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
+    # Gate on MCP_URL (already defaulted at L26), not the raw MCP_BASE_URL —
+    # a standalone container that relies on the default API URL would
+    # otherwise never reach the CODEX_OAUTH env-var fallback below, even
+    # though every other API call in this script (wait_for_api_ready,
+    # /ecosystem, /api/repos, etc.) already treats MCP_URL as "the" base
+    # URL. checkCodexCredentials (codex-adapter.ts) marks a bare CODEX_OAUTH
+    # as satisfiedBy: 'side-effect-pending' the moment it's set, trusting
+    # this block to write auth.json — so gating on the unset raw var meant
+    # the boot gate reported ready while no auth.json ever materialized and
+    # every task auth-errored.
+    if [ ! -f "$WORKER_CODEX_HOME/auth.json" ] && [ -n "$API_KEY" ] && [ -n "$MCP_URL" ]; then
         CODEX_OAUTH_SEED=$(curl -sf -H "Authorization: Bearer ${API_KEY}" \
-            "${MCP_BASE_URL}/api/config/resolved?includeSecrets=true" \
+            "${MCP_URL}/api/config/resolved?includeSecrets=true" \
             2>/dev/null | jq -r '
               (.configs[] | select(.key == "codex_oauth_0") | .value // empty),
               (.configs[] | select(.key == "codex_oauth") | .value // empty)

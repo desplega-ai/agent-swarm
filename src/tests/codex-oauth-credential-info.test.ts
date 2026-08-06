@@ -25,7 +25,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveCodexOAuthCredentialInfo } from "../commands/runner";
@@ -59,8 +59,7 @@ function mockEmptyConfigStore(): void {
 
 async function writeStandaloneAuthJson(): Promise<void> {
   const codexHome = join(tmpHome, ".codex");
-  await mkdir(codexHome, { recursive: true });
-  await writeFile(
+  await Bun.write(
     join(codexHome, "auth.json"),
     JSON.stringify({
       auth_mode: "chatgpt",
@@ -104,8 +103,7 @@ describe("resolveCodexOAuthCredentialInfo — issue #1102 bug 1", () => {
   it("returns null when auth.json exists but is not in chatgpt mode (api-key auth)", async () => {
     mockEmptyConfigStore();
     const codexHome = join(tmpHome, ".codex");
-    await mkdir(codexHome, { recursive: true });
-    await writeFile(
+    await Bun.write(
       join(codexHome, "auth.json"),
       JSON.stringify({ auth_mode: "apikey", OPENAI_API_KEY: "sk-test" }),
     );

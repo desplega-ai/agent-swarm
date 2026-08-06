@@ -892,7 +892,9 @@ See also: [Codex OAuth setup guide](/docs/guides/provider-auth/codex-oauth).
 
 #### Boot-time credential restoration: precedence and the standalone fallback
 
-`docker-entrypoint.sh`'s Codex auth path 1 (L199–243) tries, in order, the first non-empty value from:
+`docker-entrypoint.sh`'s Codex auth path 1 (L209–273) tries, in order, the first non-empty value from:
+
+The guard on this block checks `MCP_URL` (defaulted at L26 from `MCP_BASE_URL`, falling back to `http://host.docker.internal:3013`), not the raw `MCP_BASE_URL` — a standalone worker that relies on that default would otherwise never reach the `CODEX_OAUTH` env-var fallback below, even though the config-store lookup it gates only needs *some* reachable API base URL, exactly like every other API call in this script.
 
 1. `codex_oauth_0` in the resolved swarm_config (post-migration 071 pool slot 0).
 2. `codex_oauth` (legacy, pre-pool key).
