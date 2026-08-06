@@ -1,7 +1,7 @@
 ---
 date: 2026-08-06T15:00:00Z
 topic: "Cost accuracy: fix task/session cost vs harness cost mismatch"
-status: in-progress
+status: completed
 autonomy: autopilot
 tags: [cost-tracking, pricing, session-costs, providers]
 ---
