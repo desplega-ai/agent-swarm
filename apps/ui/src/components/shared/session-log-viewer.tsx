@@ -28,6 +28,7 @@ import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 
 import type { ContextSnapshot, SessionLog, SteeringMessage } from "@/api/types";
+import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import {
   SubagentDetails,
   SubagentDot,
@@ -1269,14 +1270,14 @@ function RawDetails({ data }: { data: unknown }) {
         </button>
         <CopyIconButton text={text} label="Copy raw event" className="size-5" />
       </div>
-      {open && (
+      <AnimatedReveal open={open} speed="fast">
         <JsonTree
           data={data}
           defaultExpandDepth={1}
           maxHeight="260px"
           className="mt-1 bg-muted/50"
         />
-      )}
+      </AnimatedReveal>
     </div>
   );
 }
@@ -1322,14 +1323,14 @@ function LowKeyMetaLine({
         </span>
       </div>
       {children && <div className="ml-6 mt-1 space-y-1">{children}</div>}
-      {open && (
+      <AnimatedReveal open={open} speed="fast">
         <JsonTree
           data={raw}
           defaultExpandDepth={1}
           maxHeight="220px"
           className="mt-1.5 bg-muted/50"
         />
-      )}
+      </AnimatedReveal>
     </div>
   );
 }
@@ -1859,7 +1860,7 @@ function ToolRow({
         {dur && <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{dur}</span>}
       </button>
 
-      {open && (
+      <AnimatedReveal open={open} speed="fast">
         <div className="border-t border-border">
           {hasInput && (
             <>
@@ -1878,7 +1879,7 @@ function ToolRow({
           </div>
           <ResultSection body={tool.body} open={outputOpen} onToggle={onToggleOutput} />
         </div>
-      )}
+      </AnimatedReveal>
     </div>
   );
 }
@@ -2446,11 +2447,11 @@ export function SessionLogViewer({
                 </span>
               )}
             </button>
-            {open && (
+            <AnimatedReveal open={open} speed="fast">
               <div className="mt-1.5 border-t border-border/40 py-2 pr-2 sm:ml-9">
                 <SubagentDetails run={row.run} />
               </div>
-            )}
+            </AnimatedReveal>
           </RowShell>
         );
       }
@@ -2485,7 +2486,7 @@ export function SessionLogViewer({
               {groupHeader(row.names)}
             </span>
           </button>
-          {open && (
+          <AnimatedReveal open={open} speed="fast">
             <div className="mt-1.5 flex flex-col gap-1.5 pl-0.5">
               {row.tools.map((t) => (
                 <ToolRow
@@ -2498,7 +2499,7 @@ export function SessionLogViewer({
                 />
               ))}
             </div>
-          )}
+          </AnimatedReveal>
         </RowShell>
       );
     },
@@ -2678,13 +2679,13 @@ function ThinkingRow({ text }: { text: string }) {
           </span>
         )}
       </button>
-      {open && (
+      <AnimatedReveal open={open} speed="fast">
         <div className="border-t border-border/60 px-2.5 py-2">
           <div className="prose-chat prose-session-log text-xs text-muted-foreground">
             <LogMarkdown>{text}</LogMarkdown>
           </div>
         </div>
-      )}
+      </AnimatedReveal>
     </div>
   );
 }
@@ -2695,7 +2696,10 @@ function RunningFooter({ count, isRunning }: { count: number; isRunning?: boolea
       {isRunning === true ? (
         <>
           <span className="sl-orb size-[9px] shrink-0 rounded-full bg-status-active" aria-hidden />
-          <span className="font-medium text-foreground">Agent is working…</span>
+          {/* Shimmer = the semantic liveness signal (DESIGN.md § Motion): this
+              footer is the one always-visible "agent is live" line per open
+              task, so it carries the treatment. */}
+          <span className="shimmer-text font-medium">Agent is working…</span>
         </>
       ) : isRunning === false ? (
         <>

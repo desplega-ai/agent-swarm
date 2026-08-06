@@ -1,6 +1,6 @@
 import { ChevronRight } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
+import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { cn } from "@/lib/utils";
 
 /**
@@ -24,31 +24,6 @@ function readPersistedOpen(persistKey: string | undefined, defaultOpen: boolean)
   } catch {
     return defaultOpen;
   }
-}
-
-const SNAPPY = [0.2, 0, 0, 1] as const;
-
-/**
- * Height + fade for the open/close reveal (DESIGN.md § Motion: user-initiated
- * section toggle — 200ms enter, 150ms exit, snappy curve). Under reduced
- * motion the height movement drops and only the fade remains.
- */
-function useRevealMotion() {
-  const reduceMotion = useReducedMotion();
-  if (reduceMotion) {
-    return {
-      initial: { opacity: 0 },
-      animate: { opacity: 1 },
-      exit: { opacity: 0, transition: { duration: 0.15 } },
-      transition: { duration: 0.2 },
-    };
-  }
-  return {
-    initial: { height: 0, opacity: 0 },
-    animate: { height: "auto", opacity: 1 },
-    exit: { height: 0, opacity: 0, transition: { duration: 0.15, ease: SNAPPY } },
-    transition: { duration: 0.2, ease: SNAPPY },
-  };
 }
 
 export function CollapsibleSection({
@@ -81,7 +56,6 @@ export function CollapsibleSection({
   persistKey?: string;
 }) {
   const [open, setOpen] = useState(() => readPersistedOpen(persistKey, defaultOpen));
-  const revealMotion = useRevealMotion();
 
   const toggle = () => {
     const next = !open;
@@ -118,13 +92,9 @@ export function CollapsibleSection({
           <span className={cn("text-xs font-semibold", iconColor)}>{title}</span>
           {badge}
         </button>
-        <AnimatePresence initial={false}>
-          {open && (
-            <motion.div className="overflow-hidden" {...revealMotion}>
-              <div className="px-3 pb-2.5">{children}</div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <AnimatedReveal open={open}>
+          <div className="px-3 pb-2.5">{children}</div>
+        </AnimatedReveal>
       </div>
     );
   }
@@ -139,13 +109,7 @@ export function CollapsibleSection({
         </span>
         {badge}
       </button>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div className="overflow-hidden" {...revealMotion}>
-            {children}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <AnimatedReveal open={open}>{children}</AnimatedReveal>
     </div>
   );
 }
