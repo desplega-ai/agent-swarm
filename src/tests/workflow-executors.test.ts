@@ -662,6 +662,120 @@ describe("ScriptExecutor", () => {
     expect(out.stdout).toContain("kept-output");
     expect(out.stdout).toContain("…[stdout truncated]");
   }, 10_000);
+
+  // ─── argv-injection regression (Codex review, PR #1112 comment 3732205426,
+  // thread PRRT_kwDOQr3Tmc6XH7VS) ───────────────────────────────────────
+  //
+  // engine.ts's interpolateNodeConfig deliberately routes dynamic/untrusted
+  // per-run values (webhook trigger.*, upstream node stdout) into `args`
+  // rather than the script body, on the stated assumption that args are
+  // "passed as separate argv elements (data), not spliced into source text."
+  // That assumption held for bash -c and python3 -c (both stop option
+  // parsing after the -c operand — confirmed empirically below) but NOT for
+  // `bun -e`, which kept parsing recognized flags out of trailing argv and
+  // running them: an interpolated arg literally named `--eval=<code>` was a
+  // second, attacker-controlled script.
+
+  test("bun runtime: an arg shaped like --eval=<code> is inert data, not executed", async () => {
+    const result = await executor.run(
+      input(
+        {
+          runtime: "ts",
+          script: "console.log(JSON.stringify(process.argv.slice(1)))",
+          args: ["--eval=console.log('INJECTED')"],
+        },
+        {},
+      ),
+    );
+    expect(result.status).toBe("success");
+    const out = result.output as { exitCode: number; stdout: string };
+    expect(out.exitCode).toBe(0);
+    // If `--eval=...` had executed as a second script, its own console.log
+    // would print "INJECTED" on its own line BEFORE the JSON.stringify line
+    // below runs, making stdout two lines and JSON.parse fail outright.
+    // A single clean JSON array — the literal string, unexecuted — is proof.
+    expect(JSON.parse(out.stdout)).toEqual(["--eval=console.log('INJECTED')"]);
+  });
+
+  test("bun runtime: an arg shaped like --preload=<path> is inert data, not loaded", async () => {
+    const result = await executor.run(
+      input(
+        {
+          runtime: "ts",
+          script: "console.log(JSON.stringify(process.argv.slice(1)))",
+          args: ["--preload=/tmp/should-not-be-loaded-as-a-module.js", "-r"],
+        },
+        {},
+      ),
+    );
+    expect(result.status).toBe("success");
+    const out = result.output as { exitCode: number; stdout: string };
+    // A real --preload would fail the process (module not found) before this
+    // script body ever ran — success + the literal args back is proof both
+    // "flags" were treated as plain strings.
+    expect(out.exitCode).toBe(0);
+    expect(JSON.parse(out.stdout)).toEqual([
+      "--preload=/tmp/should-not-be-loaded-as-a-module.js",
+      "-r",
+    ]);
+  });
+
+  test("bun runtime: normal args keep their previous argv indexing after the -- fix", async () => {
+    const result = await executor.run(
+      input(
+        {
+          runtime: "ts",
+          script: "console.log(JSON.stringify(process.argv.slice(1)))",
+          args: ["hello", "world"],
+        },
+        {},
+      ),
+    );
+    expect(result.status).toBe("success");
+    const out = result.output as { exitCode: number; stdout: string };
+    expect(out.exitCode).toBe(0);
+    expect(JSON.parse(out.stdout)).toEqual(["hello", "world"]);
+  });
+
+  test("bash runtime: an arg shaped like --eval=<code> was already inert (documents why -- is not added)", async () => {
+    // bash -c script [$0 [$1 ...]] binds the first trailing arg to $0, not to
+    // an option — there is no flag-reparsing surface to close here, and
+    // adding `--` would shift $0 into args[0], breaking existing workflows.
+    const result = await executor.run(
+      input(
+        {
+          runtime: "bash",
+          script: 'printf \'[%s][%s]\' "$0" "$1"',
+          args: ["--eval=INJECTED", "second"],
+        },
+        {},
+      ),
+    );
+    expect(result.status).toBe("success");
+    const out = result.output as { exitCode: number; stdout: string };
+    expect(out.stdout).toBe("[--eval=INJECTED][second]");
+  });
+
+  test("python runtime: an arg shaped like -c <code> was already inert (documents why -- is not added)", async () => {
+    // python3 -c code also stops option parsing after the -c operand —
+    // trailing args (even another literal -c) land verbatim in sys.argv.
+    const result = await executor.run(
+      input(
+        {
+          runtime: "python",
+          script: "import sys; print(sys.argv[1:])",
+          args: ["-c", "print('INJECTED')"],
+        },
+        {},
+      ),
+    );
+    expect(result.status).toBe("success");
+    const out = result.output as { exitCode: number; stdout: string };
+    // Both trailing args land verbatim in sys.argv as data — if `-c
+    // "print('INJECTED')"` had been re-parsed as a second -c invocation, its
+    // print would appear as a separate line rather than inside this repr.
+    expect(out.stdout).toBe("['-c', \"print('INJECTED')\"]");
+  });
 });
 
 // ─── VCS Executor ────────────────────────────────────────────

@@ -149,12 +149,26 @@ export class ScriptExecutor extends BaseExecutor<
 
     switch (runtime) {
       case "bash":
+        // bash stops option parsing after the `-c script` pair — the next
+        // argument always binds positionally to $0 (confirmed empirically:
+        // `bash -c '...' --eval=x` never executes `x`), so no `--` is needed
+        // here and adding one would shift $0 into args[0], breaking existing
+        // workflows that rely on that binding.
         cmd = ["bash", "-c", script, ...args];
         break;
       case "ts":
-        cmd = ["bun", "-e", script, ...args];
+        // `bun -e` keeps parsing recognized flags (e.g. `--eval=`, `--preload=`)
+        // out of trailing argv and RUNS them — confirmed empirically that an
+        // interpolated arg literally named `--eval=<code>` executes as a second
+        // script. `--` forces Bun to stop flag parsing and treat everything
+        // after it as positional data, with no change to `Bun.argv` indexing
+        // (verified: `Bun.argv` is identical with and without `--`).
+        cmd = ["bun", "-e", script, "--", ...args];
         break;
       case "python":
+        // python3 also stops option parsing after `-c script` (confirmed
+        // empirically: trailing args, including another `-c`, land verbatim
+        // in sys.argv and are never executed), so no `--` is needed.
         cmd = ["python3", "-c", script, ...args];
         break;
     }
