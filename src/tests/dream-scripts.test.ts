@@ -781,16 +781,20 @@ describe("dream-apply batches", () => {
     };
     const rotation = { available: true, key: "rotation-cursor", namespace: "dreaming" };
     const hygieneReview = JSON.stringify({ deltas: [] });
+    const prSnapshot = { repo: "owner/repo", number: 42, title: "Some PR" };
 
     // Clean review: no deltas at all, yet the target was consumed — the cursor
     // must advance or the same PR is reselected every dream.
-    const clean = await dreamApply({ deltas: [], runId: "run-rot", rotation, hygieneReview }, ctx);
+    const clean = await dreamApply(
+      { deltas: [], runId: "run-rot", rotation, hygieneReview, prSnapshot },
+      ctx,
+    );
     expect(clean.rotationCursor).toEqual({ advanced: true });
     expect(increments).toEqual([{ key: "rotation-cursor", namespace: "dreaming", by: 1 }]);
 
     // A retried run must not advance twice: the per-run marker short-circuits.
     const retried = await dreamApply(
-      { deltas: [], runId: "run-rot", rotation, hygieneReview },
+      { deltas: [], runId: "run-rot", rotation, hygieneReview, prSnapshot },
       ctx,
     );
     expect(retried.rotationCursor).toEqual({ advanced: true });
@@ -798,10 +802,65 @@ describe("dream-apply batches", () => {
 
     // No rotation target this run → nothing to consume, cursor untouched.
     const noTarget = await dreamApply(
-      { deltas: [], runId: "run-rot-2", rotation: { available: false }, hygieneReview },
+      { deltas: [], runId: "run-rot-2", rotation: { available: false }, hygieneReview, prSnapshot },
       ctx,
     );
     expect(noTarget.rotationCursor).toBeUndefined();
+    expect(increments).toHaveLength(1);
+  });
+
+  test("an available target is NOT consumed when its pull-request snapshot failed", async () => {
+    // gh-pr-snapshot degrades to { error } on a GitHub outage instead of failing
+    // the run, and the hygiene lane can still return a well-formed empty delta
+    // set from evidence it never received. Reviewing nothing is not reviewing.
+    const increments: unknown[] = [];
+    const ctx = {
+      swarm: {
+        async kv_getOrNull() {
+          return null;
+        },
+        async kv_set() {
+          return { success: true, data: { success: true } };
+        },
+        async kv_incr(request: unknown) {
+          increments.push(request);
+          return { success: true, data: { value: 1 } };
+        },
+      },
+    };
+    const rotation = { available: true, key: "rotation-cursor", namespace: "dreaming" };
+    const hygieneReview = JSON.stringify({ deltas: [] });
+
+    for (const [index, prSnapshot] of [
+      { error: "snapshot fetch failed: ECONNRESET" },
+      { skipped: true, reason: "no pull request rotation target" },
+      "",
+      undefined,
+      "not json",
+    ].entries()) {
+      const result = await dreamApply(
+        { deltas: [], runId: `run-nosnap-${index}`, rotation, hygieneReview, prSnapshot },
+        ctx,
+      );
+      expect(increments).toEqual([]);
+      expect(result.rotationCursor).toEqual({
+        advanced: false,
+        reason: "pull-request snapshot did not succeed — rotation target left for the next dream",
+      });
+    }
+
+    // A real snapshot consumes the target.
+    const ok = await dreamApply(
+      {
+        deltas: [],
+        runId: "run-snap-ok",
+        rotation,
+        hygieneReview,
+        prSnapshot: { repo: "owner/repo", number: 42, title: "Some PR" },
+      },
+      ctx,
+    );
+    expect(ok.rotationCursor).toEqual({ advanced: true });
     expect(increments).toHaveLength(1);
   });
 
@@ -844,7 +903,13 @@ describe("dream-apply batches", () => {
       42,
     ]) {
       const result = await dreamApply(
-        { deltas: [], runId: `run-unreviewed-${String(hygieneReview)}`, rotation, hygieneReview },
+        {
+          deltas: [],
+          runId: `run-unreviewed-${String(hygieneReview)}`,
+          rotation,
+          hygieneReview,
+          prSnapshot: { repo: "owner/repo", number: 42 },
+        },
         ctx,
       );
       expect(increments).toEqual([]);
@@ -862,7 +927,13 @@ describe("dream-apply batches", () => {
       [],
     ].entries()) {
       const result = await dreamApply(
-        { deltas: [], runId: `run-reviewed-${index}`, rotation, hygieneReview },
+        {
+          deltas: [],
+          runId: `run-reviewed-${index}`,
+          rotation,
+          hygieneReview,
+          prSnapshot: { repo: "owner/repo", number: 42 },
+        },
         ctx,
       );
       expect(result.rotationCursor).toEqual({ advanced: true });
@@ -1237,19 +1308,61 @@ describe("dream-apply batches", () => {
     };
 
     await dreamAgentSlice({ agentId: "agent-1", runId: "run-77" }, ctx);
-    const tasksQuery = queries.find((query) => query.sql.includes("FROM agent_tasks"))!;
+    const tasksQuery = queries.find((query) => query.sql.includes("FROM agent_tasks t\n"))!;
     expect(tasksQuery.sql).toContain("t.workflowRunId NOT IN");
     // Excluded by durable workflow ID — every run of the dream workflow, not just
     // this one, so last night's bookkeeping is filtered too.
     expect(tasksQuery.sql).toContain("SELECT workflowId FROM workflow_runs WHERE id = ?");
-    expect(tasksQuery.params).toEqual(["agent-1", "-1 days", "run-77"]);
+    // Two window params: a task may enter the slice by creation OR by outcome.
+    expect(tasksQuery.params).toEqual(["agent-1", "-1 days", "-1 days", "run-77"]);
+
+    // The bookkeeping also leaks through task-scoped rows in other tables, so the
+    // tool-event, skill-invocation and cost queries carry the same exclusion.
+    const toolQuery = queries.find((query) => query.sql.includes("tool.start"))!;
+    const skillQuery = queries.find((query) => query.sql.includes("skill.invoke"))!;
+    const costQuery = queries.find((query) => query.sql.includes("FROM session_costs"))!;
+    for (const [alias, query] of [
+      ["e", toolQuery],
+      ["e", skillQuery],
+      ["c", costQuery],
+    ] as const) {
+      expect(query.sql).toContain(`${alias}.taskId NOT IN`);
+      expect(query.params).toEqual(["agent-1", "-1 days", "run-77"]);
+    }
 
     // Without a runId there is nothing to exclude by, and the slice stays valid.
     queries.length = 0;
     await dreamAgentSlice({ agentId: "agent-1" }, ctx);
-    const noRun = queries.find((query) => query.sql.includes("FROM agent_tasks"))!;
+    const noRun = queries.find((query) => query.sql.includes("FROM agent_tasks t\n"))!;
     expect(noRun.sql).not.toContain("t.workflowRunId NOT IN");
-    expect(noRun.params).toEqual(["agent-1", "-1 days"]);
+    expect(noRun.params).toEqual(["agent-1", "-1 days", "-1 days"]);
+    expect(queries.find((query) => query.sql.includes("tool.start"))!.sql).not.toContain(
+      "taskId NOT IN",
+    );
+  });
+
+  test("the slice window follows task OUTCOME time, not just creation", async () => {
+    // The gather gate counts a task by finishedAt / lastUpdatedAt / staleness, so
+    // a task created before the window but completed inside it is activity. The
+    // slice filtering on createdAt alone would hide exactly that fresh outcome
+    // from the reflection that is told to use only this slice.
+    const queries: Array<{ sql: string; params: unknown[] }> = [];
+    await dreamAgentSlice(
+      { agentId: "agent-1" },
+      {
+        swarm: {
+          async db_query({ sql, params }: { sql: string; params: unknown[] }) {
+            queries.push({ sql, params });
+            return { success: true, columns: [], rows: [] };
+          },
+        },
+      },
+    );
+    const tasksQuery = queries.find((query) => query.sql.includes("FROM agent_tasks t\n"))!;
+    expect(tasksQuery.sql).toContain("julianday(t.createdAt) > julianday('now', ?)");
+    expect(tasksQuery.sql).toContain(
+      "julianday(COALESCE(t.finishedAt, t.lastUpdatedAt)) > julianday('now', ?)",
+    );
   });
 
   test("the agent slice fails loud when an evidence query fails", async () => {

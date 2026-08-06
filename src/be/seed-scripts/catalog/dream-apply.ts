@@ -34,7 +34,37 @@ export const argsSchema = z.object({
     .describe(
       "The hygiene lane's raw output — proof the rotation target was actually reviewed; empty when that lane failed under onNodeFailure continue",
     ),
+  prSnapshot: z
+    .unknown()
+    .optional()
+    .describe(
+      "The gh-pr-snapshot result — the rotation target is only consumed when its snapshot succeeded, so a GitHub outage cannot skip an un-snapshotted pull request",
+    ),
 });
+
+/**
+ * Whether the rotation target's pull-request snapshot actually succeeded.
+ *
+ * `gh-pr-snapshot` degrades to `{ error }` on a GitHub or network outage rather
+ * than failing the run, and the hygiene lane can still return a well-formed
+ * `{"deltas": []}` from evidence it never received. Reviewing nothing is not
+ * reviewing, so a failed snapshot must not consume the target.
+ */
+function rotationSnapshotSucceeded(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text.length === 0) return false;
+    try {
+      return rotationSnapshotSucceeded(JSON.parse(text));
+    } catch {
+      return false;
+    }
+  }
+  if (typeof value !== "object") return false;
+  const snapshot = value as Record<string, unknown>;
+  return snapshot.error === undefined && snapshot.skipped !== true;
+}
 
 /**
  * Whether the hygiene lane produced a review this run.
@@ -474,14 +504,17 @@ export default async function dreamApply(args: any, ctx: any) {
     | { available?: boolean; key?: string; namespace?: string }
     | undefined;
   const reviewed = hygieneLaneReviewed(parsed.data.hygieneReview);
-  if (rotation?.available === true && !cursorAdvancedByDelta && !reviewed) {
-    // Availability alone is not consumption: the lane that reviews the target
-    // failed this run, so leave the cursor for the next dream rather than
-    // skipping a pull request nobody looked at.
-    result.rotationCursor = {
-      advanced: false,
-      reason: "hygiene lane produced no review — rotation target left for the next dream",
-    };
+  const snapshotted = rotationSnapshotSucceeded(parsed.data.prSnapshot);
+  const notConsumed = !reviewed
+    ? "hygiene lane produced no review — rotation target left for the next dream"
+    : !snapshotted
+      ? "pull-request snapshot did not succeed — rotation target left for the next dream"
+      : null;
+  if (rotation?.available === true && !cursorAdvancedByDelta && notConsumed) {
+    // Availability alone is not consumption: either the lane that reviews the
+    // target failed, or it reviewed without the evidence it needed. Leave the
+    // cursor rather than skipping a pull request nobody actually looked at.
+    result.rotationCursor = { advanced: false, reason: notConsumed };
   } else if (rotation?.available === true && !cursorAdvancedByDelta) {
     const cursorIdempotencyKey = runId ? `apply:${runId}:rotation-cursor` : null;
     if (cursorIdempotencyKey && (await alreadyApplied(ctx, cursorIdempotencyKey))) {

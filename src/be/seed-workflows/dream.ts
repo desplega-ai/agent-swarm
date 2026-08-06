@@ -209,6 +209,7 @@ export const DREAM_WORKFLOW_DEFINITION: WorkflowDefinition = {
         agentIds: "gather-rich.result.agentIds",
         rotation: "gather-rich.result.blockers.rotation",
         hygieneReview: "hygiene.taskOutput",
+        prSnapshot: "hygiene-snapshot.result",
         runId: "run.id",
       },
       config: {
@@ -229,6 +230,7 @@ export const DREAM_WORKFLOW_DEFINITION: WorkflowDefinition = {
           agentIds: "{{agentIds}}",
           rotation: "{{rotation}}",
           hygieneReview: "{{hygieneReview}}",
+          prSnapshot: "{{prSnapshot}}",
         },
       },
       next: "receipt",

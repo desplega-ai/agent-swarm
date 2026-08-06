@@ -48,11 +48,21 @@ export default async function dreamAgentSlice(args: any, ctx: any) {
   // durable workflow ID (every run of the dream workflow, not just this one), the
   // same identity dream-gather's activity gate uses.
   const runId = parsed.data.runId;
+  const selfRuns = `SELECT r.id FROM workflow_runs r
+       WHERE r.workflowId = (SELECT workflowId FROM workflow_runs WHERE id = ?)`;
   const excludeSelfRuns = runId
-    ? `AND (t.workflowRunId IS NULL OR t.workflowRunId NOT IN (
-         SELECT r.id FROM workflow_runs r
-         WHERE r.workflowId = (SELECT workflowId FROM workflow_runs WHERE id = ?)))`
+    ? `AND (t.workflowRunId IS NULL OR t.workflowRunId NOT IN (${selfRuns}))`
     : "";
+  // Tool events, skill invocations and session costs are task-scoped too, so the
+  // same bookkeeping leaks through them: a quiet agent would otherwise see last
+  // night's Dreaming tool calls, its `dreaming` skill invocation, and the cost of
+  // running them. Rows with no taskId are not attributable to any run and stay.
+  const excludeSelfTaskRows = (alias: string) =>
+    runId
+      ? `AND (${alias}.taskId IS NULL OR ${alias}.taskId NOT IN (
+           SELECT t2.id FROM agent_tasks t2 WHERE t2.workflowRunId IN (${selfRuns})))`
+      : "";
+  const selfParams = runId ? [runId] : [];
 
   // julianday() on BOTH operands: stored timestamps are ISO ("...T12:00:00Z")
   // while datetime('now', ?) renders space-separated — lexicographic comparison
@@ -63,17 +73,21 @@ export default async function dreamAgentSlice(args: any, ctx: any) {
               t.workflowRunStepId, COALESCE(wrs.retryCount, 0) AS retryCount
        FROM agent_tasks t
        LEFT JOIN workflow_run_steps wrs ON wrs.id = t.workflowRunStepId
-       WHERE t.agentId = ? AND julianday(t.createdAt) > julianday('now', ?)
+       WHERE t.agentId = ?
+             AND (julianday(t.createdAt) > julianday('now', ?)
+                  OR julianday(COALESCE(t.finishedAt, t.lastUpdatedAt)) > julianday('now', ?))
              ${excludeSelfRuns}
        ORDER BY t.createdAt DESC LIMIT 40`,
-      [agentId, windowModifier, ...(runId ? [runId] : [])],
+      [agentId, windowModifier, windowModifier, ...selfParams],
     ),
     query(
-      `SELECT json_extract(data, '$.toolName') AS tool, count(*) AS calls
-       FROM events
-       WHERE agentId = ? AND category = 'tool' AND event = 'tool.start'
-         AND julianday(createdAt) > julianday('now', ?)
+      `SELECT json_extract(e.data, '$.toolName') AS tool, count(*) AS calls
+       FROM events e
+       WHERE e.agentId = ? AND e.category = 'tool' AND e.event = 'tool.start'
+         AND julianday(e.createdAt) > julianday('now', ?)
+         ${excludeSelfTaskRows("e")}
        GROUP BY tool ORDER BY calls DESC LIMIT 20`,
+      [agentId, windowModifier, ...selfParams],
     ),
     query(
       `SELECT id, name, scope, source, accessCount, alpha, beta, createdAt,
@@ -88,7 +102,10 @@ export default async function dreamAgentSlice(args: any, ctx: any) {
               COALESCE(SUM(outputTokens), 0) AS outputTokens,
               COALESCE(SUM(cacheReadTokens), 0) AS cacheReadTokens,
               COALESCE(SUM(cacheWriteTokens), 0) AS cacheWriteTokens
-       FROM session_costs WHERE agentId = ? AND julianday(createdAt) > julianday('now', ?)`,
+       FROM session_costs c
+       WHERE c.agentId = ? AND julianday(c.createdAt) > julianday('now', ?)
+         ${excludeSelfTaskRows("c")}`,
+      [agentId, windowModifier, ...selfParams],
     ),
     query(
       `SELECT soulMd, identityMd, claudeMd, toolsMd, heartbeatMd
@@ -102,11 +119,13 @@ export default async function dreamAgentSlice(args: any, ctx: any) {
       [agentId],
     ),
     query(
-      `SELECT json_extract(data, '$.skillName') AS name, count(*) AS invokes
-       FROM events
-       WHERE agentId = ? AND category = 'skill' AND event = 'skill.invoke'
-         AND julianday(createdAt) > julianday('now', ?)
+      `SELECT json_extract(e.data, '$.skillName') AS name, count(*) AS invokes
+       FROM events e
+       WHERE e.agentId = ? AND e.category = 'skill' AND e.event = 'skill.invoke'
+         AND julianday(e.createdAt) > julianday('now', ?)
+         ${excludeSelfTaskRows("e")}
        GROUP BY name ORDER BY invokes DESC`,
+      [agentId, windowModifier, ...selfParams],
     ),
   ]);
 
