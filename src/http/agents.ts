@@ -33,6 +33,7 @@ import {
   ProviderNameSchema,
   ReasoningEffortSchema,
 } from "../types";
+import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
 import { route } from "./route-def";
 import { agentWithCapacity, json, jsonError } from "./utils";
 
@@ -169,12 +170,12 @@ const updateAgentProfileRoute = route({
     role: z.string().max(100).optional(),
     description: z.string().optional(),
     capabilities: z.array(z.string()).optional(),
-    claudeMd: z.string().max(65536).optional(),
-    soulMd: z.string().max(65536).optional(),
-    identityMd: z.string().max(65536).optional(),
-    setupScript: z.string().max(65536).optional(),
-    toolsMd: z.string().max(65536).optional(),
-    heartbeatMd: z.string().max(65536).optional(),
+    claudeMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
+    soulMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
+    identityMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
+    setupScript: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
+    toolsMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
+    heartbeatMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
     /** `null` resets to the deterministic fallback; omit the key to leave untouched. */
     avatar: AgentAvatarSchema.nullable().optional(),
     changeSource: z.string().optional(),

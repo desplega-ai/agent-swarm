@@ -9,10 +9,14 @@ import {
   postRatings,
   type RetrievalRow,
 } from "../be/memory/raters/llm";
-import { contentSha256, readIdentityBaselines } from "../commands/profile-sync";
+import {
+  contentSha256,
+  readIdentityBaselines,
+  warnProfileFileTooLarge,
+} from "../commands/profile-sync";
 import type { Agent } from "../types";
 import { getApiKey } from "../utils/api-key";
-import { getMcpBaseUrl } from "../utils/constants";
+import { getMcpBaseUrl, MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
@@ -534,8 +538,11 @@ export async function handleHook(): Promise<void> {
 
     const content = await file.text();
 
-    // Don't sync if content is empty or too large (>64KB)
-    if (!content.trim() || content.length > 65536) return;
+    if (!content.trim()) return;
+    if (content.length > MAX_PROFILE_FILE_LENGTH) {
+      warnProfileFileTooLarge(agentId, "claudeMd", content.length, "hook");
+      return;
+    }
 
     try {
       await fetch(`${getBaseUrl()}/api/agents/${agentId}/profile`, {
@@ -579,7 +586,9 @@ export async function handleHook(): Promise<void> {
       const content = await soulFile.text();
       if (baselines?.soulMd && contentSha256(content) === baselines.soulMd) {
         // Unchanged during session — skip to preserve Lead's DB edits
-      } else if (content.trim() && content.length <= 65536) {
+      } else if (content.length > MAX_PROFILE_FILE_LENGTH) {
+        warnProfileFileTooLarge(agentId, "soulMd", content.length, "hook");
+      } else if (content.trim()) {
         if (content.length < IDENTITY_FILE_MIN_LENGTH) {
           console.error(
             `[hook] Skipping SOUL.md sync: content too short (${content.length} chars, minimum ${IDENTITY_FILE_MIN_LENGTH}). This prevents accidental profile corruption.`,
@@ -595,7 +604,9 @@ export async function handleHook(): Promise<void> {
       const content = await identityFile.text();
       if (baselines?.identityMd && contentSha256(content) === baselines.identityMd) {
         // Unchanged during session — skip
-      } else if (content.trim() && content.length <= 65536) {
+      } else if (content.length > MAX_PROFILE_FILE_LENGTH) {
+        warnProfileFileTooLarge(agentId, "identityMd", content.length, "hook");
+      } else if (content.trim()) {
         if (content.length < IDENTITY_FILE_MIN_LENGTH) {
           console.error(
             `[hook] Skipping IDENTITY.md sync: content too short (${content.length} chars, minimum ${IDENTITY_FILE_MIN_LENGTH}). This prevents accidental profile corruption.`,
@@ -611,7 +622,9 @@ export async function handleHook(): Promise<void> {
       const content = await toolsMdFile.text();
       if (baselines?.toolsMd && contentSha256(content) === baselines.toolsMd) {
         // Unchanged during session — skip
-      } else if (content.trim() && content.length <= 65536) {
+      } else if (content.length > MAX_PROFILE_FILE_LENGTH) {
+        warnProfileFileTooLarge(agentId, "toolsMd", content.length, "hook");
+      } else if (content.trim()) {
         updates.toolsMd = content;
       }
     }
@@ -621,7 +634,9 @@ export async function handleHook(): Promise<void> {
       const content = await heartbeatFile.text();
       if (baselines?.heartbeatMd && contentSha256(content) === baselines.heartbeatMd) {
         // Unchanged during session — skip
-      } else if (content.length <= 65536) {
+      } else if (content.length > MAX_PROFILE_FILE_LENGTH) {
+        warnProfileFileTooLarge(agentId, "heartbeatMd", content.length, "hook");
+      } else {
         updates.heartbeatMd = content;
       }
     }
@@ -672,7 +687,11 @@ export async function handleHook(): Promise<void> {
       content = raw.replace(/^#!\/bin\/bash\n/, "").trim();
     }
 
-    if (!content || content.length > 65536) return;
+    if (!content) return;
+    if (content.length > MAX_PROFILE_FILE_LENGTH) {
+      warnProfileFileTooLarge(agentId, "setupScript", content.length, "hook");
+      return;
+    }
 
     try {
       await fetch(`${getBaseUrl()}/api/agents/${agentId}/profile`, {

@@ -2,6 +2,9 @@
  * Shared constants used across worker- and server-side code.
  */
 
+/** Maximum profile-file length in JavaScript characters (not UTF-8 bytes). */
+export const MAX_PROFILE_FILE_LENGTH = 256 * 1024;
+
 /**
  * Default dashboard URL used when neither `APP_URL` nor the deprecated
  * `DASHBOARD_URL` is set. Points at the public production dashboard so links

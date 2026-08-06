@@ -10,6 +10,7 @@ import { rm, unlink } from "node:fs/promises";
 import type { Subprocess } from "bun";
 import { Webhook } from "svix";
 import { slackContextKey } from "../tasks/context-key";
+import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
 
 const TEST_PORT = 19876;
 const TEST_DB_PATH = `/tmp/test-http-integration-${Date.now()}.sqlite`;
@@ -296,6 +297,20 @@ describe("Agents", () => {
     expect(status).toBe(200);
     expect(body.description).toBe("Updated description");
     expect(body.role).toBe("senior-worker");
+  });
+
+  test("PUT /api/agents/:id/profile — accepts the raised character cap", async () => {
+    const aboveOldCap = "a".repeat(65_537);
+    const accepted = await put(`/api/agents/${ids.workerAgent}/profile`, {
+      body: { heartbeatMd: aboveOldCap },
+    });
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.heartbeatMd).toHaveLength(aboveOldCap.length);
+
+    const rejected = await put(`/api/agents/${ids.workerAgent}/profile`, {
+      body: { heartbeatMd: "a".repeat(MAX_PROFILE_FILE_LENGTH + 1) },
+    });
+    expect(rejected.status).toBe(400);
   });
 
   test("PUT /api/agents/:id/profile — non-existent returns 404", async () => {

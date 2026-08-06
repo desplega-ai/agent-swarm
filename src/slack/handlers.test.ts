@@ -513,6 +513,12 @@ describe("Slack accepted-message acknowledgements", () => {
     });
   });
 
+  test("direct steering wires its timestamp, reaction, and early exit", async () => {
+    const source = await Bun.file(new URL("handlers.ts", import.meta.url)).text();
+    expect(source).toContain("messageTimestamps: [msg.ts]");
+    expect(source).toMatch(/if \(steering\) \{[\s\S]*?"speech_balloon"[\s\S]*?continue;/);
+  });
+
   test("assistant thread reply after the last task completed gets an eyes reaction", async () => {
     expect(assistantMessageHandler).toBeDefined();
 
@@ -573,6 +579,7 @@ describe("Slack accepted-message acknowledgements", () => {
       "eyes",
       "heavy_plus_sign",
       "zap",
+      "speech_balloon",
     ]);
     expect(add).toHaveBeenCalledWith({
       channel: "D_THREAD_ACK_TEST",

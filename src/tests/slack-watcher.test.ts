@@ -5,6 +5,7 @@ import {
   closeDb,
   completeTask,
   createAgent,
+  createLogEntry,
   createTaskExtended,
   failTask,
   getChildTasks,
@@ -17,6 +18,7 @@ import {
   startTask,
   updateTaskProgress,
 } from "../be/db";
+import { getAgentDisplayName, getAgentEmoji } from "../slack/responses";
 import {
   _getLastRenderedTree,
   _getTaskMessages,
@@ -589,7 +591,7 @@ describe("processTreeMessages", () => {
     expect(secondUpdateTime).toBeUndefined();
   });
 
-  test("cleans up tree when all tasks are terminal", async () => {
+  test("cleans up tree and settles persisted steering reactions", async () => {
     const agent = createAgent({ name: "TerminalAgent", isLead: true, status: "idle" });
     const task = createTaskExtended("terminal tree test", {
       agentId: agent.id,
@@ -601,6 +603,12 @@ describe("processTreeMessages", () => {
     });
 
     startTask(task.id);
+    createLogEntry({
+      eventType: "task_steering",
+      taskId: task.id,
+      newValue: "slack_reaction",
+      metadata: { slackChannelId: "C_TERM1", slackMessageTs: "4040404040.000004" },
+    });
     completeTask(task.id, "All done");
 
     const messageTs = "4040404040.000002";
@@ -620,11 +628,16 @@ describe("processTreeMessages", () => {
     expect(_getTaskToTree().has(task.id)).toBe(false);
     expect(_getLastRenderedTree().has(messageTs)).toBe(false);
     expect(_getTreeLastUpdateTime().has(messageTs)).toBe(false);
-    expect(mockReactionRemove).toHaveBeenCalledTimes(3);
+    expect(mockReactionRemove).toHaveBeenCalledTimes(8);
     expect(mockReactionAdd).toHaveBeenCalledWith({
       channel: "C_TERM1",
       name: "white_check_mark",
       timestamp: "4040404040.000003",
+    });
+    expect(mockReactionAdd).toHaveBeenCalledWith({
+      channel: "C_TERM1",
+      name: "white_check_mark",
+      timestamp: "4040404040.000004",
     });
   });
 
@@ -880,6 +893,10 @@ describe("DM unification — postInitialDMTreeMessage", () => {
     expect((lastCall[0] as any).channel).toBe("D_DM_TREE1");
     expect((lastCall[0] as any).thread_ts).toBe("1212121212.000001");
     expect((lastCall[0] as any).blocks).toBeDefined();
+    expect(lastCall[0]).toMatchObject({
+      username: getAgentDisplayName(agent),
+      icon_emoji: getAgentEmoji(agent),
+    });
   });
 
   test("returns undefined when task has no agentId", async () => {

@@ -1,4 +1,4 @@
-import { Activity, Clock, Coins, DollarSign, TrendingUp } from "lucide-react";
+import { Activity, Clock, Coins, DollarSign, TrendingUp, UserCheck } from "lucide-react";
 import { useMemo } from "react";
 import {
   CartesianGrid,
@@ -18,13 +18,15 @@ function StatCard({
   label,
   value,
   icon: Icon,
+  hint,
 }: {
   label: string;
   value: string;
   icon: React.ElementType;
+  hint?: string;
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border px-4 py-3">
+    <div className="flex items-center gap-3 rounded-lg border border-border px-4 py-3" title={hint}>
       <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted">
         <Icon className="h-4 w-4 text-muted-foreground" />
       </div>
@@ -127,15 +129,32 @@ export function UsageSummary(props: UsageSummaryProps) {
     );
   }
 
+  // Share of spend whose task carries a human requester. The rest is autonomous
+  // work (heartbeat, boot triage) — the number is deliberately shown as-is.
+  const attributedPct =
+    totals?.attributedCostUsd !== undefined && stats.totalCost > 0
+      ? (totals.attributedCostUsd / stats.totalCost) * 100
+      : null;
+
   return (
     <div className="space-y-4">
       {/* Stats Strip */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div
+        className={`grid gap-3 sm:grid-cols-2 ${attributedPct === null ? "lg:grid-cols-5" : "lg:grid-cols-6"}`}
+      >
         <StatCard label="Total Cost" value={formatCost(stats.totalCost)} icon={DollarSign} />
         <StatCard label="Tokens" value={formatCompactNumber(stats.totalTokens)} icon={Coins} />
         <StatCard label="Sessions" value={String(stats.sessions)} icon={Activity} />
         <StatCard label="Total Time" value={formatDuration(stats.totalDuration)} icon={Clock} />
         <StatCard label="Avg/Session" value={formatCost(stats.avgCost)} icon={TrendingUp} />
+        {attributedPct !== null && (
+          <StatCard
+            label="Attributed spend"
+            value={`${attributedPct.toFixed(1)}%`}
+            icon={UserCheck}
+            hint="Share of spend on tasks with a named human requester. The remainder is autonomous work (heartbeat, boot triage) with no requester."
+          />
+        )}
       </div>
 
       {/* Daily Cost Chart */}

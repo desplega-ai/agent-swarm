@@ -7,6 +7,7 @@ import { getAgentById, updateAgentName, updateAgentProfile } from "@/be/db";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { type Agent, AgentAvatarSchema, AgentStatusSchema, ProviderNameSchema } from "@/types";
+import { MAX_PROFILE_FILE_LENGTH } from "@/utils/constants";
 
 // Loose mirror of AgentSchema for tool output: every field optional, no
 // datetime/uuid format pins, nested blobs collapsed to permissive objects.
@@ -106,7 +107,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           .describe("List of capabilities (e.g., ['typescript', 'react', 'testing'])."),
         claudeMd: z
           .string()
-          .max(65536)
+          .max(MAX_PROFILE_FILE_LENGTH)
           .optional()
           .describe(
             "Personal CLAUDE.md content. Loaded on session start and synced back on session end. Use for persistent notes and instructions.",
@@ -114,7 +115,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         soulMd: z
           .string()
           .min(200)
-          .max(65536)
+          .max(MAX_PROFILE_FILE_LENGTH)
           .optional()
           .describe(
             "Soul content: persona and behavioral directives. Updates both DB and /workspace/SOUL.md. Must be at least 200 characters to prevent accidental corruption.",
@@ -122,28 +123,28 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         identityMd: z
           .string()
           .min(200)
-          .max(65536)
+          .max(MAX_PROFILE_FILE_LENGTH)
           .optional()
           .describe(
             "Identity content: expertise and working style. Updates both DB and /workspace/IDENTITY.md. Must be at least 200 characters to prevent accidental corruption.",
           ),
         setupScript: z
           .string()
-          .max(65536)
+          .max(MAX_PROFILE_FILE_LENGTH)
           .optional()
           .describe(
             "Setup script content (bash). Runs at container start as the worker user after privilege drop. Persists across sessions. Also written to /workspace/start-up.sh.",
           ),
         toolsMd: z
           .string()
-          .max(65536)
+          .max(MAX_PROFILE_FILE_LENGTH)
           .optional()
           .describe(
             "Environment-specific operational knowledge. Repos, services, SSH hosts, APIs, device names — anything specific to your setup. Synced to /workspace/TOOLS.md.",
           ),
         heartbeatMd: z
           .string()
-          .max(65536)
+          .max(MAX_PROFILE_FILE_LENGTH)
           .optional()
           .describe(
             "Heartbeat checklist content (HEARTBEAT.md). Checked periodically — add standing orders for the lead to review. Synced to /workspace/HEARTBEAT.md.",

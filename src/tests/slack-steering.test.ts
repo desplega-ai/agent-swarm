@@ -7,6 +7,7 @@ import {
   createTaskExtended,
   getChildTasks,
   getLatestActiveTaskInThread,
+  getLogsByTaskId,
   getSteeringMessagesForTask,
   initDb,
   startTask,
@@ -16,7 +17,7 @@ process.env.SLACK_RENDER_V2 = "false";
 
 import { buildTreeBlocks } from "../slack/blocks";
 import { routeMessage } from "../slack/router";
-import { requestSlackThreadSteering } from "../slack/steering";
+import { formatSlackSteeringAck, requestSlackThreadSteering } from "../slack/steering";
 import { bufferThreadMessage, instantFlush } from "../slack/thread-buffer";
 
 const TEST_DB_PATH = `/tmp/agent-swarm-slack-steering-${process.pid}.sqlite`;
@@ -79,6 +80,16 @@ afterAll(() => {
 });
 
 describe("Slack thread steering", () => {
+  test("every steering acknowledgement uses the speech balloon prefix", () => {
+    for (const result of [
+      { outcome: "steered", effectiveMode: "steer" },
+      { outcome: "queued", effectiveMode: "queue" },
+      { outcome: "promoted", effectiveMode: "queue" },
+      { outcome: "queued", effectiveMode: "queue", degradedFrom: "steer" },
+    ] as const)
+      expect(formatSlackSteeringAck(result)).toStartWith(":speech_balloon:");
+  });
+
   test("off preserves the buffered follow-up task path", async () => {
     process.env.SLACK_THREAD_STEERING = "off";
     const channelId = "C_STEER_OFF";
@@ -103,6 +114,7 @@ describe("Slack thread steering", () => {
       channelId,
       threadTs,
       message: "use the safer approach",
+      messageTimestamps: ["2000.0002"],
     });
 
     expect(result).toMatchObject({
@@ -110,6 +122,10 @@ describe("Slack thread steering", () => {
       result: { outcome: "steered", effectiveMode: "steer" },
     });
     expect(getSteeringMessagesForTask(leadTask.id)).toHaveLength(1);
+    expect(JSON.parse(getLogsByTaskId(leadTask.id)[0]!.metadata!)).toMatchObject({
+      slackChannelId: channelId,
+      slackMessageTs: "2000.0002",
+    });
     expect(getChildTasks(leadTask.id)).toEqual([]);
   });
 
@@ -168,6 +184,9 @@ describe("Slack thread steering", () => {
     const messages = getSteeringMessagesForTask(leadTask.id);
     expect(messages).toHaveLength(1);
     expect(messages[0]?.body).toContain("first correction\n---\nsecond correction");
+    expect(
+      getLogsByTaskId(leadTask.id).filter((log) => log.newValue === "slack_reaction"),
+    ).toHaveLength(2);
     expect(getChildTasks(leadTask.id)).toEqual([]);
   });
 

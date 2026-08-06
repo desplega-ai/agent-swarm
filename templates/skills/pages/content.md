@@ -177,10 +177,9 @@ Before publishing:
 | `app_url` (full mode) | `${APP_URL}/pages/:id?mode=full` | Same SPA route, maximized — hides the SPA sidebar/header so the page body gets the full viewport. Slim header with title + Exit-Full button. Useful for embeds + standalone dashboards. |
 | `api_url` | `${MCP_BASE_URL}/p/:id` | Direct API render. HTML inlines and serves; JSON 302-redirects to `app_url`. Useful for no-SPA-required links. |
 
-`${APP_URL}` is the SPA origin (e.g. `https://app.agent-swarm.dev` in prod).
-`${MCP_BASE_URL}` is the API origin (e.g. `https://api.desplega.agent-swarm.dev`
-in prod). Both are surfaced as env vars to your agent — never hardcode hosts;
-read them from `process.env`.
+`${APP_URL}` is the deployment's SPA origin and `${MCP_BASE_URL}` is its API
+origin. Both are surfaced as env vars to your agent — never hardcode hosts; read
+them from `process.env`.
 
 **Default**: share `app_url`. Append `?mode=full` when the recipient should
 see ONLY the page (no surrounding swarm chrome). Use `api_url` only when you

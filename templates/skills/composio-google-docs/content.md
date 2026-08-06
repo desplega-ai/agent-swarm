@@ -5,8 +5,11 @@ A document is identified by its `document_id` (the id in the Docs URL).
 
 ```bash
 agent-swarm x composio POST /tools/execute/<SLUG> \
-  --body '{"user_id":"t@desplega.ai","connected_account_id":"ca_…","arguments":{ … }}'
+  --body '{"user_id":"<connected-account-email>","connected_account_id":"<active-connected-account-id>","arguments":{ … }}'
 ```
+
+Follow the hub's **Resolve the user and connected account** procedure, then
+select the resolved user's `googledocs` account whose status is `ACTIVE`.
 
 ## Headline tools
 
@@ -56,6 +59,26 @@ agent-swarm x composio POST /tools/execute/GOOGLEDOCS_CREATE_DOCUMENT_MARKDOWN \
     "title":"Weekly updates","markdown_text":"# Heading\n\n- point one\n- point two"
   }}'
 ```
+
+## Google Doc to agent-fs
+
+1. Read the source with `GOOGLEDOCS_GET_DOCUMENT_PLAINTEXT` and retain its
+   returned title and display URL as provenance.
+2. Write the converted content to your own agent-fs namespace with a short
+   provenance header naming the source document and import method.
+3. Resolve the destination org and drive from the environment or
+   `agent-fs stat <path> --json`; the `artifacts` skill documents the canonical
+   storage and share-link workflow. Never copy org or drive IDs from an example.
+4. Read the stored file back and assert several markers: the title, a middle
+   phrase, and the final sentence. A successful byte-count response alone does
+   not prove fidelity.
+
+Plaintext is intentionally lossy. Inline images may become bare `[IMAGE]`
+markers, and headings may be flattened into adjacent paragraphs. If those
+features matter, use `GOOGLEDOCS_GET_DOCUMENT_BY_ID` for structured JSON or a
+Google Drive export, then preserve or reconstruct the structure explicitly.
+There is no `GET_DOCUMENT_MARKDOWN` tool; markdown exists on create/update, not
+on read.
 
 ## Gotchas
 

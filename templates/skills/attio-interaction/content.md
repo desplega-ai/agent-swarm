@@ -108,6 +108,8 @@ curl -sS -X PUT "https://api.attio.com/v2/objects/people/records" \
   }' | jq '{record_id: .data.id.record_id}'
 ```
 
+An upsert returns HTTP `200` when it updates an existing record and `201` when it creates one. The response body has the same shape in both cases.
+
 ### 6. Update specific attributes on an existing record
 
 ```bash
@@ -125,6 +127,8 @@ curl -sS -X PATCH "https://api.attio.com/v2/objects/companies/records/{RECORD_ID
 ```
 
 ### 7. Write a note to a record
+
+Notes are concise free-text entries linked to a record. Use them to preserve useful interaction context, enrichment findings, or an agent result that should remain visible in the CRM.
 
 ```bash
 curl -sS -X POST "https://api.attio.com/v2/notes" \

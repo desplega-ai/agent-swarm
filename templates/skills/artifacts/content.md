@@ -59,14 +59,22 @@ agent-fs stat <path> --json | jq '.size'
 
 ### Sharing agent-fs files with humans
 
-Build the URL from the live host env var:
+The deployment configures the live viewer host through `AGENT_FS_LIVE_URL`; the
+documented fallback is `https://live.agent-fs.dev`. Resolve it in the shell and
+combine it with the `orgId` and `driveId` returned by `agent-fs stat`:
 
-```
-${AGENT_FS_LIVE_URL}/file/~/<org_id>/<drive_id>/<file_path>
+```bash
+FILE_PATH='thoughts/<agent-id>/research/<file>.md'
+AGENT_FS_HOST=${AGENT_FS_LIVE_URL:-https://live.agent-fs.dev}
+FILE_STAT=$(agent-fs stat "$FILE_PATH" --json)
+ORG_ID=$(printf '%s' "$FILE_STAT" | jq -r '.orgId')
+DRIVE_ID=$(printf '%s' "$FILE_STAT" | jq -r '.driveId')
+SHARE_URL="${AGENT_FS_HOST%/}/file/~/$ORG_ID/$DRIVE_ID/$FILE_PATH"
+printf '%s\n' "$SHARE_URL"
 ```
 
-`AGENT_FS_LIVE_URL` defaults to `https://live.agent-fs.dev`. Get `org_id` and
-`drive_id` from `agent-fs stat <path> --json`.
+Paste the printed concrete URL into Markdown or a message. Markdown does not
+expand environment variables.
 
 ## Shared filesystem
 
@@ -101,7 +109,8 @@ misc/<agent-id>/<task-id>-<description>.ext
 
 ## Attaching artifacts
 
-- **PR body** — embed `![caption](https://live.agent-fs.dev/file/~/...)` as markdown.
+- **PR body** — embed `![caption](<resolved-share-url>)` after resolving and
+  printing the concrete URL as shown above.
 - **Slack** — link the agent-fs URL (public, no auth required).
 - **`store-progress`** — use the `attachments` field with `kind: "agent-fs"` and the path.
 - **Linear comments** — paste the live URL in the comment body.
@@ -143,7 +152,7 @@ echo '<h1>My Report</h1>' > /workspace/personal/artifacts/my-report/index.html
 
 # Serve it (auto-assigns a free port, creates tunnel, registers in service registry)
 agent-swarm artifact serve /workspace/personal/artifacts/my-report --name my-report
-# -> Artifact "my-report" live at https://<agentId>-my-report.lt.desplega.ai (port <auto>)
+# -> Copy the deployment URL printed by the command; it is authoritative.
 ```
 
 ### Programmatic (custom Hono server)
@@ -195,25 +204,26 @@ Tunnels are protected by **HTTP Basic auth** by default:
 > history, browser history, proxy and tunnel access logs, referrer headers, and
 > anything you paste it into. Treat a credential-bearing URL as a leaked key.
 
-The URL you share is always the plain one — a browser will prompt for the
-credentials:
-
-```
-https://<agentId>-<name>.lt.desplega.ai
-```
+The installed `@desplega.ai/localtunnel` package currently defaults to
+`lt.desplega.ai`, but deployments may configure another tunnel host. The URL
+printed by `agent-swarm artifact serve` (or exposed as `server.url`) is
+authoritative. Save that plain URL as `ARTIFACT_URL`; a browser will prompt for
+the credentials.
 
 For scripts and `curl`, pass the credential out-of-band instead of inlining it,
 and read it from the environment so it never appears as a literal:
 
 ```bash
 # -u keeps the credential out of the URL; --netrc-file keeps it out of argv too.
-curl -u "hi:$API_KEY" https://<agentId>-<name>.lt.desplega.ai
+curl -u "hi:$API_KEY" "$ARTIFACT_URL"
 
 # Better for anything long-lived or logged — argv is visible to other processes:
-printf 'machine %s-%s.lt.desplega.ai login hi password %s\n' \
-  "$AGENT_ID" "$NAME" "$API_KEY" > /tmp/artifact-netrc
+ARTIFACT_HOST=${ARTIFACT_URL#*://}
+ARTIFACT_HOST=${ARTIFACT_HOST%%/*}
+printf 'machine %s login hi password %s\n' \
+  "$ARTIFACT_HOST" "$API_KEY" > /tmp/artifact-netrc
 chmod 600 /tmp/artifact-netrc
-curl --netrc-file /tmp/artifact-netrc https://<agentId>-<name>.lt.desplega.ai
+curl --netrc-file /tmp/artifact-netrc "$ARTIFACT_URL"
 ```
 
 Do not echo the assembled command, and do not paste the credential into a task

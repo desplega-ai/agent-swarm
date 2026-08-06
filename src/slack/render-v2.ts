@@ -30,6 +30,7 @@ import {
   markdownToSlack,
   splitSlackSectionText,
 } from "./blocks";
+import { getAgentDisplayName, getAgentEmoji } from "./responses";
 
 const TREE_UPDATE_DEBOUNCE_MS = 500;
 const TREE_UPDATE_MIN_INTERVAL_MS = 3_000;
@@ -371,6 +372,7 @@ async function createThreadTree(task: AgentTask): Promise<SlackMessageRecord | n
 
   const renderedThrough = new Date().toISOString();
   const tasks = getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
+  const agent = task.agentId ? getAgentById(task.agentId) : undefined;
   const text = renderThreadTree(tasks);
   const reserved = existing
     ? { record: existing, created: false }
@@ -394,6 +396,7 @@ async function createThreadTree(task: AgentTask): Promise<SlackMessageRecord | n
       blocks: treeBlocks(text),
       unfurl_links: false,
       unfurl_media: false,
+      ...(agent ? { username: getAgentDisplayName(agent), icon_emoji: getAgentEmoji(agent) } : {}),
       metadata: {
         event_type: SLACK_RENDER_METADATA_EVENT,
         event_payload: { message_id: reservation.id, kind: "tree" },
@@ -723,6 +726,11 @@ export async function streamOutcomeCard(
     thread_ts: task.slackThreadTs,
     markdown_text: presentation,
   };
+  const agent = task.agentId ? getAgentById(task.agentId) : undefined;
+  if (agent) {
+    startPayload.username = getAgentDisplayName(agent);
+    startPayload.icon_emoji = getAgentEmoji(agent);
+  }
   if (!task.slackChannelId.startsWith("D") && task.slackUserId) {
     const teamId = await slackTeamId(app.client);
     if (teamId) {
