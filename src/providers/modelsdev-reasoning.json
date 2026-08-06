@@ -204,6 +204,89 @@
           ]
         }
       ]
+    },
+    "claude-opus-4-0": {
+      "id": "claude-opus-4-0",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "budget_tokens"
+        }
+      ]
+    },
+    "claude-3-opus-20240229": {
+      "id": "claude-3-opus-20240229",
+      "reasoning": false
+    },
+    "claude-opus-4-1-20250805": {
+      "id": "claude-opus-4-1-20250805",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "budget_tokens"
+        }
+      ]
+    },
+    "claude-3-5-sonnet-20241022": {
+      "id": "claude-3-5-sonnet-20241022",
+      "reasoning": false
+    },
+    "claude-opus-4-20250514": {
+      "id": "claude-opus-4-20250514",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "budget_tokens"
+        }
+      ]
+    },
+    "claude-3-5-sonnet-20240620": {
+      "id": "claude-3-5-sonnet-20240620",
+      "reasoning": false
+    },
+    "claude-sonnet-4-20250514": {
+      "id": "claude-sonnet-4-20250514",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "budget_tokens"
+        }
+      ]
+    },
+    "claude-opus-4-1": {
+      "id": "claude-opus-4-1",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "budget_tokens"
+        }
+      ]
+    },
+    "claude-3-haiku-20240307": {
+      "id": "claude-3-haiku-20240307",
+      "reasoning": false
+    },
+    "claude-sonnet-4-0": {
+      "id": "claude-sonnet-4-0",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "budget_tokens"
+        }
+      ]
+    },
+    "claude-3-7-sonnet-20250219": {
+      "id": "claude-3-7-sonnet-20250219",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "budget_tokens"
+        }
+      ]
+    },
+    "claude-3-sonnet-20240229": {
+      "id": "claude-3-sonnet-20240229",
+      "reasoning": false
     }
   },
   "openai": {
@@ -692,6 +775,118 @@
     "text-embedding-3-small": {
       "id": "text-embedding-3-small",
       "reasoning": false
+    },
+    "gpt-5-codex": {
+      "id": "gpt-5-codex",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ]
+    },
+    "gpt-5.1-codex": {
+      "id": "gpt-5.1-codex",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ]
+    },
+    "gpt-5.1-codex-max": {
+      "id": "gpt-5.1-codex-max",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ]
+    },
+    "gpt-5.1-codex-mini": {
+      "id": "gpt-5.1-codex-mini",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ]
+    },
+    "gpt-5.2-codex": {
+      "id": "gpt-5.2-codex",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      ]
+    },
+    "gpt-5-chat-latest": {
+      "id": "gpt-5-chat-latest",
+      "reasoning": true
+    },
+    "gpt-5.1-chat-latest": {
+      "id": "gpt-5.1-chat-latest",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "medium"
+          ]
+        }
+      ]
+    },
+    "o4-mini-deep-research": {
+      "id": "o4-mini-deep-research",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "medium"
+          ]
+        }
+      ]
+    },
+    "o3-deep-research": {
+      "id": "o3-deep-research",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "medium"
+          ]
+        }
+      ]
     }
   },
   "openrouter": {
@@ -3408,6 +3603,178 @@
     },
     "anthracite-org/magnum-v4-72b": {
       "id": "anthracite-org/magnum-v4-72b",
+      "reasoning": false
+    },
+    "meta-llama/llama-3.2-11b-vision-instruct": {
+      "id": "meta-llama/llama-3.2-11b-vision-instruct",
+      "reasoning": false
+    },
+    "meta-llama/llama-3.3-70b-instruct:free": {
+      "id": "meta-llama/llama-3.3-70b-instruct:free",
+      "reasoning": false
+    },
+    "meta-llama/llama-3.2-3b-instruct:free": {
+      "id": "meta-llama/llama-3.2-3b-instruct:free",
+      "reasoning": false
+    },
+    "meta-llama/llama-3-8b-instruct": {
+      "id": "meta-llama/llama-3-8b-instruct",
+      "reasoning": false
+    },
+    "google/gemini-2.5-flash-lite-preview-09-2025": {
+      "id": "google/gemini-2.5-flash-lite-preview-09-2025",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "toggle"
+        },
+        {
+          "type": "budget_tokens"
+        }
+      ]
+    },
+    "liquid/lfm-2.5-1.2b-thinking:free": {
+      "id": "liquid/lfm-2.5-1.2b-thinking:free",
+      "reasoning": true
+    },
+    "liquid/lfm-2-24b-a2b": {
+      "id": "liquid/lfm-2-24b-a2b",
+      "reasoning": false
+    },
+    "liquid/lfm-2.5-1.2b-instruct:free": {
+      "id": "liquid/lfm-2.5-1.2b-instruct:free",
+      "reasoning": false
+    },
+    "microsoft/phi-4-mini-instruct": {
+      "id": "microsoft/phi-4-mini-instruct",
+      "reasoning": false
+    },
+    "poolside/laguna-xs.2": {
+      "id": "poolside/laguna-xs.2",
+      "reasoning": true
+    },
+    "poolside/laguna-xs.2:free": {
+      "id": "poolside/laguna-xs.2:free",
+      "reasoning": true
+    },
+    "poolside/laguna-m.1": {
+      "id": "poolside/laguna-m.1",
+      "reasoning": true
+    },
+    "poolside/laguna-m.1:free": {
+      "id": "poolside/laguna-m.1:free",
+      "reasoning": true
+    },
+    "openai/gpt-4o-mini-search-preview": {
+      "id": "openai/gpt-4o-mini-search-preview",
+      "reasoning": false
+    },
+    "openai/gpt-5-chat": {
+      "id": "openai/gpt-5-chat",
+      "reasoning": false
+    },
+    "openai/gpt-5.1-chat": {
+      "id": "openai/gpt-5.1-chat",
+      "reasoning": false
+    },
+    "openai/gpt-oss-120b:free": {
+      "id": "openai/gpt-oss-120b:free",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ]
+    },
+    "openai/o4-mini-deep-research": {
+      "id": "openai/o4-mini-deep-research",
+      "reasoning": true
+    },
+    "openai/o3-deep-research": {
+      "id": "openai/o3-deep-research",
+      "reasoning": true
+    },
+    "openai/gpt-4o-search-preview": {
+      "id": "openai/gpt-4o-search-preview",
+      "reasoning": false
+    },
+    "openai/gpt-5-codex": {
+      "id": "openai/gpt-5-codex",
+      "reasoning": true,
+      "reasoningOptions": [
+        {
+          "type": "effort",
+          "values": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      ]
+    },
+    "mistralai/devstral-2512": {
+      "id": "mistralai/devstral-2512",
+      "reasoning": false
+    },
+    "nvidia/llama-3.3-nemotron-super-49b-v1.5": {
+      "id": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+      "reasoning": true
+    },
+    "cognitivecomputations/dolphin-mistral-24b-venice-edition:free": {
+      "id": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+      "reasoning": false
+    },
+    "arcee-ai/coder-large": {
+      "id": "arcee-ai/coder-large",
+      "reasoning": false
+    },
+    "arcee-ai/trinity-mini": {
+      "id": "arcee-ai/trinity-mini",
+      "reasoning": true
+    },
+    "switchpoint/router": {
+      "id": "switchpoint/router",
+      "reasoning": true
+    },
+    "openrouter/owl-alpha": {
+      "id": "openrouter/owl-alpha",
+      "reasoning": false
+    },
+    "qwen/qwen3-next-80b-a3b-instruct:free": {
+      "id": "qwen/qwen3-next-80b-a3b-instruct:free",
+      "reasoning": false
+    },
+    "qwen/qwen3-coder:free": {
+      "id": "qwen/qwen3-coder:free",
+      "reasoning": false
+    },
+    "aion-labs/aion-1.0-mini": {
+      "id": "aion-labs/aion-1.0-mini",
+      "reasoning": true
+    },
+    "aion-labs/aion-1.0": {
+      "id": "aion-labs/aion-1.0",
+      "reasoning": true
+    },
+    "inflection/inflection-3-pi": {
+      "id": "inflection/inflection-3-pi",
+      "reasoning": false
+    },
+    "inflection/inflection-3-productivity": {
+      "id": "inflection/inflection-3-productivity",
+      "reasoning": false
+    },
+    "sao10k/l3.1-70b-hanami-x1": {
+      "id": "sao10k/l3.1-70b-hanami-x1",
+      "reasoning": false
+    },
+    "nousresearch/hermes-3-llama-3.1-405b:free": {
+      "id": "nousresearch/hermes-3-llama-3.1-405b:free",
       "reasoning": false
     }
   },

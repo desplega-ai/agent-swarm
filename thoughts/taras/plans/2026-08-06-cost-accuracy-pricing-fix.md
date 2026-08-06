@@ -270,12 +270,13 @@ Codex sessions sum usage across turns instead of keeping only the last turn (def
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] New codex test: two `turn.completed` events → summed tokens in `CostData`: `bun run test:root -- src/tests/codex-adapter.test.ts`
-- [ ] `bun run test:root -- src/tests/codex-adapter-otel.test.ts src/tests/codex-swarm-events.test.ts`
-- [ ] `bun run tsc:check && bun run lint`
+- [x] New codex test: two `turn.completed` events → summed tokens in `CostData`: `bun run test:root -- src/tests/codex-adapter.test.ts` (73 pass; SDK `Usage` documented per-turn → accumulation)
+- [x] `bun run test:root -- src/tests/codex-adapter-otel.test.ts src/tests/codex-swarm-events.test.ts` (15 pass)
+- [x] `bun run tsc:check && bun run lint` (full 13-file cost/adapter battery: 276 pass)
+- [x] EXTRA (refresh fallout repair): the Phase-3 models.dev snapshot refresh dropped delisted-but-still-runnable models (gpt-5.1/5.2-codex family, 12 legacy anthropic ids), breaking context-window + reasoning-effort gating (3 codex-adapter tests). Fixed durably: 5 codex pins in `PINNED_MODELSDEV_ENTRIES` + `carryForwardDelistedModels()` in `scripts/refresh-modelsdev-pricing.ts` (515 entries carried forward); cold-start re-verified (sonnet-5 $2 intro, 1h rows seeded)
 
 #### Automated QA:
-- [ ] Docs build/lint clean if docs-site has a check; otherwise verify mdx renders via `bun run docs:openapi` side-effects being absent (docs-only change)
+- [x] Docs-only change verified side-effect-free (no route/schema changes; `openapi.json` untouched by Phase 5); mdx content cross-checked against shipped recompute behavior
 
 #### Manual Verification:
 - [ ] Skim the two doc pages for accuracy against the shipped behavior

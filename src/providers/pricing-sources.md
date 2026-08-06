@@ -75,6 +75,25 @@ The `pricePerMillionUsd` column carries these as `rate * 1_000_000` so the
 same schema fits — the adapter scales by the underlying unit (hours / ACUs),
 not by tokens. The unit convention is specific to those `token_class` values.
 
+## Provider pricing caveats
+
+- **Claude Sonnet 5 introductory rate:** Anthropic's pricing page lists
+  $2/M input and $10/M output through 2026-08-31. The models.dev snapshot and
+  server pricing table carry that introductory rate. Claude Code's bundled
+  local rate table is stale-high, so treat its reported USD as advisory and
+  use the server-recomputed row for the canonical total.
+- **GPT-5.6 context tier:** above 272k context, the GPT-5.6 family bills
+  2× input/cache rates and 1.5× output rates. The current recompute receives
+  aggregate session token counts, not enough per-request context information
+  to attribute that tier. It can therefore under-count sessions containing
+  over-272k requests; this is a documented bound, not a tier-aware
+  implementation. Per-turn context/usage accumulation is needed before that
+  can be fixed accurately.
+- **Codex worker fallback:** `FALLBACK_CODEX_MODEL_PRICING` in
+  `src/providers/codex-models.ts` is advisory only. The canonical price is the
+  server-side recompute against the runtime-refreshed pricing table;
+  `agentswarm.cost.drift.usd` watches for divergence between the two.
+
 ## When a model is missing
 
 If `POST /api/session-costs` arrives with a `(provider, model)` pair that has

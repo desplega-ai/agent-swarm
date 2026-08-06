@@ -137,21 +137,29 @@ export interface CodexModelPricing {
   outputPerMillion: number;
 }
 
-const FALLBACK_CODEX_MODEL_PRICING: Record<CodexModel, CodexModelPricing> = {
+/**
+ * Advisory only: the canonical price is the API server's recompute against
+ * the runtime-refreshed pricing table. `agentswarm.cost.drift.usd` is the
+ * watchdog for divergence between this worker-local fallback and that table.
+ * Exported so tests can pin the fallback values directly — through
+ * `computeCodexCostUsd` the models.dev snapshot always wins, leaving this
+ * table unreachable when both agree.
+ */
+export const FALLBACK_CODEX_MODEL_PRICING: Record<CodexModel, CodexModelPricing> = {
   "gpt-5.6-sol": {
     inputPerMillion: 5.0,
     cachedInputPerMillion: 0.5,
     outputPerMillion: 30.0,
   },
   "gpt-5.6-terra": {
-    inputPerMillion: 2.5,
-    cachedInputPerMillion: 0.25,
-    outputPerMillion: 15.0,
+    inputPerMillion: 2.0,
+    cachedInputPerMillion: 0.2,
+    outputPerMillion: 12.0,
   },
   "gpt-5.6-luna": {
-    inputPerMillion: 1.0,
-    cachedInputPerMillion: 0.1,
-    outputPerMillion: 6.0,
+    inputPerMillion: 0.2,
+    cachedInputPerMillion: 0.02,
+    outputPerMillion: 1.2,
   },
   "gpt-5.5": {
     inputPerMillion: 5.0,
