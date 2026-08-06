@@ -63,17 +63,26 @@ rate by hand should also update this file.
 
 ## Manual overrides
 
-Two cost components models.dev doesn't carry are encoded in
+Cost components models.dev doesn't carry are encoded in
 `MANUAL_PRICING_OVERRIDES` inside `src/be/seed-pricing.ts`:
 
-| Provider         | Model | Token class    | Rate         | Source                                                                         | Verified   |
-|------------------|-------|----------------|--------------|---------------------------------------------------------------------------------|------------|
-| `claude-managed` | `*`   | `runtime_hour` | $0.08 / hour | <https://docs.claude.com/en/api/agent-sdk/managed-runtime#pricing>             | 2026-04-28 |
-| `devin`          | `*`   | `acu`          | $2.25 / ACU  | <https://devin.ai/pricing>                                                      | 2026-04-28 |
+| Provider         | Model | Token class    | Rate                 | Source                                                                         | Verified   |
+|------------------|-------|----------------|----------------------|---------------------------------------------------------------------------------|------------|
+| `claude`         | `*`   | `web_search`   | $10 / 1,000 requests | <https://docs.claude.com/en/docs/about-claude/pricing>                         | 2026-08-06 |
+| `claude-managed` | `*`   | `web_search`   | $10 / 1,000 requests | <https://docs.claude.com/en/docs/about-claude/pricing>                         | 2026-08-06 |
+| `claude-managed` | `*`   | `runtime_hour` | $0.08 / hour         | <https://docs.claude.com/en/api/agent-sdk/managed-runtime#pricing>             | 2026-04-28 |
+| `devin`          | `*`   | `acu`          | $2.25 / ACU          | <https://devin.ai/pricing>                                                      | 2026-04-28 |
 
 The `pricePerMillionUsd` column carries these as `rate * 1_000_000` so the
-same schema fits — the adapter scales by the underlying unit (hours / ACUs),
-not by tokens. The unit convention is specific to those `token_class` values.
+same schema fits — the adapter scales by the underlying unit (hours / ACUs /
+requests), not by tokens. `web_search` stores $0.01/request as
+`pricePerMillionUsd = 10_000` (USD per million requests). The unit convention
+is specific to those `token_class` values.
+
+Unlike token rates — where a missing rate marks the whole row
+`costSource='unpriced'` — a missing `web_search` rate prices searches at $0.
+That asymmetry is deliberate (a small request fee shouldn't unprice an entire
+session) and is documented in the cost-and-context-computation guide.
 
 ## Provider pricing caveats
 
