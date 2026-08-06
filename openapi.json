@@ -14508,6 +14508,20 @@
                       "null"
                     ]
                   },
+                  "cacheWrite5mTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
+                  "cacheWrite1hTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
                   "reasoningOutputTokens": {
                     "type": "integer",
                     "minimum": 0
@@ -14527,6 +14541,48 @@
                   },
                   "model": {
                     "type": "string"
+                  },
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "model": {
+                          "type": "string"
+                        },
+                        "inputTokens": {
+                          "type": "integer"
+                        },
+                        "outputTokens": {
+                          "type": "integer"
+                        },
+                        "cacheReadTokens": {
+                          "type": "integer"
+                        },
+                        "cacheWriteTokens": {
+                          "type": "integer"
+                        },
+                        "webSearchRequests": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "harnessCostUsd": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "model",
+                        "inputTokens",
+                        "outputTokens",
+                        "cacheReadTokens",
+                        "cacheWriteTokens"
+                      ]
+                    }
                   },
                   "isError": {
                     "type": "boolean"

@@ -1162,6 +1162,18 @@ export type SessionLog = z.infer<typeof SessionLogSchema>;
 export const SessionCostSourceSchema = z.enum(["harness", "pricing-table", "unpriced"]);
 export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
 
+export const SessionCostModelBreakdownSchema = z.object({
+  model: z.string(),
+  inputTokens: z.number().int(),
+  outputTokens: z.number().int(),
+  cacheReadTokens: z.number().int(),
+  cacheWriteTokens: z.number().int(),
+  webSearchRequests: z.number().int().nullable().optional(),
+  costUsd: z.number().nullable().optional(),
+  harnessCostUsd: z.number().nullable().optional(),
+});
+export type SessionCostModelBreakdown = z.infer<typeof SessionCostModelBreakdownSchema>;
+
 export const SessionCostSchema = z.object({
   id: z.uuid(),
   sessionId: z.string(),
@@ -1189,6 +1201,11 @@ export const SessionCostSchema = z.object({
   //                      had no matching pricing rows; totalCostUsd is whatever
   //                      the worker submitted (often 0).
   costSource: SessionCostSourceSchema.default("harness"),
+  // Migration 127: adapter-reported amount retained for reconciliation only.
+  harnessCostUsd: z.number().nullable().optional(),
+  cacheWrite5mTokens: z.number().int().nullable().optional(),
+  cacheWrite1hTokens: z.number().int().nullable().optional(),
+  modelBreakdown: z.array(SessionCostModelBreakdownSchema).nullable().optional(),
   createdAt: z.iso.datetime(),
 });
 

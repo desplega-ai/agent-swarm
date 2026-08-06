@@ -17,6 +17,7 @@ import { normalizeModelKey } from "../be/pricing-normalize";
 import { recordSessionCost } from "../otel";
 import { incrementServerSessionsProcessed } from "../server-runtime-counters";
 import type { SessionCost, SessionCostSource } from "../types";
+import { SessionCostModelBreakdownSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -78,6 +79,10 @@ const createSessionCostRoute = route({
     // Migration 063: nullable — adapters that can't honestly report cache writes
     // (e.g. Codex SDK) prefer null over a faked 0.
     cacheWriteTokens: z.number().int().nullable().optional(),
+    // Same nullable rationale as cacheWriteTokens: adapters that can't report
+    // the TTL split send null/omit rather than a faked 0.
+    cacheWrite5mTokens: z.number().int().nonnegative().nullable().optional(),
+    cacheWrite1hTokens: z.number().int().nonnegative().nullable().optional(),
     // Migration 063: new token classes previously dropped on the floor.
     reasoningOutputTokens: z.number().int().nonnegative().optional(),
     thinkingTokens: z.number().int().nonnegative().optional(),
@@ -85,6 +90,9 @@ const createSessionCostRoute = route({
     // Migration 063: nullable for adapters that can't honestly report numTurns.
     numTurns: z.number().int().nullable().optional(),
     model: z.string().optional(),
+    // Reuses the canonical breakdown schema minus costUsd (server-computed,
+    // never accepted from the wire).
+    models: z.array(SessionCostModelBreakdownSchema.omit({ costUsd: true })).optional(),
     isError: z.boolean().optional(),
     /**
      * Phase 6 (extended migration 063): drives the API recompute path. After
@@ -219,6 +227,9 @@ export async function handleSessionData(
       // the UI can flag it. When the provider isn't set, fall through with
       // 'harness' (back-compat for older callers).
       let totalCostUsd = parsed.body.totalCostUsd;
+      // Keep the adapter's report even when the pricing-table branch replaces
+      // totalCostUsd with the server's canonical recomputation.
+      const harnessCostUsd = parsed.body.totalCostUsd;
       let costSource: SessionCostSource = "harness";
 
       if (parsed.body.provider && model) {
@@ -293,9 +304,14 @@ export async function handleSessionData(
         model,
         isError: parsed.body.isError ?? false,
         costSource,
+        harnessCostUsd,
+        cacheWrite5mTokens: parsed.body.cacheWrite5mTokens,
+        cacheWrite1hTokens: parsed.body.cacheWrite1hTokens,
+        modelBreakdown: parsed.body.models,
       });
       recordSessionCost({
         totalCostUsd,
+        harnessCostUsd,
         harness: parsed.body.provider ?? "unknown",
         model,
         costSource,

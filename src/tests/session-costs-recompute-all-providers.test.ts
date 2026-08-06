@@ -91,6 +91,17 @@ interface CostResponse {
   success: boolean;
   cost: {
     totalCostUsd: number;
+    harnessCostUsd: number | null;
+    cacheWrite5mTokens: number | null;
+    cacheWrite1hTokens: number | null;
+    modelBreakdown: Array<{
+      model: string;
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      harnessCostUsd?: number;
+    }> | null;
     costSource: "harness" | "pricing-table" | "unpriced";
   };
 }
@@ -133,6 +144,18 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
           totalCostUsd: 999.99, // worker-reported; expected to be overwritten
           inputTokens: 1_000_000, // 1M input
           outputTokens: 500_000, // 500k output
+          cacheWrite5mTokens: 25,
+          cacheWrite1hTokens: 75,
+          models: [
+            {
+              model: `${provider}-test-model`,
+              inputTokens: 1_000_000,
+              outputTokens: 500_000,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 100,
+              harnessCostUsd: 999.99,
+            },
+          ],
           model: `${provider}-test-model`,
           provider,
           durationMs: 1_000,
@@ -144,6 +167,19 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
       expect(body.cost.costSource).toBe("pricing-table");
       // 1M @ 2 + 0.5M @ 10 = $2 + $5 = $7
       expect(body.cost.totalCostUsd).toBeCloseTo(7.0, 5);
+      expect(body.cost.harnessCostUsd).toBe(999.99);
+      expect(body.cost.cacheWrite5mTokens).toBe(25);
+      expect(body.cost.cacheWrite1hTokens).toBe(75);
+      expect(body.cost.modelBreakdown).toEqual([
+        {
+          model: `${provider}-test-model`,
+          inputTokens: 1_000_000,
+          outputTokens: 500_000,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 100,
+          harnessCostUsd: 999.99,
+        },
+      ]);
     });
   }
 
@@ -166,5 +202,79 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
     const body = (await res.json()) as CostResponse;
     expect(body.cost.costSource).toBe("unpriced");
     expect(body.cost.totalCostUsd).toBe(1.23);
+  });
+});
+
+describe("Migration 127 — modelBreakdown persistence", () => {
+  test("breakdown + harness fields survive the DB round-trip through GET", async () => {
+    seedTwoClassRates("claude", "claude-breakdown-model", 2, 10);
+    const models = [
+      {
+        model: "claude-breakdown-model",
+        inputTokens: 1_000,
+        outputTokens: 500,
+        cacheReadTokens: 10,
+        cacheWriteTokens: 5,
+        harnessCostUsd: 1.23,
+      },
+    ];
+    const post = await authedFetch(`/api/session-costs`, {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: "breakdown-roundtrip",
+        agentId: testAgent.id,
+        totalCostUsd: 9.99,
+        inputTokens: 1_000,
+        outputTokens: 500,
+        model: "claude-breakdown-model",
+        provider: "claude",
+        cacheWrite5mTokens: 0,
+        cacheWrite1hTokens: 5,
+        models,
+      }),
+    });
+    expect(post.status).toBe(201);
+
+    const res = await authedFetch(`/api/session-costs?agentId=${testAgent.id}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      costs: Array<{
+        sessionId: string;
+        harnessCostUsd: number | null;
+        cacheWrite5mTokens: number | null;
+        cacheWrite1hTokens: number | null;
+        modelBreakdown: unknown;
+      }>;
+    };
+    const row = body.costs.find((c) => c.sessionId === "breakdown-roundtrip");
+    expect(row).toBeDefined();
+    expect(row?.modelBreakdown).toEqual(models);
+    expect(row?.harnessCostUsd).toBe(9.99);
+    expect(row?.cacheWrite5mTokens).toBe(0);
+    expect(row?.cacheWrite1hTokens).toBe(5);
+  });
+
+  test("malformed stored breakdown JSON degrades to null instead of failing the listing", async () => {
+    const post = await authedFetch(`/api/session-costs`, {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: "breakdown-corrupt",
+        agentId: testAgent.id,
+        totalCostUsd: 1,
+      }),
+    });
+    expect(post.status).toBe(201);
+    getDb()
+      .prepare("UPDATE session_costs SET modelBreakdown = ? WHERE sessionId = ?")
+      .run("{not json", "breakdown-corrupt");
+
+    const res = await authedFetch(`/api/session-costs?agentId=${testAgent.id}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      costs: Array<{ sessionId: string; modelBreakdown: unknown }>;
+    };
+    const row = body.costs.find((c) => c.sessionId === "breakdown-corrupt");
+    expect(row).toBeDefined();
+    expect(row?.modelBreakdown).toBeNull();
   });
 });

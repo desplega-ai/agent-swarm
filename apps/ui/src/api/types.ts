@@ -765,6 +765,17 @@ export interface ServicesResponse {
  */
 export type SessionCostSource = "harness" | "pricing-table" | "unpriced";
 
+export interface SessionCostModelBreakdown {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  webSearchRequests?: number | null;
+  costUsd?: number | null;
+  harnessCostUsd?: number | null;
+}
+
 export interface SessionCost {
   id: string;
   sessionId: string;
@@ -786,6 +797,10 @@ export interface SessionCost {
   isError: boolean;
   // Phase 12b: surfaced on each row for the UI badge.
   costSource: SessionCostSource;
+  harnessCostUsd?: number | null;
+  cacheWrite5mTokens?: number | null;
+  cacheWrite1hTokens?: number | null;
+  modelBreakdown?: SessionCostModelBreakdown[] | null;
   createdAt: string;
 }
 

@@ -112,16 +112,16 @@ Route body changed → `bun run docs:openapi`, commit `openapi.json` + regenerat
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run tsc:check` and `bun run lint` pass
-- [ ] New/updated unit test: POST with provider+model+pricing rows stores BOTH `totalCostUsd` (recomputed) and `harnessCostUsd` (body value): `bun run test:root -- src/tests/session-costs-recompute-all-providers.test.ts`
-- [ ] Existing suite green: `bun run test:root -- src/tests/session-costs.test.ts src/tests/session-costs-codex-recompute.test.ts src/tests/otel-session-cost-metrics.test.ts`
-- [ ] Fresh-DB migration boots: `rm -f agent-swarm-db.sqlite* && timeout 15 bun run start:http` (then Ctrl-C); existing-DB boot also verified
-- [ ] `bash scripts/check-audit-columns.sh` passes (session_costs already exempt)
-- [ ] `bun run docs:openapi` produces a committed diff
-- [ ] UI: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
+- [x] `bun run tsc:check` and `bun run lint` pass
+- [x] New/updated unit test: POST with provider+model+pricing rows stores BOTH `totalCostUsd` (recomputed) and `harnessCostUsd` (body value): `bun run test:root -- src/tests/session-costs-recompute-all-providers.test.ts`
+- [x] Existing suite green: `bun run test:root -- src/tests/session-costs.test.ts src/tests/session-costs-codex-recompute.test.ts src/tests/otel-session-cost-metrics.test.ts`
+- [x] Fresh-DB migration boots: `rm -f agent-swarm-db.sqlite* && timeout 15 bun run start:http` (then Ctrl-C); existing-DB boot also verified (second boot on same DB — migration 127 applied once)
+- [x] `bash scripts/check-audit-columns.sh` passes (session_costs already exempt)
+- [x] `bun run docs:openapi` produces a committed diff
+- [x] UI: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
 
 #### Automated QA:
-- [ ] Agent-driven: POST a synthetic session-cost via curl (harness $10, tokens that recompute to a different value), then GET `/api/session-costs?taskId=...` and assert both fields present and different
+- [x] Agent-driven: POST a synthetic session-cost via curl (harness $10, tokens that recompute to a different value), then GET `/api/session-costs?taskId=...` and assert both fields present and different — PASS: recompute $7.500625 vs harness $10 both stored; TTL split + modelBreakdown round-trip intact (note: agentId has an FK to agents — QA registered a real agent first)
 
 #### Manual Verification:
 - [ ] Task detail page shows the drift tooltip on a task with differing values (screenshot)
