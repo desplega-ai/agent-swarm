@@ -3,7 +3,7 @@ date: 2026-08-06T00:00:00+02:00
 author: claude
 topic: "Per-app generated TypeScript types for swarm scripts (type-contributor seam v1)"
 tags: [plan, swarm-apps, scripts-runtime, typecheck, codegen, monaco]
-status: draft
+status: completed
 branch: main
 git_commit: 30f79a927bb6c95b53da8797629cf13b67360159
 last_updated: 2026-08-06
@@ -21,6 +21,14 @@ last_updated_by: claude
 2. **Agent-context budget for the generated block.** `script-query-types` proxies `GET /api/scripts/type-defs` with `uncappedDetails: true` (`src/tools/script-common.ts:136-142`), so the entire blob lands in the calling agent's context, and the app block is emitted **twice** (flat `sdkTypes` + ambient `stdlibTypes`). Today's payload is ~37 KB (~9k tokens); ~12 typical apps add ~48 KB (~12k tokens). Plan default: include per-app types on every consumer with a **32 KB cap** on the app block (whole apps dropped oldest-first, omitted apps named in a trailing comment, cap as a source constant). Alternatives: a different cap; making the cap an operator-tunable env var via the Settings → Configuration catalog; or excluding the app block from the agent-facing `script-query-types` path entirely (typecheck + Monaco only).
 
 3. **Per-app RBAC exposure.** The generated block hands every app's model/column/enum vocabulary to every script author and every agent that calls `script-query-types`, regardless of `app.use` grants. Plan default: accept it now (it matches today's already-ungated `GET /api/apps/{id}` and `app.use` → `anyAuthenticated`), and filter by `can({verb: "app.use", resource: {kind: "app", appId}})` only when a real per-app policy lands — the `context` parameter on the generator is the documented hook. Alternative: filter through `can()` immediately, which costs one RBAC audit-sink row per app per typecheck/type-defs call.
+
+## Implementation notes (2026-08-06, post-review)
+
+Independent review round (Codex gpt-5.6-sol) surfaced three verified defects, all fixed in the review-fixes commit: (1) `commentSafe` now also strips U+2028/U+2029 — they are JS line terminators, so a hostile app name could break out of a `//` comment and inject declarations; (2) the skipped/omitted-app trailer comments are bounded to 10 listed apps + a counter, making the 32 KB budget a hard invariant (previously a pathological catalog could push metadata alone past 80 KB); (3) the model-interface dedupe set reserves `ActionName`, so a model literally named `actionName` becomes `ActionName_2` instead of a duplicate-identifier collision with the generated alias. Also added: a `{name}/types` both-blobs test.
+
+Two accepted deviations from the plan's letter (both consequences of locked decision #1, the retained loose fallback overload):
+- Phase 2 test (c): an invalid enum literal passed *directly* to a known `app_query` call compiles via the fallback (as the plan's own `$param` note and Risks appendix predict). The test instead pins the generated enum union type itself. The delivered gate is row-shape inference, not param-value validation.
+- E2E step 9's `grep -c "pwned" → 0` oracle is wrong as written: sanitization neutralizes the *escape* (`*/`, line terminators) but deliberately leaves harmless text inside the comment, so the word survives inertly. Verified live: no top-level statement, blob parses, script upserts still 200.
 
 ## Overview
 
@@ -250,14 +258,14 @@ The renderer and its DB read land first, fully tested, with nothing consuming th
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/apps-script-types.test.ts`
-- [ ] `bun run lint && bun run tsc:check`
-- [ ] `bash scripts/check-db-boundary.sh` (generator reads via `src/apps/store.ts`, server-side only)
-- [ ] `bun run check:dep-graph` (no new forbidden edge; `src/be/scripts` → `src/apps` is permitted)
-- [ ] No app regressions: `bun run test:root -- src/tests/apps-spike5.test.ts src/tests/apps-spike.test.ts`
+- [x] `bun run test:root -- src/tests/apps-script-types.test.ts`
+- [x] `bun run lint && bun run tsc:check`
+- [x] `bash scripts/check-db-boundary.sh` (generator reads via `src/apps/store.ts`, server-side only)
+- [x] `bun run check:dep-graph` (no new forbidden edge; `src/be/scripts` → `src/apps` is permitted)
+- [x] No app regressions: `bun run test:root -- src/tests/apps-spike5.test.ts src/tests/apps-spike.test.ts`
 
 #### Manual Verification:
-- [ ] Read one rendered block end-to-end (paste a fixture app through `renderAppTypes` in a scratch `bun repl`-style test) — is it something a script author would actually want to read?
+- [x] Read one rendered block end-to-end (via live `GET /api/scripts/type-defs` for the PM Inbox fixture) — matches the plan sketch byte-for-byte in shape; doc comments carry app name, id, query→model mapping and params
 
 **Implementation Note**: pause for confirmation, then commit `[phase 1] per-app script type generator + contributor seam`.
 
@@ -288,20 +296,20 @@ One parameter on each assembly helper; every existing consumer picks the block u
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/scripts-typecheck.test.ts src/tests/scripts-http.test.ts src/tests/apps-script-types.test.ts`
-- [ ] `bun run lint && bun run tsc:check`
-- [ ] `bun run check:script-types` — fresh throwaway DB has no apps, so `src/scripts-runtime/types/*.d.ts` are byte-identical (no commit expected)
-- [ ] `bun run docs:openapi` && `git diff --stat openapi.json` shows only the type-defs description change — commit it
-- [ ] `bun run check:rbac-coverage` (no non-GET routes added — guard only)
-- [ ] Broad regression: `bun run test:root -- src/tests/scripts-mcp-e2e.test.ts src/tests/script-connections.test.ts`
+- [x] `bun run test:root -- src/tests/scripts-typecheck.test.ts src/tests/scripts-http.test.ts src/tests/apps-script-types.test.ts`
+- [x] `bun run lint && bun run tsc:check`
+- [x] `bun run check:script-types` — fresh throwaway DB has no apps, so `src/scripts-runtime/types/*.d.ts` are byte-identical (no commit expected)
+- [x] `bun run docs:openapi` && `git diff --stat openapi.json` shows only the type-defs description change — commit it
+- [x] `bun run check:rbac-coverage` (no non-GET routes added — guard only)
+- [x] Broad regression: `bun run test:root -- src/tests/scripts-mcp-e2e.test.ts src/tests/script-connections.test.ts`
 
 #### Automated QA (isolated API on :3013, Quick Reference recipe):
-- [ ] `POST /api/apps` an app with an enum column + a `$param` query, then `curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/scripts/type-defs | jq -r .sdkTypes | grep -c "App_"` → ≥ 1
-- [ ] `POST /api/scripts/upsert` (with `X-Agent-ID: $(uuidgen)`) a script that misspells a row column → 400 with a structured diagnostic naming the column; fix the spelling → 200
-- [ ] Payload budget: `curl -s … /api/scripts/type-defs | wc -c` recorded before/after the app exists — delta matches the estimate table within ~2×
+- [x] `POST /api/apps` an app with an enum column + a `$param` query, then `curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/scripts/type-defs | jq -r .sdkTypes | grep -c "App_"` → ≥ 1
+- [x] `POST /api/scripts/upsert` (with `X-Agent-ID: $(uuidgen)`) a script that misspells a row column → 400 with a structured diagnostic naming the column; fix the spelling → 200 (diagnostic: `Property 'titel' does not exist on type 'Issue'. Did you mean 'title'?`)
+- [x] Payload budget: `curl -s … /api/scripts/type-defs | wc -c` recorded before/after the app exists — 35,351 → 38,553 B (+3.2 KB for one typical app across both blobs; within the estimate)
 
 #### Manual Verification:
-- [ ] Read one failing `script_upsert` diagnostic as an agent would — does it point at the app column, or at compiler noise?
+- [x] Read one failing `script_upsert` diagnostic as an agent would — points at the app column with a fix suggestion (TS2551 incl. `Did you mean 'title'?`), no compiler noise
 
 **Implementation Note**: pause, confirm, commit `[phase 2] wire per-app types into typecheck + type-defs endpoints`.
 
@@ -326,14 +334,14 @@ Monaco already loads the assembled blobs; the only defect is a session-long cach
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cd apps/ui && bun run lint && bunx tsc -b`
-- [ ] `cd apps/ui && bun run check:tokens` (no styling touched — guard only)
+- [x] `cd apps/ui && bun run lint && bunx tsc -b`
+- [x] `cd apps/ui && bun run check:tokens` (no styling touched — guard only)
 
 #### Automated QA (agent-browser against `cd apps/ui && bun run dev` — `portless ui.swarm vite`, i.e. `https://ui.swarm.localhost` or `http://localhost:5274` depending on local setup; API proxy target is :3013, which the Quick Reference recipe puts on an isolated DB):
-- [ ] Open a script detail page (`/scripts/<id>`) → hover `ctx.swarm.app_query` shows the per-app overload, not `Promise<unknown>`
-- [ ] In the editable playground (`/connections/<id>` → playground panel) type `ctx.swarm.app_query({ appId: "<appId>", query: "` → completion lists the app's declared query names; a bad column on the result row shows a red squiggle
-- [ ] `app-patch` the app to add a column → hard-reload the editor page → the new column appears in completions (staleness path)
-- [ ] Screenshots captured for the PR (apps/ui changes are merge-gate-enforced)
+- [x] Open a script detail page (`/scripts/<id>`) → hover `ctx.swarm.app_query` shows the per-app overload (`Promise<SwarmAppQueryResult<App_PmInbox.Issue>> (+2 overloads)` with the generated doc comment), not `Promise<unknown>`
+- [x] In the editable playground (`/connections` → Playground tab) `query: "` completion lists the declared query name; bad row column shows a red squiggle with quick-fix
+- [x] `app-patch` the app to add a column → hard-reload the editor page → `owner` appears in row completions (staleness path)
+- [x] Screenshots captured for the PR (apps/ui changes are merge-gate-enforced): /tmp/des767-shots/{A2-hover-typed,B2-query-completions,B3-typo-squiggle,B4-row-completions}.png
 
 #### Manual Verification:
 - [ ] Taras: quick editor pass — do the app namespaces make the completion list noisy?
@@ -365,13 +373,13 @@ Three short, factual corrections — one of them fixes a statement the SDK now c
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run build:skill-md` && `bun run check:skill-md` && `bun run check:skill-sources`
-- [ ] `bun run check:seed-skill-files` (no `files/` touched — guard only)
-- [ ] `bun run lint`
-- [ ] Generated `SKILL.md` files committed alongside their `content.md`
+- [x] `bun run build:skill-md` && `bun run check:skill-md` && `bun run check:skill-sources`
+- [x] `bun run check:seed-skill-files` (no `files/` touched — guard only)
+- [x] `bun run lint`
+- [x] Generated `SKILL.md` files committed alongside their `content.md`
 
 #### Manual Verification:
-- [ ] The apps-skill sentence is true for an agent that has never seen this plan (no forward references)
+- [x] The apps-skill sentence is true for an agent that has never seen this plan (no forward references)
 
 **Implementation Note**: pause, confirm, commit `[phase 4] document the type-contributor seam + per-app script types`.
 
