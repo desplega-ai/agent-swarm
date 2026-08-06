@@ -69,7 +69,11 @@ Claude's final `result.modelUsage` is preserved as `modelBreakdown`, including
 sidechain/subagent entries. The API prices every entry at that entry's own
 model rate, sums those totals, and stores the per-model computed `costUsd` in
 the breakdown. Top-level stored token totals are the corresponding breakdown
-sums when one exists, rather than only the main-thread usage.
+sums when one exists, rather than only the main-thread usage. Because the
+breakdown takes precedence, the adapter refuses to zero-fill it: a missing,
+non-finite, or negative token counter on any entry drops the whole breakdown
+and the session falls back to top-level usage (advisory fields like
+`webSearchRequests` and per-model `costUSD` degrade per-field instead).
 
 `web_search` is a request-priced class, not a token rate. The manual rows for
 `claude` and `claude-managed` encode Anthropic's $10 per 1,000 requests

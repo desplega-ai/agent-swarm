@@ -449,20 +449,54 @@ describe("ClaudeSession processStreams — ProviderResult.output capture", () =>
     // null/garbage TTL values must not become 0 (Number(null) === 0 hazard).
     expect(result.cost?.cacheWrite5mTokens).toBeUndefined();
     expect(result.cost?.cacheWrite1hTokens).toBeUndefined();
+    // A malformed token counter anywhere invalidates the whole breakdown:
+    // models[] takes precedence server-side for row totals and pricing, so
+    // zero-filling would store a fabricated $0 'pricing-table' row. The server
+    // falls back to the (valid) top-level usage instead.
+    expect(result.cost?.models).toBeUndefined();
+    expect(result.cost?.totalCostUsd).toBe(0.7);
+    expect(result.cost?.inputTokens).toBe(10);
+    expect(result.cost?.outputTokens).toBe(20);
+  });
+
+  test("malformed advisory fields degrade per-field without dropping the breakdown", async () => {
+    const lines = [
+      JSON.stringify({
+        type: "result",
+        total_cost_usd: 0.7,
+        duration_ms: 100,
+        num_turns: 1,
+        usage: {
+          input_tokens: 10,
+          output_tokens: 20,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+        modelUsage: {
+          "claude-opus-5": {
+            inputTokens: 11,
+            outputTokens: 22,
+            cacheReadInputTokens: 33,
+            cacheCreationInputTokens: 44,
+            webSearchRequests: null,
+            costUSD: "not-a-number",
+          },
+        },
+      }),
+    ];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    const adapter = new ClaudeAdapter();
+    const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
+    const result = await session.waitForCompletion();
+
     expect(result.cost?.models).toEqual([
       {
         model: "claude-opus-5",
-        inputTokens: 0,
+        inputTokens: 11,
         outputTokens: 22,
         cacheReadTokens: 33,
         cacheWriteTokens: 44,
-      },
-      {
-        model: "claude-haiku-4-5",
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
       },
     ]);
     const opus = result.cost?.models?.[0];

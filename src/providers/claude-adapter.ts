@@ -994,23 +994,54 @@ class ClaudeSession implements ProviderSession {
         const cacheWrite1hTokens = cacheCreation
           ? toFiniteNumber(cacheCreation.ephemeral_1h_input_tokens)
           : undefined;
-        const models =
+        // Token counters are load-bearing downstream: the server gives models[]
+        // precedence over top-level usage for BOTH row token totals and pricing,
+        // so a zero-filled counter would store a fabricated $0 'pricing-table'
+        // row. Negative counts would be rejected by the wire schema and void
+        // the whole cost write.
+        const toTokenCount = (value: unknown): number | undefined => {
+          const n = toFiniteNumber(value);
+          return n !== undefined && n >= 0 ? n : undefined;
+        };
+        const mappedModels =
           json.modelUsage && typeof json.modelUsage === "object" && !Array.isArray(json.modelUsage)
             ? Object.entries(json.modelUsage as Record<string, unknown>).map(([model, entry]) => {
                 const modelUsage =
-                  entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
-                const webSearchRequests = toFiniteNumber(modelUsage.webSearchRequests);
+                  entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null;
+                if (!modelUsage) return null;
+                const inputTokens = toTokenCount(modelUsage.inputTokens);
+                const outputTokens = toTokenCount(modelUsage.outputTokens);
+                const cacheReadTokens = toTokenCount(modelUsage.cacheReadInputTokens);
+                const cacheWriteTokens = toTokenCount(modelUsage.cacheCreationInputTokens);
+                if (
+                  inputTokens === undefined ||
+                  outputTokens === undefined ||
+                  cacheReadTokens === undefined ||
+                  cacheWriteTokens === undefined
+                ) {
+                  return null;
+                }
+                // Advisory fields degrade per-field: a malformed value is
+                // omitted without invalidating the entry.
+                const webSearchRequests = toTokenCount(modelUsage.webSearchRequests);
                 const harnessCostUsd = toFiniteNumber(modelUsage.costUSD);
                 return {
                   model,
-                  inputTokens: toFiniteNumber(modelUsage.inputTokens) ?? 0,
-                  outputTokens: toFiniteNumber(modelUsage.outputTokens) ?? 0,
-                  cacheReadTokens: toFiniteNumber(modelUsage.cacheReadInputTokens) ?? 0,
-                  cacheWriteTokens: toFiniteNumber(modelUsage.cacheCreationInputTokens) ?? 0,
+                  inputTokens,
+                  outputTokens,
+                  cacheReadTokens,
+                  cacheWriteTokens,
                   ...(webSearchRequests === undefined ? {} : { webSearchRequests }),
                   ...(harnessCostUsd === undefined ? {} : { harnessCostUsd }),
                 };
               })
+            : undefined;
+        // One malformed entry poisons the whole breakdown — a partial list
+        // would silently undercount the session. Fall back to top-level usage
+        // (the pre-breakdown path) instead of manufacturing zeros.
+        const models =
+          mappedModels && mappedModels.length > 0 && mappedModels.every((m) => m !== null)
+            ? (mappedModels as NonNullable<CostData["models"]>)
             : undefined;
 
         const cost: CostData = {
