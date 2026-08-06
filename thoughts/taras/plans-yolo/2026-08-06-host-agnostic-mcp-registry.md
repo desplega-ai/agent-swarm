@@ -1,7 +1,7 @@
 ---
 date: 2026-08-06T17:12:12Z
 topic: "Host-agnostic MCP registry publication"
-status: in-progress
+status: done
 ---
 
 # Host-agnostic MCP registry publication
@@ -21,7 +21,7 @@ Add a schema-valid `server.json` with a user-templated remote endpoint and a loc
 - [x] Confirm the live schema, current package version, CLI flags, and repository workflow conventions.
 - [x] Add `server.json`, the `mcpName` ownership marker, and the publication workflow.
 - [x] Validate endpoint host neutrality, schema conformance, workflow syntax, and every locally available repository check.
-- [ ] Run the two-axis review, commit, push, open the PR, and check CI without merging.
+- [x] Run the two-axis review, commit, push, open the PR, and check CI without merging.
 
 ## Verification
 
