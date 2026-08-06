@@ -102,103 +102,31 @@ route({
 const PROXY_PREFIX = "/@swarm/api/";
 
 /**
- * Explicit allowlist of `/api/*` routes the page-proxy may forward to. This
- * MUST stay in sync with the domains the injected browser SDK actually
- * exposes (`src/artifact-sdk/browser-sdk.ts` — tasks, agents, events, memory,
- * repos, schedules, approvalRequests, assets, kv). A page-session cookie is
- * held by anyone who can view a page (public pages have no auth at all), so
- * the proxy must NOT forward arbitrary `/api/*` paths with the operator
- * bearer attached — that would make every cookie holder an operator for the
- * entire API surface. `null` marks a single-segment wildcard (path param).
+ * Reject a proxied suffix that smells like path traversal or an attempt to
+ * smuggle an extra path segment via percent-encoding (e.g. `%2e%2e`, `%2f`).
+ * This is a normalization guard, not a route allowlist — it doesn't track the
+ * browser-SDK surface as a second source of truth, it just refuses to
+ * forward anything that doesn't decode into a clean, traversal-free segment
+ * sequence.
  */
-const PROXY_ALLOWLIST: ReadonlyArray<{ method: string; segments: ReadonlyArray<string | null> }> = [
-  { method: "GET", segments: ["tasks"] },
-  { method: "POST", segments: ["tasks"] },
-  { method: "GET", segments: ["tasks", null] },
-  { method: "POST", segments: ["tasks", null, "progress"] },
-  { method: "GET", segments: ["agents"] },
-  { method: "GET", segments: ["agents", null] },
-  { method: "POST", segments: ["events"] },
-  { method: "GET", segments: ["events"] },
-  { method: "POST", segments: ["events", "batch"] },
-  { method: "GET", segments: ["events", "counts"] },
-  { method: "POST", segments: ["memory", "search"] },
-  { method: "GET", segments: ["memory", "list"] },
-  { method: "GET", segments: ["memory", null] },
-  { method: "POST", segments: ["memory", "rate"] },
-  { method: "GET", segments: ["repos"] },
-  { method: "POST", segments: ["repos"] },
-  { method: "GET", segments: ["repos", null] },
-  { method: "PUT", segments: ["repos", null] },
-  { method: "DELETE", segments: ["repos", null] },
-  { method: "GET", segments: ["schedules"] },
-  { method: "POST", segments: ["schedules"] },
-  { method: "GET", segments: ["schedules", null] },
-  { method: "PUT", segments: ["schedules", null] },
-  { method: "DELETE", segments: ["schedules", null] },
-  { method: "POST", segments: ["schedules", null, "run"] },
-  { method: "GET", segments: ["approval-requests"] },
-  { method: "POST", segments: ["approval-requests"] },
-  { method: "GET", segments: ["approval-requests", null] },
-  { method: "POST", segments: ["approval-requests", null, "respond"] },
-  { method: "GET", segments: ["assets"] },
-  { method: "GET", segments: ["assets", "key-audit"] },
-  { method: "POST", segments: ["assets", "mappings"] },
-  { method: "PATCH", segments: ["assets", null, null, "key"] },
-  { method: "GET", segments: ["kv"] },
-  { method: "GET", segments: ["kv", null] },
-  { method: "PUT", segments: ["kv", null] },
-  { method: "DELETE", segments: ["kv", null] },
-  { method: "POST", segments: ["kv", null, "incr"] },
-  // Explicit-namespace KV variants (`/kv/_/:namespace/...`). Safe to
-  // forward: `X-Page-Id` (set below, unconditionally, by this proxy) is the
-  // highest-priority namespace source in src/http/kv.ts, so these always
-  // resolve to the page's own `task:page:<id>` namespace regardless of what
-  // namespace the URL names — the URL argument can never actually reach
-  // another agent's KV data.
-  { method: "GET", segments: ["kv", "_", null] },
-  { method: "GET", segments: ["kv", "_", null, null] },
-  { method: "PUT", segments: ["kv", "_", null, null] },
-  { method: "DELETE", segments: ["kv", "_", null, null] },
-  { method: "POST", segments: ["kv", "_", null, null, "incr"] },
-];
-
-/**
- * Split the proxied suffix (everything after `/@swarm/api/`) into decoded
- * path segments, rejecting anything that smells like path traversal or an
- * attempt to smuggle an extra segment past the allowlist via percent-encoding
- * (e.g. `%2e%2e`, `%2f`). Returns `null` on any rejection.
- */
-function decodeProxySegments(suffix: string): string[] | null {
-  if (suffix.length === 0) return [];
-  const rawSegments = suffix.split("/");
-  const decoded: string[] = [];
-  for (const raw of rawSegments) {
+function isSafeProxySuffix(suffix: string): boolean {
+  if (suffix.length === 0) return true;
+  for (const raw of suffix.split("/")) {
     let seg: string;
     try {
       seg = decodeURIComponent(raw);
     } catch {
-      return null; // malformed percent-encoding
+      return false; // malformed percent-encoding
     }
-    if (seg.length === 0) return null; // empty segment (e.g. "//") — reject
-    if (seg === "." || seg === "..") return null; // path traversal
+    if (seg.length === 0) return false; // empty segment (e.g. "//") — reject
+    if (seg === "." || seg === "..") return false; // path traversal
     // A decoded segment containing a slash or backslash means the raw
     // segment smuggled an encoded separator (`%2F`, `%5C`) past the naive
-    // `split("/")` above — reject rather than let it re-introduce a segment
-    // boundary the allowlist match below never saw.
-    if (seg.includes("/") || seg.includes("\\")) return null;
-    decoded.push(seg);
+    // `split("/")` above — reject rather than let a segment boundary sneak
+    // past this check unaccounted for.
+    if (seg.includes("/") || seg.includes("\\")) return false;
   }
-  return decoded;
-}
-
-/** True if `method` + decoded `segments` match an allowlisted route. */
-function isProxyAllowed(method: string, segments: string[]): boolean {
-  return PROXY_ALLOWLIST.some((route) => {
-    if (route.method !== method) return false;
-    if (route.segments.length !== segments.length) return false;
-    return route.segments.every((expected, i) => expected === null || expected === segments[i]);
-  });
+  return true;
 }
 
 /**
@@ -219,14 +147,14 @@ export async function handlePageProxy(req: IncomingMessage, res: ServerResponse)
   const pathPart = queryIdx === -1 ? url : url.slice(0, queryIdx);
   const queryPart = queryIdx === -1 ? "" : url.slice(queryIdx);
 
-  // ─── Route allowlist ──────────────────────────────────────────────────────
-  // Reject anything outside the documented browser-SDK surface before doing
-  // any auth work — this also rejects path-traversal and absolute-URL-form
-  // suffixes (they can never decode into an allowlisted segment sequence).
+  // ─── Suffix normalization ─────────────────────────────────────────────────
+  // Reject path-traversal / percent-encoded segment-smuggling before doing
+  // any auth work. This does NOT restrict which `/api/*` routes may be
+  // forwarded — see the module comment for why a route allowlist was
+  // deliberately dropped here.
   const method = (req.method ?? "GET").toUpperCase();
   const suffix = pathPart.slice(PROXY_PREFIX.length);
-  const segments = decodeProxySegments(suffix);
-  if (!segments || !isProxyAllowed(method, segments)) {
+  if (!isSafeProxySuffix(suffix)) {
     jsonError(res, "not found", 404);
     return true;
   }
