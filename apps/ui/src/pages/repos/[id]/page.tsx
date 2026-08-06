@@ -277,8 +277,8 @@ export default function RepoDetailPage() {
       <PageHeader
         className="shrink-0"
         title={
+          /* Repo name lives in the breadcrumb — badges only here. */
           <div className="flex items-center gap-3 min-w-0">
-            <h1 className="text-xl font-semibold">{repo.name}</h1>
             {provider && (
               <Badge variant="outline" size="tag">
                 {provider}

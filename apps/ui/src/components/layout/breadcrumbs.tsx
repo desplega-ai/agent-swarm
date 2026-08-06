@@ -21,6 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useCurrentUser } from "@/contexts/current-user-context";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
 import { cn, sessionDisplayTitle } from "@/lib/utils";
 
@@ -76,6 +77,17 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 // Pages use 32-char random-hex IDs (`lower(hex(randomblob(16)))`), not UUIDs.
 const HEX32_REGEX = /^[0-9a-f]{32}$/i;
 
+/** Fallback for segments without a routeLabels entry: kebab-case → Title Case
+ * ("embed-test" → "Embed Test"). Keeps unknown routes readable without having
+ * to register every new path here; routeLabels stays for names automatic
+ * casing can't produce ("mcp-servers" → "MCP Servers", "keys" → "API Keys"). */
+function humanizeSegment(segment: string): string {
+  return decodeURIComponent(segment)
+    .split("-")
+    .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : word))
+    .join(" ");
+}
+
 function formatSegment(segment: string, prevSegment?: string): string {
   if (routeLabels[segment]) return routeLabels[segment];
   if (prevSegment === "integrations" && INTEGRATION_NAME_BY_ID[segment]) {
@@ -84,7 +96,7 @@ function formatSegment(segment: string, prevSegment?: string): string {
   if (UUID_REGEX.test(segment) || HEX32_REGEX.test(segment)) {
     return `${segment.slice(0, 8)}...`;
   }
-  return segment;
+  return humanizeSegment(segment);
 }
 
 /** True when a path segment looks like an entity id (UUID or 32-char hex). */
@@ -103,6 +115,10 @@ function capContextualName(name: string): string {
 export function Breadcrumbs() {
   const location = useLocation();
   const segments = location.pathname.split("/").filter(Boolean);
+  // Home shows the greeting in the breadcrumb slot (there is no trail to
+  // draw and no in-page h1 anymore). Called before the early return so hook
+  // order stays stable across routes.
+  const { user } = useCurrentUser();
 
   // Detail routes (/<parent>/:id[/...]) get a contextual leaf name fetched
   // from the matching single-entity hook instead of the truncated raw id.
@@ -139,7 +155,13 @@ export function Breadcrumbs() {
   const { data: approvalMeta } = useApprovalRequest(idFor("approval-requests"));
   const { data: connectionMeta } = useScriptConnection(idFor("connections") || undefined);
 
-  if (segments.length === 0) return null;
+  if (segments.length === 0) {
+    return (
+      <span className="min-w-0 truncate text-sm font-medium text-foreground">
+        {user?.name ? `Welcome back, ${user.name}` : "Welcome to Agent Swarm"}
+      </span>
+    );
+  }
 
   // Resolve the contextual name for the detail-id segment, if any. Falls back
   // to `undefined` (→ truncated-id display) while the entity is still loading.

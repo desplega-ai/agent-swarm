@@ -190,6 +190,8 @@ export default function ScriptsPage() {
               icon={SquareCode}
               title="No saved scripts"
               description="Scripts saved by agents via script-upsert (or auto-saved from inline runs) will appear here."
+              entity="script"
+              fullPage
             />
           ) : (
             <DataGrid

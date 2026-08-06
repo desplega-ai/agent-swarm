@@ -194,6 +194,7 @@ export default function ApprovalRequestDetailPage() {
     <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
       <PageHeader
         title={
+          /* Request title lives in the breadcrumb — back arrow + status here. */
           <div className="flex items-center gap-3 min-w-0">
             <Link
               to="/approval-requests"
@@ -201,7 +202,6 @@ export default function ApprovalRequestDetailPage() {
             >
               <ArrowLeft className="h-4 w-4" />
             </Link>
-            <h1 className="text-xl font-semibold">{request.title}</h1>
             <StatusBadge status={request.status} />
           </div>
         }

@@ -13,6 +13,7 @@ import {
   type ScheduleTargetFormValue,
 } from "@/components/schedules/schedule-target-fields";
 import { DataGrid } from "@/components/shared/data-grid";
+import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -568,10 +569,13 @@ export default function SchedulesPage() {
     return (
       <div className="flex flex-col flex-1 min-h-0 gap-4">
         <PageHeader title="Schedules" action={createButton} />
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <Clock className="h-8 w-8 mb-2" />
-          <p className="text-sm">No scheduled tasks</p>
-        </div>
+        <EmptyState
+          icon={Clock}
+          title="No scheduled tasks"
+          description="Schedules run a task on a cron cadence — reports, syncs, sweeps."
+          entity="scheduled task"
+          fullPage
+        />
         <ScheduleDialog
           open={dialogOpen}
           onOpenChange={setDialogOpen}

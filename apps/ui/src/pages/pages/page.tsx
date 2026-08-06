@@ -348,6 +348,8 @@ export default function PagesListingPage() {
           icon={Globe}
           title="No pages yet"
           description="Pages are created via the create_page MCP tool. See the built-in “pages” skill for the agent contract."
+          entity="page"
+          fullPage
         />
       ) : (
         <DataGrid

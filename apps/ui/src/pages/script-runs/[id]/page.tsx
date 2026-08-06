@@ -157,8 +157,8 @@ export default function ScriptRunDetailPage() {
 
         <PageHeader
           title={
+            /* Script name lives in the breadcrumb — badges only here. */
             <div className="flex min-w-0 flex-wrap items-center gap-3">
-              <h1 className="truncate text-xl font-semibold">{run.scriptName || "Script run"}</h1>
               <StatusBadge status={run.status} size="md" />
               <ScriptRunKindBadge kind={run.kind} />
               <Badge variant="outline" size="tag" className="font-mono">

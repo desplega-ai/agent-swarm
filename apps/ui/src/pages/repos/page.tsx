@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useCreateRepo, useDeleteRepo, useRepos, useUpdateRepo } from "@/api/hooks/use-repos";
 import type { SwarmRepo } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
+import { EmptyState } from "@/components/shared/empty-state";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -358,10 +359,13 @@ export default function ReposPage() {
             </Button>
           }
         />
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <FolderGit2 className="h-8 w-8 mb-2" />
-          <p className="text-sm">No repositories registered</p>
-        </div>
+        <EmptyState
+          icon={FolderGit2}
+          title="No repositories registered"
+          description="Registered repos are cloned into agent workspaces automatically."
+          entity="repo"
+          fullPage
+        />
 
         <RepoDialog
           key={editingRepo?.id ?? "new"}

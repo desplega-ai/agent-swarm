@@ -255,8 +255,10 @@ summary {
 
 /* Exception (Taras): the global sidebar keeps the pre-rule feel — nav
  * anchors stay pointer natively, but its buttons (group labels, toggles,
- * menu buttons) keep the default arrow. */
-[data-slot="sidebar-container"] button:not(:disabled),
+ * menu buttons) keep the default arrow. The rail (the collapse/expand
+ * border strip) is carved back out: it looks like inert chrome, so it
+ * needs the pointer to signal it's clickable. */
+[data-slot="sidebar-container"] button:not(:disabled, [data-slot="sidebar-rail"]),
 [data-slot="sidebar-container"] [role="button"] {
   cursor: default;
 }

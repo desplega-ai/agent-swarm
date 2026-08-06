@@ -136,8 +136,8 @@ export default function McpServerDetailPage() {
       <PageHeader
         className="shrink-0"
         title={
+          /* Server name lives in the breadcrumb — badges only here. */
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold">{server.name}</h1>
             <TransportBadge transport={server.transport} />
             <ScopeBadge scope={server.scope} />
             {server.authMethod === "oauth" && (

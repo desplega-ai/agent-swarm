@@ -387,14 +387,12 @@ function IntegrationDetailInner({
         </Button>
         <PageHeader
           title={
+            /* Integration name lives in the breadcrumb — logo + blurb here. */
             <div className="flex items-center gap-3 min-w-0">
               <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted/50 shrink-0">
                 {logo}
               </div>
-              <div className="min-w-0">
-                <h1 className="text-xl font-semibold">{def.name}</h1>
-                <p className="text-sm text-muted-foreground">{def.description}</p>
-              </div>
+              <p className="min-w-0 text-sm text-muted-foreground">{def.description}</p>
             </div>
           }
           action={<IntegrationStatusBadge status={status} />}

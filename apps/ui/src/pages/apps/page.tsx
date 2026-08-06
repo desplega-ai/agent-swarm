@@ -80,6 +80,8 @@ export default function AppsListingPage() {
           icon={LayoutGrid}
           title="No apps yet"
           description="Agents create apps with the `app-upsert` tool."
+          entity="app"
+          fullPage
         />
       ) : (
         <DataGrid

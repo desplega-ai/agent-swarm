@@ -1035,6 +1035,7 @@ export function AgentActivityTimeline() {
           icon={Clock}
           title="No task activity yet"
           description="Tasks appear here once an agent starts running them."
+          entity="task"
         />
       </div>
     );

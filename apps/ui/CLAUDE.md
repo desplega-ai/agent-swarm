@@ -233,7 +233,7 @@ Pages and composed components are built from primitives. Raw `<div>` layouts tha
 | `InfoRow`, `DefinitionList` | uppercase-label + value pair, used in detail pages | `<DefinitionList><InfoRow label="Role">Engineer</InfoRow></DefinitionList>` |
 | `Input` | text input | `<Input id="name" value={v} onChange={...} />` |
 | `Label` | form-control label (use inside `SettingsRow`) | `<Label htmlFor="name">Name</Label>` |
-| `PageHeader` | route-page top heading (title + optional description + optional action) | `<PageHeader title="Tasks" action={<Button>New</Button>} />` |
+| `PageHeader` | route-page description + action row. Plain-string `title`s are NOT rendered (the breadcrumb owns page identity) — keep passing them anyway; only ReactNode titles render (badges, back buttons, editable names) | `<PageHeader title="Tasks" action={<Button>New</Button>} />` |
 | `Progress` | linear progress bar | `<Progress value={75} />` |
 | `ScrollArea`, `ScrollBar` | scrollable container with custom scrollbar | `<ScrollArea className="h-72">...</ScrollArea>` |
 | `Select`, `SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem` | dropdown select | `<Select value={v} onValueChange={...}><SelectTrigger>...</SelectTrigger>...` |
@@ -259,7 +259,7 @@ Pages and composed components are built from primitives. Raw `<div>` layouts tha
 | `CollapsibleSection` | folding section header | `<CollapsibleSection title="Details">...</CollapsibleSection>` |
 | `CommandMenu` | global ⌘K palette | mounted at root |
 | `DataGrid` | AG Grid wrapper — REQUIRED for all data lists | `<DataGrid rowData={rows} columnDefs={cols} />` |
-| `EmptyState` | icon + title + description + optional action for empty lists | `<EmptyState icon={Inbox} title="No tasks" description="..." />` |
+| `EmptyState` | icon + title + description + optional action. First-run page empties add `entity` (renders an "Ask the swarm" CTA that seeds a new session) + `fullPage` (vertical centering) | `<EmptyState icon={Inbox} title="No tasks yet" description="..." entity="task" fullPage />` |
 | `ErrorBoundary` | top-level error fallback | wrap routes |
 | `JsonViewer` | collapsible JSON tree with copy | `<JsonViewer data={obj} />` |
 | `NameConnectionModal` | first-time connection naming | mounted on first connect |
@@ -277,7 +277,7 @@ If you find yourself writing `<div className="flex items-center gap-2">` or `<di
 ### Detail-page layout convention
 
 Detail pages (`pages/*/[id]/page.tsx`) follow the brand-kit's `preview/detail-page-template.html` contract:
-- Header: `<PageHeader />` (title, badges, primary actions). Single destructive actions (Delete) go in the header alongside other primary actions — they are first-class operations, not buried below the fold.
+- Header: `<PageHeader />` (badges, primary actions — the entity NAME belongs to the breadcrumb, so don't re-render it in an h1 when the breadcrumb resolves it). Single destructive actions (Delete) go in the header alongside other primary actions — they are first-class operations, not buried below the fold.
 - Body: `<DetailPageBody main={...} rail={<DetailPageRail>…</DetailPageRail>} />`. Right rail is fixed 280px; below `lg` the rail stacks below main.
 - Rail sections, in order: `<QuickStats>` (k/v at-a-glance) → `<Relationships>` (linked entities, arrow link) → `<DangerZone>` (full-width destructive button — use only when a page has multiple destructive actions or the action is genuinely supplementary, e.g. an irreversible reset paired with a primary save).
 

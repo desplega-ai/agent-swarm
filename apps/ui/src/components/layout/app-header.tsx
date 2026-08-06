@@ -42,7 +42,7 @@ export function AppHeader() {
   const connectionErrorMessage = statusError?.message || healthError?.message || null;
 
   return (
-    <header className="flex h-14 items-center gap-2 border-b border-border px-4">
+    <header className="flex h-14 items-center gap-2 px-4">
       <SidebarTrigger className="md:hidden" />
       <Separator orientation="vertical" className="mr-2 h-4 md:hidden" />
 

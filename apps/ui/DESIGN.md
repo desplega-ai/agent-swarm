@@ -158,7 +158,7 @@ Eleven `action-*` tokens (violet, cyan, teal, orange, indigo, pink, purple, blue
 **Character:** One family carries the whole interface — Space Grotesk's slightly technical geometry gives the console its voice without a display font shouting over the data. Space Mono marks machine territory: session IDs, log output, code, version strings.
 
 ### Hierarchy
-- **Headline** (600, 1.25rem / `text-xl`): route-page titles via `PageHeader`. Fixed rem scale — nothing fluid, nothing clamped.
+- **Headline** (600, 1.25rem / `text-xl`): in-content heroes only (e.g. the sessions "What would you like the swarm to do?"). Route pages have NO in-page h1 — the top-bar breadcrumb names the page. Fixed rem scale — nothing fluid, nothing clamped.
 - **Title** (600, 1rem, leading-none): card and section titles (`CardTitle`).
 - **Body** (400, 0.875rem / `text-sm`, 1.5): the default reading size for descriptions, form text, table cells. Prose runs at 65–75ch max.
 - **Label** (500, 0.75rem / `text-xs`, uppercase + tracking-wide): `InfoRow` definition labels and quiet metadata.
@@ -208,7 +208,7 @@ Utilitarian and crisp: small radii (6–10px), 36px control heights, restrained 
 - **Error / Disabled:** `aria-invalid` ring + destructive border; disabled at 50% opacity, cursor blocked.
 
 ### Navigation
-- **Style:** shadcn `Sidebar` shell (`app-sidebar.tsx`) on the sidebar token layer — one tonal step off the content field, amber for the active item; top-level `PageHeader` per route; global ⌘K `CommandMenu` for keyboard-first navigation.
+- **Style:** shadcn `Sidebar` shell (`app-sidebar.tsx`) on the sidebar token layer — one tonal step off the content field, amber for the active item; the borderless top bar's breadcrumb names the page (auto-humanized segments, entity names resolved; the home route shows the greeting there) while `PageHeader` carries only description/actions; global ⌘K `CommandMenu` for keyboard-first navigation.
 
 ### Signature Components
 - **DataGrid** (AG Grid wrapper): the mandatory surface for every data list — themed via `ag-grid.css` to the token system, fills remaining page height, row-click drill-down with `stopPropagation` on inline actions.
@@ -221,7 +221,7 @@ Utilitarian and crisp: small radii (6–10px), 36px control heights, restrained 
 - **Do** use named tokens for every color: `bg-status-success`, `text-status-error-strong`, `bg-action-script/10`. The lint gate enforces it.
 - **Do** compose from the primitives catalog (`Button`, `Badge size="tag"`, `StatusBadge`, `DataGrid`, `DetailPageBody`, `SettingsRow`, `EmptyState`) before writing a raw `<div>` layout.
 - **Do** keep one focus language: 2px `ring-ring/60` amber ring on every focusable control.
-- **Do** use skeletons (`Skeleton`, `PageSkeleton`) for loading and `EmptyState` (icon + title + description + action) for empty lists — empty states teach the interface.
+- **Do** use skeletons (`Skeleton`, `PageSkeleton`) for loading and `EmptyState` for empty lists — empty states teach the interface. First-run page empties get `fullPage` (vertically centered in the content area) and `entity="<noun>"`, which renders the "Ask the swarm" CTA seeding a new session with "Hey, help me set up my first <noun>".
 - **Do** hold WCAG 2.1 AA in both themes: ≥4.5:1 body contrast, keyboard access, `prefers-reduced-motion` alternatives (the shimmer must degrade to a static indicator).
 
 ### Don't:

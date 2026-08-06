@@ -113,8 +113,9 @@ export default function ScriptDetailPage() {
 
         <PageHeader
           title={
+            /* Name lives in the breadcrumb — the header row keeps only what
+               the breadcrumb can't show: scope/version/scratch badges. */
             <div className="flex min-w-0 flex-wrap items-center gap-3">
-              <h1 className="truncate text-xl font-semibold">{script.name}</h1>
               <Badge variant="outline" size="tag">
                 {script.scope}
               </Badge>

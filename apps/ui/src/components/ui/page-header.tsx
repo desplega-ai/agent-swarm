@@ -2,14 +2,17 @@ import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-// PageHeader — canonical title + (optional) description + (optional) action
-// row that opens every route page in ui. The pre-Phase-9 hand-rolled form
-// was `<div className="flex items-center justify-between"><h1>{title}</h1>
-// {action}</div>`, sometimes wrapped in `space-y-2` with a description below.
+// PageHeader — description + action row that opens every route page in ui.
 //
-// Detail pages with bespoke editable titles (agents/[id]'s pencil-edit name,
-// workflow-runs/[id]'s multi-line title) pass JSX into `title` directly —
-// the primitive doesn't constrain its content.
+// Plain-string titles are NOT rendered anymore (Taras, 2026-08-06): the
+// breadcrumb in the top bar already names the page, so the in-page h1 was
+// pure duplication. Call sites keep passing `title` — it documents the page
+// and stays the fallback for future layout changes — but only the
+// description/action row reaches the DOM (the icon rode along with the
+// title, so it's dropped too).
+//
+// ReactNode titles still render: they carry functional content the
+// breadcrumb can't (status badges, back buttons, editable names).
 
 export interface PageHeaderProps {
   title: ReactNode;
@@ -20,16 +23,31 @@ export interface PageHeaderProps {
 }
 
 export function PageHeader({ title, description, action, icon: Icon, className }: PageHeaderProps) {
-  const titleNode = (
-    <div className="flex items-center gap-2 min-w-0">
-      {Icon ? <Icon className="h-5 w-5 text-muted-foreground shrink-0" /> : null}
-      {typeof title === "string" ? (
-        <h1 className="text-xl font-semibold truncate">{title}</h1>
-      ) : (
-        title
-      )}
-    </div>
-  );
+  const titleNode =
+    typeof title === "string" ? null : (
+      <div className="flex items-center gap-2 min-w-0">
+        {Icon ? <Icon className="h-5 w-5 text-muted-foreground shrink-0" /> : null}
+        {title}
+      </div>
+    );
+
+  if (!titleNode) {
+    // String title (hidden) — render whatever remains, or nothing at all.
+    if (!description && !action) return null;
+    if (!action) {
+      return <p className={cn("text-sm text-muted-foreground", className)}>{description}</p>;
+    }
+    return (
+      <div className={cn("flex items-center justify-between gap-3", className)}>
+        {description ? (
+          <p className="text-sm text-muted-foreground min-w-0">{description}</p>
+        ) : (
+          <div />
+        )}
+        <div className="flex items-center gap-2 shrink-0">{action}</div>
+      </div>
+    );
+  }
 
   if (!description && !action) {
     return <div className={cn("flex items-center", className)}>{titleNode}</div>;

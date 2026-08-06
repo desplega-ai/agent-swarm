@@ -95,3 +95,35 @@ Computed-style probes at capture time: `[data-slot="button"]` shows
 per-property linger/press split live), and the `sm` button class list carries
 `active:scale-[0.97]` with the base 0.98 correctly deduped by twMerge.
 Gates: `tsc -b`, `bun run lint`, `check:tokens` all green.
+
+## Round 7 — chrome de-duplication + empty-state CTAs (2026-08-06, evening)
+
+Taras's closing batch: (1) top bar bottom border removed; (2) in-page titles
+removed everywhere — the breadcrumb owns page identity (plain-string
+`PageHeader` titles no longer render; redundant name-h1s stripped from the
+JSX-title detail pages whose breadcrumb resolves the entity name; unknown
+segments auto-humanize kebab→Title Case); (3) the home greeting moved into the
+breadcrumb slot; (4) first-run empty states vertically centered with an
+"Ask the swarm" CTA that opens `/sessions?seed=Hey, help me set up my first
+<entity>` (rides the existing NewSessionView seed contract); (5) sidebar rail
+now shows `cursor: pointer` (menu buttons keep the default arrow).
+
+| File | What it shows |
+|---|---|
+| [`30-home-greeting-breadcrumb.png`](./2026-08-06-app-theming/30-home-greeting-breadcrumb.png) | Home: "Welcome back, Taras QA" in the breadcrumb slot, borderless top bar, centered timeline empty state with primary "Ask the swarm" CTA. |
+| [`31-workflows-empty-centered-cta.png`](./2026-08-06-app-theming/31-workflows-empty-centered-cta.png) | Workflows first-run empty converted from the hand-rolled block to `EmptyState fullPage entity="workflow"` — vertically centered, CTA present, no page title. |
+| [`32-tasks-no-title.png`](./2026-08-06-app-theming/32-tasks-no-title.png) | Tasks: title gone, "Create Task" action right-aligned on its own row, grid unchanged. |
+| [`33-memory-description-only.png`](./2026-08-06-app-theming/33-memory-description-only.png) | Memory: bespoke JSX title collapsed to a description-only header under the breadcrumb. |
+| [`34-schedules-empty-cta.png`](./2026-08-06-app-theming/34-schedules-empty-cta.png) | Schedules empty: header action (Create Schedule) + centered EmptyState CTA coexist. |
+| [`35-home-light-borderless.png`](./2026-08-06-app-theming/35-home-light-borderless.png) | Light mode: borderless top bar + greeting hold up. |
+
+Live probes: `[data-slot="sidebar-rail"]` computes `cursor: pointer`,
+`[data-sidebar="menu-button"]` stays `cursor: default`; clicking the CTA lands
+on `/sessions` with the composer pre-seeded ("Hey, help me set up my first
+workflow") and the `?seed` param stripped; `/usage/metrics` breadcrumb reads
+Home › Usage › Metrics via the new auto-humanizer (no routeLabels entry).
+Deliberately KEPT their JSX titles (breadcrumb can't resolve a name for them):
+workflow-runs/[id] ("Run of <workflow>" link), templates/[id] (+ history),
+connections/oauth-apps/[id]. Grid-overlay empties (`emptyMessage` on DataGrid
+filter-misses) left as-is — they're filter feedback, not first-run states.
+Gates: `bun run lint`, `bunx tsc -b` green.

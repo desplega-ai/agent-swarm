@@ -270,6 +270,8 @@ export default function ApprovalRequestsPage() {
           icon={ClipboardCheck}
           title="No approval requests yet"
           description="Approval requests will appear here when a workflow, agent, or user asks for a decision."
+          entity="approval flow"
+          fullPage
         />
       ) : (
         <DataGrid

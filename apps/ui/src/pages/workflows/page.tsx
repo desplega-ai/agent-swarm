@@ -7,6 +7,7 @@ import { useFavoriteToggle } from "@/api/hooks/use-favorites";
 import { useAllWorkflowRuns, useUpdateWorkflow, useWorkflows } from "@/api/hooks/use-workflows";
 import type { WorkflowRun, WorkflowRunStatus, WorkflowSummary } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
+import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
 import { ListFilterBar } from "@/components/shared/list-filter-bar";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -245,12 +246,13 @@ export default function WorkflowsPage() {
     return (
       <div className="flex flex-col flex-1 min-h-0 gap-4">
         <PageHeader title="Workflows" />
-        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-4">
-          <div className="flex flex-col items-center">
-            <WorkflowIcon className="h-8 w-8 mb-2" />
-            <p className="text-sm">No workflows configured</p>
-          </div>
-        </div>
+        <EmptyState
+          icon={WorkflowIcon}
+          title="No workflows configured"
+          description="Workflows chain agent tasks, scripts, and triggers into repeatable runs."
+          entity="workflow"
+          fullPage
+        />
       </div>
     );
   }
