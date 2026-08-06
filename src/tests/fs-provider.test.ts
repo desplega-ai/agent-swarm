@@ -11,6 +11,11 @@ import {
 } from "../fs";
 
 const originalEnv = { ...process.env };
+const partialAgentFsScopeError = {
+  code: "Provider",
+  status: 400,
+  message: "agent-fs file scope must include both orgId and driveId, or neither",
+};
 
 afterEach(() => {
   process.env = { ...originalEnv };
@@ -211,49 +216,151 @@ describe("AgentFsProvider", () => {
     );
   });
 
-  test("download/delete/signed-url resolve the row's stored key + org/drive override", async () => {
-    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+  test("download rejects partial scopes and resolves default and paired scopes", async () => {
+    const calls: string[] = [];
+    const provider = new AgentFsProvider({
+      apiUrl: "http://agent-fs.test",
+      apiKey: "af_test",
+      orgId: "default-org",
+      driveId: "default-drive",
+      fetchImpl: (async (url) => {
+        calls.push(String(url));
+        return new Response("bytes");
+      }) as typeof fetch,
+    });
+
+    for (const partialScope of [
+      { taskId: "task-1", name: "notes.md", orgId: "row-org" },
+      { taskId: "task-1", name: "notes.md", driveId: "row-drive" },
+    ]) {
+      await expect(provider.download(partialScope)).rejects.toMatchObject(partialAgentFsScopeError);
+    }
+    expect(calls).toHaveLength(0);
+
+    await provider.download({ taskId: "task-1", name: "default.md" });
+    await provider.download({
+      taskId: "task-1",
+      name: "notes.md",
+      key: "misc/d454d1a5/notes.md",
+      orgId: "row-org",
+      driveId: "row-drive",
+    });
+
+    expect(calls).toEqual([
+      "http://agent-fs.test/orgs/default-org/drives/default-drive/files/tasks/task-1/default.md/raw",
+      "http://agent-fs.test/orgs/row-org/drives/row-drive/files/misc/d454d1a5/notes.md/raw",
+    ]);
+  });
+
+  test("signed URL rejects partial scopes and resolves default and paired scopes", async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
     const provider = new AgentFsProvider({
       apiUrl: "http://agent-fs.test",
       apiKey: "af_test",
       orgId: "default-org",
       driveId: "default-drive",
       fetchImpl: (async (url, init) => {
-        const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-        calls.push({ url: String(url), method: init?.method ?? "GET", body });
+        calls.push({
+          url: String(url),
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
         return Response.json({ url: "https://signed.example/x" });
       }) as typeof fetch,
     });
 
-    // An attachment written via the CLI at an arbitrary path, in the row's own org/drive.
-    const scope = {
+    for (const partialScope of [
+      { taskId: "task-1", name: "notes.md", orgId: "row-org" },
+      { taskId: "task-1", name: "notes.md", driveId: "row-drive" },
+    ]) {
+      await expect(provider.url(partialScope)).rejects.toMatchObject(partialAgentFsScopeError);
+    }
+    expect(calls).toHaveLength(0);
+
+    await provider.url({ taskId: "task-1", name: "default.md" }, { expiresIn: 600 });
+    await provider.url(
+      {
+        taskId: "task-1",
+        name: "notes.md",
+        key: "misc/d454d1a5/notes.md",
+        orgId: "row-org",
+        driveId: "row-drive",
+      },
+      { expiresIn: 600 },
+    );
+
+    expect(calls).toEqual([
+      {
+        url: "http://agent-fs.test/orgs/default-org/ops",
+        body: {
+          driveId: "default-drive",
+          op: "signed-url",
+          path: "tasks/task-1/default.md",
+          expiresIn: 600,
+        },
+      },
+      {
+        url: "http://agent-fs.test/orgs/row-org/ops",
+        body: {
+          driveId: "row-drive",
+          op: "signed-url",
+          path: "misc/d454d1a5/notes.md",
+          expiresIn: 600,
+        },
+      },
+    ]);
+  });
+
+  test("delete rejects partial scopes and resolves default and paired scopes", async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const provider = new AgentFsProvider({
+      apiUrl: "http://agent-fs.test",
+      apiKey: "af_test",
+      orgId: "default-org",
+      driveId: "default-drive",
+      fetchImpl: (async (url, init) => {
+        calls.push({
+          url: String(url),
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
+        return Response.json({});
+      }) as typeof fetch,
+    });
+
+    for (const partialScope of [
+      { taskId: "task-1", name: "notes.md", orgId: "row-org" },
+      { taskId: "task-1", name: "notes.md", driveId: "row-drive" },
+    ]) {
+      await expect(provider.delete(partialScope)).rejects.toMatchObject(partialAgentFsScopeError);
+    }
+    expect(calls).toHaveLength(0);
+
+    await provider.delete({ taskId: "task-1", name: "default.md" });
+    await provider.delete({
       taskId: "task-1",
       name: "notes.md",
       key: "misc/d454d1a5/notes.md",
       orgId: "row-org",
       driveId: "row-drive",
-    };
-
-    await provider.download(scope);
-    await provider.delete(scope);
-    await provider.url(scope, { expiresIn: 600 });
-
-    // download hits the raw endpoint at the STORED key under the ROW's org/drive.
-    expect(calls[0]?.url).toBe(
-      "http://agent-fs.test/orgs/row-org/drives/row-drive/files/misc/d454d1a5/notes.md/raw",
-    );
-    // delete + signed-url go through the row's org's ops endpoint with its drive + key.
-    expect(calls[1]?.url).toBe("http://agent-fs.test/orgs/row-org/ops");
-    expect(calls[1]?.body).toMatchObject({
-      driveId: "row-drive",
-      op: "rm",
-      path: "misc/d454d1a5/notes.md",
     });
-    expect(calls[2]?.body).toMatchObject({
-      driveId: "row-drive",
-      op: "signed-url",
-      path: "misc/d454d1a5/notes.md",
-    });
+
+    expect(calls).toEqual([
+      {
+        url: "http://agent-fs.test/orgs/default-org/ops",
+        body: {
+          driveId: "default-drive",
+          op: "rm",
+          path: "tasks/task-1/default.md",
+        },
+      },
+      {
+        url: "http://agent-fs.test/orgs/row-org/ops",
+        body: {
+          driveId: "row-drive",
+          op: "rm",
+          path: "misc/d454d1a5/notes.md",
+        },
+      },
+    ]);
   });
 
   test("stored key strips leading slashes and falls back to the provider's org/drive", async () => {

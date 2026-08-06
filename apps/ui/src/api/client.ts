@@ -673,12 +673,14 @@ class ApiClient {
     startDate?: string;
     endDate?: string;
     agentId?: string;
-    groupBy?: "day" | "agent" | "both";
+    userId?: string;
+    groupBy?: "day" | "agent" | "both" | "user";
   }): Promise<UsageSummaryResponse> {
     const params = new URLSearchParams();
     if (filters?.startDate) params.set("startDate", filters.startDate);
     if (filters?.endDate) params.set("endDate", filters.endDate);
     if (filters?.agentId) params.set("agentId", filters.agentId);
+    if (filters?.userId) params.set("userId", filters.userId);
     if (filters?.groupBy) params.set("groupBy", filters.groupBy);
     const queryString = params.toString();
     const url = `${this.getBaseUrl()}/api/session-costs/summary${queryString ? `?${queryString}` : ""}`;

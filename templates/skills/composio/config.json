@@ -4,7 +4,7 @@
   "displayName": "Composio",
   "slug": "composio",
   "title": "Composio",
-  "description": "Use Composio from Agent Swarm via the `agent-swarm x composio` CLI route or the `swarm_x` MCP tool. Trigger when a task needs connected third-party app tools such as Gmail, GitHub, Slack, Notion, or HubSpot through Composio Tool Router sessions, Connect Links, or connected accounts. This is the HUB skill — for Google apps see the sibling skills `composio-gmail`, `composio-google-calendar`, `composio-google-docs`.",
+  "description": "Use Composio from Agent Swarm through the `agent-swarm x composio` CLI route, the `swarm_x` MCP tool, or a registered `ctx.api.composio` script connection. Trigger when a task needs connected third-party app tools such as Gmail, Google Calendar, Google Docs, Google Drive, GitHub, Slack, Notion, or HubSpot through Tool Router sessions, Connect Links, or connected accounts. This is the HUB skill — for Google apps see the sibling skills `composio-gmail`, `composio-google-calendar`, `composio-google-docs`.",
   "version": "1.0.0",
   "category": "skills",
   "placeholders": ["COMPOSIO_API_KEY"],

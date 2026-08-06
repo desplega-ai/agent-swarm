@@ -1,4 +1,9 @@
-import { getLatestActiveTaskInThread, getLeadAgent, getMostRecentTaskInThread } from "../be/db";
+import {
+  getAgentById,
+  getLatestActiveTaskInThread,
+  getLeadAgent,
+  getMostRecentTaskInThread,
+} from "../be/db";
 import { createAdditiveBuffer } from "../tasks/additive-buffer";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
@@ -7,6 +12,7 @@ import { buildBufferFlushBlocks } from "./blocks";
 import { rewriteSlackMentions } from "./enrich";
 import { extractSlackMessageText } from "./message-text";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
+import { getAgentDisplayName, getAgentEmoji } from "./responses";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { registerTreeMessage } from "./watcher";
 
@@ -158,6 +164,7 @@ async function slackFlush(
     channelId,
     threadTs,
     message: combinedText,
+    messageTimestamps: items.map((item) => item.ts),
   });
   if (steering) {
     console.log(
@@ -165,6 +172,7 @@ async function slackFlush(
     );
 
     const app = getSlackApp();
+    const agent = steering.task.agentId ? getAgentById(steering.task.agentId) : undefined;
     if (app) {
       if (!isSlackRenderV2Enabled()) {
         try {
@@ -174,6 +182,9 @@ async function slackFlush(
             text: formatSlackSteeringAck(steering.result),
             unfurl_links: false,
             unfurl_media: false,
+            ...(agent
+              ? { username: getAgentDisplayName(agent), icon_emoji: getAgentEmoji(agent) }
+              : {}),
           });
         } catch (error) {
           console.error("[Slack] Failed to post steering feedback:", error);
@@ -237,6 +248,7 @@ async function slackFlush(
         text: fallbackText,
         unfurl_links: false,
         unfurl_media: false,
+        ...(lead ? { username: getAgentDisplayName(lead), icon_emoji: getAgentEmoji(lead) } : {}),
         // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
         blocks: blocks as any,
       });

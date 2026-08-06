@@ -21,6 +21,7 @@ import { getBuiltinModel as getModel } from "@earendil-works/pi-ai/providers/all
 import type { TSchema } from "typebox";
 import { z } from "zod";
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../openrouter-base-url.js";
+import { scrubSecrets } from "../secret-scrubber.js";
 import { type ResolvedCredential, resolveCredential } from "./credentials.js";
 import { parseModelStr } from "./models.js";
 
@@ -84,8 +85,21 @@ const CLAUDE_CLI_TIMEOUT_MS = 30_000;
  */
 function stripJsonFences(raw: string): string {
   const trimmed = raw.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/);
+  const fenced = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/i);
   return fenced?.[1] ? fenced[1].trim() : trimmed;
+}
+
+function parseJsonText(raw: string): unknown | undefined {
+  try {
+    return JSON.parse(stripJsonFences(raw));
+  } catch {
+    return undefined;
+  }
+}
+
+function errorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err ?? "unknown error");
+  return message.replace(/\s+/g, " ");
 }
 
 /** Exported for tests only — production callers go through `completeStructured`. */
@@ -247,8 +261,9 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
       }
     }
     console.error(
-      `internal-ai: structured output failed after ${retries} retries (callerTag=${callerTag} kind=${cred.kind})`,
-      lastErr,
+      scrubSecrets(
+        `internal-ai: structured output failed after ${retries} retries (callerTag=${callerTag} kind=${cred.kind}): ${errorMessage(lastErr)}`,
+      ),
     );
     return null;
   }
@@ -278,6 +293,10 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
   }
 
   const completeFn = opts._complete ?? complete;
+  const toolChoice =
+    model.api === "anthropic-messages"
+      ? ({ type: "tool", name: opts.toolName } as const)
+      : ("required" as const);
   let userPrompt = opts.userPrompt;
   let lastErr: unknown = null;
   for (let attempt = 0; attempt < retries; attempt++) {
@@ -297,13 +316,28 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
         },
         // pi-ai's ProviderStreamOptions type only allows known providers;
         // we pass the validated apiKey through verbatim.
-        { apiKey: cred.apiKey, signal: opts.signal } as Parameters<typeof completeFn>[2],
+        { apiKey: cred.apiKey, signal: opts.signal, toolChoice } as Parameters<
+          typeof completeFn
+        >[2],
       );
 
       const toolCall = msg.content.find(
         (c): c is ToolCall => c.type === "toolCall" && c.name === opts.toolName,
       );
       if (!toolCall) {
+        const assistantText = msg.content
+          .filter((content) => content.type === "text")
+          .map((content) => content.text)
+          .join("\n");
+        if (assistantText) {
+          const parsedText = parseJsonText(assistantText);
+          if (parsedText !== undefined) {
+            const validatedText = opts.zodSchema.safeParse(parsedText);
+            if (validatedText.success) {
+              return validatedText.data;
+            }
+          }
+        }
         userPrompt = `${userPrompt}\n\nYou did not call the ${opts.toolName} tool. You MUST call it with the requested arguments.`;
         lastErr = new Error("no tool call in response");
         continue;
@@ -320,8 +354,9 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
     }
   }
   console.error(
-    `internal-ai: structured output failed after ${retries} retries (callerTag=${callerTag} kind=${cred.kind})`,
-    lastErr,
+    scrubSecrets(
+      `internal-ai: structured output failed after ${retries} retries (callerTag=${callerTag} kind=${cred.kind}): ${errorMessage(lastErr)}`,
+    ),
   );
   return null;
 }

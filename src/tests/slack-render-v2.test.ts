@@ -31,6 +31,7 @@ import {
   renderThreadTree,
   streamOutcomeCard,
 } from "../slack/render-v2";
+import { getAgentDisplayName, getAgentEmoji } from "../slack/responses";
 import { slackContextKey } from "../tasks/context-key";
 
 const TEST_DB_PATH = "./test-slack-render-v2.sqlite";
@@ -198,7 +199,15 @@ const mockApiCall = mock(async (method: string, payload: Record<string, unknown>
 });
 
 mock.module("../slack/app", () => ({
-  getSlackApp: () => ({ client: { apiCall: mockApiCall } }),
+  getSlackApp: () => ({
+    client: {
+      apiCall: mockApiCall,
+      reactions: {
+        add: (payload: Record<string, unknown>) => mockApiCall("reactions.add", payload),
+        remove: (payload: Record<string, unknown>) => mockApiCall("reactions.remove", payload),
+      },
+    },
+  }),
 }));
 
 async function removeDbFiles() {
@@ -240,6 +249,33 @@ afterAll(async () => {
 });
 
 describe("Slack renderer v2", () => {
+  test("settles the accepted-message reaction after streaming a terminal outcome", async () => {
+    const lead = createAgent({ name: "Reaction Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REACTION");
+    const triggerTs = `${slackAddressSequence}.2`;
+    const ask = createTaskExtended("terminal reaction ask", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackTriggerMessageTs: triggerTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    completeTask(ask.id, "Done");
+    calls.length = 0;
+
+    await processSlackRenderV2();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(calls.filter((call) => call.method === "reactions.remove")).toHaveLength(4);
+    expect(calls).toContainEqual({
+      method: "reactions.add",
+      payload: { channel: channelId, name: "white_check_mark", timestamp: triggerTs },
+    });
+  });
+
   test("defaults off and accepts an explicit opt-in", () => {
     const previous = process.env.SLACK_RENDER_V2;
     delete process.env.SLACK_RENDER_V2;
@@ -466,6 +502,8 @@ describe("Slack renderer v2", () => {
     expect(calls.find((call) => call.method === "chat.postMessage")?.payload).toMatchObject({
       unfurl_links: false,
       unfurl_media: false,
+      username: getAgentDisplayName(lead),
+      icon_emoji: getAgentEmoji(lead),
     });
 
     calls.length = 0;
@@ -916,10 +954,12 @@ describe("Slack renderer v2", () => {
     expect(String(started.payload.markdown_text).startsWith("✅\n\nImplemented")).toBe(true);
     expect(Object.keys(started.payload).sort()).toEqual([
       "channel",
+      "icon_emoji",
       "markdown_text",
       "recipient_team_id",
       "recipient_user_id",
       "thread_ts",
+      "username",
     ]);
     expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
     const stopped = calls.find(
@@ -1328,6 +1368,10 @@ describe("Slack renderer v2", () => {
 
     const started = calls.find((call) => call.method === "chat.startStream");
     expect(started?.payload.markdown_text).toBe(`✅ ${lead.name} completed`);
+    expect(started?.payload).toMatchObject({
+      username: getAgentDisplayName(lead),
+      icon_emoji: getAgentEmoji(lead),
+    });
     expect(started?.payload.markdown_text).not.toContain("PRIVATE OUTPUT");
     const stopped = calls.find((call) => call.method === "chat.stopStream")!;
     const completedAsk = getTaskById(ask.id)!;

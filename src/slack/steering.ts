@@ -1,4 +1,4 @@
-import { getLatestActiveTaskInThread, getLatestLeadTaskInThread } from "../be/db";
+import { createLogEntry, getLatestActiveTaskInThread, getLatestLeadTaskInThread } from "../be/db";
 import { requestSteering } from "../be/steering";
 import type { AgentTask, SteerResult } from "../types";
 import { isSteeringEnabled } from "../utils/steering-enabled";
@@ -7,6 +7,7 @@ export interface SlackThreadSteeringRequest {
   channelId: string;
   threadTs: string;
   message: string;
+  messageTimestamps?: string[];
   requestedByUserId?: string;
 }
 
@@ -49,6 +50,14 @@ export function requestSlackThreadSteering(
     createdByKind: "user",
     createdByUserId: args.requestedByUserId,
   });
+  for (const messageTs of args.messageTimestamps ?? []) {
+    createLogEntry({
+      eventType: "task_steering",
+      taskId: task.id,
+      newValue: "slack_reaction",
+      metadata: { slackChannelId: args.channelId, slackMessageTs: messageTs },
+    });
+  }
 
   return { task, result };
 }
@@ -56,12 +65,12 @@ export function requestSlackThreadSteering(
 /** Build an honest thread acknowledgement for the core service outcome. */
 export function formatSlackSteeringAck(result: SteerResult): string {
   if (result.outcome === "promoted") {
-    return ":eyes: _Your message was queued as a follow-up task._";
+    return ":speech_balloon: _Your message was queued as a follow-up task._";
   }
   if (result.degradedFrom) {
-    return ":eyes: _Interrupt steering is unavailable for this task, so your message was queued._";
+    return ":speech_balloon: _Interrupt steering is unavailable for this task, so your message was queued._";
   }
   return result.outcome === "steered"
-    ? ":eyes: _Your steering message was sent to the active task._"
-    : ":eyes: _Your steering message was queued for the active task._";
+    ? ":speech_balloon: _Your steering message was sent to the active task._"
+    : ":speech_balloon: _Your steering message was queued for the active task._";
 }

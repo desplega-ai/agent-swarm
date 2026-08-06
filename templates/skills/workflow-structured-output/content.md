@@ -8,41 +8,63 @@ If you see this failure reason on a task, the fix is always the same:
 
 | failureReason contains | What it means | Fix |
 |---|---|---|
-| `Structured output required by outputSchema but not provided via store-progress` | You called `store-progress` with a plain-text `output` (or no `output`) when the task required a JSON object matching `outputSchema` | Re-call `store-progress` with `status: "completed"` and `output` = a **stringified JSON** matching the schema exactly |
-| `output does not match schema` / `invalid JSON` | You passed JSON but it's missing required fields or has wrong types | Re-read the schema, include every `required` field with the exact key names, re-call `store-progress` |
+| `Task has an outputSchema but no output was provided` | You called `store-progress` without an `output` when the task required a JSON object matching `outputSchema` | Re-call `store-progress` with `status: "completed"` and `output` = a **stringified JSON** matching the schema exactly |
+| `Task output must be valid JSON` / `Task output does not match the outputSchema` | You passed invalid JSON, omitted required fields, or used the wrong types | Re-read the schema, include every `required` field with the exact key names, re-call `store-progress` |
 
 **You can re-call `store-progress` even after a rejection.** Your prior progress updates do not count as the final output. Fix the JSON and try again.
 
 ## Pre-flight checklist (run through before calling store-progress)
 
-1. **Does the task have an `outputSchema`, "Output Format" JSON block, or `deterministic|litmus|validation|context` tag?** If yes → structured output required. Continue this checklist. If no → plain text `output` is fine.
-2. **Can I quote the exact schema from the task description?** Scroll back to the prompt. Find the schema. Copy it mentally.
-3. **Have I built a JSON object with every `required` field using the exact key names?** No extras, no renames, no guesses.
-4. **Is my `output` a string (stringified JSON), not an object?** `store-progress.output` must be a string like `'{"skip":true,...}'`.
-5. **Only after 1-4 pass:** call `store-progress(taskId, status="completed", output=<the stringified JSON>)`.
+1. **Do the task details contain an actual `outputSchema`?** If yes, runtime
+   enforcement is active: continue with that exact schema.
+2. **If there is no `outputSchema`, does the user provide an explicit JSON Output
+   Format or interface?** Honor it as the requested output contract even though
+   the runner is not enforcing an `outputSchema`.
+3. **Are workflow origin or tags such as `deterministic`, `litmus`, `validation`,
+   or `context` the only signals?** They are heuristics only. Re-read the task
+   details for an actual schema or explicit format. If neither exists, do not
+   invent one; plain-text output is allowed.
+4. **Can I quote the exact required shape from the task details?** Use its exact
+   keys and types, with every required field and no guessed renames.
+5. **Is my `output` a string (stringified JSON), not an object?** For a structured
+   contract, `store-progress.output` should be a JSON string.
+6. **Only after the applicable contract is clear:** call `store-progress` with
+   `status: "completed"` and the stringified JSON, or use plain text when no
+   structured contract exists.
 
-If you cannot answer yes to #1-#4, you are about to silently fail the task.
+If the required shape is unclear, re-read the task details. Never synthesize a
+schema from tags or workflow origin.
 
 ## Why this exists
 
-Workflow-driven tasks (release notes, litmus gates, content pipeline, context builders) ship with an `outputSchema`. The runner validates `store-progress.output` against that schema and rejects completions that don't parse as matching JSON — with the failure reason "Structured output required by outputSchema but not provided via store-progress".
-
-**This has bitten Tester (2026-04-01) and Content Strategist (2026-04-01, 2026-04-20).** Don't be next.
+When a task has an actual `outputSchema`, the runner validates
+`store-progress.output` against it and rejects missing output, invalid JSON, or
+schema mismatches with one of the current messages listed above. A JSON Output
+Format or interface without `task.outputSchema` remains a user instruction, but
+it is not the same runtime enforcement mechanism. Missing the distinction can
+turn completed work into a rejected terminal update, so check the task contract
+before reporting completion.
 
 ## How to spot a structured-output task
 
-Any of these signals means you need JSON output:
+Treat these signals differently:
 
-- The task description contains an `outputSchema` block or a TypeScript/JSON interface describing the expected shape.
-- The task has an "Output Format" or "Return a JSON object" section with keys like `skip`, `reason`, `contextPath`, `verdict`, etc.
-- Tags include `deterministic`, `litmus`, `validation`, `releases`, `context`.
-- The task comes from a workflow (source = `workflow`).
+- An actual `task.outputSchema` means JSON is runtime-enforced.
+- An explicit "Output Format", "Return a JSON object", or TypeScript/JSON
+  interface is a user contract to return that shape, even without runtime
+  enforcement.
+- Tags such as `deterministic`, `litmus`, `validation`, `releases`, or `context`,
+  and `source = workflow`, only tell you to inspect the task details carefully.
+  They do not prove a schema exists.
 
-When in doubt, assume structured output is required.
+When in doubt, re-read the task details and its `outputSchema`. Do not invent a
+schema or required fields.
 
 ## How to complete correctly
 
-1. **Build the JSON object** that matches the schema. Include every `required` field. Use the exact key names from the schema.
+1. **Build the JSON object** that matches the actual `outputSchema` or explicit
+   user-provided JSON format. Include every required field and use the exact key
+   names from that contract.
 2. **Stringify it** — `store-progress.output` must be a string, not an object. Use `JSON.stringify(obj)` in your head.
 3. **Call store-progress** with `status: "completed"` and that JSON string as `output`.
 
@@ -64,7 +86,7 @@ store-progress(
 store-progress(
   taskId,
   status="completed",
-  output='{"skip":false,"contextPath":"docs-site-release-runs/2026-04-20/context.json","commitCount":42,"repos":["agent-swarm"],"repoPatternsSource":"cache","dateRange":"2026-04-13 to 2026-04-20"}'
+  output='{"skip":false,"contextPath":"release-runs/2026-04-20/context.json","commitCount":42,"repos":["example-repo"],"repoPatternsSource":"cache","dateRange":"2026-04-13 to 2026-04-20"}'
 )
 ```
 
@@ -78,9 +100,9 @@ store-progress(
 )
 ```
 
-## Anti-patterns that WILL fail the task
+## Anti-patterns for an `outputSchema` task
 
-- `output: "Done. Context written to agent-fs at docs-site-release-runs/2026-04-20/context.json"`
+- `output: "Done. Context written to agent-fs at release-runs/2026-04-20/context.json"`
 - `output: "Published release notes for week of 2026-04-20"`
 - `output: "Verdict: publish"`
 - Calling `store-progress` with `status: "completed"` and no `output` at all
@@ -98,4 +120,3 @@ Read your task description once more. Find the schema. Build the JSON. Then comp
 ## See also
 
 - **`workflow-iterate`** — the author-side counterpart of this skill. Read it if you're editing the workflow that produced this task, or want to understand why this particular schema is shaped the way it is (which gates downstream depend on it, etc.).
-

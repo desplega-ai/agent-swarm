@@ -1,15 +1,16 @@
 ---
 name: composio
-description: Use Composio from Agent Swarm via the `agent-swarm x composio` CLI route or the `swarm_x` MCP tool. Trigger when a task needs connected third-party app tools such as Gmail, GitHub, Slack, Notion, or HubSpot through Composio Tool Router sessions, Connect Links, or connected accounts. This is the HUB skill — for Google apps see the sibling skills `composio-gmail`, `composio-google-calendar`, `composio-google-docs`.
+description: Use Composio from Agent Swarm through the `agent-swarm x composio` CLI route, the `swarm_x` MCP tool, or a registered `ctx.api.composio` script connection. Trigger when a task needs connected third-party app tools such as Gmail, Google Calendar, Google Docs, Google Drive, GitHub, Slack, Notion, or HubSpot through Tool Router sessions, Connect Links, or connected accounts. This is the HUB skill — for Google apps see the sibling skills `composio-gmail`, `composio-google-calendar`, `composio-google-docs`.
 ---
 
 # Composio
 
-Hub skill for Composio-managed third-party app access from the swarm.
-The supported surface is the Agent Swarm `x` route:
+Hub skill for Composio-managed third-party app access from the swarm. Three call
+surfaces are available when the deployment has enabled them:
 
 - CLI: `agent-swarm x composio <METHOD> <path> [--body '<json>']`
 - MCP: `swarm_x` with `target: "composio"`
+- Script connection: `ctx.api.composio.<operationId>(args)` inside a swarm script
 
 `COMPOSIO_API_KEY` is deployment-scoped and injected by the CLI/API process — you
 never pass or see it. All paths are **relative** Composio REST paths.
@@ -21,8 +22,9 @@ never pass or see it. All paths are **relative** Composio REST paths.
 
 ## Core Model
 
-- **`user_id`** is the app user whose connected accounts are used. We use the
-  person's **email** as `user_id` (e.g. `t@desplega.ai`). There is **no explicit
+- **`user_id`** is the app user whose connected accounts are used. A deployment
+  commonly uses the person's **email** as `user_id` (for example,
+  `<connected-account-email>`). Resolve it with the procedure below. There is **no explicit
   "create user" call** — a user is created implicitly the first time you reference
   its `user_id` (e.g. when you create a Connect Link). Don't look for a
   `POST /users` endpoint; it doesn't exist in this flow.
@@ -34,6 +36,27 @@ never pass or see it. All paths are **relative** Composio REST paths.
 - **Tool Router session** = a task/conversation runtime context that auto-resolves
   the right connected account for a toolkit set. Reuse its `session_id`; create a
   new one if the user, toolkit set, auth config, or pinned account changes.
+
+## Resolve the user and connected account
+
+Do this before substituting any `user_id` or `connected_account_id` placeholder:
+
+1. Read the current task details and take its `requestedByUserId`.
+2. Call `resolve-user` with `userId: "<requestedByUserId>"`. Inspect the returned
+   `externalIds` for `kind: "composio"`; that entry's `externalId` is the
+   Composio `user_id`.
+3. List connected accounts filtered by that resolved value:
+   `GET /connected_accounts?user_id=<resolved-composio-user-id>`. Select the
+   requested toolkit's `ACTIVE` row and use its `id` as
+   `connected_account_id`.
+4. If the task has no requester, the requester has no Composio identity, or the
+   filtered result is ambiguous, run `GET /connected_accounts` without a filter
+   and compare the returned toolkit and user identity fields. If more than one
+   account is still plausible, ask which identity/account to use. Never guess
+   from another task's example.
+
+After selecting an account, prove it with a harmless real read; `ACTIVE` status
+alone does not prove that its token works.
 
 ## Two ways to call a tool — and when to use each
 
@@ -48,8 +71,35 @@ never pass or see it. All paths are **relative** Composio REST paths.
 
 ```bash
 agent-swarm x composio POST /tools/execute/GMAIL_FETCH_EMAILS \
-  --body '{"user_id":"t@desplega.ai","connected_account_id":"ca_xlWpkPocZSGr","arguments":{"max_results":3,"include_payload":false,"verbose":false}}'
+  --body '{"user_id":"<connected-account-email>","connected_account_id":"<active-connected-account-id>","arguments":{"max_results":3,"include_payload":false,"verbose":false}}'
 ```
+
+Resolve both placeholders through **Resolve the user and connected account**
+above.
+
+## Script connection surface
+
+`ctx.api.composio` exists only when an enabled script connection with slug
+`composio` is registered for the calling agent, repository, or globally. Inspect
+`Object.keys(ctx.api ?? {})` before assuming it is present. Use the script
+connection listing's generated types or `script-query-types` to discover current
+operation IDs and parameter shapes.
+
+```ts
+import type { ScriptContext } from "swarm-sdk";
+
+export default async function (args: { userId: string }, ctx: ScriptContext) {
+  if (!ctx.api?.composio) throw new Error("The composio script connection is not available");
+  return ctx.api.composio.getV31ConnectedAccounts({
+    query: { user_ids: [args.userId] },
+  });
+}
+```
+
+Generated OpenAPI operations accept only the applicable top-level containers:
+`path`, `query`, `header`, and `body`. Put each argument under the container
+declared by the generated type. Unknown top-level keys now fail loudly and often
+include a nesting hint; fix the call instead of retrying it unchanged.
 
 ## Recipe A — Register a user + send Connect Links (one per toolkit)
 
@@ -62,7 +112,7 @@ agent-swarm x composio POST /tools/execute/GMAIL_FETCH_EMAILS \
    implicitly here):
    ```bash
    agent-swarm x composio POST /connected_accounts/link \
-     --body '{"auth_config_id":"ac_isRh2iU0Z0lM","user_id":"t@desplega.ai"}'
+     --body '{"auth_config_id":"<auth-config-id>","user_id":"<connected-account-email>"}'
    # → returns { redirect_url / connect_url: "https://connect.composio.dev/link/lk_…" }
    ```
    - **Use `/connected_accounts/link`, NOT `POST /connected_accounts`.** The older
@@ -77,11 +127,15 @@ agent-swarm x composio POST /tools/execute/GMAIL_FETCH_EMAILS \
 ## Recipe B — Verify connections / check status
 
 ```bash
-agent-swarm x composio GET "/connected_accounts?user_id=t@desplega.ai" \
+agent-swarm x composio GET "/connected_accounts?user_id=<connected-account-email>" \
   | jq -r '.items[] | "\(.toolkit.slug)\t\(.id)\t\(.status)"'
 ```
 Look for `status: ACTIVE`. Anything `INITIALIZING`/`FAILED`/`EXPIRED` is not
 usable. Pin the `ca_…` of the ACTIVE account when calling tools directly.
+
+`ACTIVE` is metadata, not proof that the token works. After connecting or
+reconnecting, run a harmless real read for that toolkit and confirm the tool
+returns `successful: true` with plausible data.
 
 ## Recipe C — Link a Composio connection to a swarm user identity
 
@@ -96,17 +150,19 @@ usable. Pin the `ca_…` of the ACTIVE account when calling tools directly.
 ```jsonc
 // manage-user action:update
 {
-  "userId": "4dacc65cdab044a6805b2aa0342331b7",
+  "userId": "<swarm-user-id>",
   "identities": [
-    { "kind": "github",   "externalId": "tarasyarema" },
-    { "kind": "slack",    "externalId": "U08NR6QD6CS" },
-    { "kind": "linear",   "externalId": "…" },
-    { "kind": "kapso",    "externalId": "…" },
-    { "kind": "composio", "externalId": "t@desplega.ai" }   // ← the new one
+    { "kind": "github",   "externalId": "<existing-github-username>" },
+    { "kind": "slack",    "externalId": "<slack-user-id>" },
+    { "kind": "linear",   "externalId": "<existing-linear-identity>" },
+    { "kind": "composio", "externalId": "<connected-account-email>" }
   ]
 }
 ```
-Confirm with `resolve-user(kind:composio, externalId:"t@desplega.ai")`.
+Resolve the swarm user and existing identities from the user record first. Resolve
+the Slack identity from the task/thread metadata or that user record, and the
+Composio identity with the procedure above. Then confirm with
+`resolve-user(kind:composio, externalId:"<connected-account-email>")`.
 
 ## Workflow (Tool Router session path)
 
@@ -124,7 +180,7 @@ Confirm with `resolve-user(kind:composio, externalId:"t@desplega.ai")`.
 ```bash
 # Create a Gmail-scoped session
 agent-swarm x composio POST /tool_router/session \
-  --body '{"user_id":"t@desplega.ai","toolkits":{"enable":["gmail"]},"workbench":{"enable":false}}'
+  --body '{"user_id":"<connected-account-email>","toolkits":{"enable":["gmail"]},"workbench":{"enable":false}}'
 
 # Search for the right tool
 agent-swarm x composio POST /tool_router/session/$SESSION_ID/search \
@@ -148,6 +204,16 @@ agent-swarm x composio GET "/tools?toolkit_slug=<slug>&limit=200" \
   | jq '.items[] | select(.slug=="<SLUG>") | {required:.input_parameters.required, props:(.input_parameters.properties|keys)}'
 ```
 
+Google Drive discovery and a metadata-first list follow the same pattern:
+
+```bash
+agent-swarm x composio GET "/tools?toolkit_slug=googledrive&limit=100" \
+  | jq -r '.items[] | "\(.slug)\t\(.name)"'
+
+agent-swarm x composio POST /tools/execute/GOOGLEDRIVE_LIST_FILES \
+  --body '{"user_id":"<connected-account-email>","connected_account_id":"<active-connected-account-id>","arguments":{}}'
+```
+
 ## Gotchas
 
 - **`ToolRouterV2_NoActiveConnection` (4302) despite an ACTIVE account.** Cause:
@@ -157,6 +223,11 @@ agent-swarm x composio GET "/tools?toolkit_slug=<slug>&limit=200" \
   `POST /tools/execute/<SLUG>` with the ACTIVE `connected_account_id` pinned
   (Recipe B → the `ca_…`). Long-term fix is deleting the stale duplicates — but
   **ask the user before deleting any connection.**
+- **A successful write response is not proof of the intended change.** Re-read
+  the affected record and compare the fields you meant to update.
+- **Connected accounts cannot be re-homed safely between `user_id` values.** With
+  explicit authorization, delete the obsolete connection and reconnect it under
+  the correct user; without that authorization, stop and request it.
 - **Calendar "from a year ago" trap** — `GOOGLECALENDAR_EVENTS_LIST` has **no
   default `timeMin`**, so it returns old events. Always pass `timeMin` (now,
   RFC3339), `singleEvents:true`, `orderBy:"startTime"`. See [[composio-google-calendar]].

@@ -39,6 +39,7 @@ function classifySlackUpdateError(error: unknown): SlackUpdateResult {
 }
 
 const isDev = process.env.ENV === "development";
+
 // Ten 2,900-char sections keep each message's fallback text below Slack's
 // 40,000-char message cap while allowing arbitrarily long output in batches.
 const MAX_INLINE_OUTPUT_BLOCKS_PER_MESSAGE = 10;
@@ -46,7 +47,7 @@ const MAX_INLINE_OUTPUT_BLOCKS_PER_MESSAGE = 10;
 /**
  * Get the display name for an agent, with (dev) prefix if in development mode.
  */
-function getAgentDisplayName(agent: Agent): string {
+export function getAgentDisplayName(agent: Agent): string {
   return isDev ? `(dev) ${agent.name}` : agent.name;
 }
 
@@ -383,7 +384,7 @@ export async function updateTreeMessage(
   }
 }
 
-async function sendWithPersona(
+export async function sendWithPersona(
   client: WebClient,
   options: {
     channel: string;
@@ -398,16 +399,14 @@ async function sendWithPersona(
     { type: "section", text: { type: "mrkdwn", text: options.text } },
   ];
 
-  // Skip persona overrides in DM channels (assistant threads use the app's own identity)
-  const isDM = options.channel.startsWith("D");
-
   const result = await client.chat.postMessage({
     channel: options.channel,
     thread_ts: options.thread_ts,
     text: options.text, // Fallback for notifications
     unfurl_links: false,
     unfurl_media: false,
-    ...(isDM ? {} : { username: options.username, icon_emoji: options.icon_emoji }),
+    username: options.username,
+    icon_emoji: options.icon_emoji,
     // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects are typed as plain JSON
     blocks: blocks as any,
   });
@@ -415,7 +414,7 @@ async function sendWithPersona(
   return result.ts;
 }
 
-function getAgentEmoji(agent: Agent): string {
+export function getAgentEmoji(agent: Agent): string {
   if (agent.isLead) return ":crown:";
 
   // Generate consistent emoji based on agent name hash

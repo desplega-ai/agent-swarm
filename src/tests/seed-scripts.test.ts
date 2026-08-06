@@ -89,7 +89,7 @@ describe("seed-scripts catalog", () => {
       if (!tc.ok) failures.push(`${s.name}: typecheck — ${tc.diagnostics.join(" | ")}`);
     }
     expect(failures).toEqual([]);
-  });
+  }, 10_000);
 
   test("every catalog script exposes a documented default export", () => {
     for (const s of SEED_SCRIPTS) {

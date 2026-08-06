@@ -2365,27 +2365,27 @@
                   },
                   "claudeMd": {
                     "type": "string",
-                    "maxLength": 65536
+                    "maxLength": 262144
                   },
                   "soulMd": {
                     "type": "string",
-                    "maxLength": 65536
+                    "maxLength": 262144
                   },
                   "identityMd": {
                     "type": "string",
-                    "maxLength": 65536
+                    "maxLength": 262144
                   },
                   "setupScript": {
                     "type": "string",
-                    "maxLength": 65536
+                    "maxLength": 262144
                   },
                   "toolsMd": {
                     "type": "string",
-                    "maxLength": 65536
+                    "maxLength": 262144
                   },
                   "heartbeatMd": {
                     "type": "string",
-                    "maxLength": 65536
+                    "maxLength": 262144
                   },
                   "avatar": {
                     "oneOf": [
@@ -14644,7 +14644,8 @@
               "enum": [
                 "day",
                 "agent",
-                "both"
+                "both",
+                "user"
               ]
             },
             "required": false,
@@ -14673,6 +14674,14 @@
             },
             "required": false,
             "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "userId",
             "in": "query"
           }
         ],

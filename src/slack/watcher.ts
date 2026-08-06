@@ -3,19 +3,20 @@ import {
   getChildTasks,
   getCompletedSlackTasks,
   getInProgressSlackTasks,
-  getSlackTasksInThread,
   getSteeringMessagesForTask,
   getTaskAttachments,
   getTaskById,
   setSlackMessageTracking,
 } from "../be/db";
-import { type AgentTask, isTerminalTaskStatus } from "../types";
-import { finalizeSlackMessageReaction } from "./ack";
+import type { AgentTask } from "../types";
+import { finalizeTerminalSlackReactions } from "./ack";
 import { getSlackApp } from "./app";
 import type { TreeNode } from "./blocks";
 import { buildTreeBlocks, formatDuration } from "./blocks";
 import { isSlackRenderV2Enabled, processSlackRenderV2 } from "./render-v2";
 import {
+  getAgentDisplayName,
+  getAgentEmoji,
   sendInlineTaskOutput,
   sendProgressUpdate,
   sendTaskResponse,
@@ -243,40 +244,6 @@ function isTreeFullyTerminal(nodes: TreeNode[]): boolean {
   return true;
 }
 
-function finalizeTerminalSlackReactions(tasks: AgentTask[]): void {
-  const app = getSlackApp();
-  if (!app) return;
-
-  const triggers = new Map<string, { channelId: string; threadTs: string; timestamp: string }>();
-  for (const task of tasks) {
-    if (!task.slackChannelId || !task.slackThreadTs || !task.slackTriggerMessageTs) continue;
-    const key = `${task.slackChannelId}\0${task.slackTriggerMessageTs}`;
-    triggers.set(key, {
-      channelId: task.slackChannelId,
-      threadTs: task.slackThreadTs,
-      timestamp: task.slackTriggerMessageTs,
-    });
-  }
-
-  for (const { channelId, threadTs, timestamp } of triggers.values()) {
-    const linkedTasks = getSlackTasksInThread(channelId, threadTs).filter(
-      (task) => task.slackTriggerMessageTs === timestamp,
-    );
-    if (
-      linkedTasks.length === 0 ||
-      linkedTasks.some((task) => !isTerminalTaskStatus(task.status))
-    ) {
-      continue;
-    }
-    const outcome = linkedTasks.every((task) => task.status === "completed")
-      ? "white_check_mark"
-      : "x";
-    void finalizeSlackMessageReaction(app.client, channelId, timestamp, outcome).catch((error) =>
-      console.error(`[Slack] Failed to finalize reaction for ${channelId}/${timestamp}:`, error),
-    );
-  }
-}
-
 /**
  * Clean up tracking for a completed tree.
  * Removes tree from treeMessages, removes all task IDs from taskToTree,
@@ -502,13 +469,14 @@ async function postInitialDMTreeMessage(task: AgentTask): Promise<string | undef
   const fallbackText = `Task in progress: ${agent.name}`;
 
   try {
-    // DM channels skip persona overrides (handled by sendWithPersona / postMessage)
     const result = await app.client.chat.postMessage({
       channel: task.slackChannelId,
       thread_ts: task.slackThreadTs,
       text: fallbackText,
       unfurl_links: false,
       unfurl_media: false,
+      username: getAgentDisplayName(agent),
+      icon_emoji: getAgentEmoji(agent),
       // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
       blocks: blocks as any,
     });

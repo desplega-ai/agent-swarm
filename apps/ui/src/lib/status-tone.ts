@@ -18,6 +18,7 @@ export function statusTextClass(status: string | null | undefined): string {
     case "idle":
       return "text-status-success";
     case "offline":
+    case "superseded":
       return "text-status-neutral";
     case "pending":
     case "offered":

@@ -232,17 +232,15 @@ export class AgentFsProvider implements FileStorageProvider {
   }
 
   private async ops(body: Record<string, unknown>, scope?: FileScope): Promise<unknown> {
-    const response = await this.fetchImpl(
-      `${this.apiUrl}/orgs/${encodeURIComponent(this.orgFor(scope))}/ops`,
-      {
-        method: "POST",
-        headers: {
-          ...this.authHeaders(),
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ driveId: this.driveFor(scope), ...body }),
+    const { orgId, driveId } = this.scopeFor(scope);
+    const response = await this.fetchImpl(`${this.apiUrl}/orgs/${encodeURIComponent(orgId)}/ops`, {
+      method: "POST",
+      headers: {
+        ...this.authHeaders(),
+        "content-type": "application/json",
       },
-    );
+      body: JSON.stringify({ driveId, ...body }),
+    });
     if (!response.ok) {
       throw await responseToFilesError(response);
     }
@@ -250,15 +248,23 @@ export class AgentFsProvider implements FileStorageProvider {
   }
 
   private rawUrl(scope: FileScope): string {
-    return `${this.apiUrl}/orgs/${encodeURIComponent(this.orgFor(scope))}/drives/${encodeURIComponent(this.driveFor(scope))}/files/${providerPath(scope)}/raw`;
+    const { orgId, driveId } = this.scopeFor(scope);
+    return `${this.apiUrl}/orgs/${encodeURIComponent(orgId)}/drives/${encodeURIComponent(driveId)}/files/${providerPath(scope)}/raw`;
   }
 
-  private orgFor(scope?: FileScope): string {
-    return scope?.orgId?.trim() || this.orgId;
-  }
+  private scopeFor(scope?: FileScope): { orgId: string; driveId: string } {
+    const orgId = scope?.orgId?.trim();
+    const driveId = scope?.driveId?.trim();
 
-  private driveFor(scope?: FileScope): string {
-    return scope?.driveId?.trim() || this.driveId;
+    if (Boolean(orgId) !== Boolean(driveId)) {
+      throw new FilesError(
+        "Provider",
+        "agent-fs file scope must include both orgId and driveId, or neither",
+        { status: 400 },
+      );
+    }
+
+    return orgId && driveId ? { orgId, driveId } : { orgId: this.orgId, driveId: this.driveId };
   }
 
   private authHeaders(): Record<string, string> {

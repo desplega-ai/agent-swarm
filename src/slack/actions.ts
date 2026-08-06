@@ -6,6 +6,7 @@ import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";
 import { resolveSlackUserId } from "./enrich";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
+import { getAgentDisplayName, getAgentEmoji } from "./responses";
 
 type ChatUpdatePayload = ChatUpdateArguments & {
   unfurl_links: false;
@@ -111,6 +112,7 @@ export function registerActionHandlers(app: App): void {
         text: `💬 Follow-up sent to *${agentName}* (${taskLink})`,
         unfurl_links: false,
         unfurl_media: false,
+        ...(lead ? { username: getAgentDisplayName(lead), icon_emoji: getAgentEmoji(lead) } : {}),
       });
     } catch (error) {
       console.error("[Slack] Failed to post follow-up confirmation:", error);
