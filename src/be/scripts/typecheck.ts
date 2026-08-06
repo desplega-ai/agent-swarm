@@ -1,5 +1,7 @@
 import ts from "typescript";
+import { getScriptAppTypes } from "@/apps/script-types";
 import { getScriptApiTypes, getScriptMcpTypes } from "@/be/script-connections";
+import type { ScriptTypeContext } from "./type-contributors";
 
 /**
  * Structured diagnostic record returned to API callers when typecheck fails.
@@ -395,8 +397,10 @@ export type ScriptMain = (args: any, ctx: ScriptContext) => unknown | Promise<un
 export function scriptSdkTypesWithGeneratedApis(
   apiTypes = getScriptApiTypes(),
   mcpTypes = getScriptMcpTypes(),
+  appTypes = getScriptAppTypes(),
 ): string {
-  return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n`;
+  if (!appTypes) return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n`;
+  return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n${appTypes}\n`;
 }
 
 const STDLIB_MODULE_TYPES = `
@@ -444,8 +448,10 @@ export const SCRIPT_STDLIB_TYPES = stdlibTypesFor(SCRIPT_SDK_TYPES);
 export function scriptStdlibTypesWithGeneratedApis(
   apiTypes = getScriptApiTypes(),
   mcpTypes = getScriptMcpTypes(),
+  appTypes = getScriptAppTypes(),
 ): string {
-  return stdlibTypesFor(`${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}`);
+  if (!appTypes) return stdlibTypesFor(`${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}`);
+  return stdlibTypesFor(`${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n${appTypes}`);
 }
 
 /**
@@ -921,7 +927,7 @@ function toStructured(diag: ts.Diagnostic): ScriptDiagnostic {
 
 export function typecheckScript(
   source: string,
-  context: { agentId?: string; repoId?: string } = {},
+  context: ScriptTypeContext = {},
 ): ScriptTypecheckResult {
   const options: ts.CompilerOptions = {
     allowImportingTsExtensions: true,
@@ -935,14 +941,17 @@ export function typecheckScript(
     types: [],
   };
 
-  const sdkTypes = scriptSdkTypesWithGeneratedApis(
-    getScriptApiTypes(context),
-    getScriptMcpTypes(context),
-  );
+  const apiTypes = getScriptApiTypes(context);
+  const mcpTypes = getScriptMcpTypes(context);
+  const appTypes = getScriptAppTypes(context);
+  const sdkTypes = scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes);
+  const stdlibTypes = appTypes
+    ? scriptStdlibTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes)
+    : SCRIPT_STDLIB_TYPES;
   const files = new Map<string, string>([
     [USER_FILE, source],
     [SDK_FILE, sdkTypes],
-    [STDLIB_FILE, SCRIPT_STDLIB_TYPES],
+    [STDLIB_FILE, stdlibTypes],
     [RUNTIME_GLOBALS_FILE, SCRIPT_RUNTIME_GLOBALS],
     [
       CHECK_FILE,

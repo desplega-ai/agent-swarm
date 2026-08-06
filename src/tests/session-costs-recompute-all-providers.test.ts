@@ -226,7 +226,7 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
   });
 });
 
-describe("Migration 127 — modelBreakdown persistence", () => {
+describe("Migration 128 — modelBreakdown persistence", () => {
   test("breakdown + harness fields survive the DB round-trip through GET", async () => {
     seedTwoClassRates("claude", "claude-breakdown-model", 2, 10);
     const models = [

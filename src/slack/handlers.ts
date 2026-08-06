@@ -305,7 +305,7 @@ async function getThreadContext(
       }
     }
 
-    return rewriteSlackMentions(formattedMessages.join("\n"));
+    return rewriteSlackMentions(formattedMessages.join("\n"), botUserId);
   } catch (error) {
     console.error("[Slack] Failed to fetch thread context:", error);
     return "";

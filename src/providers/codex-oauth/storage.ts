@@ -171,6 +171,18 @@ export function codexOAuthKeyForSlot(slot: number): string {
 /**
  * Load all stored Codex OAuth credential slots from the config store.
  * Returns slots sorted by slot index (ascending).
+ *
+ * Backwards-compat: during a rolling upgrade the control plane may still
+ * only expose the legacy single-row `codex_oauth` key (pre-071-migration).
+ * If no `codex_oauth_0` entry exists, the legacy row is reported as slot 0
+ * — mirroring {@link loadCodexOAuth}'s existing slot-0 fallback — so callers
+ * (`resolveCodexOAuthCredentialInfo` in runner.ts) treat it as pool-backed
+ * and set `codexSlot`. Without this, `resolveCodexAuthMode` (codex-adapter.ts)
+ * skips its locked `getValidCodexOAuth(..., 0)` revalidation for an existing
+ * chatgpt-mode auth.json, and once the boot-seeded access token (which had
+ * its refresh_token deliberately blanked for non-standalone sources — see
+ * docker-entrypoint.sh) expires, every task fails authentication with no way
+ * to renew it.
  */
 export async function loadAllCodexOAuthSlots(
   apiUrl: string,
@@ -190,15 +202,28 @@ export async function loadAllCodexOAuthSlots(
   const data = (await res.json()) as { configs: Array<{ key: string; value: string }> };
   const slotPattern = /^codex_oauth_(\d+)$/;
   const results: Array<{ slot: number; creds: CodexOAuthCredentials }> = [];
+  let hasSlot0 = false;
 
   for (const entry of data.configs ?? []) {
     const match = slotPattern.exec(entry.key);
     if (!match || !entry.value) continue;
     const slot = Number(match[1]);
+    if (slot === 0) hasSlot0 = true;
     try {
       results.push({ slot, creds: JSON.parse(entry.value) as CodexOAuthCredentials });
     } catch {
       // skip entries with unparseable values
+    }
+  }
+
+  if (!hasSlot0) {
+    const legacyEntry = data.configs?.find((c) => c.key === CODEX_OAUTH_KEY_LEGACY);
+    if (legacyEntry?.value) {
+      try {
+        results.push({ slot: 0, creds: JSON.parse(legacyEntry.value) as CodexOAuthCredentials });
+      } catch {
+        // skip unparseable legacy entry
+      }
     }
   }
 

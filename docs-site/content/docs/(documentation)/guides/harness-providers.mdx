@@ -890,6 +890,22 @@ The shape conversion (our flat `{access, refresh, expires, accountId}` → Codex
 
 See also: [Codex OAuth setup guide](/docs/guides/provider-auth/codex-oauth).
 
+#### Boot-time credential restoration: precedence and the standalone fallback
+
+`docker-entrypoint.sh`'s Codex auth path 1 (L209–273) tries, in order, the first non-empty value from:
+
+The guard on this block checks `MCP_URL` (defaulted at L26 from `MCP_BASE_URL`, falling back to `http://host.docker.internal:3013`), not the raw `MCP_BASE_URL` — a standalone worker that relies on that default would otherwise never reach the `CODEX_OAUTH` env-var fallback below, even though the config-store lookup it gates only needs *some* reachable API base URL, exactly like every other API call in this script.
+
+1. `codex_oauth_0` in the resolved swarm_config (post-migration 071 pool slot 0).
+2. `codex_oauth` (legacy, pre-pool key).
+3. A plain `CODEX_OAUTH` **container env var** (`docker run -e CODEX_OAUTH=...`) — used only when neither config-store key has a row.
+
+The third source exists because `checkCodexCredentials` (`codex-adapter.ts`) treats a bare `CODEX_OAUTH` env var as `satisfiedBy: 'side-effect-pending'` — it trusts this entrypoint block to materialize `~/.codex/auth.json` from it before the first task runs. Resolving it into its own local variable (rather than reusing the `CODEX_OAUTH` name) also avoids clobbering the container-provided env var with an empty string when the config store has nothing — the bug tracked as issue #1102.
+
+**Standalone vs. pool refresh-token handling.** The jq conversion that writes `auth.json` blanks `tokens.refresh_token` for config-store credentials (`codex_oauth_0` / `codex_oauth`) — matching `credentialsToAuthJson()` — because those are *pool* credentials: the runner re-materializes a fresh auth.json per task from a live `codex_oauth_<n>` slot, and any earlier self-refresh outside the `/api/oauth/refresh-locks` lock (from a credential-wait probe, a manual run, or a crash loop hitting this boot-seeded file first) is an unlocked rotation that can revoke the whole token family. A `CODEX_OAUTH` container env var is single-slot/non-pool — the runner never refreshes it back into a `codex_oauth_<n>` config-store slot, and it never gets a per-task overwrite — so this boot-time write is the *only* copy of that credential the worker will ever have. Blanking its refresh token there would permanently strip the one thing that lets the Codex CLI renew an expired access token for the container's lifetime, so the standalone path preserves it as-is (both the already-shaped `auth_mode: "chatgpt"` form and the flat `{access, refresh, accountId, expires}` form, whose `refresh` field feeds `tokens.refresh_token` only on this path).
+
+**Per-task pool-slot detection must recognize the legacy key too.** The blanked-refresh-token boot-seed above is only safe because the runner's per-task path (`resolveCodexOAuthCredentialInfo` in `runner.ts`, backed by `loadAllCodexOAuthSlots()` in `storage.ts`) revalidates/refreshes it through the locked `getValidCodexOAuth()` before every task — but only when it recognizes the credential as pool-backed and sets `codexSlot`. During a rolling upgrade where the control plane still exposes only the legacy `codex_oauth` row (not yet renamed to `codex_oauth_0`), `loadAllCodexOAuthSlots()` reports that row as pool slot 0 — mirroring `loadCodexOAuth()`'s existing slot-0 fallback — precisely so this case isn't misclassified as a standalone/non-pool auth.json. Without that, `codexSlot` stays `undefined`, `resolveCodexAuthMode()` (`codex-adapter.ts`) skips revalidation for an already-`chatgpt`-mode file, and the access token silently expires with no refresh token to renew it.
+
 ---
 
 ## 10. Pre-PR checklist for a new provider

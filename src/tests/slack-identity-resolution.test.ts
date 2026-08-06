@@ -17,9 +17,10 @@
  *      kv hit; `client.users.info` is not called).
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import { closeDb, createUser, getDb, getKv, initDb } from "../be/db";
+import * as usersModule from "../be/users";
 import {
   findUserByExternalId,
   getUserIdentities,
@@ -285,6 +286,32 @@ describe("resolveSlackUserId — three-step cascade", () => {
     // Audit trail: auto_merge (by email) + identity_added (alias link).
     expect(identityEventTypes("existing-id")).toEqual(["auto_merge", "identity_added"]);
   });
+
+  test("concurrent alias enrollment returns the external-ID winner", async () => {
+    const { client } = makeMockClient({
+      U_RACE: { user: { profile: { email: "racer@example.com", real_name: "Racer" } } },
+    });
+    const winner = createUser({ name: "Race winner", email: "winner@example.com" });
+    const originalLinkIdentity = usersModule.linkIdentity;
+    const linkSpy = spyOn(usersModule, "linkIdentity").mockImplementationOnce(
+      (_userId, kind, externalId, actor) => {
+        originalLinkIdentity(winner.id, kind, externalId, actor);
+        throw new Error("simulated concurrent enrollment");
+      },
+    );
+
+    try {
+      const resolved = await resolveSlackUserId(client, "U_RACE", {
+        sampleEventType: "message",
+        sampleContext: "race",
+      });
+
+      expect(resolved).toBe(winner.id);
+      expect(findUserByExternalId("slack", "U_RACE")?.id).toBe(winner.id);
+    } finally {
+      linkSpy.mockRestore();
+    }
+  });
 });
 
 describe("enrichSlackUserEmail — 24h success cache, no failure cache", () => {
@@ -366,6 +393,11 @@ describe("rewriteSlackMentions — pure DB, zero Slack API calls", () => {
   test("unresolved mention renders '<@id> (unknown user)' — never a guessed name", () => {
     const rewritten = rewriteSlackMentions("hey <@U4000UNKNOWN> can you look at this");
     expect(rewritten).toBe("hey <@U4000UNKNOWN> (unknown user) can you look at this");
+  });
+
+  test("bot self mention renders '(that's you)' distinctly", () => {
+    const rewritten = rewriteSlackMentions("hey <@U123SWARMBOT>", "U123SWARMBOT");
+    expect(rewritten).toBe("hey <@U123SWARMBOT> (that's you)");
   });
 
   test("multiple mentions in one string are each rewritten independently", () => {

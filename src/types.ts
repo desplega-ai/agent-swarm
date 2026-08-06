@@ -1201,7 +1201,7 @@ export const SessionCostSchema = z.object({
   //                      had no matching pricing rows; totalCostUsd is whatever
   //                      the worker submitted (often 0).
   costSource: SessionCostSourceSchema.default("harness"),
-  // Migration 127: adapter-reported amount retained for reconciliation only.
+  // Migration 128: adapter-reported amount retained for reconciliation only.
   harnessCostUsd: z.number().nullable().optional(),
   cacheWrite5mTokens: z.number().int().nullable().optional(),
   cacheWrite1hTokens: z.number().int().nullable().optional(),
