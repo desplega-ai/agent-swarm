@@ -407,7 +407,7 @@ describe("store-progress handler — attachments insert path", () => {
       expect(rows[0].driveId).toBe("row-drive");
     });
 
-    test("partial row IDs — only the missing one is filled from config", async () => {
+    test("partial row IDs are preserved instead of mixing with config defaults", async () => {
       clearSwarmConfig();
       upsertSwarmConfig({
         scope: "global",
@@ -448,7 +448,7 @@ describe("store-progress handler — attachments insert path", () => {
       const rows = getTaskAttachments(task.id);
       expect(rows.length).toBe(1);
       expect(rows[0].orgId).toBe("row-org");
-      expect(rows[0].driveId).toBe("global-drive");
+      expect(rows[0].driveId).toBeUndefined();
     });
   });
 

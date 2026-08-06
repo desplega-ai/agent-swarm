@@ -113,10 +113,12 @@ const getSessionCostSummaryRoute = route({
   summary: "Aggregated session cost summary",
   tags: ["Session Data"],
   query: z.object({
-    groupBy: z.enum(["day", "agent", "both"]).optional(),
+    groupBy: z.enum(["day", "agent", "both", "user"]).optional(),
     startDate: z.string().optional(),
     endDate: z.string().optional(),
     agentId: z.string().optional(),
+    /** A user id, or `unattributed` for spend with no human requester. */
+    userId: z.string().optional(),
   }),
   responses: {
     200: { description: "Cost summary" },
@@ -323,6 +325,7 @@ export async function handleSessionData(
       startDate: parsed.query.startDate || undefined,
       endDate: parsed.query.endDate || undefined,
       agentId: parsed.query.agentId || undefined,
+      userId: parsed.query.userId || undefined,
       groupBy: parsed.query.groupBy || "both",
     });
     json(res, summary);

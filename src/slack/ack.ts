@@ -39,7 +39,7 @@ export async function finalizeSlackMessageReaction(
   timestamp: string,
   outcome: "white_check_mark" | "x",
 ): Promise<void> {
-  for (const name of ["eyes", "heavy_plus_sign", "zap"]) {
+  for (const name of ["eyes", "heavy_plus_sign", "zap", "speech_balloon"]) {
     try {
       await client.reactions.remove({ channel, name, timestamp });
     } catch (error) {

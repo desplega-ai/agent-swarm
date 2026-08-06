@@ -150,10 +150,10 @@ const SLACK_ATTACHMENTS_MAX = 20;
  * them and the shortcut form has historically triggered `invalid_blocks`.
  *
  * `agent-fs` attachments emit a public live-host URL when the row carries
- * `orgId` and `driveId` (or when the operator-set
- * `AGENT_FS_DEFAULT_ORG_ID` / `AGENT_FS_DEFAULT_DRIVE_ID` env-vars provide
- * a fallback). Without either, we keep the `agent-fs:<path>` raw fallback so
- * the link is at least copy-pasteable.
+ * a matched `orgId` and `driveId`, or when neither row ID is supplied and the
+ * operator-set `AGENT_FS_DEFAULT_ORG_ID` / `AGENT_FS_DEFAULT_DRIVE_ID`
+ * env-vars provide a fallback. Partial metadata keeps the `agent-fs:<path>`
+ * raw fallback so the link is at least copy-pasteable.
  */
 function resolveAttachmentDisplay(a: TaskAttachment): string {
   return taskAttachmentDisplayUrl(a);

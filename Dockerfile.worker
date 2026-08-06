@@ -193,7 +193,7 @@ USER worker
 # plugin). The Claude/Codex plugin installs (worker-full-base) provide the
 # hooks; this provides the CLI binary + package importability. Disable
 # per-worker via CONTEXT_MODE_DISABLED=true (read by the adapters at runtime).
-ARG CONTEXT_MODE_VERSION=1.0.151
+ARG CONTEXT_MODE_VERSION=1.0.169
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g context-mode@${CONTEXT_MODE_VERSION} \
@@ -216,7 +216,7 @@ COPY --from=prek /prek /usr/local/bin/prek
 ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below) — bump the ARG to update both in lockstep.
-ARG AGENT_FS_VERSION=0.10.1
+ARG AGENT_FS_VERSION=0.12.2
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm

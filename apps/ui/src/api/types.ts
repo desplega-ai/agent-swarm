@@ -802,6 +802,8 @@ export interface UsageSummaryTotals {
   totalDurationMs: number;
   totalSessions: number;
   avgCostPerSession: number;
+  /** Share of `totalCostUsd` whose task carries a human requester. Older API servers omit it. */
+  attributedCostUsd?: number;
 }
 
 export interface UsageSummaryDailyRow {
@@ -821,10 +823,21 @@ export interface UsageSummaryByAgentRow {
   durationMs: number;
 }
 
+export interface UsageSummaryByUserRow {
+  /** `null` = no human requester (heartbeat, boot triage, other autonomous work). */
+  userId: string | null;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  tasks: number;
+  durationMs: number;
+}
+
 export interface UsageSummaryResponse {
   totals: UsageSummaryTotals;
   daily: UsageSummaryDailyRow[];
   byAgent: UsageSummaryByAgentRow[];
+  byUser?: UsageSummaryByUserRow[];
 }
 
 export interface DashboardCostResponse {

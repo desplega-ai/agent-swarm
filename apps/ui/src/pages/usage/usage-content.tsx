@@ -1,7 +1,17 @@
 import { useCallback, useMemo } from "react";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useUsageSummary } from "@/api/hooks/use-costs";
+import { useUsers } from "@/api/hooks/use-users";
 import { UsageSummary } from "@/components/shared/usage-summary";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -18,6 +28,9 @@ import { rechartsTooltipStyle } from "@/lib/recharts-tooltip-style";
 import { formatCompactNumber } from "@/lib/utils";
 
 type DateRange = "7d" | "30d" | "90d" | "all";
+
+/** Server-side sentinel selecting spend with no human requester. */
+const UNATTRIBUTED = "unattributed";
 
 const DAYS_MAP: Record<DateRange, number | null> = { "7d": 7, "30d": 30, "90d": 90, all: null };
 const DATE_RANGES = new Set<string>(["7d", "30d", "90d", "all"]);
@@ -38,6 +51,7 @@ export function UsageContent() {
   const { searchParams, setParam } = useUrlSearchState();
   const dateRange = coerceDateRange(readStringParam(searchParams, "range", "30d"));
   const agentFilter = readStringParam(searchParams, "agent", "all");
+  const userFilter = readStringParam(searchParams, "user", "all");
   const setDateRange = useCallback(
     (range: string) => setParam("range", coerceDateRange(range), { defaultValue: "30d" }),
     [setParam],
@@ -46,16 +60,23 @@ export function UsageContent() {
     (agent: string) => setParam("agent", agent, { defaultValue: "all" }),
     [setParam],
   );
+  const setUserFilter = useCallback(
+    (user: string) => setParam("user", user, { defaultValue: "all" }),
+    [setParam],
+  );
 
   const startDate = getStartDateISO(dateRange);
   const agentId = agentFilter !== "all" ? agentFilter : undefined;
+  const userId = userFilter !== "all" ? userFilter : undefined;
 
   const { data: summary, isLoading } = useUsageSummary({
     startDate,
     agentId,
+    userId,
     groupBy: "both",
   });
   const { data: agents } = useAgents();
+  const { data: users } = useUsers();
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -64,6 +85,14 @@ export function UsageContent() {
     });
     return m;
   }, [agents]);
+
+  const userMap = useMemo(() => {
+    const m = new Map<string, string>();
+    users?.forEach((u) => {
+      m.set(u.id, u.name);
+    });
+    return m;
+  }, [users]);
 
   const agentData = useMemo(() => {
     if (!summary?.byAgent) return [];
@@ -76,6 +105,23 @@ export function UsageContent() {
       avgCost: a.sessions > 0 ? a.costUsd / a.sessions : 0,
     }));
   }, [summary, agentMap]);
+
+  // `userId: null` is autonomous spend (heartbeat, boot triage) — it gets its
+  // own labelled row instead of being dropped or folded into a person.
+  const userData = useMemo(() => {
+    if (!summary?.byUser) return [];
+    return summary.byUser.map((u) => ({
+      key: u.userId ?? UNATTRIBUTED,
+      name: u.userId
+        ? (userMap.get(u.userId) ?? `${u.userId.slice(0, 8)}...`)
+        : "Unattributed (autonomous)",
+      isUnattributed: u.userId === null,
+      cost: Math.round(u.costUsd * 1000) / 1000,
+      tasks: u.tasks,
+      tokens: u.inputTokens + u.outputTokens,
+      avgCost: u.tasks > 0 ? u.costUsd / u.tasks : 0,
+    }));
+  }, [summary, userMap]);
 
   if (isLoading) {
     return (
@@ -119,6 +165,20 @@ export function UsageContent() {
                   <SelectItem key={a.id} value={a.id}>
                     {a.name}
                     {a.isLead ? " (Lead)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={userFilter} onValueChange={setUserFilter}>
+              <SelectTrigger className="w-[250px]">
+                <SelectValue placeholder="User" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Users</SelectItem>
+                <SelectItem value={UNATTRIBUTED}>Unattributed (autonomous)</SelectItem>
+                {users?.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    {u.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -194,6 +254,83 @@ export function UsageContent() {
                         {formatCompactNumber(agent.tokens)}
                       </td>
                       <td className="py-2 text-right font-mono">{formatCost(agent.avgCost)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cost by User — who asked for the work. Unattributed spend is its own row. */}
+      {userData.length > 0 && (
+        <div className="rounded-lg border border-border p-4">
+          <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3">
+            Cost by User
+          </p>
+          <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+            <ResponsiveContainer width="100%" height={Math.max(180, userData.length * 36)}>
+              <BarChart data={userData.slice(0, 10)} layout="vertical">
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="var(--color-border)"
+                  horizontal={false}
+                />
+                <XAxis
+                  type="number"
+                  tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+                  tickFormatter={(v) => `$${v}`}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
+                  width={140}
+                />
+                <Tooltip
+                  contentStyle={rechartsTooltipStyle}
+                  formatter={(value) => [formatCost(Number(value), { precision: 3 }), "Cost"]}
+                />
+                <Bar dataKey="cost" radius={[0, 4, 4, 0]} barSize={20}>
+                  {userData.slice(0, 10).map((u) => (
+                    <Cell
+                      key={u.key}
+                      fill={
+                        u.isUnattributed ? "var(--color-muted-foreground)" : "var(--color-primary)"
+                      }
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="overflow-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-muted-foreground border-b border-border">
+                    <th className="text-left py-2 font-medium">User</th>
+                    <th className="text-right py-2 font-medium">Cost</th>
+                    <th className="text-right py-2 font-medium">Tasks</th>
+                    <th className="text-right py-2 font-medium">Tokens</th>
+                    <th className="text-right py-2 font-medium">Avg/Task</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {userData.map((user) => (
+                    <tr key={user.key} className="border-b border-border/50">
+                      <td
+                        className={`py-2 ${user.isUnattributed ? "italic text-muted-foreground" : "font-medium"}`}
+                      >
+                        {user.name}
+                      </td>
+                      <td className="py-2 text-right font-mono">{formatCost(user.cost)}</td>
+                      <td className="py-2 text-right font-mono">{user.tasks}</td>
+                      <td className="py-2 text-right font-mono">
+                        {formatCompactNumber(user.tokens)}
+                      </td>
+                      <td className="py-2 text-right font-mono">
+                        {user.tasks > 0 ? formatCost(user.avgCost) : "—"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

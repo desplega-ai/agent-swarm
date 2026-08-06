@@ -133,6 +133,30 @@ describe("formatAttachmentsBlockForSlack", () => {
     }
   });
 
+  test("agent-fs partial row IDs stay raw even when defaults are configured", () => {
+    const origOrg = process.env.AGENT_FS_DEFAULT_ORG_ID;
+    const origDrive = process.env.AGENT_FS_DEFAULT_DRIVE_ID;
+    process.env.AGENT_FS_DEFAULT_ORG_ID = "fallback-org";
+    process.env.AGENT_FS_DEFAULT_DRIVE_ID = "fallback-drive";
+    try {
+      for (const attachment of [
+        mkAttachment({ kind: "agent-fs", path: "thoughts/a.md", orgId: "row-org" }),
+        mkAttachment({ kind: "agent-fs", path: "thoughts/a.md", driveId: "row-drive" }),
+      ]) {
+        const out = formatAttachmentsBlockForSlack([attachment]);
+        expect(out).toContain("agent-fs:thoughts/a.md");
+        expect(out).not.toContain("live.agent-fs.dev");
+        expect(out).not.toContain("fallback-org");
+        expect(out).not.toContain("fallback-drive");
+      }
+    } finally {
+      if (origOrg === undefined) delete process.env.AGENT_FS_DEFAULT_ORG_ID;
+      else process.env.AGENT_FS_DEFAULT_ORG_ID = origOrg;
+      if (origDrive === undefined) delete process.env.AGENT_FS_DEFAULT_DRIVE_ID;
+      else process.env.AGENT_FS_DEFAULT_DRIVE_ID = origDrive;
+    }
+  });
+
   test("agent-fs row-level org/drive ids win over env-var fallbacks", () => {
     const origOrg = process.env.AGENT_FS_DEFAULT_ORG_ID;
     const origDrive = process.env.AGENT_FS_DEFAULT_DRIVE_ID;

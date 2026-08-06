@@ -71,6 +71,7 @@ import {
   resolveClaudeMdPath,
   syncProfileFilesToServer,
   writeIdentityBaselines,
+  writeProfileFileFromDb,
 } from "./profile-sync.ts";
 import {
   buildCredStatusReport,
@@ -5012,7 +5013,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
   if (agentSoulMd) {
     try {
-      await Bun.write(SOUL_MD_PATH, agentSoulMd);
+      const backupPath = await writeProfileFileFromDb(SOUL_MD_PATH, agentSoulMd);
+      if (backupPath) console.warn(`[${role}] Archived differing SOUL.md at ${backupPath}`);
       console.log(`[${role}] Wrote SOUL.md to workspace`);
     } catch (err) {
       console.warn(`[${role}] Could not write SOUL.md: ${(err as Error).message}`);
@@ -5020,7 +5022,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   }
   if (agentIdentityMd) {
     try {
-      await Bun.write(IDENTITY_MD_PATH, agentIdentityMd);
+      const backupPath = await writeProfileFileFromDb(IDENTITY_MD_PATH, agentIdentityMd);
+      if (backupPath) console.warn(`[${role}] Archived differing IDENTITY.md at ${backupPath}`);
       console.log(`[${role}] Wrote IDENTITY.md to workspace`);
     } catch (err) {
       console.warn(`[${role}] Could not write IDENTITY.md: ${(err as Error).message}`);
@@ -5043,7 +5046,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Write TOOLS.md to workspace (agent can edit during session)
   if (agentToolsMd) {
     try {
-      await Bun.write("/workspace/TOOLS.md", agentToolsMd);
+      const backupPath = await writeProfileFileFromDb("/workspace/TOOLS.md", agentToolsMd);
+      if (backupPath) console.warn(`[${role}] Archived differing TOOLS.md at ${backupPath}`);
       console.log(`[${role}] Wrote TOOLS.md to workspace`);
     } catch (err) {
       console.warn(`[${role}] Could not write TOOLS.md: ${(err as Error).message}`);
@@ -5053,7 +5057,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Write HEARTBEAT.md to workspace (lead's periodic checklist)
   if (agentHeartbeatMd) {
     try {
-      await Bun.write("/workspace/HEARTBEAT.md", agentHeartbeatMd);
+      const backupPath = await writeProfileFileFromDb("/workspace/HEARTBEAT.md", agentHeartbeatMd);
+      if (backupPath) console.warn(`[${role}] Archived differing HEARTBEAT.md at ${backupPath}`);
       console.log(`[${role}] Wrote HEARTBEAT.md to workspace`);
     } catch (err) {
       console.warn(`[${role}] Could not write HEARTBEAT.md: ${(err as Error).message}`);
@@ -5063,7 +5068,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Write CLAUDE.md to workspace (agent-level instructions)
   if (agentClaudeMd) {
     try {
-      await Bun.write("/workspace/CLAUDE.md", agentClaudeMd);
+      const backupPath = await writeProfileFileFromDb("/workspace/CLAUDE.md", agentClaudeMd);
+      if (backupPath) console.warn(`[${role}] Archived differing CLAUDE.md at ${backupPath}`);
       console.log(`[${role}] Wrote CLAUDE.md to workspace`);
     } catch (err) {
       console.warn(`[${role}] Could not write CLAUDE.md: ${(err as Error).message}`);

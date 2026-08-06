@@ -20,6 +20,7 @@ import { handleCore } from "../http/core";
 import { handleFs } from "../http/fs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { formatAttachmentsBlockForSlack } from "../slack/blocks";
+import { attachmentContentDisposition } from "../utils/content-disposition";
 
 const TEST_DB_PATH = "./test-fs-routes.sqlite";
 const TEST_FS_DIR = "./test-fs-routes-data";
@@ -123,6 +124,28 @@ function operatorFetch(path: string, init: RequestInit = {}): Promise<Response> 
 }
 
 describe("/api/fs REST", () => {
+  test("RFC 6266 download filenames are Latin-1-safe and preserve UTF-8", () => {
+    for (const filename of [
+      "PR analytics backfill — dry-run report",
+      "r\u00e9sum\u00e9.txt",
+      "\u5831\u544a.md",
+      'quote".txt',
+      "newline\nname.txt",
+      "plain-ascii.txt",
+    ]) {
+      const header = attachmentContentDisposition(filename);
+      expect(header).toStartWith('attachment; filename="');
+      expect(header).toContain("; filename*=UTF-8''");
+      expect([...header].every((character) => character.charCodeAt(0) <= 0xff)).toBe(true);
+    }
+
+    expect(attachmentContentDisposition("PR analytics backfill — dry-run report")).toContain(
+      "PR%20analytics%20backfill%20%E2%80%94%20dry-run%20report",
+    );
+    expect(attachmentContentDisposition('quote".txt')).not.toContain('quote".txt');
+    expect(attachmentContentDisposition("newline\nname.txt")).not.toContain("\n");
+  });
+
   test("401 without Authorization header", async () => {
     const res = await fetch(url(`/api/fs/tasks/${taskId}/files`), {
       headers: { "X-Agent-ID": agentId },
@@ -208,6 +231,28 @@ describe("/api/fs REST", () => {
     const download = await authedFetch(`/api/fs/tasks/${taskId}/files/${attachment.id}/raw`);
     expect(download.status).toBe(200);
     expect(await download.text()).toBe("resolved via stored key");
+  });
+
+  test("download accepts the reported em-dash attachment name", async () => {
+    const storedKey = "thoughts/research/dry-run-report.md";
+    const onDisk = join(TEST_FS_DIR, storedKey);
+    await mkdir(dirname(onDisk), { recursive: true });
+    await writeFile(onDisk, "report");
+    const attachment = insertTaskAttachment({
+      taskId,
+      agentId,
+      name: "PR analytics backfill — dry-run report",
+      kind: "shared-fs",
+      path: storedKey,
+      providerId: "local-fs",
+      providerKey: storedKey,
+      mimeType: "text/markdown",
+    });
+
+    const download = await authedFetch(`/api/fs/tasks/${taskId}/files/${attachment.id}/raw`);
+    expect(download.status).toBe(200);
+    expect(download.headers.get("content-disposition")).toContain("filename*=UTF-8''");
+    expect(await download.text()).toBe("report");
   });
 
   test("cross-provider rows are not downloadable and delete is pointer-only (no orphaning)", async () => {

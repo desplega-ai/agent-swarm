@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   createMcpServer,
   deleteMcpServer,
+  getAgentById,
   getAgentMcpServers,
   getMcpServerById,
   getResolvedConfig,
@@ -14,7 +15,14 @@ import {
 import { enqueueAdmissionRow } from "../be/rbac-audit";
 import { getUserGrant } from "../be/rbac-roles";
 import { ensureMcpToken } from "../oauth/ensure-mcp-token";
-import { isRbacEnabled, type PermissionVerb } from "../rbac";
+import { assertUrlSafe, publicEndpointSsrfOptions } from "../oauth/mcp-wrapper";
+import {
+  can,
+  isRbacEnabled,
+  type PermissionVerb,
+  type RbacPrincipal,
+  type RbacResource,
+} from "../rbac";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -184,6 +192,52 @@ function canResolveMcpSecretsForHttpUser(req: IncomingMessage): boolean {
     route: getAgentMcpServersRoute.def.path,
   });
   return decision.allow;
+}
+
+function singleHeader(req: IncomingMessage, name: string): string | undefined {
+  const raw = req.headers[name];
+  return Array.isArray(raw) ? raw[0] : raw;
+}
+
+/**
+ * MCP server management is an agent-owned surface. Prefer the supplied agent
+ * identity even when the request carries the shared API key, so that an agent
+ * cannot use that key to bypass the route's declared RBAC permission.
+ */
+function mcpServerPrincipal(req: IncomingMessage): RbacPrincipal {
+  const agentId = singleHeader(req, "x-agent-id");
+  if (agentId) {
+    const agent = getAgentById(agentId);
+    return { kind: "agent", agentId, isLead: agent?.isLead ?? false };
+  }
+
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "operator") return { kind: "operator" };
+  if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
+  return { kind: "agent", agentId: "", isLead: false };
+}
+
+function ensureMcpServerPermission(
+  req: IncomingMessage,
+  res: ServerResponse,
+  verb: Extract<PermissionVerb, "mcp-server.create.swarm" | "mcp-server.update.any">,
+  resource: RbacResource,
+): boolean {
+  const principal = mcpServerPrincipal(req);
+  // The shared API key without an agent identity is the HTTP admin context.
+  // An X-Agent-ID always takes precedence above, so agents cannot use that key
+  // to bypass the permission declared on this route.
+  if (principal.kind === "operator") return true;
+
+  const decision = can({
+    principal,
+    verb,
+    resource,
+    source: "http",
+  });
+  if (decision.allow) return true;
+  jsonError(res, `Forbidden: ${decision.reason}`, 403);
+  return false;
 }
 
 export async function handleMcpServers(
@@ -375,6 +429,10 @@ export async function handleMcpServers(
     const parsed = await createMcpServerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
+    if (!ensureMcpServerPermission(req, res, "mcp-server.create.swarm", { kind: "none" })) {
+      return true;
+    }
+
     // Transport-specific validation
     if (parsed.body.transport === "stdio" && !parsed.body.command) {
       jsonError(res, "command is required for stdio transport", 400);
@@ -386,6 +444,9 @@ export async function handleMcpServers(
     }
 
     try {
+      if (parsed.body.url) {
+        assertUrlSafe(parsed.body.url, publicEndpointSsrfOptions());
+      }
       const server = createMcpServer({
         name: parsed.body.name,
         transport: parsed.body.transport,
@@ -411,22 +472,43 @@ export async function handleMcpServers(
     const parsed = await updateMcpServerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
+    const existing = getMcpServerById(parsed.params.id);
+    if (!existing) {
+      jsonError(res, "MCP server not found", 404);
+      return true;
+    }
+    if (
+      !ensureMcpServerPermission(req, res, "mcp-server.update.any", {
+        kind: "owned",
+        ownerAgentId: existing.ownerAgentId,
+      })
+    ) {
+      return true;
+    }
+
     // Transport-specific validation on update (only if transport is being set)
     const transport = parsed.body.transport as string | undefined;
     if (transport === "stdio" && parsed.body.command === undefined) {
       // Check if existing server already has a command
-      const existing = getMcpServerById(parsed.params.id);
       if (existing && !existing.command && !parsed.body.command) {
         jsonError(res, "command is required for stdio transport", 400);
         return true;
       }
     }
     if ((transport === "http" || transport === "sse") && parsed.body.url === undefined) {
-      const existing = getMcpServerById(parsed.params.id);
       if (existing && !existing.url && !parsed.body.url) {
         jsonError(res, "url is required for http/sse transport", 400);
         return true;
       }
+    }
+
+    try {
+      if (typeof parsed.body.url === "string") {
+        assertUrlSafe(parsed.body.url, publicEndpointSsrfOptions());
+      }
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Invalid MCP server URL", 400);
+      return true;
     }
 
     const server = updateMcpServer(

@@ -18,6 +18,7 @@ import {
   startTask,
   updateApprovalRequestNotifications,
 } from "../be/db";
+import { type ApprovalQuestion, missingRequiredResponseIds } from "../http/approval-requests";
 import type { ExecutorMeta } from "../types";
 import type { ExecutorDependencies, ExecutorInput } from "../workflows/executors/base";
 import { HumanInTheLoopExecutor } from "../workflows/executors/human-in-the-loop";
@@ -112,7 +113,14 @@ async function handleRequest(
     }
 
     const data = JSON.parse(body);
-    const questions = existing.questions as Array<{ id: string; type: string }>;
+    const questions = existing.questions as ApprovalQuestion[];
+    const missingRequired = missingRequiredResponseIds(questions, data.responses);
+    if (missingRequired.length > 0) {
+      return {
+        status: 400,
+        body: { error: `Required responses missing or invalid: ${missingRequired.join(", ")}` },
+      };
+    }
     let status: "approved" | "rejected" = "approved";
     for (const q of questions) {
       if (q.type === "approval") {
@@ -540,6 +548,41 @@ describe("Approval Requests", () => {
       expect(res.status).toBe(200);
       const data = (await res.json()) as { approvalRequest: { status: string } };
       expect(data.approvalRequest.status).toBe("rejected");
+    });
+
+    test("keeps the request pending when a required rejection reason is blank", async () => {
+      const created = createApprovalRequest(
+        makeApprovalData({
+          questions: [
+            { id: "q1", type: "approval", label: "Approve?", required: true },
+            { id: "reason", type: "text", label: "Reason", required: true },
+          ],
+        }),
+      );
+
+      const res = await fetch(`${baseUrl}/api/approval-requests/${created.id}/respond`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          responses: { q1: { approved: false }, reason: "   " },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(getApprovalRequestById(created.id)?.status).toBe("pending");
+    });
+
+    test("keeps the request pending when a required approval decision is missing", async () => {
+      const created = createApprovalRequest(makeApprovalData());
+
+      const res = await fetch(`${baseUrl}/api/approval-requests/${created.id}/respond`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ responses: {} }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(getApprovalRequestById(created.id)?.status).toBe("pending");
     });
 
     test("returns 404 for nonexistent request", async () => {
