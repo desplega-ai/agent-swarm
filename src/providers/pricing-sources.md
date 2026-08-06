@@ -102,6 +102,15 @@ session) and is documented in the cost-and-context-computation guide.
   `src/providers/codex-models.ts` is advisory only. The canonical price is the
   server-side recompute against the runtime-refreshed pricing table;
   `agentswarm.cost.drift.usd` watches for divergence between the two.
+- **Claude breakdown validity is all-or-nothing:** the claude adapter drops the
+  entire `modelUsage` breakdown when any entry carries a missing, non-finite,
+  or negative token counter — zero-filling would let the server price a
+  fabricated $0 `pricing-table` row, and a partial list would undercount.
+  Such sessions are priced from top-level usage (main-thread only) instead of
+  per-model sums; the harness total is preserved in `harnessCostUsd`, so the
+  divergence surfaces in `agentswarm.cost.drift.usd`. Advisory fields
+  (`webSearchRequests`, per-model `costUSD`) degrade per-field without
+  invalidating the entry.
 
 ## When a model is missing
 
