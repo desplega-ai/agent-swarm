@@ -68,6 +68,7 @@ out already solved (runtime passes `w-full`, twMerge overrides the sheet's
 | [`19-app-dark-round4.png`](./2026-08-06-app-theming/19-app-dark-round4.png) | Same app, dark — hairlines stay at the confirmed 8%/10% (Taras: keep), no light-token leaks. |
 | [`20-form-toast-dark.png`](./2026-08-06-app-theming/20-form-toast-dark.png) | Dark form create — "Saved" toast + row landed. |
 | [`21-alertdialog-dark.png`](./2026-08-06-app-theming/21-alertdialog-dark.png) | Dark AlertDialog on the retimed 200/150 snappy curve. |
+| [`22-hover-visible-light.png`](./2026-08-06-app-theming/22-hover-visible-light.png) | Light hover fix (Taras: "too lowkey"): `--color-accent` split off muted, zinc-100 → ~zinc-150 (0.943), sidebar-accent + cobalt/ember light accents bumped the same step — hovered Workflows row now clearly filled. Dark untouched. |
 
 Computed-style probes at capture time: `[data-slot="button"]` shows
 `transition-property: color, background-color, border-color, transform`,

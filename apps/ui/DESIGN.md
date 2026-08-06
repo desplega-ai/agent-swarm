@@ -123,7 +123,8 @@ A zinc-neutral field with one amber voice and a strictly named status vocabulary
 - **Background** (oklch(1 0 0) light / oklch(0.141 0.005 285.823) dark): the page field.
 - **Card** (oklch(1 0 0) light / oklch(0.21 0.006 285.885) dark): bordered section containers; in dark mode one tonal step above background.
 - **Surface** (oklch(0.985 0.0015 286) light / oklch(0.185 0.006 286) dark): the recessed step between background and card — nested blocks (e.g. tool-call rows in the session-log viewer) read as layered, not flat.
-- **Muted / Accent** (oklch(0.967 0.001 286.375) light / oklch(0.274 0.006 286.033) dark): hover fills, secondary buttons, quiet panels.
+- **Muted** (oklch(0.967 0.001 286.375) light / oklch(0.274 0.006 286.033) dark): secondary buttons, quiet resting panels.
+- **Accent** (oklch(0.943 0.003 286.375) light / oklch(0.274 0.006 286.033) dark): the interactive hover/highlight fill (button hovers, menu highlights, grid row hover). One step darker than muted in light mode — at zinc-100 on a white field a hover is a 3% lightness step and effectively invisible. Presets that override accent keep the same one-step-below-muted relationship.
 - **Muted Foreground** (oklch(0.552 0.016 285.938) light / oklch(0.705 0.015 286.067) dark): secondary text, labels, descriptions.
 - **Border** (oklch(0.92 0.004 286.32) light / oklch(1 0 0 / 10%) dark): the structural line that does the work shadows would do elsewhere. Dark-mode borders are white-alpha, so they layer on any surface.
 - **Border Subtle** (oklch(0.945 0.003 286) light / oklch(1 0 0 / 8%) dark): the quiet tier of the two-tier line system. Separators, row rules (`divide-y divide-border-subtle`), and data-grid row lines sit here so content reads in planes, not boxes. Card outlines and inputs stay on full `border` — the stronger stop is the affordance.

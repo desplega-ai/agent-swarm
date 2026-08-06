@@ -20,7 +20,11 @@
   --color-secondary-foreground: oklch(0.21 0.006 285.885);
   --color-muted: oklch(0.967 0.001 286.375);
   --color-muted-foreground: oklch(0.552 0.016 285.938);
-  --color-accent: oklch(0.967 0.001 286.375);
+  /* Accent is the interactive hover/highlight fill — one step darker than
+     muted (zinc-100 → ~zinc-150): at zinc-100 on a white field the hover was
+     a 3% lightness step, effectively invisible. Muted stays zinc-100 for
+     quiet resting surfaces. */
+  --color-accent: oklch(0.943 0.003 286.375);
   --color-accent-foreground: oklch(0.21 0.006 285.885);
   --color-destructive: oklch(0.577 0.245 27.325);
   --color-destructive-foreground: oklch(0.985 0 0);
@@ -40,7 +44,7 @@
   --color-sidebar-foreground: oklch(0.141 0.005 285.823);
   --color-sidebar-primary: oklch(0.555 0.163 48.998);
   --color-sidebar-primary-foreground: oklch(0.985 0 0);
-  --color-sidebar-accent: oklch(0.967 0.001 286.375);
+  --color-sidebar-accent: oklch(0.943 0.003 286.375);
   --color-sidebar-accent-foreground: oklch(0.21 0.006 285.885);
   /* Sidebar chrome lines live on the subtle tier: the panel reads as a tonal
      plane (bg step + quiet rules), not a boxed column. */

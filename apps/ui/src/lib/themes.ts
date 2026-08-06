@@ -147,7 +147,9 @@ export const THEME_PRESETS: ThemePreset[] = [
         "--color-secondary-foreground": "oklch(0.208 0.042 265.755)",
         "--color-muted": "oklch(0.968 0.007 247.896)",
         "--color-muted-foreground": "oklch(0.554 0.046 257.417)",
-        "--color-accent": "oklch(0.968 0.007 247.896)",
+        // Hover/highlight fill one step below muted (slate-100 → ~slate-150)
+        // so light-mode hovers read — same rationale as the base accent.
+        "--color-accent": "oklch(0.945 0.01 251.7)",
         "--color-accent-foreground": "oklch(0.208 0.042 265.755)",
         "--color-border": "oklch(0.929 0.013 255.508)",
         "--color-border-subtle": "oklch(0.948 0.01 252)",
@@ -158,7 +160,7 @@ export const THEME_PRESETS: ThemePreset[] = [
         "--color-sidebar-foreground": "oklch(0.129 0.042 264.695)",
         "--color-sidebar-primary": "oklch(0.546 0.245 262.881)",
         "--color-sidebar-primary-foreground": NEAR_WHITE,
-        "--color-sidebar-accent": "oklch(0.968 0.007 247.896)",
+        "--color-sidebar-accent": "oklch(0.945 0.01 251.7)",
         "--color-sidebar-accent-foreground": "oklch(0.208 0.042 265.755)",
         "--color-sidebar-border": "oklch(0.948 0.01 252)",
         "--color-sidebar-ring": "oklch(0.546 0.245 262.881)",
@@ -216,7 +218,9 @@ export const THEME_PRESETS: ThemePreset[] = [
         "--color-secondary-foreground": "oklch(0.216 0.006 56.043)",
         "--color-muted": "oklch(0.97 0.001 106.424)",
         "--color-muted-foreground": "oklch(0.553 0.013 58.071)",
-        "--color-accent": "oklch(0.97 0.001 106.424)",
+        // Hover/highlight fill one step below muted (stone-100 → ~stone-150);
+        // the sidebar-accent below was already at stone-200 and stays.
+        "--color-accent": "oklch(0.946 0.002 48.7)",
         "--color-accent-foreground": "oklch(0.216 0.006 56.043)",
         "--color-border": "oklch(0.923 0.003 48.717)",
         "--color-border-subtle": "oklch(0.947 0.002 48.717)",
