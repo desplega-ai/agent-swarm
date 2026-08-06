@@ -1247,7 +1247,7 @@ export interface ScriptVersion {
   changeReason: string | null;
 }
 
-/** `GET /api/scripts/type-defs` — static SDK + stdlib .d.ts for the Monaco editor. */
+/** `GET /api/scripts/type-defs` — SDK + stdlib .d.ts (incl. generated connection + per-app types) for the Monaco editor. */
 export interface ScriptTypeDefs {
   sdkTypes: string;
   stdlibTypes: string;
