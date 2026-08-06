@@ -8,11 +8,14 @@ import type {
 
 const PER_MILLION = 1_000_000;
 
-const ANTHROPIC_INPUT_PROVIDERS: ReadonlySet<PricingProvider> = new Set([
-  "claude",
-  "claude-managed",
-  "pi",
-]);
+// Providers whose reported input token counts INCLUDE cache reads
+// (OpenAI-style), so uncached input = max(0, input − cacheRead). Only codex is
+// verified inclusive (its own SDK contract, see codex-adapter.ts). Everyone
+// else reports input DISJOINT from cache reads and is billed as-is:
+// claude/claude-managed/pi per Anthropic semantics, opencode verified against
+// prod events 2026-08-06 (53/53 finalized messages show input < cacheRead —
+// subtraction would zero nearly all opencode input).
+const INCLUSIVE_INPUT_PROVIDERS: ReadonlySet<PricingProvider> = new Set(["codex"]);
 
 type PricingRateLookup = (
   provider: PricingProvider,
@@ -74,9 +77,9 @@ function priceModel(
   if (inputRate == null || outputRate == null) return null;
 
   const cacheReadRate = lookupRate(provider, lookupModel, "cached_input", atEpochMs) ?? 0;
-  const uncachedInputTokens = ANTHROPIC_INPUT_PROVIDERS.has(provider)
-    ? usage.inputTokens
-    : Math.max(0, usage.inputTokens - usage.cacheReadTokens);
+  const uncachedInputTokens = INCLUSIVE_INPUT_PROVIDERS.has(provider)
+    ? Math.max(0, usage.inputTokens - usage.cacheReadTokens)
+    : usage.inputTokens;
 
   let cacheWriteCostUnits = 0;
   if (split) {

@@ -235,11 +235,11 @@ Opencode cost/token accumulation is keyed by message id (last finalized snapshot
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/opencode-adapter.test.ts`
-- [ ] `bun run tsc:check && bun run lint`
+- [x] `bun run test:root -- src/tests/opencode-adapter.test.ts` (36 pass; 4 new dedup/last-wins/reasoning cases)
+- [x] `bun run tsc:check && bun run lint`
 
 #### Automated QA:
-- [ ] Replay a captured prod duplicate-event sequence (from task `8fc625d7`, the exact-2× example) through the adapter → cost equals the deduped truth
+- [x] Replay a captured prod duplicate-event sequence (from task `8fc625d7`, the exact-2× example) through the adapter → cost equals the deduped truth — verified against the REAL prod events 2026-08-06: 134 finalized `message.updated` over 67 distinct ids (exact 2×); dedup-by-id sum $0.253684 vs stored $0.507368512 (= 2× exactly); event shape matches the unit-test fixtures (same id finalized twice, identical values)
 
 #### Manual Verification:
 - [ ] None
@@ -366,7 +366,7 @@ ssh swarm python3 - < /tmp/cost-audit-prod.py
   - Server recompute drops claude-managed's $0.08/h runtime fee that the adapter includes (fixed in Phase 3; new defect).
   - Opencode `msg.tokens.reasoning` currently dropped on the floor (picked up in Phase 4).
   - `CostData.provider` union lacks `"gemini"` while `PricingProviderSchema` has it (`src/providers/types.ts:27-33` vs `src/types.ts:2534-2543`) — parked, no gemini adapter exists.
-  - Opencode input-token semantics (inclusive vs exclusive of cache read) unverified — left on OpenAI-style subtraction; the Phase-1 drift metric will expose it if wrong. Verify during Phase 4 with a live opencode run.
+  - Opencode input-token semantics (inclusive vs exclusive of cache read) — VERIFIED during Phase 4 against prod events (task `8fc625d7`, 2026-08-06): 53/53 finalized messages with cache reads show `input < cacheRead`, i.e. DISJOINT (anthropic-style). The recompute set was inverted to `INCLUSIVE_INPUT_PROVIDERS = {codex}` — subtraction only where verified inclusive; opencode input is billed as-is.
   - `normalizeModelKey` doesn't lowercase (`GPT-5.4` row seen in prod) — cosmetic, parked.
 - **Prod verification data** (from the audit, reusable as fixtures):
   - `aef117fe-19ef-4519-839a-f1c6303e4340`: opus-5, in 138 / out 53,185 / cr 12,276,769 / cw1h 199,428 / cw5m 0 → harness $9.4629795

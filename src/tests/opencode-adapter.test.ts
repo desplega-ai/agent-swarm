@@ -534,7 +534,44 @@ describe("OpencodeSession — cost aggregation", () => {
     mock.restore();
   });
 
-  test("N message.updated steps → totalCostUsd is the sum", async () => {
+  function finalizedMessage(
+    id: string,
+    values: {
+      cost: number;
+      input: number;
+      output: number;
+      reasoning?: number;
+      cacheRead?: number;
+      cacheWrite?: number;
+    },
+  ): OpencodeEvent {
+    const now = Date.now();
+    return {
+      type: "message.updated",
+      properties: {
+        info: {
+          id,
+          sessionID: "sess-abc-123",
+          role: "assistant",
+          cost: values.cost,
+          tokens: {
+            input: values.input,
+            output: values.output,
+            reasoning: values.reasoning ?? 0,
+            cache: { read: values.cacheRead ?? 0, write: values.cacheWrite ?? 0 },
+          },
+          time: { created: now, completed: now + 1 },
+          parentID: "",
+          modelID: "claude-opus",
+          providerID: "anthropic",
+          mode: "live",
+          path: { cwd: "/", root: "/" },
+        } as never,
+      },
+    };
+  }
+
+  test("distinct finalized message.updated steps → totals are summed", async () => {
     const stepCosts = [0.001, 0.002, 0.0015];
     const stepEvents: OpencodeEvent[] = stepCosts.map((cost, i) => ({
       type: "message.updated",
@@ -575,6 +612,107 @@ describe("OpencodeSession — cost aggregation", () => {
     expect(result.cost?.outputTokens).toBe(50 + 55 + 60);
     expect(result.cost?.cacheReadTokens).toBe(0 + 2 + 4);
     expect(result.cost?.cacheWriteTokens).toBe(0 + 1 + 2);
+  });
+
+  test("duplicate finalized snapshot with the same message id is counted once", async () => {
+    const message = finalizedMessage("msg-duplicate", {
+      cost: 0.004,
+      input: 100,
+      output: 50,
+      reasoning: 10,
+      cacheRead: 20,
+      cacheWrite: 5,
+    });
+    const { result } = await driveSession([
+      message,
+      message,
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ]);
+
+    expect(result.cost?.totalCostUsd).toBe(0.004);
+    expect(result.cost?.inputTokens).toBe(100);
+    expect(result.cost?.outputTokens).toBe(50);
+    expect(result.cost?.reasoningOutputTokens).toBe(10);
+    expect(result.cost?.cacheReadTokens).toBe(20);
+    expect(result.cost?.cacheWriteTokens).toBe(5);
+    expect(result.cost?.numTurns).toBe(1);
+  });
+
+  test("latest finalized snapshot wins when a message id is updated", async () => {
+    const { result } = await driveSession([
+      finalizedMessage("msg-last-wins", {
+        cost: 0.004,
+        input: 100,
+        output: 50,
+        reasoning: 10,
+        cacheRead: 20,
+        cacheWrite: 5,
+      }),
+      finalizedMessage("msg-last-wins", {
+        cost: 0.007,
+        input: 200,
+        output: 80,
+        reasoning: 12,
+        cacheRead: 30,
+        cacheWrite: 8,
+      }),
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ]);
+
+    expect(result.cost?.totalCostUsd).toBe(0.007);
+    expect(result.cost?.inputTokens).toBe(200);
+    expect(result.cost?.outputTokens).toBe(80);
+    expect(result.cost?.reasoningOutputTokens).toBe(12);
+    expect(result.cost?.cacheReadTokens).toBe(30);
+    expect(result.cost?.cacheWriteTokens).toBe(8);
+    expect(result.cost?.numTurns).toBe(1);
+  });
+
+  test("reasoning tokens are summed across distinct finalized messages", async () => {
+    const { result } = await driveSession([
+      finalizedMessage("msg-reasoning-1", { cost: 0.001, input: 10, output: 5, reasoning: 7 }),
+      finalizedMessage("msg-reasoning-2", { cost: 0.002, input: 20, output: 8, reasoning: 11 }),
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ]);
+
+    expect(result.cost?.reasoningOutputTokens).toBe(18);
+    expect(result.cost?.numTurns).toBe(2);
+  });
+
+  test("messages without ids are counted separately, not merged into one entry", async () => {
+    const stripId = (event: OpencodeEvent): OpencodeEvent => {
+      const clone = structuredClone(event) as {
+        properties: { info: { id?: string } };
+      };
+      delete clone.properties.info.id;
+      return clone as unknown as OpencodeEvent;
+    };
+    const { result } = await driveSession([
+      stripId(finalizedMessage("ignored-1", { cost: 0.001, input: 10, output: 5 })),
+      stripId(finalizedMessage("ignored-2", { cost: 0.002, input: 20, output: 8 })),
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ]);
+
+    // Two id-less messages must not collapse into a single Map entry.
+    expect(result.cost?.totalCostUsd).toBeCloseTo(0.003, 10);
+    expect(result.cost?.numTurns).toBe(2);
+  });
+
+  test("a finalized message without a tokens block defaults to zero tokens, no throw", async () => {
+    const message = finalizedMessage("msg-no-tokens", { cost: 0.005, input: 0, output: 0 });
+    const clone = structuredClone(message) as {
+      properties: { info: { tokens?: unknown } };
+    };
+    delete clone.properties.info.tokens;
+    const { result } = await driveSession([
+      clone as unknown as OpencodeEvent,
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ]);
+
+    expect(result.cost?.totalCostUsd).toBeCloseTo(0.005, 10);
+    expect(result.cost?.inputTokens).toBe(0);
+    expect(result.cost?.outputTokens).toBe(0);
+    expect(result.cost?.numTurns).toBe(1);
   });
 
   test("cost data includes provider='opencode'", async () => {

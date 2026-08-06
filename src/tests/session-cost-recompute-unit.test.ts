@@ -95,6 +95,18 @@ describe("recomputeSessionCost — pure branch behavior", () => {
       lookupFrom({ "codex:m:input": 2, "codex:m:output": 10, "codex:m:cached_input": 0.2 }),
     );
     expect(openai.totalCostUsd).toBe((600 * 2 + 400 * 0.2) / 1_000_000);
+
+    // Opencode reports input disjoint from cache reads (prod-verified:
+    // input < cacheRead on every cached message) — no subtraction.
+    const opencode = recomputeSessionCost(
+      { ...BASE, model: "m", provider: "opencode", inputTokens: 1_000, cacheReadTokens: 400_000 },
+      lookupFrom({
+        "opencode:m:input": 2,
+        "opencode:m:output": 10,
+        "opencode:m:cached_input": 0.2,
+      }),
+    );
+    expect(opencode.totalCostUsd).toBe((1_000 * 2 + 400_000 * 0.2) / 1_000_000);
   });
 
   test("empty models[] behaves like no breakdown and stores no modelBreakdown", () => {
