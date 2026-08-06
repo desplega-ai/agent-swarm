@@ -15896,7 +15896,7 @@
       "get": {
         "operationId": "scripts_type_defs",
         "summary": "Get script SDK and stdlib type definitions",
-        "description": "Static .d.ts blobs for editor integration (e.g. Monaco extraLibs). Cacheable.",
+        "description": "Generated .d.ts blobs for editor integration (e.g. Monaco extraLibs), including per-app types. Cacheable.",
         "tags": [
           "Scripts"
         ],
