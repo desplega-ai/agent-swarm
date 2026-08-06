@@ -46,10 +46,12 @@ describe("sandboxSpawnEnv", () => {
   });
 
   test("win32: buildSandboxedCommand no-ops (matches existing native.ts behavior), so sandboxSpawnEnv is the only place the harness env reaches the child", () => {
-    const cmd = withPlatform("win32", () => buildSandboxedCommand(["bun", "run", "harness.ts"], {
-      PATH: "C:\\Windows",
-      SWARM_SCRIPT_TMPDIR: "C:\\tmp\\x",
-    }));
+    const cmd = withPlatform("win32", () =>
+      buildSandboxedCommand(["bun", "run", "harness.ts"], {
+        PATH: "C:\\Windows",
+        SWARM_SCRIPT_TMPDIR: "C:\\tmp\\x",
+      }),
+    );
     expect(cmd).toEqual(["bun", "run", "harness.ts"]);
   });
 });

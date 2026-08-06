@@ -653,10 +653,7 @@ describe("ScriptExecutor", () => {
     // STREAM_DRAIN_GRACE_MS (5s) — the exact "successful script + surviving
     // descendant holding the pipe" scenario the review comment described.
     const result = await executor.run(
-      input(
-        { runtime: "bash", script: "printf 'kept-output'; sleep 8 & disown; exit 0" },
-        {},
-      ),
+      input({ runtime: "bash", script: "printf 'kept-output'; sleep 8 & disown; exit 0" }, {}),
     );
     expect(result.status).toBe("success");
     const out = result.output as { exitCode: number; stdout: string };
