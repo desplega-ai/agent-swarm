@@ -25,3 +25,16 @@ Environment: worktree API on :3213 (fresh `/tmp/app-theming-qa.sqlite`), vite on
 Checks at capture time: `apps/ui` `tsc -b`, `biome check`, `check:tokens` all
 green; root `tsc:check`, skill drift checks, apps test files (179 tests) green;
 full root suite run before PR.
+
+## Round 2 — linger hover + animated sidebar icons (same day)
+
+| File | What it shows |
+|---|---|
+| [`07-sidebar-icons.png`](./2026-08-06-app-theming/07-sidebar-icons.png) | Full animated icon set in the expanded sidebar — glyphs pixel-identical to the previous static lucide set. |
+| [`08-sidebar-hover.png`](./2026-08-06-app-theming/08-sidebar-hover.png) | Workflows row hovered — instant hover bg (linger timing verified via computed styles: 0s enter / 200ms + 50ms-delay exit on the snappy curve), icon caught mid draw-in animation. |
+| [`10-collapsed.png`](./2026-08-06-app-theming/10-collapsed.png) | Icon-collapsed rail — animated-icon div wrappers keep centering/sizing intact. |
+
+Functional checks: icon returns to normal state after unhover (pixel-probed the
+row before/after); `[data-sidebar="menu-button"]` computed styles show
+`transition-property: width, height, padding, color, background-color`,
+`transition-duration: 0.2s`, `transition-delay: 0.05s` at rest.

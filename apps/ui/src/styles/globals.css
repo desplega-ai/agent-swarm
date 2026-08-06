@@ -221,6 +221,26 @@ body {
   min-height: 100vh;
 }
 
+/* Hover linger — the Linear hover: enter instantly, release softly. A pure
+ * TIMING modifier: it sets duration/easing/delay only, so it composes with
+ * whatever `transition-property` the element already declares
+ * (`transition-colors`, `transition-[width,height,padding,...]`). The base
+ * rule owns the EXIT (slight delay, then a soft fade); the :hover rule zeroes
+ * both so entering is immediate. Un-layered on purpose — it must outrank the
+ * duration set by Tailwind's layered transition utilities.
+ * Do not put this on anything that transitions `transform` (press scale must
+ * stay instant in both directions) or on keyboard-driven highlights. */
+.hover-linger {
+  transition-duration: 200ms;
+  transition-timing-function: var(--ease-snappy);
+  transition-delay: 50ms;
+}
+
+.hover-linger:hover {
+  transition-duration: 0s;
+  transition-delay: 0s;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

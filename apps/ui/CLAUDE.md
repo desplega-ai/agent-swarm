@@ -158,7 +158,9 @@ Each status token has a paired `-foreground` for legible text on the colored fil
 
 Doctrine lives in [DESIGN.md § Motion](./DESIGN.md) — read it first. Hard points: <300ms budget, exits faster than enters, `ease-swift`/`ease-snappy` tokens (never `ease-in`), transform/opacity only, no animation on keyboard-driven or high-frequency interactions, `MotionConfig reducedMotion="user"` is already mounted in `app/providers.tsx`.
 
-Animated icons are vendored from lucide-animated into `src/components/icons/` (`bunx shadcn@latest add "https://lucide-animated.com/r/<icon>.json"`, then move the file out of the literal `@/` directory the CLI creates). Interactive-control affordance only — never decorative, never in rows/lists.
+Animated icons are vendored into `src/components/icons/` — sources in preference order: lucide-animated (`bunx shadcn@latest add "https://lucide-animated.com/r/<icon>.json"`, then move the file out of the literal `@/` directory the CLI creates), animateicons (`https://animateicons.in/r/lu-<icon>.json`) for gaps, hand-written on the same pattern (exact lucide path data) when neither ships one. Interactive-control and nav-row affordance only — never decorative, never in data rows (tables, logs, per-record lists). When the icon sits in a larger click target, drive it from the container via the `startAnimation`/`stopAnimation` handle ref (see `NavIconLink`).
+
+Hover timing is asymmetric: pointer-hover surfaces enter instantly and release softly via the `.hover-linger` utility (timing-only; composes with the element's `transition-property`; never on keyboard-driven highlights or transform transitions) — see DESIGN.md § Motion "linger rule".
 
 </important>
 

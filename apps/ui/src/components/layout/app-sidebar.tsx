@@ -1,23 +1,4 @@
-import {
-  BarChart3,
-  BookOpen,
-  Brain,
-  Cable,
-  ClipboardCheck,
-  Clock,
-  Contact,
-  FileClock,
-  FileText,
-  Globe,
-  Home,
-  LayoutGrid,
-  Link2,
-  ListTodo,
-  MessageSquare,
-  Settings,
-  Users,
-  Workflow,
-} from "lucide-react";
+import type { ForwardRefExoticComponent, RefAttributes } from "react";
 import { useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useDashboardCosts } from "@/api/hooks/use-costs";
@@ -26,6 +7,24 @@ import { useMetrics } from "@/api/hooks/use-metrics";
 import { useUsers } from "@/api/hooks/use-users";
 import type { UserRole } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
+import { BookOpenIcon } from "@/components/icons/book-open";
+import { BrainIcon } from "@/components/icons/brain";
+import { CableIcon } from "@/components/icons/cable";
+import { ChartColumnIcon } from "@/components/icons/chart-column";
+import { ClipboardCheckIcon } from "@/components/icons/clipboard-check";
+import { ClockIcon } from "@/components/icons/clock";
+import { ContactIcon } from "@/components/icons/contact";
+import { FileClockIcon } from "@/components/icons/file-clock";
+import { FileTextIcon } from "@/components/icons/file-text";
+import { GlobeIcon } from "@/components/icons/globe";
+import { HomeIcon } from "@/components/icons/home";
+import { LayoutGridIcon } from "@/components/icons/layout-grid";
+import { Link2Icon } from "@/components/icons/link-2";
+import { ListTodoIcon } from "@/components/icons/list-todo";
+import { MessageSquareIcon } from "@/components/icons/message-square";
+import { SettingsIcon } from "@/components/icons/settings";
+import { UsersIcon } from "@/components/icons/users";
+import { WorkflowIcon } from "@/components/icons/workflow";
 import { UserSwitcher } from "@/components/identity/user-switcher";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { Badge } from "@/components/ui/badge";
@@ -48,10 +47,21 @@ import { formatCost } from "@/lib/cost-format";
 import { cn, formatCompactNumber } from "@/lib/utils";
 import { SwarmSwitcher } from "./swarm-switcher";
 
+/** The imperative surface every vendored animated icon exposes. */
+interface AnimatedIconHandle {
+  startAnimation: () => void;
+  stopAnimation: () => void;
+}
+
+/** A vendored animated icon from `components/icons/` (see CLAUDE.md § Motion). */
+type AnimatedIconComponent = ForwardRefExoticComponent<
+  { size?: number; className?: string } & RefAttributes<AnimatedIconHandle>
+>;
+
 interface NavItem {
   title: string;
   path: string;
-  icon: typeof Home;
+  icon: AnimatedIconComponent;
   children?: Array<{
     title: string;
     path: string;
@@ -97,44 +107,49 @@ const navGroups: NavGroup[] = [
     id: "work",
     label: "WORK",
     items: [
-      { title: "Home", path: "/", icon: Home },
-      { title: "Tasks", path: "/tasks", icon: ListTodo },
-      { title: "Sessions", path: "/sessions", icon: MessageSquare, gate: { minVersion: "1.76.0" } },
+      { title: "Home", path: "/", icon: HomeIcon },
+      { title: "Tasks", path: "/tasks", icon: ListTodoIcon },
+      {
+        title: "Sessions",
+        path: "/sessions",
+        icon: MessageSquareIcon,
+        gate: { minVersion: "1.76.0" },
+      },
       {
         title: "Apps",
         path: "/apps",
-        icon: LayoutGrid,
+        icon: LayoutGridIcon,
         beta: { tooltip: "Swarm Apps — experimental: agent-built internal apps" },
       },
-      { title: "Approvals", path: "/approval-requests", icon: ClipboardCheck },
+      { title: "Approvals", path: "/approval-requests", icon: ClipboardCheckIcon },
     ],
   },
   {
     id: "swarm",
     label: "SWARM",
     items: [
-      { title: "Agents", path: "/agents", icon: Users },
-      { title: "People", path: "/people", icon: Contact, gate: { minVersion: "1.80.0" } },
-      { title: "Workflows", path: "/workflows", icon: Workflow },
-      { title: "Scripts", path: "/scripts", icon: FileClock },
-      { title: "Schedules", path: "/schedules", icon: Clock },
+      { title: "Agents", path: "/agents", icon: UsersIcon },
+      { title: "People", path: "/people", icon: ContactIcon, gate: { minVersion: "1.80.0" } },
+      { title: "Workflows", path: "/workflows", icon: WorkflowIcon },
+      { title: "Scripts", path: "/scripts", icon: FileClockIcon },
+      { title: "Schedules", path: "/schedules", icon: ClockIcon },
     ],
   },
   {
     id: "resources",
     label: "RESOURCES",
     items: [
-      { title: "Skills", path: "/skills", icon: BookOpen },
-      { title: "MCP Servers", path: "/mcp-servers", icon: Cable },
-      { title: "Connections", path: "/connections", icon: Link2 },
-      { title: "Memory", path: "/memory", icon: Brain },
+      { title: "Skills", path: "/skills", icon: BookOpenIcon },
+      { title: "MCP Servers", path: "/mcp-servers", icon: CableIcon },
+      { title: "Connections", path: "/connections", icon: Link2Icon },
+      { title: "Memory", path: "/memory", icon: BrainIcon },
       {
         title: "Pages",
         path: "/pages",
-        icon: Globe,
+        icon: GlobeIcon,
         gate: { minVersion: "1.79.0" },
       },
-      { title: "Templates", path: "/templates", icon: FileText },
+      { title: "Templates", path: "/templates", icon: FileTextIcon },
     ],
   },
 ];
@@ -150,7 +165,7 @@ const footerNav: FooterItem[] = [
   {
     title: "Settings",
     path: "/settings",
-    icon: Settings,
+    icon: SettingsIcon,
     flyout: [
       { title: "Connections", path: "/settings/connections" },
       { title: "Appearance", path: "/settings/appearance" },
@@ -165,7 +180,7 @@ const footerNav: FooterItem[] = [
   {
     title: "Usage",
     path: "/usage",
-    icon: BarChart3,
+    icon: ChartColumnIcon,
     flyout: [
       { title: "Usage", path: "/usage", end: true },
       { title: "Budgets", path: "/usage/budgets" },
@@ -193,6 +208,43 @@ function BetaTag({ tooltip }: { tooltip: string }) {
       </TooltipTrigger>
       <TooltipContent side="right">{tooltip}</TooltipContent>
     </Tooltip>
+  );
+}
+
+/**
+ * One nav row: SidebarMenuButton + NavLink + animated icon + label. The ROW
+ * drives the icon — hovering anywhere on the button plays the icon's
+ * animation through its imperative handle (attaching the ref disables the
+ * icon's own 16px-wide hover zone), so the affordance matches the actual
+ * click target.
+ */
+function NavIconLink({
+  item,
+  isActive,
+  end,
+  tooltip,
+  showBeta,
+}: {
+  item: NavItem;
+  isActive: boolean;
+  end?: boolean;
+  tooltip?: string;
+  showBeta?: boolean;
+}) {
+  const iconRef = useRef<AnimatedIconHandle>(null);
+  return (
+    <SidebarMenuButton asChild isActive={isActive} tooltip={tooltip}>
+      <NavLink
+        to={item.path}
+        end={end}
+        onMouseEnter={() => iconRef.current?.startAnimation()}
+        onMouseLeave={() => iconRef.current?.stopAnimation()}
+      >
+        <item.icon ref={iconRef} size={16} className="shrink-0" />
+        <span>{item.title}</span>
+        {showBeta && item.beta && <BetaTag tooltip={item.beta.tooltip} />}
+      </NavLink>
+    </SidebarMenuButton>
   );
 }
 
@@ -233,14 +285,7 @@ function FooterNavItem({ item, isActive, badge }: FooterNavItemProps) {
     closeTimer.current = setTimeout(() => setOpen(false), FLYOUT_CLOSE_DELAY);
   }
 
-  const link = (
-    <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
-      <NavLink to={item.path}>
-        <item.icon className="size-4" />
-        <span>{item.title}</span>
-      </NavLink>
-    </SidebarMenuButton>
-  );
+  const link = <NavIconLink item={item} isActive={isActive} tooltip={item.title} />;
 
   // Right-aligned live count — auto-hidden in icon-collapsed mode by the
   // primitive's own `group-data-[collapsible=icon]:hidden`.
@@ -289,7 +334,7 @@ function FooterNavItem({ item, isActive, badge }: FooterNavItemProps) {
                 onClick={() => setOpen(false)}
                 className={({ isActive: entryActive }) =>
                   cn(
-                    "rounded-sm px-2 py-1.5 text-sm transition-colors",
+                    "rounded-sm px-2 py-1.5 text-sm transition-colors hover-linger",
                     entryActive
                       ? "bg-accent text-accent-foreground"
                       : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
@@ -411,13 +456,12 @@ export function AppSidebar() {
                         const badge = badges[item.path];
                         return (
                           <SidebarMenuItem key={item.path}>
-                            <SidebarMenuButton asChild isActive={isActive}>
-                              <NavLink to={item.path} end={item.path === "/"}>
-                                <item.icon className="size-4" />
-                                <span>{item.title}</span>
-                                {item.beta && <BetaTag tooltip={item.beta.tooltip} />}
-                              </NavLink>
-                            </SidebarMenuButton>
+                            <NavIconLink
+                              item={item}
+                              isActive={isActive}
+                              end={item.path === "/"}
+                              showBeta
+                            />
                             {/* Live count — auto-hidden when icon-collapsed. */}
                             {badge != null && <SidebarMenuBadge>{badge}</SidebarMenuBadge>}
                             {item.children && (
@@ -428,7 +472,7 @@ export function AppSidebar() {
                                     to={child.path}
                                     className={({ isActive: childActive }) =>
                                       cn(
-                                        "rounded-sm px-2 py-1 text-sm transition-colors",
+                                        "rounded-sm px-2 py-1 text-sm transition-colors hover-linger",
                                         childActive
                                           ? "bg-sidebar-accent text-sidebar-accent-foreground"
                                           : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
@@ -461,12 +505,12 @@ export function AppSidebar() {
                       if (gated) return null;
                       return (
                         <SidebarMenuItem key={item.path}>
-                          <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
-                            <NavLink to={item.path} end={item.path === "/"}>
-                              <item.icon className="size-4" />
-                              <span>{item.title}</span>
-                            </NavLink>
-                          </SidebarMenuButton>
+                          <NavIconLink
+                            item={item}
+                            isActive={isActive}
+                            end={item.path === "/"}
+                            tooltip={item.title}
+                          />
                         </SidebarMenuItem>
                       );
                     })}
