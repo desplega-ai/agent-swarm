@@ -14588,7 +14588,8 @@
                           "type": [
                             "integer",
                             "null"
-                          ]
+                          ],
+                          "minimum": 0
                         },
                         "harnessCostUsd": {
                           "type": [

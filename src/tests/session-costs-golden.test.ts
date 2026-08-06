@@ -518,4 +518,48 @@ describe("Phase 3 — session cost recompute golden fixtures", () => {
     expect(body.cost.totalCostUsd).toBe(1.23);
     expect(body.cost.harnessCostUsd).toBe(1.23);
   });
+
+  test("negative webSearchRequests in a breakdown entry is rejected at the wire", async () => {
+    // One positive entry enables the wildcard web-search rate for the whole
+    // breakdown; a negative sibling count would then subtract real dollars.
+    const response = await fetch(`http://localhost:${port}/api/session-costs`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        agentId,
+        durationMs: 0,
+        numTurns: 1,
+        createdAt: FIXTURE_CREATED_AT,
+        sessionId: "negative-web-search",
+        provider: "claude",
+        model: "claude-opus-5",
+        totalCostUsd: 1,
+        inputTokens: 1_000,
+        outputTokens: 1_000,
+        models: [
+          {
+            model: "claude-opus-5",
+            inputTokens: 500,
+            outputTokens: 500,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            webSearchRequests: 10,
+          },
+          {
+            model: "claude-haiku-4-5",
+            inputTokens: 500,
+            outputTokens: 500,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            webSearchRequests: -5,
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(400);
+  });
 });

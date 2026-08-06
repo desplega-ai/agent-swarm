@@ -1168,7 +1168,7 @@ export const SessionCostModelBreakdownSchema = z.object({
   outputTokens: z.number().int().nonnegative(),
   cacheReadTokens: z.number().int().nonnegative(),
   cacheWriteTokens: z.number().int().nonnegative(),
-  webSearchRequests: z.number().int().nullable().optional(),
+  webSearchRequests: z.number().int().nonnegative().nullable().optional(),
   costUsd: z.number().nullable().optional(),
   harnessCostUsd: z.number().nullable().optional(),
 });
