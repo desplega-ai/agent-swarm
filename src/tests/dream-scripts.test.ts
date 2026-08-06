@@ -1424,6 +1424,40 @@ describe("dream-apply batches", () => {
     );
     const memoryQuery = queries.find((query) => query.sql.includes("FROM agent_memory"))!;
     expect(memoryQuery.sql).toContain(`tags NOT LIKE '%"dreaming"%'`);
+    // A bounded body, not just the title: the skill asks agents to retire stale
+    // or contradicted memories, and inject_learning's name is a 60-char prefix.
+    expect(memoryQuery.sql).toContain("substr(content, 1, 400) AS excerpt");
+  });
+
+  test("the PR snapshot bounds its network calls below the script deadline", async () => {
+    // The subprocess wall clock is not catchable from inside the script, and this
+    // node is the sole predecessor of reflect/skills/hygiene — an un-bounded fetch
+    // against a stalled GitHub would take the whole dream down, not just degrade.
+    const signals: Array<AbortSignal | undefined> = [];
+    const result = await ghPrSnapshot(
+      { repo: "owner/repo", number: 42 },
+      {
+        stdlib: {
+          Redacted: { value: (v: unknown) => v },
+          async fetchJson(_url: string, init: any) {
+            signals.push(init?.signal);
+            return { number: 42, title: "t", head: { sha: "abc" }, user: { login: "x" } };
+          },
+        },
+        swarm: {
+          config: { mcpBaseUrl: "http://localhost:3013", apiKey: "k" },
+          async config_get() {
+            return { success: true, data: { configs: [] } };
+          },
+        },
+      },
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(signals.length).toBeGreaterThan(1);
+    // Every call shares ONE budget, so the total is bounded, not just each attempt.
+    expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true);
+    expect(new Set(signals).size).toBe(1);
   });
 
   test("the slice window follows task OUTCOME time, not just creation", async () => {

@@ -97,6 +97,7 @@ export default async function dreamAgentSlice(args: any, ctx: any) {
       // dream wrote for it. Rows written before the tag existed are not excluded;
       // that backlog ages out of the window on its own.
       `SELECT id, name, scope, source, accessCount, alpha, beta, createdAt,
+              substr(content, 1, 400) AS excerpt,
               ROUND(alpha / (alpha + beta), 3) AS usefulness
        FROM agent_memory
        WHERE agentId = ? AND julianday(createdAt) > julianday('now', ?)
@@ -163,9 +164,14 @@ export default async function dreamAgentSlice(args: any, ctx: any) {
       })),
     },
     tools: tools.map((tool: any) => ({ tool: tool.tool ?? "unknown", calls: Number(tool.calls) || 0 })),
+    // The excerpt is what makes a `memory` delete/rewrite proposal possible at
+    // all: the skill asks agents to retire contradicted or stale memories, and
+    // inject_learning's name is only the first 60 characters of the claim — from
+    // metadata alone the lane would be guessing from a title.
     memories: memories.map((memory: any) => ({
       id: memory.id,
       name: memory.name,
+      excerpt: truncate(memory.excerpt, 400),
       scope: memory.scope,
       source: memory.source,
       accessCount: Number(memory.accessCount) || 0,

@@ -13,14 +13,31 @@ export const argsSchema = z.object({
     .describe("GitHub token override; falls back to the GITHUB_TOKEN swarm config"),
 });
 
-async function resolveSecret(ctx: any, key: string, override: unknown): Promise<string | null> {
+/**
+ * One shared deadline for every network call this script makes.
+ *
+ * The swarm-script subprocess has a 30s wall clock that a script cannot catch:
+ * if GitHub accepts the connection and then stalls, the runtime kills the
+ * process before the `{ error }` degrade can be returned, and this node is the
+ * sole predecessor of the reflect / skills / hygiene lanes — so an optional
+ * enrichment would take the whole dream down with it. A single budget shared
+ * across all four fetches bounds the total, not just each attempt.
+ */
+const FETCH_BUDGET_MS = 20_000;
+
+async function resolveSecret(
+  ctx: any,
+  key: string,
+  override: unknown,
+  signal: AbortSignal,
+): Promise<string | null> {
   if (typeof override === "string" && override.length > 0) return override;
   try {
     const base = ctx.stdlib.Redacted.value(ctx.swarm.config.mcpBaseUrl).replace(/\/+$/, "");
     const apiKey = ctx.stdlib.Redacted.value(ctx.swarm.config.apiKey);
     const res: any = await ctx.stdlib.fetchJson(
       base + "/api/config/resolved?includeSecrets=true",
-      { headers: { Authorization: "Bearer " + apiKey } },
+      { headers: { Authorization: "Bearer " + apiKey }, signal },
     );
     const configs: any = res && Array.isArray(res.configs) ? res.configs : [];
     for (const c of configs) {
@@ -61,7 +78,8 @@ async function ghPrSnapshotInner(args: any, ctx: any) {
   }
   if (number === undefined) return { error: "number is required" };
 
-  const token = await resolveSecret(ctx, "GITHUB_TOKEN", parsed.data.token);
+  const deadline = AbortSignal.timeout(FETCH_BUDGET_MS);
+  const token = await resolveSecret(ctx, "GITHUB_TOKEN", parsed.data.token, deadline);
   const headers: any = {
     Accept: "application/vnd.github+json",
     "User-Agent": "agent-swarm-scripts",
@@ -69,7 +87,10 @@ async function ghPrSnapshotInner(args: any, ctx: any) {
   if (token) headers.Authorization = "Bearer " + token;
 
   const api = "https://api.github.com/repos/" + repo;
-  const pr: any = await ctx.stdlib.fetchJson(api + "/pulls/" + number, { headers });
+  const pr: any = await ctx.stdlib.fetchJson(api + "/pulls/" + number, {
+    headers,
+    signal: deadline,
+  });
   if (!pr || typeof pr.number !== "number") {
     const why = pr && pr.message ? pr.message : "not found or not accessible";
     return { error: "PR " + repo + "#" + number + ": " + why };
@@ -80,6 +101,7 @@ async function ghPrSnapshotInner(args: any, ctx: any) {
   if (sha) {
     const runs: any = await ctx.stdlib.fetchJson(api + "/commits/" + sha + "/check-runs", {
       headers,
+      signal: deadline,
     });
     const list: any = runs && Array.isArray(runs.check_runs) ? runs.check_runs : [];
     for (const run of list) {
@@ -98,6 +120,7 @@ async function ghPrSnapshotInner(args: any, ctx: any) {
 
   const reviewsRaw: any = await ctx.stdlib.fetchJson(api + "/pulls/" + number + "/reviews", {
     headers,
+    signal: deadline,
   });
   const reviewList: any = Array.isArray(reviewsRaw) ? reviewsRaw : [];
   const latestByUser: any = {};
