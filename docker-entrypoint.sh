@@ -203,8 +203,10 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
               (.configs[] | select(.key == "codex_oauth_0") | .value // empty),
               (.configs[] | select(.key == "codex_oauth") | .value // empty)
             ' 2>/dev/null | head -1)
+        CODEX_OAUTH_SEED_STANDALONE=false
         if [ -z "$CODEX_OAUTH_SEED" ] && [ -n "${CODEX_OAUTH:-}" ]; then
             CODEX_OAUTH_SEED="$CODEX_OAUTH"
+            CODEX_OAUTH_SEED_STANDALONE=true
             echo "[entrypoint] No codex_oauth_0/codex_oauth in config store; seeding from CODEX_OAUTH env var"
         fi
         if [ -n "$CODEX_OAUTH_SEED" ]; then
@@ -212,9 +214,20 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
                 echo "Warning: codex_oauth source is not valid JSON, skipping" >&2
             else
                 mkdir -p "$WORKER_CODEX_HOME"
-                if ! echo "$CODEX_OAUTH_SEED" | jq '
+                # Refresh token handling depends on the source: config-store
+                # pool credentials get their refresh_token blanked (see the
+                # comment above this block — an unlocked self-refresh outside
+                # /api/oauth/refresh-locks can revoke the whole token family
+                # for a *pool* credential the runner rotates). A standalone
+                # container-provided CODEX_OAUTH is single-slot/non-pool and
+                # never gets a per-task overwrite from the runner, so
+                # blanking its refresh token here would permanently strip the
+                # only copy — leaving the Codex CLI unable to renew an
+                # expired access token for the lifetime of the container.
+                # Preserve it on the standalone path.
+                if ! echo "$CODEX_OAUTH_SEED" | jq --argjson standalone "$CODEX_OAUTH_SEED_STANDALONE" '
                     if .auth_mode == "chatgpt" then
-                      .tokens.refresh_token = ""
+                      (if $standalone then . else .tokens.refresh_token = "" end)
                     elif (.access and .refresh and .accountId and .expires) then
                       {
                         auth_mode: "chatgpt",
@@ -222,7 +235,7 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
                         tokens: {
                           id_token: .access,
                           access_token: .access,
-                          refresh_token: "",
+                          refresh_token: (if $standalone then (.refresh // "") else "" end),
                           account_id: .accountId
                         },
                         last_refresh: ((.expires / 1000 | floor) | todateiso8601)

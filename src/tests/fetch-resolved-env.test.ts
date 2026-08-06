@@ -142,14 +142,24 @@ describe("fetchResolvedEnv", () => {
 
   // ─── Issue #1102 bug 2 regression coverage ──────────────────────────────
   //
-  // A container-provided value for a RELOADABLE_ENV_KEYS entry (e.g.
-  // `docker run -e MODEL_OVERRIDE=...`) must survive a config reload even
-  // when swarm_config holds a BLANK row for that key. Nothing writes an
-  // intentionally-empty row through the dedicated tri-state endpoints (they
-  // DELETE to clear — see `updateAgentRuntimeRoute` in src/http/agents.ts),
-  // so a blank row can only be a stray write via the generic
-  // `PUT /api/config` (which accepts `value: z.unknown()`); treating it the
-  // same as "no row" for these keys closes that gap.
+  // A container-provided value for a model-control key (MODEL_OVERRIDE,
+  // REASONING_EFFORT_OVERRIDE — e.g. `docker run -e MODEL_OVERRIDE=...`)
+  // must survive a config reload even when swarm_config holds a BLANK row
+  // for that key. Nothing writes an intentionally-empty row through the
+  // dedicated tri-state endpoint (it DELETEs to clear — see
+  // `updateAgentRuntimeRoute` in src/http/agents.ts), so a blank row can
+  // only be a stray write via the generic `PUT /api/config` (which accepts
+  // `value: z.unknown()`); treating it the same as "no row" for these keys
+  // closes that gap.
+  //
+  // This protection is intentionally narrower than the full
+  // RELOADABLE_ENV_KEYS set: other reloadable keys (MEMORY_RATERS,
+  // SLACK_DISABLE, etc.) are written through the generic config-page path,
+  // where a blank row IS a meaningful, intentional value an operator can
+  // set on purpose (e.g. `MEMORY_RATERS=""` is the documented way to run no
+  // raters even when the container sets `MEMORY_RATERS=llm` — see
+  // getRegisteredRaters in src/be/memory/raters/registry.ts). Guarding
+  // those too would silently ignore a real operator override.
 
   test("a blank swarm_config value for MODEL_OVERRIDE does not clear the container-provided value", async () => {
     expect(RELOADABLE_ENV_KEYS.has("MODEL_OVERRIDE")).toBe(true);
@@ -204,6 +214,39 @@ describe("fetchResolvedEnv", () => {
     const result = await fetchResolvedEnv(testUrl, "key", agentId, {});
 
     expect(result.env.MODEL_OVERRIDE).toBe("");
+  });
+
+  test("a blank swarm_config value for REASONING_EFFORT_OVERRIDE does not clear the container-provided value", async () => {
+    expect(RELOADABLE_ENV_KEYS.has("REASONING_EFFORT_OVERRIDE")).toBe(true);
+
+    const agentId = "agent-blank-reasoning-effort";
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: { configs: [{ key: "REASONING_EFFORT_OVERRIDE", value: "" }] },
+    });
+
+    const baseEnv = { REASONING_EFFORT_OVERRIDE: "high" };
+    const result = await fetchResolvedEnv(testUrl, "key", agentId, baseEnv);
+
+    expect(result.env.REASONING_EFFORT_OVERRIDE).toBe("high");
+  });
+
+  test("a blank swarm_config value for MEMORY_RATERS clears the container-provided value (disable-all-raters is a real, intentional operator state)", async () => {
+    expect(RELOADABLE_ENV_KEYS.has("MEMORY_RATERS")).toBe(true);
+
+    const agentId = "agent-blank-memory-raters";
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: { configs: [{ key: "MEMORY_RATERS", value: "" }] },
+    });
+
+    // Container sets MEMORY_RATERS=llm; an operator explicitly saving a
+    // blank value on the dashboard's Configuration page must be able to
+    // turn raters off, not have the container value silently win.
+    const baseEnv = { MEMORY_RATERS: "llm" };
+    const result = await fetchResolvedEnv(testUrl, "key", agentId, baseEnv);
+
+    expect(result.env.MEMORY_RATERS).toBe("");
   });
 });
 

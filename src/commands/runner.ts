@@ -671,18 +671,27 @@ export async function fetchResolvedEnv(
             (config) => config.key === "SCRIPTS_ONLY_MCP",
           )?.value;
           for (const config of data.configs) {
-            // A blank swarm_config value for a RELOADABLE_ENV_KEYS entry must
-            // not silently blank out a genuinely-set container/boot env
-            // value — that key exists specifically so a container-provided
-            // value (e.g. `docker run -e MODEL_OVERRIDE=...`) survives config
-            // reloads. Nothing writes an intentionally-empty row through the
+            // A blank swarm_config value for a BLANK_ROW_IS_STRAY_KEYS entry
+            // (the model-control keys) must not silently blank out a
+            // genuinely-set container/boot env value — that key exists
+            // specifically so a container-provided value (e.g.
+            // `docker run -e MODEL_OVERRIDE=...`) survives config reloads.
+            // Nothing writes an intentionally-empty row through the
             // dedicated tri-state endpoints (they use DELETE to clear), so an
             // empty string here can only be a stray row (e.g. via the generic
             // `PUT /api/config`, which accepts any value) — treat it the same
             // as "no row" rather than as an explicit override (issue #1102
-            // bug 2). Every OTHER config key keeps today's behavior (empty
-            // string is a valid explicit value).
-            if (config.value === "" && RELOADABLE_ENV_KEYS.has(config.key) && baseEnv[config.key]) {
+            // bug 2). This is narrower than the full RELOADABLE_ENV_KEYS set:
+            // other reloadable keys (e.g. MEMORY_RATERS) are written through
+            // the generic config-page path where a blank row IS a meaningful,
+            // intentional value — see BLANK_ROW_IS_STRAY_KEYS above. Every
+            // other config key keeps today's behavior (empty string is a
+            // valid explicit value).
+            if (
+              config.value === "" &&
+              BLANK_ROW_IS_STRAY_KEYS.has(config.key) &&
+              baseEnv[config.key]
+            ) {
               console.warn(
                 `[env-reload] Ignoring blank swarm_config value for ${config.key} — keeping container-provided value`,
               );
@@ -820,6 +829,30 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "TEMPLATE_REGISTRY_URL",
   "SLACK_DISABLE",
   "SWARM_ORG_NAME",
+]);
+
+/**
+ * Subset of RELOADABLE_ENV_KEYS whose write path is the agent tri-state
+ * endpoint (`PATCH /api/agents/:id` — see src/http/agents.ts), which upserts
+ * a row for a concrete value and DELETEs the row to clear it. No path ever
+ * intentionally writes an empty-string row for these keys, so a blank row
+ * can only be a stray write via the generic `PUT /api/config` (which
+ * accepts any value) — safe to treat as "no row" and keep the
+ * container-provided value.
+ *
+ * Every other RELOADABLE_ENV_KEYS entry (e.g. MEMORY_RATERS, SLACK_DISABLE)
+ * is written through the generic config-page path where an explicit blank
+ * IS a meaningful value the UI lets an operator set on purpose — e.g.
+ * `MEMORY_RATERS=""` is the documented way to run no raters even when the
+ * container sets `MEMORY_RATERS=llm` (see getRegisteredRaters in
+ * src/be/memory/raters/registry.ts and the configuration-catalog
+ * description). Blank-guarding those would silently ignore a real operator
+ * override, so this set intentionally stays narrower than
+ * RELOADABLE_ENV_KEYS (issue #1102 bug 2 follow-up).
+ */
+const BLANK_ROW_IS_STRAY_KEYS: ReadonlySet<string> = new Set([
+  "MODEL_OVERRIDE",
+  "REASONING_EFFORT_OVERRIDE",
 ]);
 
 /**
