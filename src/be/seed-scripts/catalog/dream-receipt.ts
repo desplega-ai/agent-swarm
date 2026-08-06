@@ -132,6 +132,9 @@ export default async function dreamReceipt(args: any, ctx: any) {
       agentId: ctx.stdlib.Redacted.value(ctx.swarm.config.agentId),
       learning: receipt,
       category: "best-practice",
+      // Provenance: the receipt lands under the Lead, and without this marker the
+      // Lead's next slice would treat last night's receipt as fresh evidence.
+      tags: ["dreaming"],
     });
     assertSucceeded(memory, "receipt memory write");
     await setMarker("memory-written");

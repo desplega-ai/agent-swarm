@@ -140,6 +140,19 @@ describe("dream-gather gates", () => {
     expect(harness.calls).toContain("compound_insights");
   });
 
+  test("Dreaming's own failures are not presented as swarm blockers", async () => {
+    // A failed reflection or critique task from a prior run is the add-on's own
+    // bookkeeping; surfacing it to the hygiene lane invites HEARTBEAT edits
+    // proposed from Dreaming's internals.
+    const harness = gatherHarness({ roster: [{ id: "lead-1", name: "Lead", isLead: 1 }] });
+    await dreamGather({ runId: "run-42" }, harness.ctx);
+
+    const blockers = harness.queries.find((query) => query.sql.includes("failureReason"))!;
+    expect(blockers.sql).toContain("t.workflowRunId NOT IN");
+    expect(blockers.sql).toContain("SELECT workflowId FROM workflow_runs WHERE id = ?");
+    expect(blockers.params).toEqual(["-1 days", "run-42"]);
+  });
+
   test("a stale in-progress task alone counts as activity", async () => {
     // The retired daily-blocker-digest is absorbed into Dreaming, so an otherwise
     // silent day whose only signal is stuck work must still reach the blocker
@@ -723,6 +736,7 @@ describe("dream-apply batches", () => {
     const updates: unknown[] = [];
     const result = await dreamApply(
       {
+        prSnapshot: { repo: "owner/repo", number: 42 },
         deltas: [
           {
             kind: "hygiene",
@@ -806,6 +820,56 @@ describe("dream-apply batches", () => {
       ctx,
     );
     expect(noTarget.rotationCursor).toBeUndefined();
+    expect(increments).toHaveLength(1);
+  });
+
+  test("a delta-carried cursor advance is gated on the snapshot too", async () => {
+    // The hygiene lane may approve an unrelated HEARTBEAT edit and attach cursor
+    // coordinates; honouring them when gh-pr-snapshot degraded would skip a pull
+    // request that was never fetched, bypassing the run-level gate entirely.
+    const increments: unknown[] = [];
+    const ctx = {
+      swarm: {
+        async db_query() {
+          return { success: true, data: { rows: [["## Rotation\nExisting.\n"]] } };
+        },
+        async profile_update() {
+          return { success: true, data: { success: true } };
+        },
+        async kv_incr(request: unknown) {
+          increments.push(request);
+          return { success: true, data: { value: 2 } };
+        },
+      },
+    };
+    const delta = {
+      kind: "hygiene",
+      agentId: "agent-1",
+      op: "append-under",
+      anchor: "## Rotation",
+      content: "New rotation item.",
+      rotationCursorKey: "rotation-cursor",
+      rotationCursorNamespace: "dreaming",
+    };
+
+    const degraded = await dreamApply(
+      { deltas: [delta], prSnapshot: { error: "snapshot fetch failed: ECONNRESET" } },
+      ctx,
+    );
+    // The profile edit still applies — only the cursor is withheld.
+    expect(degraded.applied).toEqual([
+      expect.objectContaining({
+        kind: "hygiene",
+        cursorError: "pull-request snapshot did not succeed — cursor not advanced",
+      }),
+    ]);
+    expect(increments).toEqual([]);
+
+    const healthy = await dreamApply(
+      { deltas: [delta], prSnapshot: { repo: "owner/repo", number: 42 } },
+      ctx,
+    );
+    expect(healthy.applied[0]?.cursorError).toBeUndefined();
     expect(increments).toHaveLength(1);
   });
 
@@ -946,6 +1010,7 @@ describe("dream-apply batches", () => {
     const result = await dreamApply(
       {
         rotation: { available: true, key: "rotation-cursor", namespace: "dreaming" },
+        prSnapshot: { repo: "owner/repo", number: 42 },
         deltas: [
           {
             kind: "hygiene",
@@ -1339,6 +1404,26 @@ describe("dream-apply batches", () => {
     expect(queries.find((query) => query.sql.includes("tool.start"))!.sql).not.toContain(
       "taskId NOT IN",
     );
+  });
+
+  test("the slice leaves out memories Dreaming itself wrote", async () => {
+    // agent_memory has no taskId, so the workflow-run exclusion cannot reach it —
+    // the receipt lands under the Lead and applied deltas under their target
+    // agents, and both would otherwise be evidence for the next reflection.
+    const queries: Array<{ sql: string; params: unknown[] }> = [];
+    await dreamAgentSlice(
+      { agentId: "agent-1" },
+      {
+        swarm: {
+          async db_query({ sql, params }: { sql: string; params: unknown[] }) {
+            queries.push({ sql, params });
+            return { success: true, columns: [], rows: [] };
+          },
+        },
+      },
+    );
+    const memoryQuery = queries.find((query) => query.sql.includes("FROM agent_memory"))!;
+    expect(memoryQuery.sql).toContain(`tags NOT LIKE '%"dreaming"%'`);
   });
 
   test("the slice window follows task OUTCOME time, not just creation", async () => {

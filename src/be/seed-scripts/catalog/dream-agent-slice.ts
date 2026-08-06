@@ -90,10 +90,17 @@ export default async function dreamAgentSlice(args: any, ctx: any) {
       [agentId, windowModifier, ...selfParams],
     ),
     query(
+      // agent_memory has no taskId, so the workflow-run exclusion cannot reach it.
+      // Dreaming instead tags what it writes (the receipt under the Lead, and each
+      // applied memory delta under its target agent) so those rows can be kept out
+      // of tomorrow's evidence — otherwise an agent reflects on what last night's
+      // dream wrote for it. Rows written before the tag existed are not excluded;
+      // that backlog ages out of the window on its own.
       `SELECT id, name, scope, source, accessCount, alpha, beta, createdAt,
               ROUND(alpha / (alpha + beta), 3) AS usefulness
        FROM agent_memory
        WHERE agentId = ? AND julianday(createdAt) > julianday('now', ?)
+         AND (tags IS NULL OR tags NOT LIKE '%"dreaming"%')
        ORDER BY createdAt DESC LIMIT 20`,
     ),
     query(

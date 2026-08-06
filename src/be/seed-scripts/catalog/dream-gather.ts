@@ -267,16 +267,18 @@ export default async function dreamGather(args: any, ctx: any) {
           })
         : Promise.resolve(null),
       ctx.swarm.db_query({
-        sql: `SELECT id, agentId, status, substr(task, 1, 240) AS task,
-                     substr(failureReason, 1, 240) AS failureReason, createdAt, lastUpdatedAt
-              FROM agent_tasks
-              WHERE (status = 'in_progress'
-                     AND julianday(lastUpdatedAt) < julianday('now', '-2 hours'))
-                 OR (status = 'failed'
-                     AND julianday(lastUpdatedAt) > julianday('now', ?))
-              ORDER BY lastUpdatedAt ASC
+        sql: `SELECT t.id, t.agentId, t.status, substr(t.task, 1, 240) AS task,
+                     substr(t.failureReason, 1, 240) AS failureReason, t.createdAt, t.lastUpdatedAt
+              FROM agent_tasks t
+              WHERE ((t.status = 'in_progress'
+                      AND julianday(t.lastUpdatedAt) < julianday('now', '-2 hours'))
+                 OR (t.status = 'failed'
+                     AND julianday(t.lastUpdatedAt) > julianday('now', ?)))
+                AND (t.workflowRunId IS NULL OR t.workflowRunId NOT IN (
+                  ${selfRunsSubquery}))
+              ORDER BY t.lastUpdatedAt ASC
               LIMIT 50`,
-        params: [windowModifier],
+        params: [windowModifier, selfParam],
       }),
       ctx.swarm.db_query({
         sql: `SELECT id, agentId, substr(task, 1, 240) AS task, createdAt

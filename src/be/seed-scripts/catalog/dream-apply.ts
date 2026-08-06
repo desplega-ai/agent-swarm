@@ -287,6 +287,7 @@ export default async function dreamApply(args: any, ctx: any) {
   }
   const runId = parsed.data.runId;
   const roster = parsed.data.agentIds ? new Set(parsed.data.agentIds) : null;
+  const snapshotSucceeded = rotationSnapshotSucceeded(parsed.data.prSnapshot);
   const result: {
     applied: Record<string, unknown>[];
     held: Record<string, unknown>[];
@@ -330,7 +331,12 @@ export default async function dreamApply(args: any, ctx: any) {
           continue;
         }
         const entry = await auditEntry(delta);
-        if (delta.kind === "hygiene" && delta.rotationCursorKey) {
+        // Same gate as the run-level advance below: a delta may carry cursor
+        // coordinates for an unrelated HEARTBEAT edit, and honouring them when
+        // the snapshot failed would skip a pull request that was never fetched.
+        if (delta.kind === "hygiene" && delta.rotationCursorKey && !snapshotSucceeded) {
+          entry.cursorError = "pull-request snapshot did not succeed — cursor not advanced";
+        } else if (delta.kind === "hygiene" && delta.rotationCursorKey) {
           // Belt to the validator: without the namespace, kv_incr silently falls
           // back to the CALLER's agent namespace and the shared cursor never moves.
           const cursorNamespace = delta.rotationCursorNamespace;
@@ -411,6 +417,9 @@ export default async function dreamApply(args: any, ctx: any) {
             agentId: delta.agentId,
             learning: delta.content,
             category: "best-practice",
+            // Provenance: lets dream-agent-slice keep the add-on's own writes out
+            // of tomorrow's evidence instead of reflecting on its own output.
+            tags: ["dreaming"],
           });
           assertSucceeded(written, "memory write");
         }
@@ -504,10 +513,9 @@ export default async function dreamApply(args: any, ctx: any) {
     | { available?: boolean; key?: string; namespace?: string }
     | undefined;
   const reviewed = hygieneLaneReviewed(parsed.data.hygieneReview);
-  const snapshotted = rotationSnapshotSucceeded(parsed.data.prSnapshot);
   const notConsumed = !reviewed
     ? "hygiene lane produced no review — rotation target left for the next dream"
-    : !snapshotted
+    : !snapshotSucceeded
       ? "pull-request snapshot did not succeed — rotation target left for the next dream"
       : null;
   if (rotation?.available === true && !cursorAdvancedByDelta && notConsumed) {
