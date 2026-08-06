@@ -38,3 +38,19 @@ Functional checks: icon returns to normal state after unhover (pixel-probed the
 row before/after); `[data-sidebar="menu-button"]` computed styles show
 `transition-property: width, height, padding, color, background-color`,
 `transition-duration: 0.2s`, `transition-delay: 0.05s` at rest.
+
+## Round 3 — grid header restyle + sidebar chrome softening + responsive slice
+
+Direction reference: Taras's Cloudflare OS "cleanliness" screenshot — near
+line-free chrome, spacing + uppercase micro-labels doing the separation.
+
+| File | What it shows |
+|---|---|
+| [`11-grid-header-light.png`](./2026-08-06-app-theming/11-grid-header-light.png) | AG Grid header with no filled band — 11px uppercase tracked labels + subtle bottom rule; sidebar header/footer/panel rules on the subtle tier. |
+| [`12-grid-header-dark.png`](./2026-08-06-app-theming/12-grid-header-dark.png) | Same in dark — white/8 hairlines throughout the chrome. |
+
+Slice-2 responsive changes (Grid bare-count reflow, Stack collapseBelow,
+Grid/Split padding, Table pinned/pagination/density) verified by type gates +
+the 173 apps tests against the regenerated catalog; Drawer mobile width turned
+out already solved (runtime passes `w-full`, twMerge overrides the sheet's
+`w-3/4` base) — no change needed.

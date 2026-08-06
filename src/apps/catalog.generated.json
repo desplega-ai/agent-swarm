@@ -34,7 +34,7 @@
   ],
   "components": {
     "Stack": {
-      "description": "THE primary layout primitive — a flex column (default) or row of its children. `gap`/`padding` use the shared spacing scale (none|xs|sm|md|lg|xl, default gap md); `align` is the cross axis, `justify` the main axis, `wrap` lets a row reflow. Use this as the page root and for every section; `Container` is the legacy 2-prop alias kept for older pages.",
+      "description": "THE primary layout primitive — a flex column (default) or row of its children. `gap`/`padding` use the shared spacing scale (none|xs|sm|md|lg|xl, default gap md); `align` is the cross axis, `justify` the main axis, `wrap` lets a row reflow. For rows, set `collapseBelow` (sm|md|lg) so the row stacks vertically on narrow viewports — filter bars should always set it. Use this as the page root and for every section; `Container` is the legacy 2-prop alias kept for older pages.",
       "slots": ["default"],
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -62,13 +62,17 @@
           "padding": {
             "type": "string",
             "enum": ["none", "xs", "sm", "md", "lg", "xl"]
+          },
+          "collapseBelow": {
+            "type": "string",
+            "enum": ["sm", "md", "lg"]
           }
         },
         "additionalProperties": false
       }
     },
     "Grid": {
-      "description": "Responsive grid of equal-width cells, one per child. `columns` is either a single count (1-6) or a per-breakpoint object `{ base, sm, md, lg }` (default `{ base: 1, md: 2, lg: 3 }`) so cards reflow on narrow viewports. Prefer this over a wrapping Stack for card strips and metric tiles.",
+      "description": "Responsive grid of equal-width cells, one per child. `columns` is either a single count (1-6) — responsive shorthand: 1 column on phones, 2 from `sm`, the count from `md` up — or a per-breakpoint object `{ base, sm, md, lg }` (default `{ base: 1, md: 2, lg: 3 }`). Prefer this over a wrapping Stack for card strips and metric tiles.",
       "slots": ["default"],
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -112,6 +116,10 @@
           "gap": {
             "type": "string",
             "enum": ["none", "xs", "sm", "md", "lg", "xl"]
+          },
+          "padding": {
+            "type": "string",
+            "enum": ["none", "xs", "sm", "md", "lg", "xl"]
           }
         },
         "additionalProperties": false
@@ -138,6 +146,10 @@
           },
           "reverse": {
             "type": "boolean"
+          },
+          "padding": {
+            "type": "string",
+            "enum": ["none", "xs", "sm", "md", "lg", "xl"]
           }
         },
         "additionalProperties": false
@@ -458,7 +470,7 @@
       }
     },
     "Table": {
-      "description": "Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`). `rowActions` chains receive `{ \"$row\": \"<col>\" }` (or `{ \"$row\": \"\" }` for the whole row) and `{ \"$rowIndex\": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`\"\"` disables one) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `\"filters\": { \"pinned\": true }`).",
+      "description": "Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`). `rowActions` chains receive `{ \"$row\": \"<col>\" }` (or `{ \"$row\": \"\" }` for the whole row) and `{ \"$rowIndex\": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`\"\"` disables one) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `\"filters\": { \"pinned\": true }`). Columns take `pinned: \"left\"|\"right\"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: \"compact\"` tightens row height.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -509,6 +521,10 @@
                 },
                 "width": {
                   "type": "number"
+                },
+                "pinned": {
+                  "type": "string",
+                  "enum": ["left", "right"]
                 }
               },
               "required": ["key"],
@@ -628,6 +644,13 @@
                 }
               ]
             }
+          },
+          "pagination": {
+            "type": "boolean"
+          },
+          "density": {
+            "type": "string",
+            "enum": ["comfortable", "compact"]
           }
         },
         "required": ["columns"],

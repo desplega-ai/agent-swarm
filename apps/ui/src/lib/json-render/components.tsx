@@ -330,13 +330,26 @@ type TabsComponentProps = InferComponentProps<typeof swarmCatalog, "Tabs">;
 type SearchInputProps = InferComponentProps<typeof swarmCatalog, "SearchInput">;
 type SelectFilterProps = InferComponentProps<typeof swarmCatalog, "Select">;
 
+/** `collapseBelow` → the breakpoint the row un-stacks at (full class names). */
+const stackRowFromClass: Record<"sm" | "md" | "lg", string> = {
+  sm: "sm:flex-row",
+  md: "md:flex-row",
+  lg: "lg:flex-row",
+};
+
 function StackComponent({ props, children }: { props: StackProps; children: ReactNode }) {
   const direction = props.direction ?? "column";
+  // A collapsible row is a column below its breakpoint (Split semantics).
+  const collapse = direction === "row" ? props.collapseBelow : undefined;
   return (
     <div
       className={cn(
         "flex min-w-0",
-        direction === "row" ? "flex-row" : "flex-col",
+        direction === "row"
+          ? collapse
+            ? cn("flex-col", stackRowFromClass[collapse])
+            : "flex-row"
+          : "flex-col",
         stackGapClass[props.gap ?? "md"],
         props.align ? alignClass[props.align] : undefined,
         props.justify ? justifyClass[props.justify] : undefined,
@@ -357,11 +370,12 @@ function clampColumns(value: unknown): number | undefined {
 function GridComponent({ props, children }: { props: GridProps; children: ReactNode }) {
   const columns = props.columns as GridColumns;
   const single = clampColumns(columns);
-  // A bare count applies at every breakpoint; the object form falls back to the
+  // A bare count is responsive shorthand — 1 column on phones, 2 from `sm`,
+  // the declared count from `md` — and the object form falls back to the
   // "cards reflow" default so a sparse `{ lg: 4 }` still stacks on a phone.
   const perBreakpoint =
     single !== undefined
-      ? { base: single, sm: undefined, md: undefined, lg: undefined }
+      ? { base: 1, sm: Math.min(2, single), md: single, lg: undefined }
       : {
           base: clampColumns((columns as { base?: number } | undefined)?.base) ?? 1,
           sm: clampColumns((columns as { sm?: number } | undefined)?.sm),
@@ -380,6 +394,7 @@ function GridComponent({ props, children }: { props: GridProps; children: ReactN
         perBreakpoint.md ? gridColsMdClass[perBreakpoint.md] : undefined,
         perBreakpoint.lg ? gridColsLgClass[perBreakpoint.lg] : undefined,
         stackGapClass[props.gap ?? "md"],
+        props.padding ? paddingClass[props.padding] : undefined,
       )}
     >
       {children}
@@ -396,7 +411,14 @@ function SplitComponent({ props, children }: { props: SplitProps; children: Reac
   const reverse = props.reverse === true;
 
   return (
-    <div className={cn("grid min-w-0 grid-cols-1", splitTrackClass[breakpoint][tracks], gap)}>
+    <div
+      className={cn(
+        "grid min-w-0 grid-cols-1",
+        splitTrackClass[breakpoint][tracks],
+        gap,
+        props.padding ? paddingClass[props.padding] : undefined,
+      )}
+    >
       <div
         className={cn(
           "flex min-w-0 flex-col",
@@ -876,6 +898,9 @@ function TableComponent({ props }: { props: TableProps }) {
     width: column.width,
     flex: column.width ? undefined : flexForKind(column.kind),
     minWidth: column.width ? undefined : minWidthForKind(column.kind),
+    // Pinned columns survive horizontal scroll (id on the left, status on the
+    // right) — the mobile answer for wide tables.
+    pinned: column.pinned,
     // AG Grid's cell-data-type inference turns a boolean column into a disabled
     // checkbox renderer, which contradicts the documented `formatCell` contract
     // (yes / no text) and reads as a broken toggle. Opt every app column out of
@@ -945,6 +970,8 @@ function TableComponent({ props }: { props: TableProps }) {
 
   const columnDefs = useStableBySignature(builtColumnDefs, JSON.stringify([columns, rowActions]));
   const hugsContent = rows.length <= AUTO_HEIGHT_MAX_ROWS;
+  // Endless-scroll guard: unless the author decided, big row sets paginate.
+  const paginated = props.pagination ?? rows.length > 200;
 
   const confirmingAction = pendingRowAction
     ? rowActions[pendingRowAction.rowActionIndex]
@@ -975,7 +1002,8 @@ function TableComponent({ props }: { props: TableProps }) {
           !hugsContent && "h-[520px] flex-none",
         )}
         columnSizing="flex"
-        pagination={false}
+        pagination={paginated}
+        rowHeight={props.density === "compact" ? 34 : undefined}
       />
       <AlertDialog
         open={pendingRowAction !== null}

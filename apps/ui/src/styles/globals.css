@@ -42,7 +42,9 @@
   --color-sidebar-primary-foreground: oklch(0.985 0 0);
   --color-sidebar-accent: oklch(0.967 0.001 286.375);
   --color-sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-  --color-sidebar-border: oklch(0.92 0.004 286.32);
+  /* Sidebar chrome lines live on the subtle tier: the panel reads as a tonal
+     plane (bg step + quiet rules), not a boxed column. */
+  --color-sidebar-border: oklch(0.945 0.003 286);
   --color-sidebar-ring: oklch(0.555 0.163 48.998);
 
   /* Semantic status tokens — light mode
@@ -156,7 +158,7 @@
   --color-sidebar-primary-foreground: oklch(0.985 0 0);
   --color-sidebar-accent: oklch(0.274 0.006 286.033);
   --color-sidebar-accent-foreground: oklch(0.985 0 0);
-  --color-sidebar-border: oklch(1 0 0 / 10%);
+  --color-sidebar-border: oklch(1 0 0 / 8%);
   --color-sidebar-ring: oklch(0.769 0.188 70.08);
 
   /* Semantic status tokens — dark mode
