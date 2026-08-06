@@ -169,3 +169,23 @@ the dropdown.
 | [`44-breadcrumb-fullwidth.png`](./2026-08-06-app-theming/44-breadcrumb-fullwidth.png) | Task detail: full 44-char task name uncut in the trail (previously clipped at 40 chars). |
 
 Gates: `bun run lint`, `bunx tsc -b` green.
+
+## Round 10 — workflows/scripts tabs join the toolbar row (2026-08-06, night)
+
+Workflows and Scripts adopt the People pattern: the active tab's filters sit
+on the left of ONE shared toolbar row with the tab switcher pinned right
+(`TabsList ml-auto`); the standalone TabsList row is gone. The scripts Runs
+tab's status filter was lifted out of `ScriptRunsGrid` into a new exported
+`ScriptRunsStatusFilter` (same URL param, zero prop plumbing; the grid takes
+`hideToolbar` on /scripts while /scripts/:id keeps the built-in row). The
+workflows Runs tab's status/workflow selects moved into the shared toolbar
+the same way. Scripts filters still hide over the first-run empty state.
+
+| File | What it shows |
+|---|---|
+| [`45-scripts-tabs-toolbar.png`](./2026-08-06-app-theming/45-scripts-tabs-toolbar.png) | Scripts tab: search + scope + scratch switch left, Scripts\|Runs pinned right — one row. |
+| [`46-scripts-runs-tab-toolbar.png`](./2026-08-06-app-theming/46-scripts-runs-tab-toolbar.png) | Runs tab: status filter left, tabs right — same single row. |
+
+Workflows toolbar not visually verified with data (QA DB has no workflows so
+the page early-returns its empty state) — the structure mirrors scripts
+exactly; gates green.

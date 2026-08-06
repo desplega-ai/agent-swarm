@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useScriptRuns } from "@/api/hooks/use-script-runs";
 import { useScripts } from "@/api/hooks/use-scripts";
 import type { ScriptListItem, ScriptScope } from "@/api/types";
-import { ScriptRunsGrid } from "@/components/scripts/script-runs-grid";
+import { ScriptRunsGrid, ScriptRunsStatusFilter } from "@/components/scripts/script-runs-grid";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
@@ -138,55 +138,70 @@ export default function ScriptsPage() {
         onValueChange={(value) => setParam("tab", value, { defaultValue: "scripts" })}
         className="flex flex-col flex-1 min-h-0"
       >
-        <TabsList>
-          <TabsTrigger value="scripts">Scripts</TabsTrigger>
-          <TabsTrigger value="runs">Runs</TabsTrigger>
-        </TabsList>
+        {/* Shared toolbar (People pattern): the active tab's filters on the
+            left, tabs pinned to the right. Filters hide over the first-run
+            empty state (showEmptyState is false whenever a filter is active). */}
+        <div className="flex flex-wrap items-center gap-3">
+          {activeTab === "scripts" && (
+            <div
+              className={cn(
+                "flex flex-1 min-w-0 flex-wrap items-center gap-3",
+                showEmptyState && "hidden",
+              )}
+            >
+              <div className="relative w-full max-w-sm">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search scripts…"
+                  value={search}
+                  onChange={(e) => setParam("search", e.target.value, { reset: ["scriptsPage"] })}
+                  className="pl-9"
+                />
+              </div>
+              <Select
+                value={scopeFilter}
+                onValueChange={(value) =>
+                  setParam("scope", value, { defaultValue: "all", reset: ["scriptsPage"] })
+                }
+              >
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue placeholder="Scope" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SCOPE_OPTIONS.map((scope) => (
+                    <SelectItem key={scope} value={scope}>
+                      {scope === "all" ? "All scopes" : scope}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="include-scratch"
+                  size="sm"
+                  checked={includeScratch}
+                  onCheckedChange={(checked) =>
+                    setParam("scratch", checked ? "true" : "", { reset: ["scriptsPage"] })
+                  }
+                />
+                <Label htmlFor="include-scratch" className="text-xs text-muted-foreground">
+                  Include scratch
+                </Label>
+              </div>
+            </div>
+          )}
+          {activeTab === "runs" && (
+            <div className="flex flex-1 min-w-0 flex-wrap items-center gap-2">
+              <ScriptRunsStatusFilter paginationQueryKey="scriptRuns" />
+            </div>
+          )}
+          <TabsList className="ml-auto shrink-0">
+            <TabsTrigger value="scripts">Scripts</TabsTrigger>
+            <TabsTrigger value="runs">Runs</TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="scripts" className="flex flex-col flex-1 min-h-0 mt-2 gap-3">
-          {/* No filter chrome over a first-run empty state — nothing to filter.
-              (showEmptyState is already false whenever a filter is active.) */}
-          <div className={cn("flex flex-wrap items-center gap-3", showEmptyState && "hidden")}>
-            <div className="relative w-full max-w-sm">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search scripts…"
-                value={search}
-                onChange={(e) => setParam("search", e.target.value, { reset: ["scriptsPage"] })}
-                className="pl-9"
-              />
-            </div>
-            <Select
-              value={scopeFilter}
-              onValueChange={(value) =>
-                setParam("scope", value, { defaultValue: "all", reset: ["scriptsPage"] })
-              }
-            >
-              <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="Scope" />
-              </SelectTrigger>
-              <SelectContent>
-                {SCOPE_OPTIONS.map((scope) => (
-                  <SelectItem key={scope} value={scope}>
-                    {scope === "all" ? "All scopes" : scope}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <div className="flex items-center gap-2">
-              <Switch
-                id="include-scratch"
-                size="sm"
-                checked={includeScratch}
-                onCheckedChange={(checked) =>
-                  setParam("scratch", checked ? "true" : "", { reset: ["scriptsPage"] })
-                }
-              />
-              <Label htmlFor="include-scratch" className="text-xs text-muted-foreground">
-                Include scratch
-              </Label>
-            </div>
-          </div>
           {showEmptyState ? (
             <EmptyState
               icon={SquareCode}
@@ -209,7 +224,12 @@ export default function ScriptsPage() {
         </TabsContent>
 
         <TabsContent value="runs" className="flex flex-col flex-1 min-h-0 mt-2 gap-3">
-          <ScriptRunsGrid rows={runs} loading={runsLoading} paginationQueryKey="scriptRuns" />
+          <ScriptRunsGrid
+            rows={runs}
+            loading={runsLoading}
+            paginationQueryKey="scriptRuns"
+            hideToolbar
+          />
         </TabsContent>
       </Tabs>
     </div>

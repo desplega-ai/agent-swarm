@@ -42,6 +42,59 @@ interface ScriptRunsGridProps {
   statusParamKey?: string;
   /** Forwarded to DataGrid — keeps the grid page index in the URL. */
   paginationQueryKey?: string;
+  /** Skip the built-in status-filter row — the page renders
+   * <ScriptRunsStatusFilter> in its own toolbar instead. */
+  hideToolbar?: boolean;
+}
+
+/**
+ * Standalone status filter for script runs. Reads/writes the same URL param
+ * the grid filters by, so a page can mount it in a shared toolbar away from
+ * the grid (e.g. the /scripts tabs row) with zero prop plumbing.
+ */
+export function ScriptRunsStatusFilter({
+  statusParamKey = "status",
+  paginationQueryKey,
+}: {
+  statusParamKey?: string;
+  paginationQueryKey?: string;
+}) {
+  const { searchParams, setParam } = useUrlSearchState();
+  const statusParam = readStringParam(searchParams, statusParamKey, "all");
+  const statusFilter = STATUS_OPTIONS.includes(statusParam as ScriptRunStatus | "all")
+    ? (statusParam as ScriptRunStatus | "all")
+    : "all";
+
+  const setStatusFilter = useCallback(
+    (value: string) =>
+      setParam(statusParamKey, value, {
+        defaultValue: "all",
+        reset: paginationQueryKey ? [`${paginationQueryKey}Page`] : [],
+      }),
+    [paginationQueryKey, setParam, statusParamKey],
+  );
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <SelectTrigger className="w-[170px]">
+          <SelectValue placeholder="Status" />
+        </SelectTrigger>
+        <SelectContent>
+          {STATUS_OPTIONS.map((status) => (
+            <SelectItem key={status} value={status}>
+              {status === "all" ? "All statuses" : status.replace("_", " ")}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {statusFilter !== "all" && (
+        <Button variant="ghost" size="sm" onClick={() => setStatusFilter("all")}>
+          Clear filters
+        </Button>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -55,9 +108,10 @@ export function ScriptRunsGrid({
   hideNameColumn = false,
   statusParamKey = "status",
   paginationQueryKey,
+  hideToolbar = false,
 }: ScriptRunsGridProps) {
   const navigate = useNavigate();
-  const { searchParams, setParam } = useUrlSearchState();
+  const { searchParams } = useUrlSearchState();
   const statusParam = readStringParam(searchParams, statusParamKey, "all");
   const statusFilter = STATUS_OPTIONS.includes(statusParam as ScriptRunStatus | "all")
     ? (statusParam as ScriptRunStatus | "all")
@@ -66,15 +120,6 @@ export function ScriptRunsGrid({
   const filteredRows = useMemo(
     () => (statusFilter === "all" ? rows : rows.filter((r) => r.status === statusFilter)),
     [rows, statusFilter],
-  );
-
-  const setStatusFilter = useCallback(
-    (value: string) =>
-      setParam(statusParamKey, value, {
-        defaultValue: "all",
-        reset: paginationQueryKey ? [`${paginationQueryKey}Page`] : [],
-      }),
-    [paginationQueryKey, setParam, statusParamKey],
   );
 
   const columns = useMemo<ColDef<ScriptRunListItem>[]>(() => {
@@ -174,25 +219,12 @@ export function ScriptRunsGrid({
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2">
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[170px]">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            {STATUS_OPTIONS.map((status) => (
-              <SelectItem key={status} value={status}>
-                {status === "all" ? "All statuses" : status.replace("_", " ")}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {statusFilter !== "all" && (
-          <Button variant="ghost" size="sm" onClick={() => setStatusFilter("all")}>
-            Clear filters
-          </Button>
-        )}
-      </div>
+      {!hideToolbar && (
+        <ScriptRunsStatusFilter
+          statusParamKey={statusParamKey}
+          paginationQueryKey={paginationQueryKey}
+        />
+      )}
       <DataGrid
         rowData={filteredRows}
         columnDefs={columns}

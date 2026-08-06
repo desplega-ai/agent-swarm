@@ -266,78 +266,148 @@ export default function WorkflowsPage() {
         onValueChange={(value) => setParam("tab", value, { defaultValue: "workflows" })}
         className="flex flex-col flex-1 min-h-0"
       >
-        <TabsList>
-          <TabsTrigger value="workflows">Workflows</TabsTrigger>
-          <TabsTrigger value="runs">Runs</TabsTrigger>
-        </TabsList>
+        {/* Shared toolbar (People pattern): the active tab's filters on the
+            left, tabs pinned to the right. */}
+        <div className="flex flex-wrap items-center gap-3">
+          {activeTab === "workflows" ? (
+            <div className="flex-1 min-w-0">
+              <ListFilterBar
+                searchValue={search}
+                onSearchChange={(value) =>
+                  setParam("search", value, {
+                    replace: false,
+                    reset: ["workflowsPage"],
+                  })
+                }
+                searchPlaceholder="Search workflows…"
+                hasActiveFilters={hasActiveWorkflowFilters}
+                onClear={clearWorkflowFilters}
+              >
+                <Select
+                  value={enabledFilter}
+                  onValueChange={(value) =>
+                    setParam("enabled", value, {
+                      defaultValue: "all",
+                      replace: false,
+                      reset: ["workflowsPage"],
+                    })
+                  }
+                >
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue placeholder="Enabled" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All states</SelectItem>
+                    <SelectItem value="enabled">Enabled</SelectItem>
+                    <SelectItem value="disabled">Disabled</SelectItem>
+                  </SelectContent>
+                </Select>
+                <SearchableSelect
+                  value={creatorFilter}
+                  onChange={(value) =>
+                    setParam("creator", value, {
+                      defaultValue: "all",
+                      replace: false,
+                      reset: ["workflowsPage"],
+                    })
+                  }
+                  triggerClassName="w-[200px]"
+                  placeholder="Creator agent"
+                  searchPlaceholder="Search creator agents…"
+                  options={[
+                    { value: "all", label: "All creator agents" },
+                    ...(agents ?? []).map((agent) => ({ value: agent.id, label: agent.name })),
+                  ]}
+                />
+                <Select
+                  value={favoritesOnly ? "favorites" : "all"}
+                  onValueChange={(value) =>
+                    setParam("favorites", value === "favorites" ? "true" : "", {
+                      replace: false,
+                      reset: ["workflowsPage"],
+                    })
+                  }
+                >
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue placeholder="Favorites" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All workflows</SelectItem>
+                    <SelectItem value="favorites">Favorites only</SelectItem>
+                  </SelectContent>
+                </Select>
+              </ListFilterBar>
+            </div>
+          ) : (
+            <div className="flex flex-1 min-w-0 items-center gap-2 flex-wrap">
+              <Select
+                value={statusFilter}
+                onValueChange={(value) =>
+                  setParam("runStatus", value, {
+                    defaultValue: "all",
+                    reset: ["workflowRunsPage"],
+                  })
+                }
+              >
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="running">Running</SelectItem>
+                  <SelectItem value="waiting">Waiting</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="failed">Failed</SelectItem>
+                  <SelectItem value="skipped">Skipped</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={workflowFilter}
+                onValueChange={(value) =>
+                  setParam("workflow", value, {
+                    defaultValue: "all",
+                    reset: ["workflowRunsPage"],
+                  })
+                }
+              >
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Workflow" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All workflows</SelectItem>
+                  {workflows?.map((w) => (
+                    <SelectItem key={w.id} value={w.id}>
+                      {w.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {(statusFilter !== "all" || workflowFilter !== "all") && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setParams(
+                      { runStatus: "all", workflow: "all" },
+                      {
+                        defaultValues: { runStatus: "all", workflow: "all" },
+                        reset: ["workflowRunsPage"],
+                      },
+                    )
+                  }
+                >
+                  Clear filters
+                </Button>
+              )}
+            </div>
+          )}
+          <TabsList className="ml-auto shrink-0">
+            <TabsTrigger value="workflows">Workflows</TabsTrigger>
+            <TabsTrigger value="runs">Runs</TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="workflows" className="flex flex-col flex-1 min-h-0 mt-2 gap-3">
-          <ListFilterBar
-            searchValue={search}
-            onSearchChange={(value) =>
-              setParam("search", value, {
-                replace: false,
-                reset: ["workflowsPage"],
-              })
-            }
-            searchPlaceholder="Search workflows…"
-            hasActiveFilters={hasActiveWorkflowFilters}
-            onClear={clearWorkflowFilters}
-          >
-            <Select
-              value={enabledFilter}
-              onValueChange={(value) =>
-                setParam("enabled", value, {
-                  defaultValue: "all",
-                  replace: false,
-                  reset: ["workflowsPage"],
-                })
-              }
-            >
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Enabled" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All states</SelectItem>
-                <SelectItem value="enabled">Enabled</SelectItem>
-                <SelectItem value="disabled">Disabled</SelectItem>
-              </SelectContent>
-            </Select>
-            <SearchableSelect
-              value={creatorFilter}
-              onChange={(value) =>
-                setParam("creator", value, {
-                  defaultValue: "all",
-                  replace: false,
-                  reset: ["workflowsPage"],
-                })
-              }
-              triggerClassName="w-[200px]"
-              placeholder="Creator agent"
-              searchPlaceholder="Search creator agents…"
-              options={[
-                { value: "all", label: "All creator agents" },
-                ...(agents ?? []).map((agent) => ({ value: agent.id, label: agent.name })),
-              ]}
-            />
-            <Select
-              value={favoritesOnly ? "favorites" : "all"}
-              onValueChange={(value) =>
-                setParam("favorites", value === "favorites" ? "true" : "", {
-                  replace: false,
-                  reset: ["workflowsPage"],
-                })
-              }
-            >
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Favorites" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All workflows</SelectItem>
-                <SelectItem value="favorites">Favorites only</SelectItem>
-              </SelectContent>
-            </Select>
-          </ListFilterBar>
           <DataGrid
             rowData={filteredWorkflowRows}
             columnDefs={workflowColumns}
@@ -350,67 +420,6 @@ export default function WorkflowsPage() {
         </TabsContent>
 
         <TabsContent value="runs" className="flex flex-col flex-1 min-h-0 mt-2 gap-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            <Select
-              value={statusFilter}
-              onValueChange={(value) =>
-                setParam("runStatus", value, {
-                  defaultValue: "all",
-                  reset: ["workflowRunsPage"],
-                })
-              }
-            >
-              <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="running">Running</SelectItem>
-                <SelectItem value="waiting">Waiting</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-                <SelectItem value="failed">Failed</SelectItem>
-                <SelectItem value="skipped">Skipped</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select
-              value={workflowFilter}
-              onValueChange={(value) =>
-                setParam("workflow", value, {
-                  defaultValue: "all",
-                  reset: ["workflowRunsPage"],
-                })
-              }
-            >
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Workflow" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All workflows</SelectItem>
-                {workflows?.map((w) => (
-                  <SelectItem key={w.id} value={w.id}>
-                    {w.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {(statusFilter !== "all" || workflowFilter !== "all") && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  setParams(
-                    { runStatus: "all", workflow: "all" },
-                    {
-                      defaultValues: { runStatus: "all", workflow: "all" },
-                      reset: ["workflowRunsPage"],
-                    },
-                  )
-                }
-              >
-                Clear filters
-              </Button>
-            )}
-          </div>
           <DataGrid
             rowData={filteredRuns}
             columnDefs={runColumns}
