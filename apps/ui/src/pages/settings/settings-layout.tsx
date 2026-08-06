@@ -11,6 +11,7 @@ import {
   Settings as SettingsIcon,
   SlidersHorizontal,
 } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,8 @@ const SETTINGS_NAV: SettingsNavItem[] = [
 
 const RAIL_COLLAPSED_KEY = "agent-swarm:settings-rail-collapsed";
 
+const SNAPPY = [0.2, 0, 0, 1] as const;
+
 function readCollapsed(): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -63,6 +66,7 @@ function readCollapsed(): boolean {
 export function SettingsLayout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const reduceMotion = useReducedMotion();
   const { searchParams, setParam } = useUrlSearchState();
   const railParam = readStringParam(searchParams, "rail");
   const collapsed =
@@ -103,50 +107,63 @@ export function SettingsLayout() {
         </Select>
       </div>
 
-      {/* Desktop: left rail. */}
-      {!collapsed ? (
-        <nav
-          aria-label="Settings"
-          className="hidden md:flex md:flex-col md:gap-0.5 md:w-48 shrink-0"
-        >
-          <div className="flex items-center justify-between px-3 pb-1">
-            <span className="text-[11px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
-              Settings
-            </span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => setCollapsed(true)}
-                  className="h-6 w-6"
-                  aria-label="Collapse settings rail"
+      {/* Desktop: left rail. Width + fade on collapse/expand (DESIGN.md
+          § Motion collapse pattern — 200ms open / 150ms close, snappy;
+          reduced motion keeps the fade, drops the width movement). */}
+      <AnimatePresence initial={false}>
+        {!collapsed && (
+          <motion.div
+            className="hidden md:block shrink-0 overflow-hidden"
+            initial={reduceMotion ? { opacity: 0 } : { width: 0, opacity: 0 }}
+            animate={reduceMotion ? { opacity: 1 } : { width: "12rem", opacity: 1 }}
+            exit={
+              reduceMotion
+                ? { opacity: 0, transition: { duration: 0.15 } }
+                : { width: 0, opacity: 0, transition: { duration: 0.15, ease: SNAPPY } }
+            }
+            transition={{ duration: 0.2, ease: SNAPPY }}
+          >
+            <nav aria-label="Settings" className="flex flex-col gap-0.5 w-48">
+              <div className="flex items-center justify-between px-3 pb-1">
+                <span className="text-[11px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                  Settings
+                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => setCollapsed(true)}
+                      className="h-6 w-6"
+                      aria-label="Collapse settings rail"
+                    >
+                      <PanelLeftClose className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Collapse rail</TooltipContent>
+                </Tooltip>
+              </div>
+              {SETTINGS_NAV.map((item) => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                      isActive
+                        ? "bg-accent text-accent-foreground"
+                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                    )
+                  }
                 >
-                  <PanelLeftClose className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">Collapse rail</TooltipContent>
-            </Tooltip>
-          </div>
-          {SETTINGS_NAV.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                )
-              }
-            >
-              <item.icon className="size-4 shrink-0" />
-              <span>{item.title}</span>
-            </NavLink>
-          ))}
-        </nav>
-      ) : null}
+                  <item.icon className="size-4 shrink-0" />
+                  <span>{item.title}</span>
+                </NavLink>
+              ))}
+            </nav>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Content area owns the scroll container. */}
       <div
