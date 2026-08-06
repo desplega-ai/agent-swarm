@@ -16,7 +16,7 @@ export { instantiateTemplate, validateTemplateVariables } from "./templates";
 export {
   handleScheduleTrigger,
   handleWebhookTrigger,
-  warnUnprotectedWebhookTriggers,
+  logOpenWebhookTriggers,
 } from "./triggers";
 export { snapshotWorkflow } from "./version";
 export { startWaitPoller, stopWaitPoller } from "./wait-poller";
@@ -29,7 +29,7 @@ import { recoverIncompleteRuns } from "./recovery";
 import { initWaitBusSubscriptions, setupWorkflowResumeListener } from "./resume";
 import { startRetryPoller } from "./retry-poller";
 import { interpolate } from "./template";
-import { warnUnprotectedWebhookTriggers } from "./triggers";
+import { logOpenWebhookTriggers } from "./triggers";
 import { startWaitPoller } from "./wait-poller";
 
 // ─── Module-level singleton ────────────────────────────────
@@ -83,7 +83,7 @@ export function initWorkflows(): void {
   // Re-attaches one bus listener per distinct pending eventName from the DB.
   initWaitBusSubscriptions(_registry);
 
-  // 7. Log (non-blocking) which existing enabled workflows have an
-  // unprotected webhook trigger now that those are rejected at request time.
-  warnUnprotectedWebhookTriggers();
+  // 7. Inventory (non-blocking, informational) which enabled workflows expose
+  // an open — intentionally unsigned — webhook trigger.
+  logOpenWebhookTriggers();
 }

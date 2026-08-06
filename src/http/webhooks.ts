@@ -574,11 +574,17 @@ export async function handleWebhooks(
       switch (routing.kind) {
         case "workflow":
           // Advanced override — dispatch through the workflow's webhook trigger.
+          // This request was already verified against the Kapso webhook secret
+          // over the raw body above, and `routing.workflowId` comes from an
+          // operator-registered phone-number mapping — not from the payload. So
+          // it does not have to satisfy the "workflow must declare a webhook
+          // trigger" gate that protects the public /api/webhooks/:id endpoint.
           await handleWebhookTrigger(
             routing.workflowId,
             rawBody,
             req.headers,
             getExecutorRegistry(),
+            { alreadyAuthenticated: true },
           );
           break;
         case "no_mapping":

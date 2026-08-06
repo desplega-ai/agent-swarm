@@ -17,11 +17,11 @@ import { BaseExecutor, type ExecutorResult } from "../workflows/executors/base";
 import { ExecutorRegistry } from "../workflows/executors/registry";
 import {
   handleWebhookTrigger,
+  logOpenWebhookTriggers,
   verifyHmacSignature,
   verifyTimestampedHmacSignature,
   verifyTokenEquality,
   WebhookError,
-  warnUnprotectedWebhookTriggers,
 } from "../workflows/triggers";
 
 const TEST_DB_PATH = "./test-workflow-triggers-v2.sqlite";
@@ -269,9 +269,21 @@ describe("handleWebhookTrigger", () => {
     }
   });
 
-  test("no hmacSecret configured rejects with 401 (fail closed, not intentionally unauthenticated)", async () => {
+  test("no hmacSecret configured accepts any request (open webhook trigger is a supported opt-in)", async () => {
     const workflow = makeWorkflow({
       triggers: [{ type: "webhook" }],
+    });
+
+    const result = await handleWebhookTrigger(workflow.id, '{"data":"hello"}', {}, registry);
+
+    expect(result.runId).toBeDefined();
+    const run = getWorkflowRun(result.runId);
+    expect(run).not.toBeNull();
+  });
+
+  test("workflow with NO webhook trigger declared is rejected with 404 (superagent c27edfd7 / b132d7c5)", async () => {
+    const workflow = makeWorkflow({
+      triggers: [{ type: "schedule", scheduleId: crypto.randomUUID() }],
     });
 
     try {
@@ -279,13 +291,14 @@ describe("handleWebhookTrigger", () => {
       expect(true).toBe(false);
     } catch (err) {
       expect(err).toBeInstanceOf(WebhookError);
-      expect((err as WebhookError).statusCode).toBe(401);
+      expect((err as WebhookError).statusCode).toBe(404);
+      expect((err as WebhookError).message).toContain("does not declare a webhook trigger");
     }
   });
 
-  test("no hmacSecret configured: rejected request never creates a workflow run (superagent c27edfd7 regression)", async () => {
+  test("workflow with NO webhook trigger declared: rejected request never creates a run", async () => {
     const workflow = makeWorkflow({
-      triggers: [{ type: "webhook" }],
+      triggers: [{ type: "schedule", scheduleId: crypto.randomUUID() }],
     });
     const { countWorkflowRuns } = await import("../be/db");
     const before = countWorkflowRuns(workflow.id);
@@ -297,8 +310,30 @@ describe("handleWebhookTrigger", () => {
       registry,
     ).catch(() => {});
 
-    const after = countWorkflowRuns(workflow.id);
-    expect(after).toBe(before);
+    expect(countWorkflowRuns(workflow.id)).toBe(before);
+  });
+
+  test("workflow with an empty triggers[] is rejected — manual-only workflows are not webhook-startable", async () => {
+    const workflow = makeWorkflow({ triggers: [] });
+
+    try {
+      await handleWebhookTrigger(workflow.id, "{}", {}, registry);
+      expect(true).toBe(false);
+    } catch (err) {
+      expect((err as WebhookError).statusCode).toBe(404);
+    }
+  });
+
+  test("alreadyAuthenticated bypasses the declared-trigger gate for pre-verified integration callers", async () => {
+    const workflow = makeWorkflow({
+      triggers: [{ type: "schedule", scheduleId: crypto.randomUUID() }],
+    });
+
+    const result = await handleWebhookTrigger(workflow.id, '{"data":"hi"}', {}, registry, {
+      alreadyAuthenticated: true,
+    });
+
+    expect(result.runId).toBeDefined();
   });
 
   test("workflow not found returns 404", async () => {
@@ -684,21 +719,14 @@ describe("handleWebhookTrigger — triggerData JSON parsing", () => {
   }
 
   test("JSON body is parsed and run.triggerData is a deep-equal object", async () => {
-    const secret = "json-parsing-secret";
-    const workflow = makeWorkflow({ triggers: [{ type: "webhook", hmacSecret: secret }] });
+    const workflow = makeWorkflow({ triggers: [{ type: "webhook" }] });
     const payload = {
       message: { from: "+34000111222", text: "hi" },
       conversation: { id: "conv-abc-123" },
     };
     const body = JSON.stringify(payload);
-    const sig = `sha256=${signRaw(secret, body)}`;
 
-    const result = await handleWebhookTrigger(
-      workflow.id,
-      body,
-      { "x-hub-signature-256": sig },
-      registry,
-    );
+    const result = await handleWebhookTrigger(workflow.id, body, {}, registry);
 
     const run = getWorkflowRun(result.runId);
     expect(run).not.toBeNull();
@@ -729,17 +757,10 @@ describe("handleWebhookTrigger — triggerData JSON parsing", () => {
   });
 
   test("non-JSON body falls back to the raw string and does not throw", async () => {
-    const secret = "non-json-secret";
-    const workflow = makeWorkflow({ triggers: [{ type: "webhook", hmacSecret: secret }] });
+    const workflow = makeWorkflow({ triggers: [{ type: "webhook" }] });
     const body = "this is not json at all";
-    const sig = `sha256=${signRaw(secret, body)}`;
 
-    const result = await handleWebhookTrigger(
-      workflow.id,
-      body,
-      { "x-hub-signature-256": sig },
-      registry,
-    );
+    const result = await handleWebhookTrigger(workflow.id, body, {}, registry);
 
     const run = getWorkflowRun(result.runId);
     expect(run).not.toBeNull();
@@ -747,16 +768,9 @@ describe("handleWebhookTrigger — triggerData JSON parsing", () => {
   });
 
   test("empty body produces a run without throwing", async () => {
-    const secret = "empty-body-secret";
-    const workflow = makeWorkflow({ triggers: [{ type: "webhook", hmacSecret: secret }] });
-    const sig = `sha256=${signRaw(secret, "")}`;
+    const workflow = makeWorkflow({ triggers: [{ type: "webhook" }] });
 
-    const result = await handleWebhookTrigger(
-      workflow.id,
-      "",
-      { "x-hub-signature-256": sig },
-      registry,
-    );
+    const result = await handleWebhookTrigger(workflow.id, "", {}, registry);
 
     expect(result.runId).toBeDefined();
     const run = getWorkflowRun(result.runId);
@@ -838,22 +852,22 @@ describe("TriggerConfigSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  test("schema still parses a bare webhook trigger (e.g. mid-setup, before hmacSecret is added) — handleWebhookTrigger rejects invoking it, see workflow-triggers-v2.test.ts", () => {
+  test("accepts a webhook trigger with neither hmacSecret nor verification (intentionally unauthenticated)", () => {
     const result = TriggerConfigSchema.safeParse({ type: "webhook" });
 
     expect(result.success).toBe(true);
   });
 });
 
-// ─── Boot-time unprotected-webhook audit ─────────────────────
+// ─── Boot-time open-webhook inventory ────────────────────────
 
-describe("warnUnprotectedWebhookTriggers", () => {
-  test("never throws, even with a mix of protected/unprotected/disabled workflows", () => {
+describe("logOpenWebhookTriggers", () => {
+  test("never throws, even with a mix of open/signed/disabled workflows", () => {
     makeWorkflow({ triggers: [{ type: "webhook" }] });
     makeWorkflow({ triggers: [{ type: "webhook", hmacSecret: "s" }] });
     const disabled = makeWorkflow({ triggers: [{ type: "webhook" }] });
     updateWorkflow(disabled.id, { enabled: false });
 
-    expect(() => warnUnprotectedWebhookTriggers()).not.toThrow();
+    expect(() => logOpenWebhookTriggers()).not.toThrow();
   });
 });

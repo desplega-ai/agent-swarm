@@ -7,6 +7,36 @@ import { BaseExecutor, type ExecutorResult } from "./base";
 /** Matches the inline scripts-runtime cap (src/scripts-runtime/executors/types.ts). */
 const MAX_OUTPUT_BYTES = 1_048_576;
 
+/**
+ * How long to keep draining stdout/stderr AFTER the child has exited. Normally
+ * both streams close immediately; the grace only matters when a killed script
+ * leaked a grandchild that still holds the pipe write end, which must not hang
+ * the workflow step forever.
+ */
+const STREAM_DRAIN_GRACE_MS = 5_000;
+
+function unrefTimer(id: ReturnType<typeof globalThis.setTimeout>): void {
+  if (typeof id === "object" && "unref" in id) (id as NodeJS.Timeout).unref();
+}
+
+/** Resolve `promise`, or fall back to `onDeadline()` if it takes longer than `ms`. */
+function withDeadline<T>(promise: Promise<T>, ms: number, onDeadline: () => T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const id = globalThis.setTimeout(() => resolve(onDeadline()), ms);
+    unrefTimer(id);
+    promise.then(
+      (value) => {
+        globalThis.clearTimeout(id);
+        resolve(value);
+      },
+      () => {
+        globalThis.clearTimeout(id);
+        resolve(onDeadline());
+      },
+    );
+  });
+}
+
 // ─── Schemas ────────────────────────────────────────────────
 
 export const ScriptConfigSchema = z.object({
@@ -44,7 +74,12 @@ export class ScriptExecutor extends BaseExecutor<
     const timeoutMs = config.timeout ?? DEFAULT_TIMEOUT;
 
     try {
-      const result = await Promise.race([this.runScript(config), this.timeoutPromise(timeoutMs)]);
+      // The timeout lives INSIDE runScript so it can actually SIGKILL the child.
+      // Racing the timeout against the spawn promise out here (the previous
+      // shape) only abandoned the promise: a sleeping script kept running past
+      // the deadline — the CPU ulimit does not bound sleep — and its scoped
+      // tmpdir was deleted out from under a live process.
+      const result = await this.runScript(config, timeoutMs);
 
       // Non-zero exit code is a hard failure — mark the step failed so the
       // workflow engine stops the branch and operators can see what went wrong.
@@ -95,7 +130,10 @@ export class ScriptExecutor extends BaseExecutor<
     }
   }
 
-  private async runScript(config: z.infer<typeof ScriptConfigSchema>): Promise<{
+  private async runScript(
+    config: z.infer<typeof ScriptConfigSchema>,
+    timeoutMs: number,
+  ): Promise<{
     exitCode: number;
     stdout: string;
     stderr: string;
@@ -147,10 +185,43 @@ export class ScriptExecutor extends BaseExecutor<
         env: { PATH: env.PATH },
       });
 
-      const [stdout, stderr, exitCode] = await Promise.all([
-        readStreamCapped(proc.stdout, MAX_OUTPUT_BYTES),
-        readStreamCapped(proc.stderr, MAX_OUTPUT_BYTES),
-        proc.exited,
+      // Drain both pipes concurrently with the wait — a script producing more
+      // than a pipe buffer of output would otherwise block forever on write.
+      const stdoutPromise = readStreamCapped(proc.stdout, MAX_OUTPUT_BYTES);
+      const stderrPromise = readStreamCapped(proc.stderr, MAX_OUTPUT_BYTES);
+
+      let timedOut = false;
+      const killTimer = globalThis.setTimeout(() => {
+        timedOut = true;
+        // SIGKILL, not SIGTERM: a shell script can trap and ignore SIGTERM.
+        try {
+          proc.kill("SIGKILL");
+        } catch {
+          // Already reaped — nothing to kill.
+        }
+      }, timeoutMs);
+      unrefTimer(killTimer);
+
+      let exitCode: number;
+      try {
+        exitCode = await proc.exited;
+      } finally {
+        globalThis.clearTimeout(killTimer);
+      }
+
+      if (timedOut) {
+        // The child is dead and its output is discarded on timeout, so don't
+        // block on pipes a leaked grandchild may still hold open.
+        stdoutPromise.catch(() => {});
+        stderrPromise.catch(() => {});
+        throw new Error(`Script timed out after ${timeoutMs}ms`);
+      }
+
+      // The child exited on its own; bound the remaining drain so a leaked
+      // grandchild holding the pipe write end can't stall the step forever.
+      const [stdout, stderr] = await Promise.all([
+        withDeadline(stdoutPromise, STREAM_DRAIN_GRACE_MS, () => ({ text: "", truncated: true })),
+        withDeadline(stderrPromise, STREAM_DRAIN_GRACE_MS, () => ({ text: "", truncated: true })),
       ]);
 
       return {
@@ -159,19 +230,9 @@ export class ScriptExecutor extends BaseExecutor<
         stderr: (stderr.truncated ? `${stderr.text}\n…[stderr truncated]` : stderr.text).trimEnd(),
       };
     } finally {
+      // Reached only after `await proc.exited` above, so the scoped dir is never
+      // deleted while a live child is still using it as its cwd/TMPDIR.
       if (scopedTmpdir) await Bun.$`rm -rf ${scopedTmpdir}`.catch(() => {});
     }
-  }
-
-  private timeoutPromise(ms: number): Promise<never> {
-    return new Promise((_resolve, reject) => {
-      const id = globalThis.setTimeout(() => {
-        reject(new Error(`Script timed out after ${ms}ms`));
-      }, ms);
-      // Ensure the timer doesn't keep the process alive
-      if (typeof id === "object" && "unref" in id) {
-        (id as NodeJS.Timeout).unref();
-      }
-    });
   }
 }

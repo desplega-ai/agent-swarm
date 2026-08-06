@@ -562,6 +562,31 @@ describe("ScriptExecutor", () => {
     expect(out.stderr).toContain("Script timed out after 1000ms");
   });
 
+  test("a timed-out script is TERMINATED, not just abandoned (Promise.race regression)", async () => {
+    // A `sleep` is not bounded by the CPU ulimit, so before this fix the
+    // wall-clock timeout only abandoned the promise and the child kept
+    // running — long enough to finish its side effect after the step failed.
+    const dir = `${process.env.TMPDIR ?? "/tmp"}/script-kill-${crypto.randomUUID()}`;
+    await Bun.$`mkdir -p ${dir}`;
+    const marker = `${dir}/still-alive`;
+    try {
+      const startedAt = Date.now();
+      const result = await executor.run(
+        input({ runtime: "bash", script: `sleep 6; touch ${marker}`, timeout: 1000, cwd: dir }, {}),
+      );
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("Script timed out after 1000ms");
+      // The executor must not return until the child has actually been reaped.
+      expect(Date.now() - startedAt).toBeLessThan(6_000);
+
+      // Wait past when the abandoned child would have created its marker.
+      await Bun.sleep(6_500);
+      expect(await Bun.file(marker).exists()).toBe(false);
+    } finally {
+      await Bun.$`rm -rf ${dir}`.catch(() => {});
+    }
+  }, 20_000);
+
   // ─── Sandbox regression tests (superagent.sh c27edfd7, finding b132d7c5) ──
 
   test("child process never inherits the server's secrets — env is scrubbed, not passed through", async () => {
