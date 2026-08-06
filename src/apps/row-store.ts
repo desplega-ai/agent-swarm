@@ -14,12 +14,28 @@ export type AppRow = {
   updatedAt: string;
   createdBy?: string;
   updatedBy?: string;
+  /** Sync provenance — present only on rows a source owns. */
+  source?: string;
+  syncedAt?: string;
+  stale?: boolean;
 } & Record<string, unknown>;
+
+export type AppRowEnvelope = { source: string; syncedAt: string; stale: boolean };
 
 export interface AppRowWriteOptions {
   skipUpdatedAt?: boolean;
-  /** Stable id of the acting principal (`user:<id>`, `agent:<id>`, `operator`) for row provenance. */
+  /**
+   * Stable id of the acting principal (`user:<id>`, `agent:<id>`, `operator`,
+   * or `sync:<source>` for engine writes) for row provenance.
+   */
   actor?: string;
+  /**
+   * Sync-engine escape hatch. External write paths leave this false so
+   * source-bound and join-key columns stay read-only projections.
+   */
+  allowSourceManaged?: boolean;
+  /** Row provenance stamped after value preparation; honoured only with `allowSourceManaged`. */
+  envelope?: AppRowEnvelope;
 }
 
 export class AppRowValidationError extends Error {
@@ -92,18 +108,50 @@ function validValue(column: ColumnDef, value: unknown): boolean {
   return typeof value === "string" && Boolean(column.enum?.includes(value));
 }
 
+function joinKeyColumnNames(definition: ModelDef): Set<string> {
+  const names = new Set<string>();
+  for (const source of Object.values(definition.sources ?? {})) names.add(source.joinKey);
+  return names;
+}
+
+/** Row provenance to stamp, when the caller is the sync engine. */
+function sourceEnvelope(options: AppRowWriteOptions): AppRowEnvelope | undefined {
+  return options.allowSourceManaged === true ? options.envelope : undefined;
+}
+
 function prepareValues(
   definition: ModelDef,
   values: Record<string, unknown>,
   mode: "create" | "patch",
+  options: AppRowWriteOptions = {},
 ): Record<string, unknown> {
   const issues: AppValidationIssue[] = [];
   const prepared: Record<string, unknown> = { ...values };
+  const sourceManaged = options.allowSourceManaged === true;
+  if (sourceManaged && !options.envelope) {
+    // Without provenance the privileged write would produce a row
+    // indistinguishable from a user-owned one.
+    throw new Error("allowSourceManaged writes must carry an envelope");
+  }
+  const joinKeys = sourceManaged ? new Set<string>() : joinKeyColumnNames(definition);
 
   for (const name of Object.keys(values)) {
     const column = Object.hasOwn(definition.columns, name) ? definition.columns[name] : undefined;
     if (!column || column.hidden === true) {
       issues.push({ path: `values.${name}`, message: `unknown or hidden column "${name}"` });
+      continue;
+    }
+    if (sourceManaged) continue;
+    if (column.source) {
+      issues.push({
+        path: `values.${name}`,
+        message: `column is a read-only projection from source "${column.source.of}"; mutate it via the source or a sync refresh`,
+      });
+    } else if (joinKeys.has(name)) {
+      issues.push({
+        path: `values.${name}`,
+        message: "column is the sync join key and is managed by the sync engine",
+      });
     }
   }
 
@@ -112,6 +160,9 @@ function prepareValues(
       if (column.hidden === true) continue;
       if (!Object.hasOwn(prepared, name) && column.default !== undefined)
         prepared[name] = column.default;
+      // A source pull supplies only the fields the record carried; a bound
+      // column with no projected value is the source's business, not the row's.
+      if (sourceManaged && column.source) continue;
       if (
         column.required === true &&
         (!Object.hasOwn(prepared, name) || prepared[name] === undefined || prepared[name] === null)
@@ -186,17 +237,19 @@ function createRowUnlocked(
   model: string,
   definition: ModelDef,
   prepared: Record<string, unknown>,
-  actor?: string,
+  options: AppRowWriteOptions,
 ): AppRow {
   const issuedMs = Math.max(Date.now(), lastCreatedAtMs + 1);
   lastCreatedAtMs = issuedMs;
   const now = new Date(issuedMs).toISOString();
+  const actor = options.actor;
   return writeRow(appId, model, definition, {
     id: crypto.randomUUID(),
     createdAt: now,
     updatedAt: now,
     ...(actor !== undefined ? { createdBy: actor, updatedBy: actor } : {}),
     ...prepared,
+    ...sourceEnvelope(options),
   });
 }
 
@@ -208,9 +261,9 @@ export function createAppRowUnlocked(
   values: Record<string, unknown>,
   options: AppRowWriteOptions = {},
 ): AppRow {
-  const prepared = prepareValues(definition, values, "create");
+  const prepared = prepareValues(definition, values, "create", options);
   if (!appExists(appId)) throw new AppRowAppNotFoundError(appId);
-  return createRowUnlocked(appId, model, definition, prepared, options.actor);
+  return createRowUnlocked(appId, model, definition, prepared, options);
 }
 
 export function createAppRow(
@@ -223,8 +276,8 @@ export function createAppRow(
   return withMutationLock(appId, model, () => {
     const currentDefinition = currentModelDefinition(appId, model);
     if (!currentDefinition) throw new AppRowAppNotFoundError(appId);
-    const prepared = prepareValues(currentDefinition, values, "create");
-    return createRowUnlocked(appId, model, currentDefinition, prepared, options.actor);
+    const prepared = prepareValues(currentDefinition, values, "create", options);
+    return createRowUnlocked(appId, model, currentDefinition, prepared, options);
   });
 }
 
@@ -238,9 +291,11 @@ export function createAppRows(
   return withMutationLock(appId, model, () => {
     const currentDefinition = currentModelDefinition(appId, model);
     if (!currentDefinition) throw new AppRowAppNotFoundError(appId);
-    const prepared = rows.map((values) => prepareValues(currentDefinition, values, "create"));
+    const prepared = rows.map((values) =>
+      prepareValues(currentDefinition, values, "create", options),
+    );
     return prepared.map((values) =>
-      createRowUnlocked(appId, model, currentDefinition, values, options.actor),
+      createRowUnlocked(appId, model, currentDefinition, values, options),
     );
   });
 }
@@ -299,7 +354,7 @@ export function patchAppRow(
   return withMutationLock(appId, model, () => {
     const currentDefinition = currentModelDefinition(appId, model);
     if (!currentDefinition) throw new AppRowAppNotFoundError(appId);
-    const prepared = prepareValues(currentDefinition, values, "patch");
+    const prepared = prepareValues(currentDefinition, values, "patch", options);
     return patchPreparedRowUnlocked(appId, model, currentDefinition, rowId, prepared, options);
   });
 }
@@ -332,6 +387,7 @@ function patchPreparedRowUnlocked(
       updated[name] = value;
     }
   }
+  Object.assign(updated, sourceEnvelope(options));
   const newKeys = new Set(indexKeys(model, definition, updated));
   const namespace = appsNamespace(appId);
   for (const key of oldKeys) if (!newKeys.has(key)) deleteKv(namespace, key);
@@ -351,7 +407,7 @@ export function patchAppRowUnlocked(
   values: Record<string, unknown>,
   options: AppRowWriteOptions = {},
 ): AppRow | null {
-  const prepared = prepareValues(definition, values, "patch");
+  const prepared = prepareValues(definition, values, "patch", options);
   return patchPreparedRowUnlocked(appId, model, definition, rowId, prepared, options);
 }
 

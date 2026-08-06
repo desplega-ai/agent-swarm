@@ -9,6 +9,7 @@ import {
   isIso8601Date,
   type ModelDef,
   parseAppDefinition,
+  SORTABLE_SYSTEM_DATE_COLUMNS,
   SYSTEM_COLUMN_KINDS,
 } from "../apps/definition";
 import {
@@ -670,6 +671,12 @@ interface RowFilter {
   value: unknown;
 }
 
+/**
+ * Ad-hoc REST `filter.<col>` stays model-columns-only on purpose: system fields
+ * (including the sync envelope) are filterable through named queries, which
+ * validate kinds at definition-write time. Widening this loosely-typed
+ * query-string path would give two filter vocabularies with different rules.
+ */
 function filtersFromQuery(
   queryParams: URLSearchParams,
   model: ModelDef,
@@ -737,8 +744,7 @@ export function applyQuery(
         rowValue(a, sort.column),
         rowValue(b, sort.column),
         sort.dir,
-        sort.column === "createdAt" ||
-          sort.column === "updatedAt" ||
+        SORTABLE_SYSTEM_DATE_COLUMNS.has(sort.column) ||
           (Object.hasOwn(model.columns, sort.column) &&
             model.columns[sort.column]!.kind === "date"),
       );
@@ -925,8 +931,7 @@ export async function handleApps(
         extra !== undefined ||
         !column ||
         (dir !== "asc" && dir !== "desc") ||
-        (column !== "createdAt" &&
-          column !== "updatedAt" &&
+        (!SORTABLE_SYSTEM_DATE_COLUMNS.has(column) &&
           (!Object.hasOwn(resolved.model.columns, column) ||
             resolved.model.columns[column]!.hidden === true))
       ) {
@@ -945,8 +950,7 @@ export async function handleApps(
           rowValue(a, column),
           rowValue(b, column),
           dir,
-          column === "createdAt" ||
-            column === "updatedAt" ||
+          SORTABLE_SYSTEM_DATE_COLUMNS.has(column) ||
             (Object.hasOwn(resolved.model.columns, column) &&
               resolved.model.columns[column]!.kind === "date"),
         );
@@ -1130,6 +1134,18 @@ export async function handleApps(
           ...(error === undefined ? {} : { error }),
           durationMs: output.durationMs,
         }),
+      );
+      return true;
+    }
+
+    if (action.kind === "sync") {
+      // The engine that fulfils a sync action lands with the /sync door; until
+      // then a declared sync action is a valid definition but not invocable —
+      // never a task with an undefined prompt.
+      jsonError(
+        res,
+        `action "${parsed.params.name}" is a sync action; the sync engine is not wired up yet`,
+        400,
       );
       return true;
     }

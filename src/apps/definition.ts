@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { listScriptConnections } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId } from "../be/scripts/run-saved";
 import catalog from "./catalog.generated.json";
@@ -8,6 +9,7 @@ import {
   elementDefinitionIssues,
   validatePage,
 } from "./page-validator";
+import { resolveSyncRunAs } from "./sync-run-as";
 
 export const AppNameSchema = z.string().regex(/^[a-z][a-zA-Z0-9_]{0,39}$/, {
   message: "must start with a lowercase letter and contain only letters, numbers, or underscores",
@@ -21,6 +23,25 @@ export function isIso8601Date(value: string): boolean {
   return ISO_8601_PREFIX.test(value) && !Number.isNaN(Date.parse(value));
 }
 
+export const SourceTransformSchema = z.enum(["slug", "lower", "upper", "cents", "date-parse"]);
+
+/** Column kind each transform may target — the sync engine projects into it. */
+const TRANSFORM_COLUMN_KIND: Record<z.infer<typeof SourceTransformSchema>, ColumnKind> = {
+  slug: "string",
+  lower: "string",
+  upper: "string",
+  cents: "number",
+  "date-parse": "date",
+};
+
+const ColumnSourceBindingSchema = z
+  .object({
+    of: AppNameSchema,
+    field: z.string().min(1),
+    transform: SourceTransformSchema.optional(),
+  })
+  .strict();
+
 const ColumnDefSchema = z
   .object({
     kind: ColumnKindSchema,
@@ -29,6 +50,7 @@ const ColumnDefSchema = z
     index: z.boolean().optional(),
     default: z.union([z.string(), z.number(), z.boolean()]).optional(),
     hidden: z.boolean().optional(),
+    source: ColumnSourceBindingSchema.optional(),
   })
   .superRefine((column, ctx) => {
     if (column.kind === "enum") {
@@ -119,9 +141,36 @@ const UserConfigFieldSchema = z
 
 export const UserConfigSchema = z.record(AppNameSchema, UserConfigFieldSchema);
 
+/**
+ * An inbound projection of an external system into a model. Script sources are
+ * the extensible default; `swarm-tasks` is the one native connector. The union
+ * is discriminated so a merge patch can never splice two connector shapes.
+ */
+const SourceDefSchema = z.discriminatedUnion("connector", [
+  // Strict: a typo'd key (e.g. `connnection`) silently stripped here would
+  // surface only as an uncredentialed pull at sync time.
+  z
+    .object({
+      connector: z.literal("script"),
+      scriptId: z.string().uuid(),
+      joinKey: AppNameSchema,
+      args: z.record(z.string(), z.unknown()).optional(),
+      connection: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      connector: z.literal("swarm-tasks"),
+      joinKey: AppNameSchema,
+      config: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+    })
+    .strict(),
+]);
+
 const ModelDefSchema = z
   .object({
     columns: z.record(AppNameSchema, ColumnDefSchema),
+    sources: z.record(AppNameSchema, SourceDefSchema).optional(),
   })
   .superRefine((model, ctx) => {
     const count = Object.keys(model.columns).length;
@@ -136,6 +185,9 @@ const ModelDefSchema = z
           message: "reserved column name",
         });
       }
+    }
+    if (Object.keys(model.sources ?? {}).length > 4) {
+      ctx.addIssue({ code: "custom", path: ["sources"], message: "must define at most 4 sources" });
     }
   });
 
@@ -156,7 +208,17 @@ export const SYSTEM_COLUMN_KINDS: Record<string, "string" | "date" | "boolean"> 
   updatedAt: "date",
   createdBy: "string",
   updatedBy: "string",
+  // Sync provenance, present only on source-owned rows.
+  source: "string",
+  syncedAt: "date",
+  stale: "boolean",
 };
+
+/**
+ * System row fields a sort may target alongside declared model columns. All are
+ * ISO-8601 dates, so membership also selects date-aware comparison.
+ */
+export const SORTABLE_SYSTEM_DATE_COLUMNS = new Set(["createdAt", "updatedAt", "syncedAt"]);
 
 const AppQueryDefSchema = z.object({
   model: AppNameSchema,
@@ -184,6 +246,12 @@ const AppActionDefSchema = z.discriminatedUnion("kind", [
     // Agent ids come verbatim from X-Agent-ID at registration and may be
     // non-UUID (custom stable ids), so no format pin here.
     agentId: z.string().min(1).optional(),
+  }),
+  z.object({
+    kind: z.literal("sync"),
+    // Omitting both fans out to every (model x source) pair the app declares.
+    model: AppNameSchema.optional(),
+    source: AppNameSchema.optional(),
   }),
 ]);
 
@@ -392,8 +460,7 @@ export const AppDefinitionSchema = z
       const sortColumn = query.sort?.column;
       if (
         sortColumn &&
-        sortColumn !== "createdAt" &&
-        sortColumn !== "updatedAt" &&
+        !SORTABLE_SYSTEM_DATE_COLUMNS.has(sortColumn) &&
         (!Object.hasOwn(model.columns, sortColumn) || model.columns[sortColumn]!.hidden === true)
       ) {
         ctx.addIssue({
@@ -407,6 +474,9 @@ export const AppDefinitionSchema = z
 
 export type ColumnKind = z.infer<typeof ColumnKindSchema>;
 export type ColumnDef = z.infer<typeof ColumnDefSchema>;
+export type ColumnSourceBinding = z.infer<typeof ColumnSourceBindingSchema>;
+export type SourceTransform = z.infer<typeof SourceTransformSchema>;
+export type SourceDef = z.infer<typeof SourceDefSchema>;
 export type UserConfigField = z.infer<typeof UserConfigFieldSchema>;
 export type ModelDef = z.infer<typeof ModelDefSchema>;
 export type AppQueryDef = z.infer<typeof AppQueryDefSchema>;
@@ -474,18 +544,192 @@ export type AppDefinitionParseContext = ElementReferenceContext & {
   existingDefinition?: unknown;
 };
 
-/** Defensively collect script action ids from a possibly-broken definition. */
+/**
+ * Defensively collect every script id a possibly-broken definition already
+ * references — script actions and model sources alike — so an agent editing an
+ * app that legitimately carries another owner's script is not locked out.
+ */
 function collectScriptActionIds(definition: unknown): Set<string> {
   const ids = new Set<string>();
   if (!isMergePatchObject(definition)) return ids;
   const actions = definition.actions;
-  if (!isMergePatchObject(actions)) return ids;
-  for (const action of Object.values(actions)) {
-    if (isMergePatchObject(action) && typeof action.scriptId === "string") {
-      ids.add(action.scriptId);
+  if (isMergePatchObject(actions)) {
+    for (const action of Object.values(actions)) {
+      if (isMergePatchObject(action) && typeof action.scriptId === "string") {
+        ids.add(action.scriptId);
+      }
+    }
+  }
+  const models = definition.models;
+  if (isMergePatchObject(models)) {
+    for (const model of Object.values(models)) {
+      if (!isMergePatchObject(model) || !isMergePatchObject(model.sources)) continue;
+      for (const source of Object.values(model.sources)) {
+        if (isMergePatchObject(source) && typeof source.scriptId === "string") {
+          ids.add(source.scriptId);
+        }
+      }
     }
   }
   return ids;
+}
+
+/** Semantic checks for a model's sources and its columns' source bindings. */
+function modelSourceIssues(
+  modelName: string,
+  model: ModelDef,
+  context: AppDefinitionParseContext,
+  grandfatheredScriptIds: Set<string>,
+): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  const sources = model.sources ?? {};
+  const sourceNames = new Set(Object.keys(sources));
+
+  for (const [sourceName, source] of Object.entries(sources)) {
+    const path = `models.${modelName}.sources.${sourceName}`;
+    const joinColumn = Object.hasOwn(model.columns, source.joinKey)
+      ? model.columns[source.joinKey]!
+      : undefined;
+    if (!joinColumn || joinColumn.hidden === true) {
+      issues.push({
+        path: `${path}.joinKey`,
+        message: `unknown or hidden column "${source.joinKey}"`,
+      });
+    } else if (joinColumn.kind !== "string") {
+      issues.push({
+        path: `${path}.joinKey`,
+        message: `join key column "${source.joinKey}" must be a string column`,
+      });
+    } else {
+      if (joinColumn.source) {
+        issues.push({
+          path: `${path}.joinKey`,
+          message: `join key column "${source.joinKey}" must not be bound to a source`,
+        });
+      }
+      if (joinColumn.required === true) {
+        issues.push({
+          path: `${path}.joinKey`,
+          message: `join key column "${source.joinKey}" must not be required`,
+        });
+      }
+      if (joinColumn.default !== undefined) {
+        issues.push({
+          path: `${path}.joinKey`,
+          message: `join key column "${source.joinKey}" must not declare a default`,
+        });
+      }
+    }
+
+    if (source.connector !== "script") continue;
+    const script = getScriptById(source.scriptId);
+    if (!script) {
+      issues.push({ path: `${path}.scriptId`, message: `script "${source.scriptId}" not found` });
+      continue;
+    }
+    // A pull runs the script with its OWNER's bindings, so an agent writer may
+    // only wire scripts it owns (or global ones) — the script-action rule.
+    if (
+      context.writerAgentId &&
+      script.scope === "agent" &&
+      getSavedScriptOwnerAgentId(script) !== context.writerAgentId &&
+      !grandfatheredScriptIds.has(source.scriptId)
+    ) {
+      issues.push({
+        path: `${path}.scriptId`,
+        message: `script "${source.scriptId}" is agent-scoped to another agent — reference a script you own or a global script`,
+      });
+    }
+    if (source.connection !== undefined) {
+      const reachable = listScriptConnections({ agentId: resolveSyncRunAs(script) });
+      if (!reachable.some((connection) => connection.slug === source.connection)) {
+        issues.push({
+          path: `${path}.connection`,
+          message: `connection "${source.connection}" not found or disabled for the sync run-as identity`,
+        });
+      }
+    }
+  }
+
+  for (const [columnName, column] of Object.entries(model.columns)) {
+    const path = `models.${modelName}.columns.${columnName}`;
+    if (!column.source) {
+      // Sync creates rows from projected fields alone, so every required column
+      // it does NOT own has to be satisfiable without a writer.
+      if (
+        sourceNames.size > 0 &&
+        column.required === true &&
+        column.hidden !== true &&
+        column.default === undefined
+      ) {
+        issues.push({
+          path,
+          message:
+            "required column on a model with sources must declare a default — sync-created rows cannot supply it",
+        });
+      }
+      continue;
+    }
+    if (!sourceNames.has(column.source.of)) {
+      issues.push({ path: `${path}.source.of`, message: `unknown source "${column.source.of}"` });
+    }
+    const transform = column.source.transform;
+    if (transform && TRANSFORM_COLUMN_KIND[transform] !== column.kind) {
+      issues.push({
+        path: `${path}.source.transform`,
+        message: `transform "${transform}" requires a ${TRANSFORM_COLUMN_KIND[transform]} column`,
+      });
+    }
+    if (column.required === true) {
+      issues.push({
+        path: `${path}.required`,
+        message: "source-bound column must not be required",
+      });
+    }
+    if (column.default !== undefined) {
+      issues.push({
+        path: `${path}.default`,
+        message: "source-bound column must not declare a default",
+      });
+    }
+  }
+
+  return issues;
+}
+
+/** A `sync` action must resolve to at least one (model x source) pair. */
+function syncActionIssues(
+  name: string,
+  action: { model?: string; source?: string },
+  models: Record<string, ModelDef>,
+): AppValidationIssue[] {
+  if (action.model !== undefined && !Object.hasOwn(models, action.model)) {
+    return [{ path: `actions.${name}.model`, message: `unknown model "${action.model}"` }];
+  }
+  const candidates = action.model !== undefined ? [action.model] : Object.keys(models);
+  const pairs = candidates.flatMap((modelName) =>
+    Object.keys(models[modelName]?.sources ?? {}).filter(
+      (sourceName) => action.source === undefined || sourceName === action.source,
+    ),
+  );
+  if (pairs.length > 0) return [];
+  if (action.source !== undefined) {
+    return [
+      {
+        path: `actions.${name}.source`,
+        message:
+          action.model !== undefined
+            ? `unknown source "${action.source}" on model "${action.model}"`
+            : `unknown source "${action.source}" — no model declares it`,
+      },
+    ];
+  }
+  if (action.model !== undefined) {
+    return [
+      { path: `actions.${name}.model`, message: `model "${action.model}" declares no sources` },
+    ];
+  }
+  return [{ path: `actions.${name}`, message: "no model declares a source to sync" }];
 }
 
 export function parseAppDefinition(
@@ -528,7 +772,14 @@ export function parseAppDefinition(
     ...elementDefinitionIssues(parsed.data, catalog, elementContext),
   ];
   const grandfatheredScriptIds = collectScriptActionIds(elementContext.existingDefinition);
+  for (const [modelName, model] of Object.entries(parsed.data.models)) {
+    issues.push(...modelSourceIssues(modelName, model, elementContext, grandfatheredScriptIds));
+  }
   for (const [name, action] of Object.entries(parsed.data.actions ?? {})) {
+    if (action.kind === "sync") {
+      issues.push(...syncActionIssues(name, action, parsed.data.models));
+      continue;
+    }
     if (action.kind !== "script") continue;
     const script = getScriptById(action.scriptId);
     if (!script) {
@@ -649,6 +900,7 @@ function applyMergePatch(target: unknown, patch: unknown, path: string[]): unkno
     (path.length === 1 && path[0] === "elements") ||
     (path.length === 1 && path[0] === "userConfig") ||
     (path.length === 3 && path[0] === "models" && path[2] === "columns") ||
+    (path.length === 3 && path[0] === "models" && path[2] === "sources") ||
     (path.length === 3 && path[0] === "elements" && path[2] === "elements") ||
     (path.length === 3 && path[0] === "pages" && (path[2] === "elements" || path[2] === "params"));
 
@@ -677,9 +929,11 @@ function applyMergePatch(target: unknown, patch: unknown, path: string[]): unkno
 
 /**
  * Apply RFC 7396 JSON Merge Patch semantics to an app definition without
- * mutating either input. Individual action, page-element, and model-column
- * entries are intentionally atomic. A reusable-element patch containing only
- * `elements` merges node-by-node; any other key makes it a full replacement.
+ * mutating either input. Individual action, page-element, model-column, and
+ * model-source entries are intentionally atomic — whole-replaced, never
+ * key-merged — so a patch can never splice two connector shapes together.
+ * A reusable-element patch containing only `elements` merges node-by-node;
+ * any other key makes it a full replacement.
  */
 export function applyAppDefinitionPatch(
   stored: AppDefinition,
