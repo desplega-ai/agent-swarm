@@ -1,0 +1,34 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.desplega-ai/agent-swarm",
+  "title": "Agent Swarm",
+  "description": "Multi-agent orchestration with durable memory, isolated workers, workflows, and review gates.",
+  "version": "1.128.0",
+  "websiteUrl": "https://agent-swarm.dev",
+  "repository": {
+    "url": "https://github.com/desplega-ai/agent-swarm",
+    "source": "github",
+    "id": "1119736729"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.desplega.agent-swarm.dev/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Bearer token for the hosted Agent Swarm API (include the Bearer prefix).",
+          "placeholder": "Bearer <token>",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "X-Agent-ID",
+          "description": "UUID of an agent already registered with the hosted swarm.",
+          "placeholder": "00000000-0000-0000-0000-000000000000",
+          "isRequired": true
+        }
+      ]
+    }
+  ]
+}
