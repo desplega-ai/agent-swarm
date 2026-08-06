@@ -149,6 +149,7 @@ export function SteerComposer({
 
   return (
     <ComposerDock
+      fullWidth
       className={className}
       value={draft}
       onChange={setDraft}

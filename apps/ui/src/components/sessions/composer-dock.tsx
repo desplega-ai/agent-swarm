@@ -49,6 +49,12 @@ export interface ComposerDockProps {
   attachmentErrorMessage?: string | null;
   /** Focus the textarea on mount. */
   autoFocus?: boolean;
+  /**
+   * Let the card span the full available width instead of the chat-style
+   * centered `max-w-3xl` column. Used by the task-detail steering dock, where
+   * the composer sits under a full-width log viewer.
+   */
+  fullWidth?: boolean;
   className?: string;
 }
 
@@ -69,6 +75,7 @@ export function ComposerDock({
   onAttachmentsChange,
   attachmentErrorMessage,
   autoFocus,
+  fullWidth,
   className,
 }: ComposerDockProps) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -110,7 +117,8 @@ export function ComposerDock({
     >
       <div
         className={cn(
-          "max-w-3xl mx-auto rounded-2xl border border-border bg-card shadow-sm transition",
+          !fullWidth && "max-w-3xl mx-auto",
+          "rounded-2xl border border-border bg-card shadow-sm transition",
           "focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15",
           disabled && "opacity-60",
         )}
