@@ -8,8 +8,9 @@ import { cn } from "@/lib/utils";
 
 // Hand-written in the lucide-animated (pqoqubbw) vendored-icon pattern — the
 // registry has no `cable` — using lucide's exact `cable` path data so the
-// glyph stays pixel-identical to the static icon. Hovering re-draws the cable
-// run between the two plugs, reading as a signal passing through.
+// glyph stays pixel-identical to the static icon. Hovering sways the cable
+// run between the two plugs (transform-only — the old pathLength re-draw
+// blanked the cable on quick pass-overs).
 
 export interface CableIconHandle {
   startAnimation: () => void;
@@ -82,8 +83,8 @@ const CableIcon = forwardRef<CableIconHandle, CableIconProps>(
             d="M19 14V6.5a1 1 0 0 0-7 0v11a1 1 0 0 1-7 0V10"
             transition={{ duration: 0.5, ease: "easeInOut" }}
             variants={{
-              normal: { pathLength: 1, opacity: 1 },
-              animate: { pathLength: [0, 1], opacity: [0.4, 1] },
+              normal: { x: 0 },
+              animate: { x: [0, -0.9, 0.9, 0] },
             }}
           />
           <path d="M21 21v-2" />

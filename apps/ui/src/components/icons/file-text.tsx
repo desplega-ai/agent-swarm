@@ -85,24 +85,18 @@ const FILE_TEXT = forwardRef<FileTextIconHandle, FileTextIconProps>(
           <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
           <path d="M14 2v4a2 2 0 0 0 2 2h4" />
 
+          {/* Transform-only (no pathLength retract): the text lines must stay
+              visible on quick pass-overs. Each line nudges right and settles,
+              top to bottom — a quiet "scanning the page" beat. */}
           <motion.path
             d="M10 9H8"
             stroke="currentColor"
             strokeWidth="2"
             variants={{
-              normal: {
-                pathLength: 1,
-                x1: 8,
-                x2: 10,
-              },
+              normal: { x: 0 },
               animate: {
-                pathLength: [1, 0, 1],
-                x1: [8, 10, 8],
-                x2: [10, 10, 10],
-                transition: {
-                  duration: 0.7,
-                  delay: 0.3,
-                },
+                x: [0, 1.25, 0],
+                transition: { duration: 0.35, ease: "easeOut", delay: 0.1 },
               },
             }}
           />
@@ -111,19 +105,10 @@ const FILE_TEXT = forwardRef<FileTextIconHandle, FileTextIconProps>(
             stroke="currentColor"
             strokeWidth="2"
             variants={{
-              normal: {
-                pathLength: 1,
-                x1: 8,
-                x2: 16,
-              },
+              normal: { x: 0 },
               animate: {
-                pathLength: [1, 0, 1],
-                x1: [8, 16, 8],
-                x2: [16, 16, 16],
-                transition: {
-                  duration: 0.7,
-                  delay: 0.5,
-                },
+                x: [0, 1.25, 0],
+                transition: { duration: 0.35, ease: "easeOut", delay: 0.2 },
               },
             }}
           />
@@ -132,19 +117,10 @@ const FILE_TEXT = forwardRef<FileTextIconHandle, FileTextIconProps>(
             stroke="currentColor"
             strokeWidth="2"
             variants={{
-              normal: {
-                pathLength: 1,
-                x1: 8,
-                x2: 16,
-              },
+              normal: { x: 0 },
               animate: {
-                pathLength: [1, 0, 1],
-                x1: [8, 16, 8],
-                x2: [16, 16, 16],
-                transition: {
-                  duration: 0.7,
-                  delay: 0.7,
-                },
+                x: [0, 1.25, 0],
+                transition: { duration: 0.35, ease: "easeOut", delay: 0.3 },
               },
             }}
           />

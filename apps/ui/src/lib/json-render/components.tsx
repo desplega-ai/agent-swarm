@@ -28,7 +28,12 @@
 import { getByPath, type InferComponentProps } from "@json-render/core";
 import type { Components } from "@json-render/react";
 import { useActions, useStateStore } from "@json-render/react";
-import type { ColDef, ICellRendererParams } from "ag-grid-community";
+import type {
+  CellKeyDownEvent,
+  ColDef,
+  FullWidthCellKeyDownEvent,
+  ICellRendererParams,
+} from "ag-grid-community";
 import {
   AlertCircle,
   AlertTriangle,
@@ -41,6 +46,7 @@ import {
 import type { ReactNode } from "react";
 import { Children, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { Streamdown } from "streamdown";
 import { DataGrid } from "@/components/shared/data-grid";
 import { SearchBox } from "@/components/shared/search-box";
@@ -622,6 +628,9 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
         <Select value={value} onValueChange={(next) => set(path, next)}>
           <SelectTrigger
             id={triggerId}
+            // A standalone Select (no `label`) has no accessible name — fall
+            // back to the placeholder, mirroring `SearchBox`'s ariaLabel chain.
+            aria-label={props.label ? undefined : (props.placeholder ?? "Select an option")}
             className={cn(
               "w-full min-w-0",
               clearable && value ? "*:data-[slot=select-value]:mr-7" : undefined,
@@ -857,6 +866,29 @@ function TableComponent({ props }: { props: TableProps }) {
     [runRowAction],
   );
 
+  // Keyboard path to the row-action buttons. The buttons are natively
+  // tabbable, but AG Grid's arrow-key navigation moves CELL focus — landing on
+  // the actions cell must hand focus into it, or arrow-key users dead-end on
+  // a cell whose buttons they can see but not press. Enter drills in; Tab
+  // then walks the buttons as before.
+  const onCellKeyDown = useCallback(
+    (
+      event:
+        | CellKeyDownEvent<Record<string, unknown>>
+        | FullWidthCellKeyDownEvent<Record<string, unknown>>,
+    ) => {
+      if (!("column" in event) || event.column.getColId() !== "__rowActions") return;
+      const browserEvent = event.event as KeyboardEvent | undefined;
+      if (!browserEvent || browserEvent.key !== "Enter") return;
+      const target = browserEvent.target as HTMLElement | null;
+      // Only when the CELL itself is focused — a button inside the cell
+      // handles its own Enter as a click.
+      if (!target || !target.classList.contains("ag-cell")) return;
+      target.querySelector<HTMLButtonElement>("button")?.focus();
+    },
+    [],
+  );
+
   const columns = (props.columns ?? []) as TableColumn[];
   const rowActions = (props.rowActions ?? []) as TableRowAction[];
   const allRows = Array.isArray(props.data) ? (props.data as Record<string, unknown>[]) : [];
@@ -1004,6 +1036,8 @@ function TableComponent({ props }: { props: TableProps }) {
         columnSizing="flex"
         pagination={paginated}
         rowHeight={props.density === "compact" ? 34 : undefined}
+        cellFocus={rowActions.length > 0}
+        onCellKeyDown={rowActions.length > 0 ? onCellKeyDown : undefined}
       />
       <AlertDialog
         open={pendingRowAction !== null}
@@ -1145,6 +1179,7 @@ function FormComponent({ props }: { props: FormProps }) {
     setSubmitting(true);
     try {
       const scope = { form: values, state: getSnapshot() };
+      let mutated = false;
       for (const binding of props.onSubmit as ActionChain) {
         const params = resolveScopedParams(binding.params, scope);
         // Every mutate in the chain carries the originating form's id: a
@@ -1153,7 +1188,16 @@ function FormComponent({ props }: { props: FormProps }) {
         if (binding.action === "app.mutate" && !params.formId) {
           params.formId = props.id;
         }
+        if (binding.action === "app.mutate") mutated = true;
         await execute({ ...binding, params });
+      }
+      // Positive feedback for a successful save: the form clearing itself is
+      // too easy to miss. Only for chains that actually wrote data (a
+      // filter/state form has nothing to announce), and only when no mutate
+      // in the chain reported a failure into the `$error` slot.
+      const failed = get(`${basePath}/$error`);
+      if (mutated && (failed === null || failed === undefined || failed === "")) {
+        toast.success(props.title ? `${props.title} — saved` : "Saved");
       }
     } finally {
       setSubmitting(false);
@@ -1309,7 +1353,14 @@ function DrawerComponent({
           </SheetTitle>
           {props.description ? (
             <SheetDescription className="text-xs">{props.description}</SheetDescription>
-          ) : null}
+          ) : (
+            // Radix warns (and screen readers lose context) when a dialog has
+            // no description — keep an sr-only fallback when the app author
+            // didn't provide one.
+            <SheetDescription className="sr-only">
+              {`${props.title ?? "Details"} panel`}
+            </SheetDescription>
+          )}
         </SheetHeader>
         <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4">{children}</div>
       </SheetContent>

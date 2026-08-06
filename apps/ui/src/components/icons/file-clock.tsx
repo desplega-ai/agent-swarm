@@ -72,38 +72,27 @@ const FileClockIcon = forwardRef<FileClockIconHandle, FileClockIconProps>(
       [controls, onMouseLeave],
     );
 
-    const outlineVariants: Variants = {
-      normal: { pathLength: 1, opacity: 1 },
-      animate: {
-        pathLength: [0, 1],
-        opacity: [0, 1],
-        transition: { duration: 0.5 * duration, ease: [0.16, 1, 0.3, 1] },
-      },
-    };
-
+    // Transform-only (no pathLength/opacity draw-in): the glyph must stay
+    // whole on quick pass-overs. The file stays put; the clock dial pops and
+    // its hands sweep back and settle — "time passing", never a blank face.
     const dialVariants: Variants = {
-      normal: { scale: 1, opacity: 1 },
+      normal: { scale: 1 },
       animate: {
-        scale: [0, 1.08, 1],
-        opacity: [0, 1, 1],
+        scale: [1, 1.1, 1],
         transition: {
-          duration: 0.45 * duration,
-          delay: 0.18 * duration,
-          times: [0, 0.6, 1],
+          duration: 0.4 * duration,
           ease: [0.34, 1.4, 0.64, 1],
         },
       },
     };
 
     const handsVariants: Variants = {
-      normal: { rotate: 0, opacity: 1 },
+      normal: { rotate: 0 },
       animate: {
-        rotate: [-40, 12, 0],
-        opacity: [0, 1, 1],
+        rotate: [0, -40, 12, 0],
         transition: {
-          duration: 0.5 * duration,
-          delay: 0.4 * duration,
-          times: [0, 0.6, 1],
+          duration: 0.55 * duration,
+          delay: 0.1 * duration,
           ease: [0.34, 1.4, 0.64, 1],
         },
       },
@@ -131,11 +120,8 @@ const FileClockIcon = forwardRef<FileClockIconHandle, FileClockIconProps>(
             animate={controls}
             initial="normal"
           >
-            <m.path
-              d="M16 22h2a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v2.85"
-              variants={outlineVariants}
-            />
-            <m.path d="M14 2v5a1 1 0 0 0 1 1h5" variants={outlineVariants} />
+            <path d="M16 22h2a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v2.85" />
+            <path d="M14 2v5a1 1 0 0 0 1 1h5" />
             <m.circle
               cx="8"
               cy="16"

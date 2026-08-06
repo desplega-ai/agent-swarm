@@ -72,20 +72,22 @@ const ChartColumnIcon = forwardRef<ChartColumnIconHandle, ChartColumnIconProps>(
       [controls, onMouseLeave],
     );
 
-    const pathVariants: Variants = {
+    // Transform-only (no pathLength draw-in): the glyph must stay whole on
+    // quick pass-overs. Each bar squashes toward the baseline and re-charts,
+    // left to right; the axis stays put.
+    const barVariants: Variants = {
       normal: {
-        pathLength: 1,
-        opacity: 1,
+        scaleY: 1,
         transition: { duration: 0.2 * duration },
       },
-      animate: {
-        pathLength: [0, 1],
-        opacity: [0.7, 1],
+      animate: (custom: number) => ({
+        scaleY: [1, 0.55, 1],
         transition: {
-          duration: 0.6 * duration,
-          ease: "easeInOut",
+          duration: 0.4 * duration,
+          ease: "easeOut",
+          delay: 0.08 * custom,
         },
-      },
+      }),
     };
 
     const chartVariants: Variants = {
@@ -125,10 +127,25 @@ const ChartColumnIcon = forwardRef<ChartColumnIconHandle, ChartColumnIconProps>(
             animate={controls}
             initial="normal"
           >
-            <m.path d="M3 3v16a2 2 0 0 0 2 2h16" variants={pathVariants} />
-            <m.path d="M18 17V9" variants={pathVariants} />
-            <m.path d="M13 17V5" variants={pathVariants} />
-            <m.path d="M8 17v-3" variants={pathVariants} />
+            <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+            <m.path
+              custom={2}
+              d="M18 17V9"
+              style={{ transformBox: "view-box", originX: "18px", originY: "17px" }}
+              variants={barVariants}
+            />
+            <m.path
+              custom={1}
+              d="M13 17V5"
+              style={{ transformBox: "view-box", originX: "13px", originY: "17px" }}
+              variants={barVariants}
+            />
+            <m.path
+              custom={0}
+              d="M8 17v-3"
+              style={{ transformBox: "view-box", originX: "8px", originY: "17px" }}
+              variants={barVariants}
+            />
           </m.svg>
         </m.div>
       </LazyMotion>

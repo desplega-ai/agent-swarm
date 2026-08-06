@@ -69,39 +69,22 @@ const ContactIcon = forwardRef<ContactIconHandle, ContactIconProps>(
       [controls, onMouseLeave],
     );
 
-    const rectVariants: Variants = {
-      normal: { strokeDashoffset: 0, opacity: 1 },
+    // Transform-only (no opacity/dash draw-in): the glyph must stay whole on
+    // quick pass-overs. The card frame stays put; the person "nods" — head
+    // pulses, shoulders rise a hair behind it.
+    const headVariants: Variants = {
+      normal: { scale: 1 },
       animate: {
-        strokeDashoffset: [100, 0],
-        opacity: [0.3, 1],
-        transition: { duration: 0.8 * duration, ease: "easeInOut" },
+        scale: [1, 1.18, 1],
+        transition: { duration: 0.4 * duration, ease: "easeOut" },
       },
     };
 
-    const circleVariants: Variants = {
-      normal: { scale: 1, opacity: 1 },
+    const shouldersVariants: Variants = {
+      normal: { y: 0 },
       animate: {
-        scale: [0.5, 1.2, 1],
-        opacity: [0, 1],
-        transition: { duration: 0.6 * duration, delay: 0.3, ease: "easeOut" },
-      },
-    };
-
-    const lineVariants: Variants = {
-      normal: { x: 0, opacity: 1 },
-      animate: {
-        x: [-10, 0],
-        opacity: [0, 1],
-        transition: { duration: 0.4 * duration, ease: "easeOut", delay: 0.6 },
-      },
-    };
-
-    const curveVariants: Variants = {
-      normal: { opacity: 1, strokeDashoffset: 0 },
-      animate: {
-        strokeDashoffset: [30, 0],
-        opacity: [0, 1],
-        transition: { duration: 0.6 * duration, delay: 0.5, ease: "easeInOut" },
+        y: [0, -0.75, 0],
+        transition: { duration: 0.4 * duration, ease: "easeOut", delay: 0.1 * duration },
       },
     };
 
@@ -126,36 +109,24 @@ const ContactIcon = forwardRef<ContactIconHandle, ContactIconProps>(
             strokeLinejoin="round"
             className="lucide lucide-contact-icon lucide-contact"
           >
-            <m.path d="M16 2v2" variants={lineVariants} initial="normal" animate={controls} />
+            <path d="M16 2v2" />
             <m.path
               d="M7 22v-2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"
-              strokeDasharray="30"
-              strokeDashoffset="0"
-              variants={curveVariants}
+              variants={shouldersVariants}
               initial="normal"
               animate={controls}
             />
-            <m.path d="M8 2v2" variants={lineVariants} initial="normal" animate={controls} />
+            <path d="M8 2v2" />
             <m.circle
               cx="12"
               cy="11"
               r="3"
-              variants={circleVariants}
+              style={{ transformBox: "view-box", originX: "12px", originY: "11px" }}
+              variants={headVariants}
               initial="normal"
               animate={controls}
             />
-            <m.rect
-              x="3"
-              y="4"
-              width="18"
-              height="18"
-              rx="2"
-              strokeDasharray="100"
-              strokeDashoffset="0"
-              variants={rectVariants}
-              initial="normal"
-              animate={controls}
-            />
+            <rect x="3" y="4" width="18" height="18" rx="2" />
           </m.svg>
         </m.div>
       </LazyMotion>

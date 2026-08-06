@@ -16,20 +16,21 @@ interface ClipboardCheckIconProps extends HTMLAttributes<HTMLDivElement> {
   size?: number;
 }
 
+// Transform-only, and visible at rest: the old variant kept the check at
+// opacity 0 until hover, so the sidebar glyph was missing its checkmark and
+// the draw-in blanked on quick pass-overs. Now the check pops ("re-checked").
 const CHECK_VARIANTS: Variants = {
   normal: {
-    pathLength: 1,
-    opacity: 0,
+    scale: 1,
     transition: {
       duration: 0.3,
     },
   },
   animate: {
-    pathLength: [0, 1],
-    opacity: [0, 1],
+    scale: [1, 1.25, 1],
     transition: {
-      pathLength: { duration: 0.3, ease: "easeInOut" },
-      opacity: { duration: 0.3, ease: "easeInOut" },
+      duration: 0.35,
+      ease: "easeOut",
     },
   },
 };
@@ -95,7 +96,7 @@ const ClipboardCheckIcon = forwardRef<ClipboardCheckIconHandle, ClipboardCheckIc
             animate={controls}
             d="m9 14 2 2 4-4"
             initial="normal"
-            style={{ transformOrigin: "center" }}
+            style={{ transformBox: "view-box", originX: "12px", originY: "13px" }}
             variants={CHECK_VARIANTS}
           />
         </svg>

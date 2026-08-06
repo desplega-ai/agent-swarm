@@ -78,14 +78,6 @@ const BookOpenIcon = forwardRef<BookOpenIconHandle, BookOpenIconProps>(
       },
     };
 
-    const spineVariants: Variants = {
-      normal: { pathLength: 1 },
-      animate: {
-        pathLength: [0, 1],
-        transition: { duration: 0.6 * duration, ease: "easeInOut" },
-      },
-    };
-
     const pagesVariants: Variants = {
       normal: { scale: 1, opacity: 1 },
       animate: {
@@ -118,7 +110,9 @@ const BookOpenIcon = forwardRef<BookOpenIconHandle, BookOpenIconProps>(
             initial="normal"
             variants={iconVariants}
           >
-            <m.path d="M12 7v14" variants={spineVariants} initial="normal" animate={controls} />
+            {/* Static spine — a pathLength draw-in blanked it on quick
+                pass-overs; the whole-icon wiggle carries the gesture. */}
+            <path d="M12 7v14" />
             <m.path
               d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"
               variants={pagesVariants}

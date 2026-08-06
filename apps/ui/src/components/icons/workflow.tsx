@@ -18,20 +18,21 @@ interface WorkflowIconProps extends HTMLAttributes<HTMLDivElement> {
 
 const TRANSITION: Transition = {
   duration: 0.3,
-  opacity: { delay: 0.15 },
+  ease: "easeOut",
 };
 
+// Transform-only (no pathLength/opacity draw-in): the glyph must stay whole
+// on quick pass-overs. The two nodes "ping" in sequence — a scale pulse
+// around each rect's own center — while the connector stays put.
 const VARIANTS: Variants = {
   normal: {
-    pathLength: 1,
-    opacity: 1,
+    scale: 1,
   },
   animate: (custom: number) => ({
-    pathLength: [0, 1],
-    opacity: [0, 1],
+    scale: [1, 1.15, 1],
     transition: {
       ...TRANSITION,
-      delay: 0.1 * custom,
+      delay: 0.12 * custom,
     },
   }),
 };
@@ -96,22 +97,19 @@ const WorkflowIcon = forwardRef<WorkflowIconHandle, WorkflowIconProps>(
             custom={0}
             height="8"
             rx="2"
+            style={{ transformBox: "view-box", originX: "7px", originY: "7px" }}
             variants={VARIANTS}
             width="8"
             x="3"
             y="3"
           />
-          <motion.path
-            animate={controls}
-            custom={3}
-            d="M7 11v4a2 2 0 0 0 2 2h4"
-            variants={VARIANTS}
-          />
+          <path d="M7 11v4a2 2 0 0 0 2 2h4" />
           <motion.rect
             animate={controls}
-            custom={0}
+            custom={1}
             height="8"
             rx="2"
+            style={{ transformBox: "view-box", originX: "17px", originY: "17px" }}
             variants={VARIANTS}
             width="8"
             x="13"

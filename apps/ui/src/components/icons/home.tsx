@@ -17,18 +17,18 @@ interface HomeIconProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 const DEFAULT_TRANSITION: Transition = {
-  duration: 0.6,
-  opacity: { duration: 0.2 },
+  duration: 0.35,
+  ease: "easeOut",
 };
 
+// Transform-only (no pathLength/opacity draw-in): the glyph must stay whole
+// on quick pass-overs. The door squishes from its baseline and springs back.
 const PATH_VARIANTS: Variants = {
   normal: {
-    pathLength: 1,
-    opacity: 1,
+    scaleY: 1,
   },
   animate: {
-    opacity: [0, 1],
-    pathLength: [0, 1],
+    scaleY: [1, 0.82, 1],
   },
 };
 
@@ -90,6 +90,7 @@ const HomeIcon = forwardRef<HomeIconHandle, HomeIconProps>(
           <motion.path
             animate={controls}
             d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"
+            style={{ transformBox: "view-box", originX: "12px", originY: "21px" }}
             transition={DEFAULT_TRANSITION}
             variants={PATH_VARIANTS}
           />

@@ -243,6 +243,35 @@ body {
   transition-delay: 0s;
 }
 
+/* Button motion — the per-property split that lets one control obey two
+ * timing rules at once (DESIGN.md § Motion):
+ *   - colors follow the linger rule: hover states land instantly, release
+ *     through a 50ms delay + 200ms snappy fade;
+ *   - transform (the press scale) is its own channel: pressing is FAST
+ *     (100ms), releasing eases back slightly slower (200ms), and neither
+ *     direction ever inherits the linger delay — a lagging press reads as a
+ *     broken button.
+ * Property order is significant: the duration/delay lists below map
+ * positionally onto `transition-property`. Un-layered, like `.hover-linger`,
+ * so it outranks Tailwind's layered transition utilities. `button.tsx` owns
+ * WHAT changes (variant colors, active:scale); this block owns only WHEN. */
+[data-slot="button"] {
+  transition-property: color, background-color, border-color, transform;
+  transition-timing-function: var(--ease-snappy);
+  transition-duration: 200ms;
+  transition-delay: 50ms, 50ms, 50ms, 0s;
+}
+
+[data-slot="button"]:hover {
+  transition-duration: 0s, 0s, 0s, 200ms;
+  transition-delay: 0s;
+}
+
+[data-slot="button"]:active {
+  transition-duration: 0s, 0s, 0s, 100ms;
+  transition-delay: 0s;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

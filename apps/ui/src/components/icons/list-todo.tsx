@@ -8,8 +8,9 @@ import { cn } from "@/lib/utils";
 
 // Hand-written in the lucide-animated (pqoqubbw) vendored-icon pattern — the
 // registry has no `list-todo` — using lucide's exact `list-todo` path data so
-// the glyph stays pixel-identical to the static icon. Hovering re-draws the
-// checkmark.
+// the glyph stays pixel-identical to the static icon. Hovering pops the
+// checkmark (transform-only — a pathLength draw-in would blank the check on
+// quick pass-overs).
 
 export interface ListTodoIconHandle {
   startAnimation: () => void;
@@ -82,10 +83,11 @@ const ListTodoIcon = forwardRef<ListTodoIconHandle, ListTodoIconProps>(
           <rect x="3" y="4" width="6" height="6" rx="1" />
           <motion.path
             d="m3 17 2 2 4-4"
-            transition={{ duration: 0.4, ease: "easeInOut" }}
+            style={{ transformBox: "view-box", originX: "6px", originY: "17px" }}
+            transition={{ duration: 0.35, ease: "easeOut" }}
             variants={{
-              normal: { pathLength: 1, opacity: 1 },
-              animate: { pathLength: [0, 1], opacity: [0, 1] },
+              normal: { scale: 1 },
+              animate: { scale: [1, 1.25, 1] },
             }}
           />
         </motion.svg>

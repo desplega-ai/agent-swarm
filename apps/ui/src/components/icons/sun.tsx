@@ -16,12 +16,13 @@ interface SunIconProps extends HTMLAttributes<HTMLDivElement> {
   size?: number;
 }
 
-const PATH_VARIANTS: Variants = {
-  normal: { opacity: 1 },
-  animate: (i: number) => ({
-    opacity: [0, 1],
-    transition: { delay: i * 0.1, duration: 0.3 },
-  }),
+// Transform-only (no opacity blink): the glyph must stay whole on quick
+// pass-overs. The rays sit at 45° intervals, so rotating the whole sun one
+// ray-step lands on a pixel-identical glyph — it reads as a spin, and an
+// interrupted hover just eases back.
+const SVG_VARIANTS: Variants = {
+  normal: { rotate: 0, transition: { duration: 0.3, ease: "easeOut" } },
+  animate: { rotate: 45, transition: { duration: 0.35, ease: "easeOut" } },
 };
 
 const SunIcon = forwardRef<SunIconHandle, SunIconProps>(
@@ -67,7 +68,8 @@ const SunIcon = forwardRef<SunIconHandle, SunIconProps>(
         {...props}
       >
         {/* Decorative: the wrapping control carries the accessible label. */}
-        <svg
+        <motion.svg
+          animate={controls}
           aria-hidden="true"
           fill="none"
           height={size}
@@ -75,6 +77,7 @@ const SunIcon = forwardRef<SunIconHandle, SunIconProps>(
           strokeLinecap="round"
           strokeLinejoin="round"
           strokeWidth="2"
+          variants={SVG_VARIANTS}
           viewBox="0 0 24 24"
           width={size}
           xmlns="http://www.w3.org/2000/svg"
@@ -89,16 +92,10 @@ const SunIcon = forwardRef<SunIconHandle, SunIconProps>(
             "m6.34 17.66-1.41 1.41",
             "M2 12h2",
             "m4.93 4.93 1.41 1.41",
-          ].map((d, index) => (
-            <motion.path
-              animate={controls}
-              custom={index + 1}
-              d={d}
-              key={d}
-              variants={PATH_VARIANTS}
-            />
+          ].map((d) => (
+            <path d={d} key={d} />
           ))}
-        </svg>
+        </motion.svg>
       </div>
     );
   },

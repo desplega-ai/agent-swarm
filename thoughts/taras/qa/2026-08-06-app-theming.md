@@ -54,3 +54,24 @@ Grid/Split padding, Table pinned/pagination/density) verified by type gates +
 the 173 apps tests against the regenerated catalog; Drawer mobile width turned
 out already solved (runtime passes `w-full`, twMerge overrides the sheet's
 `w-3/4` base) — no change needed.
+
+## Round 4 — DES-766 polish + motion pass (same day, PR #1123)
+
+| File | What it shows |
+|---|---|
+| [`13-app-light-round4.png`](./2026-08-06-app-theming/13-app-light-round4.png) | Launch Tracker, light — baseline for the round; standalone stage Select now carries `aria-label="All stages"` (placeholder fallback, verified via `get attr`). |
+| [`14-form-toast-light.png`](./2026-08-06-app-theming/14-form-toast-light.png) | Form create success — sonner "Saved" toast bottom-right, form cleared, new row in the grid. |
+| [`15-rowaction-keyboard-confirm.png`](./2026-08-06-app-theming/15-rowaction-keyboard-confirm.png) | Row-action reached by KEYBOARD: cell click → ArrowRight×5 → Enter (focus hands into the actions cell) → Enter → the Delete confirm AlertDialog. Repeated twice more in dark to actually delete the QA rows. |
+| [`16-select-open-light.png`](./2026-08-06-app-theming/16-select-open-light.png) | Select popover open — computed `animation-duration: 0.15s`, `animation-timing-function: cubic-bezier(0.2, 0, 0, 1)` (ease-snappy), exit drops to 100ms via `data-[state=closed]:duration-100`. |
+| [`17-icon-midhover-light.png`](./2026-08-06-app-theming/17-icon-midhover-light.png) | Workflows row mid-hover — icon glyph fully drawn while animating (transform-based retune; the old pathLength draw-in blanked it ~150ms). |
+| [`18-sidebar-group-reopening.png`](./2026-08-06-app-theming/18-sidebar-group-reopening.png) | WORK sidebar group re-opening through the new `CollapsibleSection` height+fade (200/150 snappy); links intact after settle. |
+| [`19-app-dark-round4.png`](./2026-08-06-app-theming/19-app-dark-round4.png) | Same app, dark — hairlines stay at the confirmed 8%/10% (Taras: keep), no light-token leaks. |
+| [`20-form-toast-dark.png`](./2026-08-06-app-theming/20-form-toast-dark.png) | Dark form create — "Saved" toast + row landed. |
+| [`21-alertdialog-dark.png`](./2026-08-06-app-theming/21-alertdialog-dark.png) | Dark AlertDialog on the retimed 200/150 snappy curve. |
+
+Computed-style probes at capture time: `[data-slot="button"]` shows
+`transition-property: color, background-color, border-color, transform`,
+`transition-duration: 0.2s`, `transition-delay: 0.05s ×3, 0s` at rest (the
+per-property linger/press split live), and the `sm` button class list carries
+`active:scale-[0.97]` with the base 0.98 correctly deduped by twMerge.
+Gates: `tsc -b`, `bun run lint`, `check:tokens` all green.

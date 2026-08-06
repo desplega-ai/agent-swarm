@@ -1,8 +1,10 @@
 import {
+  type CellKeyDownEvent,
   ClientSideRowModelModule,
   type ColDef,
   ColumnAutoSizeModule,
   CsvExportModule,
+  type FullWidthCellKeyDownEvent,
   type GetRowIdParams,
   type GridReadyEvent,
   ModuleRegistry,
@@ -67,6 +69,15 @@ interface DataGridProps<TData> {
    *   the body has a width.
    */
   columnSizing?: "fit" | "flex";
+  /**
+   * Force AG Grid cell focus (arrow-key navigation) on for a read-only grid.
+   * By default only grids with editable columns get cell focus; set this when
+   * cell renderers hold interactive elements a keyboard user should reach via
+   * arrow keys + Enter (pair with `onCellKeyDown` to hand focus into the cell).
+   */
+  cellFocus?: boolean;
+  /** Grid-level cell keydown hook — see `cellFocus`. */
+  onCellKeyDown?: (event: CellKeyDownEvent<TData> | FullWidthCellKeyDownEvent<TData>) => void;
 }
 
 export function DataGrid<TData>({
@@ -86,6 +97,8 @@ export function DataGrid<TData>({
   getRowId,
   rowHeight,
   columnSizing = "fit",
+  cellFocus,
+  onCellKeyDown,
 }: DataGridProps<TData>) {
   // AG Grid's edit-on-click only works when the cell can take focus. The
   // wrapper defaults to `suppressCellFocus` for the read-only data tables
@@ -254,7 +267,8 @@ export function DataGrid<TData>({
         onPaginationChanged={onPaginationChanged}
         getRowId={getRowId ?? defaultGetRowId}
         animateRows={false}
-        suppressCellFocus={!hasEditableColumn}
+        suppressCellFocus={!(cellFocus ?? hasEditableColumn)}
+        onCellKeyDown={onCellKeyDown}
         enableCellTextSelection={enableCellTextSelection}
         ensureDomOrder={enableCellTextSelection}
         rowHeight={rowHeight}
