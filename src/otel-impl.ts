@@ -33,6 +33,7 @@ const RAW_SPAN = Symbol("agent-swarm.raw-span");
 let sdk: NodeSDK | undefined;
 let costCounter: Counter | undefined;
 let tokenCounter: Counter | undefined;
+let costDriftCounter: Counter | undefined;
 
 function decodeResourceAttributeValue(value: string): string {
   try {
@@ -246,6 +247,7 @@ export function injectTraceContext(headers: Record<string, string>): Record<stri
 
 export interface SessionCostMetric {
   totalCostUsd: number;
+  harnessCostUsd?: number;
   harness: string;
   model: string;
   costSource: string;
@@ -271,6 +273,10 @@ function ensureInstruments(): void {
     description: "Tokens per finalized cost record",
     unit: "{token}",
   });
+  costDriftCounter = meter.createCounter("agentswarm.cost.drift.usd", {
+    description: "Absolute USD drift between stored and harness-reported session costs",
+    unit: "{usd}",
+  });
 }
 
 export function recordSessionCost(m: SessionCostMetric): void {
@@ -287,6 +293,23 @@ export function recordSessionCost(m: SessionCostMetric): void {
   if (Number.isFinite(m.totalCostUsd) && m.totalCostUsd > 0) {
     costCounter!.add(m.totalCostUsd, attrs);
   }
+  // A harness-reported $0 is a valid claim, not a missing value: codex workers
+  // deliberately report $0 when their local pricing snapshot doesn't know the
+  // model (computeCodexCostUsd), and a positive server recompute against that
+  // is exactly the stale-snapshot divergence this metric exists to surface.
+  // Only absent/non-finite harness values are excluded.
+  if (Number.isFinite(m.totalCostUsd) && Number.isFinite(m.harnessCostUsd)) {
+    const drift = m.totalCostUsd - m.harnessCostUsd!;
+    // Zero drift carries no signal — harness/unpriced rows echo the harness
+    // number back verbatim, and recording them would flood the metric with
+    // empty "under" points. Only genuine recompute divergence is emitted.
+    if (drift !== 0) {
+      costDriftCounter?.add(Math.abs(drift), {
+        ...attrs,
+        drift_sign: drift > 0 ? "over" : "under",
+      });
+    }
+  }
   for (const [token_type, n] of Object.entries(m.tokens)) {
     if (Number.isFinite(n) && n > 0) {
       tokenCounter!.add(n, { ...attrs, token_type });
@@ -297,7 +320,9 @@ export function recordSessionCost(m: SessionCostMetric): void {
 export function _injectCountersForTests(
   cost: Counter | undefined,
   token: Counter | undefined,
+  drift?: Counter | undefined,
 ): void {
   costCounter = cost;
   tokenCounter = token;
+  costDriftCounter = drift;
 }

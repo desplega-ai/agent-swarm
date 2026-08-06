@@ -10,7 +10,7 @@
  *   - active (`pending` / `offered` / `in_progress`): always rendered, last
  *     line shimmers. While the task is active the underlying `useTask`
  *     query polls every 4 s so new events flow into the list live.
- *   - terminal (`completed` / `failed` / `cancelled`): collapsible. Collapsed
+ *   - terminal (`completed` / `failed` / `cancelled` / `superseded`): collapsible. Collapsed
  *     by default with a quiet "Activity (N steps)" header that expands on
  *     click — the user gets the ability to keep the breadcrumb without it
  *     dominating the timeline.

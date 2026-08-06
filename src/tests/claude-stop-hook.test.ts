@@ -20,7 +20,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { RunStopHookSessionSummaryDeps } from "../hooks/hook";
-import { runStopHookSessionSummary } from "../hooks/hook";
+import { runStopHookSessionSummary, runStopHookSessionSummarySubprocess } from "../hooks/hook";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -109,6 +109,79 @@ function makeEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 describe("runStopHookSessionSummary", () => {
+  test("summary subprocess receives the in-memory transcript and resolved OAuth env", async () => {
+    let spawnOptions: Parameters<typeof Bun.spawn>[0] | undefined;
+    let stdinPayload = "";
+    const spawn = ((opts: Parameters<typeof Bun.spawn>[0]) => {
+      spawnOptions = opts;
+      return {
+        stdin: {
+          write(value: string) {
+            stdinPayload += value;
+          },
+          async end() {},
+        },
+        exited: Promise.resolve(0),
+      } as unknown as ReturnType<typeof Bun.spawn>;
+    }) as typeof Bun.spawn;
+    const env = makeEnv({
+      CLAUDE_CODE_OAUTH_TOKEN: "test-oauth-token",
+      AGENT_SWARM_CLAUDE_OAUTH_TOKEN: "test-oauth-token",
+    });
+
+    await runStopHookSessionSummarySubprocess(
+      {
+        agentId: "agent-claude-memory",
+        transcript: "User: inspect\nAssistant: durable result",
+        env,
+      },
+      { spawn },
+    );
+
+    expect(spawnOptions).toBeDefined();
+    expect((spawnOptions as { env?: NodeJS.ProcessEnv }).env?.CLAUDE_CODE_OAUTH_TOKEN).toBe(
+      "test-oauth-token",
+    );
+    expect((spawnOptions as { env?: NodeJS.ProcessEnv }).env?.AGENT_SWARM_CLAUDE_OAUTH_TOKEN).toBe(
+      "test-oauth-token",
+    );
+    expect(JSON.parse(stdinPayload)).toEqual({
+      agentId: "agent-claude-memory",
+      transcript: "User: inspect\nAssistant: durable result",
+    });
+  });
+
+  test("in-memory transcript bypasses a missing harness transcript file", async () => {
+    const transcript = longTranscript("Adapter-owned stream event\n");
+    let observedTranscript = "";
+    let observedEnv: NodeJS.ProcessEnv | undefined;
+    const deps: RunStopHookSessionSummaryDeps = {
+      runSummarize: async (args) => {
+        observedTranscript = args.transcript;
+        observedEnv = args.env;
+        return {
+          summary: "The adapter-owned transcript reached the session summarizer.",
+          ratings: [],
+        } as RunSummarizeResult;
+      },
+    };
+
+    const env = makeEnv({ OPENROUTER_BASE_URL: "https://gateway.example.test/api/v1" });
+    await runStopHookSessionSummary(
+      {
+        agentId: "agent-claude-memory",
+        transcript,
+        transcriptPath: "/tmp/does-not-exist-session-transcript.jsonl",
+        env,
+      },
+      deps,
+    );
+
+    expect(observedTranscript).toBe(transcript.slice(-20_000));
+    expect(observedEnv).toBe(env);
+    expect(fetchCalls.filter((c) => c.url.endsWith("/api/memory/index")).length).toBe(1);
+  });
+
   test("happy path — long transcript + valid summary → POSTs to /api/memory/index with old runMemoryRater shape", async () => {
     const transcript = longTranscript("Real-looking learnings here\n");
     const transcriptPath = await writeTempTranscript(transcript);
@@ -406,7 +479,7 @@ describe("runStopHookSessionSummary", () => {
     expect(postRatingsArgs!.agentId).toBe("agent-claude-1");
   });
 
-  test("runSummarize throws → caught silently; no POST, no rethrow", async () => {
+  test("runSummarize throws → caught and logged; no POST, no rethrow", async () => {
     const transcriptPath = await writeTempTranscript(longTranscript());
 
     const deps: RunStopHookSessionSummaryDeps = {
@@ -428,5 +501,8 @@ describe("runStopHookSessionSummary", () => {
 
     const indexCalls = fetchCalls.filter((c) => c.url.endsWith("/api/memory/index"));
     expect(indexCalls.length).toBe(0);
+    expect(
+      consoleErrors.some((args) => String(args[0]).includes("session_summary failed (claude):")),
+    ).toBe(true);
   });
 });

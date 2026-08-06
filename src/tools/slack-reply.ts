@@ -12,7 +12,7 @@ import {
 import { getSlackApp } from "@/slack/app";
 import { getTaskLink } from "@/slack/blocks";
 import { withAutoJoin } from "@/slack/channel-join";
-import { markdownToSlack } from "@/slack/responses";
+import { getAgentDisplayName, getAgentEmoji, markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerSlackReplyTool = (server: McpServer) => {
@@ -135,8 +135,8 @@ export const registerSlackReplyTool = (server: McpServer) => {
             text: slackMessage, // Fallback for notifications
             unfurl_links: false,
             unfurl_media: false,
-            username: agent.name,
-            icon_emoji: agent.isLead ? ":crown:" : ":robot_face:",
+            username: getAgentDisplayName(agent),
+            icon_emoji: getAgentEmoji(agent),
             // biome-ignore lint/suspicious/noExplicitAny: MCP accepts arbitrary valid Block Kit JSON
             blocks: messageBlocks as any,
           }),

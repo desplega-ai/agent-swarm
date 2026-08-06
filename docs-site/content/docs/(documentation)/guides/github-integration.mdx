@@ -99,6 +99,8 @@ These events still emit to the internal `workflowEventBus` for workflow triggers
 
 If GitHub App credentials are provided (`GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`), the bot can react to comments and issues with emoji to acknowledge receipt.
 
+Automated replies to inline PR review threads must use the bot identity configured by `GITHUB_TOKEN`, not a user's OAuth connection. Agents verify the authenticated `gh` login before posting and append `<!-- agent-swarm:review-ack -->` so swarm-authored acknowledgements have explicit machine-readable provenance.
+
 ### Eyes Reaction on Task Pickup
 
 When an agent picks up a GitHub-sourced task (transitions to `in_progress`), a 👀 reaction is automatically added to the originating GitHub entity — the comment, issue, PR, or review that triggered the task. This gives immediate visual feedback that work has begun, without requiring the agent to post a comment.

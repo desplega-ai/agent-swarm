@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
+import { createApp } from "../apps/store";
 import { closeDb, createAgent, getDb, initDb } from "../be/db";
 import { getScript, listScripts } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
@@ -83,6 +84,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   getDb().run("DELETE FROM scripts");
+  getDb().run("DELETE FROM apps");
   getDb().run("DELETE FROM events WHERE event = 'script.global_upsert'");
 });
 
@@ -153,6 +155,54 @@ async function upsert(body: Record<string, unknown>, agentId = workerId): Promis
 }
 
 describe("/api/scripts HTTP", () => {
+  test("type definitions include per-app types in both blobs only after an app exists", async () => {
+    const before = (await dispatch("/api/scripts/type-defs").then((response) =>
+      response.json(),
+    )) as {
+      sdkTypes: string;
+      stdlibTypes: string;
+    };
+    expect(before.sdkTypes).not.toContain("namespace App_PmInbox");
+    expect(before.stdlibTypes).not.toContain("namespace App_PmInbox");
+
+    createApp({
+      name: "PM Inbox",
+      definition: {
+        models: { issue: { columns: { title: { kind: "string" } } } },
+        pages: { main: { root: "root", elements: { root: { type: "Container", props: {} } } } },
+        defaultPage: "main",
+      } as never,
+    });
+
+    const after = (await dispatch("/api/scripts/type-defs").then((response) =>
+      response.json(),
+    )) as {
+      sdkTypes: string;
+      stdlibTypes: string;
+    };
+    expect(after.sdkTypes).toContain("namespace App_PmInbox");
+    expect(after.stdlibTypes).toContain("namespace App_PmInbox");
+  });
+
+  test("named-script types endpoint includes per-app types in both blobs", async () => {
+    createApp({
+      name: "PM Inbox",
+      definition: {
+        models: { issue: { columns: { title: { kind: "string" } } } },
+        pages: { main: { root: "root", elements: { root: { type: "Container", props: {} } } } },
+        defaultPage: "main",
+      } as never,
+    });
+    const saved = await upsert({ name: "typed-app-reader", source: validSource(3) });
+    expect(saved.status).toBe(200);
+
+    const body = (await dispatch("/api/scripts/typed-app-reader/types", {
+      agentId: workerId,
+    }).then((response) => response.json())) as { sdkTypes: string; stdlibTypes: string };
+    expect(body.sdkTypes).toContain("namespace App_PmInbox");
+    expect(body.stdlibTypes).toContain("namespace App_PmInbox");
+  });
+
   test("requires X-Agent-ID", async () => {
     const res = await dispatch("/api/scripts/upsert", {
       method: "POST",

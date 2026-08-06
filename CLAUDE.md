@@ -28,7 +28,7 @@ FS modes: `'none'` = per-run tmpdir (v1 only); `'workspace-rw'` returns 501 in v
 
 SDK surface: derived from MCP tool registry at build time via `scripts/bundle-script-types.ts`. Curated allowlist in `src/scripts-runtime/sdk-allowlist.ts`.
 
-Typecheck: `script_upsert` runs `tsc --noEmit` against the generated `.d.ts`; rejects on diagnostics. Inline `script_run` skips typecheck (scratch hot path).
+Typecheck: `script_upsert` runs `tsc --noEmit` against the generated `.d.ts`; rejects on diagnostics. Inline `script_run` skips typecheck (scratch hot path). The ambient `.d.ts` is assembled per call from a static base plus N **type contributors** (`src/be/scripts/type-contributors.ts` — connections API, MCP tools, per-app types); adding one is a parameter on `scriptSdkTypesWithGeneratedApis` / `scriptStdlibTypesWithGeneratedApis`, never a compiler-host change. Staleness posture: stored scripts are **not** re-typechecked when an app or connection changes.
 
 Boundaries: `src/scripts-runtime/` is on both `check-db-boundary.sh` (no `src/be/db` imports) and `check-api-key-boundary.sh` (must use `getApiKey()`) allowlists.
 

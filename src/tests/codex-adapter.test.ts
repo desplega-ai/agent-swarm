@@ -282,6 +282,52 @@ describe("CodexSession event mapping", () => {
     expect(result.sessionId).toBe("thread-abc");
   });
 
+  test("accumulates per-turn SDK usage across a multi-turn session", async () => {
+    // @openai/codex-sdk defines Usage as tokens "during a turn" and describes
+    // a Thread as having multiple consecutive turns. Each turn.completed
+    // payload is therefore additive rather than a session-total replacement.
+    const events: ThreadEvent[] = [
+      { type: "thread.started", thread_id: "thread-two-turns" },
+      { type: "turn.started" },
+      {
+        type: "turn.completed",
+        usage: {
+          input_tokens: 100,
+          cached_input_tokens: 25,
+          cache_write_input_tokens: 0,
+          output_tokens: 50,
+          reasoning_output_tokens: 10,
+        },
+      },
+      { type: "turn.started" },
+      {
+        type: "turn.completed",
+        usage: {
+          input_tokens: 40,
+          cached_input_tokens: 5,
+          cache_write_input_tokens: 0,
+          output_tokens: 20,
+          reasoning_output_tokens: 7,
+        },
+      },
+    ];
+
+    const { emitted } = await runSessionWithFakeThread(
+      events,
+      testConfig({ logFile: join(tmpLogDir, "two-turns.log"), cwd: "" }),
+    );
+
+    const resultEvent = emitted.findLast((event) => event.type === "result");
+    expect(resultEvent).toBeDefined();
+    if (resultEvent && resultEvent.type === "result") {
+      expect(resultEvent.cost.inputTokens).toBe(140);
+      expect(resultEvent.cost.cacheReadTokens).toBe(30);
+      expect(resultEvent.cost.outputTokens).toBe(70);
+      expect(resultEvent.cost.reasoningOutputTokens).toBe(17);
+      expect(resultEvent.cost.numTurns).toBe(2);
+    }
+  });
+
   test("Phase 9: chatty turn uses the models.dev context window under the unified formula", async () => {
     // Phase 9 deliberately swapped Codex's per-adapter peak-proxy formula
     // (`(input - cached) + output`) for the unified `input + output` formula
@@ -832,10 +878,12 @@ describe("computeCodexCostUsd", () => {
     expect(cost).toBeCloseTo(35, 4);
   });
 
-  test("GPT-5.6 Codex model pricing matches OpenAI model docs", () => {
+  test("GPT-5.6 Codex fallback pricing matches the vendored models.dev snapshot", () => {
     expect(computeCodexCostUsd("gpt-5.6-sol", 1_000_000, 0, 1_000_000)).toBeCloseTo(35, 4);
-    expect(computeCodexCostUsd("gpt-5.6-terra", 1_000_000, 0, 1_000_000)).toBeCloseTo(17.5, 4);
-    expect(computeCodexCostUsd("gpt-5.6-luna", 1_000_000, 0, 1_000_000)).toBeCloseTo(7, 4);
+    expect(computeCodexCostUsd("gpt-5.6-terra", 1_000_000, 0, 1_000_000)).toBeCloseTo(14, 4);
+    expect(computeCodexCostUsd("gpt-5.6-luna", 1_000_000, 0, 1_000_000)).toBeCloseTo(1.4, 4);
+    expect(computeCodexCostUsd("gpt-5.6-terra", 0, 1_000_000, 0)).toBeCloseTo(0.2, 4);
+    expect(computeCodexCostUsd("gpt-5.6-luna", 0, 1_000_000, 0)).toBeCloseTo(0.02, 4);
   });
 
   test("gpt-5.4 with cached input applies the cached discount", () => {

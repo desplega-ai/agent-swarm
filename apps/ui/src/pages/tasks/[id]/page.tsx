@@ -56,7 +56,7 @@ import type {
 import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleDescription } from "@/components/shared/collapsible-description";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
-import { CostSourceBadge } from "@/components/shared/cost-source-badge";
+import { CostSourceBadge, costDriftPercent } from "@/components/shared/cost-source-badge";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { SessionId } from "@/components/shared/session-id";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
@@ -114,6 +114,8 @@ function logDotColor(eventType: string, newValue?: string): string {
       case "failed":
       case "cancelled":
         return "bg-status-error";
+      case "superseded":
+        return "bg-status-neutral";
       case "in_progress":
         return "bg-status-active";
       default:
@@ -263,6 +265,10 @@ function StructuredOutputContent({ raw, maxH }: { raw: string; maxH: string }) {
   );
 }
 
+// Below this, harness-vs-recomputed divergence is rounding noise; above it,
+// worth a visible warning next to the cost.
+const DRIFT_HINT_THRESHOLD_PCT = 2;
+
 function TaskCostSection({
   costs,
   isLoading,
@@ -280,6 +286,10 @@ function TaskCostSection({
   const stats = useMemo(() => {
     if (!costs || costs.length === 0) return null;
     const totalCost = costs.reduce((sum, c) => sum + c.totalCostUsd, 0);
+    const hasHarnessCosts = costs.every((c) => c.harnessCostUsd != null);
+    const harnessCost = hasHarnessCosts
+      ? costs.reduce((sum, c) => sum + (c.harnessCostUsd ?? 0), 0)
+      : null;
     const inputTokens = costs.reduce((sum, c) => sum + c.inputTokens, 0);
     const outputTokens = costs.reduce((sum, c) => sum + c.outputTokens, 0);
     const cacheReadTokens = costs.reduce((sum, c) => sum + c.cacheReadTokens, 0);
@@ -294,6 +304,7 @@ function TaskCostSection({
     const aggregateCostSource = sources.size === 1 ? Array.from(sources)[0] : ("harness" as const);
     return {
       totalCost,
+      harnessCost,
       inputTokens,
       outputTokens,
       cacheReadTokens,
@@ -322,6 +333,7 @@ function TaskCostSection({
 
   const acuCostUsd = devinMeta?.acuCostUsd ?? 2.25;
   const acusConsumed = isDevin ? stats.totalCost / acuCostUsd : 0;
+  const driftPercent = costDriftPercent(stats.harnessCost, stats.totalCost) ?? 0;
 
   return (
     <DetailPageSection title="Session Cost">
@@ -329,7 +341,16 @@ function TaskCostSection({
         <MetaRow icon={DollarSign} label="Cost">
           <span className="text-xs font-semibold inline-flex items-center gap-1.5">
             {formatCost(stats.totalCost, { precision: 4 })}
-            <CostSourceBadge source={stats.costSource} />
+            <CostSourceBadge
+              source={stats.costSource}
+              harnessCostUsd={stats.harnessCost}
+              totalCostUsd={stats.totalCost}
+            />
+            {driftPercent > DRIFT_HINT_THRESHOLD_PCT ? (
+              <span className="text-[10px] font-medium text-status-warning-strong">
+                Δ {driftPercent.toFixed(1)}%
+              </span>
+            ) : null}
           </span>
         </MetaRow>
         {isDevin ? (
@@ -576,7 +597,7 @@ export default function TaskDetailPage() {
     return <p className="text-muted-foreground">Task not found.</p>;
   }
 
-  const terminalStatuses = ["completed", "failed", "cancelled"];
+  const terminalStatuses = ["completed", "failed", "cancelled", "superseded"];
   const canCancel = !terminalStatuses.includes(task.status) && task.status !== "paused";
   const canPause = task.status === "in_progress";
   const canResume = task.status === "paused";

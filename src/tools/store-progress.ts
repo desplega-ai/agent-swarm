@@ -159,9 +159,10 @@ export const registerStoreProgressTool = (server: McpServer) => {
           // only if at least one `agent-fs` row arrives with missing IDs.
           // Scope precedence is `getResolvedConfig`'s usual repo > agent >
           // global; we pass the calling agent's id so agent-scoped overrides
-          // win. Per-row IDs always take precedence over the config defaults.
-          // Env-var fallback in `constants.ts` remains the secondary path for
-          // self-hosters who deploy without a config DB.
+          // win. Defaults apply only when a row has neither ID: filling one
+          // missing ID would create a mismatched pair and a potentially wrong
+          // live-host URL. Env-var fallback in `constants.ts` remains the
+          // secondary path for self-hosters who deploy without a config DB.
           let agentFsDefaults: { orgId?: string; driveId?: string } | null = null;
           const resolveAgentFsDefaults = (): { orgId?: string; driveId?: string } => {
             if (agentFsDefaults !== null) return agentFsDefaults;
@@ -178,7 +179,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           for (const a of attachments) {
             let orgId = a.kind === "agent-fs" ? a.orgId : undefined;
             let driveId = a.kind === "agent-fs" ? a.driveId : undefined;
-            if (a.kind === "agent-fs" && (!orgId || !driveId)) {
+            if (a.kind === "agent-fs" && !orgId && !driveId) {
               const defaults = resolveAgentFsDefaults();
               orgId = orgId || defaults.orgId;
               driveId = driveId || defaults.driveId;

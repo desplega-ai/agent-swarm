@@ -6,8 +6,11 @@ model. `calendarId` defaults to `"primary"`. Times are **RFC3339**
 
 ```bash
 agent-swarm x composio POST /tools/execute/<SLUG> \
-  --body '{"user_id":"t@desplega.ai","connected_account_id":"ca_…","arguments":{ … }}'
+  --body '{"user_id":"<connected-account-email>","connected_account_id":"<active-connected-account-id>","arguments":{ … }}'
 ```
+
+Follow the hub's **Resolve the user and connected account** procedure, then
+select the resolved user's `googlecalendar` account whose status is `ACTIVE`.
 
 ## Headline tools
 
@@ -57,7 +60,7 @@ agent-swarm x composio POST /tools/execute/GOOGLECALENDAR_EVENTS_LIST \
 ```bash
 agent-swarm x composio POST /tools/execute/GOOGLECALENDAR_CREATE_EVENT \
   --body '{"connected_account_id":"ca_…","arguments":{
-    "summary":"Norrsken <> Desplega",
+    "summary":"Project planning",
     "start_datetime":"2026-06-05T15:00:00+02:00",
     "event_duration_minutes":30,
     "timezone":"Europe/Madrid",

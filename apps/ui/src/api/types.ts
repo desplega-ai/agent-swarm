@@ -765,6 +765,17 @@ export interface ServicesResponse {
  */
 export type SessionCostSource = "harness" | "pricing-table" | "unpriced";
 
+export interface SessionCostModelBreakdown {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  webSearchRequests?: number | null;
+  costUsd?: number | null;
+  harnessCostUsd?: number | null;
+}
+
 export interface SessionCost {
   id: string;
   sessionId: string;
@@ -786,6 +797,10 @@ export interface SessionCost {
   isError: boolean;
   // Phase 12b: surfaced on each row for the UI badge.
   costSource: SessionCostSource;
+  harnessCostUsd?: number | null;
+  cacheWrite5mTokens?: number | null;
+  cacheWrite1hTokens?: number | null;
+  modelBreakdown?: SessionCostModelBreakdown[] | null;
   createdAt: string;
 }
 
@@ -802,6 +817,8 @@ export interface UsageSummaryTotals {
   totalDurationMs: number;
   totalSessions: number;
   avgCostPerSession: number;
+  /** Share of `totalCostUsd` whose task carries a human requester. Older API servers omit it. */
+  attributedCostUsd?: number;
 }
 
 export interface UsageSummaryDailyRow {
@@ -821,10 +838,21 @@ export interface UsageSummaryByAgentRow {
   durationMs: number;
 }
 
+export interface UsageSummaryByUserRow {
+  /** `null` = no human requester (heartbeat, boot triage, other autonomous work). */
+  userId: string | null;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  tasks: number;
+  durationMs: number;
+}
+
 export interface UsageSummaryResponse {
   totals: UsageSummaryTotals;
   daily: UsageSummaryDailyRow[];
   byAgent: UsageSummaryByAgentRow[];
+  byUser?: UsageSummaryByUserRow[];
 }
 
 export interface DashboardCostResponse {
@@ -1234,7 +1262,7 @@ export interface ScriptVersion {
   changeReason: string | null;
 }
 
-/** `GET /api/scripts/type-defs` — static SDK + stdlib .d.ts for the Monaco editor. */
+/** `GET /api/scripts/type-defs` — SDK + stdlib .d.ts (incl. generated connection + per-app types) for the Monaco editor. */
 export interface ScriptTypeDefs {
   sdkTypes: string;
   stdlibTypes: string;

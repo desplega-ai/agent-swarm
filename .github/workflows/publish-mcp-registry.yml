@@ -1,0 +1,50 @@
+name: Publish to MCP Registry
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish server metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install mcp-publisher
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/modelcontextprotocol/registry/releases/download/v1.8.0/mcp-publisher_linux_amd64.tar.gz \
+            --output /tmp/mcp-publisher.tar.gz
+          echo "1370446bbe74d562608e8005a6ccce02d146a661fbd78674e11cc70b9618d6cf  /tmp/mcp-publisher.tar.gz" | sha256sum --check
+          tar -xzf /tmp/mcp-publisher.tar.gz mcp-publisher
+
+      - name: Set registry manifest version
+        run: |
+          VERSION=$(jq --raw-output .version package.json)
+          jq --arg version "$VERSION" \
+            '.version = $version | .packages = [.packages[] | .version = $version]' \
+            server.json > /tmp/server.json
+          mv /tmp/server.json server.json
+
+      - name: Validate registry manifest
+        run: ./mcp-publisher validate
+
+      - name: Authenticate to MCP Registry
+        id: registry-auth
+        continue-on-error: true
+        run: ./mcp-publisher login github-oidc
+
+      - name: Skip publication when OIDC authentication is unavailable
+        if: steps.registry-auth.outcome != 'success'
+        run: echo "::warning::MCP Registry OIDC authentication unavailable; skipping publication"
+
+      - name: Publish to MCP Registry
+        if: steps.registry-auth.outcome == 'success'
+        run: ./mcp-publisher publish

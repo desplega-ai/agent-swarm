@@ -535,6 +535,10 @@ export async function handlePages(
       res.end();
       return true;
     }
+    if (myAgentId && page.agentId !== myAgentId) {
+      jsonError(res, "Page belongs to another agent", 403);
+      return true;
+    }
     const version = getPageVersion(parsed.params.id, parsed.params.version);
     if (!version) {
       res.writeHead(404);
@@ -555,6 +559,10 @@ export async function handlePages(
       res.end();
       return true;
     }
+    if (myAgentId && page.agentId !== myAgentId) {
+      jsonError(res, "Page belongs to another agent", 403);
+      return true;
+    }
     const versions = getPageVersions(parsed.params.id);
     json(res, { versions });
     return true;
@@ -567,6 +575,13 @@ export async function handlePages(
     if (!page) {
       res.writeHead(404);
       res.end();
+      return true;
+    }
+    // Object-level authorization: an agent-authenticated caller may only read
+    // its own pages. Operator/dashboard callers (no X-Agent-ID) keep full
+    // access, matching the convention in src/http/tasks.ts.
+    if (myAgentId && page.agentId !== myAgentId) {
+      jsonError(res, "Page belongs to another agent", 403);
       return true;
     }
     const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
@@ -585,6 +600,11 @@ export async function handlePages(
     if (!existing) {
       res.writeHead(404);
       res.end();
+      return true;
+    }
+
+    if (myAgentId && existing.agentId !== myAgentId) {
+      jsonError(res, "Page belongs to another agent", 403);
       return true;
     }
 
@@ -639,6 +659,16 @@ export async function handlePages(
   if (deletePageRoute.match(req.method, pathSegments)) {
     const parsed = await deletePageRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const existing = getPage(parsed.params.id);
+    if (!existing) {
+      res.writeHead(404);
+      res.end();
+      return true;
+    }
+    if (myAgentId && existing.agentId !== myAgentId) {
+      jsonError(res, "Page belongs to another agent", 403);
+      return true;
+    }
     const ok = deletePage(parsed.params.id);
     if (!ok) {
       res.writeHead(404);

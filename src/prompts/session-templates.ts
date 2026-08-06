@@ -658,6 +658,8 @@ Check the task's \`vcsProvider\` field or the repo URL to determine which CLI to
 | Review | \`gh pr review\` | \`glab mr approve\` / \`glab mr note\` |
 | Comment on issue | \`gh issue comment\` | \`glab issue note\` |
 | Clone | \`gh repo clone\` | \`glab repo clone\` |
+
+**GitHub review-reply provenance:** Before an automated reply to an inline PR review thread, verify that \`gh api user --jq .login\` matches \`\${GITHUB_BOT_NAME:-agent-swarm-bot}\`. Post the reply through the \`GITHUB_TOKEN\`-backed \`gh api\` path and append \`<!-- agent-swarm:review-ack -->\`. Never use a user-OAuth GitHub connector such as \`codex_apps\` for swarm-authored review replies. If the identity does not match, do not post; report the configuration mismatch.
 `,
   variables: [],
   category: "system",

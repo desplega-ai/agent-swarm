@@ -16,6 +16,7 @@ import { type FileObject, type FileScope, FilesError, normalizeFilesError } from
 import { getFileStorageProvider } from "../fs/registry";
 import { can, type RbacPrincipal, type RbacResource } from "../rbac";
 import type { TaskAttachment } from "../types";
+import { attachmentContentDisposition } from "../utils/content-disposition";
 import { getCurrentRequestAuth, getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
@@ -366,7 +367,7 @@ async function sendDownload(res: ServerResponse, attachment: TaskAttachment): Pr
     const headers: Record<string, string> = {
       "Content-Type":
         response.headers.get("content-type") ?? attachment.mimeType ?? "application/octet-stream",
-      "Content-Disposition": `attachment; filename="${attachment.name.replace(/"/g, "")}"`,
+      "Content-Disposition": attachmentContentDisposition(attachment.name),
     };
     const length = response.headers.get("content-length") ?? attachment.sizeBytes?.toString();
     if (length) headers["Content-Length"] = length;

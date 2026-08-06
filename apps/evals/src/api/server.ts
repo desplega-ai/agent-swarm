@@ -1,4 +1,5 @@
 import { join, normalize, sep } from "node:path";
+import { attachmentContentDisposition } from "../../../../src/utils/content-disposition.ts";
 import { DEFAULT_CONFIG_IDS } from "../../configs/index.ts";
 import { CONFIG_PRESETS } from "../../configs/presets.ts";
 import { getClaudeAliasMap, listOpenrouterModels } from "../cost/pricing.ts";
@@ -866,7 +867,7 @@ export async function startServer(
             : "text/plain; charset=utf-8",
         };
         if (new URL(req.url).searchParams.get("download") === "1") {
-          headers["content-disposition"] = `attachment; filename="${name.replace(/"/g, "")}"`;
+          headers["content-disposition"] = attachmentContentDisposition(name);
         }
         return new Response(artifact.content, { headers });
       },

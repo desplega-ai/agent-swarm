@@ -208,4 +208,110 @@ describe("Pages HTTP API", () => {
     const res = await fetch(`${baseUrl}/api/pages/${"0".repeat(32)}`, { headers });
     expect(res.status).toBe(404);
   });
+
+  // Regression coverage for CWE-639 (high-70bc9231): GET/PUT/DELETE
+  // /api/pages/:id used to call getPage(id) and return/modify/delete it
+  // without ever comparing the caller's agent to page.agentId — so any
+  // agent-authenticated caller could read, overwrite, or delete another
+  // agent's page (including password-protected bodies/hashes).
+  describe("object-level authorization across agents", () => {
+    const ownerId = crypto.randomUUID();
+    const attackerId = crypto.randomUUID();
+    const ownerHeaders = { "Content-Type": "application/json", "X-Agent-ID": ownerId };
+    const attackerHeaders = { "Content-Type": "application/json", "X-Agent-ID": attackerId };
+
+    async function createOwnedPage(): Promise<string> {
+      const res = await fetch(`${baseUrl}/api/pages`, {
+        method: "POST",
+        headers: ownerHeaders,
+        body: JSON.stringify({
+          slug: `owned-${crypto.randomUUID().slice(0, 8)}`,
+          title: "Owner's page",
+          contentType: "text/html",
+          authMode: "authed",
+          body: "<h1>owner only</h1>",
+        }),
+      });
+      expect(res.status).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+      return id;
+    }
+
+    // Must-reject: cross-agent read.
+    test("GET as a different agent → 403", async () => {
+      const id = await createOwnedPage();
+      const res = await fetch(`${baseUrl}/api/pages/${id}`, { headers: attackerHeaders });
+      expect(res.status).toBe(403);
+    });
+
+    // Must-reject: cross-agent overwrite (would also enable stored XSS via a
+    // tampered body per the finding's impact).
+    test("PUT as a different agent → 403, page left untouched", async () => {
+      const id = await createOwnedPage();
+      const res = await fetch(`${baseUrl}/api/pages/${id}`, {
+        method: "PUT",
+        headers: attackerHeaders,
+        body: JSON.stringify({ body: "<script>pwned</script>" }),
+      });
+      expect(res.status).toBe(403);
+
+      const got = await fetch(`${baseUrl}/api/pages/${id}`, { headers: ownerHeaders });
+      const page = (await got.json()) as Page;
+      expect(page.body).toBe("<h1>owner only</h1>");
+    });
+
+    // Must-reject: cross-agent delete.
+    test("DELETE as a different agent → 403, page still exists", async () => {
+      const id = await createOwnedPage();
+      const res = await fetch(`${baseUrl}/api/pages/${id}`, {
+        method: "DELETE",
+        headers: attackerHeaders,
+      });
+      expect(res.status).toBe(403);
+
+      const got = await fetch(`${baseUrl}/api/pages/${id}`, { headers: ownerHeaders });
+      expect(got.status).toBe(200);
+    });
+
+    // Must-reject: cross-agent version-history read (same info-disclosure
+    // class as GET — sibling code path fixed alongside the headline finding).
+    test("GET /versions as a different agent → 403", async () => {
+      const id = await createOwnedPage();
+      const res = await fetch(`${baseUrl}/api/pages/${id}/versions`, {
+        headers: attackerHeaders,
+      });
+      expect(res.status).toBe(403);
+    });
+
+    // Positive path: the owning agent keeps full read/write/delete access.
+    test("owner retains GET/PUT/DELETE access to its own page", async () => {
+      const id = await createOwnedPage();
+
+      const got = await fetch(`${baseUrl}/api/pages/${id}`, { headers: ownerHeaders });
+      expect(got.status).toBe(200);
+
+      const put = await fetch(`${baseUrl}/api/pages/${id}`, {
+        method: "PUT",
+        headers: ownerHeaders,
+        body: JSON.stringify({ title: "Updated by owner" }),
+      });
+      expect(put.status).toBe(200);
+
+      const del = await fetch(`${baseUrl}/api/pages/${id}`, {
+        method: "DELETE",
+        headers: ownerHeaders,
+      });
+      expect(del.status).toBe(204);
+    });
+
+    // Positive path: operator/dashboard callers (no X-Agent-ID) keep full
+    // access, matching the existing convention in src/http/tasks.ts.
+    test("operator caller (no X-Agent-ID) can still read/write any page", async () => {
+      const id = await createOwnedPage();
+      const res = await fetch(`${baseUrl}/api/pages/${id}`, {
+        headers: { "Content-Type": "application/json" },
+      });
+      expect(res.status).toBe(200);
+    });
+  });
 });

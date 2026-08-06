@@ -161,7 +161,8 @@ export function CommandMenu() {
               )}
               {activeTask.status !== "completed" &&
                 activeTask.status !== "failed" &&
-                activeTask.status !== "cancelled" && (
+                activeTask.status !== "cancelled" &&
+                activeTask.status !== "superseded" && (
                   <CommandItem
                     value={`cancel current task ${activeTask.task} ${activeTask.id}`}
                     onSelect={() => handleTaskAction("cancel", activeTask)}

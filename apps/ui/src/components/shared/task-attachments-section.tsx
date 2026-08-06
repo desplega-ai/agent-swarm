@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchTaskAttachmentBlob, useDeleteAttachment, useTaskAttachments } from "@/api/fs";
 import type { TaskAttachment, TaskAttachmentKind } from "@/api/types";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { AttachmentName, buildAgentFsLiveUrl } from "@/components/shared/task-attachment-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,58 +31,10 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * Default agent-fs live host used when the dashboard's runtime config has
- * not been told otherwise. Kept in sync with `DEFAULT_AGENT_FS_LIVE_URL` in
- * `src/utils/constants.ts`.
- */
-const DEFAULT_AGENT_FS_LIVE_URL = "https://live.agent-fs.dev";
-
-/**
- * `import.meta.env.VITE_AGENT_FS_LIVE_URL` lets self-hosted deployments point
- * the dashboard at a different agent-fs live host. Falls back to the public
- * production host so the default install keeps rendering working links.
- */
-function getAgentFsLiveUrl(): string {
-  const raw = import.meta.env.VITE_AGENT_FS_LIVE_URL?.trim();
-  return (raw || DEFAULT_AGENT_FS_LIVE_URL).replace(/\/+$/, "");
-}
-
-function getAgentFsDefaultOrgId(): string | undefined {
-  const raw = import.meta.env.VITE_AGENT_FS_DEFAULT_ORG_ID?.trim();
-  return raw || undefined;
-}
-
-function getAgentFsDefaultDriveId(): string | undefined {
-  const raw = import.meta.env.VITE_AGENT_FS_DEFAULT_DRIVE_ID?.trim();
-  return raw || undefined;
-}
-
-/**
- * Mirror of `buildAgentFsLiveUrl` in `src/utils/constants.ts`. Returns null
- * when the path is missing or no org/drive pair is available (row-level
- * fields with env-var fallback) — callers fall back to a non-clickable row.
- */
-export function buildAgentFsLiveUrl(opts: {
-  path?: string | null;
-  orgId?: string | null;
-  driveId?: string | null;
-}): string | null {
-  const path = opts.path?.trim();
-  if (!path) return null;
-  const orgId = opts.orgId?.trim() || getAgentFsDefaultOrgId();
-  const driveId = opts.driveId?.trim() || getAgentFsDefaultDriveId();
-  if (!orgId || !driveId) return null;
-  const host = getAgentFsLiveUrl();
-  const normalizedPath = path.replace(/^\/+/, "");
-  return `${host}/file/~/${orgId}/${driveId}/${normalizedPath}`;
-}
-
-/**
  * Per-row resolution mirrors `resolveAttachmentDisplay` in `src/slack/blocks.ts`.
  * For `agent-fs` we build a public live-URL when the row carries `orgId` and
- * `driveId` (or the operator-set env-var fallbacks supply them); otherwise
- * the row stays non-clickable and we surface the raw path so users can copy
- * it manually.
+ * `driveId` on that same row; otherwise the row stays non-clickable and we
+ * surface the raw path so users can copy it manually.
  */
 function resolveHref(a: TaskAttachment): string | null {
   switch (a.kind) {
@@ -517,7 +470,7 @@ function AttachmentRow({
                 aria-label="Primary attachment"
               />
             )}
-            <span className="truncate text-sm font-medium text-foreground">{attachment.name}</span>
+            <AttachmentName href={href} name={attachment.name} />
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <KindBadge kind={attachment.kind} />

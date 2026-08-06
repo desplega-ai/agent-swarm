@@ -1,5 +1,50 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { unlink } from "node:fs/promises";
+import { createApp } from "../apps/store";
+import { closeDb, getDb, initDb } from "../be/db";
 import { typecheckScript } from "../be/scripts/typecheck";
+
+const TEST_DB_PATH = "./test-scripts-typecheck.sqlite";
+
+async function removeDbFiles(path: string): Promise<void> {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      await unlink(path + suffix);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+}
+
+const appDefinition = {
+  models: {
+    issue: {
+      columns: {
+        title: { kind: "string", required: true },
+        status: { kind: "enum", enum: ["open", "urgent"] },
+      },
+    },
+  },
+  queries: {
+    byStatus: { model: "issue", filter: { status: { $param: "status" } } },
+  },
+  pages: { main: { root: "root", elements: { root: { type: "Container", props: {} } } } },
+  defaultPage: "main",
+};
+
+beforeAll(async () => {
+  await removeDbFiles(TEST_DB_PATH);
+  initDb(TEST_DB_PATH);
+});
+
+beforeEach(() => {
+  getDb().run("DELETE FROM apps");
+});
+
+afterAll(async () => {
+  closeDb();
+  await removeDbFiles(TEST_DB_PATH);
+});
 
 describe("typecheckScript", () => {
   test("accepts ES2022 globals: JSON, Math, Date, Number, String, Error, isFinite, encodeURIComponent, parseInt, parseFloat", () => {
@@ -243,5 +288,103 @@ describe("typecheckScript", () => {
       const r = typecheckScript(source);
       expect(r.ok).toBe(false);
     }
+  });
+});
+
+describe("per-app generated types", () => {
+  function createTypedApp() {
+    return createApp({
+      id: "typed-app-id",
+      name: "PM Inbox",
+      definition: appDefinition as never,
+    });
+  }
+
+  test("types declared row columns", () => {
+    const typedApp = createTypedApp();
+    const result = typecheckScript(`
+      import type { ScriptContext } from "swarm-sdk";
+      export default async (_args: unknown, ctx: ScriptContext) => {
+        const res = await ctx.swarm.app_query({
+          appId: ${JSON.stringify(typedApp.id)},
+          query: "byStatus",
+          params: { status: "open" },
+        });
+        return res.data.rows?.[0]?.title;
+      };
+    `);
+
+    expect(result.ok).toBe(true);
+  });
+
+  test("rejects misspelled row columns with an identifier diagnostic", () => {
+    const typedApp = createTypedApp();
+    const result = typecheckScript(`
+      import type { ScriptContext } from "swarm-sdk";
+      export default async (_args: unknown, ctx: ScriptContext) => {
+        const res = await ctx.swarm.app_query({
+          appId: ${JSON.stringify(typedApp.id)},
+          query: "byStatus",
+          params: { status: "open" },
+        });
+        return res.data.rows?.[0]?.titel;
+      };
+    `);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.diagnostics.join("\n")).toContain("titel");
+  });
+
+  test("rejects invalid enum literals assigned to filtered params", () => {
+    const typedApp = createTypedApp();
+    const result = typecheckScript(`
+      import type { App_PmInbox, ScriptContext } from "swarm-sdk";
+      export default async (_args: unknown, ctx: ScriptContext) => {
+        const params: { status: Exclude<App_PmInbox.Issue["status"], undefined> } = {
+          status: "closed",
+        };
+        return ctx.swarm.app_query({
+          appId: ${JSON.stringify(typedApp.id)},
+          query: "byStatus",
+          params,
+        });
+      };
+    `);
+
+    expect(result.ok).toBe(false);
+  });
+
+  test("keeps the loose fallback overload for dynamic app ids", () => {
+    createTypedApp();
+    const result = typecheckScript(`
+      import type { ScriptContext } from "swarm-sdk";
+      export default async (args: { appId: string }, ctx: ScriptContext) =>
+        ctx.swarm.app_query({ appId: args.appId, query: "byStatus", params: { status: "closed" } });
+    `);
+
+    expect(result.ok).toBe(true);
+  });
+
+  test("ignores an unparseable stored definition", () => {
+    createTypedApp();
+    getDb()
+      .prepare(
+        `INSERT INTO apps (id, name, description, definition, created_at, updated_at)
+         VALUES (?, ?, NULL, ?, ?, ?)`,
+      )
+      .run(
+        "broken-app-id",
+        "Broken App",
+        '{"models":"not an object"}',
+        "2026-08-06T00:00:00.000Z",
+        "2026-08-06T00:00:00.000Z",
+      );
+
+    expect(typecheckScript("export default async () => ({ ok: true });").ok).toBe(true);
+  });
+
+  test("leaves empty-app typechecking unchanged", () => {
+    expect(typecheckScript("export default async () => ({ ok: true });").ok).toBe(true);
   });
 });

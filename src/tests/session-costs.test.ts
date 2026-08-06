@@ -6,6 +6,7 @@ import {
   createAgent,
   createSessionCost,
   createTaskExtended,
+  createUser,
   getAllSessionCosts,
   getDashboardCostSummary,
   getSessionCostSummary,
@@ -13,6 +14,7 @@ import {
   getSessionCostsByTaskId,
   getSessionCostsFiltered,
   initDb,
+  UNATTRIBUTED_USER_ID,
 } from "../be/db";
 import type { SessionCost } from "../types";
 
@@ -881,6 +883,87 @@ describe("Session Costs API", () => {
       expect(summary.totals.totalCostUsd).toBe(0);
       expect(summary.daily.length).toBe(0);
       expect(summary.byAgent.length).toBe(0);
+      expect(summary.byUser.length).toBe(0);
+    });
+
+    test("byUser splits requester spend from unattributed spend", () => {
+      const agent = createAgent({ name: "ByUser Agent", isLead: false, status: "idle" });
+      const user = createUser({ name: "ByUser Requester" });
+      const attributed = createTaskExtended("Requested task", { requestedByUserId: user.id });
+      const autonomous = createTaskExtended("Heartbeat task");
+
+      createSessionCost({
+        sessionId: "by-user-attributed",
+        taskId: attributed.id,
+        agentId: agent.id,
+        totalCostUsd: 0.75,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+      createSessionCost({
+        sessionId: "by-user-unattributed",
+        taskId: autonomous.id,
+        agentId: agent.id,
+        totalCostUsd: 0.25,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+
+      const summary = getSessionCostSummary({ agentId: agent.id, groupBy: "user" });
+
+      expect(summary.daily.length).toBe(0);
+      expect(summary.byAgent.length).toBe(0);
+      // The unattributed bucket is a row of its own, never folded into a person.
+      const byUser = new Map(summary.byUser.map((r) => [r.userId, r]));
+      expect(byUser.get(user.id)?.costUsd).toBeCloseTo(0.75, 5);
+      expect(byUser.get(user.id)?.tasks).toBe(1);
+      expect(byUser.get(null)?.costUsd).toBeCloseTo(0.25, 5);
+      // Coverage stat: 0.75 of 1.00 carries a named requester.
+      expect(summary.totals.attributedCostUsd).toBeCloseTo(0.75, 5);
+      expect(summary.totals.totalCostUsd).toBeCloseTo(1.0, 5);
+    });
+
+    test("userId filter selects one requester, and `unattributed` selects the rest", () => {
+      const agent = createAgent({ name: "UserFilter Agent", isLead: false, status: "idle" });
+      const user = createUser({ name: "UserFilter Requester" });
+      const attributed = createTaskExtended("Requested task", { requestedByUserId: user.id });
+      const autonomous = createTaskExtended("Autonomous task");
+
+      createSessionCost({
+        sessionId: "user-filter-attributed",
+        taskId: attributed.id,
+        agentId: agent.id,
+        totalCostUsd: 0.4,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+      createSessionCost({
+        sessionId: "user-filter-unattributed",
+        taskId: autonomous.id,
+        agentId: agent.id,
+        totalCostUsd: 0.6,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+
+      const mine = getSessionCostSummary({ agentId: agent.id, userId: user.id, groupBy: "user" });
+      expect(mine.totals.totalCostUsd).toBeCloseTo(0.4, 5);
+      expect(mine.byUser.length).toBe(1);
+      expect(mine.byUser[0]?.userId).toBe(user.id);
+
+      const none = getSessionCostSummary({
+        agentId: agent.id,
+        userId: UNATTRIBUTED_USER_ID,
+        groupBy: "user",
+      });
+      expect(none.totals.totalCostUsd).toBeCloseTo(0.6, 5);
+      expect(none.totals.attributedCostUsd).toBe(0);
+      expect(none.byUser.length).toBe(1);
+      expect(none.byUser[0]?.userId).toBe(null);
     });
   });
 

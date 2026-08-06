@@ -12,6 +12,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
+import net from "node:net";
 import type { Subprocess } from "bun";
 import { signPageSession } from "../utils/page-session";
 
@@ -266,5 +267,111 @@ describe("/@swarm/api/* proxy", () => {
     expect(res.status).toBe(200);
     const agent = (await res.json()) as { id: string };
     expect(agent.id).toBe(agentId);
+  });
+});
+
+/**
+ * `fetch()` (WHATWG URL parsing) collapses `..` AND `%2e%2e` dot-segments
+ * client-side before the request ever leaves the process, so it can never
+ * exercise the server's traversal guard — it always arrives already
+ * normalized. `node:http`'s client does the same normalization internally
+ * even when given a raw `path` field, so the only way to send the literal,
+ * unnormalized request line the guard is actually meant to defend against
+ * (e.g. a non-browser HTTP client that doesn't dot-segment-normalize) is a
+ * raw TCP socket writing the HTTP/1.1 request line by hand.
+ */
+function rawGet(path: string, headers: Record<string, string>): Promise<{ status: number }> {
+  return new Promise((resolve, reject) => {
+    const sock = net.connect(TEST_PORT, "localhost", () => {
+      const headerLines = Object.entries(headers)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join("\r\n");
+      sock.write(
+        `GET ${path} HTTP/1.1\r\nHost: localhost:${TEST_PORT}\r\nConnection: close\r\n${headerLines}\r\n\r\n`,
+      );
+    });
+    let raw = "";
+    sock.on("data", (chunk) => {
+      raw += chunk.toString("utf8");
+    });
+    sock.on("end", () => {
+      const statusLine = raw.split("\r\n")[0] ?? "";
+      const status = Number.parseInt(statusLine.split(" ")[1] ?? "0", 10);
+      resolve({ status });
+    });
+    sock.on("error", reject);
+  });
+}
+
+// Regression coverage for the proxy's suffix-normalization guard: it rejects
+// path-traversal and percent-encoded segment-smuggling in the proxied suffix
+// before doing any auth work. This is deliberately NOT a route allowlist
+// (see the module comment in page-proxy.ts for why one was tried and
+// dropped) — a page-session cookie holder can reach any `/api/*` route, same
+// as the pre-existing behavior, but cannot use `..` or encoded separators to
+// dodge the suffix rewrite.
+describe("/@swarm/api/* proxy — suffix normalization", () => {
+  async function launchCookie(): Promise<string> {
+    const id = await createPage();
+    const launch = await fetch(`${BASE}/api/pages/${id}/launch`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${API_KEY}`, "X-Agent-ID": agentId },
+    });
+    const setCookie = launch.headers.get("set-cookie");
+    const cookieValue = /page_session=([^;]+)/.exec(setCookie!)?.[1];
+    if (!cookieValue) throw new Error("failed to mint test cookie");
+    return cookieValue;
+  }
+
+  // Must-reject: literal ".." path-traversal segment in the proxied suffix.
+  // Uses rawGet — fetch() would normalize this away before it ever left the
+  // process (see the rawGet doc comment above).
+  test("rejects a literal path-traversal segment", async () => {
+    const cookie = await launchCookie();
+    const res = await rawGet("/@swarm/api/agents/../pages", { Cookie: `page_session=${cookie}` });
+    expect(res.status).toBe(404);
+  });
+
+  // Must-reject: percent-encoded ".." must not sneak past the guard either
+  // (decode-then-check, not check-then-decode). Uses rawGet for the same
+  // reason as above — Bun's URL parser collapses `%2e%2e` client-side too.
+  test("rejects a percent-encoded path-traversal segment", async () => {
+    const cookie = await launchCookie();
+    const res = await rawGet("/@swarm/api/agents/%2e%2e/pages", {
+      Cookie: `page_session=${cookie}`,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  // Must-reject: a percent-encoded slash must not smuggle an extra segment
+  // past the naive `split("/")` normalization. Plain fetch() is fine here —
+  // `%2F` is not a dot-segment, so URL parsing leaves it intact.
+  test("rejects a percent-encoded slash smuggled into a segment", async () => {
+    const cookie = await launchCookie();
+    const res = await fetch(`${BASE}/@swarm/api/agents/foo%2Fbar`, {
+      headers: { Cookie: `page_session=${cookie}` },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  // Positive path: a clean suffix proxies straight through.
+  test("still allows GET /@swarm/api/tasks", async () => {
+    const cookie = await launchCookie();
+    const res = await fetch(`${BASE}/@swarm/api/tasks`, {
+      headers: { Cookie: `page_session=${cookie}` },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  // Guard against re-introducing a route allowlist: `/api/config` was one of
+  // the routes the dropped allowlist rejected outright. It must now proxy
+  // like any other route — the page-session cookie, not a route list, is the
+  // auth boundary.
+  test("forwards a route the dropped allowlist used to reject (/api/config)", async () => {
+    const cookie = await launchCookie();
+    const res = await fetch(`${BASE}/@swarm/api/config`, {
+      headers: { Cookie: `page_session=${cookie}` },
+    });
+    expect(res.status).not.toBe(404);
   });
 });

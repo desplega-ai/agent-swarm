@@ -1,5 +1,6 @@
 import type { SessionCostSource } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
  * Phase 12b — small badge for the `costSource` field on `session_costs` rows.
@@ -15,11 +16,25 @@ import { Badge } from "@/components/ui/badge";
  * Returns `null` for legacy rows with no `costSource` so older tasks don't
  * sprout an awkward "unknown" badge.
  */
-export function CostSourceBadge({ source }: { source?: SessionCostSource | null }) {
+export function CostSourceBadge({
+  source,
+  harnessCostUsd,
+  totalCostUsd,
+}: {
+  source?: SessionCostSource | null;
+  harnessCostUsd?: number | null;
+  totalCostUsd?: number | null;
+}) {
   if (!source) return null;
 
-  if (source === "pricing-table") {
-    return (
+  const driftPercent = costDriftPercent(harnessCostUsd, totalCostUsd);
+  const breakdown =
+    driftPercent != null
+      ? `harness ${formatUsd(harnessCostUsd!)} · recomputed ${formatUsd(totalCostUsd!)} · Δ ${driftPercent.toFixed(1)}%`
+      : null;
+
+  const badge =
+    source === "pricing-table" ? (
       <Badge
         variant="outline"
         size="tag"
@@ -28,10 +43,7 @@ export function CostSourceBadge({ source }: { source?: SessionCostSource | null 
       >
         PRICED
       </Badge>
-    );
-  }
-  if (source === "unpriced") {
-    return (
+    ) : source === "unpriced" ? (
       <Badge
         variant="outline"
         size="tag"
@@ -40,12 +52,48 @@ export function CostSourceBadge({ source }: { source?: SessionCostSource | null 
       >
         NO RATE
       </Badge>
+    ) : (
+      <Badge
+        variant="outline"
+        size="tag"
+        title="Cost reported by the harness, no recompute applied"
+      >
+        HARNESS
+      </Badge>
     );
-  }
-  // harness
+
+  if (!breakdown) return badge;
+
   return (
-    <Badge variant="outline" size="tag" title="Cost reported by the harness, no recompute applied">
-      HARNESS
-    </Badge>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex cursor-default">{badge}</span>
+      </TooltipTrigger>
+      <TooltipContent>{breakdown}</TooltipContent>
+    </Tooltip>
   );
+}
+
+/**
+ * Percent drift between the harness-reported and server-recomputed cost,
+ * relative to the larger magnitude. Returns null when either value is
+ * missing/non-finite or the two are equal (no drift to show).
+ */
+export function costDriftPercent(
+  harnessCostUsd: number | null | undefined,
+  totalCostUsd: number | null | undefined,
+): number | null {
+  if (!Number.isFinite(harnessCostUsd) || !Number.isFinite(totalCostUsd)) return null;
+  if (harnessCostUsd === totalCostUsd) return null;
+  const base = Math.max(Math.abs(harnessCostUsd as number), Math.abs(totalCostUsd as number));
+  if (base === 0) return null;
+  return (Math.abs((totalCostUsd as number) - (harnessCostUsd as number)) / base) * 100;
+}
+
+function formatUsd(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 4,
+  }).format(value);
 }

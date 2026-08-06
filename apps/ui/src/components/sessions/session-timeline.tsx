@@ -29,7 +29,7 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 import { ParallelGroup, TaskCard, TaskOutcome } from "./task-card";
 import { UserPromptBubble } from "./user-prompt-bubble";
 
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "superseded"]);
 
 /**
  * `true` for the orchestrator's auto-spawned review follow-ups —
@@ -69,7 +69,9 @@ function ParentClosingChip({ parent }: { parent: AgentTask }) {
             ? " closed this fork"
             : parent.status === "failed"
               ? " gave up here"
-              : " was cancelled"}
+              : parent.status === "superseded"
+                ? " was superseded"
+                : " was cancelled"}
           <span className="text-muted-foreground/70">
             {" · finished "}
             <time

@@ -135,7 +135,7 @@ const rows = rowsToObjects(await ctx.swarm.db_query({
 ## SDK And Context Gotchas
 
 - **`args` can be undefined.** When a script is called without arguments, `args` is `undefined`. Always guard: `argsSchema.safeParse(args || {})` or use optional chaining (`args?.field`).
-- **All SDK methods return `Promise<unknown>`.** Never assume a specific return shape without defensive unwrapping (`res?.data?.tasks ?? res?.tasks ?? []`). Run `script-query-types` to see live type signatures — return types are `unknown` and actual shapes vary by endpoint.
+- **SDK methods return `Promise<unknown>`** — except `app_query` called with a literal `appId` + `query` naming a known app, which returns `{ success, status, data: { rows?, count?, ... } }` with rows typed from the app's declared columns. For everything else, never assume a specific return shape without defensive unwrapping (`res?.data?.tasks ?? res?.tasks ?? []`). Run `script-query-types` to see live type signatures — including the generated per-app types.
 - `agentId` is propagated to scripts via the `X-Agent-ID` header, so SDK calls run as the invoking agent.
 - `taskId` is not ambient. If a script needs to call `ctx.swarm.task_storeProgress`, pass `taskId` explicitly in `args`.
 - Scripts invoked from a workflow script node may run with a workflow identity rather than a human or worker agent identity.

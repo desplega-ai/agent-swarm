@@ -36,6 +36,23 @@ function openAiCache(input: number, output: number): ModelsDevCache {
   };
 }
 
+function anthropicCache(input: number, output: number, cacheWrite: number): ModelsDevCache {
+  return {
+    anthropic: {
+      models: {
+        "claude-opus-5": {
+          cost: {
+            input,
+            output,
+            cache_read: input / 10,
+            cache_write: cacheWrite,
+          },
+        },
+      },
+    },
+  };
+}
+
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
@@ -54,6 +71,25 @@ afterEach(() => {
 });
 
 describe("models.dev runtime pricing refresh", () => {
+  test("derives Anthropic 1h cache-write rates for claude, managed, and pi", async () => {
+    await refreshPricingFromModelsDev({
+      now: 500,
+      fetchImpl: async () => responseFor(anthropicCache(5, 25, 6.25), '"etag-1h"'),
+    });
+
+    expect(
+      getActivePricingRow("claude", "claude-opus-5", "cache_write_1h", 500)?.pricePerMillionUsd,
+    ).toBe(10);
+    expect(
+      getActivePricingRow("claude-managed", "claude-opus-5", "cache_write_1h", 500)
+        ?.pricePerMillionUsd,
+    ).toBe(10);
+    expect(getActivePricingRow("pi", "opus", "cache_write_1h", 500)?.pricePerMillionUsd).toBe(10);
+    expect(
+      getActivePricingRow("claude", "claude-opus-5", "cache_write", 500)?.pricePerMillionUsd,
+    ).toBe(6.25);
+  });
+
   test("inserts a new effective row when upstream price changes and no-ops identical prices", async () => {
     const db = getDb();
     db.prepare(

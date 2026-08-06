@@ -1,5 +1,6 @@
 import * as z from "zod";
 import { normalizeAssetKey } from "./assets/key";
+import { MAX_PROFILE_FILE_LENGTH } from "./utils/constants";
 // ─── Asset namespaces ──────────────────────────────────────────────────────
 
 export const AssetKeySchema = z
@@ -846,19 +847,19 @@ export const AgentSchema = z.object({
   role: z.string().max(100).optional(), // Free-form, e.g., "frontend dev"
   capabilities: z.array(z.string()).default([]), // e.g., ["typescript", "react"]
 
-  // Personal CLAUDE.md content (max 64KB)
-  claudeMd: z.string().max(65536).optional(),
+  // Personal CLAUDE.md content (character cap, not a byte cap)
+  claudeMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
 
   // Soul: Persona, behavioral directives (injected via --append-system-prompt)
-  soulMd: z.string().max(65536).optional(),
+  soulMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
   // Identity: Expertise, working style, self-evolution notes (injected via --append-system-prompt)
-  identityMd: z.string().max(65536).optional(),
+  identityMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
   // Setup script: Runs at container start, agent-evolved (synced to /workspace/start-up.sh)
-  setupScript: z.string().max(65536).optional(),
+  setupScript: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
   // Tools/environment reference: Operational knowledge (synced to /workspace/TOOLS.md)
-  toolsMd: z.string().max(65536).optional(),
+  toolsMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
   // Heartbeat checklist: Standing orders checked periodically (synced to /workspace/HEARTBEAT.md)
-  heartbeatMd: z.string().max(65536).optional(),
+  heartbeatMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
 
   // Concurrency limit (defaults to 1 for backwards compatibility)
   maxTasks: z.number().int().min(1).max(100).optional(),
@@ -1161,6 +1162,18 @@ export type SessionLog = z.infer<typeof SessionLogSchema>;
 export const SessionCostSourceSchema = z.enum(["harness", "pricing-table", "unpriced"]);
 export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
 
+export const SessionCostModelBreakdownSchema = z.object({
+  model: z.string(),
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  cacheReadTokens: z.number().int().nonnegative(),
+  cacheWriteTokens: z.number().int().nonnegative(),
+  webSearchRequests: z.number().int().nonnegative().nullable().optional(),
+  costUsd: z.number().nullable().optional(),
+  harnessCostUsd: z.number().nullable().optional(),
+});
+export type SessionCostModelBreakdown = z.infer<typeof SessionCostModelBreakdownSchema>;
+
 export const SessionCostSchema = z.object({
   id: z.uuid(),
   sessionId: z.string(),
@@ -1188,6 +1201,11 @@ export const SessionCostSchema = z.object({
   //                      had no matching pricing rows; totalCostUsd is whatever
   //                      the worker submitted (often 0).
   costSource: SessionCostSourceSchema.default("harness"),
+  // Migration 128: adapter-reported amount retained for reconciliation only.
+  harnessCostUsd: z.number().nullable().optional(),
+  cacheWrite5mTokens: z.number().int().nullable().optional(),
+  cacheWrite1hTokens: z.number().int().nullable().optional(),
+  modelBreakdown: z.array(SessionCostModelBreakdownSchema).nullable().optional(),
   createdAt: z.iso.datetime(),
 });
 
@@ -2547,6 +2565,8 @@ export const PricingTokenClassSchema = z.enum([
   "output",
   // Migration 063 additions:
   "cache_write", // claude / claude-managed cache creation
+  "cache_write_1h", // Anthropic 1-hour cache creation
+  "web_search", // provider-billed web search request units
   "runtime_hour", // claude-managed runtime fee per hour
   "acu", // devin Agent Compute Unit
 ]);

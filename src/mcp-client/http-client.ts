@@ -37,6 +37,8 @@ type McpHttpClientOptions = {
   clientInfo?: { name: string; version: string };
   timeoutMs?: number;
   omitEmptyAuthHeaders?: boolean;
+  /** Revalidate the resolved request URL immediately before every fetch. */
+  validateUrl?: (url: string) => void;
 };
 
 export class McpHttpClient {
@@ -83,6 +85,7 @@ export class McpHttpClient {
       : null;
     const url = this.useRawUrl ? this.baseUrl : `${this.baseUrl}/mcp`;
     try {
+      this.options.validateUrl?.(url);
       const res = await fetch(url, {
         method: "POST",
         headers,

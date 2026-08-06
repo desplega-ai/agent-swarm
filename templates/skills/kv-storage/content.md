@@ -230,9 +230,12 @@ include enough to debug later:
 {
   "processedAt": "2026-05-28T10:00:00Z",
   "taskId": "173ca713-...",
-  "source": "slack:C0AR967K0KZ:1748430000.000000"
+  "source": "slack:<channel-id>:1748430000.000000"
 }
 ```
+
+Resolve `<channel-id>` from the current task or thread metadata; do not copy a
+channel identifier from another task.
 
 Include a version or content hash when the value is a cache entry, so you can
 invalidate without a key rename.

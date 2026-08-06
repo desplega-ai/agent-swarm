@@ -750,7 +750,7 @@ export async function handleWorkflows(
     try {
       runId = await startWorkflowExecution(workflow, body, getExecutorRegistry(), {
         triggerType: "api",
-        requestedByUserId: auth?.kind === "user" ? auth.userId : undefined,
+        requestedByUserId: auth?.kind === "user" ? auth.userId : workflow.createdBy,
       });
     } catch (err) {
       if (err instanceof TriggerSchemaError) {

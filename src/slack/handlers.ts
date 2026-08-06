@@ -305,7 +305,7 @@ async function getThreadContext(
       }
     }
 
-    return rewriteSlackMentions(formattedMessages.join("\n"));
+    return rewriteSlackMentions(formattedMessages.join("\n"), botUserId);
   } catch (error) {
     console.error("[Slack] Failed to fetch thread context:", error);
     return "";
@@ -707,11 +707,12 @@ export function registerMessageHandler(app: App): void {
                 channelId: msg.channel,
                 threadTs,
                 message: taskDescription,
+                messageTimestamps: [msg.ts],
                 requestedByUserId,
               })
             : null;
           if (steering) {
-            await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
+            await ackSlackMessage(client, msg.channel, msg.ts, "speech_balloon");
             results.steered.push({
               agentName: agent.name,
               acknowledgement: formatSlackSteeringAck(steering.result),

@@ -753,9 +753,11 @@ function ClearInputButton({ label, onClear }: { label: string; onClear: () => vo
   );
 }
 
+// Resolves a catalog entry's JSON OpenAPI document URL from apis.guru. Only the
+// spec URL is used — the base URL is extracted server-side from the fetched
+// spec, which resolves relative and templated `servers[]` entries correctly.
 async function resolveApisGuruOpenApi(domain: string): Promise<{
   specUrl?: string;
-  baseUrl?: string;
   error?: string;
 }> {
   if (!domain) return { error: "Catalog entry has no apis.guru domain." };
@@ -781,9 +783,7 @@ async function resolveApisGuruOpenApi(domain: string): Promise<{
     const specResponse = await fetch(candidate);
     if (!specResponse.ok)
       return { specUrl: candidate, error: "Spec URL found, but preview failed." };
-    const spec = (await specResponse.json()) as { servers?: Array<{ url?: string }> };
-    const baseUrl = spec.servers?.find((server) => typeof server.url === "string")?.url;
-    return { specUrl: candidate, baseUrl };
+    return { specUrl: candidate };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
@@ -1080,17 +1080,21 @@ export function AddConnectionDialog({
   function applySurfacePrefill(
     data: IntegrationsSurfaceResponse,
     targetKind: ScriptConnectionKind,
+    options: { skipSpecPrefill?: boolean } = {},
   ) {
     const httpSurface = data.surfaces.find((entry) => entry.type === "http");
     if (!httpSurface || targetKind === "mcp") return;
-    if (httpSurface.url) {
+    // GraphQL has no spec to derive an endpoint from, so the surface URL is the
+    // only prefill available. OpenAPI deliberately skips it: integrations.sh
+    // reports a human-facing API root that usually repeats the version prefix
+    // already baked into the spec's own paths (composio.dev -> `/api/v3.1`), and
+    // a user-supplied baseUrl overrides the spec-declared server — so
+    // prefilling it double-prefixes every generated request. Leaving baseUrl
+    // and allowedHosts empty lets the server derive both from the spec.
+    if (targetKind === "graphql" && httpSurface.url) {
       const surfaceUrl = httpSurface.url;
-      if (targetKind === "graphql") {
-        // The catalog entry's own URL is the GraphQL endpoint; only fill gaps.
-        setBaseUrl((current) => (current.trim() ? current : surfaceUrl));
-      } else {
-        setBaseUrl(surfaceUrl);
-      }
+      // The catalog entry's own URL is the GraphQL endpoint; only fill gaps.
+      setBaseUrl((current) => (current.trim() ? current : surfaceUrl));
       try {
         const hostname = new URL(surfaceUrl).hostname;
         setAllowedHosts((current) => uniqueStrings([...splitList(current), hostname]).join(", "));
@@ -1100,7 +1104,8 @@ export function AddConnectionDialog({
     }
     // The surface may advertise an OpenAPI spec URL; only fill gaps so an
     // apis.guru-resolved (JSON) spec or user input is never overwritten.
-    if (targetKind === "openapi" && httpSurface.spec) {
+    // Blessed entries opt out — their spec comes from the in-repo vendored copy.
+    if (targetKind === "openapi" && httpSurface.spec && !options.skipSpecPrefill) {
       const specUrl = httpSurface.spec;
       setSpecMode("url");
       setOpenapiSpecUrl((current) => (current.trim() ? current : specUrl));
@@ -1156,13 +1161,14 @@ export function AddConnectionDialog({
   async function loadSurface(
     domain: string,
     targetKind: ScriptConnectionKind,
+    options: { skipSpecPrefill?: boolean } = {},
   ): Promise<IntegrationsSurfaceResponse | null> {
     const normalized = domain.trim().toLowerCase();
     if (!normalized) return null;
     const cached = integrationsSurfaceCache.get(normalized);
     if (cached) {
       setSurface(cached);
-      applySurfacePrefill(cached, targetKind);
+      applySurfacePrefill(cached, targetKind, options);
       return cached;
     }
     setSurfaceLoading(true);
@@ -1170,7 +1176,7 @@ export function AddConnectionDialog({
       const data = await surfaceLookup.mutateAsync(normalized);
       integrationsSurfaceCache.set(normalized, data);
       setSurface(data);
-      applySurfacePrefill(data, targetKind);
+      applySurfacePrefill(data, targetKind, options);
       return data;
     } catch (error) {
       // Non-blocking: manual entry still works without surface details.
@@ -1213,7 +1219,10 @@ export function AddConnectionDialog({
     setKind(entry.kind);
     setSlug(normalizeScriptSlug(entry.slug || entry.name));
     setDisplayName(entry.name);
-    if (entry.domain) setAllowedHosts(entry.domain);
+    // OpenAPI allowed hosts are derived server-side from the spec's own server
+    // URL. Seeding the catalog domain (github.com) would scope the credential
+    // to a host the generated client never calls (api.github.com).
+    if (entry.domain && entry.kind !== "openapi") setAllowedHosts(entry.domain);
     // Blessed entries may suggest a curated OAuth preset — pre-arm the oauth path.
     setSuggestedPresetId(entry.presetId);
     if (entry.presetId) setAuthType((current) => (current === "none" ? "oauth" : current));
@@ -1236,11 +1245,15 @@ export function AddConnectionDialog({
     if (entry.vendoredSlug) {
       setVendoredSlug(entry.vendoredSlug);
       setBaseUrl("");
-      if (entry.domain) void loadSurface(entry.domain, "openapi");
+      if (entry.domain) void loadSurface(entry.domain, "openapi", { skipSpecPrefill: true });
       setCatalogHint("Blessed integration — spec and base URL are resolved on save.");
       return;
     }
-    setBaseUrl(entry.url);
+    // Base URL stays empty: the catalog entry's URL is a docs page as often as
+    // an API root, and the server extracts the spec-declared server (resolving
+    // relative/templated `servers[0].url` against the spec URL) far more
+    // reliably than we can here.
+    setBaseUrl("");
     setResolvingCatalogId(entry.id);
     const [resolved] = await Promise.all([
       resolveApisGuruOpenApi(entry.domain),
@@ -1248,8 +1261,6 @@ export function AddConnectionDialog({
     ]);
     setResolvingCatalogId(null);
     if (resolved.specUrl) setOpenapiSpecUrl(resolved.specUrl);
-    // Spec-declared server URL wins over the surface prefill when available.
-    if (resolved.baseUrl) setBaseUrl(resolved.baseUrl);
     if (resolved.error) {
       setCatalogHint(`Catalog selected; ${resolved.error}`);
     }
@@ -1365,11 +1376,18 @@ export function AddConnectionDialog({
     Boolean(connection?.auth) &&
     connection?.auth?.type !== "none" &&
     connection?.auth?.type !== "oauth";
+  // Selecting a blessed catalog entry pre-arms oauth (every blessed entry ships
+  // a curated preset), which used to hold Save hostage to the whole inline
+  // authorize flow — there was no way to register the connection first. A NEW
+  // connection may save with the authorization still unpicked: `buildAuthInput`
+  // returns undefined, so it lands with no auth and the authorization is
+  // attached by editing it later. On EDIT the authorization stays required, so
+  // an existing binding is never silently downgraded to none.
   const authReady =
     authType === "none"
       ? true
       : authType === "oauth"
-        ? Boolean(authAuthorizationId)
+        ? Boolean(authAuthorizationId) || !isEdit
         : useExistingConfigKey
           ? Boolean(authConfigKey.trim())
           : Boolean(authSecret.trim()) || canPreserveSecret;
@@ -1700,12 +1718,20 @@ export function AddConnectionDialog({
                 ) : null}
 
                 {authType === "oauth" ? (
-                  <OAuthInlineConnect
-                    oauthApps={oauthApps}
-                    value={authAuthorizationId}
-                    onChange={setAuthAuthorizationId}
-                    suggestedPresetId={suggestedPresetId}
-                  />
+                  <>
+                    <OAuthInlineConnect
+                      oauthApps={oauthApps}
+                      value={authAuthorizationId}
+                      onChange={setAuthAuthorizationId}
+                      suggestedPresetId={suggestedPresetId}
+                    />
+                    {!isEdit && !authAuthorizationId ? (
+                      <p className="text-xs text-muted-foreground">
+                        Optional right now — save the connection without an authorization and
+                        connect OAuth later by editing it.
+                      </p>
+                    ) : null}
+                  </>
                 ) : null}
               </div>
             ) : null}
