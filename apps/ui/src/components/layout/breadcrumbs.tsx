@@ -104,13 +104,10 @@ function isEntityId(segment: string | undefined): boolean {
   return !!segment && (UUID_REGEX.test(segment) || HEX32_REGEX.test(segment));
 }
 
-/** Cap a contextual breadcrumb name at a safe length, appending an ellipsis. */
-const CONTEXTUAL_NAME_MAX = 40;
-function capContextualName(name: string): string {
-  const trimmed = name.trim();
-  if (trimmed.length <= CONTEXTUAL_NAME_MAX) return trimmed;
-  return `${trimmed.slice(0, CONTEXTUAL_NAME_MAX)}…`;
-}
+// Contextual names are NOT length-capped in JS (a 40-char cap ellipsized long
+// ago before the header ran out of room — Taras). The trail takes the header's
+// free space (flex-1 in AppHeader) and CSS `truncate` clips only when the
+// space is actually exhausted; mobile always has the dropdown fallback.
 
 export function Breadcrumbs() {
   const location = useLocation();
@@ -217,10 +214,10 @@ export function Breadcrumbs() {
       // id segment at index 1 is replaced — other path segments keep their
       // routeLabels behavior.
       if (index === 1 && segment === detailId && contextualName) {
-        label = capContextualName(contextualName);
+        label = contextualName.trim();
       }
       if (index === 3 && appPageTitle) {
-        label = capContextualName(appPageTitle);
+        label = appPageTitle.trim();
       }
       const isLast = index === segments.length - 1;
 

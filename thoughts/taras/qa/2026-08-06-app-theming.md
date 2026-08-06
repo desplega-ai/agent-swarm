@@ -147,3 +147,25 @@ conditions are first-run-only, so active filters can always be cleared).
 | [`40-skills-toolbar-sync.png`](./2026-08-06-app-theming/40-skills-toolbar-sync.png) | Skills: sync icon (outline) at the toolbar's right end. |
 
 Gates: `bun run lint`, `bunx tsc -b` green.
+
+## Round 9 — schedules/people toolbars, subtitle prune, full-width breadcrumbs (2026-08-06, night)
+
+Schedules joined the toolbar-action pattern ("+" in the search row; the
+first-run empty keeps a labeled Create Schedule via `EmptyState action` next
+to the Ask-the-swarm CTA). People's two actions (Merge users outline /
+New user primary) became icon buttons to the RIGHT of the People|Unmapped
+tabs. Top-level subtitles pruned: apps, people, pages, memory descriptions +
+the skills system-skills note below the filter row. Breadcrumbs use ALL
+available header width: the 40-char JS cap on contextual names is gone and
+the trail owns the header's free space (`flex-1 min-w-0` wrapper replaces the
+spacer) — CSS `truncate` clips only when space truly runs out; mobile keeps
+the dropdown.
+
+| File | What it shows |
+|---|---|
+| [`41-schedules-empty-create-action.png`](./2026-08-06-app-theming/41-schedules-empty-create-action.png) | Schedules first-run empty: Create Schedule + Ask the swarm side by side, single breadcrumb row above. |
+| [`42-people-tabs-actions.png`](./2026-08-06-app-theming/42-people-tabs-actions.png) | People: search left, tabs right, merge/new-user icon buttons right of the tabs. |
+| [`43-skills-no-note.png`](./2026-08-06-app-theming/43-skills-no-note.png) | Skills without the system-skills note — one more row reclaimed. |
+| [`44-breadcrumb-fullwidth.png`](./2026-08-06-app-theming/44-breadcrumb-fullwidth.png) | Task detail: full 44-char task name uncut in the trail (previously clipped at 40 chars). |
+
+Gates: `bun run lint`, `bunx tsc -b` green.

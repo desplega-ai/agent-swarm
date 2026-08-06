@@ -362,7 +362,7 @@ export default function MemoryPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader title="Memory" description="Inspect and search the agent memory store" />
+      <PageHeader title="Memory" />
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[260px] max-w-md">

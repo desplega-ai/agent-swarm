@@ -66,10 +66,7 @@ export default function AppsListingPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader
-        title="Apps"
-        description="Agent-authored mini apps backed by server-native row storage."
-      />
+      <PageHeader title="Apps" />
       {error ? (
         <AlertCallout tone="error" icon={LayoutGrid} title="Failed to load apps">
           {error instanceof Error ? error.message : String(error)}

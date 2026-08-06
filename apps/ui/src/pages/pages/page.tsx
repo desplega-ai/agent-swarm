@@ -254,10 +254,7 @@ export default function PagesListingPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader
-        title="Pages"
-        description="DB-backed static artifacts created by agents via the create_page MCP tool."
-      />
+      <PageHeader title="Pages" />
 
       {/* No filter chrome over a first-run empty state — nothing to filter. */}
       {isEmpty ? null : (

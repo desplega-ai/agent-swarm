@@ -192,22 +192,7 @@ export default function PeoplePage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader
-        title="People"
-        description="Manage the humans who interact with this swarm — link their Slack, GitHub, Linear and GitLab accounts, set per-user budgets, and triage requests from accounts we haven't matched yet."
-        action={
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setMergeOpen(true)}>
-              <GitMerge className="h-4 w-4 mr-1.5" />
-              Merge users
-            </Button>
-            <Button size="sm" onClick={() => setNewUserOpen(true)}>
-              <UserPlus className="h-4 w-4 mr-1.5" />
-              New user
-            </Button>
-          </div>
-        }
-      />
+      <PageHeader title="People" />
 
       <Tabs
         value={tab}
@@ -268,6 +253,35 @@ export default function PeoplePage() {
               )}
             </TabsTrigger>
           </TabsList>
+          {/* Page actions ride the toolbar, right of the tabs — no lone
+              header action row. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-8 shrink-0"
+                onClick={() => setMergeOpen(true)}
+                aria-label="Merge users"
+              >
+                <GitMerge className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Merge users</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                className="size-8 shrink-0"
+                onClick={() => setNewUserOpen(true)}
+                aria-label="New user"
+              >
+                <UserPlus className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>New user</TooltipContent>
+          </Tooltip>
         </div>
 
         <TabsContent value="people" className="flex-1 min-h-0 flex flex-col">

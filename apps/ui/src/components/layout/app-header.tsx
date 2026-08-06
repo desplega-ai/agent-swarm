@@ -46,9 +46,11 @@ export function AppHeader() {
       <SidebarTrigger className="md:hidden" />
       <Separator orientation="vertical" className="mr-2 h-4 md:hidden" />
 
-      <Breadcrumbs />
-
-      <div className="flex-1" />
+      {/* The trail owns the header's free space (no fixed spacer) so long
+          entity names only truncate when the width is actually exhausted. */}
+      <div className="flex flex-1 items-center min-w-0">
+        <Breadcrumbs />
+      </div>
 
       <div className="flex items-center gap-3">
         {/* Phase 2: aggregate health badge — clickable, pulls from /status. */}

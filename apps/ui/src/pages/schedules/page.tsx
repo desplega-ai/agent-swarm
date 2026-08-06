@@ -568,13 +568,14 @@ export default function SchedulesPage() {
   if (!isLoading && scheduleRows.length === 0) {
     return (
       <div className="flex flex-col flex-1 min-h-0 gap-4">
-        <PageHeader title="Schedules" action={createButton} />
+        <PageHeader title="Schedules" />
         <EmptyState
           icon={Clock}
           title="No scheduled tasks"
           description="Schedules run a task on a cron cadence — reports, syncs, sweeps."
           entity="scheduled task"
           fullPage
+          action={createButton}
         />
         <ScheduleDialog
           open={dialogOpen}
@@ -587,7 +588,7 @@ export default function SchedulesPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader title="Schedules" action={createButton} />
+      <PageHeader title="Schedules" />
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">
@@ -599,6 +600,20 @@ export default function SchedulesPage() {
             className="pl-9"
           />
         </div>
+        {/* Create lives in the toolbar as a bare "+" — no lone header action row. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon"
+              className="size-8 ml-auto"
+              onClick={() => setDialogOpen(true)}
+              aria-label="Create schedule"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Create schedule</TooltipContent>
+        </Tooltip>
       </div>
 
       <DataGrid

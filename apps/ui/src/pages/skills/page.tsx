@@ -225,13 +225,6 @@ export default function SkillsPage() {
           <TooltipContent>Sync remote skills</TooltipContent>
         </Tooltip>
       </div>
-      {skills.some((skill) => skill.systemDefault) && (
-        <p className="text-xs text-muted-foreground shrink-0">
-          System skills are managed by the swarm and re-seeded on start. Fork one under a new name
-          to customize its content.
-        </p>
-      )}
-
       <DataGrid
         rowData={skills}
         columnDefs={columnDefs}
