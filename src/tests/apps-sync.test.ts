@@ -941,3 +941,480 @@ describe("apps sync row envelope and read-only enforcement", () => {
     expect(ascending.body.rows.map((row) => row.issueKey)).toEqual(["1", "2"]);
   });
 });
+
+describe("apps sync source edits as schema changes", () => {
+  /** One source, one bound column, one owned column — the lifecycle-edit shape. */
+  function lifecycleDefinition(
+    overrides: { columns?: Record<string, unknown>; sources?: Record<string, unknown> | null } = {},
+  ): Definition {
+    return {
+      models: {
+        issue: {
+          columns: {
+            issueKey: { kind: "string" },
+            title: { kind: "string", source: { of: "gh", field: "title" } },
+            note: { kind: "string" },
+            ...overrides.columns,
+          },
+          ...(overrides.sources === null
+            ? {}
+            : { sources: overrides.sources ?? { gh: ghSource() } }),
+        },
+      },
+      pages: page,
+      defaultPage: "main",
+    };
+  }
+
+  function ghSource(): Record<string, unknown> {
+    return {
+      connector: "script",
+      scriptId: globalScriptId,
+      joinKey: "issueKey",
+      args: { repo: "owner/name" },
+    };
+  }
+
+  /** The same model before any source exists — every column plain and owned. */
+  function sourcelessDefinition(): Definition {
+    return lifecycleDefinition({ columns: { title: { kind: "string" } }, sources: null });
+  }
+
+  type PatchBody = {
+    app: { definition: { models: { issue: Record<string, Record<string, unknown>> } } };
+    migration: { detachedRows: number; purgedValues: number };
+  } & IssuesBody;
+
+  function patchDefinition(
+    appId: string,
+    definition: Definition,
+    migration?: Record<string, unknown>,
+  ): Promise<{ status: number; body: PatchBody }> {
+    return request<PatchBody>(`/api/apps/${appId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ definition, ...(migration ? { migration } : {}) }),
+    });
+  }
+
+  /** Seed the row shape only the sync engine may write. */
+  function seedSyncedRow(
+    appId: string,
+    definition: Definition,
+    values: Record<string, unknown>,
+    source = "gh",
+    syncedAt = "2026-08-06T10:00:00.000Z",
+  ): Promise<AppRow> {
+    return createAppRow(appId, "issue", modelOf(definition, "issue"), values, {
+      allowSourceManaged: true,
+      envelope: { source, syncedAt, stale: false },
+      actor: `sync:${source}`,
+    });
+  }
+
+  function listRows(appId: string): Promise<{ status: number; body: { rows: AppRow[] } }> {
+    return request<{ rows: AppRow[] }>(`/api/apps/${appId}/models/issue/rows?sort=createdAt:asc`);
+  }
+
+  function listVersions(appId: string): Promise<{
+    status: number;
+    body: { versions: Array<{ version: number; snapshot: { definition: Definition } }> };
+  }> {
+    return request(`/api/apps/${appId}/versions`);
+  }
+
+  test("adding a sources entry is free and snapshots the previous definition", async () => {
+    const appId = await createApp(sourcelessDefinition());
+    const before = await listVersions(appId);
+
+    const patched = await patchDefinition(appId, {
+      models: { issue: { sources: { gh: ghSource() } } },
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.body.app.definition.models.issue.sources).toEqual({ gh: ghSource() });
+    expect(patched.body.migration.detachedRows).toBe(0);
+
+    const after = await listVersions(appId);
+    expect(after.body.versions).toHaveLength(before.body.versions.length + 1);
+    // The snapshot is the pre-patch, source-less definition.
+    expect(after.body.versions[0]?.snapshot.definition).toMatchObject({
+      models: { issue: { columns: { title: { kind: "string" } } } },
+    });
+    expect(
+      (
+        after.body.versions[0]?.snapshot.definition.models as Record<
+          string,
+          Record<string, unknown>
+        >
+      ).issue?.sources,
+    ).toBeUndefined();
+  });
+
+  test("adding a new column with a source binding is free", async () => {
+    const appId = await createApp(lifecycleDefinition());
+    const patched = await patchDefinition(appId, {
+      models: {
+        issue: { columns: { body: { kind: "string", source: { of: "gh", field: "body" } } } },
+      },
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.body.app.definition.models.issue.columns?.body).toEqual({
+      kind: "string",
+      source: { of: "gh", field: "body" },
+    });
+    expect(patched.body.migration.detachedRows).toBe(0);
+  });
+
+  test("binding an existing column that holds values is rejected with the row count", async () => {
+    const appId = await createApp(lifecycleDefinition());
+    for (const note of ["hand written", "also mine"]) {
+      const created = await request(`/api/apps/${appId}/models/issue/rows`, {
+        method: "POST",
+        body: JSON.stringify({ values: { note } }),
+      });
+      expect(created.status).toBe(201);
+    }
+    // A third row leaves the column absent — only populated rows are counted.
+    await request(`/api/apps/${appId}/models/issue/rows`, {
+      method: "POST",
+      body: JSON.stringify({ values: {} }),
+    });
+
+    const rejected = await patchDefinition(appId, {
+      models: {
+        issue: { columns: { note: { kind: "string", source: { of: "gh", field: "body" } } } },
+      },
+    });
+    expect(rejected.status).toBe(400);
+    expect(issueAt(rejected.body.issues ?? [], "models.issue.columns.note.source")?.message).toBe(
+      "binding an existing column would let the next pass overwrite 2 row(s) of existing data; hide or purge the column and add it bound instead",
+    );
+  });
+
+  test("binding an existing column with zero values is free", async () => {
+    const appId = await createApp(lifecycleDefinition());
+    // A row that never set the column does not populate it.
+    await request(`/api/apps/${appId}/models/issue/rows`, {
+      method: "POST",
+      body: JSON.stringify({ values: {} }),
+    });
+
+    const patched = await patchDefinition(appId, {
+      models: {
+        issue: { columns: { note: { kind: "string", source: { of: "gh", field: "body" } } } },
+      },
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.body.app.definition.models.issue.columns?.note).toEqual({
+      kind: "string",
+      source: { of: "gh", field: "body" },
+    });
+  });
+
+  test("changing a binding's field and transform is free and leaves rows alone", async () => {
+    const definition = lifecycleDefinition();
+    const appId = await createApp(definition);
+    const seeded = await seedSyncedRow(appId, definition, { issueKey: "1", title: "Original" });
+
+    const patched = await patchDefinition(appId, {
+      models: {
+        issue: {
+          columns: {
+            title: { kind: "string", source: { of: "gh", field: "headline", transform: "slug" } },
+          },
+        },
+      },
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.body.app.definition.models.issue.columns?.title).toEqual({
+      kind: "string",
+      source: { of: "gh", field: "headline", transform: "slug" },
+    });
+
+    const rows = await listRows(appId);
+    expect(rows.body.rows[0]).toEqual({
+      id: seeded.id,
+      createdAt: seeded.createdAt,
+      updatedAt: seeded.updatedAt,
+      createdBy: "sync:gh",
+      updatedBy: "sync:gh",
+      issueKey: "1",
+      title: "Original",
+      source: "gh",
+      syncedAt: "2026-08-06T10:00:00.000Z",
+      stale: false,
+    });
+  });
+
+  test("changing args, connection, scriptId and config is free", async () => {
+    const definition = lifecycleDefinition();
+    const appId = await createApp(definition);
+    const seeded = await seedSyncedRow(appId, definition, { issueKey: "1", title: "Original" });
+
+    const patched = await patchDefinition(appId, {
+      models: {
+        issue: {
+          sources: {
+            gh: {
+              connector: "script",
+              scriptId: ownedScriptId,
+              joinKey: "issueKey",
+              args: { repo: "other/name" },
+              connection: "vendorApi",
+            },
+          },
+        },
+      },
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.body.app.definition.models.issue.sources?.gh).toEqual({
+      connector: "script",
+      scriptId: ownedScriptId,
+      joinKey: "issueKey",
+      args: { repo: "other/name" },
+      connection: "vendorApi",
+    });
+    // A free source edit leaves the synced row byte-identical.
+    const rows = await listRows(appId);
+    expect(rows.body.rows[0]).toMatchObject({
+      title: "Original",
+      source: "gh",
+      syncedAt: "2026-08-06T10:00:00.000Z",
+      stale: false,
+      updatedAt: seeded.updatedAt,
+    });
+
+    const nativeDefinition = lifecycleDefinition({
+      columns: { title: { kind: "string", source: { of: "pool", field: "status" } } },
+      sources: { pool: { connector: "swarm-tasks", joinKey: "issueKey", config: { limit: 50 } } },
+    });
+    const nativeId = await createApp(nativeDefinition, "Native source app");
+    await seedSyncedRow(nativeId, nativeDefinition, { issueKey: "1", title: "queued" }, "pool");
+    const configPatched = await patchDefinition(nativeId, {
+      models: {
+        issue: {
+          sources: {
+            pool: {
+              connector: "swarm-tasks",
+              joinKey: "issueKey",
+              config: { limit: 10, status: "queued" },
+            },
+          },
+        },
+      },
+    });
+    expect(configPatched.status).toBe(200);
+    expect(configPatched.body.app.definition.models.issue.sources?.pool).toEqual({
+      connector: "swarm-tasks",
+      joinKey: "issueKey",
+      config: { limit: 10, status: "queued" },
+    });
+  });
+
+  test("changing joinKey is rejected as immutable even with zero rows", async () => {
+    const appId = await createApp(lifecycleDefinition());
+    const rejected = await patchDefinition(appId, {
+      models: { issue: { sources: { gh: { ...ghSource(), joinKey: "note" } } } },
+    });
+    expect(rejected.status).toBe(400);
+    expect(issueAt(rejected.body.issues ?? [], "models.issue.sources.gh.joinKey")?.message).toBe(
+      "join key is immutable; remove the source and add it again",
+    );
+  });
+
+  test("changing connector is rejected while the source owns rows, free when it owns none", async () => {
+    const swarmTasksSource = {
+      connector: "swarm-tasks",
+      joinKey: "issueKey",
+      config: { limit: 10 },
+    };
+
+    const emptyId = await createApp(lifecycleDefinition());
+    const free = await patchDefinition(emptyId, {
+      models: { issue: { sources: { gh: swarmTasksSource } } },
+    });
+    expect(free.status).toBe(200);
+    expect(free.body.app.definition.models.issue.sources?.gh).toEqual(swarmTasksSource);
+
+    const definition = lifecycleDefinition();
+    const ownedId = await createApp(definition, "Owned rows app");
+    await seedSyncedRow(ownedId, definition, { issueKey: "1", title: "a" });
+    await seedSyncedRow(ownedId, definition, { issueKey: "2", title: "b" });
+    // An operator-owned row carries no provenance and must not be counted.
+    await request(`/api/apps/${ownedId}/models/issue/rows`, {
+      method: "POST",
+      body: JSON.stringify({ values: { note: "mine" } }),
+    });
+
+    const rejected = await patchDefinition(ownedId, {
+      models: { issue: { sources: { gh: swarmTasksSource } } },
+    });
+    expect(rejected.status).toBe(400);
+    expect(issueAt(rejected.body.issues ?? [], "models.issue.sources.gh.connector")?.message).toBe(
+      "connector change would orphan 2 row(s) this source owns; remove the source and add it again",
+    );
+  });
+
+  test("removing a source without dropping its binding is rejected before any detach", async () => {
+    const definition = lifecycleDefinition();
+    const appId = await createApp(definition);
+    await seedSyncedRow(appId, definition, { issueKey: "1", title: "From GitHub" });
+
+    // The bound `title` column stays — check 3 must fire before the migration
+    // plan's detach ever becomes a write.
+    const rejected = await patchDefinition(appId, {
+      models: { issue: { sources: { gh: null } } },
+    });
+    expect(rejected.status).toBe(400);
+    expect(
+      issueAt(rejected.body.issues ?? [], "models.issue.columns.title.source.of")?.message,
+    ).toBe('unknown source "gh"');
+
+    const rows = await listRows(appId);
+    expect(rows.body.rows[0]).toMatchObject({ source: "gh", stale: false });
+  });
+
+  test("removing a source detaches its rows, preserves values and reports the count", async () => {
+    const definition = lifecycleDefinition();
+    const appId = await createApp(definition);
+    const first = await seedSyncedRow(appId, definition, {
+      issueKey: "1",
+      title: "From GitHub",
+      note: "kept",
+    });
+    const second = await seedSyncedRow(appId, definition, { issueKey: "2", title: "Second" });
+    const operatorRow = await request<{ row: AppRow }>(`/api/apps/${appId}/models/issue/rows`, {
+      method: "POST",
+      body: JSON.stringify({ values: { note: "mine" } }),
+    });
+    expect(operatorRow.status).toBe(201);
+
+    const patched = await patchDefinition(appId, {
+      models: {
+        // The binding must go with the source — a dangling source.of is rejected.
+        issue: { columns: { title: { kind: "string" } }, sources: { gh: null } },
+      },
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.body.migration.detachedRows).toBe(2);
+    // A merge patch that deletes the last entry leaves the map behind, empty.
+    expect(patched.body.app.definition.models.issue.sources).toEqual({});
+
+    const rows = await listRows(appId);
+    const [detachedFirst, detachedSecond, untouched] = rows.body.rows;
+    expect(detachedFirst).toEqual({
+      id: first.id,
+      createdAt: first.createdAt,
+      updatedAt: first.updatedAt,
+      createdBy: "sync:gh",
+      updatedBy: "sync:gh",
+      issueKey: "1",
+      title: "From GitHub",
+      note: "kept",
+    });
+    expect(detachedSecond).toMatchObject({ id: second.id, issueKey: "2", title: "Second" });
+    expect(detachedSecond?.source).toBeUndefined();
+    expect(detachedSecond?.syncedAt).toBeUndefined();
+    expect(detachedSecond?.stale).toBeUndefined();
+    expect(untouched).toMatchObject({ id: operatorRow.body.row.id, note: "mine" });
+  });
+
+  test("removing a bound column still follows the hide-or-purge rules", async () => {
+    const definition = lifecycleDefinition();
+    const appId = await createApp(definition);
+    await seedSyncedRow(appId, definition, { issueKey: "1", title: "From GitHub" });
+
+    const rejected = await patchDefinition(appId, {
+      models: { issue: { columns: { title: null } } },
+    });
+    expect(rejected.status).toBe(400);
+    expect(issueAt(rejected.body.issues ?? [], "models.issue.columns.title")?.message).toBe(
+      "column holds values on 1 row — hide it, or purge explicitly with migration.title.purge",
+    );
+
+    const purged = await patchDefinition(
+      appId,
+      { models: { issue: { columns: { title: null } } } },
+      { title: { purge: true } },
+    );
+    expect(purged.status).toBe(200);
+    expect(purged.body.migration.purgedValues).toBe(1);
+    const rows = await listRows(appId);
+    expect(rows.body.rows[0]?.title).toBeUndefined();
+    // The source survives its last binding; detachment is a removal-only effect.
+    expect(rows.body.rows[0]?.source).toBe("gh");
+  });
+
+  test("a rejected edit writes nothing — definition, rows and versions are untouched", async () => {
+    const definition = lifecycleDefinition({ columns: { altKey: { kind: "string" } } });
+    const appId = await createApp(definition);
+    await seedSyncedRow(appId, definition, { issueKey: "1", title: "From GitHub" });
+    await request(`/api/apps/${appId}/models/issue/rows`, {
+      method: "POST",
+      body: JSON.stringify({ values: { note: "mine" } }),
+    });
+
+    const definitionBefore = JSON.stringify((await request(`/api/apps/${appId}`)).body);
+    const rowsBefore = JSON.stringify((await listRows(appId)).body);
+    const versionsBefore = (await listVersions(appId)).body.versions.length;
+
+    const rejected = await patchDefinition(appId, {
+      models: {
+        issue: {
+          // Two rejections at once: an immutable join key and a populated binding.
+          columns: { note: { kind: "string", source: { of: "gh", field: "body" } } },
+          sources: { gh: { ...ghSource(), joinKey: "altKey" } },
+        },
+      },
+    });
+    expect(rejected.status).toBe(400);
+    expect((rejected.body.issues ?? []).map((issue) => issue.path).sort()).toEqual([
+      "models.issue.columns.note.source",
+      "models.issue.sources.gh.joinKey",
+    ]);
+
+    expect(JSON.stringify((await request(`/api/apps/${appId}`)).body)).toBe(definitionBefore);
+    expect(JSON.stringify((await listRows(appId)).body)).toBe(rowsBefore);
+    expect((await listVersions(appId)).body.versions).toHaveLength(versionsBefore);
+  });
+
+  test("rollback across a source-adding version restores cleanly and detaches", async () => {
+    const appId = await createApp(sourcelessDefinition());
+    const added = await patchDefinition(appId, {
+      models: {
+        issue: {
+          columns: { title: { kind: "string", source: { of: "gh", field: "title" } } },
+          sources: { gh: ghSource() },
+        },
+      },
+    });
+    expect(added.status).toBe(200);
+    const versions = await listVersions(appId);
+    const sourcelessVersion = versions.body.versions.at(-1)?.version;
+    expect(sourcelessVersion).toBeNumber();
+
+    const seeded = await seedSyncedRow(appId, lifecycleDefinition(), {
+      issueKey: "1",
+      title: "From GitHub",
+    });
+
+    const rolledBack = await request<PatchBody>(`/api/apps/${appId}/rollback`, {
+      method: "POST",
+      body: JSON.stringify({ version: sourcelessVersion }),
+    });
+    expect(rolledBack.status).toBe(200);
+    expect(rolledBack.body.migration.detachedRows).toBe(1);
+    expect(rolledBack.body.app.definition.models.issue.sources).toBeUndefined();
+    expect(rolledBack.body.app.definition.models.issue.columns?.title).toEqual({ kind: "string" });
+
+    const rows = await listRows(appId);
+    expect(rows.body.rows[0]).toEqual({
+      id: seeded.id,
+      createdAt: seeded.createdAt,
+      updatedAt: seeded.updatedAt,
+      createdBy: "sync:gh",
+      updatedBy: "sync:gh",
+      issueKey: "1",
+      title: "From GitHub",
+    });
+  });
+});

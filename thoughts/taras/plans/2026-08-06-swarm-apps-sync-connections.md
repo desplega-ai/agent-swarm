@@ -173,13 +173,13 @@ Grow the definition contract: a model-level `sources` map, column-level `source`
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/apps-sync.test.ts`
-- [ ] No regressions: `bun run test:root -- src/tests/apps-spike.test.ts src/tests/apps-spike2.test.ts src/tests/apps-spike4.test.ts src/tests/apps-spike5.test.ts src/tests/apps-elements.test.ts src/tests/apps-element-assembly.test.ts src/tests/apps-rbac.test.ts src/tests/apps-user-config.test.ts`
-- [ ] `bun run lint && bun run tsc:check`
-- [ ] `bash scripts/check-db-boundary.sh && bun run check:dep-graph`
+- [x] `bun run test:root -- src/tests/apps-sync.test.ts`
+- [x] No regressions: `bun run test:root -- src/tests/apps-spike.test.ts src/tests/apps-spike2.test.ts src/tests/apps-spike4.test.ts src/tests/apps-spike5.test.ts src/tests/apps-elements.test.ts src/tests/apps-element-assembly.test.ts src/tests/apps-rbac.test.ts src/tests/apps-user-config.test.ts`
+- [x] `bun run lint && bun run tsc:check`
+- [x] `bash scripts/check-db-boundary.sh && bun run check:dep-graph`
 
 #### Automated QA:
-- [ ] **Reserved-name preflight (Open decision 2)** — run against a copy of the prod DB and the local dev DB:
+- [x] **Reserved-name preflight (Open decision 2)** — DONE 2026-08-07 (read-only over ssh): prod has 2 collisions — "To Remember" `item.source` (+3 page refs), "Competitor Tracker" `note.source` (+4 page refs); local dev DB has no `apps` table. Hand-rename via app-patch required BEFORE deploy (Taras's call; implementation proceeds, deploy gated). Original recipe:
       `sqlite3 <db> "SELECT id, name FROM apps WHERE definition LIKE '%\"source\"%' OR definition LIKE '%\"syncedAt\"%' OR definition LIKE '%\"stale\"%'"` then inspect each hit's `models.*.columns` keys. Zero collisions → proceed; any collision → stop and take Taras's answer.
 - [ ] Boot the isolated API (Quick Reference recipe) on a copy of the prod DB; `curl -s -H "Authorization: Bearer 123123" http://localhost:3113/api/apps | jq '[.apps[]] | length'` and then `GET /api/apps/<id>` for each — **no** app returns `definitionError`.
 
@@ -217,9 +217,9 @@ Rows learn provenance; external write paths learn that source-bound and join-key
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/apps-sync.test.ts`
-- [ ] No regressions (same app-test list as Phase 1)
-- [ ] `bun run lint && bun run tsc:check && bash scripts/check-db-boundary.sh`
+- [x] `bun run test:root -- src/tests/apps-sync.test.ts`
+- [x] No regressions (same app-test list as Phase 1)
+- [x] `bun run lint && bun run tsc:check && bash scripts/check-db-boundary.sh`
 
 #### Automated QA:
 - [ ] Against :3113 — create an app with a `gh` source and a bound `title` column, then `POST /api/apps/<id>/models/<m>/rows -d '{"values":{"title":"x"}}'` → 400 with the read-only issue; the same POST with only owned columns → 201.

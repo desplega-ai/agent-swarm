@@ -769,6 +769,10 @@
                           "type": "integer",
                           "minimum": 0
                         },
+                        "detachedRows": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
                         "orphanFields": {
                           "type": "array",
                           "items": {
@@ -790,6 +794,7 @@
                         "elsed",
                         "purgedValues",
                         "idxRebuilt",
+                        "detachedRows",
                         "orphanFields",
                         "userConfigChanged"
                       ]
@@ -1056,6 +1061,10 @@
                           "type": "integer",
                           "minimum": 0
                         },
+                        "detachedRows": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
                         "orphanFields": {
                           "type": "array",
                           "items": {
@@ -1077,6 +1086,7 @@
                         "elsed",
                         "purgedValues",
                         "idxRebuilt",
+                        "detachedRows",
                         "orphanFields",
                         "userConfigChanged"
                       ]
@@ -1315,6 +1325,10 @@
                           "type": "integer",
                           "minimum": 0
                         },
+                        "detachedRows": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
                         "orphanFields": {
                           "type": "array",
                           "items": {
@@ -1336,6 +1350,7 @@
                         "elsed",
                         "purgedValues",
                         "idxRebuilt",
+                        "detachedRows",
                         "orphanFields",
                         "userConfigChanged"
                       ]

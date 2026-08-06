@@ -10,6 +10,7 @@ import {
   isIso8601Date,
   type ModelDef,
   parseAppDefinition,
+  type SourceDef,
   SYSTEM_COLUMN_KINDS,
 } from "./definition";
 import { upgradeAppDefinition } from "./format-upgrades";
@@ -49,6 +50,7 @@ export const AppMigrationReportSchema = z.object({
   elsed: z.number().int().nonnegative(),
   purgedValues: z.number().int().nonnegative(),
   idxRebuilt: z.number().int().nonnegative(),
+  detachedRows: z.number().int().nonnegative(),
   orphanFields: z.array(z.string()),
   userConfigChanged: z.array(z.string()),
 });
@@ -61,6 +63,7 @@ export const AppMigrationReportOutputSchema = z.looseObject({
   elsed: z.number().optional(),
   purgedValues: z.number().optional(),
   idxRebuilt: z.number().optional(),
+  detachedRows: z.number().optional(),
   orphanFields: z.array(z.string()).optional(),
   userConfigChanged: z.array(z.string()).optional(),
 });
@@ -102,6 +105,7 @@ const EMPTY_REPORT: AppMigrationReport = {
   elsed: 0,
   purgedValues: 0,
   idxRebuilt: 0,
+  detachedRows: 0,
   orphanFields: [],
   userConfigChanged: [],
 };
@@ -637,6 +641,67 @@ function applyDirective(
   }
 }
 
+function ownSource(model: ModelDef | undefined, sourceName: string): SourceDef | undefined {
+  const sources = model?.sources;
+  return sources && Object.hasOwn(sources, sourceName) ? sources[sourceName] : undefined;
+}
+
+/**
+ * Source lifecycle classification. Adding a source, and editing its
+ * args/config/connection/scriptId, are free. Join-key identity is immutable and
+ * a connector swap is refused while the source owns rows — both would silently
+ * re-key or orphan the rows the next pass reconciles against. Removing a source
+ * detaches its rows instead of destroying them (Invariant I4): the values stay,
+ * the `source`/`syncedAt`/`stale` envelope is stripped, and the count is
+ * reported. Detached rows ride the plan's ordinary changed-row write, which
+ * never touches `updatedAt`/`updatedBy` — a detach is not a data edit.
+ */
+function planSources(
+  modelName: string,
+  oldModel: ModelDef | undefined,
+  nextModel: ModelDef | undefined,
+  rows: AppRow[],
+  report: AppMigrationReport,
+  issues: AppValidationIssue[],
+): void {
+  const sourceNames = new Set([
+    ...Object.keys(oldModel?.sources ?? {}),
+    ...Object.keys(nextModel?.sources ?? {}),
+  ]);
+  for (const sourceName of [...sourceNames].sort()) {
+    const oldSource = ownSource(oldModel, sourceName);
+    // A source that did not exist before owns no rows, so every shape it
+    // declares is free (Phase-1 validation still gets its say).
+    if (!oldSource) continue;
+    const nextSource = ownSource(nextModel, sourceName);
+    const path = `models.${modelName}.sources.${sourceName}`;
+    const owned = rows.filter((row) => row.source === sourceName);
+
+    if (!nextSource) {
+      for (const row of owned) {
+        delete row.source;
+        delete row.syncedAt;
+        delete row.stale;
+        report.detachedRows += 1;
+      }
+      continue;
+    }
+
+    if (nextSource.joinKey !== oldSource.joinKey) {
+      issues.push({
+        path: `${path}.joinKey`,
+        message: "join key is immutable; remove the source and add it again",
+      });
+    }
+    if (nextSource.connector !== oldSource.connector && owned.length > 0) {
+      issues.push({
+        path: `${path}.connector`,
+        message: `connector change would orphan ${owned.length} row(s) this source owns; remove the source and add it again`,
+      });
+    }
+  }
+}
+
 function planModel(
   appId: string,
   modelName: string,
@@ -661,6 +726,8 @@ function planModel(
       message: `model holds ${rows.length} ${rows.length === 1 ? "row" : "rows"} — delete its rows before removing the model`,
     });
   }
+
+  planSources(modelName, oldModel, nextModel, rows, report, issues);
 
   for (const columnName of changedColumns) {
     const oldColumn = ownColumn(oldModel, columnName);
@@ -694,6 +761,22 @@ function planModel(
         });
       }
       continue;
+    }
+
+    // Binding a column that already holds data hands it to the source: the next
+    // pass projects over every value it did not write. Adding the binding on a
+    // fresh (or emptied) column is the supported path.
+    if (nextColumn.source !== undefined && oldColumn?.source === undefined) {
+      const populated = rows.filter(
+        (row) => Object.hasOwn(row, columnName) && row[columnName] !== null,
+      ).length;
+      if (populated > 0) {
+        issues.push({
+          path: `${path}.source`,
+          message: `binding an existing column would let the next pass overwrite ${populated} row(s) of existing data; hide or purge the column and add it bound instead`,
+        });
+        continue;
+      }
     }
 
     if (exactUnhide && nextColumn.required === true && (!directive || !("set" in directive))) {
