@@ -1,0 +1,86 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.desplega-ai/agent-swarm",
+  "title": "Agent Swarm",
+  "description": "Full Agent Swarm API and MCP server with local SQLite storage for multi-agent orchestration.",
+  "version": "1.128.0",
+  "websiteUrl": "https://docs.agent-swarm.dev",
+  "repository": {
+    "url": "https://github.com/desplega-ai/agent-swarm",
+    "source": "github",
+    "id": "1119736729"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@desplega.ai/agent-swarm",
+      "version": "1.128.0",
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "api"
+        },
+        {
+          "type": "named",
+          "name": "--port",
+          "description": "Port for the local Agent Swarm API and MCP server.",
+          "default": "3000"
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "AGENT_SWARM_API_KEY",
+          "description": "API key for your local Agent Swarm instance.",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ],
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://localhost:{--port}/mcp",
+        "headers": [
+          {
+            "name": "Authorization",
+            "description": "Bearer token using the API key for your local Agent Swarm instance (include the Bearer prefix).",
+            "placeholder": "Bearer <AGENT_SWARM_API_KEY>",
+            "isRequired": true,
+            "isSecret": true
+          },
+          {
+            "name": "X-Agent-ID",
+            "description": "ID of an agent registered on your local Agent Swarm instance.",
+            "placeholder": "00000000-0000-0000-0000-000000000000",
+            "isRequired": true
+          }
+        ]
+      }
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://{swarm_host}/mcp",
+      "variables": {
+        "swarm_host": {
+          "description": "Host of YOUR agent-swarm instance, e.g. swarm.example.com",
+          "isRequired": true
+        }
+      },
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Bearer token using the API key for your Agent Swarm instance (include the Bearer prefix).",
+          "placeholder": "Bearer <token>",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "X-Agent-ID",
+          "description": "ID of an agent registered on your Agent Swarm instance.",
+          "placeholder": "00000000-0000-0000-0000-000000000000",
+          "isRequired": true
+        }
+      ]
+    }
+  ]
+}
