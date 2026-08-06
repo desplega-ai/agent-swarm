@@ -5,7 +5,7 @@
  */
 export function attachmentContentDisposition(filename: string): string {
   const safeFilename = filename.replace(/[\r\n\0]/g, "");
-  const asciiFallback = safeFilename.replace(/["\\\\]/g, "").replace(/[^\x20-\x7e]/g, "_");
+  const asciiFallback = safeFilename.replace(/["\\]/g, "").replace(/[^\x20-\x7e]/g, "_");
   const encodedFilename = encodeURIComponent(safeFilename).replace(
     /[!'()*]/g,
     (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
