@@ -551,15 +551,28 @@ export async function summarizeSessionForOpencode(
       (resp as { data?: Array<{ info: Message; parts: Part[] }> }).data ??
       (resp as unknown as Array<{ info: Message; parts: Part[] }>);
 
-    if (!Array.isArray(items) || items.length === 0) return;
+    if (!Array.isArray(items) || items.length === 0) {
+      console.warn("session_summary skipped (opencode): SDK returned no session messages");
+      return;
+    }
 
     const transcriptRaw = flattenOpencodeTranscript(items);
     const transcript = transcriptRaw.length > 20_000 ? transcriptRaw.slice(-20_000) : transcriptRaw;
-    if (transcript.length <= 100) return;
+    if (transcript.length <= 100) {
+      console.warn(
+        `session_summary skipped (opencode): transcript too short (${transcript.length} chars)`,
+      );
+      return;
+    }
 
     const sourceTaskId = config.taskId;
     const agentId = config.agentId;
-    if (!sourceTaskId || !agentId) return;
+    if (!sourceTaskId || !agentId) {
+      console.warn(
+        `session_summary skipped (opencode): ${!sourceTaskId ? "task id unavailable" : "agent id unavailable"}`,
+      );
+      return;
+    }
 
     const taskDetails = await _fetchTaskDetails(config).catch(() => null);
 
@@ -581,6 +594,7 @@ export async function summarizeSessionForOpencode(
     if (!cred) {
       // No usable credentials — graceful no-op (matches Phase 0
       // `completeStructured`'s null-on-no-auth behavior).
+      console.warn("session_summary skipped (opencode): no summarizer credentials available");
       return;
     }
 
@@ -591,10 +605,16 @@ export async function summarizeSessionForOpencode(
       "You are an expert at extracting durable, generalizable learnings from agent sessions.";
 
     const result = await _runSummary(cred, systemPrompt, userPrompt);
-    if (!result) return;
+    if (!result) {
+      console.warn("session_summary skipped (opencode): summarizer returned no result");
+      return;
+    }
 
     const summary = result.summary.trim();
     if (summary.length <= 20 || summary.toLowerCase().includes("no significant learnings")) {
+      console.debug(
+        `session_summary skipped (opencode): summary failed quality gate (${summary.length} chars)`,
+      );
       return;
     }
 

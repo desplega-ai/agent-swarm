@@ -1228,6 +1228,8 @@ export class CodexSession implements ProviderSession {
         }
       } else if (sessionWasAborted) {
         console.debug("[codex] session aborted — skipping session_summary");
+      } else {
+        console.debug("session_summary skipped (codex): SKIP_SESSION_SUMMARY is set");
       }
 
       // Detach the abort controller now that the turn has settled.
@@ -1279,8 +1281,22 @@ export class CodexSession implements ProviderSession {
   private async summarizeAtEnd(): Promise<void> {
     const transcriptStr = this.transcript.join("\n").slice(-20_000);
     const { agentId, taskId, apiUrl, apiKey } = this.config;
-    if (!agentId || !taskId || !apiUrl || !apiKey) return;
-    if (transcriptStr.length <= 100) return;
+    if (!agentId || !taskId || !apiUrl || !apiKey) {
+      const missing = [
+        !agentId && "agent id",
+        !taskId && "task id",
+        !apiUrl && "API URL",
+        !apiKey && "API key",
+      ].filter(Boolean);
+      console.warn(`session_summary skipped (codex): missing ${missing.join(", ")}`);
+      return;
+    }
+    if (transcriptStr.length <= 100) {
+      console.warn(
+        `session_summary skipped (codex): transcript too short (${transcriptStr.length} chars)`,
+      );
+      return;
+    }
 
     const _runSummarize = this.summarizeDeps.runSummarize ?? runSummarize;
     const _fetchRetrievals = this.summarizeDeps.fetchRetrievalsForTask ?? fetchRetrievalsForTask;
@@ -1312,10 +1328,16 @@ export class CodexSession implements ProviderSession {
       env: this.config.env,
     });
     // null = no auth resolved or wrapper exhausted retries (already logged inside)
-    if (!result) return;
+    if (!result) {
+      console.warn("session_summary skipped (codex): summarizer returned no result");
+      return;
+    }
 
     const summary = result.summary.trim();
     if (summary.length <= 20 || summary.toLowerCase().includes("no significant learnings")) {
+      console.debug(
+        `session_summary skipped (codex): summary failed quality gate (${summary.length} chars)`,
+      );
       return;
     }
 

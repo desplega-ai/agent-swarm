@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { RunStopHookSessionSummaryOpts } from "../hooks/hook";
 import { ClaudeAdapter, createSessionMcpConfig, mergeMcpConfig } from "../providers/claude-adapter";
 import type { ProviderSessionConfig } from "../providers/types";
 
@@ -112,7 +113,7 @@ describe("ClaudeSession spawn env — reasoning_effort", () => {
   });
 
   test("reasoningEffort: 'high' on claude-opus-4-8 sets CLAUDE_CODE_EFFORT_LEVEL", async () => {
-    const adapter = new ClaudeAdapter();
+    const adapter = new ClaudeAdapter(async () => {});
     await adapter.createSession(
       makeConfig({ model: "claude-opus-4-8", reasoningEffort: "high", env: CLEAN_ENV }),
     );
@@ -122,7 +123,7 @@ describe("ClaudeSession spawn env — reasoning_effort", () => {
   });
 
   test("reasoningEffort: 'off' on a legacy budget_tokens-capable model sets MAX_THINKING_TOKENS=0, no effort env", async () => {
-    const adapter = new ClaudeAdapter();
+    const adapter = new ClaudeAdapter(async () => {});
     await adapter.createSession(
       makeConfig({ model: "claude-opus-4-0", reasoningEffort: "off", env: CLEAN_ENV }),
     );
@@ -133,7 +134,7 @@ describe("ClaudeSession spawn env — reasoning_effort", () => {
   });
 
   test("undefined reasoningEffort leaves spawn env unchanged (no effort/budget keys)", async () => {
-    const adapter = new ClaudeAdapter();
+    const adapter = new ClaudeAdapter(async () => {});
     await adapter.createSession(makeConfig({ model: "claude-opus-4-8", env: CLEAN_ENV }));
 
     expect(spawnedEnvs).toHaveLength(1);
@@ -246,11 +247,46 @@ describe("ClaudeSession processStreams — ProviderResult.output capture", () =>
     ];
     spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
 
-    const adapter = new ClaudeAdapter();
+    const adapter = new ClaudeAdapter(async () => {});
     const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
     const result = await session.waitForCompletion();
 
     expect(result.output).toBe("Final answer");
+  });
+
+  test("buffers stream-json events and invokes the parent-owned summary path", async () => {
+    const lines = [
+      assistantLine([
+        { type: "text", text: "I found a durable implementation detail." },
+        { type: "tool_use", id: "t1", name: "Read", input: { file_path: "/tmp/source.ts" } },
+      ]),
+      JSON.stringify({
+        type: "user",
+        message: {
+          content: [{ type: "tool_result", tool_use_id: "t1", content: "export const value = 1" }],
+        },
+      }),
+    ];
+    spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
+
+    let summaryOpts: RunStopHookSessionSummaryOpts | undefined;
+    const adapter = new ClaudeAdapter(async (opts) => {
+      summaryOpts = opts;
+    });
+    const prompt = "Inspect the implementation and preserve the important behavior. ".repeat(3);
+    const session = await adapter.createSession(makeConfig({ prompt, env: CLEAN_ENV }));
+    await session.waitForCompletion();
+
+    expect(summaryOpts).toBeDefined();
+    expect(summaryOpts!.transcript).toContain(`User: ${prompt}`);
+    expect(summaryOpts!.transcript).toContain(
+      "Assistant: I found a durable implementation detail.",
+    );
+    expect(summaryOpts!.transcript).toContain('Tool[Read] started: {"file_path":"/tmp/source.ts"}');
+    expect(summaryOpts!.transcript).toContain("Tool result: export const value = 1");
+    expect(summaryOpts!.transcriptPath).toBeUndefined();
+    expect(summaryOpts!.env?.CLAUDE_CODE_OAUTH_TOKEN).toBe("test-oauth-token");
+    expect(summaryOpts!.env?.AGENT_SWARM_TASK_ID).toBe("test-task-id");
   });
 
   test("tool_use-only, thinking-only, and empty-text turns are skipped, not captured", async () => {
@@ -262,7 +298,7 @@ describe("ClaudeSession processStreams — ProviderResult.output capture", () =>
     ];
     spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
 
-    const adapter = new ClaudeAdapter();
+    const adapter = new ClaudeAdapter(async () => {});
     const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
     const result = await session.waitForCompletion();
 
@@ -285,7 +321,7 @@ describe("ClaudeSession processStreams — ProviderResult.output capture", () =>
     ];
     spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
 
-    const adapter = new ClaudeAdapter();
+    const adapter = new ClaudeAdapter(async () => {});
     const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
     const result = await session.waitForCompletion();
 
@@ -300,7 +336,7 @@ describe("ClaudeSession processStreams — ProviderResult.output capture", () =>
     ];
     spawnSpy.mockImplementation((() => makeStreamingFakeProc(lines)) as typeof Bun.spawn);
 
-    const adapter = new ClaudeAdapter();
+    const adapter = new ClaudeAdapter(async () => {});
     const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV }));
     const result = await session.waitForCompletion();
 

@@ -262,6 +262,8 @@ const plugin: Plugin = async (input) => {
         // errors internally.
         if (!process.env.SKIP_SESSION_SUMMARY) {
           void summarizeSessionForOpencode(config, client, event.properties.sessionID);
+        } else {
+          console.debug("session_summary skipped (opencode): SKIP_SESSION_SUMMARY is set");
         }
 
         // Notify server session is closing

@@ -3,6 +3,10 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { type Span, trace } from "@opentelemetry/api";
 import {
+  type RunStopHookSessionSummaryOpts,
+  runStopHookSessionSummarySubprocess,
+} from "../hooks/hook";
+import {
   CONTEXT_FORMULA,
   clampContextPercent,
   computeContextUsedUnified,
@@ -561,6 +565,8 @@ class ClaudeSession implements ProviderSession {
   private appliedReasoningEffort: ReasoningEffort | null;
   /** Last non-empty assistant text seen; surfaced as ProviderResult.output — same pattern as pi-mono/claude-managed. */
   private lastAssistantText = "";
+  /** Per-session stream-json transcript used by the parent-owned session summarizer. */
+  private transcript: string[];
   readonly deliverSteering?: (delivery: SteerDelivery) => Promise<SteerDeliveryResult>;
 
   constructor(
@@ -574,10 +580,14 @@ class ClaudeSession implements ProviderSession {
     private harnessVariant?: string,
     private harnessVariantMeta?: Record<string, unknown>,
     private readonly queueSteeringSupported = false,
+    private readonly runSessionSummary: (
+      opts: RunStopHookSessionSummaryOpts,
+    ) => Promise<void> = runStopHookSessionSummarySubprocess,
   ) {
     this.taskFilePid = taskFilePid;
     this.contextWindowSize = getContextWindowSize(model);
     this.systemPromptFile = systemPromptFile;
+    this.transcript = [`User: ${scrubSecrets(config.prompt)}`];
     const cmd = this.buildCommand();
 
     console.log(
@@ -614,6 +624,9 @@ class ClaudeSession implements ProviderSession {
         // rater. The hook prefers these env vars when present. See PR #444.
         AGENT_SWARM_TASK_ID: config.taskId,
         AGENT_SWARM_AGENT_ID: config.agentId,
+        // The parent adapter owns a reliable in-memory stream-json transcript.
+        // Prevent the child Stop hook from attempting the missing CLI artifact.
+        AGENT_SWARM_ADAPTER_SESSION_SUMMARY: "1",
         // claude CLI strips CLAUDE_CODE_OAUTH_TOKEN from hook subprocess env
         // (security: prevents OAuth-token leakage to user-written hooks).
         // Mirror it under a name claude doesn't recognize so the Stop hook
@@ -677,6 +690,7 @@ class ClaudeSession implements ProviderSession {
         }
 
         try {
+          this.transcript.push(`User: ${scrubSecrets(text)}`);
           await this.writeUserMessage(text);
           // Interrupt is SDK-only; raw CLI stream-json queues. Always report queue.
           return { delivered: true, mode: "queue" };
@@ -839,6 +853,29 @@ class ClaudeSession implements ProviderSession {
     }
     await logFileHandle.end();
     const exitCode = await this.proc.exited;
+
+    const transcript = this.transcript.join("\n");
+    if (transcript.length <= 100) {
+      console.warn(
+        `session_summary skipped (claude): transcript too short (${transcript.length} chars)`,
+      );
+    } else {
+      try {
+        await this.runSessionSummary({
+          agentId: this.config.agentId,
+          transcript,
+          env: {
+            ...process.env,
+            ...this.config.env,
+            AGENT_SWARM_TASK_ID: this.config.taskId,
+            MCP_BASE_URL: this.config.apiUrl,
+            AGENT_SWARM_API_KEY: this.config.apiKey,
+          },
+        });
+      } catch (err) {
+        console.error("session_summary failed (claude):", scrubSecrets(String(err)));
+      }
+    }
 
     // Cleanup task file, per-session MCP config, and per-task system prompt
     await cleanupTaskFile(this.taskFilePid);
@@ -1007,11 +1044,15 @@ class ClaudeSession implements ProviderSession {
         // main thread's text should win the `ProviderResult.output` fallback.
         if (text && !json.parent_tool_use_id) {
           this.lastAssistantText = text;
+          this.transcript.push(`Assistant: ${scrubSecrets(text)}`);
         }
 
         if (message.content) {
           for (const block of message.content) {
             if (block.type === "tool_use" && block.name) {
+              this.transcript.push(
+                `Tool[${block.name}] started: ${scrubSecrets(JSON.stringify(block.input ?? {}))}`,
+              );
               this.emit({
                 type: "tool_start",
                 toolCallId: block.id || "",
@@ -1043,6 +1084,15 @@ class ClaudeSession implements ProviderSession {
             outputTokens: usage.output_tokens ?? 0,
             contextFormula: CONTEXT_FORMULA,
           });
+        }
+      }
+
+      if (json.type === "user" && Array.isArray(json.message?.content)) {
+        for (const block of json.message.content) {
+          if (block?.type !== "tool_result") continue;
+          const content =
+            typeof block.content === "string" ? block.content : JSON.stringify(block.content ?? "");
+          this.transcript.push(`Tool result: ${scrubSecrets(content)}`);
         }
       }
 
@@ -1089,6 +1139,12 @@ export class ClaudeAdapter implements ProviderAdapter {
     hasLocalEnvironment: true,
     steerModes: ["queue"],
   };
+
+  constructor(
+    private readonly runSessionSummary: (
+      opts: RunStopHookSessionSummaryOpts,
+    ) => Promise<void> = runStopHookSessionSummarySubprocess,
+  ) {}
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     // Native resume is deprecated. Follow-up continuity is delivered via the
@@ -1265,6 +1321,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       harnessVariant,
       harnessVariantMeta,
       queueSteeringSupported,
+      this.runSessionSummary,
     );
   }
 

@@ -405,6 +405,12 @@ Native session resume (the `claude --resume <UUID>` CLI flag and `codex.resumeTh
 
 **What your adapter owes the task:** emit `session_init` as early as possible (so the runner can persist the provider session id), emit `tool_start`/`tool_end` faithfully (so the UI shows the agent's work), and emit a `result` with populated `CostData` before your `waitForCompletion()` resolves.
 
+### Session-summary transcript sourcing
+
+Session summaries must not depend solely on harness-managed transcript artifacts being present at shutdown. The Claude adapter owns an in-memory transcript assembled from its stream-json user, assistant, tool-call, and tool-result events, then invokes the session summarizer from the parent process after the CLI exits. Its child Stop hook detects this adapter-owned path and skips the legacy `transcript_path` read; standalone Claude hook installations retain that file fallback.
+
+Codex already follows the same parent-owned in-memory pattern. Pi and OpenCode still use their harness-provided session file or SDK message query, respectively. Every provider emits a one-line `session_summary skipped (<provider>): <reason>` diagnostic when a transcript, task context, credential, summarizer result, or quality gate prevents indexing, so a missing upstream artifact cannot become a silent outage.
+
 ---
 
 ## 4. Raw session logs & the task details page
