@@ -39,7 +39,7 @@ fail_fast = true
 id = "test"
 name = "Unit tests"
 language = "system"
-entry = "bun test"
+entry = "bash -c 'bun run test:root -- --shard=1/4 && bun run test:root -- --shard=2/4 && bun run test:root -- --shard=3/4 && bun run test:root -- --shard=4/4'"
 # CI "test" domain: src/ + scripts tests import + lockfile/tsconfig.
 files = '^(src/|scripts/|package\.json$|bun\.lock|tsconfig\.json$)'
 pass_filenames = false
