@@ -1,4 +1,8 @@
-import { buildSandboxedCommand, readStreamCapped } from "../../utils/sandboxed-process";
+import {
+  buildSandboxedCommand,
+  readStreamCapped,
+  sandboxSpawnEnv,
+} from "../../utils/sandboxed-process";
 import type { ExecutorInput, ExecutorOutput, ScriptExecutor, ScriptExecutorError } from "./types";
 
 function makeUnsupportedOutput(stderr: string): ExecutorOutput {
@@ -165,10 +169,13 @@ export class NativeScriptExecutor implements ScriptExecutor {
       };
 
       const proc = Bun.spawn(harnessCommand(harnessPath, input, harnessEnv), {
-        // Bun.spawn still needs PATH itself to locate the `sh` binary for
-        // argv[0] — the sandboxed command's `env -i` prelude is what actually
-        // scrubs the child's environment down to `harnessEnv` above.
-        env: { PATH: harnessEnv.PATH },
+        // On POSIX, Bun.spawn only needs PATH itself to locate the `sh`
+        // binary for argv[0] — the sandboxed command's `env -i` prelude is
+        // what actually scrubs the child's environment down to `harnessEnv`
+        // above. On win32 there is no such prelude, so `sandboxSpawnEnv`
+        // passes `harnessEnv` through directly instead — see
+        // `buildSandboxedCommand`'s win32 doc comment.
+        env: sandboxSpawnEnv(harnessEnv),
         cwd: tmpdir,
         stdin: "pipe",
         stdout: "pipe",

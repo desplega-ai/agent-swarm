@@ -61,7 +61,11 @@ function shellQuote(value: string): string {
  *     never appear in `/proc/<pid>/environ` or a child's `process.env`.
  *
  * No-ops (returns `innerCommand` unchanged) on win32, where `ulimit`/`env -i`
- * don't exist — matches the existing native.ts behavior.
+ * don't exist — matches the existing native.ts behavior. Because this no-op
+ * means `env` is never applied on win32, callers MUST pass `env` itself
+ * (not just `{ PATH }`) to `Bun.spawn` on that platform — use
+ * `sandboxSpawnEnv(env)` for the `Bun.spawn` `env` option so both platforms
+ * are handled correctly.
  */
 export function buildSandboxedCommand(
   innerCommand: readonly string[],
@@ -91,36 +95,80 @@ export function buildSandboxedCommand(
   return ["sh", "-c", `${ulimits}; exec env -i ${envAssignments} ${quotedInner}`];
 }
 
+/**
+ * The env object callers should pass to `Bun.spawn`'s own `env` option,
+ * alongside the command from `buildSandboxedCommand`.
+ *
+ * On POSIX, `buildSandboxedCommand` wraps the command in an `env -i` prelude
+ * that injects `env` itself into the child — Bun.spawn only needs PATH to
+ * locate the `sh` binary that runs the prelude.
+ *
+ * On win32, `buildSandboxedCommand` is a no-op (no `ulimit`/`env -i`), so
+ * there is no prelude to inject `env` — it must go through Bun.spawn's own
+ * `env` option directly, or the child gets none of it (every caller here
+ * passes Bun.spawn only `{ PATH }` on the assumption the prelude supplies
+ * the rest).
+ */
+export function sandboxSpawnEnv(env: Readonly<Record<string, string>>): Record<string, string> {
+  return process.platform === "win32" ? { ...env } : { PATH: env.PATH ?? "" };
+}
+
 export type CappedText = { text: string; truncated: boolean };
+
+/**
+ * Mutable progress state for `readStreamCapped`, owned by the caller. Lets a
+ * caller that races the read against a deadline (see
+ * `src/workflows/executors/script.ts`) snapshot whatever has been read so
+ * far via `snapshotCapped` even while the read promise is still pending —
+ * e.g. because a leaked grandchild still holds the pipe's write end open.
+ */
+export interface CappedStreamState {
+  chunks: Uint8Array[];
+  total: number;
+  truncated: boolean;
+}
+
+export function createCappedStreamState(): CappedStreamState {
+  return { chunks: [], total: 0, truncated: false };
+}
+
+/** Snapshot whatever `readStreamCapped` has accumulated into `state` so far. */
+export function snapshotCapped(state: CappedStreamState): CappedText {
+  return { text: new TextDecoder().decode(Buffer.concat(state.chunks)), truncated: true };
+}
 
 /**
  * Read a stream up to `maxBytes`, discarding (but noting) any overflow.
  * Prevents an unsandboxed-output path from letting a spawned child OOM the
  * parent by writing unbounded stdout/stderr.
+ *
+ * Accepts an optional caller-owned `state` so the caller can snapshot
+ * partial progress (via `snapshotCapped`) before this promise resolves.
  */
 export async function readStreamCapped(
   stream: ReadableStream<Uint8Array> | null,
   maxBytes: number,
+  state: CappedStreamState = createCappedStreamState(),
 ): Promise<CappedText> {
   if (!stream) return { text: "", truncated: false };
   const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  let truncated = false;
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     if (!value) continue;
 
-    const remaining = maxBytes - total;
+    const remaining = maxBytes - state.total;
     if (remaining > 0) {
       const accepted = value.byteLength > remaining ? value.slice(0, remaining) : value;
-      chunks.push(accepted);
-      total += accepted.byteLength;
+      state.chunks.push(accepted);
+      state.total += accepted.byteLength;
     }
-    if (value.byteLength > remaining) truncated = true;
+    if (value.byteLength > remaining) state.truncated = true;
   }
 
-  return { text: new TextDecoder().decode(Buffer.concat(chunks)), truncated };
+  return {
+    text: new TextDecoder().decode(Buffer.concat(state.chunks)),
+    truncated: state.truncated,
+  };
 }

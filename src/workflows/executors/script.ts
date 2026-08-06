@@ -1,7 +1,13 @@
 import { z } from "zod";
 import { MAX_SCRIPT_WALL_CLOCK_MS } from "../../scripts-runtime/executors/types";
 import type { ExecutorMeta } from "../../types";
-import { buildSandboxedCommand, readStreamCapped } from "../../utils/sandboxed-process";
+import {
+  buildSandboxedCommand,
+  createCappedStreamState,
+  readStreamCapped,
+  sandboxSpawnEnv,
+  snapshotCapped,
+} from "../../utils/sandboxed-process";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
 /** Matches the inline scripts-runtime cap (src/scripts-runtime/executors/types.ts). */
@@ -179,16 +185,24 @@ export class ScriptExecutor extends BaseExecutor<
         stdout: "pipe",
         stderr: "pipe",
         cwd: workdir,
-        // Bun.spawn still needs PATH to locate `sh` for argv[0] — the
-        // sandboxed command's `env -i` prelude scrubs the child down to
-        // `env` above, so the server's secrets never reach it either way.
-        env: { PATH: env.PATH },
+        // On POSIX, Bun.spawn only needs PATH to locate `sh` for argv[0] —
+        // the sandboxed command's `env -i` prelude scrubs the child down to
+        // `env` above, so the server's secrets never reach it either way. On
+        // win32 there is no such prelude, so `sandboxSpawnEnv` passes `env`
+        // through directly instead — see `buildSandboxedCommand`'s win32 doc
+        // comment.
+        env: sandboxSpawnEnv(env),
       });
 
       // Drain both pipes concurrently with the wait — a script producing more
       // than a pipe buffer of output would otherwise block forever on write.
-      const stdoutPromise = readStreamCapped(proc.stdout, MAX_OUTPUT_BYTES);
-      const stderrPromise = readStreamCapped(proc.stderr, MAX_OUTPUT_BYTES);
+      // Each gets its own progress state so the STREAM_DRAIN_GRACE_MS
+      // deadline below can snapshot whatever was captured so far instead of
+      // discarding it — see withDeadline usage.
+      const stdoutState = createCappedStreamState();
+      const stderrState = createCappedStreamState();
+      const stdoutPromise = readStreamCapped(proc.stdout, MAX_OUTPUT_BYTES, stdoutState);
+      const stderrPromise = readStreamCapped(proc.stderr, MAX_OUTPUT_BYTES, stderrState);
 
       let timedOut = false;
       const killTimer = globalThis.setTimeout(() => {
@@ -219,14 +233,23 @@ export class ScriptExecutor extends BaseExecutor<
 
       // The child exited on its own; bound the remaining drain so a leaked
       // grandchild holding the pipe write end can't stall the step forever.
+      // On deadline, snapshot whatever each stream captured before giving up
+      // — the read promise may still be pending (a leaked descendant can
+      // hold the pipe open indefinitely), but the bytes already read are
+      // real output and must not be thrown away.
       const [stdout, stderr] = await Promise.all([
-        withDeadline(stdoutPromise, STREAM_DRAIN_GRACE_MS, () => ({ text: "", truncated: true })),
-        withDeadline(stderrPromise, STREAM_DRAIN_GRACE_MS, () => ({ text: "", truncated: true })),
+        withDeadline(stdoutPromise, STREAM_DRAIN_GRACE_MS, () => snapshotCapped(stdoutState)),
+        withDeadline(stderrPromise, STREAM_DRAIN_GRACE_MS, () => snapshotCapped(stderrState)),
       ]);
 
+      // A `truncated` stream (whether from hitting MAX_OUTPUT_BYTES or from
+      // the drain deadline above) gets an explicit marker rather than being
+      // presented as complete — silently truncating a script's real stdout
+      // (e.g. mid-JSON) would otherwise look like a clean, complete result to
+      // downstream workflow nodes.
       return {
         exitCode,
-        stdout: stdout.text.trimEnd(),
+        stdout: (stdout.truncated ? `${stdout.text}\n…[stdout truncated]` : stdout.text).trimEnd(),
         stderr: (stderr.truncated ? `${stderr.text}\n…[stderr truncated]` : stderr.text).trimEnd(),
       };
     } finally {

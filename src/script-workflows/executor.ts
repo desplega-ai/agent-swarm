@@ -2,7 +2,11 @@ import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ScriptRun } from "../types";
-import { buildSandboxedCommand, readStreamCapped } from "../utils/sandboxed-process";
+import {
+  buildSandboxedCommand,
+  readStreamCapped,
+  sandboxSpawnEnv,
+} from "../utils/sandboxed-process";
 import { scriptRunMaxWallMs } from "./limits";
 
 /** Matches the inline scripts-runtime cap (src/scripts-runtime/executors/types.ts). */
@@ -91,10 +95,13 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       buildSandboxedCommand(["bun", "run", getScriptWorkflowHarnessPath()], harnessEnv),
       {
         cwd: tmpdir,
-        // Bun.spawn still needs PATH itself to find the `sh` binary — the
-        // sandboxed command's `env -i` prelude scrubs the child down to
-        // `harnessEnv` above, so no secret rides on this outer env either.
-        env: { PATH: harnessEnv.PATH },
+        // On POSIX, Bun.spawn only needs PATH itself to find the `sh` binary
+        // — the sandboxed command's `env -i` prelude scrubs the child down
+        // to `harnessEnv` above, so no secret rides on this outer env
+        // either. On win32 there is no such prelude, so `sandboxSpawnEnv`
+        // passes `harnessEnv` through directly instead — see
+        // `buildSandboxedCommand`'s win32 doc comment.
+        env: sandboxSpawnEnv(harnessEnv),
         stdin: "pipe",
         stdout: "ignore",
         stderr: "pipe",
