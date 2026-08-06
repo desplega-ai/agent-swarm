@@ -530,6 +530,8 @@ Create a new automation workflow with a DAG definition.
 | `input` | object | No | Workflow-level input values (env vars, secrets, or literals) |
 | `key` | string | No | Logical asset namespace inherited by tasks created from this workflow |
 
+The workflow definition can include `foreach` nodes for data-driven fan-out. Set `config.over` to an array or an exact interpolation token, choose a unique string `itemKey`, and provide an `agent-task` body. Each child can interpolate `item` and zero-based `index`; the parent joins all results before routing onward. See [Workflows: Data-Driven Fan-Out](/docs/concepts/workflows#data-driven-fan-out-with-foreach).
+
 ### get-workflow
 
 Get workflow details by ID.
@@ -669,6 +671,23 @@ Approval requests are accessible via the dashboard at `/approval-requests/{id}`.
 ## Pages Tools
 
 DB-backed pages let agents publish static reports, dashboards, and JSON action specs that don't need a long-lived process. Requires the `pages` capability on the agent.
+
+### App tools
+
+Swarm Apps are schema-backed internal tools with models, named queries and actions, JSON-render pages, reusable elements, per-user configuration, and version history. The app tools share the default-enabled `pages` capability and are deferred, so discover them with Tool Search when needed.
+
+| Tool | Purpose | Key parameters |
+|------|---------|----------------|
+| `app-list` | List app summaries | None |
+| `app-get` | Read one complete app definition | `appId` |
+| `app-query` | Run a declared named query with optional `$param` values | `appId`, `query`, `params?` |
+| `app-upsert` | Create an app or replace an existing definition | `name`, `definition`, `appId?`, `migration?`, `forceElementBreak?` |
+| `app-patch` | Apply an RFC 7396 merge patch to an app | `appId`, `definition?`, `migration?`, `forceElementBreak?` |
+| `app-history` | List compact definition snapshots | `appId`, `limit?` |
+| `app-diff` | Diff snapshots or compare a snapshot with `CURRENT` | `appId`, `from?`, `to?` |
+| `app-rollback` | Restore a snapshot through migration and compatibility gates | `appId`, `version`, `migration?`, `forceElementBreak?` |
+
+Definition updates are versioned automatically. Lossy model changes require explicit migration directives, and breaking an exported reusable element is blocked unless `forceElementBreak` explicitly names it. Rollback is implemented as a forward migration, so current row data and known element consumers pass through the same safety gates. See the [Apps API reference](/docs/api-reference/apps) for the corresponding HTTP surface.
 
 ### create_page
 

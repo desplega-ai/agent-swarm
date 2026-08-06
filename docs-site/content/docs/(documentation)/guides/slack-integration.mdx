@@ -61,6 +61,8 @@ When the swarm accepts a Slack message, it adds an :eyes: reaction after it has 
 
 Additive thread buffering uses a slightly richer vocabulary: :eyes: for the first captured message, :heavy_plus_sign: for later messages appended to that buffer, and :zap: when `!now` triggers an immediate flush.
 
+For a tracked task-trigger message, the acceptance reaction is temporary. Once every task linked to that trigger is terminal, the swarm removes its temporary :eyes:, :heavy_plus_sign:, or :zap: reaction, then adds :white_check_mark: if every linked task completed or :x: if any task failed or was cancelled. Steering acknowledgements and later additive-buffer reactions are not task triggers, so they remain unchanged.
+
 ### Thread Follow-up Routing
 
 When you @mention the bot in a thread where a worker is already handling a task, the message routes directly to that worker — no lead delegation needed. This keeps conversations flowing naturally.

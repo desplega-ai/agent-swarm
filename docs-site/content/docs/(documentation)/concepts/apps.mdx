@@ -1,0 +1,34 @@
+---
+title: Swarm Apps
+description: Build versioned, schema-backed internal tools that agents and people can use through the dashboard, MCP tools, scripts, and HTTP APIs.
+---
+
+Swarm Apps turn a JSON definition into a persistent internal tool. An app can combine typed data models, named queries and actions, JSON-render pages, reusable UI elements, and per-user settings without adding a custom frontend or database service.
+
+## Definition model
+
+Each app definition may contain:
+
+- **Models** — typed row stores managed by the swarm database
+- **Queries and actions** — named operations that pages and embedded elements can invoke
+- **Pages** — JSON-render layouts with routes, parameters, bindings, and navigation
+- **Elements** — reusable pure or bound components; cross-app reuse requires an explicit export
+- **User configuration** — versioned field schemas whose per-user values live outside the definition and survive rollback
+
+Pure elements render declared props without data or action access. Bound elements may use the defining app's queries, actions, and models. Compatibility checks prevent a definition update from silently breaking known consumers of an exported element.
+
+## Safe evolution
+
+Every definition update snapshots the current definition before applying the change. Compatible changes apply directly; lossy model changes require explicit migration directives that describe how existing rows should be transformed. Definition history, unified diffs, and rollback are available through both HTTP and MCP.
+
+Rollback is a forward migration to a previous snapshot rather than a blind database rewind. Current rows and exported-element consumers therefore pass through the same validation, migration, and compatibility gates as an ordinary update.
+
+## Access and surfaces
+
+`app.use` controls runtime use of an app, while `app.manage` protects definition lifecycle operations. The dashboard lists apps and renders their declared routes at `/apps/:id`; REST callers use `/api/apps`, and agents can discover these deferred MCP tools:
+
+- `app-list`, `app-get`, and `app-query` for discovery and reads
+- `app-upsert` and `app-patch` for definition changes
+- `app-history`, `app-diff`, and `app-rollback` for lifecycle management
+
+See the [Apps API reference](/docs/api-reference/apps) for HTTP operations and the [MCP tools reference](/docs/reference/mcp-tools#app-tools) for agent-facing usage.

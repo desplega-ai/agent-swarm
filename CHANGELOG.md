@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.129.0] - 2026-08-06
+
+### Added
+- **Swarm Apps provide a versioned, schema-backed internal-tool platform** (#1066) — apps support migration-aware models, named queries and actions, reusable pure or bound elements, per-user configuration, RBAC, definition history, diffs, and rollback across HTTP, MCP, scripts, and the dashboard.
+- **Workflow `foreach` nodes fan out agent tasks from runtime arrays** (#1093) — each item gets an interpolated child task, the parent waits for a deterministic aggregate, and retry, recovery, step limits, failure policy, and run-detail grouping understand the synthetic children.
+
+### Changed
+- **System-default skills now use database-seeded, single-source definitions** (#1083) — canonical `templates/skills/` sources replace duplicated image-baked copies, vendor the pinned ai-toolbox catalog, preserve complex skill files, and keep skill discovery appropriate to each harness.
+
+### Fixed
+- **Worker Git identity cannot be overridden by repository-local configuration** (#1105) — entrypoint-selected author and committer values now use environment precedence for GitHub and GitLab commits.
+- **A tracked Slack task-trigger reaction now resolves to the final linked-task outcome** (#1103) — its temporary acceptance reaction becomes :white_check_mark: only after every linked task completes, or :x: if any fail or are cancelled.
+
 ## [1.128.0] - 2026-08-05
 
 ### Added

@@ -119,6 +119,8 @@ GITHUB_EMAIL=worker@example.com    # Git commit email
 GITHUB_NAME=Worker Agent           # Git commit name
 ```
 
+The worker entrypoint exports this identity as `GIT_AUTHOR_*` and `GIT_COMMITTER_*`, giving it precedence over repository-local Git configuration so later setup steps cannot silently change commit attribution.
+
 ## Related
 
 - [GitLab Integration](/docs/guides/gitlab-integration) — GitLab webhook support (same adapter pattern)

@@ -294,6 +294,8 @@ These are the key variables for Docker Compose deployment. For the complete refe
 | `SLACK_BOT_TOKEN` | Enable Slack integration (also needs `SLACK_APP_TOKEN`) |
 | `SLACK_DISABLE` | Set to `true` to disable Slack (default: `false`) |
 
+At worker startup, the selected GitHub identity (or the GitLab-specific identity when only GitLab is configured) is exported as `GIT_AUTHOR_*` and `GIT_COMMITTER_*`. Those environment values intentionally take precedence over repository-local Git configuration so automated commits keep the configured identity.
+
 ### Secrets Encryption
 
 Starting with `v1.67.0`, `swarm_config` secrets are encrypted at rest using AES-256-GCM. The `docker-compose.example.yml` includes a Docker secrets block for the encryption key:
@@ -440,7 +442,7 @@ The worker image also includes PostgreSQL 16 server binaries for local test setu
 
 For local Redis, set `SWARM_DEP_REDIS_ENABLED=true`; the root-stage entrypoint runs [`scripts/init-local-redis.sh`](https://github.com/desplega-ai/agent-swarm/blob/main/scripts/init-local-redis.sh) before privilege drop and starts `redis-server` as the `worker` user.
 
-Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
+Both `Dockerfile` and `Dockerfile.worker` copy the repository `templates/` directory into the image. System-default skills are seeded into the database from the canonical `templates/skills/` sources at startup, so the worker image no longer installs the ai-toolbox catalog or copies the retired `plugin/skills/` tree into each harness. CLI-coupled skills such as `agent-fs` and `qa-use` remain image-installed.
 
 The worker image also bundles `/usr/local/bin/install-repo-hooks.sh`. If a registered repo is configured with `hooks: { enabled: true }`, the runner calls that helper after clone/refresh so git hooks are installed automatically inside the worker checkout.
 

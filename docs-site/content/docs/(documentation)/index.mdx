@@ -20,6 +20,7 @@ Built by [desplega.sh](https://desplega.sh) — build by builders, for builders.
 - **Service discovery** — Workers can expose HTTP services and discover each other
 - **Scheduled tasks** — Recurring and one-time task automation (cron, interval, or delayed)
 - **Workflow automation** — DAG-based workflow engine with triggers, conditions, and actions
+- **[Swarm Apps](/docs/concepts/apps)** — Versioned, schema-backed internal tools with reusable elements, per-user configuration, RBAC, migrations, and rollback
 - **E2B-backed eval harness** — Scenario × harness-config matrix testing against real swarm stacks with stored artifacts, deterministic checks, and LLM/agentic judges
 - **x402 payments** — Agents can make USDC micropayments for x402-gated APIs
 - **Agent-fs integration** — Persistent, searchable filesystem shared across the swarm with provider-backed task attachments and direct raw-download routes for workers
@@ -27,7 +28,7 @@ Built by [desplega.sh](https://desplega.sh) — build by builders, for builders.
 - **[Linear integration](/docs/integrations/linear)** — Bidirectional ticket tracker sync with AgentSession lifecycle
 - **Portless local dev** — Friendly domain URLs for local development
 - **Onboard wizard** — Interactive CLI to set up a new swarm from scratch with Docker Compose
-- **Skill system** — Reusable procedural knowledge that agents can create, share, install, and publish
+- **Skill system** — Database-seeded procedural knowledge that agents can create, share, install, publish, and inspect as multi-file skill bundles
 - **External route bridge** — `agent-swarm x` and `swarm_x` expose approved third-party routes such as Composio without a custom MCP server
 - **Config-driven metrics** — Define read-only SQL dashboards and render them in the UI with versioned metric definitions
 - **Human-in-the-Loop** — Workflow nodes that pause for human approval or input via the dashboard
@@ -84,4 +85,4 @@ See the [Harness Configuration](/docs/guides/harness-configuration) guide for se
 
 ---
 
-_Last updated: August 5, 2026 — v1.128.0_
+_Last updated: August 6, 2026 — v1.129.0_

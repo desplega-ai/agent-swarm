@@ -17,13 +17,14 @@ A workflow consists of:
 
 ### Executor Types
 
-The engine includes 11 built-in executor types:
+The engine includes 12 built-in executor types:
 
 | Executor | Description |
 |----------|-------------|
 | `script` | Run a shell script or JavaScript expression |
 | `swarm-script` | Run a reusable TypeScript script from the swarm catalog with optional `args`, `scope`, `pinHash`, and a configurable `timeoutMs` wall-clock budget |
 | `agent-task` | Create and delegate a task to a swarm agent |
+| `foreach` | Fan out one `agent-task` child per array item and join their results |
 | `raw-llm` | Call an LLM directly with a prompt template |
 | `vcs` | Version control operations (create PR, merge, etc.) |
 | `property-match` | Route based on matching properties in step input |
@@ -206,6 +207,33 @@ Workflows support **fan-out** by specifying an array of node IDs in the `next` f
 ```
 
 The engine detects convergence nodes (nodes with multiple predecessors) and gates execution until all predecessors complete. This works correctly with async executors like `agent-task` — the resume logic uses convergence-aware node detection.
+
+### Data-Driven Fan-Out with `foreach`
+
+Use a `foreach` node when the fan-out width comes from runtime data rather than a fixed set of `next` branches. In v1, each item creates one `agent-task` child; the parent waits for every child and exposes a single aggregate to its successor.
+
+```json
+{
+  "id": "review-each",
+  "type": "foreach",
+  "inputs": { "files": "discover.result.files" },
+  "config": {
+    "over": "{{files}}",
+    "itemKey": "path",
+    "body": {
+      "type": "agent-task",
+      "config": {
+        "template": "Review {{item.path}} (item {{index}})"
+      }
+    }
+  },
+  "next": "summarize"
+}
+```
+
+`over` must resolve to an array, and `itemKey` must name a unique, non-empty string field on each item. The body is restricted to `agent-task` in v1 and can interpolate `item` plus the zero-based `index`. Empty arrays complete normally; `concurrency`, nested loops, and `foreach` nodes inside graph cycles are rejected. Child IDs use `<foreachNodeId>#<itemKey>`, while downstream nodes receive the parent aggregate with `results`, `okCount`, and `failedCount`.
+
+The workflow-level `onNodeFailure` policy also governs foreach children: `fail` stops on a failed or cancelled child, while `continue` records the failed result and lets the remaining children close the join.
 
 ### Node Failure Behavior (`onNodeFailure`)
 

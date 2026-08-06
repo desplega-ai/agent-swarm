@@ -207,7 +207,7 @@ The worker image now also ships PostgreSQL 16 server binaries (`initdb`, `pg_ctl
 
 The worker image also now bundles the Ubuntu runtime libraries Playwright's Chromium binary needs at launch time, so `qa-use` / browser-automation tasks no longer need an extra per-agent `apt` bootstrap just to start the bundled browser.
 
-Both `Dockerfile` and `Dockerfile.worker` now copy the repository `templates/` directory into the image, so system-default skills and templates are available inside compiled deployments without an extra post-build sync step.
+Both `Dockerfile` and `Dockerfile.worker` copy the repository `templates/` directory into the image. System-default skills are seeded into the database from the canonical `templates/skills/` sources at startup, so the worker image no longer installs the ai-toolbox catalog or copies the retired `plugin/skills/` tree into each harness. CLI-coupled skills such as `agent-fs` and `qa-use` remain image-installed.
 
 Workers also ship a best-effort `install-repo-hooks.sh` helper at `/usr/local/bin/install-repo-hooks.sh`. When a repo is registered with `hooks: { enabled: true }`, the runner invokes that helper after cloning or refreshing the repo so repository-local git hooks can be bootstrapped automatically inside the worker checkout.
 
@@ -469,6 +469,8 @@ When a worker starts, it:
 | `GITHUB_NAME` | No | Git commit name (default: `Worker Agent`) |
 | `SENTRY_AUTH_TOKEN` | No | Sentry Organization Auth Token for issue investigation |
 | `SENTRY_ORG` | No | Sentry organization slug |
+
+At worker startup, the selected GitHub identity (or the GitLab-specific identity when only GitLab is configured) is exported as `GIT_AUTHOR_*` and `GIT_COMMITTER_*`. Those environment values intentionally take precedence over repository-local Git configuration so automated commits keep the configured identity.
 
 ### Server Variables
 
