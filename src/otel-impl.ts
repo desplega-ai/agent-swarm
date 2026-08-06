@@ -293,11 +293,12 @@ export function recordSessionCost(m: SessionCostMetric): void {
   if (Number.isFinite(m.totalCostUsd) && m.totalCostUsd > 0) {
     costCounter!.add(m.totalCostUsd, attrs);
   }
-  if (
-    Number.isFinite(m.totalCostUsd) &&
-    Number.isFinite(m.harnessCostUsd) &&
-    (m.harnessCostUsd ?? 0) > 0
-  ) {
+  // A harness-reported $0 is a valid claim, not a missing value: codex workers
+  // deliberately report $0 when their local pricing snapshot doesn't know the
+  // model (computeCodexCostUsd), and a positive server recompute against that
+  // is exactly the stale-snapshot divergence this metric exists to surface.
+  // Only absent/non-finite harness values are excluded.
+  if (Number.isFinite(m.totalCostUsd) && Number.isFinite(m.harnessCostUsd)) {
     const drift = m.totalCostUsd - m.harnessCostUsd!;
     // Zero drift carries no signal — harness/unpriced rows echo the harness
     // number back verbatim, and recording them would flood the metric with

@@ -77,6 +77,46 @@ describe("otel-impl cost drift metric", () => {
     });
   });
 
+  test("harness-reported $0 vs positive recompute is recorded (stale worker snapshot)", () => {
+    // codex workers deliberately report $0 for models missing from their local
+    // pricing snapshot; the server recompute succeeding against a positive
+    // total is exactly the divergence operators need to see.
+    driftCounterAddSpy.mockClear();
+    _injectCountersForTests(metricCounter, metricCounter, driftCounter);
+    recordSessionCostImpl({
+      totalCostUsd: 6,
+      harnessCostUsd: 0,
+      harness: "codex",
+      model: "gpt-5.7-codex",
+      costSource: "pricing-table",
+      isError: false,
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, thinking: 0 },
+    });
+
+    expect(driftCounterAddSpy).toHaveBeenCalledWith(6, {
+      harness: "codex",
+      model: "gpt-5.7-codex",
+      cost_source: "pricing-table",
+      is_error: false,
+      drift_sign: "over",
+    });
+  });
+
+  test("absent harnessCostUsd records no drift", () => {
+    driftCounterAddSpy.mockClear();
+    _injectCountersForTests(metricCounter, metricCounter, driftCounter);
+    recordSessionCostImpl({
+      totalCostUsd: 6,
+      harness: "claude",
+      model: "claude-sonnet",
+      costSource: "pricing-table",
+      isError: false,
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, thinking: 0 },
+    });
+
+    expect(driftCounterAddSpy).not.toHaveBeenCalled();
+  });
+
   test("zero drift (harness/unpriced rows echo the harness number) is not recorded", () => {
     driftCounterAddSpy.mockClear();
     _injectCountersForTests(metricCounter, metricCounter, driftCounter);
