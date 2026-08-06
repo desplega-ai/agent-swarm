@@ -224,8 +224,15 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
                 # blanking its refresh token here would permanently strip the
                 # only copy — leaving the Codex CLI unable to renew an
                 # expired access token for the lifetime of the container.
-                # Preserve it on the standalone path.
-                if ! echo "$CODEX_OAUTH_SEED" | jq --argjson standalone "$CODEX_OAUTH_SEED_STANDALONE" '
+                # Preserve it on the standalone path. Read via jq's `env`
+                # builtin (rather than --argjson) so the invocation below
+                # keeps its plain, unadorned shape — extractCodexOauthSeedFilter
+                # in src/tests/entrypoint-codex-oauth-seed.test.ts locates this
+                # program by anchoring on that exact prefix and re-runs it
+                # against real jq.
+                export CODEX_OAUTH_SEED_STANDALONE
+                if ! echo "$CODEX_OAUTH_SEED" | jq '
+                    (env.CODEX_OAUTH_SEED_STANDALONE == "true") as $standalone |
                     if .auth_mode == "chatgpt" then
                       (if $standalone then . else .tokens.refresh_token = "" end)
                     elif (.access and .refresh and .accountId and .expires) then
