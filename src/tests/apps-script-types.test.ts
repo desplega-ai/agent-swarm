@@ -174,8 +174,62 @@ describe("renderAppTypes", () => {
 
     expect(new TextEncoder().encode(rendered).byteLength).toBeLessThanOrEqual(MAX_APP_TYPES_BYTES);
     expect(rendered).toContain("namespace App_First");
-    expect(rendered).toContain("Omitted app types");
-    expect(rendered).toContain("Fourth");
+    expect(rendered).toContain("omitted (type budget)");
+    expect(rendered).toContain("Fourth (Fourth-id)");
+    expect(rendered).toContain("call app-get for their shape");
+  });
+
+  test("stays within the byte budget even when metadata alone is pathological", () => {
+    const definition = {
+      models: { issue: { columns: { title: { kind: "string" } } } },
+      queries: Object.fromEntries(
+        Array.from({ length: 45 }, (_, index) => [`query${index}`, { model: "issue" }]),
+      ),
+    };
+    const manyOmitted = renderAppTypes(
+      Array.from({ length: 40 }, (_, index) => app(`Bulk${index}`, definition)),
+    );
+    expect(new TextEncoder().encode(manyOmitted).byteLength).toBeLessThanOrEqual(
+      MAX_APP_TYPES_BYTES,
+    );
+    expect(manyOmitted).toContain("+");
+    expect(manyOmitted).toContain("more — call app-get for their shape");
+
+    const manyBroken = renderAppTypes([
+      ...Array.from({ length: 30 }, (_, index) =>
+        app(
+          `Broken${index}`,
+          {},
+          { id: `broken-${index}`, definitionError: [{ path: "definition", message: "invalid" }] },
+        ),
+      ),
+      app("Working", issueDefinition()),
+    ]);
+    expect(new TextEncoder().encode(manyBroken).byteLength).toBeLessThanOrEqual(
+      MAX_APP_TYPES_BYTES,
+    );
+    expect(manyBroken).toContain("...and 20 more app(s) with undecodable definitions skipped.");
+    expect(manyBroken).toContain("namespace App_Working");
+  });
+
+  test("neutralises U+2028/U+2029 line separators in comment text", () => {
+    const rendered = renderAppTypes([
+      app(`evil\u2028export const pwned2 = 1;\u2029next`, issueDefinition(), { id: "ls-id" }),
+    ]);
+    expect(rendered).not.toContain("\u2028");
+    expect(rendered).not.toContain("\u2029");
+    expect(rendered).not.toMatch(/^export const pwned2/m);
+  });
+
+  test("a model named actionName does not collide with the ActionName alias", () => {
+    const rendered = renderAppTypes([
+      app("Collision", {
+        models: { actionName: { columns: { title: { kind: "string" } } } },
+        actions: { close: { kind: "task", prompt: "close" } },
+      }),
+    ]);
+    expect(rendered).toContain("export interface ActionName_2");
+    expect(rendered).toContain('export type ActionName = "close";');
   });
 
   test("emits syntactically valid TypeScript", () => {

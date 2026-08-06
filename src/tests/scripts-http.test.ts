@@ -184,6 +184,25 @@ describe("/api/scripts HTTP", () => {
     expect(after.stdlibTypes).toContain("namespace App_PmInbox");
   });
 
+  test("named-script types endpoint includes per-app types in both blobs", async () => {
+    createApp({
+      name: "PM Inbox",
+      definition: {
+        models: { issue: { columns: { title: { kind: "string" } } } },
+        pages: { main: { root: "root", elements: { root: { type: "Container", props: {} } } } },
+        defaultPage: "main",
+      } as never,
+    });
+    const saved = await upsert({ name: "typed-app-reader", source: validSource(3) });
+    expect(saved.status).toBe(200);
+
+    const body = (await dispatch("/api/scripts/typed-app-reader/types", {
+      agentId: workerId,
+    }).then((response) => response.json())) as { sdkTypes: string; stdlibTypes: string };
+    expect(body.sdkTypes).toContain("namespace App_PmInbox");
+    expect(body.stdlibTypes).toContain("namespace App_PmInbox");
+  });
+
   test("requires X-Agent-ID", async () => {
     const res = await dispatch("/api/scripts/upsert", {
       method: "POST",

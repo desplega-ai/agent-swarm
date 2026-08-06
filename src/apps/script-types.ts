@@ -53,8 +53,9 @@ function dedupe(identifier: string, seen: Set<string>): string {
 }
 
 function commentSafe(value: string): string {
+  // U+2028/U+2029 are JS line terminators too — they end a `//` comment.
   return value
-    .replace(/[\r\n]+/g, " ")
+    .replace(/[\r\n\u2028\u2029]+/g, " ")
     .replace(/\*\//g, "")
     .trim()
     .slice(0, 80);
@@ -135,7 +136,9 @@ function renderQuery(
 }
 
 function renderApp(app: AppRecord, namespace: string): string {
-  const modelNames = new Set<string>();
+  // Reserve the generated alias so a model named `actionName` dedupes to
+  // `ActionName_2` instead of colliding with `type ActionName`.
+  const modelNames = new Set<string>(["ActionName"]);
   const renderedModels = Object.entries(app.definition.models).map(([modelName, model]) =>
     renderModel(modelName, model, modelNames),
   );
@@ -168,14 +171,31 @@ ${queries.join("\n\n")}
 `;
 }
 
-function skippedAppComment(app: AppRecord): string {
-  return `// Skipped app ${JSON.stringify(app.id)}: stored definition could not be decoded.\n`;
+/** Skipped/omitted trailers list at most this many apps so metadata alone can never blow the byte budget. */
+const MAX_LISTED_METADATA_APPS = 10;
+
+function skippedAppsComment(apps: AppRecord[]): string {
+  if (apps.length === 0) return "";
+  const lines = apps
+    .slice(0, MAX_LISTED_METADATA_APPS)
+    .map(
+      (app) =>
+        `// Skipped app ${JSON.stringify(app.id)}: stored definition could not be decoded.\n`,
+    );
+  const rest = apps.length - MAX_LISTED_METADATA_APPS;
+  if (rest > 0) lines.push(`// ...and ${rest} more app(s) with undecodable definitions skipped.\n`);
+  return lines.join("");
 }
 
 function omittedAppsComment(apps: AppRecord[]): string {
-  return `// Omitted app types due to the ${MAX_APP_TYPES_BYTES}-byte budget: ${apps
-    .map((app) => commentSafe(app.name) || app.id)
-    .join(", ")}.\n`;
+  const listed = apps
+    .slice(0, MAX_LISTED_METADATA_APPS)
+    .map((app) => `${commentSafe(app.name) || app.id} (${app.id})`)
+    .join(", ");
+  const rest = apps.length - MAX_LISTED_METADATA_APPS;
+  return `// ${apps.length} more app(s) omitted (type budget): ${listed}${
+    rest > 0 ? `, +${rest} more` : ""
+  } — call app-get for their shape.\n`;
 }
 
 /** Renders the pure, generated per-app `.d.ts` overlay for script authors. */
@@ -188,10 +208,7 @@ export function renderAppTypes(apps: AppRecord[]): string {
     app,
     source: renderApp(app, `App_${dedupe(pascalIdentifier(app.name), namespaces)}`),
   }));
-  const skipped = apps
-    .filter((app) => app.definitionError)
-    .map(skippedAppComment)
-    .join("");
+  const skipped = skippedAppsComment(apps.filter((app) => app.definitionError));
   const kept: Array<(typeof renderedApps)[number]> = [];
   const omitted: AppRecord[] = [];
   let result = `${APP_TYPES_PREAMBLE}\n${skipped}`;
