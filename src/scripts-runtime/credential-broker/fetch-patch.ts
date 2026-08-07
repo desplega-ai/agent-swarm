@@ -83,8 +83,10 @@ export function patchFetchWithCredentialBroker(
   bindings: ResolvedCredentialBinding[],
   failedBindings: FailedCredentialBinding[] = [],
 ): void {
-  if (bindings.length === 0 && failedBindings.length === 0) return;
-
+  // Always install: even with zero resolved bindings (fresh install, identity
+  // without the credential) the wrapper must strip unresolved placeholder
+  // headers below, or the literal placeholder rides to the provider as a
+  // guaranteed 401 and optional-auth APIs stop serving public data.
   const originalFetch = globalThis.fetch;
 
   globalThis.fetch = function patchedFetch(
@@ -111,6 +113,14 @@ export function patchFetchWithCredentialBroker(
           value = value.split(binding.placeholder).join(binding.value);
           headersModified = true;
         }
+      }
+      // A placeholder still present after substitution means the credential is
+      // not configured (or not allowed) for this identity and host: drop the
+      // header instead of sending the literal, so optional-auth providers can
+      // still serve public data unauthenticated.
+      if (value.includes("[REDACTED:")) {
+        headersModified = true;
+        continue;
       }
       newHeaders.set(key, value);
     }

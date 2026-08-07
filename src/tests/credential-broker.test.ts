@@ -328,7 +328,7 @@ describe("credential broker", () => {
     expect(authorization).toBe("Bearer ghp_secret");
   });
 
-  test("does not substitute placeholders for non-allowlisted hosts", async () => {
+  test("drops a placeholder header for non-allowlisted hosts instead of forwarding the literal", async () => {
     let authorization: string | null = null;
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
       authorization = new Headers(init?.headers).get("authorization");
@@ -352,7 +352,32 @@ describe("credential broker", () => {
       headers: { Authorization: "Bearer [REDACTED:GITHUB_TOKEN]" },
     });
 
-    expect(authorization).toBe("Bearer [REDACTED:GITHUB_TOKEN]");
+    // The literal placeholder is useless to any provider and must never egress.
+    expect(authorization).toBeNull();
+  });
+
+  test("drops a placeholder header when no binding resolves (fresh install)", async () => {
+    let authorization: string | null = null;
+    let accept: string | null = null;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      authorization = headers.get("authorization");
+      accept = headers.get("accept");
+      return Response.json([]);
+    }) as typeof fetch;
+
+    patchFetchWithCredentialBroker([]);
+
+    await fetch("https://api.github.com/repos/owner/name/issues", {
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: "Bearer [REDACTED:GITHUB_TOKEN]",
+      },
+    });
+
+    // No GITHUB_TOKEN configured: auth is omitted so public repos still pull.
+    expect(authorization).toBeNull();
+    expect(accept).toBe("application/vnd.github+json");
   });
 
   test("substitutes query placeholders for allowlisted hosts", async () => {

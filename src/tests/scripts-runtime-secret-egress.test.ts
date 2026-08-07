@@ -111,7 +111,7 @@ describe("egress-substitution", () => {
       expect(capturedHeaders?.get("authorization")).toBe("Bearer ghp_real_secret_value_123");
     });
 
-    test("does NOT substitute for non-allowlisted host", async () => {
+    test("drops the placeholder header for a non-allowlisted host", async () => {
       let capturedHeaders: Headers | undefined;
       globalThis.fetch = async (_input: any, init?: any) => {
         capturedHeaders = new Headers(init?.headers);
@@ -134,7 +134,9 @@ describe("egress-substitution", () => {
         headers: { Authorization: "Bearer [REDACTED:GITHUB_TOKEN]" },
       });
 
-      expect(capturedHeaders?.get("authorization")).toBe("Bearer [REDACTED:GITHUB_TOKEN]");
+      // The placeholder header is DROPPED for non-allowlisted hosts: the
+      // literal marker is useless to the destination and must never egress.
+      expect(capturedHeaders?.get("authorization")).toBeNull();
     });
 
     test("passes through requests with no redacted placeholders", async () => {

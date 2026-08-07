@@ -1,11 +1,12 @@
 import * as z from "zod";
-import { getAllTasks, getKv, type TaskFilters, upsertKv } from "../be/db";
+import { deleteKv, getAllTasks, getKv, type TaskFilters, upsertKv } from "../be/db";
 import { listScriptConnections } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import { type AgentTask, AgentTaskStatusSchema } from "../types";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import {
+  type AppDefinition,
   type AppValidationIssue,
   type ColumnDef,
   isIso8601Date,
@@ -163,6 +164,32 @@ export function collectAppSyncStatus(appId: string): Record<string, AppSyncStatu
     }
   }
   return statuses;
+}
+
+/**
+ * Delete the per-pair status for every (model x source) whose pull or
+ * projection dependencies changed between two definitions, or whose pair is
+ * gone: the stored freshness described the OLD configuration, and presenting
+ * it for the new one would claim a pass that never ran.
+ */
+export function invalidateChangedSyncStatus(
+  appId: string,
+  previous: AppDefinition | undefined,
+  next: AppDefinition,
+): void {
+  if (!previous) return;
+  for (const [modelName, oldModel] of Object.entries(previous.models)) {
+    for (const [sourceName, oldSource] of Object.entries(oldModel.sources ?? {})) {
+      const nextModel = next.models[modelName];
+      const nextSource = nextModel?.sources?.[sourceName];
+      const unchanged =
+        nextModel !== undefined &&
+        nextSource !== undefined &&
+        pairFingerprint(nextModel, sourceName, nextSource) ===
+          pairFingerprint(oldModel, sourceName, oldSource);
+      if (!unchanged) deleteKv(appsNamespace(appId), syncStatusKey(modelName, sourceName));
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

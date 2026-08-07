@@ -1522,6 +1522,34 @@ describe("secret hygiene and sync status", () => {
     expect(text).toContain("issue:gh");
   });
 
+  test("a source change invalidates the stale sync status; unrelated edits keep it", async () => {
+    const script = await fixtureScript("status-invalidate", [ghRecord(1)]);
+    const appId = createSyncApp(issueDefinition(script.id));
+    await runAppSync({ appId });
+    expect(getAppSyncStatus(appId, "issue", "gh")).not.toBeNull();
+
+    // An unrelated definition edit keeps the pair's freshness.
+    const unrelated = await request<{ app: object }>(`/api/apps/${appId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        definition: { models: { issue: { columns: { note2: { kind: "string" } } } } },
+      }),
+    });
+    expect(unrelated.status).toBe(200);
+    expect(getAppSyncStatus(appId, "issue", "gh")).not.toBeNull();
+
+    // Changing the source's args discards freshness the old config earned:
+    // the status would otherwise claim a pass the new config never ran.
+    const changed = await request<{ app: object }>(`/api/apps/${appId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        definition: issueDefinition(script.id, { args: { repo: "owner/other" } }),
+      }),
+    });
+    expect(changed.status).toBe(200);
+    expect(getAppSyncStatus(appId, "issue", "gh")).toBeNull();
+  });
+
   test("a pulled field carrying a known secret is redacted before it lands in a row", async () => {
     const secret = "fixture-secret-value-0123456789";
     process.env.APPS_SYNC_FIXTURE_TOKEN = secret;
@@ -2420,7 +2448,7 @@ describe("a sync source against a dummy GitHub through the real sandbox", () => 
     releaseStall?.();
   });
 
-  test("the fixture only ever sees the placeholder, never the token", async () => {
+  test("the fixture never sees the token — the unresolved placeholder header is dropped", async () => {
     // An ACTIVE binding for this identity — otherwise the assertion is vacuous.
     const bindings = await buildScriptCredentialBindingsWithFailures({ agentId: LEAD_AGENT_ID });
     const github = bindings.egressSecrets.find((secret) => secret.configKey === "GITHUB_TOKEN");
@@ -2438,8 +2466,10 @@ describe("a sync source against a dummy GitHub through the real sandbox", () => 
 
     const result = await runAppSync({ appId });
 
-    expect(seen?.authorization).toBe("Bearer [REDACTED:GITHUB_TOKEN]");
-    expect(rowsOf(appId)[0]?.title).toBe("Bearer [REDACTED:GITHUB_TOKEN]");
+    // The fixture host is not allowlisted for the binding, so the placeholder
+    // header is DROPPED before egress: no auth reaches it — never the token.
+    expect(seen?.authorization ?? null).toBeNull();
+    expect(rowsOf(appId)[0]?.title ?? null).toBeNull();
     expect(JSON.stringify(rowsOf(appId))).not.toContain(FIXTURE_TOKEN);
     expect(JSON.stringify(result)).not.toContain(FIXTURE_TOKEN);
     expect(JSON.stringify(getAppSyncStatus(appId, "issue", "gh"))).not.toContain(FIXTURE_TOKEN);

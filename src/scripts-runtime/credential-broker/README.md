@@ -26,7 +26,7 @@ Example binding document:
 }
 ```
 
-Scripts still opt in per request by sending a header value that contains the placeholder from `headerTemplate`. Query-string bindings work the same way: configure `queryTemplate` as `param=[REDACTED:CONFIG_KEY]`, then send a URL with that placeholder-bearing query value. The broker does not auto-add headers or query parameters in this draft.
+A header whose value still contains an unresolved `[REDACTED:...]` placeholder after substitution is dropped before egress — the literal is useless to any provider, and omitting it lets optional-auth APIs (e.g. GitHub public repos) serve unauthenticated requests on installs without the credential. Scripts still opt in per request by sending a header value that contains the placeholder from `headerTemplate`. Query-string bindings work the same way: configure `queryTemplate` as `param=[REDACTED:CONFIG_KEY]`, then send a URL with that placeholder-bearing query value. The broker does not auto-add headers or query parameters in this draft.
 
 ## Management
 

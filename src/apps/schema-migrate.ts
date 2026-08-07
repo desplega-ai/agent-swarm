@@ -21,6 +21,7 @@ import {
   withMutationLock,
   writeAppRowForMigrationUnlocked,
 } from "./row-store";
+import { invalidateChangedSyncStatus } from "./sync";
 
 const MigrationValueSchema = z.union([z.string(), z.number(), z.boolean()]);
 
@@ -1062,7 +1063,11 @@ export async function migrateAppSchema<T>(input: {
           );
         }
       }
-      return input.writeDefinition();
+      const written = input.writeDefinition();
+      // The stored per-pair sync status describes the OLD configuration:
+      // presenting it for a changed pair would claim a pass that never ran.
+      invalidateChangedSyncStatus(input.appId, input.previousDefinition, input.nextDefinition);
+      return written;
     });
     return { result: transaction(), migration: plan.report };
   });
