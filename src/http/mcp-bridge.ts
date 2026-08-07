@@ -40,7 +40,11 @@ const mcpBridgeRoute = route({
     args: z.record(z.string(), z.unknown()).default({}),
   }),
   responses: {
-    200: { description: "Tool result" },
+    200: {
+      description: "Tool result",
+      unstructured:
+        "Generic MCP tool proxy — response shape is whatever the invoked tool's structuredContent/content returns, which varies per tool",
+    },
     400: { description: "Invalid tool name or args" },
     403: { description: "Tool not in SDK allowlist" },
     404: { description: "Tool not found" },

@@ -23,13 +23,15 @@ import {
   type Page,
   PageAuthModeSchema,
   PageContentTypeSchema,
+  PageSchema,
   type PageSummary,
+  PageVersionSchema,
 } from "../types";
 import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
 import { issuePageSessionCookie } from "../utils/page-session";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
-import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
+import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError } from "./utils";
 
 /**
  * Per-page body-size cap. Page bodies are stored as a TEXT column with no
@@ -57,6 +59,32 @@ function slugify(input: string): string {
   return slug || "page";
 }
 
+// ─── Response Schemas ───────────────────────────────────────────────────────
+
+/**
+ * Shape of a single page row as returned by the get-by-id / resolve-by-slug
+ * routes: the `Page` row (with its already-optional `favorite`, populated by
+ * `withFavoriteFlags` on the normal path but structurally optional to match
+ * the `decorated ?? page` defensive fallback in the handler) plus the two
+ * share-URL pointers added by `withShareUrls`.
+ */
+const PageWithShareUrlsSchema = PageSchema.extend({
+  api_url: z.string(),
+  app_url: z.string(),
+});
+
+/**
+ * `/api/pages` list item. `body` / `passwordHash` are only present when the
+ * caller passes `?fields=full` (otherwise the slim `PageSummary` shape is
+ * used, which omits them entirely) — modeled as optional rather than a union
+ * since both shapes share every other field verbatim.
+ */
+const PageListItemSchema = PageSchema.partial({ body: true, passwordHash: true }).extend({
+  favorite: z.boolean(),
+  api_url: z.string(),
+  app_url: z.string(),
+});
+
 // ─── Route Definitions ──────────────────────────────────────────────────────
 
 const createPageRoute = route({
@@ -77,7 +105,16 @@ const createPageRoute = route({
     needsCredentials: z.array(z.string()).optional(),
   }),
   responses: {
-    201: { description: "Page created" },
+    201: {
+      description: "Page created",
+      schema: z.object({
+        id: z.string(),
+        key: AssetKeySchema,
+        version: z.literal(1),
+        api_url: z.string(),
+        app_url: z.string(),
+      }),
+    },
     400: { description: "Invalid body" },
     409: { description: "Slug already exists for this agent" },
   },
@@ -91,7 +128,7 @@ const getPageRoute = route({
   tags: ["Pages"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Page row" },
+    200: { description: "Page row", schema: PageWithShareUrlsSchema },
     404: { description: "Page not found" },
   },
 });
@@ -107,7 +144,7 @@ const resolvePageRoute = route({
     agentId: z.string().min(1).optional(),
   }),
   responses: {
-    200: { description: "Resolved page row" },
+    200: { description: "Resolved page row", schema: PageWithShareUrlsSchema },
     404: { description: "Page not found" },
   },
 });
@@ -164,7 +201,10 @@ const updatePageRoute = route({
     needsCredentials: z.array(z.string()).nullable().optional(),
   }),
   responses: {
-    200: { description: "Page updated" },
+    200: {
+      description: "Page updated",
+      schema: z.object({ id: z.string(), key: AssetKeySchema, version: z.number().int().min(1) }),
+    },
     404: { description: "Page not found" },
     413: { description: "Payload too large" },
   },
@@ -201,7 +241,15 @@ const listPagesRoute = route({
     fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
-    200: { description: "Page list with totals + share-URL pointers" },
+    200: {
+      description: "Page list with totals + share-URL pointers",
+      schema: z.object({
+        pages: z.array(PageListItemSchema),
+        total: z.number().int(),
+        limit: z.number().int(),
+        offset: z.number().int(),
+      }),
+    },
   },
 });
 
@@ -223,7 +271,21 @@ const listPageActionsRoute = route({
   summary: "List JSON-page action allowlist (with param JSON Schemas)",
   tags: ["Pages"],
   responses: {
-    200: { description: "Action allowlist" },
+    200: {
+      description: "Action allowlist",
+      schema: z.object({
+        actions: z.array(
+          z.object({
+            name: z.string(),
+            description: z.string(),
+            // Rendered via `z.toJSONSchema()` — a draft-7 JSON Schema document,
+            // not otherwise modeled as a zod entity.
+            params: z.record(z.string(), z.unknown()),
+            sdkMethods: z.array(z.string()).optional(),
+          }),
+        ),
+      }),
+    },
   },
 });
 
@@ -265,7 +327,10 @@ const listPageVersionsRoute = route({
   tags: ["Pages"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Version list (newest first)" },
+    200: {
+      description: "Version list (newest first)",
+      schema: z.object({ versions: z.array(PageVersionSchema) }),
+    },
     404: { description: "Page not found" },
   },
 });
@@ -278,7 +343,7 @@ const getPageVersionRoute = route({
   tags: ["Pages"],
   params: z.object({ id: z.string(), version: z.coerce.number().int().min(1) }),
   responses: {
-    200: { description: "Version snapshot" },
+    200: { description: "Version snapshot", schema: PageVersionSchema },
     404: { description: "Page or version not found" },
   },
 });
@@ -412,17 +477,13 @@ export async function handlePages(
       });
       // First write has no prior snapshot — version 1 is implicit (the parent
       // IS v1). Subsequent edits land via PUT and bump the counter.
-      json(
-        res,
-        {
-          id: page.id,
-          key: page.key,
-          version: 1,
-          api_url: `${getApiBaseUrl()}/p/${page.id}`,
-          app_url: `${getAppBaseUrl()}/pages/${page.slug}`,
-        },
-        201,
-      );
+      createPageRoute.respond(res, 201, {
+        id: page.id,
+        key: page.key,
+        version: 1,
+        api_url: `${getApiBaseUrl()}/p/${page.id}`,
+        app_url: `${getAppBaseUrl()}/pages/${page.slug}`,
+      });
     } catch (err) {
       if (err instanceof AssetKeyAuthorizationError) {
         jsonError(res, err.message, err.statusCode);
@@ -444,13 +505,13 @@ export async function handlePages(
   if (listPageActionsRoute.match(req.method, pathSegments)) {
     const sdkSchema = z.toJSONSchema(swarmSdkActionParamsSchema, { target: "draft-7" });
     const callSchema = z.toJSONSchema(swarmCallActionParamsSchema, { target: "draft-7" });
-    json(res, {
+    listPageActionsRoute.respond(res, 200, {
       actions: [
         {
           name: "swarm.sdk",
           description: "Invoke a method on the in-SPA Swarm SDK with the viewer's bearer.",
           params: sdkSchema,
-          sdkMethods: SDK_METHODS,
+          sdkMethods: [...SDK_METHODS],
         },
         {
           name: "swarm.call",
@@ -478,7 +539,7 @@ export async function handlePages(
     }
     const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
     const [decorated] = withFavoriteFlags([page], { favoriteScope, itemType: "page" });
-    json(res, withShareUrls(decorated ?? page));
+    resolvePageRoute.respond(res, 200, withShareUrls(decorated ?? page));
     return true;
   }
 
@@ -513,7 +574,7 @@ export async function handlePages(
     }
     const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
     const decoratedPages = withFavoriteFlags(pages, { favoriteScope, itemType: "page" });
-    json(res, {
+    listPagesRoute.respond(res, 200, {
       pages: decoratedPages.map(withShareUrls),
       // Filter-aware total (real row count, not the current page's length) so
       // the UI pager reflects all pages, not just what this request returned.
@@ -545,7 +606,7 @@ export async function handlePages(
       res.end();
       return true;
     }
-    json(res, version);
+    getPageVersionRoute.respond(res, 200, version);
     return true;
   }
 
@@ -564,7 +625,7 @@ export async function handlePages(
       return true;
     }
     const versions = getPageVersions(parsed.params.id);
-    json(res, { versions });
+    listPageVersionsRoute.respond(res, 200, { versions });
     return true;
   }
 
@@ -586,7 +647,7 @@ export async function handlePages(
     }
     const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
     const [decorated] = withFavoriteFlags([page], { favoriteScope, itemType: "page" });
-    json(res, withShareUrls(decorated ?? page));
+    getPageRoute.respond(res, 200, withShareUrls(decorated ?? page));
     return true;
   }
 
@@ -651,7 +712,11 @@ export async function handlePages(
       res.end();
       return true;
     }
-    json(res, { id: updated.id, key: updated.key, version: pageEditCounter(updated.id) });
+    updatePageRoute.respond(res, 200, {
+      id: updated.id,
+      key: updated.key,
+      version: pageEditCounter(updated.id),
+    });
     return true;
   }
 

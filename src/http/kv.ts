@@ -15,9 +15,9 @@ import { mcpOverflowAuthError } from "../kv-overflow";
 import { reservedNamespaceError } from "../kv-reserved-namespaces";
 import { can } from "../rbac";
 import { agentContextKey, pageContextKey } from "../tasks/context-key";
-import { KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "../types";
+import { KvEntrySchema, KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "../types";
 import { route } from "./route-def";
-import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
+import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError } from "./utils";
 
 /**
  * KV store HTTP surface — see plan & `src/be/migrations/061_kv_store.sql`.
@@ -72,21 +72,29 @@ const kvListQuerySchema = z.object({
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 const RESPONSES_GET = {
-  200: { description: "KV entry" },
+  200: { description: "KV entry", schema: KvEntrySchema },
   404: { description: "KV entry not found or expired" },
   400: { description: "Validation error or unresolvable namespace" },
 } as const;
 
 const RESPONSES_PUT = {
-  200: { description: "KV entry stored" },
+  200: { description: "KV entry stored", schema: KvEntrySchema },
   400: { description: "Validation error" },
   403: { description: "Caller may not write this namespace" },
   409: { description: "INCR collision: existing value_type is not 'integer'" },
   413: { description: "Body exceeds 2 MiB" },
 } as const;
 
+// Wire shape sent by `sendList` — not an existing named entity, defined
+// locally since it's a list+total+namespace wrapper unique to this endpoint.
+const kvListResponseSchema = z.object({
+  entries: z.array(KvEntrySchema),
+  total: z.number().int().nonnegative(),
+  namespace: z.string(),
+});
+
 const RESPONSES_LIST = {
-  200: { description: "KV entries in the resolved namespace" },
+  200: { description: "KV entries in the resolved namespace", schema: kvListResponseSchema },
   400: { description: "Validation error or unresolvable namespace" },
 } as const;
 
@@ -211,6 +219,15 @@ const listKvExplicit = route({
   query: kvListQuerySchema,
   responses: RESPONSES_LIST,
 });
+
+// The header-resolved and explicit-namespace route pairs share the exact same
+// `responses` object references (RESPONSES_GET / RESPONSES_PUT / RESPONSES_LIST
+// above), so their `.respond` methods are structurally identical types. These
+// aliases let the shared `send*`/`handleIncr` helpers accept "whichever of the
+// two matched" without re-deriving the response shape per call site.
+type GetKvRespond = typeof getKvHeader.respond;
+type PutKvRespond = typeof putKvHeader.respond;
+type ListKvRespond = typeof listKvHeader.respond;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -454,7 +471,7 @@ export async function handleKv(
     if (!ns) return true;
     const key = decodeKvSegment(res, parsed.params.key, "key");
     if (!key) return true;
-    return sendGet(req, res, ns, key);
+    return sendGet(req, res, ns, key, getKvExplicit.respond);
   }
   if (putKvExplicit.match(req.method, pathSegments)) {
     if (enforceContentLengthCap(req, res, MAX_KV_BODY_BYTES) === BODY_TOO_LARGE) return true;
@@ -464,7 +481,7 @@ export async function handleKv(
     if (!ns) return true;
     const key = decodeKvSegment(res, parsed.params.key, "key");
     if (!key) return true;
-    return sendPut(req, res, ns, key, parsed.body);
+    return sendPut(req, res, ns, key, parsed.body, putKvExplicit.respond);
   }
   if (deleteKvExplicit.match(req.method, pathSegments)) {
     const parsed = await deleteKvExplicit.parse(req, res, pathSegments, queryParams);
@@ -480,7 +497,7 @@ export async function handleKv(
     if (!parsed) return true;
     const ns = decodeKvSegment(res, parsed.params.namespace, "namespace");
     if (!ns) return true;
-    return sendList(req, res, ns, parsed.query);
+    return sendList(req, res, ns, parsed.query, listKvExplicit.respond);
   }
 
   // ── Header-resolved variants ──────────────────────────────────────────────
@@ -494,7 +511,7 @@ export async function handleKv(
     }
     const key = decodeKvSegment(res, parsed.params.key, "key");
     if (!key) return true;
-    return sendGet(req, res, ns, key);
+    return sendGet(req, res, ns, key, getKvHeader.respond);
   }
   if (putKvHeader.match(req.method, pathSegments)) {
     if (enforceContentLengthCap(req, res, MAX_KV_BODY_BYTES) === BODY_TOO_LARGE) return true;
@@ -507,7 +524,7 @@ export async function handleKv(
     }
     const key = decodeKvSegment(res, parsed.params.key, "key");
     if (!key) return true;
-    return sendPut(req, res, ns, key, parsed.body);
+    return sendPut(req, res, ns, key, parsed.body, putKvHeader.respond);
   }
   if (deleteKvHeader.match(req.method, pathSegments)) {
     const parsed = await deleteKvHeader.parse(req, res, pathSegments, queryParams);
@@ -529,7 +546,7 @@ export async function handleKv(
       jsonError(res, "namespace is required (pass X-Source-Task-Id or X-Agent-ID)", 400);
       return true;
     }
-    return sendList(req, res, ns, parsed.query);
+    return sendList(req, res, ns, parsed.query, listKvHeader.respond);
   }
 
   return false;
@@ -595,10 +612,11 @@ async function handleIncr(
     return true;
   }
 
+  const respond: PutKvRespond = explicit ? incrKvExplicit.respond : incrKvHeader.respond;
   const by = body?.by ?? 1;
   try {
     const entry = incrKv(namespace, key, by);
-    json(res, entry);
+    respond(res, 200, entry);
   } catch (err) {
     if (err instanceof KvTypeCollisionError) {
       jsonError(res, err.message, 409);
@@ -615,6 +633,7 @@ function sendGet(
   res: ServerResponse,
   namespace: string,
   key: string,
+  respond: GetKvRespond,
 ): boolean {
   const authErr = authorizeRead(namespace, buildAuthCtx(req));
   if (authErr) {
@@ -626,7 +645,7 @@ function sendGet(
     jsonError(res, "not found", 404);
     return true;
   }
-  json(res, entry);
+  respond(res, 200, entry);
   return true;
 }
 
@@ -636,6 +655,7 @@ function sendPut(
   namespace: string,
   key: string,
   body: z.infer<typeof kvSetBodySchema>,
+  respond: PutKvRespond,
 ): boolean {
   const authErr = authorizeWrite(namespace, buildAuthCtx(req));
   if (authErr) {
@@ -660,7 +680,7 @@ function sendPut(
       valueType,
       expiresAt,
     });
-    json(res, entry);
+    respond(res, 200, entry);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "upsert failed";
     jsonError(res, msg, 400);
@@ -694,6 +714,7 @@ function sendList(
   res: ServerResponse,
   namespace: string,
   query: z.infer<typeof kvListQuerySchema>,
+  respond: ListKvRespond,
 ): boolean {
   const authErr = authorizeRead(namespace, buildAuthCtx(req));
   if (authErr) {
@@ -705,6 +726,6 @@ function sendList(
   const prefix = query.prefix && query.prefix.length > 0 ? query.prefix : undefined;
   const entries = listKv(namespace, { prefix, limit, offset });
   const total = countKv(namespace, { prefix });
-  json(res, { entries, total, namespace });
+  respond(res, 200, { entries, total, namespace });
   return true;
 }

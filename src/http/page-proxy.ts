@@ -40,7 +40,11 @@ route({
   summary: "Cookie-gated proxy to the swarm API (used by db-backed page iframes)",
   tags: ["Pages"],
   responses: {
-    200: { description: "Proxied response from the underlying /api/* endpoint" },
+    200: {
+      description: "Proxied response from the underlying /api/* endpoint",
+      unstructured:
+        "Body is forwarded verbatim from the proxied /api/* endpoint; shape and content-type vary per target route",
+    },
     401: { description: "No or invalid page-session cookie" },
     404: { description: "Page referenced by the cookie no longer exists" },
   },
@@ -54,7 +58,11 @@ route({
   summary: "Cookie-gated proxy to the swarm API (POST)",
   tags: ["Pages"],
   responses: {
-    200: { description: "Proxied response" },
+    200: {
+      description: "Proxied response",
+      unstructured:
+        "Body is forwarded verbatim from the proxied /api/* endpoint; shape and content-type vary per target route",
+    },
     401: { description: "No or invalid page-session cookie" },
   },
   auth: { apiKey: false },
@@ -67,7 +75,11 @@ route({
   summary: "Cookie-gated proxy to the swarm API (PUT)",
   tags: ["Pages"],
   responses: {
-    200: { description: "Proxied response" },
+    200: {
+      description: "Proxied response",
+      unstructured:
+        "Body is forwarded verbatim from the proxied /api/* endpoint; shape and content-type vary per target route",
+    },
     401: { description: "No or invalid page-session cookie" },
   },
   auth: { apiKey: false },
@@ -80,7 +92,11 @@ route({
   summary: "Cookie-gated proxy to the swarm API (DELETE)",
   tags: ["Pages"],
   responses: {
-    200: { description: "Proxied response" },
+    200: {
+      description: "Proxied response",
+      unstructured:
+        "Body is forwarded verbatim from the proxied /api/* endpoint; shape and content-type vary per target route",
+    },
     401: { description: "No or invalid page-session cookie" },
   },
   auth: { apiKey: false },
@@ -93,7 +109,11 @@ route({
   summary: "Cookie-gated proxy to the swarm API (PATCH)",
   tags: ["Pages"],
   responses: {
-    200: { description: "Proxied response" },
+    200: {
+      description: "Proxied response",
+      unstructured:
+        "Body is forwarded verbatim from the proxied /api/* endpoint; shape and content-type vary per target route",
+    },
     401: { description: "No or invalid page-session cookie" },
   },
   auth: { apiKey: false },

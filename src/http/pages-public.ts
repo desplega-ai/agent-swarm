@@ -24,13 +24,29 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { BROWSER_SDK_JS, SWARM_UI_JS } from "../artifact-sdk/browser-sdk";
 import { getPage, incrementPageViewCount } from "../be/db";
-import type { Page } from "../types";
+import { type Page, PageSchema } from "../types";
 import { getAppUrl, getConfiguredAppUrls } from "../utils/constants";
 import { extractAndVerifyCookie, issuePageSessionCookie } from "../utils/page-session";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 
 // ─── Route definitions (registered with auth: { apiKey: false }) ────────────
+
+/**
+ * Wire shape sent by the `/p/{id}.json` 200 response — a subset of `Page`
+ * fields plus a hardcoded `version: 1` (edit-counter is API-internal; the SPA
+ * reads real version numbers via `/api/pages/:id/versions`, NOT this field).
+ */
+const PublicPageJsonSchema = PageSchema.pick({
+  id: true,
+  title: true,
+  description: true,
+  contentType: true,
+  authMode: true,
+  body: true,
+}).extend({
+  version: z.literal(1),
+});
 
 const publicPageRoute = route({
   method: "get",
@@ -40,7 +56,11 @@ const publicPageRoute = route({
   tags: ["Pages"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Rendered HTML page" },
+    200: {
+      description: "Rendered HTML page",
+      unstructured:
+        "Serves the page's raw agent-authored HTML body (SDK-injected) or, for ?print=1 on a JSON-content page, a standalone printable HTML document — not a JSON shape",
+    },
     302: { description: "Redirect to SPA for JSON content" },
     401: { description: "Page requires an authenticated session" },
     403: { description: "Cookie does not match this page id" },
@@ -57,7 +77,7 @@ const publicPageJsonRoute = route({
   tags: ["Pages"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Page JSON" },
+    200: { description: "Page JSON", schema: PublicPageJsonSchema },
     401: { description: "Page requires an authenticated session" },
     403: { description: "Cookie does not match this page id" },
     404: { description: "Page not found" },
@@ -545,23 +565,20 @@ export async function handlePagesPublic(
     // Returns the current head state (no version history). Body included
     // verbatim. NOTE: passwordHash / agentId are NOT exposed here — these
     // are private. step-4 may revisit if needed.
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "Cache-Control": "no-store",
-    };
-    if (inlineSetCookie) headers["Set-Cookie"] = inlineSetCookie;
-    res.writeHead(200, headers);
-    res.end(
-      JSON.stringify({
-        id: page.id,
-        version: 1, // edit-counter is API-internal; SPA reads via /api/pages/:id/versions
-        title: page.title,
-        description: page.description,
-        contentType: page.contentType,
-        authMode: page.authMode,
-        body: page.body,
-      }),
-    );
+    // `res.setHeader` merges with the `Content-Type: application/json` header
+    // that `respond()` writes via `res.writeHead()` — Node gives the latter
+    // precedence, which is the value we want here anyway.
+    res.setHeader("Cache-Control", "no-store");
+    if (inlineSetCookie) res.setHeader("Set-Cookie", inlineSetCookie);
+    publicPageJsonRoute.respond(res, 200, {
+      id: page.id,
+      version: 1, // edit-counter is API-internal; SPA reads via /api/pages/:id/versions
+      title: page.title,
+      description: page.description,
+      contentType: page.contentType,
+      authMode: page.authMode,
+      body: page.body,
+    });
     bumpViewCount(page.id);
     return true;
   }

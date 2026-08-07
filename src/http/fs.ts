@@ -15,12 +15,12 @@ import {
 import { type FileObject, type FileScope, FilesError, normalizeFilesError } from "../fs/provider";
 import { getFileStorageProvider } from "../fs/registry";
 import { can, type RbacPrincipal, type RbacResource } from "../rbac";
-import type { TaskAttachment } from "../types";
+import { type TaskAttachment, TaskAttachmentSchema } from "../types";
 import { attachmentContentDisposition } from "../utils/content-disposition";
 import { getCurrentRequestAuth, getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
-import { BODY_TOO_LARGE, enforceContentLengthCap, json, jsonError } from "./utils";
+import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError } from "./utils";
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
@@ -38,6 +38,37 @@ const signedUrlQuery = z.object({
   expiresIn: z.coerce.number().int().positive().max(3600).optional(),
 });
 
+// Mirrors `ProviderCapabilities` from src/fs/capabilities.ts — no zod schema
+// exists there (it's a plain TS type consumed by provider implementations).
+const providerCapabilitiesSchema = z.object({
+  signedUrl: z.object({
+    supported: z.boolean(),
+    maxExpiresIn: z.number().optional(),
+  }),
+  search: z.boolean().optional(),
+  comments: z.boolean().optional(),
+  versioning: z.boolean().optional(),
+});
+
+const agentFsCredentialStateSchema = z.object({
+  enabled: z.boolean(),
+  created: z.boolean(),
+  agentId: z.string(),
+  email: z.string().optional(),
+  orgId: z.string().optional(),
+  driveId: z.string().optional(),
+});
+
+const agentFsInviteStateSchema = z.object({
+  orgId: z.string(),
+  invited: z.boolean(),
+});
+
+const signedUrlResponseSchema = z.object({
+  url: z.string(),
+  expiresIn: z.number(),
+});
+
 const capabilitiesRoute = route({
   method: "get",
   path: "/api/fs/capabilities",
@@ -45,7 +76,10 @@ const capabilitiesRoute = route({
   summary: "Get active file-storage provider capabilities",
   tags: ["FS"],
   responses: {
-    200: { description: "Active provider capabilities" },
+    200: {
+      description: "Active provider capabilities",
+      schema: z.object({ providerId: z.string(), capabilities: providerCapabilitiesSchema }),
+    },
     401: { description: "Unauthorized" },
   },
 });
@@ -60,7 +94,7 @@ const ensureAgentCredentialsRoute = route({
   tags: ["FS"],
   body: z.object({}).optional(),
   responses: {
-    200: { description: "Credential state" },
+    200: { description: "Credential state", schema: agentFsCredentialStateSchema },
     400: { description: "Missing agent id" },
     500: { description: "Provisioning failed" },
   },
@@ -80,7 +114,7 @@ const inviteMemberRoute = route({
     role: z.enum(["viewer", "editor", "admin"]).default("editor"),
   }),
   responses: {
-    200: { description: "Invite state ({ orgId, invited })" },
+    200: { description: "Invite state ({ orgId, invited })", schema: agentFsInviteStateSchema },
     400: { description: "Invalid body" },
     500: { description: "Provisioning or invite failed" },
   },
@@ -99,7 +133,10 @@ const listTaskFilesRoute = route({
   tags: ["FS"],
   params: taskParams,
   responses: {
-    200: { description: "Task file attachments" },
+    200: {
+      description: "Task file attachments",
+      schema: z.object({ attachments: z.array(TaskAttachmentSchema) }),
+    },
     404: { description: "Task not found" },
   },
 });
@@ -115,7 +152,7 @@ const uploadTaskFileRoute = route({
   params: taskParams,
   query: uploadQuery,
   responses: {
-    201: { description: "Uploaded task attachment" },
+    201: { description: "Uploaded task attachment", schema: TaskAttachmentSchema },
     400: { description: "Validation error" },
     403: { description: "Caller cannot mutate this task" },
     404: { description: "Task not found" },
@@ -133,7 +170,7 @@ const getTaskFileRoute = route({
   tags: ["FS"],
   params: attachmentParams,
   responses: {
-    200: { description: "Task attachment metadata" },
+    200: { description: "Task attachment metadata", schema: TaskAttachmentSchema },
     404: { description: "Task or attachment not found" },
   },
 });
@@ -147,7 +184,10 @@ const downloadTaskFileRoute = route({
   tags: ["FS"],
   params: attachmentParams,
   responses: {
-    200: { description: "Raw file bytes" },
+    200: {
+      description: "Raw file bytes",
+      unstructured: "Streams raw binary file bytes (Content-Type varies per attachment)",
+    },
     404: { description: "Task, attachment, or provider object not found" },
   },
 });
@@ -161,7 +201,7 @@ const signedUrlTaskFileRoute = route({
   params: attachmentParams,
   query: signedUrlQuery,
   responses: {
-    200: { description: "Signed URL" },
+    200: { description: "Signed URL", schema: signedUrlResponseSchema },
     404: { description: "Task, attachment, or provider object not found" },
     501: { description: "Active provider does not support signed URLs" },
   },
@@ -202,7 +242,7 @@ export async function handleFs(
     }
     try {
       const result = await ensureAgentFsCredentialsForAgent(agentId);
-      json(res, result);
+      ensureAgentCredentialsRoute.respond(res, 200, result);
     } catch (error) {
       const message = scrubSecrets(error instanceof Error ? error.message : String(error));
       jsonError(res, `Failed to provision agent-fs credentials: ${message}`, 500);
@@ -215,7 +255,7 @@ export async function handleFs(
     if (!parsed) return true;
     try {
       const result = await inviteEmailToSharedOrg(parsed.body.email, parsed.body.role);
-      json(res, result);
+      inviteMemberRoute.respond(res, 200, result);
     } catch (error) {
       const message = scrubSecrets(error instanceof Error ? error.message : String(error));
       jsonError(res, `Failed to invite member to agent-fs shared org: ${message}`, 500);
@@ -244,7 +284,7 @@ export async function handleFs(
     if (!parsed) return true;
     const attachment = findAttachment(parsed.params.taskId, parsed.params.attachmentId, res);
     if (!attachment) return true;
-    json(res, attachment);
+    getTaskFileRoute.respond(res, 200, attachment);
     return true;
   }
 
@@ -275,13 +315,16 @@ export async function handleFs(
     const parsed = await listTaskFilesRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!getTaskById(parsed.params.taskId)) return notFound(res, "Task not found");
-    json(res, { attachments: getTaskAttachments(parsed.params.taskId) });
+    listTaskFilesRoute.respond(res, 200, { attachments: getTaskAttachments(parsed.params.taskId) });
     return true;
   }
 
   if (capabilitiesRoute.match(req.method, pathSegments)) {
     const provider = getFileStorageProvider();
-    json(res, { providerId: provider.id, capabilities: provider.capabilities });
+    capabilitiesRoute.respond(res, 200, {
+      providerId: provider.id,
+      capabilities: provider.capabilities,
+    });
     return true;
   }
 
@@ -338,7 +381,7 @@ async function sendUpload(
       isPrimary: query.isPrimary === "true",
       createdBy: auth?.kind === "user" ? auth.userId : undefined,
     });
-    json(res, attachment, 201);
+    uploadTaskFileRoute.respond(res, 201, attachment);
   } catch (error) {
     try {
       await provider.delete(scope);
@@ -397,7 +440,7 @@ async function sendSignedUrl(
   }
   try {
     const url = await provider.url(scopeFromAttachment(attachment), { expiresIn });
-    json(res, { url, expiresIn: Math.min(expiresIn ?? 3600, 3600) });
+    signedUrlTaskFileRoute.respond(res, 200, { url, expiresIn: Math.min(expiresIn ?? 3600, 3600) });
   } catch (error) {
     return sendProviderError(res, error);
   }

@@ -48,6 +48,24 @@ const TIMEOUT_HEADER = "x-swarm-timeout-ms";
 // otherwise fully unauthenticated.
 const MAX_BODY_BYTES = 1 * 1024 * 1024;
 
+// Mirrors the local `ExternalError` type below — kept as a separate schema
+// since that type is TS-only and not exported for reuse.
+const XScriptErrorSchema = z.object({
+  type: z.string(),
+  message: z.string(),
+  details: z.array(z.string()).optional(),
+});
+
+// `result` is `unknown | undefined` on `RunScriptOutput` — when `undefined`,
+// `JSON.stringify` drops the key entirely, so callers may see it absent as
+// well as present-with-any-value (including `null` on the failure paths).
+const XScriptResponseSchema = z.object({
+  ok: z.boolean(),
+  result: z.unknown().optional(),
+  error: XScriptErrorSchema.nullable(),
+  durationMs: z.number(),
+});
+
 const scriptApiRoute = route({
   method: "post",
   path: "/api/x/script/{endpointId}",
@@ -64,7 +82,10 @@ const scriptApiRoute = route({
   params: z.object({ endpointId: z.string() }),
   auth: { apiKey: false },
   responses: {
-    200: { description: "Script executed — see `ok` in the envelope" },
+    200: {
+      description: "Script executed — see `ok` in the envelope",
+      schema: XScriptResponseSchema,
+    },
     401: { description: "Missing or invalid bearer token" },
     404: { description: "Endpoint not found or disabled" },
     501: { description: "workspace-rw scripts are not supported" },
@@ -154,7 +175,7 @@ export async function handleX(
   try {
     args = await parseBody(req);
   } catch {
-    json(res, {
+    scriptApiRoute.respond(res, 200, {
       ok: false,
       result: null,
       error: { type: "invalid_json", message: "Request body must be valid JSON" },
@@ -182,7 +203,7 @@ export async function handleX(
       const schema = JSON.parse(script.argsJsonSchema) as Record<string, unknown>;
       const errors = validateJsonSchema(schema, args ?? null);
       if (errors.length > 0) {
-        json(res, {
+        scriptApiRoute.respond(res, 200, {
           ok: false,
           result: null,
           error: { type: "args_validation", message: errors.join("; "), details: errors },
@@ -246,8 +267,9 @@ export async function handleX(
   }
 
   // Never expose stdout/stderr to external callers.
-  json(
+  scriptApiRoute.respond(
     res,
+    200,
     scrubObject({ ok, result: ok ? output.result : null, error, durationMs: output.durationMs }),
   );
   return true;

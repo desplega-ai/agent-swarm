@@ -22,7 +22,7 @@ import {
 import { PricingProviderSchema, PricingRowSchema, PricingTokenClassSchema } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -61,7 +61,10 @@ const listPricingForTriple = route({
   tags: ["Pricing"],
   params: PricingTriplePathParams,
   responses: {
-    200: { description: "Pricing rows (latest first)" },
+    200: {
+      description: "Pricing rows (latest first)",
+      schema: z.object({ rows: z.array(PricingRowSchema) }),
+    },
   },
 });
 
@@ -128,7 +131,7 @@ export async function handlePricing(
   if (listAllPricing.match(req.method, pathSegments)) {
     const parsed = await listAllPricing.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    json(res, { rows: getAllPricingRows() });
+    listAllPricing.respond(res, 200, { rows: getAllPricingRows() });
     return true;
   }
 
@@ -147,7 +150,7 @@ export async function handlePricing(
       jsonError(res, "No pricing row in effect", 404);
       return true;
     }
-    json(res, row);
+    getActivePricing.respond(res, 200, row);
     return true;
   }
 
@@ -193,7 +196,7 @@ export async function handlePricing(
       parsed.params.model,
       parsed.params.tokenClass,
     );
-    json(res, { rows });
+    listPricingForTriple.respond(res, 200, { rows });
     return true;
   }
 
@@ -224,7 +227,7 @@ export async function handlePricing(
         },
       });
 
-      json(res, row, 201);
+      insertPricing.respond(res, 201, row);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // bun:sqlite raises SQLITE_CONSTRAINT for PK collision. Surface as 409.
