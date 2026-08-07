@@ -1,4 +1,13 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   createServer as createHttpServer,
@@ -8,6 +17,7 @@ import {
 } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type ModelDef, parseAppDefinition } from "../apps/definition";
+import * as rowStore from "../apps/row-store";
 import {
   type AppRow,
   createAppRow,
@@ -1171,6 +1181,93 @@ describe("concurrency", () => {
     expect(result.ok).toBe(false);
     expect(result.passes[0]?.error).toContain("changed while the pull was running");
     expect(rowSnapshot(appId)).toBe(before);
+  });
+
+  test("an args swap during the pull aborts the pass with no writes", async () => {
+    const script = await fixtureScript("args-drift", [ghRecord(1)]);
+    const appId = createSyncApp(issueDefinition(script.id));
+    await runAppSync({ appId });
+    await script.setSource(
+      `export default async () => { await new Promise((resolve) => setTimeout(resolve, 300)); return ${JSON.stringify(
+        [ghRecord(1, { title: "stale payload" })],
+      )}; };`,
+    );
+    const before = rowSnapshot(appId);
+
+    const pass = runAppSync({ appId });
+    // Same connector and join key, different args: the old guard missed this.
+    updateApp(appId, {
+      definition: parsed(issueDefinition(script.id, { args: { repo: "owner/other" } })),
+    });
+
+    const result = await pass;
+
+    expect(result.ok).toBe(false);
+    expect(result.passes[0]?.error).toContain("changed while the pull was running");
+    expect(rowSnapshot(appId)).toBe(before);
+  });
+
+  test("a binding swap during the pull aborts the pass with no writes", async () => {
+    const script = await fixtureScript("binding-drift", [ghRecord(1)]);
+    const appId = createSyncApp(issueDefinition(script.id));
+    await runAppSync({ appId });
+    await script.setSource(
+      `export default async () => { await new Promise((resolve) => setTimeout(resolve, 300)); return ${JSON.stringify(
+        [ghRecord(1, { title: "stale payload" })],
+      )}; };`,
+    );
+    const before = rowSnapshot(appId);
+
+    const pass = runAppSync({ appId });
+    // Rebind `title` to a different field mid-pull: the payload was projected
+    // against the old rules and must not land under the new ones.
+    updateApp(appId, {
+      definition: parsed(
+        appWith({
+          issue: {
+            columns: {
+              ...ISSUE_COLUMNS,
+              title: { kind: "string", source: { of: "gh", field: "user.login" } },
+            },
+            sources: { gh: ghSource(script.id) },
+          },
+        }),
+      ),
+    });
+
+    const result = await pass;
+
+    expect(result.ok).toBe(false);
+    expect(result.passes[0]?.error).toContain("changed while the pull was running");
+    expect(rowSnapshot(appId)).toBe(before);
+  });
+
+  test("a mid-pass write failure reports the committed churn instead of zero counts", async () => {
+    // Row writes are independent KV upserts, not a transaction: fail the
+    // SECOND create after the first already committed and the pass counts
+    // must say so instead of reporting the zero-count base.
+    const script = await fixtureScript("partial", [ghRecord(1), ghRecord(2)]);
+    const appId = createSyncApp(issueDefinition(script.id));
+
+    const realCreate = rowStore.createAppRowUnlocked;
+    let creates = 0;
+    const spy = spyOn(rowStore, "createAppRowUnlocked").mockImplementation((...callArgs) => {
+      creates += 1;
+      if (creates === 2) throw new Error("kv write failed (injected)");
+      return realCreate(...callArgs);
+    });
+    try {
+      const result = await runAppSync({ appId });
+      const pass = result.passes[0]!;
+
+      expect(result.ok).toBe(false);
+      expect(pass.error).toContain("kv write failed (injected)");
+      expect(pass).toMatchObject({ pulled: 2, created: 1 });
+      expect(rowsOf(appId).map((row) => row.issueKey)).toEqual(["1"]);
+      expect(getAppSyncStatus(appId, "issue", "gh")).toMatchObject({ ok: false, created: 1 });
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   test("single-flight is keyed per source, not per model", async () => {

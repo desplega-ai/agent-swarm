@@ -490,6 +490,30 @@ function resolvePair(appId: string, model: string, source: string): PairDefiniti
   return modelDef && sourceDef ? { model: modelDef, source: sourceDef } : null;
 }
 
+/**
+ * Everything a pass's projection depends on: the full source definition plus
+ * the shape of every column bound to it. Snapshotted before the unlocked pull
+ * and compared under the lock — ANY drift (script, args, connection, config,
+ * join key, bindings) aborts the pass rather than projecting a stale payload
+ * through fresh rules. Serialization order is stable because both reads parse
+ * the same stored definition; a concurrent definition write that merely
+ * reorders keys aborts too, which is the safe direction.
+ */
+function pairFingerprint(model: ModelDef, sourceName: string, source: SourceDef): string {
+  const bindings = Object.entries(model.columns)
+    .filter(([, column]) => column.source?.of === sourceName)
+    .map(([name, column]) => ({
+      name,
+      kind: column.kind,
+      enum: column.enum ?? null,
+      required: column.required === true,
+      hidden: column.hidden === true,
+      field: column.source?.field,
+      transform: column.source?.transform ?? null,
+    }));
+  return JSON.stringify({ source, bindings });
+}
+
 type ReconcileCounts = {
   created: number;
   updated: number;
@@ -503,23 +527,29 @@ function reconcile(args: {
   appId: string;
   model: string;
   sourceName: string;
-  connector: SourceDef["connector"];
+  fingerprint: string;
   joinKey: string;
   pull: PullResult;
   warnings: string[];
-}): Promise<ReconcileCounts> {
-  const { appId, model, sourceName, joinKey, pull, warnings } = args;
+  /**
+   * Mutated write-by-write so a mid-pass failure still reports the row churn
+   * that actually committed — the writes are independent KV upserts, not a
+   * transaction, and a thrown error must not zero them out.
+   */
+  counts: ReconcileCounts;
+}): Promise<void> {
+  const { appId, model, sourceName, joinKey, pull, warnings, counts } = args;
   return withMutationLock(appId, model, () => {
     // Re-read under the lock: the pull ran unlocked, so the definition it was
-    // planned against may be gone. Anything that moves the identity of this
-    // pair aborts before the first write.
+    // planned against may be gone. Anything that moves the identity or the
+    // projection rules of this pair aborts before the first write.
     const fresh = resolvePair(appId, model, sourceName);
     if (!fresh) {
       throw new SyncPassError(
         `model "${model}" no longer declares source "${sourceName}"; pass aborted with no writes`,
       );
     }
-    if (fresh.source.connector !== args.connector || fresh.source.joinKey !== joinKey) {
+    if (pairFingerprint(fresh.model, sourceName, fresh.source) !== args.fingerprint) {
       throw new SyncPassError(
         `source "${sourceName}" changed while the pull was running; pass aborted with no writes`,
       );
@@ -542,13 +572,6 @@ function reconcile(args: {
 
     const now = new Date().toISOString();
     const actor = `sync:${sourceName}`;
-    const counts: ReconcileCounts = {
-      created: 0,
-      updated: 0,
-      refreshed: 0,
-      unchanged: 0,
-      markedStale: 0,
-    };
     const seen = new Set<string>();
 
     for (const record of pull.records) {
@@ -598,7 +621,7 @@ function reconcile(args: {
       counts.staleSweepSkipped = true;
       counts.unchanged += unseen.length;
       warn(warnings, "pull reported an incomplete window; stale sweep skipped");
-      return counts;
+      return;
     }
     for (const row of unseen) {
       if (row.stale === true) {
@@ -624,7 +647,6 @@ function reconcile(args: {
       );
       counts.markedStale += 1;
     }
-    return counts;
   });
 }
 
@@ -680,7 +702,28 @@ async function executePass(args: {
     return scrubbed;
   };
 
+  // Reconcile mutates this accumulator write-by-write, so the error path below
+  // reports the churn that actually committed instead of the zero-count base.
+  const counts: ReconcileCounts = {
+    created: 0,
+    updated: 0,
+    refreshed: 0,
+    unchanged: 0,
+    markedStale: 0,
+  };
+  let pulled = 0;
+
   try {
+    // Snapshot the pair's projection rules before the unlocked pull; reconcile
+    // compares under the lock and aborts on any drift.
+    const planned = resolvePair(args.appId, args.model, args.sourceName);
+    if (!planned) {
+      throw new SyncPassError(
+        `model "${args.model}" no longer declares source "${args.sourceName}"; pass aborted with no writes`,
+      );
+    }
+    const fingerprint = pairFingerprint(planned.model, args.sourceName, planned.source);
+
     // Pull OUTSIDE the lock; reconcile inside it. Pulled values persist into
     // rows any app.use principal can later read, so secrets are redacted here
     // at the persistence boundary — the finish() scrub only covers the pass
@@ -695,17 +738,19 @@ async function executePass(args: {
           })
         : pullFromSwarmTasks(args.source, args.invokedBy),
     );
+    pulled = pull.records.length;
     for (const warning of pull.warnings) warn(warnings, warning);
-    const counts = await reconcile({
+    await reconcile({
       appId: args.appId,
       model: args.model,
       sourceName: args.sourceName,
-      connector: args.source.connector,
+      fingerprint,
       joinKey: args.source.joinKey,
       pull,
       warnings,
+      counts,
     });
-    return finish({ ...base, ...counts, pulled: pull.records.length });
+    return finish({ ...base, ...counts, pulled });
   } catch (error) {
     const message =
       error instanceof SyncPassError
@@ -713,7 +758,7 @@ async function executePass(args: {
         : error instanceof Error
           ? `${error.name}: ${error.message}`
           : String(error);
-    return finish({ ...base, error: message });
+    return finish({ ...base, ...counts, pulled, error: message });
   }
 }
 

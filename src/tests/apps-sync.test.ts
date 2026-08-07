@@ -553,6 +553,73 @@ describe("apps sync definition surface", () => {
     expect(patched.status).toBe(200);
   });
 
+  test("check 7b — a stored foreign reference does not grandfather new paths for the same script", async () => {
+    // Operator wires the foreign script as an ACTION only.
+    const withAction = await fetch(`${base}/api/apps`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Foreign action only",
+        definition: syncDefinition({
+          actions: { run: { kind: "script", scriptId: foreignScriptId } },
+        }),
+      }),
+    });
+    expect(withAction.status).toBe(201);
+    const actionAppId = ((await withAction.json()) as { app: { id: string } }).app.id;
+
+    // Action-to-source: the agent must not repoint a source at that id — the
+    // source would run with the foreign owner's bindings under fresh args.
+    const sourcePatch = await request<IssuesBody>(`/api/apps/${actionAppId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        definition: {
+          models: {
+            issue: {
+              sources: {
+                gh: { connector: "script", scriptId: foreignScriptId, joinKey: "issueKey" },
+              },
+            },
+          },
+        },
+      }),
+    });
+    expect(sourcePatch.status).toBe(400);
+    expect(
+      issueAt(sourcePatch.body.issues ?? [], "models.issue.sources.gh.scriptId")?.message,
+    ).toContain("agent-scoped to another agent");
+
+    // Source-to-action: the inverse hop is rejected the same way.
+    const withSource = await fetch(`${base}/api/apps`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Foreign source only",
+        definition: scriptSourceDefinition(foreignScriptId),
+      }),
+    });
+    expect(withSource.status).toBe(201);
+    const sourceAppId = ((await withSource.json()) as { app: { id: string } }).app.id;
+
+    const actionPatch = await request<IssuesBody>(`/api/apps/${sourceAppId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        definition: { actions: { steal: { kind: "script", scriptId: foreignScriptId } } },
+      }),
+    });
+    expect(actionPatch.status).toBe(400);
+    expect(issueAt(actionPatch.body.issues ?? [], "actions.steal.scriptId")?.message).toContain(
+      "agent-scoped to another agent",
+    );
+
+    // The grandfathered path itself stays editable.
+    const stillEditable = await request(`/api/apps/${sourceAppId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ definition: { models: { issue: { columns: { extra: null } } } } }),
+    });
+    expect(stillEditable.status).toBe(200);
+  });
+
   test("check 8 — connection must resolve to an enabled connection for the run-as identity", async () => {
     const issues = await rejectedIssues(scriptSourceDefinition(globalScriptId, "ghost"));
     expect(issueAt(issues, "models.issue.sources.gh.connection")?.message).toBe(

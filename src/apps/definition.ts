@@ -537,9 +537,11 @@ export type AppDefinitionParseContext = ElementReferenceContext & {
    */
   writerAgentId?: string | null;
   /**
-   * The app's current stored definition, for grandfathering: script ids already
-   * wired into the app stay referenceable so an agent can keep editing an app
-   * that legitimately carries another owner's script action.
+   * The app's current stored definition, for grandfathering: a script already
+   * wired into the app stays referenceable AT ITS EXISTING PATH so an agent can
+   * keep editing an app that legitimately carries another owner's script. The
+   * bare id is never grandfathered — a stored foreign action must not seed a
+   * new foreign source (or vice versa) with fresh args or a connection.
    */
   existingDefinition?: unknown;
 };
@@ -583,8 +585,17 @@ export function collectScriptReferences(definition: unknown): Map<string, string
   return references;
 }
 
-function collectScriptActionIds(definition: unknown): Set<string> {
-  return new Set(collectScriptReferences(definition).keys());
+/**
+ * Path-exact grandfathering index: `definition path -> scriptId`. A reference
+ * is grandfathered only when the stored definition already names the SAME
+ * script at the SAME path.
+ */
+function collectScriptReferencePathMap(definition: unknown): Map<string, string> {
+  const byPath = new Map<string, string>();
+  for (const [scriptId, paths] of collectScriptReferences(definition)) {
+    for (const path of paths) byPath.set(path, scriptId);
+  }
+  return byPath;
 }
 
 /** Semantic checks for a model's sources and its columns' source bindings. */
@@ -592,7 +603,7 @@ function modelSourceIssues(
   modelName: string,
   model: ModelDef,
   context: AppDefinitionParseContext,
-  grandfatheredScriptIds: Set<string>,
+  grandfatheredScriptRefs: Map<string, string>,
 ): AppValidationIssue[] {
   const issues: AppValidationIssue[] = [];
   const sources = model.sources ?? {};
@@ -646,7 +657,7 @@ function modelSourceIssues(
       context.writerAgentId &&
       script.scope === "agent" &&
       getSavedScriptOwnerAgentId(script) !== context.writerAgentId &&
-      !grandfatheredScriptIds.has(source.scriptId)
+      grandfatheredScriptRefs.get(path) !== source.scriptId
     ) {
       issues.push({
         path: `${path}.scriptId`,
@@ -784,9 +795,9 @@ export function parseAppDefinition(
     ...crossPageDefinitionIssues(parsed.data, catalog),
     ...elementDefinitionIssues(parsed.data, catalog, elementContext),
   ];
-  const grandfatheredScriptIds = collectScriptActionIds(elementContext.existingDefinition);
+  const grandfatheredScriptRefs = collectScriptReferencePathMap(elementContext.existingDefinition);
   for (const [modelName, model] of Object.entries(parsed.data.models)) {
-    issues.push(...modelSourceIssues(modelName, model, elementContext, grandfatheredScriptIds));
+    issues.push(...modelSourceIssues(modelName, model, elementContext, grandfatheredScriptRefs));
   }
   for (const [name, action] of Object.entries(parsed.data.actions ?? {})) {
     if (action.kind === "sync") {
@@ -803,14 +814,15 @@ export function parseAppDefinition(
       continue;
     }
     // Invoke-time runs the script with the OWNER's bindings, so an agent writer
-    // may only wire scripts it owns (or global ones). Script ids already present
-    // in the stored definition are grandfathered so foreign-authored apps stay
-    // editable.
+    // may only wire scripts it owns (or global ones). A reference the stored
+    // definition already carries at this exact path is grandfathered so
+    // foreign-authored apps stay editable — the bare id is not, so an existing
+    // foreign reference cannot seed a new one elsewhere.
     if (
       elementContext.writerAgentId &&
       script.scope === "agent" &&
       getSavedScriptOwnerAgentId(script) !== elementContext.writerAgentId &&
-      !grandfatheredScriptIds.has(action.scriptId)
+      grandfatheredScriptRefs.get(`actions.${name}`) !== action.scriptId
     ) {
       issues.push({
         path: `actions.${name}.scriptId`,
