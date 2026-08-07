@@ -58,6 +58,7 @@ import {
   rollbackApp,
   snapshotApp,
 } from "../apps/version";
+import { normalizeAssetKey } from "../assets/key";
 import { getAgentById, getAppVersion, getAppVersions, getLeadAgent } from "../be/db";
 import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId, runSavedScriptAsAgent } from "../be/scripts/run-saved";
@@ -1209,6 +1210,9 @@ export async function handleApps(
     const task = createTaskWithSiblingAwareness(taskPrompt.text, {
       source: "api",
       agentId: action.agentId ?? lead?.id,
+      // App-spawned tasks group under the app's asset namespace so a
+      // swarm-tasks source can pull them back via config.assetKey.
+      key: normalizeAssetKey(`shared/app:${app.id}/action:${parsed.params.name}/`),
       ...(actor.startsWith("user:") ? { requestedByUserId: actor.slice("user:".length) } : {}),
     });
     json(res, { ok: true, taskId: task.id, status: task.status });

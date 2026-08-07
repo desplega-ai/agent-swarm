@@ -1064,7 +1064,7 @@ describe("custom app actions", () => {
     );
     expect(started.status).toBe(200);
     expect(started.body).toMatchObject({ ok: true, status: "pending" });
-    const observed = await request<{ id: string; agentId: string; task: string }>(
+    const observed = await request<{ id: string; agentId: string; task: string; key: string }>(
       `/api/tasks/${started.body.taskId}`,
     );
     expect(observed.status).toBe(200);
@@ -1072,6 +1072,9 @@ describe("custom app actions", () => {
     expect(observed.body.agentId).toBe(LEAD_ID);
     expect(observed.body.task).toContain(`[App action] app=${appId}`);
     expect(observed.body.task).toContain('input={"idea":"42"}');
+    // The app-namespaced asset key lets a swarm-tasks source pull these back
+    // via config.assetKey.
+    expect(observed.body.key).toBe(`shared/app:${appId}/action:investigate/`);
   });
 });
 

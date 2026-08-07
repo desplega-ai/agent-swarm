@@ -17,7 +17,15 @@ import {
 } from "../apps/row-store";
 import { createApp, getApp, updateApp } from "../apps/store";
 import { getAppSyncStatus, runAppSync, type SyncPassResult } from "../apps/sync";
-import { closeDb, createAgent, createTaskExtended, getDb, getKv, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  createUser,
+  getDb,
+  getKv,
+  initDb,
+} from "../be/db";
 import { upsertScriptConnection } from "../be/script-connections";
 import { buildScriptCredentialBindingsWithFailures } from "../be/script-credential-broker";
 import { upsertScriptByName } from "../be/scripts/db";
@@ -31,6 +39,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 import { LEGACY_POLICY, type LegacyRule } from "../rbac";
 import { validateScriptImports } from "../scripts-runtime/import-allowlist";
 import { runtimeFetchJson } from "../scripts-runtime/stdlib/fetch";
+import { registerAppGetTool } from "../tools/app-get";
 import { registerAppSyncTool } from "../tools/app-sync";
 import { registerScriptDeleteTool } from "../tools/script-delete";
 import { setRequestAuth } from "../utils/request-auth-context";
@@ -770,6 +779,34 @@ describe("swarm-tasks source", () => {
     expect(failed.passes[0]?.error).toContain('unknown task status "nonsense"');
   });
 
+  test("a user-invoked sync is scoped to the requester and never sweeps stale", async () => {
+    const userId = createUser({ name: "Apps Sync Requester" }).id;
+    createTaskExtended("mine: fix the login flow", {
+      agentId: OWNER_AGENT_ID,
+      requestedByUserId: userId,
+    });
+    createTaskExtended("theirs: rotate the billing keys", {
+      agentId: OWNER_AGENT_ID,
+      requestedByUserId: createUser({ name: "Apps Sync Other" }).id,
+    });
+    createTaskExtended("pool: unattributed chore", { agentId: OWNER_AGENT_ID });
+    const appId = createSyncApp(taskDefinition());
+
+    const scoped = (await runAppSync({ appId, invokedBy: `user:${userId}` })).passes[0]!;
+
+    expect(scoped).toMatchObject({ pulled: 1, created: 1, staleSweepSkipped: true });
+    expect(scoped.warnings.some((w) => w.includes("scoped to tasks requested"))).toBe(true);
+    const rows = rowsOf(appId, "task", "taskKey");
+    expect(rows).toHaveLength(1);
+    expect(String(rows[0]?.prompt)).toContain("fix the login flow");
+    expect(JSON.stringify(rows)).not.toContain("rotate the billing keys");
+
+    // Operator- and agent-invoked passes keep the full window and its sweep.
+    const full = (await runAppSync({ appId, invokedBy: "operator" })).passes[0]!;
+    expect(full.pulled).toBe(3);
+    expect(full.staleSweepSkipped).toBeUndefined();
+  });
+
   test("an unsupported config key is reported as a warning", async () => {
     createTaskExtended("only task", { agentId: OWNER_AGENT_ID });
     const appId = createSyncApp(taskDefinition({ nonsense: "value" }));
@@ -1264,6 +1301,47 @@ describe("secret hygiene and sync status", () => {
     expect(after.status).toBe(200);
     expect(after.body.syncStatus?.["issue:gh"]).toMatchObject({ ok: true, created: 1 });
     expect(Object.keys(after.body.syncStatus ?? {})).toEqual(["issue:gh"]);
+  });
+
+  test("app-get carries sync status on both result channels", async () => {
+    const script = await fixtureScript("appget-status", [ghRecord(1)]);
+    const appId = createSyncApp(issueDefinition(script.id));
+    await runAppSync({ appId });
+
+    const appGetTool = registeredTool(registerAppGetTool, "app-get");
+    const result = (await appGetTool.handler({ appId }, toolMeta())) as StructuredResult<{
+      syncStatus?: Record<string, { ok?: boolean; created?: number }>;
+    }> & { content: Array<{ type: string; text?: string }> };
+
+    expect(result.structuredContent.syncStatus?.["issue:gh"]).toMatchObject({
+      ok: true,
+      created: 1,
+    });
+    const text = result.content.map((chunk) => chunk.text ?? "").join("\n");
+    expect(text).toContain("Sync status (model:source)");
+    expect(text).toContain("issue:gh");
+  });
+
+  test("a pulled field carrying a known secret is redacted before it lands in a row", async () => {
+    const secret = "fixture-secret-value-0123456789";
+    process.env.APPS_SYNC_FIXTURE_TOKEN = secret;
+    refreshSecretScrubberCache();
+    try {
+      const script = await fixtureScript("secret-field", [
+        ghRecord(1, { title: `deploy key ${secret}` }),
+      ]);
+      const appId = createSyncApp(issueDefinition(script.id));
+
+      const pass = (await runAppSync({ appId })).passes[0]!;
+
+      expect(pass.error).toBeUndefined();
+      const rows = rowsOf(appId);
+      expect(rows[0]?.title).toBe("deploy key [REDACTED:APPS_SYNC_FIXTURE_TOKEN]");
+      expect(JSON.stringify(rows)).not.toContain(secret);
+    } finally {
+      delete process.env.APPS_SYNC_FIXTURE_TOKEN;
+      refreshSecretScrubberCache();
+    }
   });
 });
 

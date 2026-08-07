@@ -326,7 +326,10 @@ function taskRecord(task: AgentTask): SourceRecord {
   };
 }
 
-function pullFromSwarmTasks(source: Extract<SourceDef, { connector: "swarm-tasks" }>): PullResult {
+function pullFromSwarmTasks(
+  source: Extract<SourceDef, { connector: "swarm-tasks" }>,
+  invokedBy?: string,
+): PullResult {
   const warnings: string[] = [];
   const config = source.config ?? {};
   for (const key of Object.keys(config)) {
@@ -363,9 +366,18 @@ function pullFromSwarmTasks(source: Extract<SourceDef, { connector: "swarm-tasks
     filters.keyPrefix = config.assetKey.trim();
   }
 
+  // Mirror the get-tasks surface: a user principal is hard-scoped to tasks it
+  // requested. A scoped window can never confirm absence outside that scope,
+  // so the pull always reports incomplete and the stale sweep stays off.
+  const scopedUserId = invokedBy?.startsWith("user:") ? invokedBy.slice("user:".length) : undefined;
+  if (scopedUserId !== undefined) {
+    filters.requestedByUserId = scopedUserId;
+    warn(warnings, "pull scoped to tasks requested by the invoking user");
+  }
+
   const records = getAllTasks(filters).map(taskRecord);
   // A full page means the window may have cut records off.
-  return { records, complete: records.length < limit, warnings };
+  return { records, complete: scopedUserId === undefined && records.length < limit, warnings };
 }
 
 // ---------------------------------------------------------------------------
@@ -669,8 +681,11 @@ async function executePass(args: {
   };
 
   try {
-    // Pull OUTSIDE the lock; reconcile inside it.
-    const pull =
+    // Pull OUTSIDE the lock; reconcile inside it. Pulled values persist into
+    // rows any app.use principal can later read, so secrets are redacted here
+    // at the persistence boundary — the finish() scrub only covers the pass
+    // summary, never pull.records.
+    const pull = scrubObject(
       args.source.connector === "script"
         ? await pullFromScript({
             appId: args.appId,
@@ -678,7 +693,8 @@ async function executePass(args: {
             sourceName: args.sourceName,
             source: args.source,
           })
-        : pullFromSwarmTasks(args.source);
+        : pullFromSwarmTasks(args.source, args.invokedBy),
+    );
     for (const warning of pull.warnings) warn(warnings, warning);
     const counts = await reconcile({
       appId: args.appId,

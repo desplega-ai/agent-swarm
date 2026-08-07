@@ -311,7 +311,7 @@ Actions are optional (maximum 20) and are invoked from the page with the `app.ac
 | Kind | Contract |
 |---|---|
 | `script` | `scriptId` must identify an existing script; optional `args` are defaults. Invocation input overrides same-named defaults, and the runtime also supplies `app: { id }`. |
-| `task` | `prompt` must be non-empty; omit `agentId` to use default (lead) assignment. Only set `agentId` to a real agent UUID. Invocation `input` is included as context for the task prompt. |
+| `task` | `prompt` must be non-empty; omit `agentId` to use default (lead) assignment. Only set `agentId` to a real agent UUID. Invocation `input` is included as context for the task prompt. Spawned tasks carry asset key `shared/app:<appId>/action:<name>/`, so a `swarm-tasks` source with `config.assetKey: "shared/app:<appId>/"` pulls back the tasks this app spawned. |
 | `sync` | Optional `model` and `source` narrow which (model × source) pairs refresh; omitting both syncs every pair the app declares. At least one pair must exist. Answers the script-kind state shape with per-pass results under `result.passes`. |
 
 - Invocation state lands at `/actions/<name>` as `{ status, result?, error?, taskId?, taskStatus? }`, where `status` is `"running"`, `"ok"`, or `"error"`.
