@@ -537,6 +537,13 @@ export type AppDefinitionParseContext = ElementReferenceContext & {
    */
   writerAgentId?: string | null;
   /**
+   * True when the writer is an authenticated web USER. Users own no scripts,
+   * so every fresh agent-scoped reference is foreign for them — without this
+   * flag a user write (which carries no agent id) would skip the ownership
+   * gate exactly like the trusted operator.
+   */
+  writerIsUser?: boolean;
+  /**
    * The app's current stored definition, for grandfathering: a script already
    * wired into the app stays referenceable AT ITS EXISTING PATH so an agent can
    * keep editing an app that legitimately carries another owner's script. The
@@ -583,6 +590,21 @@ export function collectScriptReferences(definition: unknown): Map<string, string
     }
   }
   return references;
+}
+
+/**
+ * Is this agent-scoped script foreign to the writing principal? Operators
+ * (no writer identity at all) may wire anything; an agent may wire its own;
+ * a web user owns no scripts, so every agent-scoped script is foreign to it.
+ */
+function foreignScriptForWriter(
+  context: AppDefinitionParseContext,
+  script: NonNullable<ReturnType<typeof getScriptById>>,
+): boolean {
+  if (script.scope !== "agent") return false;
+  if (context.writerIsUser === true) return true;
+  if (!context.writerAgentId) return false;
+  return getSavedScriptOwnerAgentId(script) !== context.writerAgentId;
 }
 
 /**
@@ -651,12 +673,10 @@ function modelSourceIssues(
       issues.push({ path: `${path}.scriptId`, message: `script "${source.scriptId}" not found` });
       continue;
     }
-    // A pull runs the script with its OWNER's bindings, so an agent writer may
-    // only wire scripts it owns (or global ones) — the script-action rule.
+    // A pull runs the script with its OWNER's bindings, so a writer may only
+    // wire scripts it owns (or global ones) — the script-action rule.
     if (
-      context.writerAgentId &&
-      script.scope === "agent" &&
-      getSavedScriptOwnerAgentId(script) !== context.writerAgentId &&
+      foreignScriptForWriter(context, script) &&
       grandfatheredScriptRefs.get(path) !== source.scriptId
     ) {
       issues.push({
@@ -813,15 +833,13 @@ export function parseAppDefinition(
       });
       continue;
     }
-    // Invoke-time runs the script with the OWNER's bindings, so an agent writer
-    // may only wire scripts it owns (or global ones). A reference the stored
+    // Invoke-time runs the script with the OWNER's bindings, so a writer may
+    // only wire scripts it owns (or global ones). A reference the stored
     // definition already carries at this exact path is grandfathered so
     // foreign-authored apps stay editable — the bare id is not, so an existing
     // foreign reference cannot seed a new one elsewhere.
     if (
-      elementContext.writerAgentId &&
-      script.scope === "agent" &&
-      getSavedScriptOwnerAgentId(script) !== elementContext.writerAgentId &&
+      foreignScriptForWriter(elementContext, script) &&
       grandfatheredScriptRefs.get(`actions.${name}`) !== action.scriptId
     ) {
       issues.push({

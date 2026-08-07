@@ -8,6 +8,7 @@ import {
 } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, createUser, getDb, getTaskById, initDb } from "../be/db";
+import { upsertScriptByName } from "../be/scripts/db";
 import { type IdentityActor, mintToken } from "../be/users";
 import { handleApps } from "../http/apps";
 import { resolveHttpRequestAuth } from "../http/auth";
@@ -338,5 +339,106 @@ describe("app viewer identity", () => {
     );
     expect(agentAction.status).toBe(200);
     expect(getTaskById(agentAction.body.taskId)?.requestedByUserId).toBeUndefined();
+  });
+});
+
+describe("user writers and the script ownership gate", () => {
+  async function saveScript(scope: "agent" | "global", ownerId: string | null): Promise<string> {
+    const result = await upsertScriptByName({
+      name: `apps_rbac_${scope}_${crypto.randomUUID().replaceAll("-", "")}`,
+      scope,
+      scopeId: ownerId,
+      agentId: ownerId,
+      source: "export default function run() { return { ok: true }; }",
+      description: "Ownership-gate fixture",
+      intent: "Prove the user-writer ownership gate",
+      signatureJson: JSON.stringify({ args: { type: "object" }, result: { type: "object" } }),
+      typeChecked: true,
+      embeddingMode: "skip",
+    });
+    return result.script.id;
+  }
+
+  function withSource(scriptId: string) {
+    return {
+      ...definition,
+      models: {
+        note: {
+          columns: {
+            title: { kind: "string" },
+            issueKey: { kind: "string" },
+            body: { kind: "string", source: { of: "gh", field: "body" } },
+          },
+          sources: { gh: { connector: "script", scriptId, joinKey: "issueKey" } },
+        },
+      },
+    };
+  }
+
+  test("a web user cannot wire an agent-scoped script, may wire a global one, and stored paths stay editable", async () => {
+    const ownerId = crypto.randomUUID();
+    createAgent({ id: ownerId, name: "apps-rbac-script-owner", isLead: false, status: "idle" });
+    const foreignId = await saveScript("agent", ownerId);
+    const globalId = await saveScript("global", null);
+    type Issues = { issues?: Array<{ path: string; message: string }> };
+
+    // A user write carries no agent id — it must NOT pass like the operator.
+    const asSource = await request<Issues>("/api/apps", "user", {
+      method: "POST",
+      body: JSON.stringify({ name: "User foreign source", definition: withSource(foreignId) }),
+    });
+    expect(asSource.status).toBe(400);
+    expect(
+      asSource.body.issues?.some(
+        (issue) =>
+          issue.path === "models.note.sources.gh.scriptId" &&
+          issue.message.includes("agent-scoped to another agent"),
+      ),
+    ).toBe(true);
+
+    const asAction = await request<Issues>("/api/apps", "user", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "User foreign action",
+        definition: {
+          ...definition,
+          actions: { steal: { kind: "script", scriptId: foreignId } },
+        },
+      }),
+    });
+    expect(asAction.status).toBe(400);
+    expect(
+      asAction.body.issues?.some(
+        (issue) =>
+          issue.path === "actions.steal.scriptId" &&
+          issue.message.includes("agent-scoped to another agent"),
+      ),
+    ).toBe(true);
+
+    // Global scripts remain wireable by users.
+    const globalApp = await request<{ app: { id: string } }>("/api/apps", "user", {
+      method: "POST",
+      body: JSON.stringify({ name: "User global source", definition: withSource(globalId) }),
+    });
+    expect(globalApp.status).toBe(201);
+
+    // An operator-authored app carrying the foreign script at a stored path
+    // stays editable for users — grandfathering is path-exact, not skipped.
+    const operatorApp = await request<{ app: { id: string } }>("/api/apps", "operator", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Operator foreign action",
+        definition: { ...definition, actions: { run: { kind: "script", scriptId: foreignId } } },
+      }),
+    });
+    expect(operatorApp.status).toBe(201);
+
+    const edited = await request<Issues>(`/api/apps/${operatorApp.body.app.id}`, "user", {
+      method: "PATCH",
+      body: JSON.stringify({
+        definition: { models: { note: { columns: { extra: { kind: "string" } } } } },
+      }),
+    });
+    expect(edited.status).toBe(200);
   });
 });

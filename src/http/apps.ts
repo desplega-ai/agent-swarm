@@ -811,6 +811,7 @@ export async function handleApps(
     const definition = parseAppDefinition(parsed.body.definition, {
       resolveApp: getApp,
       writerAgentId: myAgentId ?? null,
+      writerIsUser: getRequestAuth(req)?.kind === "user",
     });
     if (!definition.success) {
       invalidDefinition(res, definition.issues);
@@ -1282,6 +1283,7 @@ export async function handleApps(
           currentAppId: parsed.params.id,
           resolveApp: getApp,
           writerAgentId: myAgentId ?? null,
+          writerIsUser: getRequestAuth(req)?.kind === "user",
           existingDefinition: existing.definition,
         });
         if (!definition.success) {
@@ -1359,6 +1361,7 @@ export async function handleApps(
             currentAppId: parsed.params.id,
             resolveApp: getApp,
             writerAgentId: myAgentId ?? null,
+            writerIsUser: getRequestAuth(req)?.kind === "user",
             existingDefinition: existing.definition,
           });
           if (!parsedDefinition.success) {
