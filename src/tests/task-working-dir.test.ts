@@ -55,10 +55,14 @@ describe("Task Working Directory", () => {
       expect(() => dirSchema.parse("")).toThrow();
     });
 
-    test("rejects relative paths", () => {
-      expect(() => dirSchema.parse("relative/path")).toThrow();
-      expect(() => dirSchema.parse("./local")).toThrow();
-      expect(() => dirSchema.parse("../parent")).toThrow();
+    test("accepts relative paths (row contract mirrors what the create body stores verbatim)", () => {
+      // The create-task body validates dir as z.string() and the DB stores it
+      // as-is, so rows CAN hold relative paths — the entity schema must not
+      // pin .startsWith("/") or response validation would reject honest rows
+      // after the write already landed (PR #1141 review). Absolute paths stay
+      // the documented expectation; enforcement would belong on the INPUT side.
+      expect(dirSchema.parse("relative/path")).toBe("relative/path");
+      expect(dirSchema.parse("./local")).toBe("./local");
     });
   });
 

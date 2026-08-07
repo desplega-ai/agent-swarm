@@ -13,9 +13,87 @@ import {
 } from "../be/db";
 import { isSteeringEnabled } from "../be/steering";
 import type { AgentLog } from "../types";
+import { AgentLogSchema, ScheduledTaskSchema, ServiceSchema } from "../types";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
-import { json } from "./utils";
+
+// ─── Response schemas ────────────────────────────────────────────────────────
+
+const AgentCountsSchema = z.object({
+  total: z.number(),
+  idle: z.number(),
+  busy: z.number(),
+  offline: z.number(),
+});
+
+// getTaskStats() runs a scalar SUM(CASE ...) aggregate with no GROUP BY: on a
+// totally empty agent_tasks table (fresh DB) every SUM comes back SQL NULL
+// (COUNT(*) is the only one that reliably yields 0), so these must be
+// nullable to match the actual wire payload.
+const TaskCountsSchema = z.object({
+  total: z.number(),
+  unassigned: z.number().nullable(),
+  offered: z.number().nullable(),
+  reviewing: z.number().nullable(),
+  pending: z.number().nullable(),
+  in_progress: z.number().nullable(),
+  paused: z.number().nullable(),
+  completed: z.number().nullable(),
+  failed: z.number().nullable(),
+});
+
+/** Mirrors the object literal built by handleStats for GET /api/stats. */
+const DashboardStatsSchema = z.object({
+  agents: AgentCountsSchema,
+  tasks: TaskCountsSchema,
+  steeringEnabled: z.boolean(),
+});
+
+/** Mirrors `SwarmMetrics` (src/be/db.ts). */
+const SwarmMetricsSchema = z.object({
+  tasks: z.object({ total: z.number(), by_status: z.record(z.string(), z.number()) }),
+  agents: z.object({ total: z.number(), by_status: z.record(z.string(), z.number()) }),
+  workflows: z.object({ total: z.number(), enabled: z.number() }),
+  pages: z.object({ total: z.number() }),
+  sessions: z.object({ active: z.number() }),
+  skills: z.object({ total: z.number() }),
+});
+
+/** Mirrors `ConcurrentContext` (src/be/db.ts). */
+const ConcurrentContextSchema = z.object({
+  processingInboxMessages: z.array(
+    z.object({
+      id: z.string(),
+      content: z.string(),
+      source: z.string(),
+      slackChannelId: z.string().nullable(),
+      slackThreadTs: z.string().nullable(),
+      createdAt: z.string(),
+    }),
+  ),
+  recentTaskDelegations: z.array(
+    z.object({
+      id: z.string(),
+      task: z.string(),
+      agentId: z.string().nullable(),
+      agentName: z.string().nullable(),
+      creatorAgentId: z.string().nullable(),
+      status: z.string(),
+      createdAt: z.string(),
+    }),
+  ),
+  activeSwarmTasks: z.array(
+    z.object({
+      id: z.string(),
+      task: z.string(),
+      agentId: z.string().nullable(),
+      agentName: z.string().nullable(),
+      status: z.string(),
+      createdAt: z.string(),
+      progress: z.string().nullable(),
+    }),
+  ),
+});
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -30,7 +108,7 @@ const listLogs = route({
     agentId: z.string().optional(),
   }),
   responses: {
-    200: { description: "Agent logs" },
+    200: { description: "Agent logs", schema: z.object({ logs: z.array(AgentLogSchema) }) },
   },
 });
 
@@ -41,7 +119,7 @@ const getStats = route({
   summary: "Dashboard summary stats",
   tags: ["Stats"],
   responses: {
-    200: { description: "Agent and task statistics" },
+    200: { description: "Agent and task statistics", schema: DashboardStatsSchema },
   },
 });
 
@@ -54,7 +132,7 @@ const getMetrics = route({
     "Single JSON object of cheap `COUNT(*)` metrics — tasks (by status), agents (by status), workflows (total + enabled), pages, active sessions, skills. Use this instead of fetching full list payloads just to count. Powers UI footers/sidebars and MCP context.",
   tags: ["Stats"],
   responses: {
-    200: { description: "Swarm metrics counts" },
+    200: { description: "Swarm metrics counts", schema: SwarmMetricsSchema },
   },
 });
 
@@ -70,7 +148,7 @@ const listServices = route({
     name: z.string().optional(),
   }),
   responses: {
-    200: { description: "Service list" },
+    200: { description: "Service list", schema: z.object({ services: z.array(ServiceSchema) }) },
   },
 });
 
@@ -90,7 +168,10 @@ const listScheduledTasks = route({
     scriptName: z.string().optional(),
   }),
   responses: {
-    200: { description: "Scheduled tasks list" },
+    200: {
+      description: "Scheduled tasks list",
+      schema: z.object({ scheduledTasks: z.array(ScheduledTaskSchema) }),
+    },
   },
 });
 
@@ -101,7 +182,7 @@ const getConcurrentContextRoute = route({
   summary: "Get concurrent session context for lead awareness",
   tags: ["Stats"],
   responses: {
-    200: { description: "Concurrent context data" },
+    200: { description: "Concurrent context data", schema: ConcurrentContextSchema },
   },
 });
 
@@ -125,7 +206,7 @@ export async function handleStats(
     } else {
       logs = getAllLogs(limit);
     }
-    json(res, { logs });
+    listLogs.respond(res, 200, { logs });
     return true;
   }
 
@@ -156,12 +237,12 @@ export async function handleStats(
       steeringEnabled: isSteeringEnabled(),
     };
 
-    json(res, stats);
+    getStats.respond(res, 200, stats);
     return true;
   }
 
   if (getMetrics.match(req.method, pathSegments)) {
-    json(res, getSwarmMetrics());
+    getMetrics.respond(res, 200, getSwarmMetrics());
     return true;
   }
 
@@ -173,7 +254,7 @@ export async function handleStats(
       agentId: parsed.query.agentId || undefined,
       name: parsed.query.name || undefined,
     });
-    json(res, { services });
+    listServices.respond(res, 200, { services });
     return true;
   }
 
@@ -193,7 +274,7 @@ export async function handleStats(
       scriptName: parsed.query.scriptName,
     });
     const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
-    json(res, {
+    listScheduledTasks.respond(res, 200, {
       scheduledTasks: withFavoriteFlags(scheduledTasks, { favoriteScope, itemType: "schedule" }),
     });
     return true;
@@ -201,7 +282,7 @@ export async function handleStats(
 
   if (getConcurrentContextRoute.match(req.method, pathSegments)) {
     const context = getConcurrentContext();
-    json(res, context);
+    getConcurrentContextRoute.respond(res, 200, context);
     return true;
   }
 

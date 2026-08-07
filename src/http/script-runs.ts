@@ -25,9 +25,20 @@ import {
   startScriptRunProcess,
   terminateScriptRunProcess,
 } from "../script-workflows/supervisor";
-import { ScriptRunStatusSchema, TERMINAL_SCRIPT_RUN_STATUSES } from "../types";
+import {
+  AgentTaskStatusSchema,
+  ScriptRunJournalEntrySchema,
+  ScriptRunListItemSchema,
+  ScriptRunSchema,
+  ScriptRunStatusSchema,
+  TERMINAL_SCRIPT_RUN_STATUSES,
+} from "../types";
 import { getAppUrl } from "../utils/constants";
-import { executeRawLlm, RawLlmConfigSchema } from "../workflows/executors/raw-llm";
+import {
+  executeRawLlm,
+  RawLlmConfigSchema,
+  RawLlmOutputSchema,
+} from "../workflows/executors/raw-llm";
 import { route } from "./route-def";
 import { deriveApiBaseUrl, json, jsonError } from "./utils";
 
@@ -89,6 +100,20 @@ const agentTaskBodySchema = z.object({
   outputSchema: z.record(z.string(), z.unknown()).optional(),
 });
 
+const scriptRunCreatedSchema = z.object({
+  id: z.string().uuid(),
+  status: ScriptRunStatusSchema,
+  url: z.string(),
+});
+
+const journalStepReplaySchema = ScriptRunJournalEntrySchema.pick({
+  stepKey: true,
+  stepType: true,
+  status: true,
+  result: true,
+  error: true,
+});
+
 const createScriptRunRoute = route({
   method: "post",
   path: "/api/script-runs",
@@ -100,9 +125,11 @@ const createScriptRunRoute = route({
   tags: ["Script Runs"],
   body: createScriptRunBodySchema,
   responses: {
-    201: { description: "Script run created" },
+    201: { description: "Script run created", schema: scriptRunCreatedSchema },
     400: { description: "Validation or label-lint failure" },
-    409: { description: "Existing idempotent run returned" },
+    // Idempotency conflict returns the EXISTING run's pointer, not the
+    // standard error envelope — declare it so the fallback doesn't lie.
+    409: { description: "Existing idempotent run returned", schema: scriptRunCreatedSchema },
     429: { description: "Script run concurrency cap reached" },
   },
   // Matches the inline `POST /api/scripts/run` route and the `launch-script-run`
@@ -126,7 +153,13 @@ const listScriptRunsRoute = route({
   tags: ["Script Runs"],
   query: listScriptRunsQuerySchema,
   responses: {
-    200: { description: "Paginated script run list" },
+    200: {
+      description: "Paginated script run list",
+      schema: z.object({
+        runs: z.array(ScriptRunListItemSchema),
+        total: z.number().int(),
+      }),
+    },
   },
 });
 
@@ -139,7 +172,10 @@ const getScriptRunRoute = route({
   tags: ["Script Runs"],
   params: idParamsSchema,
   responses: {
-    200: { description: "Script run detail" },
+    200: {
+      description: "Script run detail",
+      schema: z.object({ run: ScriptRunSchema, journal: z.array(ScriptRunJournalEntrySchema) }),
+    },
     404: { description: "Script run not found" },
   },
 });
@@ -167,7 +203,7 @@ const getInternalStepRoute = route({
   tags: ["Script Runs"],
   params: stepParamsSchema,
   responses: {
-    200: { description: "Journal step found" },
+    200: { description: "Journal step found", schema: journalStepReplaySchema },
     404: { description: "Journal step not found" },
   },
 });
@@ -182,7 +218,7 @@ const postInternalStepRoute = route({
   params: runIdParamsSchema,
   body: journalStepBodySchema,
   responses: {
-    201: { description: "Journal step written" },
+    201: { description: "Journal step written", schema: z.object({ ok: z.literal(true) }) },
     404: { description: "Script run not found" },
   },
 });
@@ -225,7 +261,7 @@ const rawLlmRoute = route({
   tags: ["Script Runs"],
   body: RawLlmConfigSchema,
   responses: {
-    200: { description: "LLM call completed" },
+    200: { description: "LLM call completed", schema: RawLlmOutputSchema },
     500: { description: "LLM call failed" },
   },
 });
@@ -240,8 +276,14 @@ const agentTaskRoute = route({
   params: runIdParamsSchema,
   body: agentTaskBodySchema,
   responses: {
-    200: { description: "Agent task completed" },
-    202: { description: "Agent task created or still running" },
+    200: {
+      description: "Agent task completed",
+      schema: z.object({ taskId: z.string(), taskOutput: z.string().nullable() }),
+    },
+    202: {
+      description: "Agent task created or still running",
+      schema: z.object({ taskId: z.string(), status: AgentTaskStatusSchema }),
+    },
     404: { description: "Script run not found" },
   },
 });
@@ -369,7 +411,19 @@ export async function handleScriptRuns(
       });
     }
 
-    json(res, { id: run.id, status: run.status, url: scriptRunUrl(run.id) }, existing ? 409 : 201);
+    if (existing) {
+      createScriptRunRoute.respond(res, 409, {
+        id: run.id,
+        status: run.status,
+        url: scriptRunUrl(run.id),
+      });
+      return true;
+    }
+    createScriptRunRoute.respond(res, 201, {
+      id: run.id,
+      status: run.status,
+      url: scriptRunUrl(run.id),
+    });
     return true;
   }
 
@@ -383,7 +437,7 @@ export async function handleScriptRuns(
       limit: parsed.query.limit ?? 50,
       offset: parsed.query.offset ?? 0,
     };
-    json(res, {
+    listScriptRunsRoute.respond(res, 200, {
       runs: listScriptRuns(opts),
       total: countScriptRuns({
         status: opts.status,
@@ -402,7 +456,7 @@ export async function handleScriptRuns(
       jsonError(res, "Script run not found", 404);
       return true;
     }
-    json(res, { run, journal: listScriptRunJournalSteps(run.id) });
+    getScriptRunRoute.respond(res, 200, { run, journal: listScriptRunJournalSteps(run.id) });
     return true;
   }
 
@@ -441,7 +495,7 @@ export async function handleScriptRuns(
     // `status` + `error` are part of the replay contract, not diagnostics: the
     // harness rethrows a recorded failure instead of replaying it as a
     // successful `undefined` (see durableStep in script-workflows/workflow-ctx).
-    json(res, {
+    getInternalStepRoute.respond(res, 200, {
       stepKey: step.stepKey,
       stepType: step.stepType,
       status: step.status,
@@ -474,7 +528,7 @@ export async function handleScriptRuns(
       json(res, { error: "script_run_limit", message: limit.error }, 429);
       return true;
     }
-    json(res, { ok: true }, 201);
+    postInternalStepRoute.respond(res, 201, { ok: true });
     return true;
   }
 
@@ -524,7 +578,7 @@ export async function handleScriptRuns(
       json(res, { error: result.error }, 500);
       return true;
     }
-    json(res, result.output);
+    rawLlmRoute.respond(res, 200, result.output);
     return true;
   }
 
@@ -563,7 +617,7 @@ export async function handleScriptRuns(
       // A later same-context task must never change which work this poll resolves.
       const latest = getTaskById(task.id) ?? task;
       if (latest.status === "completed") {
-        json(res, { taskId: latest.id, taskOutput: latest.output ?? null });
+        agentTaskRoute.respond(res, 200, { taskId: latest.id, taskOutput: latest.output ?? null });
         return true;
       }
       if (
@@ -577,7 +631,7 @@ export async function handleScriptRuns(
       await sleep(1000);
     }
 
-    json(res, { taskId: task.id, status: task.status }, 202);
+    agentTaskRoute.respond(res, 202, { taskId: task.id, status: task.status });
     return true;
   }
 

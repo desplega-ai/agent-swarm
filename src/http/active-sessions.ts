@@ -11,8 +11,9 @@ import {
   resetOrphanedInProgressTasksForAgent,
   updateActiveSessionProviderSessionId,
 } from "../be/db";
+import { ActiveSessionSchema, AgentTaskSchema } from "../types";
 import { route } from "./route-def";
-import { json } from "./utils";
+import { jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -26,7 +27,10 @@ const listActiveSessions = route({
     agentId: z.string().optional(),
   }),
   responses: {
-    200: { description: "Active session list" },
+    200: {
+      description: "Active session list",
+      schema: z.object({ sessions: z.array(ActiveSessionSchema) }),
+    },
   },
 });
 
@@ -45,7 +49,7 @@ const createActiveSession = route({
     runnerSessionId: z.string().optional(),
   }),
   responses: {
-    201: { description: "Session created" },
+    201: { description: "Session created", schema: z.object({ session: ActiveSessionSchema }) },
     400: { description: "Validation error" },
   },
 });
@@ -58,7 +62,7 @@ const deleteSessionByTask = route({
   tags: ["Active Sessions"],
   params: z.object({ taskId: z.string() }),
   responses: {
-    200: { description: "Session deleted" },
+    200: { description: "Session deleted", schema: z.object({ deleted: z.boolean() }) },
   },
 });
 
@@ -70,7 +74,7 @@ const deleteSessionById = route({
   tags: ["Active Sessions"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Session deleted" },
+    200: { description: "Session deleted", schema: z.object({ deleted: z.boolean() }) },
   },
 });
 
@@ -82,7 +86,7 @@ const heartbeatSession = route({
   tags: ["Active Sessions"],
   params: z.object({ taskId: z.string() }),
   responses: {
-    200: { description: "Heartbeat updated" },
+    200: { description: "Heartbeat updated", schema: z.object({ updated: z.boolean() }) },
   },
 });
 
@@ -95,7 +99,7 @@ const updateProviderSession = route({
   params: z.object({ taskId: z.string() }),
   body: z.object({ providerSessionId: z.string().min(1) }),
   responses: {
-    200: { description: "Provider session ID updated" },
+    200: { description: "Provider session ID updated", schema: z.object({ updated: z.boolean() }) },
   },
 });
 
@@ -112,7 +116,7 @@ const cleanupSessions = route({
     })
     .optional(),
   responses: {
-    200: { description: "Cleanup result" },
+    200: { description: "Cleanup result", schema: z.object({ cleaned: z.number().int() }) },
   },
 });
 
@@ -127,7 +131,11 @@ const recoverOrphanedTasks = route({
     minAgeSeconds: z.number().int().positive().optional(),
   }),
   responses: {
-    200: { description: "Recovery result" },
+    200: {
+      description: "Recovery result",
+      schema: z.object({ recovered: z.number().int(), tasks: z.array(AgentTaskSchema) }),
+    },
+    403: { description: "Can only recover orphaned tasks for the calling agent" },
   },
 });
 
@@ -144,7 +152,7 @@ export async function handleActiveSessions(
     const parsed = await listActiveSessions.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const sessions = getActiveSessions(parsed.query.agentId || undefined);
-    json(res, { sessions });
+    listActiveSessions.respond(res, 200, { sessions });
     return true;
   }
 
@@ -159,7 +167,7 @@ export async function handleActiveSessions(
       taskDescription: parsed.body.taskDescription,
       runnerSessionId: parsed.body.runnerSessionId,
     });
-    json(res, { session }, 201);
+    createActiveSession.respond(res, 201, { session });
     return true;
   }
 
@@ -167,7 +175,7 @@ export async function handleActiveSessions(
     const parsed = await deleteSessionByTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const deleted = deleteActiveSession(parsed.params.taskId);
-    json(res, { deleted });
+    deleteSessionByTask.respond(res, 200, { deleted });
     return true;
   }
 
@@ -175,7 +183,7 @@ export async function handleActiveSessions(
     const parsed = await deleteSessionById.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const deleted = deleteActiveSessionById(parsed.params.id);
-    json(res, { deleted });
+    deleteSessionById.respond(res, 200, { deleted });
     return true;
   }
 
@@ -183,7 +191,7 @@ export async function handleActiveSessions(
     const parsed = await heartbeatSession.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const updated = heartbeatActiveSession(parsed.params.taskId);
-    json(res, { updated });
+    heartbeatSession.respond(res, 200, { updated });
     return true;
   }
 
@@ -194,7 +202,7 @@ export async function handleActiveSessions(
       parsed.params.taskId,
       parsed.body.providerSessionId,
     );
-    json(res, { updated });
+    updateProviderSession.respond(res, 200, { updated });
     return true;
   }
 
@@ -207,7 +215,7 @@ export async function handleActiveSessions(
     } else {
       cleaned = cleanupStaleSessions(parsed.body?.maxAgeMinutes ?? 30);
     }
-    json(res, { cleaned });
+    cleanupSessions.respond(res, 200, { cleaned });
     return true;
   }
 
@@ -215,14 +223,14 @@ export async function handleActiveSessions(
     const parsed = await recoverOrphanedTasks.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!myAgentId || parsed.body.agentId !== myAgentId) {
-      json(res, { error: "Can only recover orphaned tasks for the calling agent" }, 403);
+      jsonError(res, "Can only recover orphaned tasks for the calling agent", 403);
       return true;
     }
     const tasks = resetOrphanedInProgressTasksForAgent(
       parsed.body.agentId,
       parsed.body.minAgeSeconds ?? 60,
     );
-    json(res, { recovered: tasks.length, tasks });
+    recoverOrphanedTasks.respond(res, 200, { recovered: tasks.length, tasks });
     return true;
   }
 

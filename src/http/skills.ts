@@ -18,8 +18,14 @@ import {
 } from "../be/db";
 import { parseSkillContent } from "../be/skill-parser";
 import { computeAgentSkillsSignature, syncSkillsToFilesystem } from "../be/skill-sync";
+import {
+  AgentSkillSchema,
+  SkillFileSchema,
+  SkillSchema,
+  SkillWithInstallInfoSchema,
+} from "../types";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 const SYSTEM_DEFAULT_SKILL_LOCKED_MESSAGE =
   "This skill is system-managed and cannot be edited from the UI; it is re-seeded on each start. Fork it under a new name to customize.";
@@ -33,6 +39,72 @@ const skillFileBodySchema = z.object({
 
 const skillFileWithPathSchema = skillFileBodySchema.extend({
   path: z.string().min(1),
+});
+
+// ─── Response Schemas ────────────────────────────────────────────────────────
+
+/** Bundled-file manifest entry — `SkillFile` minus the heavy `content` field. */
+const skillFileManifestEntrySchema = SkillFileSchema.omit({ content: true });
+
+const skillsListResponseSchema = z.object({
+  skills: z.array(SkillSchema),
+  total: z.number(),
+});
+
+const skillFileManifestResponseSchema = z.object({
+  files: z.array(skillFileManifestEntrySchema),
+  total: z.number(),
+});
+
+const bulkUpsertSkillFilesResponseSchema = z.object({
+  files: z.array(SkillFileSchema),
+  total: z.number(),
+  skill: SkillSchema.nullable(),
+});
+
+const skillFileResponseSchema = z.object({ file: SkillFileSchema });
+
+const skillFileWithSkillResponseSchema = z.object({
+  file: SkillFileSchema,
+  skill: SkillSchema.nullable(),
+});
+
+const deleteSkillFileResponseSchema = z.object({
+  success: z.literal(true),
+  skill: SkillSchema.nullable(),
+});
+
+const skillWrapperResponseSchema = z.object({ skill: SkillSchema });
+
+const deleteSuccessResponseSchema = z.object({ success: z.literal(true) });
+
+const installSkillResponseSchema = z.object({ agentSkill: AgentSkillSchema });
+
+const uninstallSkillResponseSchema = z.object({ success: z.boolean() });
+
+const syncRemoteResponseSchema = z.object({
+  updated: z.number(),
+  checked: z.number(),
+  errors: z.array(z.string()),
+});
+
+const syncFilesystemResponseSchema = z.object({
+  synced: z.number(),
+  removed: z.number(),
+  errors: z.array(z.string()),
+  message: z.string(),
+});
+
+const agentSkillsListResponseSchema = z.object({
+  skills: z.array(SkillWithInstallInfoSchema),
+  total: z.number(),
+  signature: z.string(),
+});
+
+const agentSkillsSignatureResponseSchema = z.object({
+  hash: z.string(),
+  count: z.number(),
+  generatedAt: z.string(),
 });
 
 function decodeSkillFilePath(pathSegments: string[]): string {
@@ -63,7 +135,7 @@ const listSkillsRoute = route({
     fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
-    200: { description: "Skill list" },
+    200: { description: "Skill list", schema: skillsListResponseSchema },
   },
 });
 
@@ -76,7 +148,7 @@ const getSkillRoute = route({
   auth: { apiKey: true },
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Skill details" },
+    200: { description: "Skill details", schema: SkillSchema },
     404: { description: "Skill not found" },
   },
 });
@@ -91,7 +163,7 @@ const listSkillFilesRoute = route({
   auth: { apiKey: true },
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Skill file manifest" },
+    200: { description: "Skill file manifest", schema: skillFileManifestResponseSchema },
     404: { description: "Skill not found" },
   },
 });
@@ -109,7 +181,7 @@ const bulkUpsertSkillFilesRoute = route({
     files: z.array(skillFileWithPathSchema).max(100),
   }),
   responses: {
-    200: { description: "Skill files upserted" },
+    200: { description: "Skill files upserted", schema: bulkUpsertSkillFilesResponseSchema },
     400: { description: "Validation error" },
     404: { description: "Skill not found" },
   },
@@ -125,7 +197,7 @@ const getSkillFileRoute = route({
   auth: { apiKey: true },
   params: z.object({ id: z.string(), path: z.string() }),
   responses: {
-    200: { description: "Skill file" },
+    200: { description: "Skill file", schema: skillFileResponseSchema },
     404: { description: "Skill or file not found" },
   },
 });
@@ -142,7 +214,7 @@ const upsertSkillFileRoute = route({
   params: z.object({ id: z.string(), path: z.string() }),
   body: skillFileBodySchema,
   responses: {
-    200: { description: "Skill file upserted" },
+    200: { description: "Skill file upserted", schema: skillFileWithSkillResponseSchema },
     400: { description: "Validation error" },
     404: { description: "Skill not found" },
   },
@@ -159,7 +231,7 @@ const deleteSkillFileRoute = route({
   rbac: { permission: "skill.update.any" },
   params: z.object({ id: z.string(), path: z.string() }),
   responses: {
-    200: { description: "Skill file deleted" },
+    200: { description: "Skill file deleted", schema: deleteSkillFileResponseSchema },
     404: { description: "Skill or file not found" },
   },
 });
@@ -180,7 +252,7 @@ const createSkillRoute = route({
     systemDefault: z.boolean().optional(),
   }),
   responses: {
-    201: { description: "Skill created" },
+    201: { description: "Skill created", schema: skillWrapperResponseSchema },
     400: { description: "Validation error" },
   },
 });
@@ -196,7 +268,7 @@ const updateSkillRoute = route({
   params: z.object({ id: z.string() }),
   body: z.record(z.string(), z.unknown()),
   responses: {
-    200: { description: "Skill updated" },
+    200: { description: "Skill updated", schema: skillWrapperResponseSchema },
     403: { description: "System-managed skills cannot be edited" },
     404: { description: "Skill not found" },
   },
@@ -212,7 +284,7 @@ const deleteSkillRoute = route({
   rbac: { permission: "skill.delete.any" },
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Skill deleted" },
+    200: { description: "Skill deleted", schema: deleteSuccessResponseSchema },
     403: { description: "System-managed skills cannot be deleted" },
     404: { description: "Skill not found" },
   },
@@ -231,7 +303,7 @@ const installSkillRoute = route({
     agentId: z.string(),
   }),
   responses: {
-    200: { description: "Skill installed" },
+    200: { description: "Skill installed", schema: installSkillResponseSchema },
     404: { description: "Skill not found" },
   },
 });
@@ -246,7 +318,7 @@ const uninstallSkillRoute = route({
   rbac: { permission: "skill.uninstall.any" },
   params: z.object({ id: z.string(), agentId: z.string() }),
   responses: {
-    200: { description: "Skill uninstalled" },
+    200: { description: "Skill uninstalled", schema: uninstallSkillResponseSchema },
   },
 });
 
@@ -265,7 +337,7 @@ const installRemoteRoute = route({
     isComplex: z.boolean().optional(),
   }),
   responses: {
-    201: { description: "Remote skill installed" },
+    201: { description: "Remote skill installed", schema: skillWrapperResponseSchema },
     400: { description: "Fetch failed" },
   },
 });
@@ -283,7 +355,7 @@ const syncRemoteRoute = route({
     force: z.boolean().optional(),
   }),
   responses: {
-    200: { description: "Sync results" },
+    200: { description: "Sync results", schema: syncRemoteResponseSchema },
   },
 });
 
@@ -296,7 +368,7 @@ const syncFilesystemRoute = route({
   auth: { apiKey: true, agentId: true },
   rbac: { ungated: "self-scoped: syncs the caller's own agent FS" },
   responses: {
-    200: { description: "Filesystem sync results" },
+    200: { description: "Filesystem sync results", schema: syncFilesystemResponseSchema },
   },
 });
 
@@ -309,7 +381,7 @@ const getAgentSkillsRoute = route({
   auth: { apiKey: true },
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Agent skills list" },
+    200: { description: "Agent skills list", schema: agentSkillsListResponseSchema },
   },
 });
 
@@ -324,7 +396,7 @@ const getAgentSkillsSignatureRoute = route({
   auth: { apiKey: true },
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Skills signature" },
+    200: { description: "Skills signature", schema: agentSkillsSignatureResponseSchema },
   },
 });
 
@@ -342,7 +414,11 @@ export async function handleSkills(
     const parsed = await getAgentSkillsSignatureRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const sig = computeAgentSkillsSignature(parsed.params.id);
-    json(res, { hash: sig.hash, count: sig.count, generatedAt: new Date().toISOString() });
+    getAgentSkillsSignatureRoute.respond(res, 200, {
+      hash: sig.hash,
+      count: sig.count,
+      generatedAt: new Date().toISOString(),
+    });
     return true;
   }
 
@@ -352,7 +428,7 @@ export async function handleSkills(
     if (!parsed) return true;
     const skills = getAgentSkills(parsed.params.id);
     const signature = computeAgentSkillsSignature(parsed.params.id).hash;
-    json(res, { skills, total: skills.length, signature });
+    getAgentSkillsRoute.respond(res, 200, { skills, total: skills.length, signature });
     return true;
   }
 
@@ -400,7 +476,7 @@ export async function handleSkills(
         isComplex: parsed.body.isComplex ?? false,
       });
 
-      json(res, { skill }, 201);
+      installRemoteRoute.respond(res, 201, { skill });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Unknown error", 400);
     }
@@ -462,7 +538,7 @@ export async function handleSkills(
       }
     }
 
-    json(res, { updated, checked: remoteSkills.length, errors });
+    syncRemoteRoute.respond(res, 200, { updated, checked: remoteSkills.length, errors });
     return true;
   }
 
@@ -476,7 +552,7 @@ export async function handleSkills(
     }
 
     const result = syncSkillsToFilesystem(agentId);
-    json(res, {
+    syncFilesystemRoute.respond(res, 200, {
       synced: result.synced,
       removed: result.removed,
       errors: result.errors,
@@ -498,7 +574,7 @@ export async function handleSkills(
 
     try {
       const agentSkill = installSkill(parsed.body.agentId, parsed.params.id);
-      json(res, { agentSkill });
+      installSkillRoute.respond(res, 200, { agentSkill });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Install failed", 400);
     }
@@ -511,7 +587,7 @@ export async function handleSkills(
     if (!parsed) return true;
 
     const removed = uninstallSkill(parsed.params.agentId, parsed.params.id);
-    json(res, { success: removed });
+    uninstallSkillRoute.respond(res, 200, { success: removed });
     return true;
   }
 
@@ -533,7 +609,7 @@ export async function handleSkills(
           includeContent,
         });
 
-    json(res, { skills, total: skills.length });
+    listSkillsRoute.respond(res, 200, { skills, total: skills.length });
     return true;
   }
 
@@ -549,7 +625,7 @@ export async function handleSkills(
     }
 
     const files = listSkillFileManifest(parsed.params.id);
-    json(res, { files, total: files.length });
+    listSkillFilesRoute.respond(res, 200, { files, total: files.length });
     return true;
   }
 
@@ -571,7 +647,11 @@ export async function handleSkills(
     try {
       const files = upsertSkillFiles(parsed.params.id, parsed.body.files);
       const updatedSkill = getSkillById(parsed.params.id);
-      json(res, { files, total: files.length, skill: updatedSkill });
+      bulkUpsertSkillFilesRoute.respond(res, 200, {
+        files,
+        total: files.length,
+        skill: updatedSkill,
+      });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to upsert files", 400);
     }
@@ -595,7 +675,7 @@ export async function handleSkills(
         jsonError(res, "Skill file not found", 404);
         return true;
       }
-      json(res, { file });
+      getSkillFileRoute.respond(res, 200, { file });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Invalid file path", 400);
     }
@@ -623,7 +703,7 @@ export async function handleSkills(
         ...parsed.body,
       });
       const updatedSkill = getSkillById(parsed.params.id);
-      json(res, { file, skill: updatedSkill });
+      upsertSkillFileRoute.respond(res, 200, { file, skill: updatedSkill });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to upsert file", 400);
     }
@@ -652,7 +732,7 @@ export async function handleSkills(
         return true;
       }
       const updatedSkill = getSkillById(parsed.params.id);
-      json(res, { success: true, skill: updatedSkill });
+      deleteSkillFileRoute.respond(res, 200, { success: true, skill: updatedSkill });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Invalid file path", 400);
     }
@@ -669,7 +749,7 @@ export async function handleSkills(
       jsonError(res, "Skill not found", 404);
       return true;
     }
-    json(res, skill);
+    getSkillRoute.respond(res, 200, skill);
     return true;
   }
 
@@ -696,7 +776,7 @@ export async function handleSkills(
         userInvocable: pm.userInvocable,
         systemDefault: parsed.body.systemDefault,
       });
-      json(res, { skill }, 201);
+      createSkillRoute.respond(res, 201, { skill });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Create failed", 400);
     }
@@ -768,7 +848,7 @@ export async function handleSkills(
       jsonError(res, "Skill not found", 404);
       return true;
     }
-    json(res, { skill });
+    updateSkillRoute.respond(res, 200, { skill });
     return true;
   }
 
@@ -792,7 +872,7 @@ export async function handleSkills(
       jsonError(res, "Skill not found", 404);
       return true;
     }
-    json(res, { success: true });
+    deleteSkillRoute.respond(res, 200, { success: true });
     return true;
   }
 

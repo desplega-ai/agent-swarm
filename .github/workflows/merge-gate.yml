@@ -311,6 +311,9 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
+      - name: Check OpenAPI response-schema coverage
+        run: bun scripts/check-openapi-response-coverage.ts
+
       # Same-run calls merge server-side. See agent-fs docs/ci-timings.md.
       # Skipped on merge_group events and forks (no secret); never blocks the gate.
       - name: Report check timings to ci-timings
@@ -569,9 +572,9 @@ jobs:
           echo "OpenAPI spec is up to date."
       - name: Check generated API docs for drift
         run: |
-          if [ -n "$(git diff --name-only docs-site/content/docs/api-reference/)" ]; then
+          if [ -n "$(git diff --name-only docs-site/content/docs/api-reference/ docs-site/public/openapi.d.ts)" ]; then
             echo "::error::API reference docs are out of date! Run 'bun run docs:openapi' and commit the changes."
-            git diff --stat docs-site/content/docs/api-reference/
+            git diff --stat docs-site/content/docs/api-reference/ docs-site/public/openapi.d.ts
             exit 1
           fi
           echo "API reference docs are up to date."

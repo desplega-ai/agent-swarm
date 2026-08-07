@@ -34,7 +34,11 @@ const genericOAuthCallbackRoute = route({
     error_description: z.string().optional(),
   }),
   responses: {
-    200: { description: "OAuth authorization completed" },
+    200: {
+      description: "OAuth authorization completed",
+      unstructured:
+        "delegates to completeGenericOAuthCallback, which sends an HTML success page or a 302 redirect to the caller-supplied finalRedirect — never JSON",
+    },
     400: { description: "Missing or invalid OAuth callback parameters" },
     404: { description: "OAuth app not configured" },
     502: { description: "Token exchange failed" },

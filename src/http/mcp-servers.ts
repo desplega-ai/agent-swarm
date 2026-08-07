@@ -23,9 +23,23 @@ import {
   type RbacPrincipal,
   type RbacResource,
 } from "../rbac";
+import { AgentMcpServerSchema, McpServerSchema, McpServerWithInstallInfoSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
+
+// ─── Response Schemas ────────────────────────────────────────────────────────
+
+/**
+ * `getAgentMcpServers` response shape. When `?resolveSecrets=true`, each
+ * server is additionally decorated with resolved env/header values and any
+ * OAuth resolution error — see the `resolveSecrets` branch in the handler.
+ */
+const McpServerWithOptionalSecretsSchema = McpServerWithInstallInfoSchema.extend({
+  resolvedEnv: z.record(z.string(), z.string()).optional(),
+  resolvedHeaders: z.record(z.string(), z.string()).optional(),
+  authError: z.string().nullable().optional(),
+});
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -44,7 +58,10 @@ const listMcpServersRoute = route({
     search: z.string().optional(),
   }),
   responses: {
-    200: { description: "MCP server list" },
+    200: {
+      description: "MCP server list",
+      schema: z.object({ servers: z.array(McpServerSchema), total: z.number() }),
+    },
   },
 });
 
@@ -57,7 +74,7 @@ const getMcpServerRoute = route({
   auth: { apiKey: true },
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "MCP server details" },
+    200: { description: "MCP server details", schema: McpServerSchema },
     404: { description: "MCP server not found" },
   },
 });
@@ -83,7 +100,7 @@ const createMcpServerRoute = route({
     headerConfigKeys: z.string().optional(),
   }),
   responses: {
-    201: { description: "MCP server created" },
+    201: { description: "MCP server created", schema: z.object({ server: McpServerSchema }) },
     400: { description: "Validation error" },
   },
   rbac: { permission: "mcp-server.create.swarm" },
@@ -99,7 +116,7 @@ const updateMcpServerRoute = route({
   params: z.object({ id: z.string() }),
   body: z.record(z.string(), z.unknown()),
   responses: {
-    200: { description: "MCP server updated" },
+    200: { description: "MCP server updated", schema: z.object({ server: McpServerSchema }) },
     404: { description: "MCP server not found" },
   },
   rbac: { permission: "mcp-server.update.any" },
@@ -114,7 +131,13 @@ const deleteMcpServerRoute = route({
   auth: { apiKey: true },
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "MCP server deleted" },
+    200: {
+      description: "MCP server deleted",
+      schema: z.object({
+        success: z.boolean(),
+        deletedScriptConnectionCount: z.number(),
+      }),
+    },
     404: { description: "MCP server not found" },
   },
   rbac: { permission: "mcp-server.delete.any" },
@@ -132,7 +155,10 @@ const installMcpServerRoute = route({
     agentId: z.string(),
   }),
   responses: {
-    200: { description: "MCP server installed" },
+    200: {
+      description: "MCP server installed",
+      schema: z.object({ agentMcpServer: AgentMcpServerSchema }),
+    },
     404: { description: "MCP server not found" },
   },
   rbac: { permission: "mcp-server.install.any" },
@@ -147,7 +173,10 @@ const uninstallMcpServerRoute = route({
   auth: { apiKey: true },
   params: z.object({ id: z.string(), agentId: z.string() }),
   responses: {
-    200: { description: "MCP server uninstalled" },
+    200: {
+      description: "MCP server uninstalled",
+      schema: z.object({ success: z.boolean() }),
+    },
   },
   rbac: { permission: "mcp-server.uninstall.any" },
 });
@@ -164,7 +193,13 @@ const getAgentMcpServersRoute = route({
     resolveSecrets: z.string().optional(),
   }),
   responses: {
-    200: { description: "Agent MCP servers list" },
+    200: {
+      description: "Agent MCP servers list",
+      schema: z.object({
+        servers: z.array(McpServerWithOptionalSecretsSchema),
+        total: z.number(),
+      }),
+    },
   },
 });
 
@@ -356,9 +391,12 @@ export async function handleMcpServers(
         }),
       );
 
-      json(res, { servers: serversWithSecrets, total: serversWithSecrets.length });
+      getAgentMcpServersRoute.respond(res, 200, {
+        servers: serversWithSecrets,
+        total: serversWithSecrets.length,
+      });
     } else {
-      json(res, { servers, total: servers.length });
+      getAgentMcpServersRoute.respond(res, 200, { servers, total: servers.length });
     }
     return true;
   }
@@ -376,7 +414,7 @@ export async function handleMcpServers(
 
     try {
       const agentMcpServer = installMcpServer(parsed.body.agentId, parsed.params.id);
-      json(res, { agentMcpServer });
+      installMcpServerRoute.respond(res, 200, { agentMcpServer });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Install failed", 400);
     }
@@ -389,7 +427,7 @@ export async function handleMcpServers(
     if (!parsed) return true;
 
     const removed = uninstallMcpServer(parsed.params.agentId, parsed.params.id);
-    json(res, { success: removed });
+    uninstallMcpServerRoute.respond(res, 200, { success: removed });
     return true;
   }
 
@@ -406,7 +444,7 @@ export async function handleMcpServers(
       search: parsed.query.search,
     });
 
-    json(res, { servers, total: servers.length });
+    listMcpServersRoute.respond(res, 200, { servers, total: servers.length });
     return true;
   }
 
@@ -420,7 +458,7 @@ export async function handleMcpServers(
       jsonError(res, "MCP server not found", 404);
       return true;
     }
-    json(res, server);
+    getMcpServerRoute.respond(res, 200, server);
     return true;
   }
 
@@ -460,7 +498,7 @@ export async function handleMcpServers(
         envConfigKeys: parsed.body.envConfigKeys,
         headerConfigKeys: parsed.body.headerConfigKeys,
       });
-      json(res, { server }, 201);
+      createMcpServerRoute.respond(res, 201, { server });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Create failed", 400);
     }
@@ -519,7 +557,7 @@ export async function handleMcpServers(
       jsonError(res, "MCP server not found", 404);
       return true;
     }
-    json(res, { server });
+    updateMcpServerRoute.respond(res, 200, { server });
     return true;
   }
 
@@ -533,7 +571,7 @@ export async function handleMcpServers(
       jsonError(res, "MCP server not found", 404);
       return true;
     }
-    json(res, {
+    deleteMcpServerRoute.respond(res, 200, {
       success: true,
       deletedScriptConnectionCount: result.deletedScriptConnectionCount,
     });

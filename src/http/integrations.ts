@@ -3,7 +3,6 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { getResolvedConfig } from "../be/db";
 import { route } from "./route-def";
-import { json } from "./utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -27,6 +26,25 @@ interface TestConnectionDeps {
   buildClient?: (apiKey: string) => ClaudeManagedTestClient;
 }
 
+// ─── Response schemas ────────────────────────────────────────────────────────
+
+const ClaudeManagedTestResultSchema = z.union([
+  z.object({
+    ok: z.literal(true),
+    agentName: z.string().nullable(),
+    model: z.string().nullable(),
+  }),
+  z.object({
+    ok: z.literal(false),
+    error: z.string(),
+  }),
+]);
+
+const McpUserConfigSchema = z.object({
+  mcpBaseUrl: z.string(),
+  mcpUserUrl: z.string(),
+});
+
 // ─── Route Definition ────────────────────────────────────────────────────────
 
 const claudeManagedTestRoute = route({
@@ -41,6 +59,7 @@ const claudeManagedTestRoute = route({
     200: {
       description:
         "Connection result — `{ ok: true, agentName, model }` on success or `{ ok: false, error }` on any failure (missing config, Anthropic API error). Always 200 OK.",
+      schema: ClaudeManagedTestResultSchema,
     },
   },
 });
@@ -55,6 +74,7 @@ const mcpUserConfigRoute = route({
     200: {
       description:
         "Server-derived MCP user config. `mcpBaseUrl` is the API server base URL and `mcpUserUrl` appends `/mcp-user`.",
+      schema: McpUserConfigSchema,
     },
   },
 });
@@ -116,7 +136,7 @@ export function createIntegrationsHandler(deps: TestConnectionDeps = {}) {
   ): Promise<boolean> {
     if (mcpUserConfigRoute.match(req.method, pathSegments)) {
       const mcpBaseUrl = resolveMcpBaseUrl();
-      json(res, { mcpBaseUrl, mcpUserUrl: `${mcpBaseUrl}/mcp-user` });
+      mcpUserConfigRoute.respond(res, 200, { mcpBaseUrl, mcpUserUrl: `${mcpBaseUrl}/mcp-user` });
       return true;
     }
 
@@ -128,7 +148,7 @@ export function createIntegrationsHandler(deps: TestConnectionDeps = {}) {
         const missing: string[] = [];
         if (!apiKey) missing.push("ANTHROPIC_API_KEY");
         if (!agentId) missing.push("MANAGED_AGENT_ID");
-        json(res, {
+        claudeManagedTestRoute.respond(res, 200, {
           ok: false,
           error: `Missing required config: ${missing.join(", ")}. Run \`bun run src/cli.tsx claude-managed-setup\` to populate.`,
         });
@@ -144,14 +164,14 @@ export function createIntegrationsHandler(deps: TestConnectionDeps = {}) {
           typeof agent.model === "string"
             ? agent.model
             : ((agent.model as { id?: string } | null | undefined)?.id ?? null);
-        json(res, {
+        claudeManagedTestRoute.respond(res, 200, {
           ok: true,
           agentName: agent.name ?? null,
           model: modelId,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        json(res, { ok: false, error: message });
+        claudeManagedTestRoute.respond(res, 200, { ok: false, error: message });
       }
       return true;
     }

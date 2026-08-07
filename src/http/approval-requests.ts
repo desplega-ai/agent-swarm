@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveTaskAuditUserId } from "../be/audit-user";
 import {
+  type ApprovalRequest,
   createApprovalRequest,
   createTaskExtended,
   getApprovalRequestById,
@@ -13,7 +14,7 @@ import { resolveTemplate } from "../prompts/resolver";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { workflowEventBus } from "../workflows/event-bus";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -40,6 +41,69 @@ const QuestionSchema = z.object({
 });
 
 export type ApprovalQuestion = z.infer<typeof QuestionSchema>;
+
+// ─── Response Schemas ────────────────────────────────────────────────────────
+// `ApprovalRequest` (src/be/db.ts) types `questions`/`approvers`/`responses`/
+// `notificationChannels` as `unknown` — the DB layer stores opaque JSON blobs.
+// Reading every writer (this file's create route, tools/request-human-input.ts,
+// workflows/executors/human-in-the-loop.ts) confirms they always conform to the
+// shapes below, so we describe them precisely here and cast at the call sites
+// (matching the existing `existing.questions as ApprovalQuestion[]` pattern in
+// this file) rather than degrading the documented contract to `z.unknown()`.
+
+const ApproversSchema = z.object({
+  users: z.array(z.string()).optional(),
+  roles: z.array(z.string()).optional(),
+  policy: z.union([z.literal("any"), z.literal("all"), z.object({ min: z.number().int().min(1) })]),
+});
+type ApproversShape = z.infer<typeof ApproversSchema>;
+
+const NotificationChannelSchema = z.object({
+  channel: z.enum(["slack", "email"]),
+  target: z.string(),
+  // Added post-creation by workflows/executors/human-in-the-loop.ts once the
+  // notification message is sent (see `updateApprovalRequestNotifications`).
+  messageTs: z.string().optional(),
+});
+type NotificationChannelShape = z.infer<typeof NotificationChannelSchema>;
+
+const ApprovalRequestSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  questions: z.array(QuestionSchema),
+  workflowRunId: z.string().nullable(),
+  workflowRunStepId: z.string().nullable(),
+  sourceTaskId: z.string().nullable(),
+  approvers: ApproversSchema,
+  status: z.enum(["pending", "approved", "rejected", "timeout"]),
+  responses: z.record(z.string(), z.unknown()).nullable(),
+  resolvedBy: z.string().nullable(),
+  resolvedAt: z.string().nullable(),
+  timeoutSeconds: z.number().nullable(),
+  expiresAt: z.string().nullable(),
+  notificationChannels: z.array(NotificationChannelSchema).nullable(),
+  createdBy: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+/**
+ * Reshapes a DB `ApprovalRequest` row for `respond()` — identical values,
+ * narrowed from the DB layer's `unknown` fields to the precise wire shape
+ * (see comment above `ApproversSchema`). Not a behavior change: same object
+ * contents, serialized the same way.
+ */
+function toApprovalRequestResponse(
+  request: ApprovalRequest,
+): z.infer<typeof ApprovalRequestSchema> {
+  return {
+    ...request,
+    questions: request.questions as ApprovalQuestion[],
+    approvers: request.approvers as ApproversShape,
+    responses: request.responses as Record<string, unknown> | null,
+    notificationChannels: request.notificationChannels as NotificationChannelShape[] | null,
+  };
+}
 
 function hasRequiredResponse(question: ApprovalQuestion, response: unknown): boolean {
   switch (question.type) {
@@ -118,7 +182,10 @@ const createRoute = route({
       .optional(),
   }),
   responses: {
-    201: { description: "Approval request created" },
+    201: {
+      description: "Approval request created",
+      schema: z.object({ approvalRequest: ApprovalRequestSchema }),
+    },
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
@@ -132,7 +199,10 @@ const getByIdRoute = route({
   tags: ["ApprovalRequests"],
   params: z.object({ id: z.string().uuid() }),
   responses: {
-    200: { description: "Approval request details" },
+    200: {
+      description: "Approval request details",
+      schema: z.object({ approvalRequest: ApprovalRequestSchema }),
+    },
     404: { description: "Not found" },
   },
   auth: { apiKey: true },
@@ -150,7 +220,10 @@ const respondRoute = route({
     respondedBy: z.string().optional(),
   }),
   responses: {
-    200: { description: "Response recorded" },
+    200: {
+      description: "Response recorded",
+      schema: z.object({ approvalRequest: ApprovalRequestSchema }),
+    },
     400: { description: "Validation error" },
     404: { description: "Not found" },
     409: { description: "Already resolved" },
@@ -170,7 +243,10 @@ const listRoute = route({
     limit: z.coerce.number().optional(),
   }),
   responses: {
-    200: { description: "List of approval requests" },
+    200: {
+      description: "List of approval requests",
+      schema: z.object({ approvalRequests: z.array(ApprovalRequestSchema) }),
+    },
   },
   auth: { apiKey: true },
 });
@@ -278,7 +354,7 @@ export async function handleApprovalRequests(
       }
     }
 
-    json(res, { approvalRequest: updated });
+    respondRoute.respond(res, 200, { approvalRequest: toApprovalRequestResponse(updated) });
     return true;
   }
 
@@ -293,7 +369,7 @@ export async function handleApprovalRequests(
       return true;
     }
 
-    json(res, { approvalRequest: request });
+    getByIdRoute.respond(res, 200, { approvalRequest: toApprovalRequestResponse(request) });
     return true;
   }
 
@@ -325,8 +401,7 @@ export async function handleApprovalRequests(
       createdBy,
     });
 
-    res.writeHead(201, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ approvalRequest: request }));
+    createRoute.respond(res, 201, { approvalRequest: toApprovalRequestResponse(request) });
     return true;
   }
 
@@ -341,7 +416,9 @@ export async function handleApprovalRequests(
       limit: parsed.query.limit || undefined,
     });
 
-    json(res, { approvalRequests: requests });
+    listRoute.respond(res, 200, {
+      approvalRequests: requests.map(toApprovalRequestResponse),
+    });
     return true;
   }
 

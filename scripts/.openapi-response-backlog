@@ -1,0 +1,3 @@
+# 2xx responses (METHOD /path CODE) that predate the response-schema
+# requirement. This file only ever shrinks — regenerate with:
+# bun scripts/check-openapi-response-coverage.ts --update-backlog

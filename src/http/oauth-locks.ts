@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { acquireOAuthRefreshLock, releaseOAuthRefreshLock } from "../be/db-queries/oauth";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 /**
  * HTTP surface for the cross-process OAuth refresh-token lock
@@ -39,7 +39,10 @@ const acquireLockRoute = route({
   params: LockKeySchema,
   body: acquireBodySchema,
   responses: {
-    200: { description: "Lock acquired; returns the owner token" },
+    200: {
+      description: "Lock acquired; returns the owner token",
+      schema: z.object({ owner: z.string() }),
+    },
     409: { description: "Lock is currently held by another caller" },
     400: { description: "Validation error" },
   },
@@ -73,7 +76,7 @@ export async function handleOAuthLocks(
       jsonError(res, "lock is held by another caller", 409);
       return true;
     }
-    json(res, { owner });
+    acquireLockRoute.respond(res, 200, { owner });
     return true;
   }
 

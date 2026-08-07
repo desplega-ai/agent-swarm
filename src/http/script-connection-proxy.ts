@@ -5,7 +5,30 @@ import { callMcpServerTool } from "@/be/mcp-proxy";
 import { getScriptConnectionById } from "@/be/script-connections";
 import { can } from "@/rbac";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
+
+// Mirrors `McpToolCallResult` from `src/mcp-client/http-client.ts`.
+const McpToolCallResultSchema = z.object({
+  content: z.array(z.object({ type: z.string(), text: z.string().optional() })),
+  isError: z.boolean().optional(),
+});
+
+// Mirrors `McpJsonRpcError` from `src/mcp-client/http-client.ts`.
+const McpJsonRpcErrorSchema = z.object({
+  code: z.number().optional(),
+  message: z.string().optional(),
+  data: z.unknown().optional(),
+});
+
+// Mirrors `McpToolCallEnvelope` from `src/mcp-client/http-client.ts` — the
+// success/failure envelope returned by `callMcpServerTool`, plus the
+// `{ ok: false, error: string }` shape the catch block below constructs
+// directly (a subtype of the `ok: false` branch, since `error` accepts a
+// plain string there too).
+const McpToolCallEnvelopeSchema = z.union([
+  z.object({ ok: z.literal(true), result: McpToolCallResultSchema }),
+  z.object({ ok: z.literal(false), error: z.union([McpJsonRpcErrorSchema, z.string()]) }),
+]);
 
 const mcpCallRoute = route({
   method: "post",
@@ -21,7 +44,7 @@ const mcpCallRoute = route({
     arguments: z.record(z.string(), z.unknown()).optional(),
   }),
   responses: {
-    200: { description: "MCP call result" },
+    200: { description: "MCP call result", schema: McpToolCallEnvelopeSchema },
     400: { description: "Invalid MCP connection or request" },
     403: { description: "Not allowed to invoke this MCP connection" },
     404: { description: "Script connection or agent not found" },
@@ -108,9 +131,12 @@ export async function handleScriptConnectionProxy(
       parsed.body.arguments ?? {},
       { agentId, timeoutMs: 30_000 },
     );
-    json(res, result);
+    mcpCallRoute.respond(res, 200, result);
   } catch (err) {
-    json(res, { ok: false, error: err instanceof Error ? err.message : String(err) });
+    mcpCallRoute.respond(res, 200, {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
   return true;
 }

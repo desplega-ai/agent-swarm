@@ -26,6 +26,7 @@ const memory: AgentMemory = {
   name: "ui-memory-fixture",
   scope: "agent",
   source: "manual",
+  summary: null,
   sourcePath: null,
   sourceTaskId: null,
   chunkIndex: 0,
@@ -34,6 +35,7 @@ const memory: AgentMemory = {
   contextKey: null,
   createdAt: new Date("2026-06-14T00:00:00.000Z").toISOString(),
   updatedAt: new Date("2026-06-14T00:00:00.000Z").toISOString(),
+  accessedAt: new Date("2026-06-14T00:00:00.000Z").toISOString(),
 };
 
 mock.module("../be/memory", () => ({

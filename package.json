@@ -92,6 +92,7 @@
     "check:api-key-boundary": "bash scripts/check-api-key-boundary.sh",
     "check:vendored-openapi": "bun scripts/check-vendored-openapi.ts",
     "check:rbac-coverage": "bun scripts/check-rbac-coverage.ts",
+    "check:openapi-response-coverage": "bun scripts/check-openapi-response-coverage.ts",
     "check:script-types": "bash scripts/check-script-types-freshness.sh",
     "check:audit-columns": "bash scripts/check-audit-columns.sh",
     "lint:structure": "konsistent check",
@@ -151,6 +152,7 @@
     "@types/bun": "latest",
     "dependency-cruiser": "^18.0.0",
     "konsistent": "1.0.0-beta.1",
+    "openapi-typescript": "^7",
     "ts-morph": "^28.0.0",
     "turbo": "^2.10.0"
   },

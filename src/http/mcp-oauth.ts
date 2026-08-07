@@ -27,10 +27,11 @@ import {
   registerClient,
   revokeMcpToken,
 } from "../oauth/mcp-wrapper";
+import { McpAuthMethodSchema } from "../types";
 import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -79,6 +80,61 @@ interface OAuthClientForAuthorize {
   revocationUrl: string | null;
   scopes: string[];
 }
+
+// ─── Response schemas ────────────────────────────────────────────────────────
+// Mirror the `DiscoveryResult` interface above and the handler bodies below —
+// keep in sync by hand since these are local (non-DB-entity) response shapes.
+
+const DiscoveryResultSchema = z.object({
+  resourceUrl: z.string(),
+  authorizationServerIssuer: z.string(),
+  authorizeUrl: z.string(),
+  tokenUrl: z.string(),
+  revocationUrl: z.string().nullable(),
+  registrationEndpoint: z.string().nullable(),
+  scopes: z.array(z.string()),
+  requiresOAuth: z.literal(true),
+  dcrSupported: z.boolean(),
+  bearerMethodsSupported: z.array(z.string()).nullable(),
+});
+
+const MetadataResponseSchema = z.union([
+  z.object({ requiresOAuth: z.literal(false) }),
+  DiscoveryResultSchema,
+]);
+
+const McpOAuthStatusResponseSchema = z.object({
+  mcpServerId: z.string(),
+  authMethod: McpAuthMethodSchema,
+  connected: z.boolean(),
+  token: z
+    .object({
+      id: z.string(),
+      status: z.enum(["connected", "expired", "error", "revoked"]),
+      tokenType: z.string(),
+      expiresAt: z.string().nullable(),
+      scope: z.string().nullable(),
+      lastErrorMessage: z.string().nullable(),
+      lastRefreshedAt: z.string().nullable(),
+      authorizationServerIssuer: z.string(),
+      resourceUrl: z.string(),
+      clientSource: z.enum(["dcr", "manual", "preregistered"]),
+      hasRefreshToken: z.boolean(),
+      createdAt: z.string(),
+      updatedAt: z.string(),
+    })
+    .nullable(),
+});
+
+const AuthorizeUrlResponseSchema = z.object({ providerUrl: z.string() });
+
+const RefreshResponseSchema = z.object({
+  ok: z.literal(true),
+  expiresAt: z.string().nullable(),
+  scope: z.string().nullable(),
+});
+
+const OkResponseSchema = z.object({ ok: z.literal(true) });
 
 function splitScopes(scopes: string | null | undefined): string[] {
   return scopes?.split(/\s+/).filter(Boolean) ?? [];
@@ -175,7 +231,10 @@ const metadataRoute = route({
   auth: { apiKey: true },
   params: z.object({ mcpServerId: z.string() }),
   responses: {
-    200: { description: "OAuth metadata or { requiresOAuth: false }" },
+    200: {
+      description: "OAuth metadata or { requiresOAuth: false }",
+      schema: MetadataResponseSchema,
+    },
     400: { description: "MCP has no URL / invalid transport" },
     404: { description: "MCP server not found" },
   },
@@ -191,7 +250,10 @@ const statusRoute = route({
   params: z.object({ mcpServerId: z.string() }),
   query: z.object({ userId: z.string().optional() }),
   responses: {
-    200: { description: "Token status (never includes the token value itself)" },
+    200: {
+      description: "Token status (never includes the token value itself)",
+      schema: McpOAuthStatusResponseSchema,
+    },
     404: { description: "MCP server not found" },
   },
 });
@@ -233,7 +295,7 @@ const authorizeUrlRoute = route({
   }),
   rbac: { permission: "mcp-oauth.authorize.any" },
   responses: {
-    200: { description: "{ providerUrl: string }" },
+    200: { description: "{ providerUrl: string }", schema: AuthorizeUrlResponseSchema },
     400: { description: "MCP has no URL / does not require OAuth" },
     404: { description: "MCP server not found" },
   },
@@ -272,7 +334,7 @@ const refreshRoute = route({
     })
     .optional(),
   responses: {
-    200: { description: "Refreshed token" },
+    200: { description: "Refreshed token", schema: RefreshResponseSchema },
     404: { description: "No token for this MCP server" },
     500: { description: "Refresh failed" },
   },
@@ -288,7 +350,7 @@ const disconnectRoute = route({
   params: z.object({ mcpServerId: z.string() }),
   query: z.object({ userId: z.string().optional() }),
   responses: {
-    200: { description: "Token revoked/deleted" },
+    200: { description: "Token revoked/deleted", schema: OkResponseSchema },
     404: { description: "No token for this MCP server" },
   },
 });
@@ -311,7 +373,10 @@ const manualClientRoute = route({
     scopes: z.array(z.string()).optional(),
   }),
   responses: {
-    200: { description: "Pending client stored. Call /authorize to start the flow." },
+    200: {
+      description: "Pending client stored. Call /authorize to start the flow.",
+      schema: OkResponseSchema,
+    },
     400: { description: "Bad input" },
     404: { description: "MCP server not found" },
   },
@@ -717,7 +782,7 @@ export async function handleMcpOAuth(
     const userId = parsed.query.userId ?? null;
     const token = getMcpOAuthToken(parsed.params.mcpServerId, userId);
 
-    json(res, {
+    statusRoute.respond(res, 200, {
       mcpServerId: server.id,
       authMethod: server.authMethod,
       connected: !!token && token.status === "connected",
@@ -753,10 +818,10 @@ export async function handleMcpOAuth(
     try {
       const result = await discoverForMcp(server.url!);
       if (!result) {
-        json(res, { requiresOAuth: false });
+        metadataRoute.respond(res, 200, { requiresOAuth: false });
         return true;
       }
-      json(res, result);
+      metadataRoute.respond(res, 200, result);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       jsonError(res, `Metadata discovery failed: ${message}`, 502);
@@ -806,7 +871,7 @@ export async function handleMcpOAuth(
         parsed.query,
       );
       if (!providerUrl) return true;
-      json(res, { providerUrl });
+      authorizeUrlRoute.respond(res, 200, { providerUrl });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       jsonError(res, `Authorize failed: ${message}`, 502);
@@ -841,7 +906,7 @@ export async function handleMcpOAuth(
         scope: refreshed.scope ?? null,
         expectedTokenVersion: existing.tokenVersion,
       });
-      json(res, {
+      refreshRoute.respond(res, 200, {
         ok: true,
         expiresAt: computeExpiresAt(refreshed.expires_in),
         scope: refreshed.scope ?? existing.scope,
@@ -892,7 +957,7 @@ export async function handleMcpOAuth(
     deleteMcpOAuthToken(parsed.params.mcpServerId, userId);
     // Flip back to static so resolveSecrets stops trying to inject Bearer.
     setMcpServerAuthMethod(parsed.params.mcpServerId, "static");
-    json(res, { ok: true });
+    disconnectRoute.respond(res, 200, { ok: true });
     return true;
   }
 
@@ -961,7 +1026,7 @@ export async function handleMcpOAuth(
         status: "error",
         lastErrorMessage: "Manual client pre-registered; awaiting authorize flow.",
       });
-      json(res, { ok: true });
+      manualClientRoute.respond(res, 200, { ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       jsonError(res, `Manual-client registration failed: ${message}`, 500);

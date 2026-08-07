@@ -59,7 +59,7 @@ import { resolveScopedResourceId, scopedResourceScopeIdSchema } from "@/utils/sc
 import { registerVolatileSecret, scrubSecrets } from "@/utils/secret-scrubber";
 import { staticOAuthCallbackUri } from "./oauth-callback";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 const providerSchema = z
   .string()
@@ -163,6 +163,257 @@ const discoverOAuthAppBodySchema = z.object({
   url: z.string().url(),
 });
 
+// ─── Response schemas ────────────────────────────────────────────────────────
+// Local zod mirrors of the response shapes built by this handler. Nothing in
+// src/types.ts models script connections / OAuth apps / credential bindings,
+// so these are defined here rather than reusing a shared entity schema.
+
+const oauthBindingTokenStatusSchema = z.enum([
+  "ok",
+  "expiring",
+  "refresh-failed",
+  "revoked",
+  "missing",
+]);
+
+const oauthAuthorizationStatusSchema = z.enum(["active", "refresh-failed", "expired", "revoked"]);
+
+const credentialAuthKindSchema = z.enum(["config", "oauth"]);
+
+const connectionAuthTypeResponseSchema = z.enum(["none", "bearer", "header", "query", "oauth"]);
+
+// DB CHECK constraint on script_connections.kind also allows the legacy 'raw'
+// value (never written via this handler's upsert path, but readable via the
+// list/get routes for rows written elsewhere) — wider than the HTTP-body-only
+// `connectionKindSchema` above.
+const connectionRecordKindSchema = z.enum(["raw", "openapi", "mcp", "graphql"]);
+
+const bindingSummarySchema = z.object({
+  id: z.string(),
+  configKey: z.string(),
+  authKind: credentialAuthKindSchema,
+  oauthAuthorizationId: z.string().optional(),
+  tokenStatus: oauthBindingTokenStatusSchema.optional(),
+});
+
+const connectionAuthSummaryResponseSchema = z.object({
+  type: connectionAuthTypeResponseSchema,
+  configKey: z.string().optional(),
+  authorizationId: z.string().optional(),
+  paramName: z.string().optional(),
+  status: oauthBindingTokenStatusSchema.optional(),
+});
+
+const decoratedConnectionSchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+  displayName: z.string().nullable(),
+  kind: connectionRecordKindSchema,
+  scope: scopeSchema,
+  scopeId: z.string().nullable(),
+  baseUrl: z.string().nullable(),
+  baseUrlSource: z.enum(["user", "spec"]),
+  baseUrlMismatch: z.object({ specUrl: z.string(), effectiveUrl: z.string() }).optional(),
+  allowedHosts: z.array(z.string()),
+  credentialBindingId: z.string().nullable(),
+  authType: connectionAuthTypeResponseSchema,
+  authConfigKey: z.string().nullable(),
+  authAuthorizationId: z.string().nullable(),
+  authParamName: z.string().nullable(),
+  authTemplateOverride: z.string().nullable(),
+  authHostsOverride: z.array(z.string()).nullable(),
+  openapiSpecSourceKind: z.enum(["url", "inline", "agent_fs", "vendored"]).nullable(),
+  openapiSpecSource: z.string().nullable(),
+  openapiSpecEtag: z.string().nullable(),
+  openapiSpecFetchedAt: z.string().nullable(),
+  mcpServerId: z.string().nullable(),
+  generatedAt: z.string().nullable(),
+  generationError: z.string().nullable(),
+  enabled: z.boolean(),
+  version: z.number(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  createdBy: z.string().nullable(),
+  updatedBy: z.string().nullable(),
+  operationCount: z.number(),
+  toolCount: z.number(),
+  credentialBinding: bindingSummarySchema.nullable(),
+  auth: connectionAuthSummaryResponseSchema,
+});
+
+const connectionDetailSchema = decoratedConnectionSchema.extend({
+  operations: z.array(
+    z.object({
+      name: z.string(),
+      method: z.string(),
+      path: z.string(),
+      parameters: z
+        .array(
+          z.object({
+            name: z.string(),
+            in: z.string(),
+            required: z.boolean(),
+            schema: z.unknown().optional(),
+          }),
+        )
+        .optional(),
+      hasBody: z.boolean().optional(),
+      successStatus: z.string().optional(),
+      requestBodySchema: z.unknown().optional(),
+      responseSchema: z.unknown().optional(),
+    }),
+  ),
+  tools: z.array(
+    z.object({
+      name: z.string(),
+      description: z.string().optional(),
+      inputSchema: z.unknown().optional(),
+    }),
+  ),
+  graphql: z.boolean(),
+  generatedTypes: z.string(),
+  specSummary: z
+    .object({
+      title: z.string().optional(),
+      version: z.string().optional(),
+      pathCount: z.number(),
+    })
+    .optional(),
+  specPreview: z.object({ json: z.string(), truncated: z.boolean() }).optional(),
+});
+
+const scriptCredentialBindingRecordSchema = z.object({
+  id: z.string(),
+  configKey: z.string(),
+  allowedHosts: z.array(z.string()),
+  headerTemplate: z.string().optional(),
+  queryTemplate: z.string().optional(),
+  scope: scopeSchema,
+  // ScriptCredentialBindingRecord inherits this from the zod-inferred
+  // CredentialBinding type (`.nullable().optional()`); bindingFromRow always
+  // sets a concrete `string | null` at runtime, but the declared TS type
+  // still allows `undefined`.
+  scopeId: z.string().nullable().optional(),
+  active: z.boolean(),
+  authKind: credentialAuthKindSchema,
+  oauthAuthorizationId: z.string().optional(),
+  source: z.enum(["default", "user", "migration", "connection"]),
+  managedByConnectionId: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  createdBy: z.string().nullable(),
+  updatedBy: z.string().nullable(),
+});
+
+const decoratedBindingSchema = scriptCredentialBindingRecordSchema.extend({
+  tokenStatus: oauthBindingTokenStatusSchema.optional(),
+});
+
+const oauthPresetSchema = z.object({
+  id: z.string(),
+  displayName: z.string(),
+  provider: z.string(),
+  authorizeUrl: z.string(),
+  tokenUrl: z.string(),
+  revocationUrl: z.string().optional(),
+  userinfoUrl: z.string().optional(),
+  scopes: z.array(z.string()),
+  scopeSeparator: z.string().optional(),
+  tokenAuthStyle: z.enum(["body", "basic"]).optional(),
+  tokenBodyFormat: z.enum(["form", "json"]).optional(),
+  requiresRefreshTokenRotation: z.boolean().optional(),
+  extraParams: z.record(z.string(), z.string()).optional(),
+  setupHints: z.array(z.string()),
+});
+
+const sanitizedAuthorizationSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  accountEmail: z.string().nullable(),
+  status: oauthAuthorizationStatusSchema,
+  expiresAt: z.string().nullable(),
+  scope: z.string().nullable(),
+  hasRefreshToken: z.boolean(),
+  lastErrorMessage: z.string().nullable(),
+  lastRefreshedAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+const sanitizedOAuthAppSchema = z.object({
+  id: z.string(),
+  provider: z.string(),
+  clientId: z.string(),
+  authorizeUrl: z.string(),
+  tokenUrl: z.string(),
+  redirectUri: z.string(),
+  scopes: z.array(z.string()),
+  extraParams: z.record(z.string(), z.string()).optional(),
+  tokenAuthStyle: z.enum(["body", "basic"]),
+  tokenBodyFormat: z.enum(["form", "json"]),
+  source: z.string(),
+  tokenStatus: oauthBindingTokenStatusSchema,
+  expiresAt: z.string().nullable(),
+  lastRefreshedAt: z.string().nullable(),
+  authorizations: z.array(sanitizedAuthorizationSchema),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+const integrationsCatalogEntrySchema = z.object({
+  id: z.string(),
+  kind: z.string(),
+  slug: z.string(),
+  name: z.string(),
+  description: z.string(),
+  url: z.string(),
+  icon: z.string().nullable(),
+  domain: z.string(),
+  categories: z.array(z.string()),
+  feeds: z.array(z.string()),
+  vendoredSlug: z.string().optional(),
+  presetId: z.string().optional(),
+});
+
+const integrationsCatalogListSchema = z.object({
+  entries: z.array(integrationsCatalogEntrySchema),
+  cachedAt: z.string(),
+  partial: z.boolean(),
+});
+
+const integrationsSurfaceMechanicsSchema = z.object({
+  in: z.string(),
+  headerName: z.string().nullable(),
+  scheme: z.string().nullable(),
+});
+
+const integrationsSurfaceEntrySchema = z.object({
+  type: z.string(),
+  name: z.string(),
+  url: z.string().nullable(),
+  docs: z.string().nullable(),
+  spec: z.string().nullable(),
+  auth: z.object({
+    required: z.boolean(),
+    credentialIds: z.array(z.string()),
+    mechanics: integrationsSurfaceMechanicsSchema.nullable(),
+  }),
+});
+
+const integrationsSurfaceCredentialSchema = z.object({
+  type: z.string(),
+  label: z.string(),
+  generateUrl: z.string().nullable(),
+  setup: z.string().nullable(),
+});
+
+const integrationsSurfacePayloadSchema = z.object({
+  domain: z.string(),
+  summary: z.string(),
+  surfaces: z.array(integrationsSurfaceEntrySchema),
+  credentials: z.record(z.string(), integrationsSurfaceCredentialSchema),
+});
+
 const listConnectionsRoute = route({
   method: "get",
   path: "/api/script-connections",
@@ -174,7 +425,10 @@ const listConnectionsRoute = route({
   tags: ["Script Connections"],
   query: listConnectionsQuerySchema,
   responses: {
-    200: { description: "Script connections" },
+    200: {
+      description: "Script connections",
+      schema: z.object({ connections: z.array(decoratedConnectionSchema) }),
+    },
     400: { description: "Validation error" },
   },
 });
@@ -188,7 +442,10 @@ const getConnectionRoute = route({
   tags: ["Script Connections"],
   params: idParamsSchema,
   responses: {
-    200: { description: "Script connection detail" },
+    200: {
+      description: "Script connection detail",
+      schema: z.object({ connection: connectionDetailSchema }),
+    },
     404: { description: "Script connection not found" },
   },
 });
@@ -202,7 +459,10 @@ const upsertConnectionRoute = route({
   tags: ["Script Connections"],
   body: upsertConnectionBodySchema,
   responses: {
-    200: { description: "Saved script connection" },
+    200: {
+      description: "Saved script connection",
+      schema: z.object({ connection: decoratedConnectionSchema }),
+    },
     400: { description: "Validation or generation error" },
     403: { description: "Only the lead agent can manage script connections" },
   },
@@ -218,7 +478,10 @@ const refreshConnectionRoute = route({
   tags: ["Script Connections"],
   params: idParamsSchema,
   responses: {
-    200: { description: "Refreshed script connection" },
+    200: {
+      description: "Refreshed script connection",
+      schema: z.object({ connection: decoratedConnectionSchema }),
+    },
     400: { description: "Connection cannot be refreshed" },
     403: { description: "Only the lead agent can manage script connections" },
     404: { description: "Script connection not found" },
@@ -236,7 +499,10 @@ const setConnectionEnabledRoute = route({
   params: idParamsSchema,
   body: disableConnectionBodySchema,
   responses: {
-    200: { description: "Updated script connection" },
+    200: {
+      description: "Updated script connection",
+      schema: z.object({ connection: decoratedConnectionSchema }),
+    },
     403: { description: "Only the lead agent can manage script connections" },
     404: { description: "Script connection not found" },
   },
@@ -254,7 +520,10 @@ const listCredentialBindingsRoute = route({
   tags: ["Script Connections"],
   query: z.object({ includeManaged: z.enum(["true", "false"]).optional() }),
   responses: {
-    200: { description: "Credential bindings" },
+    200: {
+      description: "Credential bindings",
+      schema: z.object({ bindings: z.array(decoratedBindingSchema) }),
+    },
   },
 });
 
@@ -267,7 +536,10 @@ const upsertCredentialBindingRoute = route({
   tags: ["Script Connections"],
   body: credentialBindingBodySchema,
   responses: {
-    200: { description: "Saved credential binding" },
+    200: {
+      description: "Saved credential binding",
+      schema: z.object({ binding: decoratedBindingSchema }),
+    },
     400: { description: "Validation error" },
     403: { description: "Only the lead agent can manage script connections" },
   },
@@ -282,7 +554,10 @@ const listOAuthAppsRoute = route({
   summary: "List OAuth apps for script credential bindings",
   tags: ["Script Connections"],
   responses: {
-    200: { description: "OAuth apps without client secrets" },
+    200: {
+      description: "OAuth apps without client secrets",
+      schema: z.object({ oauthApps: z.array(sanitizedOAuthAppSchema) }),
+    },
   },
 });
 
@@ -296,7 +571,10 @@ const listOAuthPresetsRoute = route({
     "Static curated OAuth presets (endpoints, scopes, quirks, and setup hints). Contains no secrets; client credentials are always customer-supplied.",
   tags: ["Script Connections"],
   responses: {
-    200: { description: "Curated OAuth presets" },
+    200: {
+      description: "Curated OAuth presets",
+      schema: z.object({ presets: z.array(oauthPresetSchema) }),
+    },
   },
 });
 
@@ -309,7 +587,16 @@ const upsertOAuthAppRoute = route({
   tags: ["Script Connections"],
   body: oauthAppBodySchema,
   responses: {
-    200: { description: "Saved OAuth app without client secret" },
+    200: {
+      description: "Saved OAuth app without client secret",
+      schema: z.object({
+        // `.find()` after create/update — always resolves in practice, but the
+        // lookup is not provably total, so this stays honestly optional.
+        oauthApp: sanitizedOAuthAppSchema.optional(),
+        redirectUri: z.string(),
+        setupHints: z.array(z.string()).optional(),
+      }),
+    },
     400: { description: "Validation error" },
     403: { description: "Only the lead agent can manage script connections" },
   },
@@ -325,7 +612,15 @@ const discoverOAuthAppRoute = route({
   tags: ["Script Connections"],
   body: discoverOAuthAppBodySchema,
   responses: {
-    200: { description: "Discovered OAuth metadata" },
+    200: {
+      description: "Discovered OAuth metadata",
+      schema: z.object({
+        authorizeUrl: z.string(),
+        tokenUrl: z.string(),
+        scopes: z.array(z.string()),
+        sourceUrl: z.string(),
+      }),
+    },
     400: { description: "Discovery failed" },
     403: { description: "Only the lead agent can manage script connections" },
   },
@@ -341,7 +636,10 @@ const deleteOAuthAppRoute = route({
   tags: ["Script Connections"],
   params: providerParamsSchema,
   responses: {
-    200: { description: "OAuth app deleted" },
+    200: {
+      description: "OAuth app deleted",
+      schema: z.object({ success: z.literal(true), warnings: z.array(z.string()).optional() }),
+    },
     403: { description: "Only the lead agent can manage script connections" },
     404: { description: "OAuth app not found" },
   },
@@ -373,7 +671,15 @@ const authorizeUrlRoute = route({
   params: oauthResourceIdParamsSchema,
   body: authorizeUrlBodySchema,
   responses: {
-    200: { description: "OAuth authorization URL + state" },
+    200: {
+      description: "OAuth authorization URL + state",
+      schema: z.object({
+        authorizeUrl: z.string(),
+        state: z.string(),
+        label: z.string(),
+        redirectUri: z.string(),
+      }),
+    },
     403: { description: "Only the lead agent can manage OAuth authorizations" },
     404: { description: "OAuth app not found" },
   },
@@ -389,7 +695,10 @@ const listAuthorizationsRoute = route({
   tags: ["Script Connections"],
   params: oauthResourceIdParamsSchema,
   responses: {
-    200: { description: "Authorizations without token material" },
+    200: {
+      description: "Authorizations without token material",
+      schema: z.object({ authorizations: z.array(sanitizedAuthorizationSchema) }),
+    },
     404: { description: "OAuth app not found" },
   },
 });
@@ -403,7 +712,10 @@ const deleteAuthorizationRoute = route({
   tags: ["Script Connections"],
   params: oauthResourceIdParamsSchema,
   responses: {
-    200: { description: "Authorization revoked + deleted" },
+    200: {
+      description: "Authorization revoked + deleted",
+      schema: z.object({ deleted: z.literal(true), revocationAttempted: z.boolean() }),
+    },
     403: { description: "Only the lead agent can manage OAuth authorizations" },
     404: { description: "Authorization not found" },
   },
@@ -419,7 +731,14 @@ const refreshAuthorizationRoute = route({
   tags: ["Script Connections"],
   params: oauthResourceIdParamsSchema,
   responses: {
-    200: { description: "Refresh result with token status and new expiry" },
+    200: {
+      description: "Refresh result with token status and new expiry",
+      schema: z.object({
+        ok: z.literal(true),
+        status: oauthAuthorizationStatusSchema,
+        expiresAt: z.string().nullable(),
+      }),
+    },
     400: { description: "No refresh token stored" },
     403: { description: "Only the lead agent can manage OAuth authorizations" },
     404: { description: "Authorization not found" },
@@ -436,7 +755,7 @@ const integrationsCatalogRoute = route({
   summary: "Proxy integrations.sh catalog entries",
   tags: ["Script Connections"],
   responses: {
-    200: { description: "Integrations catalog entries" },
+    200: { description: "Integrations catalog entries", schema: integrationsCatalogListSchema },
     502: { description: "Catalog upstream unavailable" },
   },
 });
@@ -456,7 +775,10 @@ const integrationsSurfaceRoute = route({
   tags: ["Script Connections"],
   params: z.object({ domain: surfaceDomainSchema }),
   responses: {
-    200: { description: "Trimmed integration surface details for a domain" },
+    200: {
+      description: "Trimmed integration surface details for a domain",
+      schema: integrationsSurfacePayloadSchema,
+    },
     404: { description: "No surface data for this domain" },
     502: { description: "Surface upstream unavailable" },
   },
@@ -472,7 +794,13 @@ const disconnectOAuthAppRoute = route({
   tags: ["Script Connections"],
   params: providerParamsSchema,
   responses: {
-    200: { description: "Disconnect result" },
+    200: {
+      description: "Disconnect result",
+      schema: z.union([
+        z.object({ disconnected: z.literal(false), message: z.string() }),
+        z.object({ disconnected: z.literal(true), revocationAttempted: z.boolean() }),
+      ]),
+    },
     403: { description: "Only the lead agent can manage script connections" },
     404: { description: "OAuth app not found" },
   },
@@ -488,7 +816,14 @@ const refreshOAuthAppTokensRoute = route({
   tags: ["Script Connections"],
   params: providerParamsSchema,
   responses: {
-    200: { description: "Refresh result with token status and new expiry" },
+    200: {
+      description: "Refresh result with token status and new expiry",
+      schema: z.object({
+        refreshed: z.literal(true),
+        tokenStatus: oauthBindingTokenStatusSchema,
+        expiresAt: z.string().nullable(),
+      }),
+    },
     400: { description: "No stored tokens or provider does not support refresh" },
     403: { description: "Only the lead agent can manage script connections" },
     404: { description: "OAuth app not found" },
@@ -1515,7 +1850,7 @@ export async function handleScriptConnections(
   if (listConnectionsRoute.match(req.method, pathSegments)) {
     const parsed = await listConnectionsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    json(res, { connections: listConnections(parsed.query) });
+    listConnectionsRoute.respond(res, 200, { connections: listConnections(parsed.query) });
     return true;
   }
 
@@ -1530,7 +1865,7 @@ export async function handleScriptConnections(
       jsonError(res, "Script connection not found.", 404);
       return true;
     }
-    json(res, { connection: connectionDetail(connection) });
+    getConnectionRoute.respond(res, 200, { connection: connectionDetail(connection) });
     return true;
   }
 
@@ -1646,7 +1981,9 @@ export async function handleScriptConnections(
         userId,
       });
 
-      json(res, { connection: decorateConnections([connection])[0] });
+      upsertConnectionRoute.respond(res, 200, {
+        connection: decorateConnections([connection])[0]!,
+      });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err), 400);
     }
@@ -1667,7 +2004,9 @@ export async function handleScriptConnections(
         jsonError(res, "Script connection not found.", 404);
         return true;
       }
-      json(res, { connection: decorateConnections([refreshed])[0] });
+      refreshConnectionRoute.respond(res, 200, {
+        connection: decorateConnections([refreshed])[0]!,
+      });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err), 400);
     }
@@ -1687,13 +2026,13 @@ export async function handleScriptConnections(
       jsonError(res, "Script connection not found.", 404);
       return true;
     }
-    json(res, { connection: decorateConnections([updated])[0] });
+    setConnectionEnabledRoute.respond(res, 200, { connection: decorateConnections([updated])[0]! });
     return true;
   }
 
   if (listCredentialBindingsRoute.match(req.method, pathSegments)) {
     const includeManaged = queryParams.get("includeManaged") === "true";
-    json(res, {
+    listCredentialBindingsRoute.respond(res, 200, {
       bindings: listRelationalCredentialBindings({
         includeInactive: true,
         excludeManaged: !includeManaged,
@@ -1748,7 +2087,7 @@ export async function handleScriptConnections(
         oauthAuthorizationId: nextBinding.oauthAuthorizationId ?? null,
         userId: resolveHttpAuditUserId(req, agentId),
       });
-      json(res, { binding: decorateBinding(binding) });
+      upsertCredentialBindingRoute.respond(res, 200, { binding: decorateBinding(binding) });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err), 400);
     }
@@ -1756,12 +2095,12 @@ export async function handleScriptConnections(
   }
 
   if (listOAuthPresetsRoute.match(req.method, pathSegments)) {
-    json(res, { presets: listOAuthPresets() });
+    listOAuthPresetsRoute.respond(res, 200, { presets: listOAuthPresets() });
     return true;
   }
 
   if (listOAuthAppsRoute.match(req.method, pathSegments)) {
-    json(res, { oauthApps: listOAuthApps() });
+    listOAuthAppsRoute.respond(res, 200, { oauthApps: listOAuthApps() });
     return true;
   }
 
@@ -1869,7 +2208,7 @@ export async function handleScriptConnections(
         savedId = createOAuthApp(provider, appData);
       }
       const app = listOAuthApps().find((row) => row.id === savedId);
-      json(res, {
+      upsertOAuthAppRoute.respond(res, 200, {
         oauthApp: app,
         redirectUri,
         ...(hydrated ? { setupHints: hydrated.setupHints } : {}),
@@ -1886,7 +2225,7 @@ export async function handleScriptConnections(
     if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
     try {
       const discovered = await discoverOAuthApp(parsed.body.url);
-      json(res, discovered);
+      discoverOAuthAppRoute.respond(res, 200, discovered);
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err), 400);
     }
@@ -1902,7 +2241,7 @@ export async function handleScriptConnections(
       jsonError(res, `OAuth app ${parsed.params.provider} not found.`, 404);
       return true;
     }
-    json(res, {
+    deleteOAuthAppRoute.respond(res, 200, {
       success: true,
       ...(deletion.warnings.length > 0 ? { warnings: deletion.warnings } : {}),
     });
@@ -1917,7 +2256,7 @@ export async function handleScriptConnections(
       jsonError(res, `OAuth app ${parsed.params.id} not found.`, 404);
       return true;
     }
-    json(res, {
+    listAuthorizationsRoute.respond(res, 200, {
       authorizations: listAuthorizationsForApp(app.id).map(sanitizeAuthorization),
     });
     return true;
@@ -1944,7 +2283,7 @@ export async function handleScriptConnections(
         ...(parsed.body?.finalRedirect ? { finalRedirect: parsed.body.finalRedirect } : {}),
         userId: resolveHttpAuditUserId(req, agentId),
       });
-      json(res, {
+      authorizeUrlRoute.respond(res, 200, {
         authorizeUrl: result.url,
         state: result.state,
         label,
@@ -1972,7 +2311,7 @@ export async function handleScriptConnections(
       revocationAttempted = await attemptRemoteRevocation(app, authorization.accessToken);
     }
     deleteAuthorizationById(authorization.id);
-    json(res, { deleted: true, revocationAttempted });
+    deleteAuthorizationRoute.respond(res, 200, { deleted: true, revocationAttempted });
     return true;
   }
 
@@ -2024,21 +2363,25 @@ export async function handleScriptConnections(
       jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
       return true;
     }
-    json(res, { ok: true, status: refreshed.status, expiresAt: refreshed.expiresAt });
+    refreshAuthorizationRoute.respond(res, 200, {
+      ok: true,
+      status: refreshed.status,
+      expiresAt: refreshed.expiresAt,
+    });
     return true;
   }
 
   if (integrationsCatalogRoute.match(req.method, pathSegments)) {
     try {
       const catalog = await fetchIntegrationsCatalog();
-      json(res, {
+      integrationsCatalogRoute.respond(res, 200, {
         ...catalog,
         entries: mergeBlessedCatalogEntries(catalog.entries),
         partial: false,
       });
     } catch (err) {
       if (BLESSED_CATALOG_ENTRIES.length > 0) {
-        json(res, {
+        integrationsCatalogRoute.respond(res, 200, {
           entries: BLESSED_CATALOG_ENTRIES,
           cachedAt: new Date().toISOString(),
           partial: true,
@@ -2058,7 +2401,11 @@ export async function handleScriptConnections(
     const parsed = await integrationsSurfaceRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {
-      json(res, await fetchIntegrationsSurface(parsed.params.domain));
+      integrationsSurfaceRoute.respond(
+        res,
+        200,
+        await fetchIntegrationsSurface(parsed.params.domain),
+      );
     } catch (err) {
       if (err instanceof SurfaceNotFoundError) {
         jsonError(res, err.message, 404);
@@ -2085,12 +2432,15 @@ export async function handleScriptConnections(
     }
     const tokens = getOAuthTokens(parsed.params.provider);
     if (!tokens) {
-      json(res, { disconnected: false, message: "no stored tokens" });
+      disconnectOAuthAppRoute.respond(res, 200, {
+        disconnected: false,
+        message: "no stored tokens",
+      });
       return true;
     }
     const revocationAttempted = await attemptRemoteRevocation(app, tokens.accessToken);
     deleteOAuthTokens(parsed.params.provider);
-    json(res, { disconnected: true, revocationAttempted });
+    disconnectOAuthAppRoute.respond(res, 200, { disconnected: true, revocationAttempted });
     return true;
   }
 
@@ -2126,7 +2476,7 @@ export async function handleScriptConnections(
       return true;
     }
 
-    json(res, {
+    refreshOAuthAppTokensRoute.respond(res, 200, {
       refreshed: true,
       tokenStatus: getOAuthBindingTokenStatus(tokens.id),
       expiresAt: getOAuthTokens(provider)?.expiresAt ?? null,

@@ -1,10 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { listFavorites as listFavoriteRows, setFavorite } from "../be/db";
-import { FavoriteItemTypeSchema } from "../types";
+import { FavoriteItemTypeSchema, UserFavoriteSchema } from "../types";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 const listFavorites = route({
   method: "get",
@@ -17,7 +17,13 @@ const listFavorites = route({
     itemIds: z.string().optional(),
   }),
   responses: {
-    200: { description: "Favorite rows and favorite item ids" },
+    200: {
+      description: "Favorite rows and favorite item ids",
+      schema: z.object({
+        favorites: z.array(UserFavoriteSchema),
+        favoriteIds: z.array(z.string()),
+      }),
+    },
     401: { description: "No authenticated principal context" },
   },
 });
@@ -35,7 +41,15 @@ const putFavorite = route({
     favorite: z.boolean(),
   }),
   responses: {
-    200: { description: "Favorite state" },
+    200: {
+      description: "Favorite state",
+      schema: z.object({
+        favorite: z.boolean(),
+        itemType: FavoriteItemTypeSchema,
+        itemId: z.string(),
+        row: UserFavoriteSchema.nullable(),
+      }),
+    },
     401: { description: "No authenticated principal context" },
   },
 });
@@ -64,7 +78,7 @@ export async function handleFavorites(
       itemType: parsed.query.itemType,
       itemIds,
     });
-    json(res, {
+    listFavorites.respond(res, 200, {
       favorites,
       favoriteIds: favorites.map((favorite) => favorite.itemId),
     });
@@ -87,7 +101,7 @@ export async function handleFavorites(
       favorite: parsed.body.favorite,
       actorId: owner.actorId,
     });
-    json(res, {
+    putFavorite.respond(res, 200, {
       favorite: parsed.body.favorite,
       itemType: parsed.body.itemType,
       itemId: parsed.body.itemId,

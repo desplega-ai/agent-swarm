@@ -1,13 +1,17 @@
-import {
-  extendZodWithOpenApi,
-  OpenAPIRegistry,
-  OpenApiGeneratorV31,
-} from "@asteasolutions/zod-to-openapi";
-import { z } from "zod";
+import { OpenAPIRegistry, OpenApiGeneratorV31 } from "@asteasolutions/zod-to-openapi";
 import { getPublicMcpBaseUrl } from "../utils/constants";
+import { z } from "../utils/zod-openapi";
 import { routeRegistry } from "./route-def";
 
-extendZodWithOpenApi(z);
+/**
+ * Default component for 4xx/5xx responses that declare no schema of their own:
+ * the `jsonError()` envelope every error path emits. Loose because a few
+ * handlers attach extra diagnostic fields (e.g. TriggerSchemaError's
+ * `message`/`details`) — those may declare an explicit schema instead.
+ */
+const ErrorResponseSchema = z
+  .looseObject({ error: z.string() })
+  .openapi("ErrorResponse", { description: "Standard error envelope" });
 
 let cachedSpec: string | null = null;
 
@@ -43,11 +47,16 @@ export function generateOpenApiSpec(opts: OpenApiOptions): string {
       { description: string; content?: Record<string, { schema: z.ZodType }> }
     > = {};
     for (const [code, resDef] of Object.entries(routeDef.responses)) {
+      const schema =
+        resDef.schema ??
+        // Untyped error responses default to the shared jsonError envelope;
+        // `unstructured` (non-JSON body) opts out.
+        (Number(code) >= 400 && !resDef.unstructured ? ErrorResponseSchema : undefined);
       responses[code] = {
         description: resDef.description,
-        ...(resDef.schema && {
+        ...(schema && {
           content: {
-            "application/json": { schema: resDef.schema },
+            "application/json": { schema },
           },
         }),
       };
@@ -77,6 +86,42 @@ export function generateOpenApiSpec(opts: OpenApiOptions): string {
 
   const serverUrl = opts.serverUrl || getPublicMcpBaseUrl();
 
+  /**
+   * zod-to-openapi emits `.nullable()` on an `.extend()`ed (or `$ref`ed)
+   * schema as `allOf: [{$ref}, {type: ["object","null"], ...delta}]` — an
+   * allOf member allowing null is semantically wrong (the intersection with
+   * the non-null base can never be null), and TS-definition generators
+   * (fumadocs-openapi) collapse it to `never`. Rewrite to the intended
+   * `anyOf: [<intersection>, {type: "null"}]`.
+   */
+  function fixNullableAllOf(node: unknown): void {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const item of node) fixNullableAllOf(item);
+      return;
+    }
+    const obj = node as Record<string, unknown>;
+    const allOf = obj.allOf;
+    if (Array.isArray(allOf)) {
+      let hadNull = false;
+      for (const member of allOf) {
+        if (member && Array.isArray(member.type) && member.type.includes("null")) {
+          hadNull = true;
+          const rest = member.type.filter((t: string) => t !== "null");
+          member.type = rest.length === 1 ? rest[0] : rest;
+        }
+      }
+      if (hadNull) {
+        // Drop members reduced to a bare `{type: "object"}` (no constraints left).
+        const members = allOf.filter((m) => !(Object.keys(m).length === 1 && m.type === "object"));
+        const intersection = members.length === 1 ? members[0] : { allOf: members };
+        delete obj.allOf;
+        obj.anyOf = [intersection, { type: "null" }];
+      }
+    }
+    for (const value of Object.values(obj)) fixNullableAllOf(value);
+  }
+
   const generator = new OpenApiGeneratorV31(registry.definitions);
   const doc = generator.generateDocument({
     openapi: "3.1.0",
@@ -95,6 +140,9 @@ export function generateOpenApiSpec(opts: OpenApiOptions): string {
       },
     ],
   });
+
+  fixNullableAllOf(doc.paths);
+  fixNullableAllOf(doc.components);
 
   cachedSpec = JSON.stringify(doc, null, 2);
   return cachedSpec;

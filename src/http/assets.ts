@@ -12,10 +12,39 @@ import {
   upsertAssetKeyMapping,
 } from "../be/db";
 import { can, type RbacPrincipal, type RbacResource } from "../rbac";
-import { type AssetEntityType, AssetEntityTypeSchema, AssetKeySchema } from "../types";
+import {
+  type AssetEntityType,
+  AssetEntityTypeSchema,
+  AssetKeyMappingSchema,
+  AssetKeySchema,
+  AssetSummarySchema,
+} from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
+
+const AssetKeyAuditIssueSchema = z.object({
+  severity: z.enum(["fatal", "warning"]),
+  code: z.enum([
+    "missing-key",
+    "noncanonical-key",
+    "unknown-personal-user",
+    "missing-provider-mapping",
+    "provider-mapping-drift",
+  ]),
+  entityType: AssetEntityTypeSchema,
+  entityId: z.string(),
+  message: z.string(),
+});
+
+const AssetKeyAuditResultSchema = z.object({
+  ok: z.boolean(),
+  structuralValid: z.boolean(),
+  checked: z.number().int().min(0),
+  fatalCount: z.number().int().min(0),
+  warningCount: z.number().int().min(0),
+  issues: z.array(AssetKeyAuditIssueSchema),
+});
 
 const keyAuditRoute = route({
   method: "get",
@@ -26,7 +55,7 @@ const keyAuditRoute = route({
     "Operator-only check for structural key validity, personal-user references, and logical provider mapping drift. Repeated logical keys are valid and are never reported as conflicts.",
   tags: ["Assets"],
   responses: {
-    200: { description: "Asset namespace audit result" },
+    200: { description: "Asset namespace audit result", schema: AssetKeyAuditResultSchema },
     403: { description: "Operator access required" },
   },
 });
@@ -45,7 +74,10 @@ const listAssetsRoute = route({
     limit: z.coerce.number().int().min(1).max(1000).optional(),
   }),
   responses: {
-    200: { description: "Lightweight asset summary list" },
+    200: {
+      description: "Lightweight asset summary list",
+      schema: z.object({ assets: z.array(AssetSummarySchema), count: z.number().int() }),
+    },
     400: { description: "Invalid entity type" },
   },
 });
@@ -66,7 +98,7 @@ const registerMappingRoute = route({
     key: AssetKeySchema.optional(),
   }),
   responses: {
-    200: { description: "Mapping registered" },
+    200: { description: "Mapping registered", schema: AssetKeyMappingSchema },
     400: { description: "Invalid provider tuple or namespace" },
     403: { description: "Operator access required or personal namespace not authorized" },
   },
@@ -92,7 +124,14 @@ const moveAssetRoute = route({
   params: z.object({ entityType: AssetEntityTypeSchema, id: z.string().min(1) }),
   body: z.object({ key: AssetKeySchema }),
   responses: {
-    200: { description: "Asset namespace updated" },
+    200: {
+      description: "Asset namespace updated",
+      schema: z.object({
+        entityType: AssetEntityTypeSchema,
+        id: z.string(),
+        key: AssetKeySchema,
+      }),
+    },
     400: { description: "Invalid namespace" },
     403: { description: "Move not authorized" },
     404: { description: "Asset not found" },
@@ -140,7 +179,7 @@ export async function handleAssets(
     const parsed = await keyAuditRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!ensureOperator(req, res)) return true;
-    json(res, auditAssetKeys(getDb()));
+    keyAuditRoute.respond(res, 200, auditAssetKeys(getDb()));
     return true;
   }
 
@@ -162,7 +201,7 @@ export async function handleAssets(
       types: types.length > 0 ? types : undefined,
       limit: parsed.query.limit,
     });
-    json(res, { assets, count: assets.length });
+    listAssetsRoute.respond(res, 200, { assets, count: assets.length });
     return true;
   }
 
@@ -182,7 +221,7 @@ export async function handleAssets(
         createdBy: actor ?? undefined,
         updatedBy: actor ?? undefined,
       });
-      json(res, mapping);
+      registerMappingRoute.respond(res, 200, mapping);
     } catch (error) {
       if (error instanceof AssetKeyAuthorizationError) {
         jsonError(res, error.message, error.statusCode);
@@ -222,7 +261,11 @@ export async function handleAssets(
         jsonError(res, "Asset not found", 404);
         return true;
       }
-      json(res, { entityType: parsed.params.entityType, id: parsed.params.id, key });
+      moveAssetRoute.respond(res, 200, {
+        entityType: parsed.params.entityType,
+        id: parsed.params.id,
+        key,
+      });
     } catch (error) {
       if (error instanceof AssetKeyAuthorizationError) {
         jsonError(res, error.message, error.statusCode);

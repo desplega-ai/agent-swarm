@@ -1,7 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
 import { checkHeartbeatChecklist, runHeartbeatSweep } from "../heartbeat/heartbeat";
 import { route } from "./route-def";
 import { json } from "./utils";
+
+// ─── Response schemas ───────────────────────────────────────────────────────
+
+const HeartbeatActionResultSchema = z.object({
+  success: z.literal(true),
+  message: z.string(),
+});
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -12,7 +20,7 @@ const triggerSweep = route({
   summary: "Trigger an immediate heartbeat sweep",
   tags: ["Heartbeat"],
   responses: {
-    200: { description: "Sweep completed successfully" },
+    200: { description: "Sweep completed successfully", schema: HeartbeatActionResultSchema },
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
@@ -25,7 +33,10 @@ const triggerChecklist = route({
   summary: "Trigger an immediate heartbeat checklist check",
   tags: ["Heartbeat"],
   responses: {
-    200: { description: "Checklist check completed successfully" },
+    200: {
+      description: "Checklist check completed successfully",
+      schema: HeartbeatActionResultSchema,
+    },
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
@@ -44,7 +55,7 @@ export async function handleHeartbeat(
 
     try {
       await runHeartbeatSweep();
-      json(res, { success: true, message: "Heartbeat sweep completed" });
+      triggerSweep.respond(res, 200, { success: true, message: "Heartbeat sweep completed" });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error during heartbeat sweep";
       json(res, { success: false, error: message }, 500);
@@ -58,7 +69,10 @@ export async function handleHeartbeat(
 
     try {
       await checkHeartbeatChecklist();
-      json(res, { success: true, message: "Heartbeat checklist check completed" });
+      triggerChecklist.respond(res, 200, {
+        success: true,
+        message: "Heartbeat checklist check completed",
+      });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Unknown error during heartbeat checklist check";

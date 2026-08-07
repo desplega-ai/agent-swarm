@@ -2,8 +2,69 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { countSessions, getRootTaskChain, getTaskById, listRecentSessions } from "../be/db";
 import { getTaskSteeringFields } from "../be/steering";
+import { AgentTaskSchema, AgentTaskStatusSchema, SteerModeSchema } from "../types";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
+
+// ─── Response Schemas ────────────────────────────────────────────────────────
+
+/**
+ * `/api/sessions` list item's `root` when slim (default) — mirrors the
+ * `AgentTaskSummary` TS type in ../types: the `task` text truncated to a
+ * bounded preview and completion/integration/context blobs dropped. Kept in
+ * lock-step with that type's `Pick<...>` field list (mirrors the sibling
+ * definition in src/http/tasks.ts — not imported from there since it isn't
+ * exported).
+ */
+const AgentTaskSummarySchema = AgentTaskSchema.pick({
+  id: true,
+  key: true,
+  agentId: true,
+  creatorAgentId: true,
+  task: true,
+  title: true,
+  status: true,
+  source: true,
+  taskType: true,
+  tags: true,
+  priority: true,
+  dependsOn: true,
+  offeredTo: true,
+  acceptedAt: true,
+  parentTaskId: true,
+  scheduleId: true,
+  model: true,
+  modelTier: true,
+  effort: true,
+  provider: true,
+  requestedByUserId: true,
+  progress: true,
+  createdAt: true,
+  lastUpdatedAt: true,
+  finishedAt: true,
+  peakContextPercent: true,
+  totalCostUsd: true,
+});
+
+/**
+ * A `/api/sessions` list item. `root` is a full `AgentTask` when
+ * `?fields=full`, an `AgentTaskSummary` otherwise (default).
+ */
+const SessionListItemSchema = z.object({
+  root: z.union([AgentTaskSchema, AgentTaskSummarySchema]),
+  chainTaskCount: z.number().int(),
+  lastActivityAt: z.string(),
+  latestStatus: AgentTaskStatusSchema,
+});
+
+/**
+ * A full `AgentTask` decorated with `getTaskSteeringFields` — the shape of
+ * `root` and each `chain` entry on `GET /api/sessions/{rootTaskId}`.
+ */
+const TaskWithSteeringSchema = AgentTaskSchema.extend({
+  isLeadTask: z.boolean(),
+  supportedSteerModes: z.array(SteerModeSchema),
+});
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -32,7 +93,15 @@ const listSessions = route({
     fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
-    200: { description: "Recent sessions ordered by chain-wide last activity" },
+    200: {
+      description: "Recent sessions ordered by chain-wide last activity",
+      schema: z.object({
+        sessions: z.array(SessionListItemSchema),
+        total: z.number().int(),
+        limit: z.number().int(),
+        offset: z.number().int(),
+      }),
+    },
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
@@ -46,7 +115,13 @@ const getSession = route({
   tags: ["Sessions"],
   params: z.object({ rootTaskId: z.string() }),
   responses: {
-    200: { description: "Root task + chain (ordered by createdAt)" },
+    200: {
+      description: "Root task + chain (ordered by createdAt)",
+      schema: z.object({
+        root: TaskWithSteeringSchema,
+        chain: z.array(TaskWithSteeringSchema),
+      }),
+    },
     401: { description: "Unauthorized" },
     404: { description: "Root task not found" },
   },
@@ -89,7 +164,7 @@ export async function handleSessions(
       q: parsed.query.q,
       requestedByUserId: parsed.query.requestedByUserId,
     });
-    json(res, {
+    listSessions.respond(res, 200, {
       sessions,
       total,
       limit: parsed.query.limit ?? 25,
@@ -107,7 +182,7 @@ export async function handleSessions(
       return true;
     }
     const chain = getRootTaskChain(parsed.params.rootTaskId);
-    json(res, {
+    getSession.respond(res, 200, {
       root: { ...root, ...getTaskSteeringFields(root) },
       chain: chain.map((task) => ({ ...task, ...getTaskSteeringFields(task) })),
     });

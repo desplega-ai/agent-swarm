@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getWorkflowRun } from "../be/db";
 import { workflowEventBus } from "../workflows/event-bus";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -30,7 +30,14 @@ const runScopedSignalRoute = route({
     payload: z.record(z.string(), z.unknown()).optional(),
   }),
   responses: {
-    200: { description: "Event emitted" },
+    200: {
+      description: "Event emitted",
+      schema: z.object({
+        ok: z.literal(true),
+        name: z.string(),
+        runId: z.string(),
+      }),
+    },
     404: { description: "Workflow run not found" },
     400: { description: "Validation error" },
   },
@@ -56,7 +63,13 @@ const globalSignalRoute = route({
     payload: z.record(z.string(), z.unknown()).optional(),
   }),
   responses: {
-    200: { description: "Event emitted" },
+    200: {
+      description: "Event emitted",
+      schema: z.object({
+        ok: z.literal(true),
+        name: z.string(),
+      }),
+    },
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
@@ -84,7 +97,7 @@ export async function handleWorkflowEvents(
     const payload = { ...(parsed.body.payload ?? {}), _runId: parsed.params.runId };
     workflowEventBus.emit(parsed.body.name, payload);
 
-    json(res, {
+    runScopedSignalRoute.respond(res, 200, {
       ok: true,
       name: parsed.body.name,
       runId: parsed.params.runId,
@@ -99,7 +112,7 @@ export async function handleWorkflowEvents(
 
     workflowEventBus.emit(parsed.body.name, parsed.body.payload ?? {});
 
-    json(res, { ok: true, name: parsed.body.name });
+    globalSignalRoute.respond(res, 200, { ok: true, name: parsed.body.name });
     return true;
   }
 

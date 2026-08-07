@@ -44,7 +44,9 @@ import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
 import { createResumeFollowUp, createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
 import {
+  AgentLogSchema,
   type AgentTask,
+  AgentTaskSchema,
   type AgentTaskSource,
   AgentTaskSourceSchema,
   type AgentTaskStatus,
@@ -56,14 +58,106 @@ import {
   ProviderNameSchema,
   ReasoningEffortSchema,
   ResumeReasonSchema,
+  SteeringMessageSchema,
   SteeringSourceSchema,
   SteerModeSchema,
+  SteerResultSchema,
   splitLegacyModelAlias,
+  TaskAttachmentSchema,
 } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
-import { json, jsonError, parseBody } from "./utils";
+import { jsonError, parseBody } from "./utils";
+
+// ─── Response Schemas ────────────────────────────────────────────────────────
+
+/**
+ * `/api/tasks` + `/api/sessions` list item shape — mirrors the `AgentTaskSummary`
+ * TS type in ../types (a strict field subset of `AgentTask`): the `task` text
+ * truncated to a bounded preview and completion/integration/context blobs
+ * dropped. Kept in lock-step with that type's `Pick<...>` field list.
+ */
+const AgentTaskSummarySchema = AgentTaskSchema.pick({
+  id: true,
+  key: true,
+  agentId: true,
+  creatorAgentId: true,
+  task: true,
+  title: true,
+  status: true,
+  source: true,
+  taskType: true,
+  tags: true,
+  priority: true,
+  dependsOn: true,
+  offeredTo: true,
+  acceptedAt: true,
+  parentTaskId: true,
+  scheduleId: true,
+  model: true,
+  modelTier: true,
+  effort: true,
+  provider: true,
+  requestedByUserId: true,
+  progress: true,
+  createdAt: true,
+  lastUpdatedAt: true,
+  finishedAt: true,
+  peakContextPercent: true,
+  totalCostUsd: true,
+});
+
+/** Shared by cancel/pause/resume — each sends `{ success: true, task }` on success. */
+const TaskActionResultSchema = z.object({
+  success: z.literal(true),
+  task: AgentTaskSchema,
+});
+
+/** Shared by the steering-message delivered/handled callbacks — `{ message }`. */
+const SteeringMessageEnvelopeSchema = z.object({ message: SteeringMessageSchema });
+
+/** Shared by the steering-message list routes — `{ messages }`. */
+const SteeringMessagesListSchema = z.object({ messages: z.array(SteeringMessageSchema) });
+
+/** `POST /api/steering-messages/{id}/undeliverable` — promotion result. */
+const SteeringUndeliverableResponseSchema = z.object({
+  message: SteeringMessageSchema,
+  promotedTaskId: z.string().optional(),
+});
+
+/** `GET /api/tasks/{id}` — full task decorated with steering + logs + attachments. */
+const GetTaskResponseSchema = AgentTaskSchema.extend({
+  isLeadTask: z.boolean(),
+  supportedSteerModes: z.array(SteerModeSchema),
+  logs: z.array(AgentLogSchema),
+  attachments: z.array(TaskAttachmentSchema),
+});
+
+const FinishTaskSuccessSchema = z.object({
+  success: z.literal(true),
+  alreadyFinished: z.boolean(),
+  task: AgentTaskSchema,
+  message: z.string().optional(),
+  wasNoOp: z.literal(true).optional(),
+  wasForcedOverwrite: z.literal(true).optional(),
+});
+
+const FinishTaskConflictSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
+  task: AgentTaskSchema,
+  alreadyFinished: z.literal(true),
+  error: z.string(),
+});
+
+const SupersedeTaskResponseSchema = z.object({
+  success: z.literal(true),
+  kind: z.enum(["alreadyFinished", "workflow-failed", "resumed"]),
+  task: AgentTaskSchema.nullable(),
+  resumeTaskId: z.string().nullable(),
+  resumeTaskStatus: AgentTaskStatusSchema.optional(),
+});
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -104,7 +198,13 @@ const listTasks = route({
     fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
-    200: { description: "Paginated task list" },
+    200: {
+      description: "Paginated task list",
+      schema: z.object({
+        tasks: z.union([z.array(AgentTaskSchema), z.array(AgentTaskSummarySchema)]),
+        total: z.number().int(),
+      }),
+    },
     400: { description: "Validation error (e.g. unknown status token)" },
   },
 });
@@ -135,7 +235,7 @@ const createTask = route({
     effort: ReasoningEffortSchema.optional(),
   }),
   responses: {
-    201: { description: "Task created" },
+    201: { description: "Task created", schema: AgentTaskSchema },
     400: { description: "Validation error" },
   },
 });
@@ -168,7 +268,7 @@ const updateSession = route({
     }),
   ]),
   responses: {
-    200: { description: "Session ID updated" },
+    200: { description: "Session ID updated", schema: AgentTaskSchema },
     404: { description: "Task not found" },
   },
 });
@@ -181,7 +281,7 @@ const cancelTaskRoute = route({
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Task cancelled" },
+    200: { description: "Task cancelled", schema: TaskActionResultSchema },
     400: { description: "Cannot cancel terminal task" },
     404: { description: "Task not found" },
   },
@@ -206,7 +306,10 @@ const steerTaskRoute = route({
   }),
   rbac: { permission: "task.steer.own" },
   responses: {
-    200: { description: "Steering accepted (see `outcome` for what actually happened)" },
+    200: {
+      description: "Steering accepted (see `outcome` for what actually happened)",
+      schema: SteerResultSchema,
+    },
     400: { description: "Validation error" },
     403: { description: "Caller cannot steer this task" },
     404: { description: "Task not found" },
@@ -224,7 +327,7 @@ const getTaskSteeringMessagesRoute = route({
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Steering messages" },
+    200: { description: "Steering messages", schema: SteeringMessagesListSchema },
     404: { description: "Task not found" },
   },
 });
@@ -238,7 +341,7 @@ const getPendingSteeringMessagesRoute = route({
   query: z.object({ taskId: z.string().optional() }),
   auth: { apiKey: true, agentId: true },
   responses: {
-    200: { description: "Pending steering messages" },
+    200: { description: "Pending steering messages", schema: SteeringMessagesListSchema },
     400: { description: "Missing X-Agent-ID header" },
     404: { description: "Agent not found" },
   },
@@ -258,7 +361,10 @@ const markSteeringDeliveredRoute = route({
       "worker callback scoped by required X-Agent-ID and verified against the steering message task assignee",
   },
   responses: {
-    200: { description: "Steering message delivery recorded" },
+    200: {
+      description: "Steering message delivery recorded",
+      schema: SteeringMessageEnvelopeSchema,
+    },
     400: { description: "Missing X-Agent-ID header or validation error" },
     403: { description: "Steering message task is assigned to another agent" },
     404: { description: "Agent or steering message not found" },
@@ -280,7 +386,10 @@ const markSteeringHandledRoute = route({
       "worker acknowledgement scoped by required X-Agent-ID and verified against the steering message task assignee",
   },
   responses: {
-    200: { description: "Steering message acknowledgement recorded" },
+    200: {
+      description: "Steering message acknowledgement recorded",
+      schema: SteeringMessageEnvelopeSchema,
+    },
     400: { description: "Missing X-Agent-ID header or validation error" },
     403: { description: "Steering message task is assigned to another agent" },
     404: { description: "Agent or steering message not found" },
@@ -301,7 +410,10 @@ const markSteeringUndeliverableRoute = route({
       "worker callback scoped by required X-Agent-ID and verified against the steering message task assignee",
   },
   responses: {
-    200: { description: "Steering message promoted to a follow-up task" },
+    200: {
+      description: "Steering message promoted to a follow-up task",
+      schema: SteeringUndeliverableResponseSchema,
+    },
     400: { description: "Missing X-Agent-ID header or validation error" },
     403: { description: "Steering message task is assigned to another agent" },
     404: { description: "Agent or steering message not found" },
@@ -322,7 +434,7 @@ const getTask = route({
     logsLimit: z.coerce.number().int().min(1).max(1000).optional(),
   }),
   responses: {
-    200: { description: "Task with logs and attachments" },
+    200: { description: "Task with logs and attachments", schema: GetTaskResponseSchema },
     404: { description: "Task not found" },
   },
 });
@@ -336,7 +448,7 @@ const updateTaskProgressRoute = route({
   params: z.object({ id: z.string() }),
   body: z.object({ progress: z.string().min(1) }),
   responses: {
-    200: { description: "Progress updated" },
+    200: { description: "Progress updated", schema: z.object({ success: z.literal(true) }) },
     404: { description: "Task not found" },
   },
 });
@@ -356,11 +468,14 @@ const finishTask = route({
   }),
   auth: { apiKey: true, agentId: true },
   responses: {
-    200: { description: "Task finished" },
+    200: { description: "Task finished", schema: FinishTaskSuccessSchema },
     400: { description: "Invalid status" },
     403: { description: "Not assigned to this agent" },
     404: { description: "Task not found" },
-    409: { description: "Differing terminal result text was discarded" },
+    409: {
+      description: "Differing terminal result text was discarded",
+      schema: FinishTaskConflictSchema,
+    },
   },
 });
 
@@ -372,7 +487,10 @@ const listPausedTasks = route({
   tags: ["Tasks"],
   auth: { apiKey: true, agentId: true },
   responses: {
-    200: { description: "Paused task list" },
+    200: {
+      description: "Paused task list",
+      schema: z.object({ tasks: z.array(AgentTaskSchema) }),
+    },
   },
 });
 
@@ -384,7 +502,7 @@ const pauseTaskRoute = route({
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Task paused" },
+    200: { description: "Task paused", schema: TaskActionResultSchema },
     400: { description: "Task not in_progress" },
     403: { description: "Task belongs to another agent" },
     404: { description: "Task not found" },
@@ -399,7 +517,7 @@ const resumeTaskRoute = route({
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Task resumed" },
+    200: { description: "Task resumed", schema: TaskActionResultSchema },
     400: { description: "Task not paused" },
     403: { description: "Task belongs to another agent" },
     404: { description: "Task not found" },
@@ -418,7 +536,10 @@ const supersedeTaskRoute = route({
   body: z.object({ reason: ResumeReasonSchema }),
   auth: { apiKey: true, agentId: true },
   responses: {
-    200: { description: "Task superseded (or workflow-failed)" },
+    200: {
+      description: "Task superseded (or workflow-failed)",
+      schema: SupersedeTaskResponseSchema,
+    },
     400: { description: "Task not in_progress" },
     403: { description: "Task belongs to another agent" },
     404: { description: "Task not found" },
@@ -439,7 +560,7 @@ const updateTaskVcsRoute = route({
     vcsUrl: z.string().url(),
   }),
   responses: {
-    200: { description: "VCS info updated" },
+    200: { description: "VCS info updated", schema: AgentTaskSchema },
     404: { description: "Task not found" },
   },
   auth: { apiKey: true },
@@ -458,7 +579,7 @@ const updateTaskTitleRoute = route({
     title: z.string().trim().max(120).nullable(),
   }),
   responses: {
-    200: { description: "Title updated" },
+    200: { description: "Title updated", schema: z.object({ task: AgentTaskSchema }) },
     404: { description: "Task not found" },
   },
   auth: { apiKey: true },
@@ -576,7 +697,7 @@ export async function handleTasks(
     const tasks =
       parsed.query.fields === "full" ? getAllTasks(filters) : getAllTasks(filters, { slim: true });
     const total = getTasksCount(filters);
-    json(res, { tasks, total });
+    listTasks.respond(res, 200, { tasks, total });
     return true;
   }
 
@@ -671,7 +792,7 @@ export async function handleTasks(
         },
       });
 
-      json(res, task, 201);
+      createTask.respond(res, 201, task);
     } catch (error) {
       console.error("[HTTP] Failed to create task:", error);
       jsonError(res, "Failed to create task", 500);
@@ -695,7 +816,7 @@ export async function handleTasks(
       jsonError(res, "Task not found", 404);
       return true;
     }
-    json(res, task);
+    updateSession.respond(res, 200, task);
     return true;
   }
 
@@ -783,7 +904,7 @@ export async function handleTasks(
       updateAgentStatusFromCapacity(task.agentId);
     }
 
-    json(res, { success: true, task: cancelledTask });
+    cancelTaskRoute.respond(res, 200, { success: true, task: cancelledTask });
     return true;
   }
 
@@ -830,7 +951,7 @@ export async function handleTasks(
         createdByAgentId,
         createdByUserId: requestedByUserId,
       });
-      json(res, result);
+      steerTaskRoute.respond(res, 200, result);
     } catch (error) {
       if (error instanceof SteeringRequestError) {
         jsonError(res, error.message, error.statusCode);
@@ -849,7 +970,9 @@ export async function handleTasks(
       jsonError(res, "Task not found", 404);
       return true;
     }
-    json(res, { messages: getSteeringMessagesForTask(parsed.params.id) });
+    getTaskSteeringMessagesRoute.respond(res, 200, {
+      messages: getSteeringMessagesForTask(parsed.params.id),
+    });
     return true;
   }
 
@@ -870,11 +993,13 @@ export async function handleTasks(
       const task = getTaskById(parsed.query.taskId);
       const messages =
         task?.agentId === myAgentId ? getPendingSteeringForTask(parsed.query.taskId) : [];
-      json(res, { messages });
+      getPendingSteeringMessagesRoute.respond(res, 200, { messages });
       return true;
     }
 
-    json(res, { messages: getPendingSteeringForAgent(myAgentId) });
+    getPendingSteeringMessagesRoute.respond(res, 200, {
+      messages: getPendingSteeringForAgent(myAgentId),
+    });
     return true;
   }
 
@@ -902,7 +1027,7 @@ export async function handleTasks(
       return true;
     }
     if (message.status !== "pending") {
-      json(res, { message });
+      markSteeringDeliveredRoute.respond(res, 200, { message });
       return true;
     }
 
@@ -912,7 +1037,7 @@ export async function handleTasks(
       jsonError(res, "Failed to mark steering message delivered", 500);
       return true;
     }
-    json(res, { message: delivered });
+    markSteeringDeliveredRoute.respond(res, 200, { message: delivered });
     return true;
   }
 
@@ -940,7 +1065,7 @@ export async function handleTasks(
       return true;
     }
     if (message.status !== "delivered") {
-      json(res, { message });
+      markSteeringHandledRoute.respond(res, 200, { message });
       return true;
     }
 
@@ -961,7 +1086,7 @@ export async function handleTasks(
       jsonError(res, "Failed to mark steering message handled", 500);
       return true;
     }
-    json(res, { message: handled });
+    markSteeringHandledRoute.respond(res, 200, { message: handled });
     return true;
   }
 
@@ -989,7 +1114,7 @@ export async function handleTasks(
       return true;
     }
     if (message.status !== "pending") {
-      json(res, {
+      markSteeringUndeliverableRoute.respond(res, 200, {
         message,
         promotedTaskId: message.promotedTaskId,
       });
@@ -997,7 +1122,11 @@ export async function handleTasks(
     }
 
     try {
-      json(res, markSteeringUndeliverable(message.id, parsed.body.reason));
+      markSteeringUndeliverableRoute.respond(
+        res,
+        200,
+        markSteeringUndeliverable(message.id, parsed.body.reason),
+      );
     } catch (error) {
       if (error instanceof SteeringRequestError) {
         jsonError(res, error.message, error.statusCode);
@@ -1020,7 +1149,7 @@ export async function handleTasks(
 
     const logs = getLogsByTaskId(parsed.params.id, parsed.query.logsLimit ?? 200);
     const attachments = getTaskAttachments(parsed.params.id);
-    json(res, { ...task, ...getTaskSteeringFields(task), logs, attachments });
+    getTask.respond(res, 200, { ...task, ...getTaskSteeringFields(task), logs, attachments });
     return true;
   }
 
@@ -1035,7 +1164,7 @@ export async function handleTasks(
     }
 
     updateTaskProgress(parsed.params.id, parsed.body.progress);
-    json(res, { success: true });
+    updateTaskProgressRoute.respond(res, 200, { success: true });
     return true;
   }
 
@@ -1048,7 +1177,51 @@ export async function handleTasks(
     const parsed = await finishTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const result = getDb().transaction(() => {
+    // Explicit (plain, non-derived) return type: without it TS infers a merged
+    // shape across these branches and the `"success" in result` / `"error" in
+    // result` narrowing below stops working. A `Pick`/`Extract`-derived alias
+    // for the middle (guard-handled) variant was tried and also defeated
+    // narrowing, so its fields are spelled out by hand here — keep in sync
+    // with the `handled: true` branch of `TerminalResultGuardResult`
+    // (../tasks/terminal-result-guard) minus the `handled` discriminant.
+    type FinishTaskTransactionResult =
+      | { error: string; status: number }
+      | {
+          success: boolean;
+          message: string;
+          task: AgentTask;
+          wasNoOp?: boolean;
+          wasForcedOverwrite?: boolean;
+          alreadyFinished: true;
+        }
+      | { success: true; task: AgentTask; alreadyFinished: true }
+      | { task: AgentTask; wasPaused: boolean };
+
+    // User-defined type guards (rather than inline `"x" in r && r.x` checks)
+    // so TS narrows both branches of each condition — plain `&&`/`!(...)`
+    // guards only narrow the true-branch (or don't narrow at all when negated),
+    // leaving `result` unnarrowed (and e.g. `.task` inaccessible) for the rest
+    // of this handler. Each predicate below evaluates the exact same runtime
+    // condition the inline checks used to.
+    const hasFinishError = (
+      r: FinishTaskTransactionResult,
+    ): r is Extract<FinishTaskTransactionResult, { error: string }> => "error" in r && !!r.error;
+    const isFinishConflict = (
+      r: FinishTaskTransactionResult,
+    ): r is {
+      success: false;
+      message: string;
+      task: AgentTask;
+      wasNoOp?: boolean;
+      wasForcedOverwrite?: boolean;
+      alreadyFinished: true;
+    } => "success" in r && r.success === false;
+    const isFreshFinishResult = (
+      r: FinishTaskTransactionResult,
+    ): r is Extract<FinishTaskTransactionResult, { task: AgentTask; wasPaused: boolean }> =>
+      !("alreadyFinished" in r && r.alreadyFinished);
+
+    const result = getDb().transaction((): FinishTaskTransactionResult => {
       const task = getTaskById(parsed.params.id);
 
       if (!task) {
@@ -1099,24 +1272,20 @@ export async function handleTasks(
       return { task: updatedTask, wasPaused };
     })();
 
-    if ("error" in result && result.error) {
-      jsonError(res, result.error, (result as { status?: number }).status ?? 500);
+    if (hasFinishError(result)) {
+      jsonError(res, result.error, result.status ?? 500);
       return true;
     }
 
-    if ("success" in result && result.success === false) {
-      json(
-        res,
-        {
-          ...result,
-          error: "message" in result ? result.message : "Terminal result write was discarded",
-        },
-        409,
-      );
+    if (isFinishConflict(result)) {
+      finishTask.respond(res, 409, {
+        ...result,
+        error: "message" in result ? result.message : "Terminal result write was discarded",
+      });
       return true;
     }
 
-    if (result.task && !("alreadyFinished" in result && result.alreadyFinished)) {
+    if (result.task && isFreshFinishResult(result)) {
       const finishEventId = parsed.body.status === "completed" ? "completed" : "failed";
 
       ensure({
@@ -1155,7 +1324,7 @@ export async function handleTasks(
       }
     }
 
-    json(res, {
+    finishTask.respond(res, 200, {
       success: true,
       alreadyFinished: "alreadyFinished" in result ? result.alreadyFinished : false,
       task: result.task,
@@ -1174,7 +1343,7 @@ export async function handleTasks(
       return true;
     }
     const pausedTasks = getPausedTasksForAgent(myAgentId);
-    json(res, { tasks: pausedTasks });
+    listPausedTasks.respond(res, 200, { tasks: pausedTasks });
     return true;
   }
 
@@ -1220,7 +1389,7 @@ export async function handleTasks(
       conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
     });
 
-    json(res, { success: true, task: pausedTask });
+    pauseTaskRoute.respond(res, 200, { success: true, task: pausedTask });
     return true;
   }
 
@@ -1232,7 +1401,7 @@ export async function handleTasks(
       jsonError(res, "Task not found", 404);
       return true;
     }
-    json(res, task);
+    updateTaskVcsRoute.respond(res, 200, task);
     return true;
   }
 
@@ -1244,7 +1413,7 @@ export async function handleTasks(
       jsonError(res, "Task not found", 404);
       return true;
     }
-    json(res, { task });
+    updateTaskTitleRoute.respond(res, 200, { task });
     return true;
   }
 
@@ -1290,7 +1459,7 @@ export async function handleTasks(
       conditions: [{ timeout_ms: 86_400_000 }], // 1 day: tasks may stay paused for extended periods
     });
 
-    json(res, { success: true, task: resumedTask });
+    resumeTaskRoute.respond(res, 200, { success: true, task: resumedTask });
     return true;
   }
 
@@ -1313,7 +1482,7 @@ export async function handleTasks(
     // response (mirrors finishTask). Caller treats this as a successful
     // supersede.
     if (isTerminalTaskStatus(task.status)) {
-      json(res, {
+      supersedeTaskRoute.respond(res, 200, {
         success: true,
         kind: "alreadyFinished",
         task,
@@ -1343,7 +1512,7 @@ export async function handleTasks(
           reason: parsed.body.reason,
         },
       });
-      json(res, {
+      supersedeTaskRoute.respond(res, 200, {
         success: true,
         kind: "workflow-failed",
         task: failed,
@@ -1365,7 +1534,7 @@ export async function handleTasks(
       // Worker won the race (terminal transition between status check and
       // this UPDATE). Treat as `alreadyFinished` — no resume child is created.
       const fresh = getTaskById(parsed.params.id);
-      json(res, {
+      supersedeTaskRoute.respond(res, 200, {
         success: true,
         kind: "alreadyFinished",
         task: fresh,
@@ -1389,7 +1558,7 @@ export async function handleTasks(
           followUp.kind === "skipped" ? followUp.reason : followUp.kind
         })`,
       );
-      json(res, {
+      supersedeTaskRoute.respond(res, 200, {
         success: true,
         kind: "resumed",
         task: superseded,
@@ -1413,7 +1582,7 @@ export async function handleTasks(
       },
     });
 
-    json(res, {
+    supersedeTaskRoute.respond(res, 200, {
       success: true,
       kind: "resumed",
       task: superseded,

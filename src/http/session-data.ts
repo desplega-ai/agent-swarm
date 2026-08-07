@@ -16,10 +16,68 @@ import {
 import { recordSessionCost } from "../otel";
 import { incrementServerSessionsProcessed } from "../server-runtime-counters";
 import type { SessionCost } from "../types";
-import { SessionCostModelBreakdownSchema } from "../types";
+import { SessionCostModelBreakdownSchema, SessionCostSchema, SessionLogSchema } from "../types";
 import { route } from "./route-def";
 import { recomputeSessionCost } from "./session-cost-recompute";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
+
+// ─── Response Schemas ────────────────────────────────────────────────────────
+
+/** Mirrors `SessionCostSummaryTotals` in src/be/db.ts. */
+const SessionCostSummaryTotalsSchema = z.object({
+  totalCostUsd: z.number(),
+  totalInputTokens: z.number().int(),
+  totalOutputTokens: z.number().int(),
+  totalCacheReadTokens: z.number().int(),
+  totalCacheWriteTokens: z.number().int(),
+  totalDurationMs: z.number().int(),
+  totalSessions: z.number().int(),
+  avgCostPerSession: z.number(),
+  attributedCostUsd: z.number(),
+});
+
+/** Mirrors `SessionCostDailyRow` in src/be/db.ts. */
+const SessionCostDailyRowSchema = z.object({
+  date: z.string(),
+  costUsd: z.number(),
+  inputTokens: z.number().int(),
+  outputTokens: z.number().int(),
+  sessions: z.number().int(),
+});
+
+/** Mirrors `SessionCostByAgentRow` in src/be/db.ts. */
+const SessionCostByAgentRowSchema = z.object({
+  agentId: z.string(),
+  costUsd: z.number(),
+  inputTokens: z.number().int(),
+  outputTokens: z.number().int(),
+  sessions: z.number().int(),
+  durationMs: z.number().int(),
+});
+
+/** Mirrors `SessionCostByUserRow` in src/be/db.ts. */
+const SessionCostByUserRowSchema = z.object({
+  userId: z.string().nullable(),
+  costUsd: z.number(),
+  inputTokens: z.number().int(),
+  outputTokens: z.number().int(),
+  tasks: z.number().int(),
+  durationMs: z.number().int(),
+});
+
+/** Mirrors the return type of `getSessionCostSummary` in src/be/db.ts. */
+const SessionCostSummarySchema = z.object({
+  totals: SessionCostSummaryTotalsSchema,
+  daily: z.array(SessionCostDailyRowSchema),
+  byAgent: z.array(SessionCostByAgentRowSchema),
+  byUser: z.array(SessionCostByUserRowSchema),
+});
+
+/** Mirrors `DashboardCostSummary` in src/be/db.ts. */
+const DashboardCostSummarySchema = z.object({
+  costToday: z.number(),
+  costMtd: z.number(),
+});
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -37,7 +95,10 @@ const createSessionLogsRoute = route({
     cli: z.string().optional(),
   }),
   responses: {
-    201: { description: "Logs stored" },
+    201: {
+      description: "Logs stored",
+      schema: z.object({ success: z.literal(true), count: z.number().int().nonnegative() }),
+    },
     400: { description: "Validation error" },
   },
 });
@@ -57,7 +118,10 @@ const getSessionLogsByTask = route({
     limit: z.coerce.number().int().min(1).max(1000).optional(),
   }),
   responses: {
-    200: { description: "Session logs" },
+    200: {
+      description: "Session logs",
+      schema: z.object({ logs: z.array(SessionLogSchema) }),
+    },
     404: { description: "Task not found" },
   },
 });
@@ -111,7 +175,10 @@ const createSessionCostRoute = route({
     createdAt: z.number().int().nonnegative().optional(),
   }),
   responses: {
-    201: { description: "Cost record stored" },
+    201: {
+      description: "Cost record stored",
+      schema: z.object({ success: z.literal(true), cost: SessionCostSchema }),
+    },
     400: { description: "Validation error" },
   },
 });
@@ -131,7 +198,7 @@ const getSessionCostSummaryRoute = route({
     userId: z.string().optional(),
   }),
   responses: {
-    200: { description: "Cost summary" },
+    200: { description: "Cost summary", schema: SessionCostSummarySchema },
     400: { description: "Invalid groupBy" },
   },
 });
@@ -143,7 +210,7 @@ const getDashboardCosts = route({
   summary: "Cost today and month-to-date for dashboard",
   tags: ["Session Data"],
   responses: {
-    200: { description: "Dashboard cost data" },
+    200: { description: "Dashboard cost data", schema: DashboardCostSummarySchema },
   },
 });
 
@@ -161,7 +228,10 @@ const listSessionCosts = route({
     limit: z.coerce.number().int().min(1).optional(),
   }),
   responses: {
-    200: { description: "Session costs" },
+    200: {
+      description: "Session costs",
+      schema: z.object({ costs: z.array(SessionCostSchema) }),
+    },
   },
 });
 
@@ -186,7 +256,10 @@ export async function handleSessionData(
         cli: parsed.body.cli || "claude",
         lines: parsed.body.lines,
       });
-      json(res, { success: true, count: parsed.body.lines.length }, 201);
+      createSessionLogsRoute.respond(res, 201, {
+        success: true,
+        count: parsed.body.lines.length,
+      });
     } catch (error) {
       console.error("[HTTP] Failed to create session logs:", error);
       jsonError(res, "Failed to store session logs", 500);
@@ -203,7 +276,7 @@ export async function handleSessionData(
       return true;
     }
     const logs = getSessionLogsByTaskId(parsed.params.taskId, parsed.query?.limit);
-    json(res, { logs });
+    getSessionLogsByTask.respond(res, 200, { logs });
     return true;
   }
 
@@ -302,7 +375,7 @@ export async function handleSessionData(
         },
       });
       incrementServerSessionsProcessed();
-      json(res, { success: true, cost }, 201);
+      createSessionCostRoute.respond(res, 201, { success: true, cost });
     } catch (error) {
       console.error("[HTTP] Failed to create session cost:", error);
       jsonError(res, "Failed to store session cost", 500);
@@ -320,13 +393,13 @@ export async function handleSessionData(
       userId: parsed.query.userId || undefined,
       groupBy: parsed.query.groupBy || "both",
     });
-    json(res, summary);
+    getSessionCostSummaryRoute.respond(res, 200, summary);
     return true;
   }
 
   if (getDashboardCosts.match(req.method, pathSegments)) {
     const dashboardCosts = getDashboardCostSummary();
-    json(res, dashboardCosts);
+    getDashboardCosts.respond(res, 200, dashboardCosts);
     return true;
   }
 
@@ -352,7 +425,7 @@ export async function handleSessionData(
       costs = getAllSessionCosts(limit);
     }
 
-    json(res, { costs });
+    listSessionCosts.respond(res, 200, { costs });
     return true;
   }
 

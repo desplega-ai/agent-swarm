@@ -11,9 +11,15 @@ import {
   setApiKeyName,
 } from "../be/db";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
+
+/** Wire shape sent by every `report-*` acknowledgement route. */
+const successMessageSchema = z.object({
+  success: z.literal(true),
+  message: z.string(),
+});
 
 const reportUsage = route({
   method: "post",
@@ -30,7 +36,7 @@ const reportUsage = route({
     scopeId: z.string().optional(),
   }),
   responses: {
-    200: { description: "Usage recorded" },
+    200: { description: "Usage recorded", schema: successMessageSchema },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
   },
@@ -52,7 +58,7 @@ const reportRateLimit = route({
     scopeId: z.string().optional(),
   }),
   responses: {
-    200: { description: "Key marked as rate-limited" },
+    200: { description: "Key marked as rate-limited", schema: successMessageSchema },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
   },
@@ -83,7 +89,10 @@ const reportRateLimitWindows = route({
     scopeId: z.string().optional(),
   }),
   responses: {
-    200: { description: "Rate-limit window telemetry recorded" },
+    200: {
+      description: "Rate-limit window telemetry recorded",
+      schema: successMessageSchema,
+    },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
   },
@@ -103,11 +112,42 @@ const getAvailable = route({
     scopeId: z.string().optional(),
   }),
   responses: {
-    200: { description: "List of available key indices" },
+    200: {
+      description: "List of available key indices",
+      schema: z.object({
+        success: z.literal(true),
+        availableIndices: z.array(z.number().int()),
+        totalKeys: z.number().int(),
+      }),
+    },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
+});
+
+/** Mirrors `ApiKeyStatus` in `src/be/db.ts` (not exported from `src/types.ts`). */
+const ApiKeyStatusSchema = z.object({
+  id: z.string(),
+  keyType: z.string(),
+  keySuffix: z.string(),
+  keyIndex: z.number().int(),
+  scope: z.string(),
+  scopeId: z.string().nullable(),
+  status: z.string(),
+  rateLimitedUntil: z.string().nullable(),
+  lastUsedAt: z.string().nullable(),
+  lastRateLimitAt: z.string().nullable(),
+  totalUsageCount: z.number().int(),
+  rateLimitCount: z.number().int(),
+  /** Optional human-friendly label set from the dashboard. */
+  name: z.string().nullable(),
+  /** Auto-derived harness provider (claude/pi/codex/...). */
+  provider: z.string(),
+  /** Latest provider-emitted rate-limit window snapshots, keyed by window type. */
+  rateLimitWindows: z.record(z.string(), rateLimitWindowSchema),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 });
 
 const listStatuses = route({
@@ -122,10 +162,23 @@ const listStatuses = route({
     scopeId: z.string().optional(),
   }),
   responses: {
-    200: { description: "List of key status records" },
+    200: {
+      description: "List of key status records",
+      schema: z.object({ success: z.literal(true), keys: z.array(ApiKeyStatusSchema) }),
+    },
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
+});
+
+/** Mirrors `KeyCostSummary` in `src/be/db.ts`. */
+const KeyCostSummarySchema = z.object({
+  keyType: z.string(),
+  keySuffix: z.string(),
+  totalCost: z.number().nonnegative(),
+  totalInputTokens: z.number().int().nonnegative(),
+  totalOutputTokens: z.number().int().nonnegative(),
+  taskCount: z.number().int().nonnegative(),
 });
 
 const getCosts = route({
@@ -138,7 +191,10 @@ const getCosts = route({
     keyType: z.string().optional(),
   }),
   responses: {
-    200: { description: "Per-key cost aggregation" },
+    200: {
+      description: "Per-key cost aggregation",
+      schema: z.object({ success: z.literal(true), costs: z.array(KeyCostSummarySchema) }),
+    },
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
@@ -159,7 +215,15 @@ const setKeyName = route({
     scopeId: z.string().optional(),
   }),
   responses: {
-    200: { description: "Name updated" },
+    200: {
+      description: "Name updated",
+      schema: z.object({
+        success: z.literal(true),
+        keyType: z.string(),
+        keySuffix: z.string(),
+        name: z.string().nullable(),
+      }),
+    },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
     404: { description: "Key not found" },
@@ -180,7 +244,14 @@ const clearRateLimitRoute = route({
     scopeId: z.string().optional(),
   }),
   responses: {
-    200: { description: "Rate limit cleared (or key was not rate-limited)" },
+    200: {
+      description: "Rate limit cleared (or key was not rate-limited)",
+      schema: z.object({
+        success: z.literal(true),
+        cleared: z.boolean(),
+        message: z.string(),
+      }),
+    },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
   },
@@ -203,7 +274,7 @@ export async function handleApiKeys(
     const { keyType, keySuffix, keyIndex, taskId, scope, scopeId } = parsed.body;
     try {
       recordKeyUsage(keyType, keySuffix, keyIndex, taskId ?? null, scope, scopeId ?? null);
-      json(res, { success: true, message: "Key usage recorded" });
+      reportUsage.respond(res, 200, { success: true, message: "Key usage recorded" });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to record usage", 500);
     }
@@ -218,7 +289,7 @@ export async function handleApiKeys(
     const { keyType, keySuffix, keyIndex, rateLimitedUntil, scope, scopeId } = parsed.body;
     try {
       markKeyRateLimited(keyType, keySuffix, keyIndex, rateLimitedUntil, scope, scopeId ?? null);
-      json(res, {
+      reportRateLimit.respond(res, 200, {
         success: true,
         message: `Key ...${keySuffix} marked as rate-limited until ${rateLimitedUntil}`,
       });
@@ -236,7 +307,10 @@ export async function handleApiKeys(
     const { keyType, keySuffix, keyIndex, windows, scope, scopeId } = parsed.body;
     try {
       recordKeyRateLimitWindows(keyType, keySuffix, keyIndex, windows, scope, scopeId ?? null);
-      json(res, { success: true, message: `Rate-limit windows recorded for ...${keySuffix}` });
+      reportRateLimitWindows.respond(res, 200, {
+        success: true,
+        message: `Rate-limit windows recorded for ...${keySuffix}`,
+      });
     } catch (err) {
       jsonError(
         res,
@@ -255,7 +329,7 @@ export async function handleApiKeys(
     const { keyType, totalKeys, scope, scopeId } = parsed.query;
     try {
       const indices = getAvailableKeyIndices(keyType, totalKeys, scope, scopeId ?? null);
-      json(res, { success: true, availableIndices: indices, totalKeys });
+      getAvailable.respond(res, 200, { success: true, availableIndices: indices, totalKeys });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to get available keys", 500);
     }
@@ -270,7 +344,7 @@ export async function handleApiKeys(
     const { keyType } = parsed.query;
     try {
       const costs = getKeyCostSummary(keyType);
-      json(res, { success: true, costs });
+      getCosts.respond(res, 200, { success: true, costs });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to get key costs", 500);
     }
@@ -285,7 +359,7 @@ export async function handleApiKeys(
     const { keyType, scope, scopeId } = parsed.query;
     try {
       const statuses = getKeyStatuses(keyType, scope, scopeId ?? null);
-      json(res, { success: true, keys: statuses });
+      listStatuses.respond(res, 200, { success: true, keys: statuses });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to get key statuses", 500);
     }
@@ -307,7 +381,7 @@ export async function handleApiKeys(
         jsonError(res, `No key matching ${keyType} ...${keySuffix}`, 404);
         return true;
       }
-      json(res, { success: true, keyType, keySuffix, name: value });
+      setKeyName.respond(res, 200, { success: true, keyType, keySuffix, name: value });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to set key name", 500);
     }
@@ -322,7 +396,7 @@ export async function handleApiKeys(
     const { keyType, keySuffix, scope, scopeId } = parsed.body;
     try {
       const cleared = clearKeyRateLimit(keyType, keySuffix, scope, scopeId ?? null);
-      json(res, {
+      clearRateLimitRoute.respond(res, 200, {
         success: true,
         cleared,
         message: cleared

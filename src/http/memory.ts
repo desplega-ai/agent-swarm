@@ -20,11 +20,26 @@ import { rerank } from "../be/memory/reranker";
 import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retrieval-store";
 import { getUsefulnessStats } from "../be/memory/usefulness-stats";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
-import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
+import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { route } from "./route-def";
-import { json, jsonError, parseQueryParams } from "./utils";
+import { jsonError, parseQueryParams } from "./utils";
+
+// ─── Response Schemas ────────────────────────────────────────────────────────
+
+// Mirrors `MemoryRetrievalSource` (src/be/memory/types.ts) — the arm that
+// surfaced a search candidate. Shared by the search and list result shapes.
+const MemoryRetrievalSourceSchema = z.enum(["vec", "fts", "hybrid", "fallback", "graph"]);
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
+
+// Shared shape across the three 202 sends: (1) automatic-task-memory skip,
+// (2) single-chunk re-index of an existing sourcePath, (3) fresh batch queue.
+const IndexMemoryResponseSchema = z.object({
+  queued: z.boolean(),
+  memoryIds: z.array(z.string()),
+  skipped: z.string().optional(),
+  edited: z.boolean().optional(),
+});
 
 const indexMemory = route({
   method: "post",
@@ -45,9 +60,22 @@ const indexMemory = route({
     contextKey: z.string().optional(),
   }),
   responses: {
-    202: { description: "Content queued for embedding" },
+    202: { description: "Content queued for embedding", schema: IndexMemoryResponseSchema },
     400: { description: "Validation error" },
   },
+});
+
+const MemorySearchResultItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  content: z.string(),
+  similarity: z.number(),
+  rawSimilarity: z.number().optional(),
+  compositeScore: z.number().optional(),
+  retrievalSource: MemoryRetrievalSourceSchema.optional(),
+  source: AgentMemorySourceSchema,
+  scope: AgentMemoryScopeSchema,
+  tags: z.array(z.string()),
 });
 
 const searchMemory = route({
@@ -71,9 +99,22 @@ const searchMemory = route({
     source: z.enum(["manual", "file_index", "session_summary", "task_completion"]).optional(),
   }),
   responses: {
-    200: { description: "Search results" },
+    200: {
+      description: "Search results",
+      schema: z.object({ results: z.array(MemorySearchResultItemSchema) }),
+    },
     400: { description: "Missing query or agent ID" },
   },
+});
+
+// Mirrors `MemoryEditResult` (src/be/memory/types.ts) — `store.edit()`'s
+// return value, sent verbatim.
+const MemoryEditResultSchema = z.object({
+  memory: AgentMemorySchema,
+  changed: z.boolean(),
+  previousVersion: z.number(),
+  version: z.number(),
+  contentHash: z.string(),
 });
 
 const editMemory = route({
@@ -96,7 +137,7 @@ const editMemory = route({
     expectedVersion: z.number().int().min(1).optional(),
   }),
   responses: {
-    200: { description: "Memory edited" },
+    200: { description: "Memory edited", schema: MemoryEditResultSchema },
     400: { description: "Validation error" },
     404: { description: "Memory not found" },
     409: { description: "Version conflict" },
@@ -119,8 +160,37 @@ const reEmbedMemory = route({
     batchSize: z.number().int().min(1).max(100).default(20).describe("Memories per batch"),
   }),
   responses: {
-    202: { description: "Re-embedding started" },
+    202: {
+      description: "Re-embedding started",
+      schema: z.object({ started: z.boolean(), totalMemories: z.number() }),
+    },
   },
+});
+
+// Shared result item across both listMemory branches: the semantic-search
+// branch (query set) populates similarity/rawSimilarity/compositeScore/
+// retrievalSource; the plain-list branch (query empty) omits them.
+const MemoryListResultItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  content: z.string(),
+  agentId: z.string().nullable(),
+  scope: AgentMemoryScopeSchema,
+  source: AgentMemorySourceSchema,
+  similarity: z.number().optional(),
+  rawSimilarity: z.number().optional(),
+  compositeScore: z.number().optional(),
+  retrievalSource: MemoryRetrievalSourceSchema.optional(),
+  createdAt: z.string(),
+  accessedAt: z.string(),
+  accessCount: z.number(),
+  expiresAt: z.string().nullable(),
+  embeddingModel: z.string().nullable(),
+  sourceTaskId: z.string().nullable(),
+  sourcePath: z.string().nullable(),
+  chunkIndex: z.number(),
+  totalChunks: z.number(),
+  tags: z.array(z.string()),
 });
 
 const listMemory = route({
@@ -150,9 +220,54 @@ const listMemory = route({
     offset: z.number().int().min(0).default(0),
   }),
   responses: {
-    200: { description: "Memory list / search results" },
+    200: {
+      description: "Memory list / search results",
+      schema: z.object({
+        results: z.array(MemoryListResultItemSchema),
+        total: z.number(),
+        limit: z.number(),
+        offset: z.number(),
+        mode: z.enum(["semantic", "list"]),
+      }),
+    },
     400: { description: "Validation error" },
   },
+});
+
+// Mirrors `MemoryVecPopulateStats` (src/be/memory/types.ts).
+const MemoryVecPopulateStatsSchema = z.object({
+  attempted: z.number(),
+  inserted: z.number(),
+  skippedInvalidDimensions: z.number(),
+  failed: z.number(),
+  beforeCount: z.number(),
+  afterCount: z.number(),
+});
+
+// Mirrors `MemoryHealth` (src/be/memory/types.ts) — `store.getHealth()`'s
+// return value, sent verbatim.
+const MemoryHealthSchema = z.object({
+  sqliteVec: z.object({
+    extensionLoaded: z.boolean(),
+    tableExists: z.boolean(),
+    initialized: z.boolean(),
+    vectorDimensions: z.number(),
+    distanceMetric: z.literal("cosine"),
+    schema: z.string().nullable(),
+    lastPopulate: MemoryVecPopulateStatsSchema.nullable(),
+  }),
+  counts: z.object({
+    total: z.number(),
+    withEmbedding: z.number(),
+    validEmbedding: z.number(),
+    invalidEmbedding: z.number(),
+    searchable: z.number(),
+    memoryVec: z.number(),
+    missingFromVec: z.number(),
+    extraInVec: z.number(),
+  }),
+  retrievalMode: z.enum(["vec", "fallback"]),
+  reasons: z.array(z.string()),
 });
 
 const memoryHealth = route({
@@ -163,13 +278,57 @@ const memoryHealth = route({
   tags: ["Memory"],
   auth: { apiKey: true },
   responses: {
-    200: { description: "Memory vector index health" },
+    200: { description: "Memory vector index health", schema: MemoryHealthSchema },
   },
 });
 
 // Windowed usefulness analytics — sibling of the cheap /health probe.
 // Reads memory_retrieval + memory_rating + agent_memory posteriors; plan:
 // thoughts/taras/plans/2026-07-02-memory-retrieval-v2-graph-and-measurement.md Phase 1.
+// Mirrors `UsefulnessStats` and its nested shapes (src/be/memory/usefulness-stats.ts)
+// — `getUsefulnessStats()`'s return value, sent verbatim.
+const UsefulnessStatsSchema = z.object({
+  windowDays: z.number(),
+  threshold: z.number(),
+  cutoff: z.string(),
+  volume: z.object({
+    retrievals: z.number(),
+    distinctMemories: z.number(),
+    retrievalGroups: z.number(),
+    byEventType: z.object({ search: z.number(), get: z.number() }),
+  }),
+  byArm: z.array(
+    z.object({
+      retrievalSource: z.string().nullable(),
+      retrievals: z.number(),
+      distinctMemories: z.number(),
+      citedRetrievals: z.number(),
+      citationRate: z.number(),
+    }),
+  ),
+  citationBySource: z.array(
+    z.object({
+      source: z.string(),
+      ratings: z.number(),
+      positive: z.number(),
+      citationRate: z.number(),
+      avgSignal: z.number(),
+    }),
+  ),
+  posterior: z.object({
+    totalMemories: z.number(),
+    movedFromPrior: z.number(),
+    avgPosteriorMean: z.number().nullable(),
+    avgPosteriorMeanMoved: z.number().nullable(),
+    aboveThreshold: z.number(),
+  }),
+  sanity: z.object({
+    totalRetrievalRows: z.number(),
+    totalRatingRows: z.number(),
+    ratingsBySource: z.array(z.object({ source: z.string(), count: z.number() })),
+  }),
+});
+
 const memoryUsefulness = route({
   method: "get",
   path: "/api/memory/usefulness",
@@ -194,7 +353,7 @@ const memoryUsefulness = route({
       .describe("Posterior-mean threshold for the aboveThreshold count (default 0.6)"),
   }),
   responses: {
-    200: { description: "Usefulness stats for the window" },
+    200: { description: "Usefulness stats for the window", schema: UsefulnessStatsSchema },
     400: { description: "Validation error" },
   },
 });
@@ -208,9 +367,51 @@ const deleteMemoryById = route({
   auth: { apiKey: true },
   params: z.object({ id: z.string().uuid() }),
   responses: {
-    200: { description: "Memory deleted" },
+    200: { description: "Memory deleted", schema: z.object({ deleted: z.boolean() }) },
     404: { description: "Memory not found" },
   },
+});
+
+// Mirrors `LinkType` / `TargetKind` (src/be/memory/link-resolver.ts).
+const LinkTypeSchema = z.enum([
+  "wikilink",
+  "sequel",
+  "agent-fs-file",
+  "agent-ui",
+  "pr",
+  "external-source",
+]);
+const TargetKindSchema = z.enum(["memory", "agent-fs-file", "agent-ui", "pr", "external-source"]);
+
+// Mirrors `LinkedMemoryRef` (src/be/memory/links-store.ts).
+const LinkedMemoryRefSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  scope: z.string(),
+});
+
+// Mirrors `MemoryLinkView` (src/be/memory/links-store.ts).
+const MemoryLinkViewSchema = z.object({
+  id: z.string(),
+  linkType: LinkTypeSchema,
+  targetKind: TargetKindSchema,
+  targetId: z.string(),
+  strength: z.number(),
+  resolver: z.string(),
+  sourceText: z.string().nullable(),
+  createdAt: z.string(),
+  resolved: z.boolean(),
+  target: LinkedMemoryRefSchema.optional(),
+});
+
+// Mirrors `MemoryBacklinkView` (src/be/memory/links-store.ts).
+const MemoryBacklinkViewSchema = z.object({
+  id: z.string(),
+  linkType: LinkTypeSchema,
+  strength: z.number(),
+  sourceText: z.string().nullable(),
+  createdAt: z.string(),
+  from: LinkedMemoryRefSchema,
 });
 
 const getMemoryById = route({
@@ -234,6 +435,11 @@ const getMemoryById = route({
     200: {
       description:
         "Memory details, plus `links` (outgoing memory_link rows; memory-kind targets carry `resolved` + ACL-filtered `target` metadata) and `backlinks` (inbound links from other memories, ACL-filtered)",
+      schema: z.object({
+        memory: AgentMemorySchema,
+        links: z.array(MemoryLinkViewSchema),
+        backlinks: z.array(MemoryBacklinkViewSchema),
+      }),
     },
     404: { description: "Memory not found" },
   },
@@ -291,10 +497,29 @@ const rateMemory = route({
     events: z.array(RateEventSchema).min(1).max(50),
   }),
   responses: {
-    200: { description: "Ratings applied; per-event rejections returned in body" },
+    200: {
+      description: "Ratings applied; per-event rejections returned in body",
+      schema: z.object({
+        applied: z.number(),
+        rejected: z.array(z.object({ memoryId: z.string(), reason: z.string() })),
+      }),
+    },
     400: { description: "Validation error or explicit-self R6 spam-guard rejection" },
     409: { description: "Duplicate explicit-self rating for (taskId, memoryId)" },
   },
+});
+
+// Mirrors `RetrievalListRow` (src/be/memory/retrieval-store.ts).
+const RetrievalListRowSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  content: z.string(),
+  scope: z.string(),
+  source: z.string(),
+  scheduleId: z.string().nullable(),
+  similarity: z.number().nullable(),
+  retrievalSource: z.string().nullable(),
+  retrievedAt: z.string(),
 });
 
 const getRetrievals = route({
@@ -313,7 +538,10 @@ const getRetrievals = route({
       message: "taskId or sessionId required",
     }),
   responses: {
-    200: { description: "Retrieval rows joined with agent_memory" },
+    200: {
+      description: "Retrieval rows joined with agent_memory",
+      schema: z.object({ results: z.array(RetrievalListRowSchema) }),
+    },
     400: { description: "Missing taskId/sessionId or X-Agent-ID" },
   },
 });
@@ -322,6 +550,16 @@ const getRetrievals = route({
 // homepage demo ("this memory references PR #377"). Auth by X-Agent-ID +
 // Bearer with defence-in-depth: the joined `agent_memory` row must either
 // be swarm-scope or owned by the requesting agent. Plan §7.
+// Mirrors `MemoryEdgeRow` (src/be/memory/edges-store.ts).
+const MemoryEdgeRowSchema = z.object({
+  to: z.string(),
+  type: z.literal("references-source"),
+  alpha: z.number(),
+  beta: z.number(),
+  usefulness: z.number(),
+  createdAt: z.string(),
+});
+
 const getMemoryEdges = route({
   method: "get",
   path: "/api/memory/edges",
@@ -333,7 +571,10 @@ const getMemoryEdges = route({
     memoryId: z.string().min(1),
   }),
   responses: {
-    200: { description: "Edges with computed usefulness scores" },
+    200: {
+      description: "Edges with computed usefulness scores",
+      schema: z.object({ edges: z.array(MemoryEdgeRowSchema) }),
+    },
     400: { description: "Missing memoryId or X-Agent-ID" },
   },
 });
@@ -367,7 +608,11 @@ export async function handleMemory(
     if (source === "session_summary" && sourceTaskId) {
       const sourceTask = getTaskById(sourceTaskId);
       if (sourceTask && !shouldPersistAutomaticTaskMemory(sourceTask, persistMemory)) {
-        json(res, { queued: false, memoryIds: [], skipped: "automatic_task_memory_disabled" }, 202);
+        indexMemory.respond(res, 202, {
+          queued: false,
+          memoryIds: [],
+          skipped: "automatic_task_memory_disabled",
+        });
         return true;
       }
     }
@@ -414,7 +659,11 @@ export async function handleMemory(
             (err as Error).message,
           );
         }
-        json(res, { queued: false, memoryIds: [result.memory.id], edited: result.changed }, 202);
+        indexMemory.respond(res, 202, {
+          queued: false,
+          memoryIds: [result.memory.id],
+          edited: result.changed,
+        });
         return true;
       }
     }
@@ -478,7 +727,7 @@ export async function handleMemory(
       }
     })();
 
-    json(res, { queued: true, memoryIds: memories.map((m) => m.id) }, 202);
+    indexMemory.respond(res, 202, { queued: true, memoryIds: memories.map((m) => m.id) });
     return true;
   }
 
@@ -544,7 +793,7 @@ export async function handleMemory(
         }
       }
 
-      json(res, {
+      searchMemory.respond(res, 200, {
         results: ranked.map((r) => ({
           id: r.id,
           name: r.name,
@@ -560,7 +809,7 @@ export async function handleMemory(
       });
     } catch (err) {
       console.error("[memory-search] Error:", (err as Error).message);
-      json(res, { results: [] });
+      searchMemory.respond(res, 200, { results: [] });
     }
     return true;
   }
@@ -601,7 +850,7 @@ export async function handleMemory(
         const ranked = rerank(candidates, { limit: candidates.length });
         const page = ranked.slice(offset, offset + pageLimit);
 
-        json(res, {
+        listMemory.respond(res, 200, {
           results: page.map((r) => ({
             id: r.id,
             name: r.name,
@@ -644,7 +893,7 @@ export async function handleMemory(
       const rows = store.list(agentId ?? "", listOptions);
       const total = store.count(agentId ?? "", listOptions);
 
-      json(res, {
+      listMemory.respond(res, 200, {
         results: rows.map((r) => ({
           id: r.id,
           name: r.name,
@@ -720,7 +969,7 @@ export async function handleMemory(
           );
         }
       }
-      json(res, result);
+      editMemory.respond(res, 200, result);
     } catch (err) {
       const message = (err as Error).message;
       if (message.includes("not found")) jsonError(res, message, 404);
@@ -734,7 +983,7 @@ export async function handleMemory(
     const parsed = await memoryHealth.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
 
-    json(res, getMemoryStore().getHealth());
+    memoryHealth.respond(res, 200, getMemoryStore().getHealth());
     return true;
   }
 
@@ -744,7 +993,7 @@ export async function handleMemory(
     if (!parsed) return true;
 
     const { days, threshold } = parsed.query;
-    json(res, getUsefulnessStats({ days, threshold }));
+    memoryUsefulness.respond(res, 200, getUsefulnessStats({ days, threshold }));
     return true;
   }
 
@@ -758,7 +1007,7 @@ export async function handleMemory(
       jsonError(res, "Memory not found", 404);
       return true;
     }
-    json(res, { deleted: true });
+    deleteMemoryById.respond(res, 200, { deleted: true });
     return true;
   }
 
@@ -771,7 +1020,7 @@ export async function handleMemory(
     const provider = getEmbeddingProvider();
     const memories = store.listForReembedding(agentId ? { agentId } : undefined);
 
-    json(res, { started: true, totalMemories: memories.length }, 202);
+    reEmbedMemory.respond(res, 202, { started: true, totalMemories: memories.length });
 
     // Async re-embed in batches
     (async () => {
@@ -865,7 +1114,7 @@ export async function handleMemory(
       throw err;
     }
 
-    json(res, { applied, rejected });
+    rateMemory.respond(res, 200, { applied, rejected });
     return true;
   }
 
@@ -881,7 +1130,7 @@ export async function handleMemory(
 
     const { taskId, sessionId } = parsed.query;
     const rows = getRetrievalsForAgent(myAgentId, { taskId, sessionId });
-    json(res, { results: rows });
+    getRetrievals.respond(res, 200, { results: rows });
     return true;
   }
 
@@ -897,7 +1146,7 @@ export async function handleMemory(
 
     const { memoryId } = parsed.query;
     const edges = listEdgesForAgent(myAgentId, memoryId);
-    json(res, { edges });
+    getMemoryEdges.respond(res, 200, { edges });
     return true;
   }
 
@@ -951,7 +1200,11 @@ export async function handleMemory(
       console.error("[memory-get] link traversal failed:", (err as Error).message);
     }
 
-    json(res, { memory, links: linkBlocks.links, backlinks: linkBlocks.backlinks });
+    getMemoryById.respond(res, 200, {
+      memory,
+      links: linkBlocks.links,
+      backlinks: linkBlocks.backlinks,
+    });
     return true;
   }
 

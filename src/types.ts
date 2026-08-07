@@ -1,6 +1,10 @@
-import * as z from "zod";
+// z comes pre-extended with `.openapi()` — entity schemas here are named as
+// OpenAPI components (`.openapi("AgentTask")`) so route response schemas that
+// reference them emit `$ref`s and SDK generators produce named types.
+
 import { normalizeAssetKey } from "./assets/key";
 import { MAX_PROFILE_FILE_LENGTH } from "./utils/constants";
+import { z } from "./utils/zod-openapi";
 // ─── Asset namespaces ──────────────────────────────────────────────────────
 
 export const AssetKeySchema = z
@@ -24,38 +28,44 @@ export const AssetKeySchema = z
 export const AssetEntityTypeSchema = z.enum(["task", "workflow", "schedule", "page", "file"]);
 export type AssetEntityType = z.infer<typeof AssetEntityTypeSchema>;
 
-export const AssetProviderRefSchema = z.object({
-  providerId: z.string(),
-  orgId: z.string().optional(),
-  driveId: z.string().optional(),
-  providerKey: z.string(),
-});
+export const AssetProviderRefSchema = z
+  .object({
+    providerId: z.string(),
+    orgId: z.string().optional(),
+    driveId: z.string().optional(),
+    providerKey: z.string(),
+  })
+  .openapi("AssetProviderRef");
 export type AssetProviderRef = z.infer<typeof AssetProviderRefSchema>;
 
-export const AssetKeyMappingSchema = z.object({
-  id: z.string(),
-  providerId: z.string(),
-  providerOrgId: z.string().optional(),
-  providerDriveId: z.string().optional(),
-  providerKey: z.string(),
-  key: AssetKeySchema,
-  sourceEntityType: z.enum(["task-attachment", "external"]).optional(),
-  sourceEntityId: z.string().optional(),
-  createdAt: z.iso.datetime(),
-  updatedAt: z.iso.datetime(),
-  createdBy: z.string().optional(),
-  updatedBy: z.string().optional(),
-});
+export const AssetKeyMappingSchema = z
+  .object({
+    id: z.string(),
+    providerId: z.string(),
+    providerOrgId: z.string().optional(),
+    providerDriveId: z.string().optional(),
+    providerKey: z.string(),
+    key: AssetKeySchema,
+    sourceEntityType: z.enum(["task-attachment", "external"]).optional(),
+    sourceEntityId: z.string().optional(),
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+    createdBy: z.string().optional(),
+    updatedBy: z.string().optional(),
+  })
+  .openapi("AssetKeyMapping");
 export type AssetKeyMapping = z.infer<typeof AssetKeyMappingSchema>;
 
-export const AssetSummarySchema = z.object({
-  entityType: AssetEntityTypeSchema,
-  id: z.string(),
-  key: AssetKeySchema,
-  label: z.string(),
-  updatedAt: z.string(),
-  providerRef: AssetProviderRefSchema.optional(),
-});
+export const AssetSummarySchema = z
+  .object({
+    entityType: AssetEntityTypeSchema,
+    id: z.string(),
+    key: AssetKeySchema,
+    label: z.string(),
+    updatedAt: z.string(),
+    providerRef: AssetProviderRefSchema.optional(),
+  })
+  .openapi("AssetSummary");
 export type AssetSummary = z.infer<typeof AssetSummarySchema>;
 
 // ─── Model Tiers ─────────────────────────────────────────────────────────────
@@ -267,29 +277,31 @@ export const InboxMessageStatusSchema = z.enum([
   "delegated",
 ]);
 
-export const InboxMessageSchema = z.object({
-  id: z.uuid(),
-  agentId: z.string(), // Lead agent who received this
-  content: z.string().min(1), // The message content
-  source: z.enum(["slack", "agentmail"]).default("slack"),
-  status: InboxMessageStatusSchema.default("unread"),
+export const InboxMessageSchema = z
+  .object({
+    id: z.uuid(),
+    agentId: z.string(), // Lead agent who received this
+    content: z.string().min(1), // The message content
+    source: z.enum(["slack", "agentmail"]).default("slack"),
+    status: InboxMessageStatusSchema.default("unread"),
 
-  // Slack context (for replying)
-  slackChannelId: z.string().optional(),
-  slackThreadTs: z.string().optional(),
-  slackUserId: z.string().optional(),
+    // Slack context (for replying)
+    slackChannelId: z.string().optional(),
+    slackThreadTs: z.string().optional(),
+    slackUserId: z.string().optional(),
 
-  // Routing info
-  matchedText: z.string().optional(), // Why it was routed here
+    // Routing info
+    matchedText: z.string().optional(), // Why it was routed here
 
-  // Delegation tracking
-  delegatedToTaskId: z.uuid().optional(), // If delegated, which task
-  responseText: z.string().optional(), // If responded directly
+    // Delegation tracking
+    delegatedToTaskId: z.uuid().optional(), // If delegated, which task
+    responseText: z.string().optional(), // If responded directly
 
-  // Timestamps
-  createdAt: z.iso.datetime(),
-  lastUpdatedAt: z.iso.datetime(),
-});
+    // Timestamps
+    createdAt: z.iso.datetime(),
+    lastUpdatedAt: z.iso.datetime(),
+  })
+  .openapi("InboxMessage");
 
 export type InboxMessageStatus = z.infer<typeof InboxMessageStatusSchema>;
 export type InboxMessage = z.infer<typeof InboxMessageSchema>;
@@ -348,24 +360,26 @@ export type SteeringStatus = z.infer<typeof SteeringStatusSchema>;
 export const SteeringSourceSchema = z.enum(["ui", "mcp", "script", "slack", "api"]);
 export type SteeringSource = z.infer<typeof SteeringSourceSchema>;
 
-export const SteeringMessageSchema = z.object({
-  id: z.uuid(),
-  taskId: z.uuid(),
-  body: z.string().min(1),
-  mode: SteerModeSchema,
-  status: SteeringStatusSchema,
-  deliveredMode: SteerModeSchema.optional(),
-  source: SteeringSourceSchema,
-  createdByKind: z.enum(["user", "agent", "system"]),
-  createdByUserId: z.string().optional(),
-  createdByAgentId: z.string().optional(),
-  promotedTaskId: z.uuid().optional(),
-  createdAt: z.iso.datetime(),
-  deliveredAt: z.iso.datetime().optional(),
-  handledAt: z.iso.datetime().optional(),
-  /** accept-steer's optional note describing how the steering was incorporated. */
-  handledNote: z.string().optional(),
-});
+export const SteeringMessageSchema = z
+  .object({
+    id: z.uuid(),
+    taskId: z.uuid(),
+    body: z.string().min(1),
+    mode: SteerModeSchema,
+    status: SteeringStatusSchema,
+    deliveredMode: SteerModeSchema.optional(),
+    source: SteeringSourceSchema,
+    createdByKind: z.enum(["user", "agent", "system"]),
+    createdByUserId: z.string().optional(),
+    createdByAgentId: z.string().optional(),
+    promotedTaskId: z.uuid().optional(),
+    createdAt: z.iso.datetime(),
+    deliveredAt: z.iso.datetime().optional(),
+    handledAt: z.iso.datetime().optional(),
+    /** accept-steer's optional note describing how the steering was incorporated. */
+    handledNote: z.string().optional(),
+  })
+  .openapi("SteeringMessage");
 export type SteeringMessage = z.infer<typeof SteeringMessageSchema>;
 
 export const SteerOutcomeSchema = z.enum(["steered", "queued", "promoted"]);
@@ -375,13 +389,15 @@ export type SteerOutcome = z.infer<typeof SteerOutcomeSchema>;
 export const OnUnsupportedSchema = z.enum(["degrade", "fail"]).default("degrade");
 export type OnUnsupported = z.infer<typeof OnUnsupportedSchema>;
 
-export const SteerResultSchema = z.object({
-  outcome: SteerOutcomeSchema,
-  steeringMessageId: z.uuid().optional(),
-  promotedTaskId: z.uuid().optional(),
-  effectiveMode: SteerModeSchema,
-  degradedFrom: SteerModeSchema.optional(),
-});
+export const SteerResultSchema = z
+  .object({
+    outcome: SteerOutcomeSchema,
+    steeringMessageId: z.uuid().optional(),
+    promotedTaskId: z.uuid().optional(),
+    effectiveMode: SteerModeSchema,
+    degradedFrom: SteerModeSchema.optional(),
+  })
+  .openapi("SteerResult");
 export type SteerResult = z.infer<typeof SteerResultSchema>;
 
 /**
@@ -428,11 +444,13 @@ export type ProviderMetaMap = {
   opencode: NoProviderMeta;
 };
 
-export const FollowUpConfigSchema = z.object({
-  disabled: z.boolean().optional(),
-  onCompleted: z.string().max(4000).optional(),
-  onFailed: z.string().max(4000).optional(),
-});
+export const FollowUpConfigSchema = z
+  .object({
+    disabled: z.boolean().optional(),
+    onCompleted: z.string().max(4000).optional(),
+    onFailed: z.string().max(4000).optional(),
+  })
+  .openapi("FollowUpConfig");
 export type FollowUpConfig = z.infer<typeof FollowUpConfigSchema>;
 
 // Routing-affinity snapshot for interrupted/pooled tasks (routing-affinity
@@ -442,153 +460,170 @@ export type FollowUpConfig = z.infer<typeof FollowUpConfigSchema>;
 // declares `capabilities`); `harnessProvider` is informational only (native
 // session resume is deprecated, so it is never enforced by the eligibility
 // gate). See `isAgentEligibleForTask` in `src/be/db.ts`.
-export const RoutingAffinitySchema = z.object({
-  sourceAgentId: z.string().optional(),
-  role: z.string().max(100).optional(),
-  harnessProvider: ProviderNameSchema.optional(),
-  capabilities: z.array(z.string()).default([]),
-});
+export const RoutingAffinitySchema = z
+  .object({
+    sourceAgentId: z.string().optional(),
+    role: z.string().max(100).optional(),
+    harnessProvider: ProviderNameSchema.optional(),
+    capabilities: z.array(z.string()).default([]),
+  })
+  .openapi("RoutingAffinity");
 export type RoutingAffinity = z.infer<typeof RoutingAffinitySchema>;
 
-export const AgentTaskSchema = z.object({
-  id: z.uuid(),
-  key: AssetKeySchema,
-  // Agent-id fields are plain strings, NOT .uuid(): agents may join with custom
-  // IDs (AGENT_ID env / join-swarm agentId), and a UUID constraint here makes MCP
-  // tool responses fail output validation after the write already applied.
-  agentId: z.string().nullable(), // Nullable for unassigned tasks
-  creatorAgentId: z.string().optional(), // Who created this task (optional for Slack/API)
-  task: z.string().min(1),
-  title: z.string().optional(), // Human-facing display title override (e.g. session rename); falls back to `task` when unset
-  status: AgentTaskStatusSchema,
-  source: AgentTaskSourceSchema.default("mcp"),
+export const AgentTaskSchema = z
+  .object({
+    id: z.uuid(),
+    key: AssetKeySchema,
+    // Agent-id fields are plain strings, NOT .uuid(): agents may join with custom
+    // IDs (AGENT_ID env / join-swarm agentId), and a UUID constraint here makes MCP
+    // tool responses fail output validation after the write already applied.
+    agentId: z.string().nullable(), // Nullable for unassigned tasks
+    creatorAgentId: z.string().optional(), // Who created this task (optional for Slack/API)
+    task: z.string().min(1),
+    title: z.string().optional(), // Human-facing display title override (e.g. session rename); falls back to `task` when unset
+    status: AgentTaskStatusSchema,
+    source: AgentTaskSourceSchema.default("mcp"),
 
-  // Task metadata
-  taskType: z.string().max(50).optional(), // e.g., "bug", "feature", "chore"
-  tags: z.array(z.string()).default([]), // e.g., ["urgent", "frontend"]
-  priority: z.number().int().min(0).max(100).default(50),
-  dependsOn: z.array(z.uuid()).default([]), // Task IDs this depends on
+    // Task metadata
+    taskType: z.string().max(50).optional(), // e.g., "bug", "feature", "chore"
+    tags: z.array(z.string()).default([]), // e.g., ["urgent", "frontend"]
+    priority: z.number().int().min(0).max(100).default(50),
+    // Task IDs this depends on. z.string(), not z.uuid(): the create-task
+    // body accepts arbitrary strings and the DB stores them verbatim, so a
+    // uuid pin here would make response validation reject honest rows.
+    dependsOn: z.array(z.string()).default([]),
 
-  // Acceptance tracking
-  offeredTo: z.string().optional(), // Agent the task was offered to
-  offeredAt: z.iso.datetime().optional(),
-  acceptedAt: z.iso.datetime().optional(),
-  rejectionReason: z.string().optional(),
+    // Acceptance tracking
+    offeredTo: z.string().optional(), // Agent the task was offered to
+    offeredAt: z.iso.datetime().optional(),
+    acceptedAt: z.iso.datetime().optional(),
+    rejectionReason: z.string().optional(),
 
-  // Timestamps
-  createdAt: z.iso.datetime().default(() => new Date().toISOString()),
-  lastUpdatedAt: z.iso.datetime().default(() => new Date().toISOString()),
-  finishedAt: z.iso.datetime().optional(),
-  notifiedAt: z.iso.datetime().optional(),
+    // Timestamps. No `.default(() => now)`: rows always carry these, and a
+    // function default gets EVALUATED at OpenAPI generation time — baking a
+    // wall-clock value into openapi.json and making generation
+    // non-reproducible (freshness gate flake).
+    createdAt: z.iso.datetime(),
+    lastUpdatedAt: z.iso.datetime(),
+    finishedAt: z.iso.datetime().optional(),
+    notifiedAt: z.iso.datetime().optional(),
 
-  // Completion data
-  failureReason: z.string().optional(),
-  output: z.string().optional(),
-  progress: z.string().optional(),
+    // Completion data
+    failureReason: z.string().optional(),
+    output: z.string().optional(),
+    progress: z.string().optional(),
 
-  // Slack-specific metadata (optional)
-  slackChannelId: z.string().optional(),
-  slackThreadTs: z.string().optional(),
-  slackTriggerMessageTs: z.string().optional(),
-  slackUserId: z.string().optional(),
-  slackReplySent: z.boolean().default(false),
-  slackProgressMessageTs: z.string().optional(),
-  slackTreeRootMessageTs: z.string().optional(),
+    // Slack-specific metadata (optional)
+    slackChannelId: z.string().optional(),
+    slackThreadTs: z.string().optional(),
+    slackTriggerMessageTs: z.string().optional(),
+    slackUserId: z.string().optional(),
+    slackReplySent: z.boolean().default(false),
+    slackProgressMessageTs: z.string().optional(),
+    slackTreeRootMessageTs: z.string().optional(),
 
-  // VCS metadata (GitHub / GitLab — provider-agnostic)
-  vcsProvider: z.enum(["github", "gitlab"]).optional(),
-  vcsRepo: z.string().optional(),
-  vcsEventType: z.string().optional(),
-  vcsNumber: z.number().int().optional(),
-  vcsCommentId: z.number().int().optional(),
-  vcsAuthor: z.string().optional(),
-  vcsUrl: z.string().optional(),
-  vcsInstallationId: z.number().int().optional(),
-  vcsNodeId: z.string().optional(),
+    // VCS metadata (GitHub / GitLab — provider-agnostic)
+    vcsProvider: z.enum(["github", "gitlab"]).optional(),
+    vcsRepo: z.string().optional(),
+    vcsEventType: z.string().optional(),
+    vcsNumber: z.number().int().optional(),
+    vcsCommentId: z.number().int().optional(),
+    vcsAuthor: z.string().optional(),
+    vcsUrl: z.string().optional(),
+    vcsInstallationId: z.number().int().optional(),
+    vcsNodeId: z.string().optional(),
 
-  // AgentMail-specific metadata (optional)
-  agentmailInboxId: z.string().optional(),
-  agentmailMessageId: z.string().optional(),
-  agentmailThreadId: z.string().optional(),
+    // AgentMail-specific metadata (optional)
+    agentmailInboxId: z.string().optional(),
+    agentmailMessageId: z.string().optional(),
+    agentmailThreadId: z.string().optional(),
 
-  // Mention-to-task metadata (optional)
-  mentionMessageId: z.uuid().optional(),
-  mentionChannelId: z.uuid().optional(),
+    // Mention-to-task metadata (optional). Plain strings, not z.uuid():
+    // Slack channel/message IDs (e.g. "C0AR967K0KZ") are not UUIDs — a uuid
+    // pin here makes response validation reject honest Slack-originated rows
+    // (same trap as the MCP tool output schemas, see get-task-details).
+    mentionMessageId: z.string().optional(),
+    mentionChannelId: z.string().optional(),
 
-  // Working directory (optional — must be an absolute path for the agent process)
-  dir: z.string().min(1).startsWith("/").optional(),
+    // Working directory (optional — SHOULD be an absolute path, but the
+    // create-task body accepts any string and the DB stores it verbatim, so
+    // the row contract cannot pin the format (see dependsOn note above).
+    dir: z.string().min(1).optional(),
 
-  // Session attachment (optional)
-  parentTaskId: z.uuid().optional(),
-  claudeSessionId: z.string().optional(),
+    // Session attachment (optional). z.string(), not z.uuid(): accepted
+    // verbatim from the create-task body (see dependsOn note above).
+    parentTaskId: z.string().optional(),
+    claudeSessionId: z.string().optional(),
 
-  // Model selection (optional — provider-specific; can be "opus", "gpt-4o",
-  // "openrouter/openai/gpt-5-nano", etc. depending on HARNESS_PROVIDER).
-  // Prefer modelTier for portable task intent; model is a concrete override
-  // interpreted by the claiming worker's harness and never switches provider.
-  model: z.string().optional(),
-  modelTier: ModelTierSchema.optional(),
-  effort: ReasoningEffortSchema.optional(),
+    // Model selection (optional — provider-specific; can be "opus", "gpt-4o",
+    // "openrouter/openai/gpt-5-nano", etc. depending on HARNESS_PROVIDER).
+    // Prefer modelTier for portable task intent; model is a concrete override
+    // interpreted by the claiming worker's harness and never switches provider.
+    model: z.string().optional(),
+    modelTier: ModelTierSchema.optional(),
+    effort: ReasoningEffortSchema.optional(),
 
-  // Schedule linking (optional — set when task was created by a schedule)
-  scheduleId: z.uuid().optional(),
+    // Schedule linking (optional — set when task was created by a schedule).
+    // z.string(): also reachable verbatim from the create-task query param.
+    scheduleId: z.string().optional(),
 
-  // Workflow linking (optional — set when task was created by a workflow)
-  workflowRunId: z.string().uuid().nullable().optional(),
-  workflowRunStepId: z.string().uuid().nullable().optional(),
+    // Workflow linking (optional — set when task was created by a workflow)
+    workflowRunId: z.string().uuid().nullable().optional(),
+    workflowRunStepId: z.string().uuid().nullable().optional(),
 
-  // Cross-ingress context key — uniform identifier for the "context entity"
-  // (Slack thread, GitHub issue, Linear issue, schedule, workflow run, ...).
-  // See src/tasks/context-key.ts. Nullable: legacy rows stay NULL.
-  contextKey: z.string().optional(),
+    // Cross-ingress context key — uniform identifier for the "context entity"
+    // (Slack thread, GitHub issue, Linear issue, schedule, workflow run, ...).
+    // See src/tasks/context-key.ts. Nullable: legacy rows stay NULL.
+    contextKey: z.string().optional(),
 
-  // Structured output schema (optional — JSON Schema that task output must conform to)
-  outputSchema: z.record(z.string(), z.unknown()).optional(),
+    // Structured output schema (optional — JSON Schema that task output must conform to)
+    outputSchema: z.record(z.string(), z.unknown()).optional(),
 
-  // Lead follow-up control (optional — null/undefined preserves default behavior)
-  followUpConfig: FollowUpConfigSchema.optional(),
+    // Lead follow-up control (optional — null/undefined preserves default behavior)
+    followUpConfig: FollowUpConfigSchema.optional(),
 
-  // Pause tracking
-  wasPaused: z.boolean().default(false),
+    // Pause tracking
+    wasPaused: z.boolean().default(false),
 
-  // Context usage aggregates
-  compactionCount: z.number().int().min(0).optional(),
-  peakContextPercent: z.number().min(0).max(100).optional(),
-  // Migration 063: renamed from totalContextTokensUsed. Semantic is now a
-  // monotonic max across the task's snapshots — "high water mark" rather than
-  // "latest known".
-  peakContextTokens: z.number().int().min(0).optional(),
-  contextWindowSize: z.number().int().min(0).optional(),
+    // Context usage aggregates
+    compactionCount: z.number().int().min(0).optional(),
+    peakContextPercent: z.number().min(0).max(100).optional(),
+    // Migration 063: renamed from totalContextTokensUsed. Semantic is now a
+    // monotonic max across the task's snapshots — "high water mark" rather than
+    // "latest known".
+    peakContextTokens: z.number().int().min(0).optional(),
+    contextWindowSize: z.number().int().min(0).optional(),
 
-  // Credential tracking
-  credentialKeySuffix: z.string().optional(),
-  credentialKeyType: z.string().optional(),
+    // Credential tracking
+    credentialKeySuffix: z.string().optional(),
+    credentialKeyType: z.string().optional(),
 
-  // User identity — canonical user who requested this task
-  requestedByUserId: z.string().optional(),
+    // User identity — canonical user who requested this task
+    requestedByUserId: z.string().optional(),
 
-  // agent-swarm package version at task creation time. Enables benchmarking
-  // performance across releases. Nullable for rows created before tracking was added.
-  swarmVersion: z.string().optional(),
+    // agent-swarm package version at task creation time. Enables benchmarking
+    // performance across releases. Nullable for rows created before tracking was added.
+    swarmVersion: z.string().optional(),
 
-  // Provider tracking — which harness provider ran this task
-  provider: ProviderNameSchema.optional(),
-  providerMeta: z.record(z.string(), z.unknown()).optional(),
+    // Provider tracking — which harness provider ran this task
+    provider: ProviderNameSchema.optional(),
+    providerMeta: z.record(z.string(), z.unknown()).optional(),
 
-  // Harness variant — sub-variant within a provider (e.g. "bridge" vs "stock" for claude)
-  harnessVariant: z.string().optional(),
-  harnessVariantMeta: z.record(z.string(), z.unknown()).optional(),
+    // Harness variant — sub-variant within a provider (e.g. "bridge" vs "stock" for claude)
+    harnessVariant: z.string().optional(),
+    harnessVariantMeta: z.record(z.string(), z.unknown()).optional(),
 
-  // Aggregated session cost for task list/read models. Undefined means no
-  // session cost rows have been recorded for this task.
-  totalCostUsd: z.number().min(0).optional(),
+    // Aggregated session cost for task list/read models. Undefined means no
+    // session cost rows have been recorded for this task.
+    totalCostUsd: z.number().min(0).optional(),
 
-  // Routing-affinity snapshot (nullable) — gates which agents may claim/
-  // auto-claim this task via the pool. Undefined = untagged, unchanged
-  // behavior. Inherited from parentTaskId when not explicitly set (see
-  // `createTaskExtended` in src/be/db.ts). See `isAgentEligibleForTask`.
-  routingAffinity: RoutingAffinitySchema.optional(),
-});
+    // Routing-affinity snapshot (nullable) — gates which agents may claim/
+    // auto-claim this task via the pool. Undefined = untagged, unchanged
+    // behavior. Inherited from parentTaskId when not explicitly set (see
+    // `createTaskExtended` in src/be/db.ts). See `isAgentEligibleForTask`.
+    routingAffinity: RoutingAffinitySchema.optional(),
+  })
+  .openapi("AgentTask");
 
 // ============================================================================
 // Task Attachments (Phase 1 — pointer-based artifacts)
@@ -656,55 +691,59 @@ export const AttachmentInputSchema = z.discriminatedUnion("kind", [
 ]);
 export type AttachmentInput = z.infer<typeof AttachmentInputSchema>;
 
-export const TaskAttachmentSchema = z.object({
-  id: z.uuid(),
-  taskId: z.uuid(),
-  agentId: z.string().nullable(),
-  name: z.string(),
-  kind: TaskAttachmentKindSchema,
-  url: z.string().optional(),
-  path: z.string().optional(),
-  pageId: z.string().optional(),
-  providerId: z.string().optional(),
-  providerKey: z.string().optional(),
-  capabilities: z.record(z.string(), z.unknown()).optional(),
-  // agent-fs only — pair with `path` to build a public live-host URL.
-  orgId: z.string().optional(),
-  driveId: z.string().optional(),
-  mimeType: z.string().optional(),
-  sizeBytes: z.number().int().min(0).optional(),
-  sha256: z.string().optional(),
-  intent: z.string().optional(),
-  description: z.string().optional(),
-  isPrimary: z.boolean().default(false),
-  createdAt: z.iso.datetime(),
-  createdBy: z.string().optional(),
-  updatedBy: z.string().optional(),
-});
+export const TaskAttachmentSchema = z
+  .object({
+    id: z.uuid(),
+    taskId: z.uuid(),
+    agentId: z.string().nullable(),
+    name: z.string(),
+    kind: TaskAttachmentKindSchema,
+    url: z.string().optional(),
+    path: z.string().optional(),
+    pageId: z.string().optional(),
+    providerId: z.string().optional(),
+    providerKey: z.string().optional(),
+    capabilities: z.record(z.string(), z.unknown()).optional(),
+    // agent-fs only — pair with `path` to build a public live-host URL.
+    orgId: z.string().optional(),
+    driveId: z.string().optional(),
+    mimeType: z.string().optional(),
+    sizeBytes: z.number().int().min(0).optional(),
+    sha256: z.string().optional(),
+    intent: z.string().optional(),
+    description: z.string().optional(),
+    isPrimary: z.boolean().default(false),
+    createdAt: z.iso.datetime(),
+    createdBy: z.string().optional(),
+    updatedBy: z.string().optional(),
+  })
+  .openapi("TaskAttachment");
 export type TaskAttachment = z.infer<typeof TaskAttachmentSchema>;
 
 // ============================================================================
 // User Identity Types
 // ============================================================================
 
-export const UserSchema = z.object({
-  id: z.string(),
-  name: z.string().min(1),
-  email: z.string().optional(),
-  role: z.string().optional(),
-  notes: z.string().optional(),
-  emailAliases: z.array(z.string()).default([]),
-  preferredChannel: z.string().default("slack"),
-  timezone: z.string().optional(),
-  // Phase 064: free-form JSON for operator notes + integration hints.
-  metadata: z.record(z.string(), z.unknown()).optional(),
-  // NULL = unlimited (Phase 064).
-  dailyBudgetUsd: z.number().nullable().optional(),
-  // Lifecycle (Phase 064). CHECK constraint enforces these three values.
-  status: z.enum(["invited", "active", "suspended"]).default("active"),
-  createdAt: z.iso.datetime(),
-  lastUpdatedAt: z.iso.datetime(),
-});
+export const UserSchema = z
+  .object({
+    id: z.string(),
+    name: z.string().min(1),
+    email: z.string().optional(),
+    role: z.string().optional(),
+    notes: z.string().optional(),
+    emailAliases: z.array(z.string()).default([]),
+    preferredChannel: z.string().default("slack"),
+    timezone: z.string().optional(),
+    // Phase 064: free-form JSON for operator notes + integration hints.
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    // NULL = unlimited (Phase 064).
+    dailyBudgetUsd: z.number().nullable().optional(),
+    // Lifecycle (Phase 064). CHECK constraint enforces these three values.
+    status: z.enum(["invited", "active", "suspended"]).default("active"),
+    createdAt: z.iso.datetime(),
+    lastUpdatedAt: z.iso.datetime(),
+  })
+  .openapi("User");
 
 export type User = z.infer<typeof UserSchema>;
 
@@ -756,18 +795,20 @@ export type InboxItemType = z.infer<typeof InboxItemTypeSchema>;
 export const InboxItemStatusSchema = z.enum(["open", "snoozed", "dismissed", "done"]);
 export type InboxItemStatus = z.infer<typeof InboxItemStatusSchema>;
 
-export const InboxItemStateSchema = z.object({
-  id: z.string(),
-  userId: z.string(),
-  itemType: InboxItemTypeSchema,
-  itemId: z.string(),
-  status: InboxItemStatusSchema,
-  snoozeUntil: z.string().optional(),
-  dismissedAt: z.string().optional(),
-  doneAt: z.string().optional(),
-  createdAt: z.string(),
-  lastUpdatedAt: z.string(),
-});
+export const InboxItemStateSchema = z
+  .object({
+    id: z.string(),
+    userId: z.string(),
+    itemType: InboxItemTypeSchema,
+    itemId: z.string(),
+    status: InboxItemStatusSchema,
+    snoozeUntil: z.string().optional(),
+    dismissedAt: z.string().optional(),
+    doneAt: z.string().optional(),
+    createdAt: z.string(),
+    lastUpdatedAt: z.string(),
+  })
+  .openapi("InboxItemState");
 export type InboxItemState = z.infer<typeof InboxItemStateSchema>;
 
 // ============================================================================
@@ -777,16 +818,18 @@ export type InboxItemState = z.infer<typeof InboxItemStateSchema>;
 export const FavoriteItemTypeSchema = z.enum(["page", "workflow", "schedule"]);
 export type FavoriteItemType = z.infer<typeof FavoriteItemTypeSchema>;
 
-export const UserFavoriteSchema = z.object({
-  id: z.string(),
-  userId: z.string().optional(),
-  itemType: FavoriteItemTypeSchema,
-  itemId: z.string(),
-  createdAt: z.string(),
-  lastUpdatedAt: z.string(),
-  createdBy: z.string().optional(),
-  updatedBy: z.string().optional(),
-});
+export const UserFavoriteSchema = z
+  .object({
+    id: z.string(),
+    userId: z.string().optional(),
+    itemType: FavoriteItemTypeSchema,
+    itemId: z.string(),
+    createdAt: z.string(),
+    lastUpdatedAt: z.string(),
+    createdBy: z.string().optional(),
+    updatedBy: z.string().optional(),
+  })
+  .openapi("UserFavorite");
 export type UserFavorite = z.infer<typeof UserFavoriteSchema>;
 
 // ============================================================================
@@ -800,17 +843,19 @@ export type UserFavorite = z.infer<typeof UserFavoriteSchema>;
 export const TaskTemplateKindSchema = z.enum(["task", "workflow", "schedule"]);
 export type TaskTemplateKind = z.infer<typeof TaskTemplateKindSchema>;
 
-export const TaskTemplateSchema = z.object({
-  id: z.string(),
-  title: z.string().min(1),
-  description: z.string(),
-  prompt: z.string(),
-  kind: TaskTemplateKindSchema.default("task"),
-  payload: z.record(z.string(), z.unknown()).default({}),
-  category: z.string().optional(),
-  tags: z.array(z.string()).default([]),
-  createdAt: z.string(),
-});
+export const TaskTemplateSchema = z
+  .object({
+    id: z.string(),
+    title: z.string().min(1),
+    description: z.string(),
+    prompt: z.string(),
+    kind: TaskTemplateKindSchema.default("task"),
+    payload: z.record(z.string(), z.unknown()).default({}),
+    category: z.string().optional(),
+    tags: z.array(z.string()).default([]),
+    createdAt: z.string(),
+  })
+  .openapi("TaskTemplate");
 export type TaskTemplate = z.infer<typeof TaskTemplateSchema>;
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline", "waiting_for_credentials"]);
@@ -834,78 +879,82 @@ export const AgentAvatarSchema = z.discriminatedUnion("type", [
 ]);
 export type AgentAvatar = z.infer<typeof AgentAvatarSchema>;
 
-export const AgentSchema = z.object({
-  // Plain string, NOT .uuid(): agents may join with custom IDs (AGENT_ID env /
-  // join-swarm agentId).
-  id: z.string(),
-  name: z.string().min(1),
-  isLead: z.boolean().default(false),
-  status: AgentStatusSchema,
+export const AgentSchema = z
+  .object({
+    // Plain string, NOT .uuid(): agents may join with custom IDs (AGENT_ID env /
+    // join-swarm agentId).
+    id: z.string(),
+    name: z.string().min(1),
+    isLead: z.boolean().default(false),
+    status: AgentStatusSchema,
 
-  // Profile fields
-  description: z.string().optional(),
-  role: z.string().max(100).optional(), // Free-form, e.g., "frontend dev"
-  capabilities: z.array(z.string()).default([]), // e.g., ["typescript", "react"]
+    // Profile fields
+    description: z.string().optional(),
+    role: z.string().max(100).optional(), // Free-form, e.g., "frontend dev"
+    capabilities: z.array(z.string()).default([]), // e.g., ["typescript", "react"]
 
-  // Personal CLAUDE.md content (character cap, not a byte cap)
-  claudeMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
+    // Personal CLAUDE.md content (character cap, not a byte cap)
+    claudeMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
 
-  // Soul: Persona, behavioral directives (injected via --append-system-prompt)
-  soulMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
-  // Identity: Expertise, working style, self-evolution notes (injected via --append-system-prompt)
-  identityMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
-  // Setup script: Runs at container start, agent-evolved (synced to /workspace/start-up.sh)
-  setupScript: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
-  // Tools/environment reference: Operational knowledge (synced to /workspace/TOOLS.md)
-  toolsMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
-  // Heartbeat checklist: Standing orders checked periodically (synced to /workspace/HEARTBEAT.md)
-  heartbeatMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
+    // Soul: Persona, behavioral directives (injected via --append-system-prompt)
+    soulMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
+    // Identity: Expertise, working style, self-evolution notes (injected via --append-system-prompt)
+    identityMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
+    // Setup script: Runs at container start, agent-evolved (synced to /workspace/start-up.sh)
+    setupScript: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
+    // Tools/environment reference: Operational knowledge (synced to /workspace/TOOLS.md)
+    toolsMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
+    // Heartbeat checklist: Standing orders checked periodically (synced to /workspace/HEARTBEAT.md)
+    heartbeatMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
 
-  // Concurrency limit (defaults to 1 for backwards compatibility)
-  maxTasks: z.number().int().min(1).max(100).optional(),
+    // Concurrency limit (defaults to 1 for backwards compatibility)
+    maxTasks: z.number().int().min(1).max(100).optional(),
 
-  // Polling limit tracking (consecutive empty polls)
-  emptyPollCount: z.number().int().min(0).optional(),
+    // Polling limit tracking (consecutive empty polls)
+    emptyPollCount: z.number().int().min(0).optional(),
 
-  // Last session activity timestamp (updated on tool calls, task updates, etc.)
-  lastActivityAt: z.iso.datetime().optional(),
+    // Last session activity timestamp (updated on tool calls, task updates, etc.)
+    lastActivityAt: z.iso.datetime().optional(),
 
-  // Harness provider this agent runs (claude, opencode, codex, ...)
-  provider: ProviderNameSchema.optional(),
+    // Harness provider this agent runs (claude, opencode, codex, ...)
+    provider: ProviderNameSchema.optional(),
 
-  // Phase 1.5 (cloud-personalization): harness provider pushed by the worker
-  // on registration. Mirrors `provider` but lives in its own column so the
-  // server can answer "what harnesses are deployed?" without joining
-  // anywhere else, and so an operator can re-assign via
-  // PATCH /api/agents/:id/harness-provider without restarting the worker.
-  // Worker boot path is NOT yet rewritten (DES-359 tracks that) — the
-  // PATCH is a planning/forecast mechanism today; on next worker restart,
-  // the env-driven value wins.
-  harnessProvider: ProviderNameSchema.nullable().optional(),
+    // Phase 1.5 (cloud-personalization): harness provider pushed by the worker
+    // on registration. Mirrors `provider` but lives in its own column so the
+    // server can answer "what harnesses are deployed?" without joining
+    // anywhere else, and so an operator can re-assign via
+    // PATCH /api/agents/:id/harness-provider without restarting the worker.
+    // Worker boot path is NOT yet rewritten (DES-359 tracks that) — the
+    // PATCH is a planning/forecast mechanism today; on next worker restart,
+    // the env-driven value wins.
+    harnessProvider: ProviderNameSchema.nullable().optional(),
 
-  // Env-var names the worker is blocked on when status is
-  // `waiting_for_credentials`. Null otherwise.
-  credentialMissing: z.array(z.string()).nullable().optional(),
+    // Env-var names the worker is blocked on when status is
+    // `waiting_for_credentials`. Null otherwise.
+    credentialMissing: z.array(z.string()).nullable().optional(),
 
-  // Worker-self-reported credential snapshot for this agent's harness.
-  // Pairs with `harnessProvider`. Null = unreported (worker hasn't booted
-  // yet, or CRED_CHECK_DISABLE=1 was set). Migration 055 adds the column.
-  credStatus: z
-    .lazy(() => AgentCredStatusSchema)
-    .nullable()
-    .optional(),
+    // Worker-self-reported credential snapshot for this agent's harness.
+    // Pairs with `harnessProvider`. Null = unreported (worker hasn't booted
+    // yet, or CRED_CHECK_DISABLE=1 was set). Migration 055 adds the column.
+    credStatus: z
+      .lazy(() => AgentCredStatusSchema)
+      .nullable()
+      .optional(),
 
-  // Custom avatar (icon + color). Null/missing = fall back to the
-  // deterministic hash-derived icon and color (see apps/ui/src/lib/agent-icon.ts
-  // and agent-color.ts). Migration 119 adds the column.
-  avatar: z
-    .lazy(() => AgentAvatarSchema)
-    .nullable()
-    .optional(),
+    // Custom avatar (icon + color). Null/missing = fall back to the
+    // deterministic hash-derived icon and color (see apps/ui/src/lib/agent-icon.ts
+    // and agent-color.ts). Migration 119 adds the column.
+    avatar: z
+      .lazy(() => AgentAvatarSchema)
+      .nullable()
+      .optional(),
 
-  createdAt: z.iso.datetime().default(() => new Date().toISOString()),
-  lastUpdatedAt: z.iso.datetime().default(() => new Date().toISOString()),
-});
+    // No function defaults — see AgentTaskSchema's timestamp comment
+    // (OpenAPI-generation reproducibility).
+    createdAt: z.iso.datetime(),
+    lastUpdatedAt: z.iso.datetime(),
+  })
+  .openapi("Agent");
 
 // ---------------------------------------------------------------------------
 // Worker-reported credential snapshot
@@ -920,23 +969,27 @@ export const AgentSchema = z.object({
 //
 // The cache-hit post-task path does NOT produce a new report; the row's
 // `reportedAt` deliberately stays at the last actual check.
-export const AgentCredStatusLiveTestSchema = z.object({
-  ok: z.boolean(),
-  error: z.string().nullable().default(null),
-  latency_ms: z.number(),
-  testedAt: z.number(), // unix ms
-});
+export const AgentCredStatusLiveTestSchema = z
+  .object({
+    ok: z.boolean(),
+    error: z.string().nullable().default(null),
+    latency_ms: z.number(),
+    testedAt: z.number(), // unix ms
+  })
+  .openapi("AgentCredStatusLiveTest");
 export type AgentCredStatusLiveTest = z.infer<typeof AgentCredStatusLiveTestSchema>;
 
-export const AgentLatestModelSchema = z.object({
-  model: z.string().min(1),
-  source: z.enum(["task", "agent_config", "adapter_default", "custom"]),
-  taskId: z.string().nullable().default(null),
-  harnessProvider: ProviderNameSchema.nullable().default(null),
-  reportedAt: z.number(), // unix ms
-  /** Worker-applied reasoning/effort level for this session, when the adapter honored one. */
-  reasoningEffort: ReasoningEffortSchema.optional(),
-});
+export const AgentLatestModelSchema = z
+  .object({
+    model: z.string().min(1),
+    source: z.enum(["task", "agent_config", "adapter_default", "custom"]),
+    taskId: z.string().nullable().default(null),
+    harnessProvider: ProviderNameSchema.nullable().default(null),
+    reportedAt: z.number(), // unix ms
+    /** Worker-applied reasoning/effort level for this session, when the adapter honored one. */
+    reasoningEffort: ReasoningEffortSchema.optional(),
+  })
+  .openapi("AgentLatestModel");
 export type AgentLatestModel = z.infer<typeof AgentLatestModelSchema>;
 
 /**
@@ -949,30 +1002,34 @@ export type AgentLatestModel = z.infer<typeof AgentLatestModelSchema>;
  * entries (e.g. OpenAI models listed in the account) are excluded. An empty
  * `region` means Bedrock mode with `AWS_REGION` unset (no region fabricated).
  */
-export const AgentBedrockStatusSchema = z.object({
-  region: z.string(),
-  probedAt: z.number(), // unix ms
-  ready: z.boolean(),
-  models: z.array(z.object({ id: z.string(), name: z.string() })).default([]),
-  error: z.string().optional(),
-});
+export const AgentBedrockStatusSchema = z
+  .object({
+    region: z.string(),
+    probedAt: z.number(), // unix ms
+    ready: z.boolean(),
+    models: z.array(z.object({ id: z.string(), name: z.string() })).default([]),
+    error: z.string().optional(),
+  })
+  .openapi("AgentBedrockStatus");
 export type AgentBedrockStatus = z.infer<typeof AgentBedrockStatusSchema>;
 
-export const AgentCredStatusSchema = z.object({
-  ready: z.boolean(),
-  missing: z.array(z.string()).default([]),
-  satisfiedBy: z
-    .enum(["env", "file", "side-effect-pending", "sdk-delegated"])
-    .nullable()
-    .default(null),
-  hint: z.string().nullable().default(null),
-  liveTest: AgentCredStatusLiveTestSchema.nullable().default(null),
-  latestModel: AgentLatestModelSchema.nullable().default(null),
-  reportedAt: z.number(), // unix ms
-  reportKind: z.enum(["boot", "post_task"]).default("boot"),
-  /** Pi-mono Bedrock enumeration block — null when not in Bedrock mode. */
-  bedrock: AgentBedrockStatusSchema.nullable().default(null),
-});
+export const AgentCredStatusSchema = z
+  .object({
+    ready: z.boolean(),
+    missing: z.array(z.string()).default([]),
+    satisfiedBy: z
+      .enum(["env", "file", "side-effect-pending", "sdk-delegated"])
+      .nullable()
+      .default(null),
+    hint: z.string().nullable().default(null),
+    liveTest: AgentCredStatusLiveTestSchema.nullable().default(null),
+    latestModel: AgentLatestModelSchema.nullable().default(null),
+    reportedAt: z.number(), // unix ms
+    reportKind: z.enum(["boot", "post_task"]).default("boot"),
+    /** Pi-mono Bedrock enumeration block — null when not in Bedrock mode. */
+    bedrock: AgentBedrockStatusSchema.nullable().default(null),
+  })
+  .openapi("AgentCredStatus");
 export type AgentCredStatus = z.infer<typeof AgentCredStatusSchema>;
 
 export const AgentWithTasksSchema = AgentSchema.extend({
@@ -1007,19 +1064,21 @@ export const VersionableFieldSchema = z.enum([
   "heartbeatMd",
 ]);
 
-export const ContextVersionSchema = z.object({
-  id: z.uuid(),
-  agentId: z.string(),
-  field: VersionableFieldSchema,
-  content: z.string(),
-  version: z.number().int().min(1),
-  changeSource: ChangeSourceSchema,
-  changedByAgentId: z.string().nullable(),
-  changeReason: z.string().nullable(),
-  contentHash: z.string(),
-  previousVersionId: z.uuid().nullable(),
-  createdAt: z.iso.datetime(),
-});
+export const ContextVersionSchema = z
+  .object({
+    id: z.uuid(),
+    agentId: z.string(),
+    field: VersionableFieldSchema,
+    content: z.string(),
+    version: z.number().int().min(1),
+    changeSource: ChangeSourceSchema,
+    changedByAgentId: z.string().nullable(),
+    changeReason: z.string().nullable(),
+    contentHash: z.string(),
+    previousVersionId: z.uuid().nullable(),
+    createdAt: z.iso.datetime(),
+  })
+  .openapi("ContextVersion");
 
 export type ChangeSource = z.infer<typeof ChangeSourceSchema>;
 export type VersionableField = z.infer<typeof VersionableFieldSchema>;
@@ -1034,26 +1093,30 @@ export type VersionMeta = {
 // Channel Types
 export const ChannelTypeSchema = z.enum(["public", "dm"]);
 
-export const ChannelSchema = z.object({
-  id: z.uuid(),
-  name: z.string().min(1).max(100),
-  description: z.string().max(500).optional(),
-  type: ChannelTypeSchema.default("public"),
-  createdBy: z.string().optional(),
-  participants: z.array(z.string()).default([]), // For DMs
-  createdAt: z.iso.datetime(),
-});
+export const ChannelSchema = z
+  .object({
+    id: z.uuid(),
+    name: z.string().min(1).max(100),
+    description: z.string().max(500).optional(),
+    type: ChannelTypeSchema.default("public"),
+    createdBy: z.string().optional(),
+    participants: z.array(z.string()).default([]), // For DMs
+    createdAt: z.iso.datetime(),
+  })
+  .openapi("Channel");
 
-export const ChannelMessageSchema = z.object({
-  id: z.uuid(),
-  channelId: z.uuid(),
-  agentId: z.string().nullable(), // Null for human users
-  agentName: z.string().optional(), // Denormalized for convenience, "Human" when agentId is null
-  content: z.string().min(1).max(4000),
-  replyToId: z.uuid().optional(),
-  mentions: z.array(z.string()).default([]), // Agent IDs mentioned
-  createdAt: z.iso.datetime(),
-});
+export const ChannelMessageSchema = z
+  .object({
+    id: z.uuid(),
+    channelId: z.uuid(),
+    agentId: z.string().nullable(), // Null for human users
+    agentName: z.string().optional(), // Denormalized for convenience, "Human" when agentId is null
+    content: z.string().min(1).max(4000),
+    replyToId: z.uuid().optional(),
+    mentions: z.array(z.string()).default([]), // Agent IDs mentioned
+    createdAt: z.iso.datetime(),
+  })
+  .openapi("ChannelMessage");
 
 export type ChannelType = z.infer<typeof ChannelTypeSchema>;
 export type Channel = z.infer<typeof ChannelSchema>;
@@ -1062,27 +1125,29 @@ export type ChannelMessage = z.infer<typeof ChannelMessageSchema>;
 // Service Types (for PM2/background services)
 export const ServiceStatusSchema = z.enum(["starting", "healthy", "unhealthy", "stopped"]);
 
-export const ServiceSchema = z.object({
-  id: z.uuid(),
-  agentId: z.string(),
-  name: z.string().min(1).max(50),
-  port: z.number().int().min(1).max(65535).default(3000),
-  description: z.string().optional(),
-  url: z.string().url().optional(),
-  healthCheckPath: z.string().default("/health"),
-  status: ServiceStatusSchema.default("starting"),
+export const ServiceSchema = z
+  .object({
+    id: z.uuid(),
+    agentId: z.string(),
+    name: z.string().min(1).max(50),
+    port: z.number().int().min(1).max(65535).default(3000),
+    description: z.string().optional(),
+    url: z.string().url().optional(),
+    healthCheckPath: z.string().default("/health"),
+    status: ServiceStatusSchema.default("starting"),
 
-  // PM2 configuration (required for ecosystem-based restart)
-  script: z.string().min(1), // Path to script (required)
-  cwd: z.string().optional(), // Working directory (defaults to script dir)
-  interpreter: z.string().optional(), // e.g., "node", "bun" (auto-detected if not set)
-  args: z.array(z.string()).optional(), // Command line arguments
-  env: z.record(z.string(), z.string()).optional(), // Environment variables
+    // PM2 configuration (required for ecosystem-based restart)
+    script: z.string().min(1), // Path to script (required)
+    cwd: z.string().optional(), // Working directory (defaults to script dir)
+    interpreter: z.string().optional(), // e.g., "node", "bun" (auto-detected if not set)
+    args: z.array(z.string()).optional(), // Command line arguments
+    env: z.record(z.string(), z.string()).optional(), // Environment variables
 
-  metadata: z.record(z.string(), z.unknown()).default({}),
-  createdAt: z.iso.datetime(),
-  lastUpdatedAt: z.iso.datetime(),
-});
+    metadata: z.record(z.string(), z.unknown()).default({}),
+    createdAt: z.iso.datetime(),
+    lastUpdatedAt: z.iso.datetime(),
+  })
+  .openapi("Service");
 
 export type ServiceStatus = z.infer<typeof ServiceStatusSchema>;
 export type Service = z.infer<typeof ServiceSchema>;
@@ -1128,31 +1193,35 @@ export const ResumeReasonSchema = z.enum([
 ]);
 export type ResumeReason = z.infer<typeof ResumeReasonSchema>;
 
-export const AgentLogSchema = z.object({
-  id: z.uuid(),
-  eventType: AgentLogEventTypeSchema,
-  agentId: z.string().optional(),
-  taskId: z.string().optional(),
-  oldValue: z.string().optional(),
-  newValue: z.string().optional(),
-  metadata: z.string().optional(),
-  createdAt: z.iso.datetime(),
-});
+export const AgentLogSchema = z
+  .object({
+    id: z.uuid(),
+    eventType: AgentLogEventTypeSchema,
+    agentId: z.string().optional(),
+    taskId: z.string().optional(),
+    oldValue: z.string().optional(),
+    newValue: z.string().optional(),
+    metadata: z.string().optional(),
+    createdAt: z.iso.datetime(),
+  })
+  .openapi("AgentLog");
 
 export type AgentLogEventType = z.infer<typeof AgentLogEventTypeSchema>;
 export type AgentLog = z.infer<typeof AgentLogSchema>;
 
 // Session Log Types (raw CLI output)
-export const SessionLogSchema = z.object({
-  id: z.uuid(),
-  taskId: z.uuid().optional(),
-  sessionId: z.string(),
-  iteration: z.number().int().min(1),
-  cli: z.string().default("claude"),
-  content: z.string(), // Raw JSON line
-  lineNumber: z.number().int().min(0),
-  createdAt: z.iso.datetime(),
-});
+export const SessionLogSchema = z
+  .object({
+    id: z.uuid(),
+    taskId: z.uuid().optional(),
+    sessionId: z.string(),
+    iteration: z.number().int().min(1),
+    cli: z.string().default("claude"),
+    content: z.string(), // Raw JSON line
+    lineNumber: z.number().int().min(0),
+    createdAt: z.iso.datetime(),
+  })
+  .openapi("SessionLog");
 
 export type SessionLog = z.infer<typeof SessionLogSchema>;
 
@@ -1162,52 +1231,56 @@ export type SessionLog = z.infer<typeof SessionLogSchema>;
 export const SessionCostSourceSchema = z.enum(["harness", "pricing-table", "unpriced"]);
 export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
 
-export const SessionCostModelBreakdownSchema = z.object({
-  model: z.string(),
-  inputTokens: z.number().int().nonnegative(),
-  outputTokens: z.number().int().nonnegative(),
-  cacheReadTokens: z.number().int().nonnegative(),
-  cacheWriteTokens: z.number().int().nonnegative(),
-  webSearchRequests: z.number().int().nonnegative().nullable().optional(),
-  costUsd: z.number().nullable().optional(),
-  harnessCostUsd: z.number().nullable().optional(),
-});
+export const SessionCostModelBreakdownSchema = z
+  .object({
+    model: z.string(),
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    cacheReadTokens: z.number().int().nonnegative(),
+    cacheWriteTokens: z.number().int().nonnegative(),
+    webSearchRequests: z.number().int().nonnegative().nullable().optional(),
+    costUsd: z.number().nullable().optional(),
+    harnessCostUsd: z.number().nullable().optional(),
+  })
+  .openapi("SessionCostModelBreakdown");
 export type SessionCostModelBreakdown = z.infer<typeof SessionCostModelBreakdownSchema>;
 
-export const SessionCostSchema = z.object({
-  id: z.uuid(),
-  sessionId: z.string(),
-  taskId: z.uuid().optional(),
-  agentId: z.string(),
-  totalCostUsd: z.number().min(0),
-  inputTokens: z.number().int().min(0).default(0),
-  outputTokens: z.number().int().min(0).default(0),
-  cacheReadTokens: z.number().int().min(0).default(0),
-  cacheWriteTokens: z.number().int().min(0).default(0),
-  // Migration 063: reasoning_output_tokens from codex turn.completed events.
-  reasoningOutputTokens: z.number().int().min(0).default(0),
-  // Migration 063: thinking_input_tokens from claude extended-thinking flows.
-  thinkingTokens: z.number().int().min(0).default(0),
-  durationMs: z.number().int().min(0),
-  // numTurns is nullable — some adapters (e.g. Claude when num_turns is absent)
-  // can't honestly report a turn count. We prefer null over a faked 1.
-  numTurns: z.number().int().min(1).nullable(),
-  model: z.string(),
-  isError: z.boolean().default(false),
-  // Phase 6 (extended by migration 063): where the recorded totalCostUsd came from.
-  //   'harness'        — value reported by the harness as-is.
-  //   'pricing-table'  — value recomputed by the API from `pricing` rows.
-  //   'unpriced'       — the API tried to recompute but the (provider, model)
-  //                      had no matching pricing rows; totalCostUsd is whatever
-  //                      the worker submitted (often 0).
-  costSource: SessionCostSourceSchema.default("harness"),
-  // Migration 128: adapter-reported amount retained for reconciliation only.
-  harnessCostUsd: z.number().nullable().optional(),
-  cacheWrite5mTokens: z.number().int().nullable().optional(),
-  cacheWrite1hTokens: z.number().int().nullable().optional(),
-  modelBreakdown: z.array(SessionCostModelBreakdownSchema).nullable().optional(),
-  createdAt: z.iso.datetime(),
-});
+export const SessionCostSchema = z
+  .object({
+    id: z.uuid(),
+    sessionId: z.string(),
+    taskId: z.uuid().optional(),
+    agentId: z.string(),
+    totalCostUsd: z.number().min(0),
+    inputTokens: z.number().int().min(0).default(0),
+    outputTokens: z.number().int().min(0).default(0),
+    cacheReadTokens: z.number().int().min(0).default(0),
+    cacheWriteTokens: z.number().int().min(0).default(0),
+    // Migration 063: reasoning_output_tokens from codex turn.completed events.
+    reasoningOutputTokens: z.number().int().min(0).default(0),
+    // Migration 063: thinking_input_tokens from claude extended-thinking flows.
+    thinkingTokens: z.number().int().min(0).default(0),
+    durationMs: z.number().int().min(0),
+    // numTurns is nullable — some adapters (e.g. Claude when num_turns is absent)
+    // can't honestly report a turn count. We prefer null over a faked 1.
+    numTurns: z.number().int().min(1).nullable(),
+    model: z.string(),
+    isError: z.boolean().default(false),
+    // Phase 6 (extended by migration 063): where the recorded totalCostUsd came from.
+    //   'harness'        — value reported by the harness as-is.
+    //   'pricing-table'  — value recomputed by the API from `pricing` rows.
+    //   'unpriced'       — the API tried to recompute but the (provider, model)
+    //                      had no matching pricing rows; totalCostUsd is whatever
+    //                      the worker submitted (often 0).
+    costSource: SessionCostSourceSchema.default("harness"),
+    // Migration 128: adapter-reported amount retained for reconciliation only.
+    harnessCostUsd: z.number().nullable().optional(),
+    cacheWrite5mTokens: z.number().int().nullable().optional(),
+    cacheWrite1hTokens: z.number().int().nullable().optional(),
+    modelBreakdown: z.array(SessionCostModelBreakdownSchema).nullable().optional(),
+    createdAt: z.iso.datetime(),
+  })
+  .openapi("SessionCost");
 
 export type SessionCost = z.infer<typeof SessionCostSchema>;
 
@@ -1263,21 +1336,23 @@ export const EventNameSchema = z.enum([
   "schedule.deleted",
 ]);
 
-export const SwarmEventSchema = z.object({
-  id: z.uuid(),
-  category: EventCategorySchema,
-  event: EventNameSchema,
-  status: EventStatusSchema,
-  source: EventSourceSchema,
-  agentId: z.string().optional(),
-  taskId: z.string().optional(),
-  sessionId: z.string().optional(),
-  parentEventId: z.string().optional(),
-  numericValue: z.number().optional(),
-  durationMs: z.number().int().optional(),
-  data: z.record(z.string(), z.unknown()).optional(),
-  createdAt: z.iso.datetime(),
-});
+export const SwarmEventSchema = z
+  .object({
+    id: z.uuid(),
+    category: EventCategorySchema,
+    event: EventNameSchema,
+    status: EventStatusSchema,
+    source: EventSourceSchema,
+    agentId: z.string().optional(),
+    taskId: z.string().optional(),
+    sessionId: z.string().optional(),
+    parentEventId: z.string().optional(),
+    numericValue: z.number().optional(),
+    durationMs: z.number().int().optional(),
+    data: z.record(z.string(), z.unknown()).optional(),
+    createdAt: z.iso.datetime(),
+  })
+  .openapi("SwarmEvent");
 
 export type EventCategory = z.infer<typeof EventCategorySchema>;
 export type EventStatus = z.infer<typeof EventStatusSchema>;
@@ -1361,23 +1436,25 @@ export type ScheduledTask = z.infer<typeof ScheduledTaskSchema>;
 
 export const SwarmConfigScopeSchema = z.enum(["global", "agent", "repo"]);
 
-export const SwarmConfigSchema = z.object({
-  id: z.string().uuid(),
-  scope: SwarmConfigScopeSchema,
-  scopeId: z.string().nullable(), // agentId or repoId, null for global
-  key: z.string().min(1).max(255),
-  value: z.string(),
-  isSecret: z.boolean(),
-  envPath: z.string().nullable(),
-  description: z.string().nullable(),
-  createdAt: z.string(),
-  lastUpdatedAt: z.string(),
-  // True when the row's value is stored as AES-256-GCM ciphertext in the DB.
-  // Plaintext rows return encrypted=false. Legacy isSecret=1 rows are
-  // auto-encrypted during initDb; if that fails, boot aborts before normal API
-  // reads occur.
-  encrypted: z.boolean(),
-});
+export const SwarmConfigSchema = z
+  .object({
+    id: z.string().uuid(),
+    scope: SwarmConfigScopeSchema,
+    scopeId: z.string().nullable(), // agentId or repoId, null for global
+    key: z.string().min(1).max(255),
+    value: z.string(),
+    isSecret: z.boolean(),
+    envPath: z.string().nullable(),
+    description: z.string().nullable(),
+    createdAt: z.string(),
+    lastUpdatedAt: z.string(),
+    // True when the row's value is stored as AES-256-GCM ciphertext in the DB.
+    // Plaintext rows return encrypted=false. Legacy isSecret=1 rows are
+    // auto-encrypted during initDb; if that fails, boot aborts before normal API
+    // reads occur.
+    encrypted: z.boolean(),
+  })
+  .openapi("SwarmConfig");
 
 export type SwarmConfigScope = z.infer<typeof SwarmConfigScopeSchema>;
 export type SwarmConfig = z.infer<typeof SwarmConfigSchema>;
@@ -1386,33 +1463,39 @@ export type SwarmConfig = z.infer<typeof SwarmConfigSchema>;
 // Swarm Repos Types (Centralized Repository Management)
 // ============================================================================
 
-export const RepoGuidelinesSchema = z.object({
-  prChecks: z.array(z.string()),
-  mergeChecks: z.array(z.string()),
-  allowMerge: z.boolean().optional().default(false),
-  review: z.array(z.string()),
-});
+export const RepoGuidelinesSchema = z
+  .object({
+    prChecks: z.array(z.string()),
+    mergeChecks: z.array(z.string()),
+    allowMerge: z.boolean().optional().default(false),
+    review: z.array(z.string()),
+  })
+  .openapi("RepoGuidelines");
 
 export type RepoGuidelines = z.infer<typeof RepoGuidelinesSchema>;
 
-export const RepoHooksSchema = z.object({
-  enabled: z.boolean().default(false),
-});
+export const RepoHooksSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+  })
+  .openapi("RepoHooks");
 
 export type RepoHooks = z.infer<typeof RepoHooksSchema>;
 
-export const SwarmRepoSchema = z.object({
-  id: z.string().uuid(),
-  url: z.string().min(1),
-  name: z.string().min(1).max(100),
-  clonePath: z.string().min(1),
-  defaultBranch: z.string().default("main"),
-  autoClone: z.boolean().default(true),
-  hooks: RepoHooksSchema.optional().default({ enabled: false }),
-  guidelines: RepoGuidelinesSchema.nullable().optional(),
-  createdAt: z.string(),
-  lastUpdatedAt: z.string(),
-});
+export const SwarmRepoSchema = z
+  .object({
+    id: z.string().uuid(),
+    url: z.string().min(1),
+    name: z.string().min(1).max(100),
+    clonePath: z.string().min(1),
+    defaultBranch: z.string().default("main"),
+    autoClone: z.boolean().default(true),
+    hooks: RepoHooksSchema.optional().default({ enabled: false }),
+    guidelines: RepoGuidelinesSchema.nullable().optional(),
+    createdAt: z.string(),
+    lastUpdatedAt: z.string(),
+  })
+  .openapi("SwarmRepo");
 
 export type SwarmRepo = z.infer<typeof SwarmRepoSchema>;
 
@@ -1428,29 +1511,31 @@ export const AgentMemorySourceSchema = z.enum([
   "task_completion",
 ]);
 
-export const AgentMemorySchema = z.object({
-  id: z.string().uuid(),
-  agentId: z.string().nullable(),
-  scope: AgentMemoryScopeSchema,
-  key: z.string().nullable().optional(),
-  name: z.string().min(1).max(500),
-  content: z.string(),
-  summary: z.string().nullable(),
-  source: AgentMemorySourceSchema,
-  sourceTaskId: z.string().uuid().nullable(),
-  sourcePath: z.string().nullable(),
-  chunkIndex: z.number().int().min(0).default(0),
-  totalChunks: z.number().int().min(1).default(1),
-  tags: z.array(z.string()),
-  createdAt: z.string(),
-  updatedAt: z.string().nullable().optional(),
-  accessedAt: z.string(),
-  expiresAt: z.string().nullable().optional(),
-  accessCount: z.number().int().min(0).default(0).optional(),
-  embeddingModel: z.string().nullable().optional(),
-  contentHash: z.string().nullable().optional(),
-  version: z.number().int().min(1).default(1).optional(),
-});
+export const AgentMemorySchema = z
+  .object({
+    id: z.string().uuid(),
+    agentId: z.string().nullable(),
+    scope: AgentMemoryScopeSchema,
+    key: z.string().nullable().optional(),
+    name: z.string().min(1).max(500),
+    content: z.string(),
+    summary: z.string().nullable(),
+    source: AgentMemorySourceSchema,
+    sourceTaskId: z.string().uuid().nullable(),
+    sourcePath: z.string().nullable(),
+    chunkIndex: z.number().int().min(0).default(0),
+    totalChunks: z.number().int().min(1).default(1),
+    tags: z.array(z.string()),
+    createdAt: z.string(),
+    updatedAt: z.string().nullable().optional(),
+    accessedAt: z.string(),
+    expiresAt: z.string().nullable().optional(),
+    accessCount: z.number().int().min(0).default(0).optional(),
+    embeddingModel: z.string().nullable().optional(),
+    contentHash: z.string().nullable().optional(),
+    version: z.number().int().min(1).default(1).optional(),
+  })
+  .openapi("AgentMemory");
 
 export type AgentMemoryScope = z.infer<typeof AgentMemoryScopeSchema>;
 export type AgentMemorySource = z.infer<typeof AgentMemorySourceSchema>;
@@ -1460,18 +1545,20 @@ export type AgentMemory = z.infer<typeof AgentMemorySchema>;
 // Active Session Types (runner session tracking)
 // ============================================================================
 
-export const ActiveSessionSchema = z.object({
-  id: z.uuid(),
-  agentId: z.string(),
-  taskId: z.string().nullable(),
-  triggerType: z.string(),
-  inboxMessageId: z.string().nullable(),
-  taskDescription: z.string().nullable(),
-  runnerSessionId: z.string().nullable(),
-  providerSessionId: z.string().nullable(),
-  startedAt: z.iso.datetime(),
-  lastHeartbeatAt: z.iso.datetime(),
-});
+export const ActiveSessionSchema = z
+  .object({
+    id: z.uuid(),
+    agentId: z.string(),
+    taskId: z.string().nullable(),
+    triggerType: z.string(),
+    inboxMessageId: z.string().nullable(),
+    taskDescription: z.string().nullable(),
+    runnerSessionId: z.string().nullable(),
+    providerSessionId: z.string().nullable(),
+    startedAt: z.iso.datetime(),
+    lastHeartbeatAt: z.iso.datetime(),
+  })
+  .openapi("ActiveSession");
 
 export type ActiveSession = z.infer<typeof ActiveSessionSchema>;
 
@@ -1481,133 +1568,149 @@ export type ActiveSession = z.infer<typeof ActiveSessionSchema>;
 
 // --- Retry Policy ---
 
-export const RetryPolicySchema = z.object({
-  maxRetries: z.number().int().min(0).default(3),
-  strategy: z.enum(["exponential", "static", "linear"]).default("exponential"),
-  baseDelayMs: z.number().int().min(0).default(1000),
-  maxDelayMs: z.number().int().min(0).default(60000),
-});
+export const RetryPolicySchema = z
+  .object({
+    maxRetries: z.number().int().min(0).default(3),
+    strategy: z.enum(["exponential", "static", "linear"]).default("exponential"),
+    baseDelayMs: z.number().int().min(0).default(1000),
+    maxDelayMs: z.number().int().min(0).default(60000),
+  })
+  .openapi("RetryPolicy");
 export type RetryPolicy = z.infer<typeof RetryPolicySchema>;
 
 // --- Executor Metadata ---
 
-export const ExecutorMetaSchema = z.object({
-  runId: z.string().uuid(),
-  stepId: z.string().uuid(),
-  nodeId: z.string(),
-  workflowId: z.string().uuid(),
-  dryRun: z.boolean().default(false),
-  requestedByUserId: z.string().optional(),
-  // The node's declared-inputs interpolation context (aliases + builtins) as built
-  // by buildNodeInterpolationCtx. Executors that defer interpolation (foreach's
-  // per-item body pass) must use THIS — not the full run context — so deferred
-  // config obeys the same explicit-dataflow boundary as normal node config.
-  inputCtx: z.record(z.string(), z.unknown()).optional(),
-});
+export const ExecutorMetaSchema = z
+  .object({
+    runId: z.string().uuid(),
+    stepId: z.string().uuid(),
+    nodeId: z.string(),
+    workflowId: z.string().uuid(),
+    dryRun: z.boolean().default(false),
+    requestedByUserId: z.string().optional(),
+    // The node's declared-inputs interpolation context (aliases + builtins) as built
+    // by buildNodeInterpolationCtx. Executors that defer interpolation (foreach's
+    // per-item body pass) must use THIS — not the full run context — so deferred
+    // config obeys the same explicit-dataflow boundary as normal node config.
+    inputCtx: z.record(z.string(), z.unknown()).optional(),
+  })
+  .openapi("ExecutorMeta");
 export type ExecutorMeta = z.infer<typeof ExecutorMetaSchema>;
 
 // --- Validation ---
 
-export const ValidationResultSchema = z.object({
-  pass: z.boolean(),
-  reasoning: z.string(),
-  confidence: z.number().min(0).max(1),
-});
+export const ValidationResultSchema = z
+  .object({
+    pass: z.boolean(),
+    reasoning: z.string(),
+    confidence: z.number().min(0).max(1),
+  })
+  .openapi("ValidationResult");
 export type ValidationResult = z.infer<typeof ValidationResultSchema>;
 
-export const StepValidationConfigSchema = z.object({
-  executor: z.string().default("validate"),
-  config: z.record(z.string(), z.unknown()),
-  mustPass: z.boolean().default(false),
-  retry: RetryPolicySchema.optional(),
-});
+export const StepValidationConfigSchema = z
+  .object({
+    executor: z.string().default("validate"),
+    config: z.record(z.string(), z.unknown()),
+    mustPass: z.boolean().default(false),
+    retry: RetryPolicySchema.optional(),
+  })
+  .openapi("StepValidationConfig");
 export type StepValidationConfig = z.infer<typeof StepValidationConfigSchema>;
 
-export const SwarmScriptNodeConfigSchema = z.object({
-  scriptName: z.string().min(1),
-  scope: z.enum(["global", "agent"]).optional(),
-  pinHash: z.string().min(1).optional(),
-  args: z.record(z.string(), z.unknown()).optional(),
-  fsMode: z.enum(["none", "workspace-rw"]).optional(),
-  timeoutMs: z.number().int().min(1_000).max(300_000).optional(),
-});
+export const SwarmScriptNodeConfigSchema = z
+  .object({
+    scriptName: z.string().min(1),
+    scope: z.enum(["global", "agent"]).optional(),
+    pinHash: z.string().min(1).optional(),
+    args: z.record(z.string(), z.unknown()).optional(),
+    fsMode: z.enum(["none", "workspace-rw"]).optional(),
+    timeoutMs: z.number().int().min(1_000).max(300_000).optional(),
+  })
+  .openapi("SwarmScriptNodeConfig");
 export type SwarmScriptNodeConfig = z.infer<typeof SwarmScriptNodeConfigSchema>;
 
 // --- Workflow Node (nodes-with-next) ---
 
-export const WorkflowNodeSchema = z.object({
-  id: z.string().describe("Unique node identifier, used in 'next' and 'inputs' mappings"),
-  type: z
-    .string()
-    .describe(
-      "Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match'",
-    ),
-  label: z.string().optional().describe("Human-readable label for UI display"),
-  config: z
-    .record(z.string(), z.unknown())
-    .describe(
-      "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. " +
-        "For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. " +
-        "Values support {{interpolation}} from the node's inputs context. " +
-        "NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, " +
-        "while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}).",
-    ),
-  next: z
-    .union([z.string(), z.array(z.string()), z.record(z.string(), z.string())])
-    .optional()
-    .describe(
-      "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})",
-    ),
-  validation: StepValidationConfigSchema.optional(),
-  retry: RetryPolicySchema.optional(),
-  // REQUIRED for cross-node data access — without this, only 'trigger' and 'input' are available for interpolation.
-  inputs: z
-    .record(z.string(), z.string())
-    .optional()
-    .describe(
-      "REQUIRED for cross-node data access. Maps local names to context paths. " +
-        "Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. " +
-        'Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. ' +
-        'For trigger data: { "pr": "trigger.pullRequest" }.',
-    ),
-  inputSchema: z
-    .record(z.string(), z.unknown())
-    .optional()
-    .describe("JSON Schema to validate resolved inputs before execution"),
-  outputSchema: z
-    .record(z.string(), z.unknown())
-    .optional()
-    .describe(
-      "JSON Schema to validate the executor's output (e.g. {taskId, taskOutput} for agent-task). " +
-        "Different from config.outputSchema which validates the agent's raw output.",
-    ),
-});
+export const WorkflowNodeSchema = z
+  .object({
+    id: z.string().describe("Unique node identifier, used in 'next' and 'inputs' mappings"),
+    type: z
+      .string()
+      .describe(
+        "Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match'",
+      ),
+    label: z.string().optional().describe("Human-readable label for UI display"),
+    config: z
+      .record(z.string(), z.unknown())
+      .describe(
+        "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. " +
+          "For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. " +
+          "Values support {{interpolation}} from the node's inputs context. " +
+          "NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, " +
+          "while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}).",
+      ),
+    next: z
+      .union([z.string(), z.array(z.string()), z.record(z.string(), z.string())])
+      .optional()
+      .describe(
+        "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})",
+      ),
+    validation: StepValidationConfigSchema.optional(),
+    retry: RetryPolicySchema.optional(),
+    // REQUIRED for cross-node data access — without this, only 'trigger' and 'input' are available for interpolation.
+    inputs: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe(
+        "REQUIRED for cross-node data access. Maps local names to context paths. " +
+          "Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. " +
+          'Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. ' +
+          'For trigger data: { "pr": "trigger.pullRequest" }.',
+      ),
+    inputSchema: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe("JSON Schema to validate resolved inputs before execution"),
+    outputSchema: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe(
+        "JSON Schema to validate the executor's output (e.g. {taskId, taskOutput} for agent-task). " +
+          "Different from config.outputSchema which validates the agent's raw output.",
+      ),
+  })
+  .openapi("WorkflowNode");
 export type WorkflowNode = z.infer<typeof WorkflowNodeSchema>;
 
 // --- Workflow Edge (derived — for UI rendering) ---
 
-export const WorkflowEdgeSchema = z.object({
-  id: z.string(),
-  source: z.string(),
-  sourcePort: z.string(),
-  target: z.string(),
-});
+export const WorkflowEdgeSchema = z
+  .object({
+    id: z.string(),
+    source: z.string(),
+    sourcePort: z.string(),
+    target: z.string(),
+  })
+  .openapi("WorkflowEdge");
 export type WorkflowEdge = z.infer<typeof WorkflowEdgeSchema>;
 
 // --- Workflow Definition (nodes-only, no explicit edges) ---
 
-export const WorkflowDefinitionSchema = z.object({
-  nodes: z.array(WorkflowNodeSchema).min(1),
-  onNodeFailure: z
-    .enum(["fail", "continue"])
-    .default("fail")
-    .describe(
-      "Behavior when a node's task fails or is cancelled. " +
-        "'fail' (default): mark the entire run as failed. " +
-        "'continue': treat the failed node as completed with error output and proceed — " +
-        "downstream convergence nodes receive '[FAILED: reason]' and can handle partial results.",
-    ),
-});
+export const WorkflowDefinitionSchema = z
+  .object({
+    nodes: z.array(WorkflowNodeSchema).min(1),
+    onNodeFailure: z
+      .enum(["fail", "continue"])
+      .default("fail")
+      .describe(
+        "Behavior when a node's task fails or is cancelled. " +
+          "'fail' (default): mark the entire run as failed. " +
+          "'continue': treat the failed node as completed with error output and proceed — " +
+          "downstream convergence nodes receive '[FAILED: reason]' and can handle partial results.",
+      ),
+  })
+  .openapi("WorkflowDefinition");
 export type WorkflowDefinition = z.infer<typeof WorkflowDefinitionSchema>;
 
 // --- Workflow Patch Schemas ---
@@ -1617,33 +1720,35 @@ export const WorkflowNodePatchSchema = WorkflowNodeSchema.partial().omit({ id: t
 export type WorkflowNodePatch = z.infer<typeof WorkflowNodePatchSchema>;
 
 /** Bulk workflow patch — DAG operations plus optional metadata fields like triggerSchema */
-export const WorkflowPatchSchema = z.object({
-  update: z
-    .array(
-      z.object({
-        nodeId: z.string().describe("ID of the node to update"),
-        node: WorkflowNodePatchSchema.describe("Partial node data to merge"),
-      }),
-    )
-    .optional()
-    .describe("Nodes to update (partial merge)"),
-  delete: z.array(z.string()).optional().describe("Node IDs to delete"),
-  create: z.array(WorkflowNodeSchema).optional().describe("New nodes to add"),
-  onNodeFailure: z
-    .enum(["fail", "continue"])
-    .optional()
-    .describe("Update the definition-level onNodeFailure behavior"),
-  triggerSchema: z
-    .record(z.string(), z.unknown())
-    .optional()
-    .nullable()
-    .describe(
-      "Optional JSON-Schema describing the expected trigger payload shape. " +
-        "Pass an object to set/replace; pass null to clear; omit to leave unchanged. " +
-        "Validator subset: type, required, properties, enum, const, items. " +
-        "Other JSON-Schema keywords are silently ignored.",
-    ),
-});
+export const WorkflowPatchSchema = z
+  .object({
+    update: z
+      .array(
+        z.object({
+          nodeId: z.string().describe("ID of the node to update"),
+          node: WorkflowNodePatchSchema.describe("Partial node data to merge"),
+        }),
+      )
+      .optional()
+      .describe("Nodes to update (partial merge)"),
+    delete: z.array(z.string()).optional().describe("Node IDs to delete"),
+    create: z.array(WorkflowNodeSchema).optional().describe("New nodes to add"),
+    onNodeFailure: z
+      .enum(["fail", "continue"])
+      .optional()
+      .describe("Update the definition-level onNodeFailure behavior"),
+    triggerSchema: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .nullable()
+      .describe(
+        "Optional JSON-Schema describing the expected trigger payload shape. " +
+          "Pass an object to set/replace; pass null to clear; omit to leave unchanged. " +
+          "Validator subset: type, required, properties, enum, const, items. " +
+          "Other JSON-Schema keywords are silently ignored.",
+      ),
+  })
+  .openapi("WorkflowPatch");
 export type WorkflowPatch = z.infer<typeof WorkflowPatchSchema>;
 
 /** Result of applying a patch — collects all errors instead of throwing on the first */
@@ -1752,74 +1857,82 @@ export type InputValue = z.infer<typeof InputValueSchema>;
 
 // --- Workflow Template ---
 
-export const WorkflowTemplateSchema = z.object({
-  id: z.string().uuid(),
-  name: z.string(),
-  description: z.string(),
-  category: z.string(),
-  variables: z.array(
-    z.object({
-      name: z.string(),
-      description: z.string(),
-      type: z.enum(["string", "number", "boolean"]),
-      default: z.unknown().optional(),
-      required: z.boolean().default(true),
-    }),
-  ),
-  definition: WorkflowDefinitionSchema,
-});
+export const WorkflowTemplateSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: z.string(),
+    description: z.string(),
+    category: z.string(),
+    variables: z.array(
+      z.object({
+        name: z.string(),
+        description: z.string(),
+        type: z.enum(["string", "number", "boolean"]),
+        default: z.unknown().optional(),
+        required: z.boolean().default(true),
+      }),
+    ),
+    definition: WorkflowDefinitionSchema,
+  })
+  .openapi("WorkflowTemplate");
 export type WorkflowTemplate = z.infer<typeof WorkflowTemplateSchema>;
 
 // --- Workflow Snapshot (for version history) ---
 
-export const WorkflowSnapshotSchema = z.object({
-  name: z.string(),
-  description: z.string().optional(),
-  definition: WorkflowDefinitionSchema,
-  triggers: z.array(TriggerConfigSchema),
-  cooldown: CooldownConfigSchema.optional(),
-  input: z.record(z.string(), InputValueSchema).optional(),
-  triggerSchema: z.record(z.string(), z.unknown()).optional(),
-  dir: z.string().min(1).startsWith("/").optional(),
-  vcsRepo: z.string().min(1).optional(),
-  enabled: z.boolean(),
-});
+export const WorkflowSnapshotSchema = z
+  .object({
+    name: z.string(),
+    description: z.string().optional(),
+    definition: WorkflowDefinitionSchema,
+    triggers: z.array(TriggerConfigSchema),
+    cooldown: CooldownConfigSchema.optional(),
+    input: z.record(z.string(), InputValueSchema).optional(),
+    triggerSchema: z.record(z.string(), z.unknown()).optional(),
+    dir: z.string().min(1).startsWith("/").optional(),
+    vcsRepo: z.string().min(1).optional(),
+    enabled: z.boolean(),
+  })
+  .openapi("WorkflowSnapshot");
 export type WorkflowSnapshot = z.infer<typeof WorkflowSnapshotSchema>;
 
 // --- Workflow ---
 
-export const WorkflowSchema = z.object({
-  id: z.string().uuid(),
-  key: AssetKeySchema,
-  name: z.string(),
-  description: z.string().optional(),
-  enabled: z.boolean(),
-  definition: WorkflowDefinitionSchema,
-  triggers: z.array(TriggerConfigSchema).default([]),
-  cooldown: CooldownConfigSchema.optional(),
-  input: z.record(z.string(), InputValueSchema).optional(),
-  triggerSchema: z.record(z.string(), z.unknown()).optional(),
-  dir: z.string().min(1).startsWith("/").optional(),
-  vcsRepo: z.string().min(1).optional(),
-  createdByAgentId: z.string().optional(),
-  createdAt: z.string(),
-  lastUpdatedAt: z.string(),
-  createdBy: z.string().optional(),
-  updatedBy: z.string().optional(),
-  favorite: z.boolean().optional(),
-});
+export const WorkflowSchema = z
+  .object({
+    id: z.string().uuid(),
+    key: AssetKeySchema,
+    name: z.string(),
+    description: z.string().optional(),
+    enabled: z.boolean(),
+    definition: WorkflowDefinitionSchema,
+    triggers: z.array(TriggerConfigSchema).default([]),
+    cooldown: CooldownConfigSchema.optional(),
+    input: z.record(z.string(), InputValueSchema).optional(),
+    triggerSchema: z.record(z.string(), z.unknown()).optional(),
+    dir: z.string().min(1).startsWith("/").optional(),
+    vcsRepo: z.string().min(1).optional(),
+    createdByAgentId: z.string().optional(),
+    createdAt: z.string(),
+    lastUpdatedAt: z.string(),
+    createdBy: z.string().optional(),
+    updatedBy: z.string().optional(),
+    favorite: z.boolean().optional(),
+  })
+  .openapi("Workflow");
 export type Workflow = z.infer<typeof WorkflowSchema>;
 
 // --- Workflow Version ---
 
-export const WorkflowVersionSchema = z.object({
-  id: z.string().uuid(),
-  workflowId: z.string().uuid(),
-  version: z.number().int().min(1),
-  snapshot: WorkflowSnapshotSchema,
-  changedByAgentId: z.string().optional(),
-  createdAt: z.string(),
-});
+export const WorkflowVersionSchema = z
+  .object({
+    id: z.string().uuid(),
+    workflowId: z.string().uuid(),
+    version: z.number().int().min(1),
+    snapshot: WorkflowSnapshotSchema,
+    changedByAgentId: z.string().optional(),
+    createdAt: z.string(),
+  })
+  .openapi("WorkflowVersion");
 export type WorkflowVersion = z.infer<typeof WorkflowVersionSchema>;
 
 // ---------------------------------------------------------------------------
@@ -1839,34 +1952,38 @@ export type PageAuthMode = z.infer<typeof PageAuthModeSchema>;
 // page_versions.snapshot. Omits id / agentId / slug / timestamps (these are
 // invariant across versions for a given page id; the slug is a parent-only
 // identifier).
-export const PageSnapshotSchema = z.object({
-  title: z.string(),
-  description: z.string().optional(),
-  contentType: PageContentTypeSchema,
-  authMode: PageAuthModeSchema,
-  passwordHash: z.string().optional(),
-  body: z.string(),
-  needsCredentials: z.array(z.string()).optional(),
-});
+export const PageSnapshotSchema = z
+  .object({
+    title: z.string(),
+    description: z.string().optional(),
+    contentType: PageContentTypeSchema,
+    authMode: PageAuthModeSchema,
+    passwordHash: z.string().optional(),
+    body: z.string(),
+    needsCredentials: z.array(z.string()).optional(),
+  })
+  .openapi("PageSnapshot");
 export type PageSnapshot = z.infer<typeof PageSnapshotSchema>;
 
-export const PageSchema = z.object({
-  id: z.string(),
-  key: AssetKeySchema,
-  agentId: z.string(),
-  slug: z.string(),
-  title: z.string(),
-  description: z.string().optional(),
-  contentType: PageContentTypeSchema,
-  authMode: PageAuthModeSchema,
-  passwordHash: z.string().optional(),
-  body: z.string(),
-  needsCredentials: z.array(z.string()).optional(),
-  viewCount: z.number().int().min(0).default(0),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  favorite: z.boolean().optional(),
-});
+export const PageSchema = z
+  .object({
+    id: z.string(),
+    key: AssetKeySchema,
+    agentId: z.string(),
+    slug: z.string(),
+    title: z.string(),
+    description: z.string().optional(),
+    contentType: PageContentTypeSchema,
+    authMode: PageAuthModeSchema,
+    passwordHash: z.string().optional(),
+    body: z.string(),
+    needsCredentials: z.array(z.string()).optional(),
+    viewCount: z.number().int().min(0).default(0),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    favorite: z.boolean().optional(),
+  })
+  .openapi("Page");
 export type Page = z.infer<typeof PageSchema>;
 
 // ---------------------------------------------------------------------------
@@ -1934,14 +2051,16 @@ export type AgentTaskSummary = Pick<
   | "totalCostUsd"
 >;
 
-export const PageVersionSchema = z.object({
-  id: z.string(),
-  pageId: z.string(),
-  version: z.number().int().min(1),
-  snapshot: PageSnapshotSchema,
-  changedByAgentId: z.string().optional(),
-  createdAt: z.string(),
-});
+export const PageVersionSchema = z
+  .object({
+    id: z.string(),
+    pageId: z.string(),
+    version: z.number().int().min(1),
+    snapshot: PageSnapshotSchema,
+    changedByAgentId: z.string().optional(),
+    createdAt: z.string(),
+  })
+  .openapi("PageVersion");
 export type PageVersion = z.infer<typeof PageVersionSchema>;
 
 // ---------------------------------------------------------------------------
@@ -1971,105 +2090,119 @@ const MetricQuerySchema = z.object({
   maxRows: z.number().int().min(1).max(500).optional(),
 });
 
-export const MetricVariableSchema = z.object({
-  key: z
-    .string()
-    .min(1)
-    .regex(/^[a-zA-Z][a-zA-Z0-9_]*$/),
-  label: z.string().min(1).optional(),
-  type: MetricVariableTypeSchema.default("text"),
-  defaultValue: MetricParamSchema.optional(),
-  options: z
-    .array(
-      z.object({
-        label: z.string().min(1),
-        value: MetricParamSchema,
-      }),
-    )
-    .optional(),
-  optionsQuery: z
-    .object({
-      sql: z.string().min(1).max(10_000),
-      valueKey: z.string().min(1),
-      labelKey: z.string().min(1).optional(),
-    })
-    .optional(),
-});
+export const MetricVariableSchema = z
+  .object({
+    key: z
+      .string()
+      .min(1)
+      .regex(/^[a-zA-Z][a-zA-Z0-9_]*$/),
+    label: z.string().min(1).optional(),
+    type: MetricVariableTypeSchema.default("text"),
+    defaultValue: MetricParamSchema.optional(),
+    options: z
+      .array(
+        z.object({
+          label: z.string().min(1),
+          value: MetricParamSchema,
+        }),
+      )
+      .optional(),
+    optionsQuery: z
+      .object({
+        sql: z.string().min(1).max(10_000),
+        valueKey: z.string().min(1),
+        labelKey: z.string().min(1).optional(),
+      })
+      .optional(),
+  })
+  .openapi("MetricVariable");
 export type MetricVariable = z.infer<typeof MetricVariableSchema>;
 
-export const MetricVizConfigSchema = z.object({
-  type: MetricVisualizationSchema,
-  x: z.string().optional(),
-  y: z.string().optional(),
-  series: z.array(z.string()).optional(),
-  label: z.string().optional(),
-  value: z.string().optional(),
-  columns: z
-    .array(
-      z.object({
-        key: z.string(),
-        label: z.string().optional(),
-        format: MetricFormatSchema.optional(),
-      }),
-    )
-    .optional(),
-  format: MetricFormatSchema.optional(),
-});
+export const MetricVizConfigSchema = z
+  .object({
+    type: MetricVisualizationSchema,
+    x: z.string().optional(),
+    y: z.string().optional(),
+    series: z.array(z.string()).optional(),
+    label: z.string().optional(),
+    value: z.string().optional(),
+    columns: z
+      .array(
+        z.object({
+          key: z.string(),
+          label: z.string().optional(),
+          format: MetricFormatSchema.optional(),
+        }),
+      )
+      .optional(),
+    format: MetricFormatSchema.optional(),
+  })
+  .openapi("MetricVizConfig");
 export type MetricVizConfig = z.infer<typeof MetricVizConfigSchema>;
 
-export const MetricWidgetSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().min(1),
-  description: z.string().optional(),
-  query: MetricQuerySchema,
-  viz: MetricVizConfigSchema,
-  colSpan: z.number().int().min(1).max(4).optional(),
-  rowSpan: z.number().int().min(1).max(4).optional(),
-});
+export const MetricWidgetSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    description: z.string().optional(),
+    query: MetricQuerySchema,
+    viz: MetricVizConfigSchema,
+    colSpan: z.number().int().min(1).max(4).optional(),
+    rowSpan: z.number().int().min(1).max(4).optional(),
+  })
+  .openapi("MetricWidget");
 export type MetricWidget = z.infer<typeof MetricWidgetSchema>;
 
-export const MetricDefinitionSchema = z.object({
-  version: z.literal(1),
-  widgets: z.array(MetricWidgetSchema).min(1).max(24),
-  variables: z.array(MetricVariableSchema).max(12).optional(),
-  layout: z
-    .object({
-      columns: z.number().int().min(1).max(4).optional(),
-    })
-    .optional(),
-  refreshSeconds: z.number().int().min(5).max(3600).optional(),
-});
+export const MetricDefinitionSchema = z
+  .object({
+    version: z.literal(1),
+    widgets: z.array(MetricWidgetSchema).min(1).max(24),
+    variables: z.array(MetricVariableSchema).max(12).optional(),
+    layout: z
+      .object({
+        columns: z.number().int().min(1).max(4).optional(),
+      })
+      .optional(),
+    refreshSeconds: z.number().int().min(5).max(3600).optional(),
+  })
+  .openapi("MetricDefinition");
 export type MetricDefinition = z.infer<typeof MetricDefinitionSchema>;
 
-export const MetricSnapshotSchema = z.object({
-  title: z.string(),
-  description: z.string().optional(),
-  definition: MetricDefinitionSchema,
-});
+export const MetricSnapshotSchema = z
+  .object({
+    title: z.string(),
+    description: z.string().optional(),
+    definition: MetricDefinitionSchema,
+  })
+  .openapi("MetricSnapshot");
 export type MetricSnapshot = z.infer<typeof MetricSnapshotSchema>;
 
-export const MetricSchema = z.object({
-  id: z.string(),
-  agentId: z.string(),
-  slug: z.string(),
-  title: z.string(),
-  description: z.string().optional(),
-  definition: MetricDefinitionSchema,
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
+export const MetricSchema = z
+  .object({
+    id: z.string(),
+    agentId: z.string(),
+    slug: z.string(),
+    title: z.string(),
+    description: z.string().optional(),
+    definition: MetricDefinitionSchema,
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .openapi("Metric");
 export type Metric = z.infer<typeof MetricSchema>;
 
 export type MetricSummary = Omit<Metric, "definition">;
 
-export const MetricVersionSchema = z.object({
-  id: z.string(),
-  metricId: z.string(),
-  version: z.number().int().min(1),
-  snapshot: MetricSnapshotSchema,
-  changedByAgentId: z.string().optional(),
-  createdAt: z.string(),
-});
+export const MetricVersionSchema = z
+  .object({
+    id: z.string(),
+    metricId: z.string(),
+    version: z.number().int().min(1),
+    snapshot: MetricSnapshotSchema,
+    changedByAgentId: z.string().optional(),
+    createdAt: z.string(),
+  })
+  .openapi("MetricVersion");
 export type MetricVersion = z.infer<typeof MetricVersionSchema>;
 
 // --- Workflow Run ---
@@ -2084,17 +2217,19 @@ export const WorkflowRunStatusSchema = z.enum([
 ]);
 export type WorkflowRunStatus = z.infer<typeof WorkflowRunStatusSchema>;
 
-export const WorkflowRunSchema = z.object({
-  id: z.string().uuid(),
-  workflowId: z.string().uuid(),
-  status: WorkflowRunStatusSchema,
-  triggerData: z.unknown().optional(),
-  context: z.record(z.string(), z.unknown()).optional(),
-  error: z.string().optional(),
-  startedAt: z.string(),
-  lastUpdatedAt: z.string(),
-  finishedAt: z.string().optional(),
-});
+export const WorkflowRunSchema = z
+  .object({
+    id: z.string().uuid(),
+    workflowId: z.string().uuid(),
+    status: WorkflowRunStatusSchema,
+    triggerData: z.unknown().optional(),
+    context: z.record(z.string(), z.unknown()).optional(),
+    error: z.string().optional(),
+    startedAt: z.string(),
+    lastUpdatedAt: z.string(),
+    finishedAt: z.string().optional(),
+  })
+  .openapi("WorkflowRun");
 export type WorkflowRun = z.infer<typeof WorkflowRunSchema>;
 
 // --- Script Workflow Runs ---
@@ -2122,23 +2257,25 @@ export type TerminalScriptRunStatus = (typeof TERMINAL_SCRIPT_RUN_STATUSES)[numb
 export const ScriptRunKindSchema = z.enum(["workflow", "inline"]);
 export type ScriptRunKind = z.infer<typeof ScriptRunKindSchema>;
 
-export const ScriptRunSchema = z.object({
-  id: z.string().uuid(),
-  agentId: z.string(),
-  scriptName: z.string().optional(),
-  source: z.string(),
-  args: z.unknown(),
-  kind: ScriptRunKindSchema,
-  status: ScriptRunStatusSchema,
-  pid: z.number().int().optional(),
-  startedAt: z.string(),
-  finishedAt: z.string().optional(),
-  output: z.unknown().optional(),
-  error: z.string().optional(),
-  lastHeartbeatAt: z.string().optional(),
-  idempotencyKey: z.string().optional(),
-  requestedByUserId: z.string().optional(),
-});
+export const ScriptRunSchema = z
+  .object({
+    id: z.string().uuid(),
+    agentId: z.string(),
+    scriptName: z.string().optional(),
+    source: z.string(),
+    args: z.unknown(),
+    kind: ScriptRunKindSchema,
+    status: ScriptRunStatusSchema,
+    pid: z.number().int().optional(),
+    startedAt: z.string(),
+    finishedAt: z.string().optional(),
+    output: z.unknown().optional(),
+    error: z.string().optional(),
+    lastHeartbeatAt: z.string().optional(),
+    idempotencyKey: z.string().optional(),
+    requestedByUserId: z.string().optional(),
+  })
+  .openapi("ScriptRun");
 export type ScriptRun = z.infer<typeof ScriptRunSchema>;
 
 export const ScriptRunListItemSchema = ScriptRunSchema.omit({
@@ -2148,19 +2285,21 @@ export const ScriptRunListItemSchema = ScriptRunSchema.omit({
 });
 export type ScriptRunListItem = z.infer<typeof ScriptRunListItemSchema>;
 
-export const ScriptRunJournalEntrySchema = z.object({
-  id: z.string().uuid(),
-  runId: z.string().uuid(),
-  stepKey: z.string(),
-  stepType: z.string(),
-  config: z.record(z.string(), z.unknown()),
-  status: z.enum(["completed", "failed"]),
-  result: z.unknown().optional(),
-  error: z.string().optional(),
-  startedAt: z.string(),
-  completedAt: z.string().optional(),
-  durationMs: z.number().optional(),
-});
+export const ScriptRunJournalEntrySchema = z
+  .object({
+    id: z.string().uuid(),
+    runId: z.string().uuid(),
+    stepKey: z.string(),
+    stepType: z.string(),
+    config: z.record(z.string(), z.unknown()),
+    status: z.enum(["completed", "failed"]),
+    result: z.unknown().optional(),
+    error: z.string().optional(),
+    startedAt: z.string(),
+    completedAt: z.string().optional(),
+    durationMs: z.number().optional(),
+  })
+  .openapi("ScriptRunJournalEntry");
 export type ScriptRunJournalEntry = z.infer<typeof ScriptRunJournalEntrySchema>;
 
 // --- Workflow Run Step ---
@@ -2176,24 +2315,26 @@ export const WorkflowRunStepStatusSchema = z.enum([
 ]);
 export type WorkflowRunStepStatus = z.infer<typeof WorkflowRunStepStatusSchema>;
 
-export const WorkflowRunStepSchema = z.object({
-  id: z.string().uuid(),
-  runId: z.string().uuid(),
-  nodeId: z.string(),
-  nodeType: z.string(),
-  status: WorkflowRunStepStatusSchema,
-  input: z.unknown().optional(),
-  output: z.unknown().optional(),
-  error: z.string().optional(),
-  startedAt: z.string(),
-  finishedAt: z.string().optional(),
-  retryCount: z.number().int().min(0).default(0),
-  maxRetries: z.number().int().min(0).default(3),
-  nextRetryAt: z.string().optional(),
-  idempotencyKey: z.string().optional(),
-  diagnostics: z.string().optional(),
-  nextPort: z.string().optional(),
-});
+export const WorkflowRunStepSchema = z
+  .object({
+    id: z.string().uuid(),
+    runId: z.string().uuid(),
+    nodeId: z.string(),
+    nodeType: z.string(),
+    status: WorkflowRunStepStatusSchema,
+    input: z.unknown().optional(),
+    output: z.unknown().optional(),
+    error: z.string().optional(),
+    startedAt: z.string(),
+    finishedAt: z.string().optional(),
+    retryCount: z.number().int().min(0).default(0),
+    maxRetries: z.number().int().min(0).default(3),
+    nextRetryAt: z.string().optional(),
+    idempotencyKey: z.string().optional(),
+    diagnostics: z.string().optional(),
+    nextPort: z.string().optional(),
+  })
+  .openapi("WorkflowRunStep");
 export type WorkflowRunStep = z.infer<typeof WorkflowRunStepSchema>;
 
 // --- Wait State (workflow `wait` node side table) ---
@@ -2213,22 +2354,24 @@ export type WaitStateStatus = z.infer<typeof WaitStateStatusSchema>;
  *   key/dot-path object OR arrow-fn body string); `expiresAt` is set when the
  *   wait carries a timeout.
  */
-export const WaitStateRowSchema = z.object({
-  id: z.string(),
-  workflowRunId: z.string(),
-  workflowRunStepId: z.string(),
-  mode: WaitModeSchema,
-  wakeUpAt: z.string().nullable(),
-  eventName: z.string().nullable(),
-  eventFilter: z.union([z.record(z.string(), z.unknown()), z.string()]).nullable(),
-  expiresAt: z.string().nullable(),
-  status: WaitStateStatusSchema,
-  firedPayload: z.unknown().nullable(),
-  resolvedAt: z.string().nullable(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  eventScope: z.enum(["run", "global"]),
-});
+export const WaitStateRowSchema = z
+  .object({
+    id: z.string(),
+    workflowRunId: z.string(),
+    workflowRunStepId: z.string(),
+    mode: WaitModeSchema,
+    wakeUpAt: z.string().nullable(),
+    eventName: z.string().nullable(),
+    eventFilter: z.union([z.record(z.string(), z.unknown()), z.string()]).nullable(),
+    expiresAt: z.string().nullable(),
+    status: WaitStateStatusSchema,
+    firedPayload: z.unknown().nullable(),
+    resolvedAt: z.string().nullable(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    eventScope: z.enum(["run", "global"]),
+  })
+  .openapi("WaitStateRow");
 export type WaitStateRow = z.infer<typeof WaitStateRowSchema>;
 
 // ============================================================================
@@ -2242,31 +2385,35 @@ export const PromptTemplateStateSchema = z.enum([
   "skip_event",
 ]);
 
-export const PromptTemplateSchema = z.object({
-  id: z.string(),
-  eventType: z.string(),
-  scope: PromptTemplateScopeSchema,
-  scopeId: z.string().nullable(),
-  state: PromptTemplateStateSchema,
-  body: z.string(),
-  isDefault: z.boolean(),
-  version: z.number(),
-  createdBy: z.string().nullable(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
+export const PromptTemplateSchema = z
+  .object({
+    id: z.string(),
+    eventType: z.string(),
+    scope: PromptTemplateScopeSchema,
+    scopeId: z.string().nullable(),
+    state: PromptTemplateStateSchema,
+    body: z.string(),
+    isDefault: z.boolean(),
+    version: z.number(),
+    createdBy: z.string().nullable(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .openapi("PromptTemplate");
 export type PromptTemplate = z.infer<typeof PromptTemplateSchema>;
 
-export const PromptTemplateHistorySchema = z.object({
-  id: z.string(),
-  templateId: z.string(),
-  version: z.number(),
-  body: z.string(),
-  state: z.string(),
-  changedBy: z.string().nullable(),
-  changedAt: z.string(),
-  changeReason: z.string().nullable(),
-});
+export const PromptTemplateHistorySchema = z
+  .object({
+    id: z.string(),
+    templateId: z.string(),
+    version: z.number(),
+    body: z.string(),
+    state: z.string(),
+    changedBy: z.string().nullable(),
+    changedAt: z.string(),
+    changeReason: z.string().nullable(),
+  })
+  .openapi("PromptTemplateHistory");
 export type PromptTemplateHistory = z.infer<typeof PromptTemplateHistorySchema>;
 
 // ============================================================================
@@ -2279,40 +2426,44 @@ export type ScriptScope = z.infer<typeof ScriptScopeSchema>;
 export const ScriptFsModeSchema = z.enum(["none", "workspace-rw"]);
 export type ScriptFsMode = z.infer<typeof ScriptFsModeSchema>;
 
-export const ScriptRecordSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  scope: ScriptScopeSchema,
-  scopeId: z.string().nullable(),
-  source: z.string(),
-  description: z.string(),
-  intent: z.string(),
-  signatureJson: z.string(),
-  argsJsonSchema: z.string().nullable(),
-  contentHash: z.string(),
-  version: z.number(),
-  isScratch: z.boolean(),
-  typeChecked: z.boolean(),
-  fsMode: ScriptFsModeSchema,
-  createdByAgentId: z.string().nullable(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
+export const ScriptRecordSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    scope: ScriptScopeSchema,
+    scopeId: z.string().nullable(),
+    source: z.string(),
+    description: z.string(),
+    intent: z.string(),
+    signatureJson: z.string(),
+    argsJsonSchema: z.string().nullable(),
+    contentHash: z.string(),
+    version: z.number(),
+    isScratch: z.boolean(),
+    typeChecked: z.boolean(),
+    fsMode: ScriptFsModeSchema,
+    createdByAgentId: z.string().nullable(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .openapi("ScriptRecord");
 export type ScriptRecord = z.infer<typeof ScriptRecordSchema>;
 
-export const ScriptVersionRecordSchema = z.object({
-  id: z.string(),
-  scriptId: z.string(),
-  version: z.number(),
-  source: z.string(),
-  description: z.string(),
-  intent: z.string(),
-  signatureJson: z.string(),
-  contentHash: z.string(),
-  changedByAgentId: z.string().nullable(),
-  changedAt: z.string(),
-  changeReason: z.string().nullable(),
-});
+export const ScriptVersionRecordSchema = z
+  .object({
+    id: z.string(),
+    scriptId: z.string(),
+    version: z.number(),
+    source: z.string(),
+    description: z.string(),
+    intent: z.string(),
+    signatureJson: z.string(),
+    contentHash: z.string(),
+    changedByAgentId: z.string().nullable(),
+    changedAt: z.string(),
+    changeReason: z.string().nullable(),
+  })
+  .openapi("ScriptVersionRecord");
 export type ScriptVersionRecord = z.infer<typeof ScriptVersionRecordSchema>;
 
 /** Lean projection served by `GET /api/scripts` — omits `source` (payload size) and raw JSON blobs. */
@@ -2333,17 +2484,19 @@ export const ScriptApiAuthModeSchema = z.enum(["none", "bearer"]);
 export type ScriptApiAuthMode = z.infer<typeof ScriptApiAuthModeSchema>;
 
 /** A script exposed as an externally-callable HTTP endpoint. Never carries the token. */
-export const ScriptApiRecordSchema = z.object({
-  id: z.string(),
-  scriptId: z.string(),
-  agentId: z.string(),
-  authMode: ScriptApiAuthModeSchema,
-  enabled: z.boolean(),
-  label: z.string().nullable(),
-  callCount: z.number(),
-  lastUsedAt: z.string().nullable(),
-  createdAt: z.string(),
-});
+export const ScriptApiRecordSchema = z
+  .object({
+    id: z.string(),
+    scriptId: z.string(),
+    agentId: z.string(),
+    authMode: ScriptApiAuthModeSchema,
+    enabled: z.boolean(),
+    label: z.string().nullable(),
+    callCount: z.number(),
+    lastUsedAt: z.string().nullable(),
+    createdAt: z.string(),
+  })
+  .openapi("ScriptApiRecord");
 export type ScriptApiRecord = z.infer<typeof ScriptApiRecordSchema>;
 
 /**
@@ -2363,43 +2516,47 @@ export type SkillType = z.infer<typeof SkillTypeSchema>;
 export const SkillScopeSchema = z.enum(["global", "swarm", "agent"]);
 export type SkillScope = z.infer<typeof SkillScopeSchema>;
 
-export const SkillSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string(),
-  content: z.string(),
-  type: SkillTypeSchema,
-  scope: SkillScopeSchema,
-  ownerAgentId: z.string().nullable(),
-  sourceUrl: z.string().nullable(),
-  sourceRepo: z.string().nullable(),
-  sourcePath: z.string().nullable(),
-  sourceBranch: z.string(),
-  sourceHash: z.string().nullable(),
-  isComplex: z.boolean(),
-  allowedTools: z.string().nullable(),
-  model: z.string().nullable(),
-  effort: z.string().nullable(),
-  context: z.string().nullable(),
-  agent: z.string().nullable(),
-  disableModelInvocation: z.boolean(),
-  userInvocable: z.boolean(),
-  version: z.number(),
-  isEnabled: z.boolean(),
-  systemDefault: z.boolean(),
-  createdAt: z.string(),
-  lastUpdatedAt: z.string(),
-  lastFetchedAt: z.string().nullable(),
-});
+export const SkillSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string(),
+    content: z.string(),
+    type: SkillTypeSchema,
+    scope: SkillScopeSchema,
+    ownerAgentId: z.string().nullable(),
+    sourceUrl: z.string().nullable(),
+    sourceRepo: z.string().nullable(),
+    sourcePath: z.string().nullable(),
+    sourceBranch: z.string(),
+    sourceHash: z.string().nullable(),
+    isComplex: z.boolean(),
+    allowedTools: z.string().nullable(),
+    model: z.string().nullable(),
+    effort: z.string().nullable(),
+    context: z.string().nullable(),
+    agent: z.string().nullable(),
+    disableModelInvocation: z.boolean(),
+    userInvocable: z.boolean(),
+    version: z.number(),
+    isEnabled: z.boolean(),
+    systemDefault: z.boolean(),
+    createdAt: z.string(),
+    lastUpdatedAt: z.string(),
+    lastFetchedAt: z.string().nullable(),
+  })
+  .openapi("Skill");
 export type Skill = z.infer<typeof SkillSchema>;
 
-export const AgentSkillSchema = z.object({
-  id: z.string(),
-  agentId: z.string(),
-  skillId: z.string(),
-  isActive: z.boolean(),
-  installedAt: z.string(),
-});
+export const AgentSkillSchema = z
+  .object({
+    id: z.string(),
+    agentId: z.string(),
+    skillId: z.string(),
+    isActive: z.boolean(),
+    installedAt: z.string(),
+  })
+  .openapi("AgentSkill");
 export type AgentSkill = z.infer<typeof AgentSkillSchema>;
 
 export const SkillWithInstallInfoSchema = SkillSchema.extend({
@@ -2408,17 +2565,19 @@ export const SkillWithInstallInfoSchema = SkillSchema.extend({
 });
 export type SkillWithInstallInfo = z.infer<typeof SkillWithInstallInfoSchema>;
 
-export const SkillFileSchema = z.object({
-  id: z.string(),
-  skillId: z.string(),
-  path: z.string(),
-  content: z.string(),
-  mimeType: z.string(),
-  isBinary: z.boolean(),
-  size: z.number().nullable(),
-  createdAt: z.string(),
-  lastUpdatedAt: z.string(),
-});
+export const SkillFileSchema = z
+  .object({
+    id: z.string(),
+    skillId: z.string(),
+    path: z.string(),
+    content: z.string(),
+    mimeType: z.string(),
+    isBinary: z.boolean(),
+    size: z.number().nullable(),
+    createdAt: z.string(),
+    lastUpdatedAt: z.string(),
+  })
+  .openapi("SkillFile");
 export type SkillFile = z.infer<typeof SkillFileSchema>;
 
 // ── MCP Servers ──────────────────────────────────────────────────────────
@@ -2432,35 +2591,39 @@ export type McpServerScope = z.infer<typeof McpServerScopeSchema>;
 export const McpAuthMethodSchema = z.enum(["static", "oauth", "auto"]);
 export type McpAuthMethod = z.infer<typeof McpAuthMethodSchema>;
 
-export const McpServerSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string().nullable(),
-  scope: McpServerScopeSchema,
-  ownerAgentId: z.string().nullable(),
-  transport: McpServerTransportSchema,
-  command: z.string().nullable(),
-  args: z.string().nullable(),
-  url: z.string().nullable(),
-  headers: z.string().nullable(),
-  envConfigKeys: z.string().nullable(),
-  headerConfigKeys: z.string().nullable(),
-  extraAuthorizeParams: z.string().nullable(),
-  authMethod: McpAuthMethodSchema.default("static"),
-  isEnabled: z.boolean(),
-  version: z.number(),
-  createdAt: z.string(),
-  lastUpdatedAt: z.string(),
-});
+export const McpServerSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable(),
+    scope: McpServerScopeSchema,
+    ownerAgentId: z.string().nullable(),
+    transport: McpServerTransportSchema,
+    command: z.string().nullable(),
+    args: z.string().nullable(),
+    url: z.string().nullable(),
+    headers: z.string().nullable(),
+    envConfigKeys: z.string().nullable(),
+    headerConfigKeys: z.string().nullable(),
+    extraAuthorizeParams: z.string().nullable(),
+    authMethod: McpAuthMethodSchema.default("static"),
+    isEnabled: z.boolean(),
+    version: z.number(),
+    createdAt: z.string(),
+    lastUpdatedAt: z.string(),
+  })
+  .openapi("McpServer");
 export type McpServer = z.infer<typeof McpServerSchema>;
 
-export const AgentMcpServerSchema = z.object({
-  id: z.string(),
-  agentId: z.string(),
-  mcpServerId: z.string(),
-  isActive: z.boolean(),
-  installedAt: z.string(),
-});
+export const AgentMcpServerSchema = z
+  .object({
+    id: z.string(),
+    agentId: z.string(),
+    mcpServerId: z.string(),
+    isActive: z.boolean(),
+    installedAt: z.string(),
+  })
+  .openapi("AgentMcpServer");
 export type AgentMcpServer = z.infer<typeof AgentMcpServerSchema>;
 
 export const McpServerWithInstallInfoSchema = McpServerSchema.extend({
@@ -2491,35 +2654,37 @@ export const ContextFormulaSchema = z.enum([
 ]);
 export type ContextFormula = z.infer<typeof ContextFormulaSchema>;
 
-export const ContextSnapshotSchema = z.object({
-  id: z.uuid(),
-  taskId: z.uuid(),
-  agentId: z.string(),
-  sessionId: z.string(),
+export const ContextSnapshotSchema = z
+  .object({
+    id: z.uuid(),
+    taskId: z.uuid(),
+    agentId: z.string(),
+    sessionId: z.string(),
 
-  // Context window state
-  contextUsedTokens: z.number().int().min(0).optional(),
-  contextTotalTokens: z.number().int().min(0).optional(),
-  contextPercent: z.number().min(0).max(100).optional(),
+    // Context window state
+    contextUsedTokens: z.number().int().min(0).optional(),
+    contextTotalTokens: z.number().int().min(0).optional(),
+    contextPercent: z.number().min(0).max(100).optional(),
 
-  // Event metadata
-  eventType: ContextSnapshotEventTypeSchema,
+    // Event metadata
+    eventType: ContextSnapshotEventTypeSchema,
 
-  // Compaction-specific (null for non-compaction)
-  compactTrigger: z.enum(["auto", "manual", "auto-inferred"]).optional(),
-  preCompactTokens: z.number().int().min(0).optional(),
+    // Compaction-specific (null for non-compaction)
+    compactTrigger: z.enum(["auto", "manual", "auto-inferred"]).optional(),
+    preCompactTokens: z.number().int().min(0).optional(),
 
-  // Cumulative counters at this point
-  cumulativeInputTokens: z.number().int().min(0).default(0),
-  cumulativeOutputTokens: z.number().int().min(0).default(0),
+    // Cumulative counters at this point
+    cumulativeInputTokens: z.number().int().min(0).default(0),
+    cumulativeOutputTokens: z.number().int().min(0).default(0),
 
-  // Migration 063 — adapter stamps the formula it used to compute
-  // contextUsedTokens. Optional so old rows / new providers without a tag
-  // don't break, but every adapter should populate this going forward.
-  contextFormula: ContextFormulaSchema.optional(),
+    // Migration 063 — adapter stamps the formula it used to compute
+    // contextUsedTokens. Optional so old rows / new providers without a tag
+    // don't break, but every adapter should populate this going forward.
+    contextFormula: ContextFormulaSchema.optional(),
 
-  createdAt: z.iso.datetime(),
-});
+    createdAt: z.iso.datetime(),
+  })
+  .openapi("ContextSnapshot");
 
 export type ContextSnapshot = z.infer<typeof ContextSnapshotSchema>;
 
@@ -2536,13 +2701,15 @@ export type ContextSnapshot = z.infer<typeof ContextSnapshotSchema>;
 export const BudgetScopeSchema = z.enum(["global", "agent", "user"]);
 export type BudgetScope = z.infer<typeof BudgetScopeSchema>;
 
-export const BudgetSchema = z.object({
-  scope: BudgetScopeSchema,
-  scopeId: z.string(), // '' (empty string) for the global row
-  dailyBudgetUsd: z.number().nonnegative(),
-  createdAt: z.number(), // epoch ms
-  lastUpdatedAt: z.number(), // epoch ms
-});
+export const BudgetSchema = z
+  .object({
+    scope: BudgetScopeSchema,
+    scopeId: z.string(), // '' (empty string) for the global row
+    dailyBudgetUsd: z.number().nonnegative(),
+    createdAt: z.number(), // epoch ms
+    lastUpdatedAt: z.number(), // epoch ms
+  })
+  .openapi("Budget");
 export type Budget = z.infer<typeof BudgetSchema>;
 
 // Migration 063 widened both enums and dropped the SQL CHECKs to match.
@@ -2572,34 +2739,38 @@ export const PricingTokenClassSchema = z.enum([
 ]);
 export type PricingTokenClass = z.infer<typeof PricingTokenClassSchema>;
 
-export const PricingRowSchema = z.object({
-  provider: PricingProviderSchema,
-  model: z.string(),
-  tokenClass: PricingTokenClassSchema,
-  effectiveFrom: z.number().nonnegative(), // epoch ms; 0 = seed
-  pricePerMillionUsd: z.number().nonnegative(),
-  createdAt: z.number(), // epoch ms
-  lastUpdatedAt: z.number(), // epoch ms
-});
+export const PricingRowSchema = z
+  .object({
+    provider: PricingProviderSchema,
+    model: z.string(),
+    tokenClass: PricingTokenClassSchema,
+    effectiveFrom: z.number().nonnegative(), // epoch ms; 0 = seed
+    pricePerMillionUsd: z.number().nonnegative(),
+    createdAt: z.number(), // epoch ms
+    lastUpdatedAt: z.number(), // epoch ms
+  })
+  .openapi("PricingRow");
 export type PricingRow = z.infer<typeof PricingRowSchema>;
 
 export const BudgetRefusalCauseSchema = z.enum(["agent", "global", "user"]);
 export type BudgetRefusalCause = z.infer<typeof BudgetRefusalCauseSchema>;
 
-export const BudgetRefusalNotificationSchema = z.object({
-  taskId: z.string(),
-  date: z.string(), // 'YYYY-MM-DD' UTC
-  agentId: z.string(),
-  cause: BudgetRefusalCauseSchema,
-  agentSpendUsd: z.number().nullable().optional(),
-  agentBudgetUsd: z.number().nullable().optional(),
-  globalSpendUsd: z.number().nullable().optional(),
-  globalBudgetUsd: z.number().nullable().optional(),
-  userSpendUsd: z.number().nullable().optional(),
-  userBudgetUsd: z.number().nullable().optional(),
-  followUpTaskId: z.string().nullable().optional(),
-  createdAt: z.number(), // epoch ms
-});
+export const BudgetRefusalNotificationSchema = z
+  .object({
+    taskId: z.string(),
+    date: z.string(), // 'YYYY-MM-DD' UTC
+    agentId: z.string(),
+    cause: BudgetRefusalCauseSchema,
+    agentSpendUsd: z.number().nullable().optional(),
+    agentBudgetUsd: z.number().nullable().optional(),
+    globalSpendUsd: z.number().nullable().optional(),
+    globalBudgetUsd: z.number().nullable().optional(),
+    userSpendUsd: z.number().nullable().optional(),
+    userBudgetUsd: z.number().nullable().optional(),
+    followUpTaskId: z.string().nullable().optional(),
+    createdAt: z.number(), // epoch ms
+  })
+  .openapi("BudgetRefusalNotification");
 export type BudgetRefusalNotification = z.infer<typeof BudgetRefusalNotificationSchema>;
 
 /**
@@ -2609,17 +2780,19 @@ export type BudgetRefusalNotification = z.infer<typeof BudgetRefusalNotification
  * to default polling without back-off (degrades gracefully); Phase 4 teaches
  * the runner to recognize it.
  */
-export const BudgetRefusedTriggerSchema = z.object({
-  type: z.literal("budget_refused"),
-  cause: BudgetRefusalCauseSchema,
-  agentSpend: z.number().optional(),
-  agentBudget: z.number().optional(),
-  globalSpend: z.number().optional(),
-  globalBudget: z.number().optional(),
-  userSpend: z.number().optional(),
-  userBudget: z.number().optional(),
-  resetAt: z.string(), // ISO 8601, next UTC midnight
-});
+export const BudgetRefusedTriggerSchema = z
+  .object({
+    type: z.literal("budget_refused"),
+    cause: BudgetRefusalCauseSchema,
+    agentSpend: z.number().optional(),
+    agentBudget: z.number().optional(),
+    globalSpend: z.number().optional(),
+    globalBudget: z.number().optional(),
+    userSpend: z.number().optional(),
+    userBudget: z.number().optional(),
+    resetAt: z.string(), // ISO 8601, next UTC midnight
+  })
+  .openapi("BudgetRefusedTrigger");
 export type BudgetRefusedTrigger = z.infer<typeof BudgetRefusedTriggerSchema>;
 
 // ─── KV store ────────────────────────────────────────────────────────────────
@@ -2663,13 +2836,15 @@ export const KvKeySchema = z
  * `valueType`: `'json'` returns the parsed JS value, `'string'` returns the
  * raw string, `'integer'` returns a number.
  */
-export const KvEntrySchema = z.object({
-  namespace: z.string(),
-  key: z.string(),
-  value: z.unknown(),
-  valueType: KvValueTypeSchema,
-  expiresAt: z.number().int().nullable(),
-  createdAt: z.number().int(),
-  updatedAt: z.number().int(),
-});
+export const KvEntrySchema = z
+  .object({
+    namespace: z.string(),
+    key: z.string(),
+    value: z.unknown(),
+    valueType: KvValueTypeSchema,
+    expiresAt: z.number().int().nullable(),
+    createdAt: z.number().int(),
+    updatedAt: z.number().int(),
+  })
+  .openapi("KvEntry");
 export type KvEntry = z.infer<typeof KvEntrySchema>;
