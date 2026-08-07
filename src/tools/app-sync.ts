@@ -79,7 +79,8 @@ export const registerAppSyncTool = (server: McpServer) => {
       });
 
       if (result.issues && result.issues.length > 0) {
-        return toolErr(`Nothing to sync on app "${app.name}" (${app.id}).`, {
+        // Covers both "no matching pair" and "definition needs repair".
+        return toolErr(`Cannot sync app "${app.name}" (${app.id}).`, {
           details: result.issues.map((issue) => `${issue.path}: ${issue.message}`).join("\n"),
           data: { ok: false },
         });

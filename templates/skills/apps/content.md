@@ -49,6 +49,8 @@ Use `set` to backfill a changed column, `from` with optional `map`/`else` to der
 
 **Source lifecycle** rides the same engine with the same all-or-nothing guarantees. Free: adding a source, adding a NEW column with a `source` binding, binding an existing column that holds zero values, changing a binding's `field`/`transform`, and changing a source's `args`/`config`/`connection`/`scriptId` (window changes churn staleness on the next pass — expect `stale` flips when narrowing). Rejected with a path-bearing issue: changing `joinKey` (immutable — remove the source and add it again), changing `connector` while the source owns rows (row count in the message), and binding an existing column that already holds values (purge it — or add a fresh column — and bind that instead; a sync pass would otherwise overwrite the data). Removing a source **detaches** its rows: values survive as ordinary columns, the `source`/`syncedAt`/`stale` envelope is stripped, and the report counts them in `detachedRows`. A patch removing a source must drop its column bindings in the same call — a dangling `source.of` is rejected before anything is written.
 
+Sync never adopts rows it does not own: a pulled record whose join key matches an unowned row creates a second, source-owned row. Adding a source over a join-key column that already holds values therefore duplicates those records on the first pass — and remove-source → re-add duplicates for the same reason, because detached rows keep their values. To convert a hand-maintained model into a synced one, purge the old rows first or use a fresh join-key column.
+
 For example, split a legacy `flag` into `priority` and `status` without losing data in one patch: add the two columns, map both from `flag`, update every affected query/page binding, then hide `flag`.
 
 ```json
@@ -221,7 +223,7 @@ Return `Array<{ key, fields }>` or `{ records, complete? }`. `key` is the extern
 
 The seeded catalog script `github-issues-pull` is the worked example (placeholder auth via `[REDACTED:GITHUB_TOKEN]`, PR filtering, `complete` computed before filtering). For scheduled refreshes, point a `targetType: "script"` schedule at the seeded `app-sync-run` with `scriptArgs: { "appId": "<id>", "model"?, "source"? }`.
 
-**Three refresh doors, one engine**: `POST /api/apps/<id>/sync` (body `{ "model"?, "source"? }`), a `sync` action kind, and the `app-sync` MCP tool (`ctx.swarm.app_sync` from scripts). `{model?, source?}` fans out to every matching (model × source) pair; each pass reports `{ pulled, created, updated, refreshed, unchanged, markedStale, warnings }`. A pair already syncing short-circuits with `alreadyRunning: true` instead of pulling twice, and the last pass's status is kept per pair (surfaced on sync responses).
+**Three refresh doors, one engine**: `POST /api/apps/<id>/sync` (body `{ "model"?, "source"? }`), a `sync` action kind, and the `app-sync` MCP tool (`ctx.swarm.app_sync` from scripts). `{model?, source?}` fans out to every matching (model × source) pair; each pass reports `{ pulled, created, updated, refreshed, unchanged, markedStale, warnings }`. A pair already syncing in this API process short-circuits with `alreadyRunning: true` instead of pulling twice. Each pair's last-pass status (`lastFinishedAt`, counts, `error?`) comes back as `syncStatus` — keyed `"<model>:<source>"` — on `GET /api/apps/<id>` and in `app-get` data, so UI and agents can render "last synced / last error" without extra calls.
 
 ### Freshness and the refresh button
 

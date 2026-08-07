@@ -42,7 +42,7 @@ import {
   listApps,
   updateApp,
 } from "../apps/store";
-import { runAppSync } from "../apps/sync";
+import { collectAppSyncStatus, runAppSync } from "../apps/sync";
 import {
   getAppUserConfigValues,
   isReservedUserConfigKey,
@@ -1448,7 +1448,10 @@ export async function handleApps(
       jsonError(res, "app not found", 404);
       return true;
     }
-    json(res, { app });
+    // Per-source freshness for the runtime payload — present only once a
+    // declared source has completed at least one pass.
+    const syncStatus = collectAppSyncStatus(app.id);
+    json(res, { app, ...(Object.keys(syncStatus).length > 0 ? { syncStatus } : {}) });
     return true;
   }
 

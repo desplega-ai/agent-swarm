@@ -114,6 +114,9 @@ function syncStatusKey(model: string, source: string): string {
 }
 
 function writeSyncStatus(appId: string, pass: SyncPassResult, lastStartedAt: string): void {
+  // A pass can outlive its app: deletion purges the apps:<id> namespace while
+  // a pull is in flight, and writing here would resurrect it as an orphan.
+  if (!getApp(appId)) return;
   const status: AppSyncStatus = {
     lastStartedAt,
     lastFinishedAt: new Date().toISOString(),
@@ -142,6 +145,24 @@ export function getAppSyncStatus(
   const value = entry?.value;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   return value as AppSyncStatus;
+}
+
+/**
+ * Every declared (model x source) pair's last-pass status, keyed
+ * `<model>:<source>` — the per-source freshness surface the app payload and
+ * `app-get` expose so UI/agents can render "last synced / last error".
+ */
+export function collectAppSyncStatus(appId: string): Record<string, AppSyncStatus> {
+  const statuses: Record<string, AppSyncStatus> = {};
+  const app = getApp(appId);
+  if (!app || appDefinitionNeedsRepair(app)) return statuses;
+  for (const [modelName, model] of Object.entries(app.definition.models)) {
+    for (const sourceName of Object.keys(model.sources ?? {})) {
+      const status = getAppSyncStatus(appId, modelName, sourceName);
+      if (status) statuses[`${modelName}:${sourceName}`] = status;
+    }
+  }
+  return statuses;
 }
 
 // ---------------------------------------------------------------------------

@@ -1245,6 +1245,26 @@ describe("secret hygiene and sync status", () => {
       "updated",
     ]);
   });
+
+  test("per-source status rides the app payload once a pass has run", async () => {
+    const script = await fixtureScript("payload-status", [ghRecord(1)]);
+    const appId = createSyncApp(issueDefinition(script.id));
+
+    // No pass yet: the payload carries no syncStatus key at all.
+    const before = await request<{ app: object; syncStatus?: unknown }>(`/api/apps/${appId}`);
+    expect(before.status).toBe(200);
+    expect(Object.hasOwn(before.body, "syncStatus")).toBe(false);
+
+    await runAppSync({ appId });
+
+    const after = await request<{
+      app: object;
+      syncStatus?: Record<string, { ok: boolean; created: number; error?: string }>;
+    }>(`/api/apps/${appId}`);
+    expect(after.status).toBe(200);
+    expect(after.body.syncStatus?.["issue:gh"]).toMatchObject({ ok: true, created: 1 });
+    expect(Object.keys(after.body.syncStatus ?? {})).toEqual(["issue:gh"]);
+  });
 });
 
 // ─── Phase 5: the three doors ────────────────────────────────────────────────
@@ -1533,7 +1553,7 @@ describe("app-sync MCP tool", () => {
       toolMeta(),
     )) as StructuredResult<{ success: boolean; message: string; details: string }>;
     expect(nothing.isError).toBe(true);
-    expect(nothing.structuredContent.message).toContain("Nothing to sync");
+    expect(nothing.structuredContent.message).toContain("Cannot sync");
     expect(nothing.structuredContent.details).toContain('unknown source "nope"');
 
     const missing = (await syncTool.handler(
