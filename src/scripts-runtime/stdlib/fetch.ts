@@ -11,10 +11,14 @@ export async function runtimeFetch(
   let lastError: unknown;
 
   for (let attempt = 0; attempt < retries; attempt++) {
+    if (signal?.aborted) {
+      throw signal.reason ?? new DOMException("This operation was aborted", "AbortError");
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const onAbort = () => controller.abort();
     signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) controller.abort();
 
     try {
       const res = await fetch(input, { ...init, signal: controller.signal });
@@ -24,6 +28,8 @@ export async function runtimeFetch(
       }
       return res;
     } catch (error) {
+      // Caller abort is terminal — only the controller's own timeout abort retries.
+      if (signal?.aborted) throw signal.reason ?? error;
       lastError = error;
       if (attempt === retries - 1) break;
     } finally {
