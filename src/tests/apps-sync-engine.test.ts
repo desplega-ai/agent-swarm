@@ -1378,6 +1378,37 @@ describe("populated-column rebind guard", () => {
   });
 });
 
+describe("pass snapshot consistency", () => {
+  test("a later pass pulls the definition current at ITS start, not selection time", async () => {
+    const slow = await fixtureScript("race-slow", []);
+    await slow.setSource(
+      `export default async () => { await new Promise((resolve) => setTimeout(resolve, 300)); return ${JSON.stringify(
+        [ghRecord(1)],
+      )}; };`,
+    );
+    const oldScript = await fixtureScript("race-old", [ghRecord(1, { title: "from-old" })]);
+    const newScript = await fixtureScript("race-new", [ghRecord(1, { title: "from-new" })]);
+    const definitionWith = (secondId: string) =>
+      appWith({
+        a: { columns: { ...ISSUE_COLUMNS }, sources: { gh: ghSource(slow.id) } },
+        b: { columns: { ...ISSUE_COLUMNS }, sources: { gh: ghSource(secondId) } },
+      });
+    const appId = createSyncApp(definitionWith(oldScript.id));
+
+    const run = runAppSync({ appId });
+    // While pass "a" awaits its slow pull, repoint model b's source. Pass "b"
+    // must pull the CURRENT script — pulling the selection-time one while
+    // fingerprinting the fresh resolve would commit drifted data silently.
+    updateApp(appId, { definition: parsed(definitionWith(newScript.id)) });
+    const result = await run;
+
+    expect(result.ok).toBe(true);
+    const bRows = rowsOf(appId, "b");
+    expect(bRows).toHaveLength(1);
+    expect(bRows[0]?.title).toBe("from-new");
+  });
+});
+
 describe("secret hygiene and sync status", () => {
   test("a pass error carrying a known secret comes back redacted", async () => {
     const secret = "fixture-secret-value-0123456789";
@@ -2154,23 +2185,23 @@ describe("github-issues-pull", () => {
     expect(result.complete).toBe(true);
   });
 
-  test("truncates a long body to 1000 characters", async () => {
+  test("returns the full body untruncated for the engine to scrub whole", async () => {
     stubGithub([ghApiIssue(1, { body: "x".repeat(5000) })]);
 
     const result = (await githubIssuesPull({ repo: "owner/name" }, stdlibCtx)) as {
       records: Array<{ fields: { body: string } }>;
     };
 
-    expect(result.records[0]?.fields.body).toHaveLength(1000);
+    // Truncating in the script would run BEFORE the engine's scrub and could
+    // split a secret across the cut; the complete value must travel back.
+    expect(result.records[0]?.fields.body).toHaveLength(5000);
   });
 
   for (const repo of ["owner", "owner/name/extra", "../name", "owner/..", "/name", "owner/"]) {
     test(`rejects the malformed repo "${repo}" without a request`, async () => {
       stubGithub([ghApiIssue(1)]);
 
-      const result = (await githubIssuesPull({ repo }, stdlibCtx)) as { error: string };
-
-      expect(result.error).toContain("owner/name");
+      await expect(githubIssuesPull({ repo }, stdlibCtx)).rejects.toThrow("owner/name");
       expect(fetchCalls).toBe(0);
     });
   }
@@ -2178,23 +2209,18 @@ describe("github-issues-pull", () => {
   test("rejects a missing repo as invalid args", async () => {
     stubGithub([ghApiIssue(1)]);
 
-    const result = (await githubIssuesPull({}, stdlibCtx)) as { error: string };
-
-    expect(result.error).toContain("invalid args");
+    await expect(githubIssuesPull({}, stdlibCtx)).rejects.toThrow("invalid args");
     expect(fetchCalls).toBe(0);
   });
 
-  test("a non-2xx response becomes an error return", async () => {
+  test("a non-2xx response throws with GitHub's own message", async () => {
     stubGithub({ message: "API rate limit exceeded" }, 403);
 
-    const result = (await githubIssuesPull({ repo: "owner/name" }, stdlibCtx)) as {
-      error: string;
-      records?: unknown;
-    };
-
-    expect(result.error).toContain("API rate limit exceeded");
-    // A non-conforming return is what the engine turns into a pass error.
-    expect(result.records).toBeUndefined();
+    // A returned {error} object would exit 0 and reach the engine as a generic
+    // invalid-payload error; throwing preserves the cause via scriptFailure.
+    await expect(githubIssuesPull({ repo: "owner/name" }, stdlibCtx)).rejects.toThrow(
+      "API rate limit exceeded",
+    );
   });
 });
 

@@ -24,7 +24,9 @@ export const argsSchema = z.object({
 /** Pull a repository's GitHub issues as sync records: {records, complete} with pull requests filtered out. */
 export default async function githubIssuesPull(args: any, ctx: any) {
   const parsed = argsSchema.safeParse(args);
-  if (!parsed.success) return { error: "invalid args: " + parsed.error.message };
+  // Failures THROW: a returned {error} object exits 0 and the sync engine
+  // reports it as a generic invalid-payload error, burying the real cause.
+  if (!parsed.success) throw new Error("invalid args: " + parsed.error.message);
   const { repo, state = "open", limit = 100, connection } = parsed.data;
 
   const segments = repo.split("/");
@@ -32,7 +34,7 @@ export default async function githubIssuesPull(args: any, ctx: any) {
     segments.length !== 2 ||
     segments.some((segment) => segment === "" || segment === "." || segment === "..")
   ) {
-    return { error: "repo must be in 'owner/name' form" };
+    throw new Error("repo must be in 'owner/name' form");
   }
   const path = segments.map((segment) => encodeURIComponent(segment)).join("/");
 
@@ -57,7 +59,7 @@ export default async function githubIssuesPull(args: any, ctx: any) {
   if (!Array.isArray(payload)) {
     const why =
       payload && typeof payload.message === "string" ? payload.message : "unexpected response";
-    return { error: "GitHub issues " + repo + ": " + why };
+    throw new Error("GitHub issues " + repo + ": " + why);
   }
 
   // Completeness is computed on the RAW page, before the pull-request filter: a
@@ -77,7 +79,11 @@ export default async function githubIssuesPull(args: any, ctx: any) {
         id: issue.id,
         title: issue.title,
         state: issue.state,
-        body: typeof issue.body === "string" ? issue.body.slice(0, 1000) : "",
+        // The FULL body goes back: the engine scrubs pulled values whole at
+        // its trusted boundary, and truncating here first could split a
+        // secret across the cut and defeat exact-value redaction. GitHub
+        // bounds issue bodies (~65k), so rows stay sane without a cap here.
+        body: typeof issue.body === "string" ? issue.body : "",
         userLogin: issue.user ? issue.user.login : null,
         labelsCsv: Array.isArray(issue.labels)
           ? issue.labels

@@ -740,21 +740,26 @@ async function executePass(args: {
         `model "${args.model}" no longer declares source "${args.sourceName}"; pass aborted with no writes`,
       );
     }
-    const fingerprint = pairFingerprint(planned.model, args.sourceName, planned.source);
+    // Pull from the SAME snapshot the fingerprint was computed from:
+    // args.source was captured at pair-selection time and may already be
+    // stale (an earlier pass's await lets the definition move); pulling it
+    // while fingerprinting the fresh resolve would let drifted data commit.
+    const source = planned.source;
+    const fingerprint = pairFingerprint(planned.model, args.sourceName, source);
 
     // Pull OUTSIDE the lock; reconcile inside it. Pulled values persist into
     // rows any app.use principal can later read, so secrets are redacted here
     // at the persistence boundary — the finish() scrub only covers the pass
     // summary, never pull.records.
     const pull = scrubObject(
-      args.source.connector === "script"
+      source.connector === "script"
         ? await pullFromScript({
             appId: args.appId,
             model: args.model,
             sourceName: args.sourceName,
-            source: args.source,
+            source,
           })
-        : pullFromSwarmTasks(args.source, args.invokedBy),
+        : pullFromSwarmTasks(source, args.invokedBy),
     );
     pulled = pull.records.length;
     for (const warning of pull.warnings) warn(warnings, warning);
@@ -763,7 +768,7 @@ async function executePass(args: {
       model: args.model,
       sourceName: args.sourceName,
       fingerprint,
-      joinKey: args.source.joinKey,
+      joinKey: source.joinKey,
       pull,
       warnings,
       counts,
