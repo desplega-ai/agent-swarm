@@ -1,9 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { listTaskTemplates } from "../be/db";
-import { TaskTemplateKindSchema } from "../types";
+import { TaskTemplateKindSchema, TaskTemplateSchema } from "../types";
 import { route } from "./route-def";
-import { json } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -21,7 +20,10 @@ const listTemplates = route({
     query: z.string().optional(),
   }),
   responses: {
-    200: { description: "Task template list" },
+    200: {
+      description: "Task template list",
+      schema: z.object({ templates: z.array(TaskTemplateSchema) }),
+    },
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
@@ -43,7 +45,7 @@ export async function handleTaskTemplates(
       kind: parsed.query.kind,
       query: parsed.query.query,
     });
-    json(res, { templates });
+    listTemplates.respond(res, 200, { templates });
     return true;
   }
 

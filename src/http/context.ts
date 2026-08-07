@@ -6,9 +6,36 @@ import {
   getContextSummaryByTaskId,
   getTaskById,
 } from "../be/db";
-import { ContextFormulaSchema, ContextSnapshotEventTypeSchema } from "../types";
+import {
+  ContextFormulaSchema,
+  ContextSnapshotEventTypeSchema,
+  ContextSnapshotSchema,
+} from "../types";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
+
+// ─── Response Schemas ───────────────────────────────────────────────────────
+
+const PostContextResponseSchema = z.object({
+  ok: z.literal(true),
+  snapshotId: z.uuid(),
+});
+
+// Mirrors the `ContextSummary` interface returned by
+// `getContextSummaryByTaskId` in src/be/db.ts — not a named entity schema in
+// types.ts, so defined locally.
+const ContextSummarySchema = z.object({
+  compactionCount: z.number().int().min(0),
+  peakContextPercent: z.number().min(0).max(100).nullable(),
+  peakContextTokens: z.number().int().min(0).nullable(),
+  contextWindowSize: z.number().int().min(0).nullable(),
+  snapshotCount: z.number().int().min(0),
+});
+
+const GetContextResponseSchema = z.object({
+  snapshots: z.array(ContextSnapshotSchema),
+  summary: ContextSummarySchema,
+});
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -34,7 +61,7 @@ const postContext = route({
     contextFormula: ContextFormulaSchema.optional(),
   }),
   responses: {
-    200: { description: "Snapshot recorded" },
+    200: { description: "Snapshot recorded", schema: PostContextResponseSchema },
     400: { description: "Validation error" },
     404: { description: "Task not found" },
   },
@@ -52,7 +79,7 @@ const getContext = route({
     limit: z.coerce.number().int().min(1).max(500).default(100),
   }),
   responses: {
-    200: { description: "Context snapshot history" },
+    200: { description: "Context snapshot history", schema: GetContextResponseSchema },
     404: { description: "Task not found" },
   },
   auth: { apiKey: true },
@@ -97,7 +124,7 @@ export async function handleContext(
       contextFormula: parsed.body.contextFormula,
     });
 
-    json(res, { ok: true, snapshotId: snapshot.id });
+    postContext.respond(res, 200, { ok: true, snapshotId: snapshot.id });
     return true;
   }
 
@@ -114,7 +141,7 @@ export async function handleContext(
     const snapshots = getContextSnapshotsByTaskId(parsed.params.id, parsed.query.limit);
     const summary = getContextSummaryByTaskId(parsed.params.id);
 
-    json(res, { snapshots, summary });
+    getContext.respond(res, 200, { snapshots, summary });
     return true;
   }
 

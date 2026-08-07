@@ -488,7 +488,10 @@ export const AgentTaskSchema = z
     taskType: z.string().max(50).optional(), // e.g., "bug", "feature", "chore"
     tags: z.array(z.string()).default([]), // e.g., ["urgent", "frontend"]
     priority: z.number().int().min(0).max(100).default(50),
-    dependsOn: z.array(z.uuid()).default([]), // Task IDs this depends on
+    // Task IDs this depends on. z.string(), not z.uuid(): the create-task
+    // body accepts arbitrary strings and the DB stores them verbatim, so a
+    // uuid pin here would make response validation reject honest rows.
+    dependsOn: z.array(z.string()).default([]),
 
     // Acceptance tracking
     offeredTo: z.string().optional(), // Agent the task was offered to
@@ -496,9 +499,12 @@ export const AgentTaskSchema = z
     acceptedAt: z.iso.datetime().optional(),
     rejectionReason: z.string().optional(),
 
-    // Timestamps
-    createdAt: z.iso.datetime().default(() => new Date().toISOString()),
-    lastUpdatedAt: z.iso.datetime().default(() => new Date().toISOString()),
+    // Timestamps. No `.default(() => now)`: rows always carry these, and a
+    // function default gets EVALUATED at OpenAPI generation time — baking a
+    // wall-clock value into openapi.json and making generation
+    // non-reproducible (freshness gate flake).
+    createdAt: z.iso.datetime(),
+    lastUpdatedAt: z.iso.datetime(),
     finishedAt: z.iso.datetime().optional(),
     notifiedAt: z.iso.datetime().optional(),
 
@@ -936,8 +942,10 @@ export const AgentSchema = z
       .nullable()
       .optional(),
 
-    createdAt: z.iso.datetime().default(() => new Date().toISOString()),
-    lastUpdatedAt: z.iso.datetime().default(() => new Date().toISOString()),
+    // No function defaults — see AgentTaskSchema's timestamp comment
+    // (OpenAPI-generation reproducibility).
+    createdAt: z.iso.datetime(),
+    lastUpdatedAt: z.iso.datetime(),
   })
   .openapi("Agent");
 

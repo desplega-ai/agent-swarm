@@ -22,9 +22,14 @@ import {
   InputValueSchema,
   TriggerConfigSchema,
   WorkflowDefinitionSchema,
+  WorkflowEdgeSchema,
   WorkflowNodePatchSchema,
   WorkflowPatchSchema,
+  WorkflowRunSchema,
   WorkflowRunStatusSchema,
+  WorkflowRunStepSchema,
+  WorkflowSchema,
+  WorkflowVersionSchema,
 } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
@@ -41,7 +46,45 @@ import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { snapshotWorkflow } from "../workflows/version";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
-import { json, jsonError, parseBody, triggerSchemaErrorResponse } from "./utils";
+import { jsonError, parseBody, triggerSchemaErrorResponse } from "./utils";
+
+// ─── Response Schemas ────────────────────────────────────────────────────────
+
+/** `Workflow` decorated with the caller-scoped favorite flag (always set once `withFavoriteFlags` runs). */
+const WorkflowWithFavoriteSchema = WorkflowSchema.extend({ favorite: z.boolean() });
+
+/** `/api/workflows` slim list item — mirrors `WorkflowSummary` in src/types.ts (no exported schema there). */
+const WorkflowSummarySchema = WorkflowSchema.omit({
+  definition: true,
+  triggers: true,
+  cooldown: true,
+  input: true,
+  triggerSchema: true,
+})
+  .extend({ nodeCount: z.number().int() })
+  .extend({ favorite: z.boolean() });
+
+/** Mirrors `ExecutorTypeInfo` in src/workflows/executors/registry.ts. */
+const ExecutorTypeInfoSchema = z.object({
+  type: z.string(),
+  mode: z.enum(["instant", "async"]),
+  configSchema: z.record(z.string(), z.unknown()),
+  outputSchema: z.record(z.string(), z.unknown()),
+});
+
+/** Mirrors `WorkflowRunPage` in src/be/db.ts. */
+const WorkflowRunPageSchema = z.object({
+  runs: z.array(WorkflowRunSchema),
+  page: z.object({
+    limit: z.number().int(),
+    offset: z.number().int(),
+    total: z.number().int(),
+    hasMore: z.boolean(),
+    nextOffset: z.number().int().optional(),
+  }),
+});
+
+const SuccessResponseSchema = z.object({ success: z.literal(true) });
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -66,7 +109,10 @@ const listWorkflowsRoute = route({
     fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
-    200: { description: "Workflow list" },
+    200: {
+      description: "Workflow list",
+      schema: z.union([z.array(WorkflowSummarySchema), z.array(WorkflowWithFavoriteSchema)]),
+    },
   },
 });
 
@@ -89,7 +135,7 @@ const createWorkflowRoute = route({
     vcsRepo: z.string().min(1).optional(),
   }),
   responses: {
-    201: { description: "Workflow created" },
+    201: { description: "Workflow created", schema: WorkflowSchema },
     400: { description: "Invalid definition" },
   },
 });
@@ -102,7 +148,16 @@ const getWorkflowRoute = route({
   tags: ["Workflows"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Workflow details with auto-generated edges" },
+    200: {
+      description: "Workflow details with auto-generated edges",
+      // `favorite` stays optional here (unlike the list routes) because the
+      // handler falls back to the undecorated `workflow` (no `favorite`) if
+      // `withFavoriteFlags` ever returns an empty array for a truthy input.
+      schema: WorkflowSchema.extend({
+        favorite: z.boolean().optional(),
+        edges: z.array(WorkflowEdgeSchema),
+      }),
+    },
     404: { description: "Workflow not found" },
   },
 });
@@ -128,7 +183,7 @@ const updateWorkflowRoute = route({
     enabled: z.boolean().optional(),
   }),
   responses: {
-    200: { description: "Workflow updated (version snapshot created)" },
+    200: { description: "Workflow updated (version snapshot created)", schema: WorkflowSchema },
     400: { description: "Invalid definition" },
     404: { description: "Workflow not found" },
   },
@@ -143,7 +198,7 @@ const patchWorkflowRoute = route({
   params: z.object({ id: z.string() }),
   body: WorkflowPatchSchema.extend({ key: AssetKeySchema.optional() }),
   responses: {
-    200: { description: "Workflow patched (version snapshot created)" },
+    200: { description: "Workflow patched (version snapshot created)", schema: WorkflowSchema },
     400: { description: "Invalid patch or resulting definition" },
     404: { description: "Workflow not found" },
   },
@@ -158,7 +213,7 @@ const patchWorkflowNodeRoute = route({
   params: z.object({ id: z.string(), nodeId: z.string() }),
   body: WorkflowNodePatchSchema,
   responses: {
-    200: { description: "Node patched (version snapshot created)" },
+    200: { description: "Node patched (version snapshot created)", schema: WorkflowSchema },
     400: { description: "Invalid patch or resulting definition" },
     404: { description: "Workflow or node not found" },
   },
@@ -185,7 +240,10 @@ const triggerWorkflowRoute = route({
   tags: ["Workflows"],
   params: z.object({ id: z.string() }),
   responses: {
-    201: { description: "Workflow run started (or skipped if cooldown active)" },
+    201: {
+      description: "Workflow run started (or skipped if cooldown active)",
+      schema: z.object({ runId: z.string(), skipped: z.boolean() }),
+    },
     400: { description: "Workflow is disabled" },
     401: { description: "Unauthorized" },
     404: { description: "Workflow not found" },
@@ -200,7 +258,10 @@ const validateTriggerRoute = route({
   tags: ["Workflows"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Payload matches the workflow's triggerSchema (or workflow has none)" },
+    200: {
+      description: "Payload matches the workflow's triggerSchema (or workflow has none)",
+      schema: z.object({ valid: z.literal(true), schema: z.null().optional() }),
+    },
     400: { description: "Payload failed validation; body matches the TriggerSchemaError contract" },
     404: { description: "Workflow not found" },
   },
@@ -219,7 +280,10 @@ const listWorkflowRunsRoute = route({
     offset: z.coerce.number().int().min(0).optional(),
   }),
   responses: {
-    200: { description: "Workflow run list" },
+    200: {
+      description: "Workflow run list",
+      schema: z.union([z.array(WorkflowRunSchema), WorkflowRunPageSchema]),
+    },
   },
 });
 
@@ -231,7 +295,10 @@ const getWorkflowRunRoute = route({
   tags: ["Workflows"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Workflow run details with steps including retry info" },
+    200: {
+      description: "Workflow run details with steps including retry info",
+      schema: z.object({ run: WorkflowRunSchema, steps: z.array(WorkflowRunStepSchema) }),
+    },
     404: { description: "Run not found" },
   },
 });
@@ -244,7 +311,7 @@ const retryWorkflowRunRoute = route({
   tags: ["Workflows"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Retry started" },
+    200: { description: "Retry started", schema: SuccessResponseSchema },
     400: { description: "Cannot retry" },
   },
 });
@@ -258,7 +325,7 @@ const cancelWorkflowRunRoute = route({
   params: z.object({ id: z.string() }),
   body: z.object({ reason: z.string().optional() }).optional(),
   responses: {
-    200: { description: "Run cancelled" },
+    200: { description: "Run cancelled", schema: SuccessResponseSchema },
     400: { description: "Cannot cancel" },
   },
   auth: { apiKey: true },
@@ -271,7 +338,10 @@ const listExecutorTypesRoute = route({
   summary: "List all executor types with their config and output schemas",
   tags: ["Workflows"],
   responses: {
-    200: { description: "List of executor types with schemas" },
+    200: {
+      description: "List of executor types with schemas",
+      schema: z.object({ executorTypes: z.array(ExecutorTypeInfoSchema) }),
+    },
   },
 });
 
@@ -283,7 +353,7 @@ const getExecutorTypeRoute = route({
   tags: ["Workflows"],
   params: z.object({ type: z.string() }),
   responses: {
-    200: { description: "Executor type details" },
+    200: { description: "Executor type details", schema: ExecutorTypeInfoSchema },
     404: { description: "Executor type not found" },
   },
 });
@@ -297,7 +367,7 @@ const webhookTriggerRoute = route({
   params: z.object({ workflowId: z.string() }),
   auth: { apiKey: false },
   responses: {
-    201: { description: "Webhook processed" },
+    201: { description: "Webhook processed", schema: z.object({ runId: z.string() }) },
     401: { description: "Invalid signature" },
     404: { description: "Workflow not found" },
   },
@@ -313,7 +383,10 @@ const listWorkflowVersionsRoute = route({
   tags: ["Workflows"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Version list (newest first)" },
+    200: {
+      description: "Version list (newest first)",
+      schema: z.object({ versions: z.array(WorkflowVersionSchema) }),
+    },
     404: { description: "Workflow not found" },
   },
 });
@@ -326,7 +399,7 @@ const getWorkflowVersionRoute = route({
   tags: ["Workflows"],
   params: z.object({ id: z.string(), version: z.coerce.number().int().min(1) }),
   responses: {
-    200: { description: "Version snapshot" },
+    200: { description: "Version snapshot", schema: WorkflowVersionSchema },
     404: { description: "Version not found" },
   },
 });
@@ -343,7 +416,7 @@ export async function handleWorkflows(
   // Executor type schemas
   if (listExecutorTypesRoute.match(req.method, pathSegments)) {
     const registry = getExecutorRegistry();
-    json(res, { executorTypes: registry.describeAll() });
+    listExecutorTypesRoute.respond(res, 200, { executorTypes: registry.describeAll() });
     return true;
   }
 
@@ -356,7 +429,7 @@ export async function handleWorkflows(
       res.end();
       return true;
     }
-    json(res, registry.describe(parsed.params.type));
+    getExecutorTypeRoute.respond(res, 200, registry.describe(parsed.params.type));
     return true;
   }
 
@@ -371,14 +444,14 @@ export async function handleWorkflows(
     }
     const rawBody = Buffer.concat(chunks).toString();
 
+    let result: Awaited<ReturnType<typeof handleWebhookTrigger>>;
     try {
-      const result = await handleWebhookTrigger(
+      result = await handleWebhookTrigger(
         workflowId,
         rawBody, // Raw body string — HMAC is verified against raw bytes; JSON parsing happens inside
         req.headers, // Full header bag — signature header resolved per trigger config
         getExecutorRegistry(),
       );
-      json(res, result, 201);
     } catch (err) {
       if (err instanceof TriggerSchemaError) {
         triggerSchemaErrorResponse(res, err.message, err.validationErrors);
@@ -387,7 +460,12 @@ export async function handleWorkflows(
       } else {
         jsonError(res, String(err), 500);
       }
+      return true;
     }
+    // Egress stays OUTSIDE the try: `respond()` runtime-validates in dev/test
+    // and must fail loudly rather than be reported as a webhook failure for a
+    // run that already started.
+    webhookTriggerRoute.respond(res, 201, result);
     return true;
   }
 
@@ -402,7 +480,7 @@ export async function handleWorkflows(
       res.end();
       return true;
     }
-    json(res, version);
+    getWorkflowVersionRoute.respond(res, 200, version);
     return true;
   }
 
@@ -416,7 +494,7 @@ export async function handleWorkflows(
       return true;
     }
     const versions = getWorkflowVersions(parsed.params.id);
-    json(res, { versions });
+    listWorkflowVersionsRoute.respond(res, 200, { versions });
     return true;
   }
 
@@ -433,10 +511,15 @@ export async function handleWorkflows(
     };
     // List responses default to slim (no `definition`); `?fields=full` restores it.
     if (parsed.query.fields === "full") {
-      json(res, withFavoriteFlags(listWorkflows(filters), { favoriteScope, itemType: "workflow" }));
-    } else {
-      json(
+      listWorkflowsRoute.respond(
         res,
+        200,
+        withFavoriteFlags(listWorkflows(filters), { favoriteScope, itemType: "workflow" }),
+      );
+    } else {
+      listWorkflowsRoute.respond(
+        res,
+        200,
         withFavoriteFlags(listWorkflows(filters, { slim: true }), {
           favoriteScope,
           itemType: "workflow",
@@ -486,7 +569,7 @@ export async function handleWorkflows(
       },
       "api",
     );
-    json(res, workflow, 201);
+    createWorkflowRoute.respond(res, 201, workflow);
     return true;
   }
 
@@ -503,7 +586,7 @@ export async function handleWorkflows(
     const edges = generateEdges(workflow.definition);
     const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
     const [decorated] = withFavoriteFlags([workflow], { favoriteScope, itemType: "workflow" });
-    json(res, { ...(decorated ?? workflow), edges });
+    getWorkflowRoute.respond(res, 200, { ...(decorated ?? workflow), edges });
     return true;
   }
 
@@ -553,7 +636,7 @@ export async function handleWorkflows(
       res.end();
       return true;
     }
-    json(res, workflow);
+    patchWorkflowNodeRoute.respond(res, 200, workflow);
     return true;
   }
 
@@ -616,7 +699,7 @@ export async function handleWorkflows(
       res.end();
       return true;
     }
-    json(res, workflow);
+    patchWorkflowRoute.respond(res, 200, workflow);
     return true;
   }
 
@@ -684,7 +767,7 @@ export async function handleWorkflows(
       res.end();
       return true;
     }
-    json(res, workflow);
+    updateWorkflowRoute.respond(res, 200, workflow);
     return true;
   }
 
@@ -714,7 +797,7 @@ export async function handleWorkflows(
     const body = await parseBody<Record<string, unknown>>(req);
     const triggerData = (body?.triggerData ?? body) as unknown;
     if (!workflow.triggerSchema) {
-      json(res, { valid: true, schema: null });
+      validateTriggerRoute.respond(res, 200, { valid: true, schema: null });
       return true;
     }
     const errors = validateJsonSchema(workflow.triggerSchema, triggerData);
@@ -726,7 +809,7 @@ export async function handleWorkflows(
       );
       return true;
     }
-    json(res, { valid: true });
+    validateTriggerRoute.respond(res, 200, { valid: true });
     return true;
   }
 
@@ -764,7 +847,7 @@ export async function handleWorkflows(
     const run = getWorkflowRun(runId);
     const skipped = run?.status === "skipped";
 
-    json(res, { runId, skipped }, 201);
+    triggerWorkflowRoute.respond(res, 201, { runId, skipped });
     return true;
   }
 
@@ -779,13 +862,13 @@ export async function handleWorkflows(
         limit: parsed.query?.limit ?? 20,
         offset: parsed.query?.offset ?? 0,
       });
-      json(res, page);
+      listWorkflowRunsRoute.respond(res, 200, page);
       return true;
     }
     // Preserve the pre-pagination response for the UI when limit/offset are
     // omitted: a bare array containing every matching run.
     const runs = listWorkflowRuns(parsed.params.id, { status: parsed.query?.status });
-    json(res, runs);
+    listWorkflowRunsRoute.respond(res, 200, runs);
     return true;
   }
 
@@ -799,7 +882,7 @@ export async function handleWorkflows(
       return true;
     }
     const steps = getWorkflowRunStepsByRunId(parsed.params.id);
-    json(res, { run, steps });
+    getWorkflowRunRoute.respond(res, 200, { run, steps });
     return true;
   }
 
@@ -808,10 +891,13 @@ export async function handleWorkflows(
     if (!parsed) return true;
     try {
       await retryFailedRun(parsed.params.id, getExecutorRegistry());
-      json(res, { success: true });
     } catch (err) {
       jsonError(res, String(err), 400);
+      return true;
     }
+    // Outside the try — a response-schema violation must not be reported as a
+    // 400 "cannot retry" after the retry already started.
+    retryWorkflowRunRoute.respond(res, 200, { success: true });
     return true;
   }
 
@@ -820,10 +906,13 @@ export async function handleWorkflows(
     if (!parsed) return true;
     try {
       cancelWorkflowRun(parsed.params.id, parsed.body?.reason);
-      json(res, { success: true });
     } catch (err) {
       jsonError(res, String(err), 400);
+      return true;
     }
+    // Outside the try — a response-schema violation must not be reported as a
+    // 400 "cannot cancel" after the run was already cancelled.
+    cancelWorkflowRunRoute.respond(res, 200, { success: true });
     return true;
   }
 

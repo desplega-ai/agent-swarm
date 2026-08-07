@@ -23,12 +23,15 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import { reasoningCapability } from "../providers/reasoning-effort";
-import { getEnabledCapabilities } from "../server";
+import { ALL_CAPABILITIES, getEnabledCapabilities } from "../server";
 import { telemetry } from "../telemetry";
 import {
   AgentAvatarSchema,
   AgentCredStatusSchema,
   AgentLatestModelSchema,
+  AgentSchema,
+  AgentStatusSchema,
+  AgentWithTasksSchema,
   type ProviderName,
   ProviderNameSchema,
   ReasoningEffortSchema,
@@ -38,6 +41,47 @@ import { route } from "./route-def";
 import { agentWithCapacity, json, jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
+
+/** Mirrors `CAPABILITIES_T` (src/server.ts) — the server's registered MCP tool-group flags. */
+const CapabilitySchema = z.enum(ALL_CAPABILITIES);
+
+const AgentCapacitySchema = z.object({
+  current: z.number().int(),
+  max: z.number().int(),
+  available: z.number().int(),
+});
+
+/** Shape sent by `agentWithCapacity()` (src/http/utils.ts) for a plain Agent row. */
+const AgentWithCapacitySchema = AgentSchema.extend({
+  capacity: AgentCapacitySchema,
+});
+
+/**
+ * Same as `AgentWithCapacitySchema`, plus the `tasks` array added by
+ * `getAgentWithTasks`/`getAllAgentsWithTasks` when `?include=tasks` is used.
+ * Reuses the canonical `AgentWithTasksSchema` (src/types.ts) rather than
+ * re-declaring the `tasks` field inline.
+ */
+const AgentWithCapacityAndTasksSchema = AgentWithTasksSchema.extend({
+  capacity: AgentCapacitySchema,
+});
+
+/** POST /api/agents response: the agent row plus the server's capability flags. */
+const RegisterAgentResponseSchema = AgentSchema.extend({
+  enabledCapabilities: z.array(CapabilitySchema),
+});
+
+/** Shape shared by the single- and bulk- credential-status endpoints. */
+const AgentCredentialStatusEntrySchema = z.object({
+  agentId: z.string(),
+  name: z.string(),
+  status: AgentStatusSchema,
+  missing: z.array(z.string()),
+  provider: ProviderNameSchema.nullable(),
+  harnessProvider: ProviderNameSchema.nullable(),
+  credStatus: AgentCredStatusSchema.nullable(),
+  lastCheckedAt: z.string(),
+});
 
 const registerAgent = route({
   method: "post",
@@ -64,8 +108,12 @@ const registerAgent = route({
     200: {
       description:
         "Agent re-registered (already existed). Response includes `enabledCapabilities` — the server's capability flags (registered MCP tool groups), not the agent's declared skill tags.",
+      schema: RegisterAgentResponseSchema,
     },
-    201: { description: "Agent created. Response includes `enabledCapabilities` (see 200)." },
+    201: {
+      description: "Agent created. Response includes `enabledCapabilities` (see 200).",
+      schema: RegisterAgentResponseSchema,
+    },
     400: { description: "Validation error" },
   },
 });
@@ -83,7 +131,7 @@ const setAgentHarnessProviderRoute = route({
     harness_provider: ProviderNameSchema,
   }),
   responses: {
-    200: { description: "Updated agent row" },
+    200: { description: "Updated agent row", schema: AgentWithCapacitySchema },
     400: { description: "Validation error (unknown provider)" },
     404: { description: "Agent not found" },
   },
@@ -107,7 +155,7 @@ const updateAgentRuntimeRoute = route({
     reasoning_effort: ReasoningEffortSchema.nullable().optional(),
   }),
   responses: {
-    200: { description: "Updated agent row" },
+    200: { description: "Updated agent row", schema: AgentWithCapacitySchema },
     400: { description: "Validation error" },
     404: { description: "Agent not found" },
   },
@@ -127,7 +175,10 @@ const listAgents = route({
     fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
-    200: { description: "Agent list with capacity info" },
+    200: {
+      description: "Agent list with capacity info",
+      schema: z.object({ agents: z.array(AgentWithCapacityAndTasksSchema) }),
+    },
   },
 });
 
@@ -140,7 +191,7 @@ const updateAgentNameRoute = route({
   params: z.object({ id: z.string() }),
   body: z.object({ name: z.string().min(1) }),
   responses: {
-    200: { description: "Agent updated" },
+    200: { description: "Agent updated", schema: AgentWithCapacitySchema },
     404: { description: "Agent not found" },
     409: { description: "Name conflict" },
   },
@@ -154,7 +205,13 @@ const getAgentSetupScript = route({
   tags: ["Agents"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Setup scripts" },
+    200: {
+      description: "Setup scripts",
+      schema: z.object({
+        setupScript: z.string().nullable(),
+        globalSetupScript: z.string().nullable(),
+      }),
+    },
     404: { description: "Agent not found" },
   },
 });
@@ -183,7 +240,7 @@ const updateAgentProfileRoute = route({
     changeReason: z.string().optional(),
   }),
   responses: {
-    200: { description: "Profile updated" },
+    200: { description: "Profile updated", schema: AgentWithCapacitySchema },
     400: { description: "Validation error" },
     404: { description: "Agent not found" },
   },
@@ -212,7 +269,7 @@ const getAgent = route({
     include: z.enum(["tasks"]).optional(),
   }),
   responses: {
-    200: { description: "Agent with capacity info" },
+    200: { description: "Agent with capacity info", schema: AgentWithCapacityAndTasksSchema },
     404: { description: "Agent not found" },
   },
 });
@@ -246,7 +303,10 @@ const updateAgentCredentialStatusRoute = route({
   params: z.object({ id: z.string() }),
   body: credentialStatusBody,
   responses: {
-    200: { description: "State updated; returns the agent row." },
+    200: {
+      description: "State updated; returns the agent row.",
+      schema: AgentWithCapacitySchema,
+    },
     404: { description: "Agent not found" },
   },
 });
@@ -259,7 +319,7 @@ const getAgentCredentialStatusRoute = route({
   tags: ["Agents"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Credential status payload" },
+    200: { description: "Credential status payload", schema: AgentCredentialStatusEntrySchema },
     404: { description: "Agent not found" },
   },
 });
@@ -274,7 +334,10 @@ const listCredentialStatusRoute = route({
     status: z.enum(["idle", "busy", "offline", "waiting_for_credentials"]).optional(),
   }),
   responses: {
-    200: { description: "List of {agentId, status, missing[], lastCheckedAt}" },
+    200: {
+      description: "List of {agentId, status, missing[], lastCheckedAt}",
+      schema: z.object({ agents: z.array(AgentCredentialStatusEntrySchema) }),
+    },
   },
 });
 
@@ -375,11 +438,15 @@ export async function handleAgentRegister(
     // `enabledCapabilities` = the server's capability flags (which MCP tool
     // groups are registered), NOT the agent's declared skill tags. Workers use
     // it to drop prompt sections that instruct unregistered tools.
-    json(
-      res,
-      { ...result.agent, enabledCapabilities: getEnabledCapabilities() },
-      result.created ? 201 : 200,
-    );
+    // Non-null assertion: `result.agent` is only `| null` in the TS union
+    // because the re-registration branch re-fetches by id inside the same
+    // transaction right after confirming the row exists — it cannot actually
+    // be null here. (Same value as before; this only affects the compile-time
+    // type used to check the response schema.)
+    registerAgent.respond(res, result.created ? 201 : 200, {
+      ...result.agent!,
+      enabledCapabilities: getEnabledCapabilities(),
+    });
     return true;
   }
 
@@ -401,7 +468,7 @@ export async function handleAgentsRest(
     const slim = parsed.query.fields !== "full";
     const agents = includeTasks ? getAllAgentsWithTasks({ slim }) : getAllAgents({ slim });
     const agentsWithCapacity = agents.map(agentWithCapacity);
-    json(res, { agents: agentsWithCapacity });
+    listAgents.respond(res, 200, { agents: agentsWithCapacity });
     return true;
   }
 
@@ -415,7 +482,7 @@ export async function handleAgentsRest(
         jsonError(res, "Agent not found", 404);
         return true;
       }
-      json(res, agentWithCapacity(agent));
+      updateAgentNameRoute.respond(res, 200, agentWithCapacity(agent));
     } catch (error) {
       jsonError(res, (error as Error).message, 409);
     }
@@ -432,7 +499,7 @@ export async function handleAgentsRest(
     }
     const globalConfigs = getSwarmConfigs({ scope: "global", key: "SETUP_SCRIPT" });
     const globalSetupScript = globalConfigs[0]?.value ?? null;
-    json(res, {
+    getAgentSetupScript.respond(res, 200, {
       setupScript: agent.setupScript ?? null,
       globalSetupScript,
     });
@@ -502,7 +569,7 @@ export async function handleAgentsRest(
       return true;
     }
 
-    json(res, agentWithCapacity(agent));
+    updateAgentProfileRoute.respond(res, 200, agentWithCapacity(agent));
     return true;
   }
 
@@ -533,7 +600,7 @@ export async function handleAgentsRest(
       value: parsed.body.harness_provider,
       description: "Set via PATCH /api/agents/{id}/harness-provider",
     });
-    json(res, agentWithCapacity(agent));
+    setAgentHarnessProviderRoute.respond(res, 200, agentWithCapacity(agent));
     return true;
   }
 
@@ -624,7 +691,7 @@ export async function handleAgentsRest(
       jsonError(res, "Agent not found", 404);
       return true;
     }
-    json(res, agentWithCapacity(agent));
+    updateAgentRuntimeRoute.respond(res, 200, agentWithCapacity(agent));
     return true;
   }
 
@@ -646,7 +713,7 @@ export async function handleAgentsRest(
         credStatus: a.credStatus ?? null,
         lastCheckedAt: a.lastUpdatedAt,
       }));
-    json(res, { agents });
+    listCredentialStatusRoute.respond(res, 200, { agents });
     return true;
   }
 
@@ -709,7 +776,7 @@ export async function handleAgentsRest(
           latestModel: parsed.body.latest_model,
         }) ?? agent;
     }
-    json(res, agentWithCapacity(finalAgent));
+    updateAgentCredentialStatusRoute.respond(res, 200, agentWithCapacity(finalAgent));
     return true;
   }
 
@@ -721,7 +788,7 @@ export async function handleAgentsRest(
       jsonError(res, "Agent not found", 404);
       return true;
     }
-    json(res, {
+    getAgentCredentialStatusRoute.respond(res, 200, {
       agentId: agent.id,
       name: agent.name,
       status: agent.status,
@@ -747,7 +814,7 @@ export async function handleAgentsRest(
       return true;
     }
 
-    json(res, agentWithCapacity(agent));
+    getAgent.respond(res, 200, agentWithCapacity(agent));
     return true;
   }
 

@@ -29,8 +29,14 @@ import { renderIdentity, resolveIdentity } from "../be/identity";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
 import { telemetry } from "../telemetry";
+import {
+  AgentTaskSchema,
+  BudgetRefusedTriggerSchema,
+  TaskAttachmentSchema,
+  UserSchema,
+} from "../types";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 // ─── Budget-refused trigger envelope ────────────────────────────────────────
 
@@ -70,6 +76,78 @@ function buildBudgetRefusedTrigger(refusal: {
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
+// Slim attachment projection sent on `task_assigned` triggers — mirrors the
+// fields built by `attachmentsForTrigger` below (id, name, mimeType, sizeBytes).
+const PollTriggerAttachmentSchema = TaskAttachmentSchema.pick({
+  id: true,
+  name: true,
+  mimeType: true,
+  sizeBytes: true,
+});
+
+// Requester projection sent on `task_assigned` triggers — either the resolved
+// user's identity fields, or (when no `requestedByUserId` is recorded) just a
+// rendered `name` for the UNKNOWN-identity sentinel.
+const PollRequestedBySchema = UserSchema.pick({
+  name: true,
+  email: true,
+  role: true,
+  notes: true,
+});
+
+const PollTaskOfferedTriggerSchema = z.object({
+  type: z.literal("task_offered"),
+  taskId: z.string(),
+  task: AgentTaskSchema,
+});
+
+const PollTaskAssignedTriggerSchema = z.object({
+  type: z.literal("task_assigned"),
+  taskId: z.string(),
+  task: AgentTaskSchema.extend({
+    attachments: z.array(PollTriggerAttachmentSchema),
+  }),
+  requestedBy: PollRequestedBySchema.optional(),
+});
+
+// `budget_refused` reuses the canonical `BudgetRefusedTriggerSchema` entity
+// (src/types.ts) — it was already defined as the wire shape for this exact
+// `/api/poll` trigger back in Phase 3, mirrored by `buildBudgetRefusedTrigger`
+// below.
+
+const PollUnreadMentionsTriggerSchema = z.object({
+  type: z.literal("unread_mentions"),
+  mentionsCount: z.number(),
+  claimedChannels: z.array(z.string()),
+});
+
+const PollChannelActivityTriggerSchema = z.object({
+  type: z.literal("channel_activity"),
+  count: z.number(),
+  messages: z.array(
+    z.object({
+      channelId: z.string(),
+      channelName: z.string().optional(),
+      ts: z.string(),
+      user: z.string(),
+      text: z.string(),
+    }),
+  ),
+  cursorUpdates: z.array(z.object({ channelId: z.string(), ts: z.string() })),
+});
+
+const PollTriggerSchema = z.discriminatedUnion("type", [
+  PollTaskOfferedTriggerSchema,
+  PollTaskAssignedTriggerSchema,
+  BudgetRefusedTriggerSchema,
+  PollUnreadMentionsTriggerSchema,
+  PollChannelActivityTriggerSchema,
+]);
+
+const pollResponseSchema = z.object({
+  trigger: PollTriggerSchema.nullable(),
+});
+
 const pollTriggers = route({
   method: "get",
   path: "/api/poll",
@@ -78,7 +156,7 @@ const pollTriggers = route({
   tags: ["Poll"],
   auth: { apiKey: true, agentId: true },
   responses: {
-    200: { description: "Trigger data or null" },
+    200: { description: "Trigger data or null", schema: pollResponseSchema },
     400: { description: "Missing X-Agent-ID" },
     404: { description: "Agent not found" },
   },
@@ -128,7 +206,10 @@ const commitCursorsRoute = route({
     ),
   }),
   responses: {
-    200: { description: "Cursors committed" },
+    200: {
+      description: "Cursors committed",
+      schema: z.object({ success: z.literal(true), committed: z.number().int().nonnegative() }),
+    },
     400: { description: "Invalid request" },
   },
 });
@@ -151,7 +232,10 @@ export async function handlePoll(
         upsertChannelActivityCursor(channelId, ts);
       }
     }
-    json(res, { success: true, committed: parsed.body.cursorUpdates.length });
+    commitCursorsRoute.respond(res, 200, {
+      success: true,
+      committed: parsed.body.cursorUpdates.length,
+    });
     return true;
   }
 
@@ -535,7 +619,7 @@ export async function handlePoll(
       refusalSideEffects?: unknown;
       [key: string]: unknown;
     };
-    json(res, publicResult);
+    pollTriggers.respond(res, 200, publicResult as z.infer<typeof pollResponseSchema>);
     return true;
   }
 

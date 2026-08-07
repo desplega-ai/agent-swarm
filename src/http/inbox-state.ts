@@ -1,9 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { listInboxState, upsertInboxState } from "../be/db";
-import { InboxItemStatusSchema, InboxItemTypeSchema } from "../types";
+import { InboxItemStateSchema, InboxItemStatusSchema, InboxItemTypeSchema } from "../types";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -19,7 +19,10 @@ const listState = route({
     itemType: InboxItemTypeSchema.optional(),
   }),
   responses: {
-    200: { description: "Inbox state rows" },
+    200: {
+      description: "Inbox state rows",
+      schema: z.object({ items: z.array(InboxItemStateSchema) }),
+    },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
   },
@@ -40,7 +43,10 @@ const upsertState = route({
     snoozeUntil: z.string().datetime().optional(),
   }),
   responses: {
-    200: { description: "Upserted inbox state row" },
+    200: {
+      description: "Upserted inbox state row",
+      schema: z.object({ item: InboxItemStateSchema }),
+    },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
   },
@@ -63,7 +69,7 @@ export async function handleInboxState(
       status: parsed.query.status,
       itemType: parsed.query.itemType,
     });
-    json(res, { items });
+    listState.respond(res, 200, { items });
     return true;
   }
 
@@ -78,7 +84,7 @@ export async function handleInboxState(
         status: parsed.body.status,
         snoozeUntil: parsed.body.snoozeUntil,
       });
-      json(res, { item });
+      upsertState.respond(res, 200, { item });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to upsert inbox state", 500);
     }

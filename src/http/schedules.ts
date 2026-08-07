@@ -18,14 +18,16 @@ import { mergeScheduleTiming, validateRecurringTiming } from "../be/schedules/va
 import { getScript } from "../be/scripts/db";
 import { calculateNextRun, dispatchScheduleTarget } from "../scheduler/scheduler";
 import {
+  AgentTaskSchema,
   AssetKeySchema,
   ModelTierSchema,
+  ScheduledTaskSchema,
   ScheduledTaskTargetTypeSchema,
   splitLegacyModelAlias,
 } from "../types";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -49,6 +51,34 @@ const scheduleUpdateBodySchema = z.object({
   workflowId: z.string().uuid().nullable().optional(),
   scriptName: z.string().nullable().optional(),
   scriptArgs: z.record(z.string(), z.unknown()).nullable().optional(),
+});
+
+// `ScheduledTaskSchema` carries `.refine()` checks, so Zod v4 forbids the
+// plain `.extend()` / `.omit()` chain-builders here (they throw at call
+// time: "Object schemas containing refinements cannot be extended/omitted.
+// Use `.safeExtend()` instead."). Use `.safeExtend()` for additive shapes,
+// and build the taskTemplate-dropping summary shape from `.shape` directly.
+
+/** Full schedule row decorated with the caller's favorite flag (full-mode `listSchedules`). */
+const scheduleWithFavoriteSchema = ScheduledTaskSchema.safeExtend({ favorite: z.boolean() });
+
+/**
+ * `getSchedule` response: `favorite` is optional because the handler falls
+ * back to the undecorated row (`decorated ?? schedule`) if `withFavoriteFlags`
+ * ever returned an empty array — structurally unreachable for a 1-row input,
+ * but the schema stays honest about what the code could send.
+ */
+const scheduleWithOptionalFavoriteSchema = ScheduledTaskSchema.safeExtend({
+  favorite: z.boolean().optional(),
+});
+
+/** Slim list row — `taskTemplate` swapped for a bounded preview (see `ScheduledTaskSummary`). */
+const { taskTemplate: _omittedTaskTemplate, ...scheduleShapeWithoutTemplate } =
+  ScheduledTaskSchema.shape;
+const scheduleSummaryWithFavoriteSchema = z.object({
+  ...scheduleShapeWithoutTemplate,
+  taskTemplatePreview: z.string(),
+  favorite: z.boolean(),
 });
 
 const createSchedule = route({
@@ -81,7 +111,7 @@ const createSchedule = route({
     runAt: z.string().optional(),
   }),
   responses: {
-    201: { description: "Schedule created" },
+    201: { description: "Schedule created", schema: ScheduledTaskSchema },
     400: { description: "Validation error" },
     409: { description: "Duplicate name" },
   },
@@ -95,7 +125,14 @@ const runScheduleNow = route({
   tags: ["Schedules"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Schedule run triggered" },
+    200: {
+      description: "Schedule run triggered",
+      schema: z.object({
+        schedule: ScheduledTaskSchema.nullable(),
+        workflowRunIds: z.array(z.string()).optional(),
+        task: AgentTaskSchema.optional(),
+      }),
+    },
     400: { description: "Schedule is disabled" },
     404: { description: "Schedule not found" },
   },
@@ -131,7 +168,16 @@ const listSchedules = route({
     keyPrefix: AssetKeySchema.optional(),
   }),
   responses: {
-    200: { description: "List of schedules" },
+    200: {
+      description: "List of schedules",
+      schema: z.object({
+        schedules: z.union([
+          z.array(scheduleSummaryWithFavoriteSchema),
+          z.array(scheduleWithFavoriteSchema),
+        ]),
+        count: z.number().int(),
+      }),
+    },
   },
 });
 
@@ -143,7 +189,7 @@ const getSchedule = route({
   tags: ["Schedules"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Schedule details" },
+    200: { description: "Schedule details", schema: scheduleWithOptionalFavoriteSchema },
     404: { description: "Schedule not found" },
   },
 });
@@ -157,7 +203,7 @@ const updateSchedule = route({
   params: z.object({ id: z.string() }),
   body: scheduleUpdateBodySchema,
   responses: {
-    200: { description: "Schedule updated" },
+    200: { description: "Schedule updated", schema: ScheduledTaskSchema.nullable() },
     400: { description: "Validation error" },
     404: { description: "Schedule not found" },
     409: { description: "Duplicate name" },
@@ -175,7 +221,7 @@ const patchSchedule = route({
   params: z.object({ id: z.string() }),
   body: scheduleUpdateBodySchema,
   responses: {
-    200: { description: "Schedule patched" },
+    200: { description: "Schedule patched", schema: ScheduledTaskSchema.nullable() },
     400: { description: "Validation error" },
     404: { description: "Schedule not found" },
     409: { description: "Duplicate name" },
@@ -194,7 +240,7 @@ const deleteSchedule = route({
   tags: ["Schedules"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Schedule deleted" },
+    200: { description: "Schedule deleted", schema: z.object({ success: z.literal(true) }) },
     404: { description: "Schedule not found" },
   },
 });
@@ -234,7 +280,10 @@ export async function handleSchedules(
       favoriteScope,
       itemType: "schedule",
     });
-    json(res, { schedules: decoratedSchedules, count: decoratedSchedules.length });
+    listSchedules.respond(res, 200, {
+      schedules: decoratedSchedules,
+      count: decoratedSchedules.length,
+    });
     return true;
   }
 
@@ -379,7 +428,7 @@ export async function handleSchedules(
         createdBy: resolveHttpAuditUserId(req, myAgentId) ?? undefined,
       });
 
-      json(res, schedule, 201);
+      createSchedule.respond(res, 201, schedule);
     } catch (_error) {
       jsonError(res, "Failed to create schedule", 500);
     }
@@ -420,7 +469,7 @@ export async function handleSchedules(
       }
 
       const updatedSchedule = getScheduledTaskById(parsed.params.id);
-      json(res, { schedule: updatedSchedule, workflowRunIds, task });
+      runScheduleNow.respond(res, 200, { schedule: updatedSchedule, workflowRunIds, task });
     } catch (error) {
       jsonError(res, error instanceof Error ? error.message : "Failed to run schedule", 500);
     }
@@ -439,7 +488,7 @@ export async function handleSchedules(
 
     const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
     const [decorated] = withFavoriteFlags([schedule], { favoriteScope, itemType: "schedule" });
-    json(res, decorated ?? schedule);
+    getSchedule.respond(res, 200, decorated ?? schedule);
     return true;
   }
 
@@ -601,7 +650,7 @@ export async function handleSchedules(
     const updatedBy = resolveHttpAuditUserId(req, myAgentId);
     if (updatedBy !== null) body.updatedBy = updatedBy;
     const schedule = updateScheduledTask(parsed.params.id, body);
-    json(res, schedule);
+    routeHandle.respond(res, 200, schedule);
     return true;
   }
 
@@ -615,7 +664,7 @@ export async function handleSchedules(
       return true;
     }
 
-    json(res, { success: true });
+    deleteSchedule.respond(res, 200, { success: true });
     return true;
   }
 

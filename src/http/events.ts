@@ -11,9 +11,10 @@ import {
   EventNameSchema,
   EventSourceSchema,
   EventStatusSchema,
+  SwarmEventSchema,
 } from "../types";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -39,7 +40,10 @@ const createEventRoute = route({
   tags: ["Events"],
   body: eventBodySchema,
   responses: {
-    201: { description: "Event stored" },
+    201: {
+      description: "Event stored",
+      schema: z.object({ success: z.literal(true), event: SwarmEventSchema }),
+    },
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
@@ -55,7 +59,10 @@ const createEventsBatchRoute = route({
     events: z.array(eventBodySchema).min(1).max(500),
   }),
   responses: {
-    201: { description: "Events stored" },
+    201: {
+      description: "Events stored",
+      schema: z.object({ success: z.literal(true), count: z.number().int() }),
+    },
     400: { description: "Validation error" },
   },
   auth: { apiKey: true },
@@ -80,7 +87,10 @@ const getEventsRoute = route({
     limit: z.coerce.number().int().min(1).max(1000).optional(),
   }),
   responses: {
-    200: { description: "List of events" },
+    200: {
+      description: "List of events",
+      schema: z.object({ events: z.array(SwarmEventSchema) }),
+    },
   },
   auth: { apiKey: true },
 });
@@ -101,7 +111,12 @@ const getEventCountsRoute = route({
     until: z.string().optional(),
   }),
   responses: {
-    200: { description: "Event counts" },
+    200: {
+      description: "Event counts",
+      schema: z.object({
+        counts: z.array(z.object({ event: z.string(), count: z.number().int() })),
+      }),
+    },
   },
   auth: { apiKey: true },
 });
@@ -122,7 +137,7 @@ export async function handleEvents(
 
     try {
       const count = createEventsBatch(parsed.body.events);
-      json(res, { success: true, count }, 201);
+      createEventsBatchRoute.respond(res, 201, { success: true, count });
     } catch (error) {
       console.error("[HTTP] Failed to create events batch:", error);
       jsonError(res, "Failed to store events batch", 500);
@@ -144,7 +159,7 @@ export async function handleEvents(
       since: parsed.query.since || undefined,
       until: parsed.query.until || undefined,
     });
-    json(res, { counts });
+    getEventCountsRoute.respond(res, 200, { counts });
     return true;
   }
 
@@ -155,7 +170,7 @@ export async function handleEvents(
 
     try {
       const event = createEvent(parsed.body);
-      json(res, { success: true, event }, 201);
+      createEventRoute.respond(res, 201, { success: true, event });
     } catch (error) {
       console.error("[HTTP] Failed to create event:", error);
       jsonError(res, "Failed to store event", 500);
@@ -180,7 +195,7 @@ export async function handleEvents(
       until: parsed.query.until || undefined,
       limit: parsed.query.limit ?? 100,
     });
-    json(res, { events });
+    getEventsRoute.respond(res, 200, { events });
     return true;
   }
 

@@ -47,9 +47,10 @@ import {
   revokeToken,
   unlinkIdentity,
 } from "../be/users";
+import { UserSchema } from "../types";
 import { getOperatorActor } from "./operator-actor";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 // ─── Response composition ────────────────────────────────────────────────────
 
@@ -78,6 +79,53 @@ function syncUserBudgetMirror(userId: string, dailyBudgetUsd: number | null | un
   upsertBudget("user", userId, dailyBudgetUsd);
 }
 
+// ─── Response schemas ────────────────────────────────────────────────────────
+
+const UserIdentityLinkSchema = z.object({
+  kind: z.string(),
+  externalId: z.string(),
+});
+
+const UserTokenSummarySchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  label: z.string().nullable(),
+  tokenPreview: z.string(),
+  createdAt: z.string(),
+  lastUsedAt: z.string().nullable(),
+  revokedAt: z.string().nullable(),
+});
+
+const IdentityEventSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  // `IdentityEvent.eventType` is read back from the DB as a plain `string`
+  // (the CHECK constraint guarantees membership in `IdentityEventTypeSchema`,
+  // but the read path's static type is not narrowed to the enum).
+  eventType: z.string(),
+  actor: z.string(),
+  before: z.unknown().nullable(),
+  after: z.unknown().nullable(),
+  createdAt: z.string(),
+});
+
+/** `composeUser()`'s shape — base user row + identities + token summaries + recent events. */
+const ComposedUserSchema = UserSchema.extend({
+  identities: z.array(UserIdentityLinkSchema),
+  tokens: z.array(UserTokenSummarySchema),
+  recentEvents: z.array(IdentityEventSchema),
+});
+
+/** `collectUnmappedForKind()`'s per-externalId grouped shape. */
+const UnmappedIdentitySchema = z.object({
+  kind: z.string(),
+  externalId: z.string(),
+  lastSeenAt: z.string().nullable(),
+  count: z.number(),
+  sampleEventType: z.string().nullable(),
+  sampleContext: z.unknown().nullable(),
+});
+
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
 const listUsers = route({
@@ -90,7 +138,10 @@ const listUsers = route({
     recentEvents: z.coerce.number().int().min(0).max(50).optional(),
   }),
   responses: {
-    200: { description: "List of users" },
+    200: {
+      description: "List of users",
+      schema: z.object({ users: z.array(ComposedUserSchema.nullable()) }),
+    },
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
@@ -118,7 +169,10 @@ const createUserRoute = route({
       .optional(),
   }),
   responses: {
-    200: { description: "User created" },
+    200: {
+      description: "User created",
+      schema: z.object({ user: ComposedUserSchema.nullable() }),
+    },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
   },
@@ -136,7 +190,10 @@ const listUnmapped = route({
     limit: z.coerce.number().int().min(1).max(1000).optional(),
   }),
   responses: {
-    200: { description: "List of unmapped identities sorted by count DESC, lastSeenAt DESC" },
+    200: {
+      description: "List of unmapped identities sorted by count DESC, lastSeenAt DESC",
+      schema: z.object({ unmapped: z.array(UnmappedIdentitySchema) }),
+    },
     401: { description: "Unauthorized" },
   },
   auth: { apiKey: true },
@@ -158,7 +215,10 @@ const resolveUnmapped = route({
     }),
   ]),
   responses: {
-    200: { description: "Identity linked + kv entries cleared" },
+    200: {
+      description: "Identity linked + kv entries cleared",
+      schema: z.object({ user: ComposedUserSchema.nullable() }),
+    },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
     404: { description: "Target user not found" },
@@ -177,7 +237,10 @@ const getUserRoute = route({
     recentEvents: z.coerce.number().int().min(0).max(200).optional(),
   }),
   responses: {
-    200: { description: "User row" },
+    200: {
+      description: "User row",
+      schema: z.object({ user: ComposedUserSchema }),
+    },
     401: { description: "Unauthorized" },
     404: { description: "User not found" },
   },
@@ -213,7 +276,10 @@ const updateUserRoute = route({
       message: "At least one field must be provided",
     }),
   responses: {
-    200: { description: "User updated" },
+    200: {
+      description: "User updated",
+      schema: z.object({ user: ComposedUserSchema.nullable() }),
+    },
     400: { description: "Validation error or empty body" },
     401: { description: "Unauthorized" },
     404: { description: "User not found" },
@@ -234,7 +300,14 @@ const mintUserMcpTokenRoute = route({
     label: z.string().nullable().optional(),
   }),
   responses: {
-    200: { description: "Minted token plaintext, token summary and composed user" },
+    200: {
+      description: "Minted token plaintext, token summary and composed user",
+      schema: z.object({
+        plaintext: z.string(),
+        token: UserTokenSummarySchema.optional(),
+        user: ComposedUserSchema.nullable(),
+      }),
+    },
     401: { description: "Unauthorized" },
     404: { description: "User not found" },
   },
@@ -249,7 +322,10 @@ const revokeUserMcpTokenRoute = route({
   tags: ["Users"],
   params: z.object({ id: z.string(), tokenId: z.string() }),
   responses: {
-    200: { description: "Composed user after token revocation" },
+    200: {
+      description: "Composed user after token revocation",
+      schema: z.object({ user: ComposedUserSchema.nullable() }),
+    },
     401: { description: "Unauthorized" },
     404: { description: "User or token not found" },
   },
@@ -265,7 +341,10 @@ const mergeUsersRoute = route({
   params: z.object({ id: z.string() }),
   body: z.object({ sourceUserId: z.string().min(1) }),
   responses: {
-    200: { description: "Merged user" },
+    200: {
+      description: "Merged user",
+      schema: z.object({ user: ComposedUserSchema.nullable() }),
+    },
     400: { description: "Validation error (e.g. target == source)" },
     401: { description: "Unauthorized" },
     404: { description: "Target or source user not found" },
@@ -285,7 +364,10 @@ const listEventsRoute = route({
     before: z.string().optional(),
   }),
   responses: {
-    200: { description: "Array of identity events" },
+    200: {
+      description: "Array of identity events",
+      schema: z.object({ events: z.array(IdentityEventSchema) }),
+    },
     401: { description: "Unauthorized" },
     404: { description: "User not found" },
   },
@@ -301,7 +383,10 @@ const addIdentityRoute = route({
   params: z.object({ id: z.string() }),
   body: z.object({ kind: z.string().min(1), externalId: z.string().min(1) }),
   responses: {
-    200: { description: "Updated identity list" },
+    200: {
+      description: "Updated identity list",
+      schema: z.object({ identities: z.array(UserIdentityLinkSchema) }),
+    },
     400: { description: "Validation error or PK collision" },
     401: { description: "Unauthorized" },
     404: { description: "User not found" },
@@ -317,7 +402,10 @@ const deleteIdentityRoute = route({
   tags: ["Users"],
   params: z.object({ id: z.string(), kind: z.string(), externalId: z.string() }),
   responses: {
-    200: { description: "Updated identity list" },
+    200: {
+      description: "Updated identity list",
+      schema: z.object({ identities: z.array(UserIdentityLinkSchema) }),
+    },
     401: { description: "Unauthorized" },
     404: { description: "User not found" },
   },
@@ -409,7 +497,7 @@ export async function handleUsers(
     if (!parsed) return true;
     const recentLimit = parsed.query.recentEvents ?? 5;
     const users = getAllUsers().map((u) => composeUser(u.id, recentLimit));
-    json(res, { users });
+    listUsers.respond(res, 200, { users });
     return true;
   }
 
@@ -433,7 +521,7 @@ export async function handleUsers(
         });
       }
       const composed = composeUser(user.id);
-      json(res, { user: composed });
+      createUserRoute.respond(res, 200, { user: composed });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to create user", 500);
     }
@@ -454,7 +542,7 @@ export async function handleUsers(
       const bl = b.lastSeenAt ?? "";
       return bl.localeCompare(al);
     });
-    json(res, { unmapped: rows.slice(0, limit) });
+    listUnmapped.respond(res, 200, { unmapped: rows.slice(0, limit) });
     return true;
   }
 
@@ -494,7 +582,7 @@ export async function handleUsers(
       deleteKv(ns, `${externalId}:meta`);
       deleteKv(ns, `${externalId}:count`);
       const user = composeUser(targetUserId);
-      json(res, { user });
+      resolveUnmapped.respond(res, 200, { user });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to resolve unmapped", 500);
     }
@@ -513,7 +601,7 @@ export async function handleUsers(
       limit: parsed.query.limit,
       before: parsed.query.before,
     });
-    json(res, { events });
+    listEventsRoute.respond(res, 200, { events });
     return true;
   }
 
@@ -531,7 +619,11 @@ export async function handleUsers(
     try {
       const { tokenId, plaintext } = mintToken(parsed.params.id, parsed.body.label ?? null, actor);
       const token = listUserTokens(parsed.params.id).find((t) => t.id === tokenId);
-      json(res, { plaintext, token, user: composeUser(parsed.params.id) });
+      mintUserMcpTokenRoute.respond(res, 200, {
+        plaintext,
+        token,
+        user: composeUser(parsed.params.id),
+      });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to mint token", 500);
     }
@@ -559,7 +651,7 @@ export async function handleUsers(
 
     try {
       revokeToken(parsed.params.tokenId, actor);
-      json(res, { user: composeUser(parsed.params.id) });
+      revokeUserMcpTokenRoute.respond(res, 200, { user: composeUser(parsed.params.id) });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to revoke token";
       if (message.includes("Token not found")) {
@@ -583,7 +675,7 @@ export async function handleUsers(
     }
     try {
       linkIdentity(parsed.params.id, parsed.body.kind, parsed.body.externalId, actor);
-      json(res, { identities: getUserIdentities(parsed.params.id) });
+      addIdentityRoute.respond(res, 200, { identities: getUserIdentities(parsed.params.id) });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to link identity", 400);
     }
@@ -607,7 +699,7 @@ export async function handleUsers(
       const kind = decodeURIComponent(parsed.params.kind);
       const externalId = decodeURIComponent(parsed.params.externalId);
       unlinkIdentity(parsed.params.id, kind, externalId, actor);
-      json(res, { identities: getUserIdentities(parsed.params.id) });
+      deleteIdentityRoute.respond(res, 200, { identities: getUserIdentities(parsed.params.id) });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to unlink identity", 500);
     }
@@ -692,7 +784,7 @@ export async function handleUsers(
 
       // Re-compose AFTER the event so the response surfaces the merge event in
       // recentEvents (otherwise the timeline is missing the event we just wrote).
-      json(res, { user: composeUser(targetId) });
+      mergeUsersRoute.respond(res, 200, { user: composeUser(targetId) });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to merge users", 500);
     }
@@ -708,7 +800,7 @@ export async function handleUsers(
       jsonError(res, "User not found", 404);
       return true;
     }
-    json(res, { user: composed });
+    getUserRoute.respond(res, 200, { user: composed });
     return true;
   }
 
@@ -826,7 +918,7 @@ export async function handleUsers(
       }
 
       const composed = composeUser(parsed.params.id);
-      json(res, { user: composed });
+      updateUserRoute.respond(res, 200, { user: composed });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to update user", 500);
     }
