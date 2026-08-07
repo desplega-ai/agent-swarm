@@ -19,6 +19,7 @@ import {
   Cpu,
   HeartPulse,
   type LucideIcon,
+  Moon,
   Palette,
   Plug,
   Shield,
@@ -615,6 +616,32 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "https://templates.agent-swarm.dev",
         placeholder: "https://templates.agent-swarm.dev",
         restartRequired: true,
+      },
+    ],
+  },
+  {
+    id: "addons",
+    title: "Add-ons",
+    description: "Configure optional capabilities shipped with the swarm.",
+    icon: Moon,
+    entries: [
+      {
+        key: "DREAMING_ENABLED",
+        label: "Enable Dreaming",
+        description:
+          "Runtime kill switch for the Dreaming workflow (a DREAMING_ENABLED=false deployment env var works too). With no value a Dreaming run proceeds, but the dream-daily schedule ships disabled — enable that schedule to start the nightly pass.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}addons/dreaming`,
+      },
+      {
+        key: "DREAMING_SLACK_CHANNEL",
+        label: "Dreaming Slack channel",
+        description:
+          "Optional Slack channel ID for Dreaming receipts. Leave unset to keep receipts in memory only.",
+        kind: "string",
+        placeholder: "C0123456789",
+        docsUrl: `${DOCS}addons/dreaming`,
       },
     ],
   },

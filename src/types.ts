@@ -1496,6 +1496,8 @@ export const ExecutorMetaSchema = z.object({
   stepId: z.string().uuid(),
   nodeId: z.string(),
   workflowId: z.string().uuid(),
+  workflowDefinitionHash: z.string().optional(),
+  workflowRunDefinitionHash: z.string().optional(),
   dryRun: z.boolean().default(false),
   requestedByUserId: z.string().optional(),
   // The node's declared-inputs interpolation context (aliases + builtins) as built
@@ -1527,6 +1529,7 @@ export const SwarmScriptNodeConfigSchema = z.object({
   scriptName: z.string().min(1),
   scope: z.enum(["global", "agent"]).optional(),
   pinHash: z.string().min(1).optional(),
+  agentId: z.string().min(1).optional(),
   args: z.record(z.string(), z.unknown()).optional(),
   fsMode: z.enum(["none", "workspace-rw"]).optional(),
   timeoutMs: z.number().int().min(1_000).max(300_000).optional(),
@@ -1547,7 +1550,7 @@ export const WorkflowNodeSchema = z.object({
     .record(z.string(), z.unknown())
     .describe(
       "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. " +
-        "For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. " +
+        "For swarm-script: { scriptName, scope?, pinHash?, agentId?, args?, fsMode?, timeoutMs? (1000-300000) }; agentId is reserved for trusted shipped add-on nodes. " +
         "Values support {{interpolation}} from the node's inputs context. " +
         "NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, " +
         "while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}).",
@@ -2090,6 +2093,7 @@ export const WorkflowRunSchema = z.object({
   status: WorkflowRunStatusSchema,
   triggerData: z.unknown().optional(),
   context: z.record(z.string(), z.unknown()).optional(),
+  definitionHash: z.string().optional(),
   error: z.string().optional(),
   startedAt: z.string(),
   lastUpdatedAt: z.string(),

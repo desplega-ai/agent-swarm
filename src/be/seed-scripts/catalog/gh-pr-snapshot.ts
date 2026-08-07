@@ -1,22 +1,43 @@
 import { z } from "zod";
 
 export const argsSchema = z.object({
-  repo: z.string().describe("Repository in 'owner/name' form, e.g. 'owner/name'"),
-  number: z.number().int().positive().describe("Pull request number"),
+  repo: z.string().optional().describe("Repository in 'owner/name' form, e.g. 'owner/name'"),
+  number: z.number().int().positive().optional().describe("Pull request number"),
+  skipIfMissing: z
+    .boolean()
+    .optional()
+    .describe("Return a skipped result when repo/number are absent instead of validating them"),
   token: z
     .string()
     .optional()
     .describe("GitHub token override; falls back to the GITHUB_TOKEN swarm config"),
 });
 
-async function resolveSecret(ctx: any, key: string, override: unknown): Promise<string | null> {
+/**
+ * One shared deadline for every network call this script makes.
+ *
+ * The swarm-script subprocess has a 30s wall clock that a script cannot catch:
+ * if GitHub accepts the connection and then stalls, the runtime kills the
+ * process before the `{ error }` degrade can be returned, and this node is the
+ * sole predecessor of the reflect / skills / hygiene lanes — so an optional
+ * enrichment would take the whole dream down with it. A single budget shared
+ * across all four fetches bounds the total, not just each attempt.
+ */
+const FETCH_BUDGET_MS = 20_000;
+
+async function resolveSecret(
+  ctx: any,
+  key: string,
+  override: unknown,
+  signal: AbortSignal,
+): Promise<string | null> {
   if (typeof override === "string" && override.length > 0) return override;
   try {
     const base = ctx.stdlib.Redacted.value(ctx.swarm.config.mcpBaseUrl).replace(/\/+$/, "");
     const apiKey = ctx.stdlib.Redacted.value(ctx.swarm.config.apiKey);
     const res: any = await ctx.stdlib.fetchJson(
       base + "/api/config/resolved?includeSecrets=true",
-      { headers: { Authorization: "Bearer " + apiKey } },
+      { headers: { Authorization: "Bearer " + apiKey }, signal },
     );
     const configs: any = res && Array.isArray(res.configs) ? res.configs : [];
     for (const c of configs) {
@@ -32,14 +53,33 @@ async function resolveSecret(ctx: any, key: string, override: unknown): Promise<
 
 /** One-call GitHub PR snapshot: state, draft, mergeable, CI checks and review tallies. */
 export default async function ghPrSnapshot(args: any, ctx: any) {
+  // NEVER throw: this snapshot is optional enrichment inside the Dreaming DAG, and
+  // an instant-node failure is not softened by onNodeFailure:"continue" — a
+  // transient GitHub/network outage must degrade to an { error } result, not take
+  // the reflection/skills/hygiene lanes down with it.
+  try {
+    return await ghPrSnapshotInner(args, ctx);
+  } catch (error) {
+    return {
+      error: `snapshot fetch failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+async function ghPrSnapshotInner(args: any, ctx: any) {
   const parsed = argsSchema.safeParse(args);
   if (!parsed.success) return { error: "invalid args: " + parsed.error.message };
   const { repo, number } = parsed.data;
-  if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) {
+  if (parsed.data.skipIfMissing && (repo === undefined || number === undefined)) {
+    return { skipped: true, reason: "no pull request rotation target" };
+  }
+  if (repo === undefined || !/^[^/\s]+\/[^/\s]+$/.test(repo)) {
     return { error: "repo must be in 'owner/name' form" };
   }
+  if (number === undefined) return { error: "number is required" };
 
-  const token = await resolveSecret(ctx, "GITHUB_TOKEN", parsed.data.token);
+  const deadline = AbortSignal.timeout(FETCH_BUDGET_MS);
+  const token = await resolveSecret(ctx, "GITHUB_TOKEN", parsed.data.token, deadline);
   const headers: any = {
     Accept: "application/vnd.github+json",
     "User-Agent": "agent-swarm-scripts",
@@ -47,19 +87,29 @@ export default async function ghPrSnapshot(args: any, ctx: any) {
   if (token) headers.Authorization = "Bearer " + token;
 
   const api = "https://api.github.com/repos/" + repo;
-  const pr: any = await ctx.stdlib.fetchJson(api + "/pulls/" + number, { headers });
+  const pr: any = await ctx.stdlib.fetchJson(api + "/pulls/" + number, {
+    headers,
+    signal: deadline,
+  });
   if (!pr || typeof pr.number !== "number") {
     const why = pr && pr.message ? pr.message : "not found or not accessible";
     return { error: "PR " + repo + "#" + number + ": " + why };
   }
 
-  const checks = { passed: 0, failed: 0, pending: 0 };
+  const checks: any = { passed: 0, failed: 0, pending: 0 };
   const sha = pr.head && pr.head.sha ? pr.head.sha : null;
   if (sha) {
-    const runs: any = await ctx.stdlib.fetchJson(api + "/commits/" + sha + "/check-runs", {
-      headers,
-    });
+    // Default page size is 30; a busy PR would silently report only its first
+    // page and look healthier than it is. 100 is the API maximum — following
+    // further pages would multiply requests against the shared fetch budget, so
+    // a full page is reported as `truncated` instead of quietly under-counting.
+    const runs: any = await ctx.stdlib.fetchJson(
+      api + "/commits/" + sha + "/check-runs?per_page=100",
+      { headers, signal: deadline },
+    );
     const list: any = runs && Array.isArray(runs.check_runs) ? runs.check_runs : [];
+    const total = runs && typeof runs.total_count === "number" ? runs.total_count : list.length;
+    if (total > list.length) checks.truncated = true;
     for (const run of list) {
       if (run.status !== "completed") checks.pending++;
       else if (run.conclusion === "success") checks.passed++;
@@ -74,9 +124,10 @@ export default async function ghPrSnapshot(args: any, ctx: any) {
     }
   }
 
-  const reviewsRaw: any = await ctx.stdlib.fetchJson(api + "/pulls/" + number + "/reviews", {
-    headers,
-  });
+  const reviewsRaw: any = await ctx.stdlib.fetchJson(
+    api + "/pulls/" + number + "/reviews?per_page=100",
+    { headers, signal: deadline },
+  );
   const reviewList: any = Array.isArray(reviewsRaw) ? reviewsRaw : [];
   const latestByUser: any = {};
   for (const r of reviewList) {
@@ -85,7 +136,10 @@ export default async function ghPrSnapshot(args: any, ctx: any) {
       latestByUser[user] = r.state;
     }
   }
-  const reviews = { approved: 0, changesRequested: 0, pending: 0 };
+  const reviews: any = { approved: 0, changesRequested: 0, pending: 0 };
+  // The reviews endpoint returns no total; a full page is the only signal that
+  // later reviews exist. Say so rather than under-reporting silently.
+  if (reviewList.length >= 100) reviews.truncated = true;
   for (const user of Object.keys(latestByUser)) {
     if (latestByUser[user] === "APPROVED") reviews.approved++;
     else reviews.changesRequested++;

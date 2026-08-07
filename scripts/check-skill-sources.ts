@@ -113,7 +113,11 @@ function importAliasFor(source: string, modulePath: string): string | null {
 
 /** Body of the BUILT_IN_SKILL_SOURCES array literal, or null if not found. */
 const catalogBody =
-  seederSource.match(/const BUILT_IN_SKILL_SOURCES\s*=\s*\[([\s\S]*?)\n\];/)?.[1] ?? null;
+  seederSource.match(
+    // The literal may be consumed directly (`];`) or piped through a parse
+    // step (`].map(...)`) — accept both terminators.
+    /(?:export\s+)?const\s+BUILT_IN_SKILL_SOURCES(?:\s*:[^=]+)?\s*=\s*\[([\s\S]*?)\n\](?:;|\.map\()/,
+  )?.[1] ?? null;
 
 // ── 1. No name may exist in both delivery paths ─────────────────────────────
 for (const name of templateNames) {
@@ -220,8 +224,9 @@ for (const name of templateNames) {
   }
 
   const referenced =
-    new RegExp(`\\bconfig:\\s*${configAlias}\\b`).test(catalogBody) &&
-    new RegExp(`\\bbody:\\s*${contentAlias}\\b`).test(catalogBody);
+    new RegExp(`\\bconfig:\\s*(?:parseBuiltInSkillConfig\\([^,]+,\\s*)?${configAlias}\\b`).test(
+      catalogBody,
+    ) && new RegExp(`\\bbody:\\s*${contentAlias}\\b`).test(catalogBody);
 
   if (!referenced) {
     fail(

@@ -1,5 +1,7 @@
 # Daily Blocker Digest
 
+> **Superseded for swarm installs by the [Dreaming add-on](https://docs.agent-swarm.dev/docs/addons/dreaming)** (fka compounding) — its `gather` stage absorbed this blocker sweep. This template remains as copy-paste prior art for standalone use.
+
 Ask the lead to summarize stuck work, failing checks, and owner decisions every weekday.
 
 ## Schedule

@@ -26,12 +26,18 @@ export const registerInjectLearningTool = (server: McpServer) => {
         category: LearningCategoryEnum.describe(
           "Category of the learning: mistake-pattern, best-practice, codebase-knowledge, or preference",
         ),
+        tags: z
+          .array(z.string().min(1))
+          .optional()
+          .describe(
+            "Extra provenance tags stored alongside the category, e.g. the add-on that wrote this memory so it can exclude its own output later",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         memoryId: z.string().optional(),
       }),
     },
-    async ({ agentId: targetAgentId, learning, category }, requestInfo, _meta) => {
+    async ({ agentId: targetAgentId, learning, category, tags }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return toolErr('Agent ID not found. The MCP client should define the "X-Agent-ID" header.');
       }
@@ -67,7 +73,8 @@ export const registerInjectLearningTool = (server: McpServer) => {
         name: `Lead feedback: ${category} — ${learning.slice(0, 60)}`,
         content,
         source: "manual",
-        tags: [category],
+        // Category first so existing consumers that read tags[0] are unaffected.
+        tags: [category, ...(tags ?? []).filter((tag) => tag !== category)],
       });
 
       // Generate and store embedding (async, best-effort)

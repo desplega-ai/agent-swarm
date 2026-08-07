@@ -1,0 +1,15 @@
+{
+  "kind": "skill",
+  "name": "dreaming",
+  "displayName": "Dreaming",
+  "slug": "dreaming",
+  "title": "Dreaming",
+  "description": "Reflect on evidence from recent work and propose structured, safely applicable improvements.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["dreaming", "compounding", "reflection"],
+  "must": true
+}

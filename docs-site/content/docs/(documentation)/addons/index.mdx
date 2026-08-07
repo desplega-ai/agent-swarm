@@ -1,0 +1,68 @@
+---
+title: "Add-ons"
+description: "Bundled swarm capabilities that seed themselves at boot — what ships, what is on by default, how your edits are preserved, and how to turn any of it off."
+---
+
+An **add-on** is a capability that ships with Agent Swarm as a bundle of ordinary entities: a workflow, the schedule that fires it, a skill, some catalog scripts, and a couple of configuration keys. Nothing about an add-on is special at runtime — once seeded, its workflow is a workflow you can open in the dashboard, its schedule is a schedule you can retime, and its skill is a skill you can edit.
+
+The only thing that makes it an add-on is that the swarm creates it for you on first boot, so the capability is there — already wired together — with zero manual steps. Seeding an add-on is not the same as switching it on: an add-on whose schedule ships disabled is fully installed and inspectable, and waits for you to enable it.
+
+## What ships
+
+| Add-on | What it does | On by default? | Kill switch |
+| --- | --- | --- | --- |
+| [**Dreaming**](/docs/addons/dreaming) *(fka compounding)* | A nightly reflection pass: every agent reviews its own day, the Lead critiques the proposals, and approved changes are applied surgically to profiles, memories, and skills. | **No** — seeded, but its `dream-daily` schedule ships disabled. Enable it to start dreaming. | `DREAMING_ENABLED` |
+
+An add-on that writes to your agents' profiles, memories, or skills ships **off**: it is installed so you can read it and try it by hand, and it starts only when you enable its schedule.
+
+## How seeding works
+
+Seeders run **once at API server boot**, before the swarm starts taking work. Each entity an add-on ships is seeded **individually**, keyed by its unique name, and tracked with a content hash. On every boot each entity falls into one of four cases:
+
+| State | What happens |
+| --- | --- |
+| Entity absent | **Created** from the shipped definition. |
+| Present, untouched, shipped source unchanged | No-op. |
+| Present, untouched, shipped source changed | **Updated** to the new shipped definition — you get upstream improvements for free. |
+| Present and **modified by you** | **Skipped, permanently.** The swarm never touches it again. |
+
+That last row is the guarantee: *your edit wins*. Disabling a schedule, changing its cron, editing a workflow's DAG, or rewriting a seeded skill all mark the entity as yours. From then on, upgrades leave it alone — restarts, redeploys, and new releases included.
+
+<Callout type="info">
+  Preservation is per entity, not per add-on. Retiming Dreaming's schedule keeps that schedule frozen at your cron while the add-on's workflow and scripts continue to receive upstream updates.
+</Callout>
+
+### What counts as "modified by you"
+
+The content hash covers the fields an operator would meaningfully change:
+
+- **Schedules** — name, description, cron expression, timezone, `enabled`, and the target (the workflow it fires, or the task template it runs). Toggling `enabled` off is therefore a permanent, upgrade-proof disable.
+- **Workflows** — name, description, `enabled`, and the full node graph. A DAG edit made in the dashboard survives every future release.
+- **Skills** — seeded skills are version-tracked with user-edit preservation; see the [skills authoring rules](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/skills.md).
+
+Changes made anywhere — dashboard, MCP tool, REST API, or direct DB write — count the same. There is no separate "opt out of updates" flag; editing *is* the opt-out.
+
+## Turning an add-on on
+
+An add-on that ships with its schedule disabled — Dreaming does — needs one deliberate step: **enable its schedule** in the dashboard. Everything else is already seeded, so there is nothing to install and nothing to re-seed. Because `enabled` is part of the preservation hash, that flip is permanent: a later release can change the shipped default without ever overriding the choice you made.
+
+## Turning an add-on off
+
+Pick the level that matches what you want:
+
+1. **Kill switch (recommended).** Set the add-on's configuration key — for Dreaming, `DREAMING_ENABLED = false` — on **Settings → Configuration**. The schedule keeps firing but the workflow exits at its gate node, costing one cheap script execution. Flip it back on at any time with no re-seeding.
+2. **Disable the schedule.** Turn the add-on's schedule off in the dashboard. Nothing fires at all, and the disable survives every restart and upgrade.
+3. **Disable the workflow.** Disabling the workflow itself makes the scheduler skip dispatch even if the schedule fires.
+4. **Retime it.** Change the cron to run weekly, or at a quieter hour. Same preservation guarantee.
+
+### Getting back onto upstream
+
+Since edits are permanent by design, the way to return an entity to the shipped version is to **delete it** and restart the API server. It is absent, so the next boot recreates it from source, pristine and tracking upstream again.
+
+<Callout type="warn">
+  Deleting a workflow or schedule discards its history and your customizations. If you only want to pause an add-on, use the kill switch or disable the schedule — both are reversible.
+</Callout>
+
+## For contributors
+
+Add-ons are a code-level composition manifest (`src/be/seed/addons.ts`): each entry names the workflows, schedules, skills, scripts, and configuration keys it owns, plus the docs page that documents it. Cross-references are asserted at boot, so a schedule pointing at a workflow name that doesn't exist fails loudly instead of silently never firing. There is no add-ons table, API, or UI yet — the composition exists for provenance, logging, and documentation.

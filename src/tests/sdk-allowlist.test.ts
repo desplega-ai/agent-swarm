@@ -98,6 +98,42 @@ describe("script SDK allowlist", () => {
     }
   });
 
+  test("config_get keeps the key query and filters resolved rows client-side", async () => {
+    let requestUrl: URL | undefined;
+    const httpServer = Bun.serve({
+      port: 0,
+      fetch(req) {
+        requestUrl = new URL(req.url);
+        return Response.json({
+          configs: [
+            { key: "OTHER_CHANNEL", value: "wrong" },
+            { key: "DREAMING_SLACK_CHANNEL", value: "right" },
+          ],
+        });
+      },
+    });
+    const config = new SwarmConfig({
+      system: {
+        apiKey: { value: "sdk-test-key", isSecret: true },
+        agentId: { value: "sdk-test-agent", isSecret: false },
+        mcpBaseUrl: { value: `http://127.0.0.1:${httpServer.port}`, isSecret: false },
+      },
+      user: {},
+    });
+
+    try {
+      const result = (await createSwarmSdk(config).config_get({
+        key: "DREAMING_SLACK_CHANNEL",
+      })) as { data: { configs: Array<{ key: string; value: string }> } };
+
+      expect(requestUrl?.pathname).toBe("/api/config/resolved");
+      expect(requestUrl?.searchParams.get("key")).toBe("DREAMING_SLACK_CHANNEL");
+      expect(result.data.configs).toEqual([{ key: "DREAMING_SLACK_CHANNEL", value: "right" }]);
+    } finally {
+      httpServer.stop(true);
+    }
+  });
+
   test("bundled swarm-sdk.d.ts exposes only allowlisted methods", async () => {
     const types = await Bun.file("src/scripts-runtime/types/swarm-sdk.d.ts").text();
     for (const name of SDK_ALLOWLIST) {

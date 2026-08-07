@@ -13,6 +13,7 @@ import {
 import { getUserGrant } from "../be/rbac-roles";
 import {
   isReservedConfigKey,
+  overlayOperatorEnvValues,
   reservedKeyError,
   validateConfigValue,
 } from "../be/swarm-config-guard";
@@ -236,8 +237,13 @@ export async function handleConfig(
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
     const { effectiveIncludeSecrets, secretsNote } = resolveSecretsRead(req, includeSecrets);
-    const configs = stripApiOnlyKeys(
-      getResolvedConfig(parsed.query.agentId || undefined, parsed.query.repoId || undefined),
+    // Env overlay: this is the route the script SDK's ctx.swarm.config_get hits
+    // (scripts never call the MCP tool), so an env-only operator value — e.g. an
+    // emergency DREAMING_ENABLED=false — must be resolved here too.
+    const configs = overlayOperatorEnvValues(
+      stripApiOnlyKeys(
+        getResolvedConfig(parsed.query.agentId || undefined, parsed.query.repoId || undefined),
+      ),
     );
     const result = effectiveIncludeSecrets ? configs : maskSecrets(configs);
     if (effectiveIncludeSecrets) {

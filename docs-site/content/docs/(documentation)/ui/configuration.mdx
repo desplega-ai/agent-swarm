@@ -3,7 +3,7 @@ title: "Configuration"
 description: "Manage operator-facing swarm settings from the dashboard — feature flags, thresholds, and defaults grouped by subsystem"
 ---
 
-The **Configuration** page (Settings → Configuration, at `/settings/configuration` in the dashboard) surfaces the environment variables that shape how your swarm behaves — steering, memory retrieval, heartbeat and crash recovery, harness selection, integration toggles, security, workflow limits, and branding — as editable settings, so you can tune a running deployment without shelling into the host to edit `.env` files.
+The **Configuration** page (Settings → Configuration, at `/settings/configuration` in the dashboard) surfaces the environment variables that shape how your swarm behaves — add-ons, steering, memory retrieval, heartbeat and crash recovery, harness selection, integration toggles, security, workflow limits, and branding — as editable settings, so you can tune a running deployment without shelling into the host to edit `.env` files.
 
 ![The Configuration settings page](/ui/configuration-page.png)
 
@@ -23,6 +23,7 @@ Each row shows a source chip when the underlying environment variable is set on 
 
 | Group | Examples |
 | --- | --- |
+| Add-ons | `DREAMING_ENABLED`, `DREAMING_SLACK_CHANNEL` |
 | Steering | `STEERING_ENABLED`, `SLACK_THREAD_STEERING`, `SLACK_THREAD_STEERING_MODE` |
 | Memory | `MEMORY_HYBRID_SEARCH`, `MEMORY_GRAPH_EXPANSION`, `MEMORY_RATERS`, `EMBEDDING_MODEL` |
 | Heartbeat & crash recovery | `HEARTBEAT_INTERVAL_MS`, `HEARTBEAT_STALL_THRESHOLD_MIN`, `HEARTBEAT_PIN_CRASH_RESUME` |

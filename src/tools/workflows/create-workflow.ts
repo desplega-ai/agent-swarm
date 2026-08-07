@@ -35,6 +35,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         "- STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. " +
         "Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different.\n" +
         "- Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }.\n" +
+        "- Swarm-script config: { scriptName, scope?, pinHash?, agentId?, args?, fsMode?, timeoutMs? }; agentId is reserved for declared nodes in unmodified shipped add-on workflows and may resolve $lead or a concrete live Lead id.\n" +
         "- FOREACH NODE: type 'foreach' fans out one agent-task per item. Config: " +
         "{ over: <array or exact {{input}} token>, itemKey: <property name>, body: { type: 'agent-task', config: {...} } }. " +
         "The body config is interpolated once per item with {{item.*}} and {{index}}. Child steps use synthetic IDs " +

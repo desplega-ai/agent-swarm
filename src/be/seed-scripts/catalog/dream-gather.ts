@@ -1,0 +1,380 @@
+import { z } from "zod";
+import { getH2Anchors } from "../dream-schemas";
+
+export const argsSchema = z.object({
+  days: z.number().int().positive().optional().describe("Lookback window in days (default 1)"),
+  preflightOnly: z
+    .boolean()
+    .optional()
+    .describe("Stop after the enabled/activity/Lead checks so the workflow can gate rich gathering"),
+  selfWorkflowName: z
+    .string()
+    .optional()
+    .describe(
+      "Name of the Dreaming workflow whose own task output must not count as swarm activity (default 'dream'; the runId-based workflow-ID exclusion is preferred when available)",
+    ),
+  runId: z
+    .string()
+    .optional()
+    .describe(
+      "This dream run's workflow-run ID — used to exclude the bound workflow's own tasks by durable workflow ID, which survives a rename of the seeded workflow",
+    ),
+});
+
+function payload(response: any): any {
+  return response?.data ?? response;
+}
+
+function rowsToObjects(response: any): any[] {
+  const data = payload(response);
+  const columns: string[] = data?.columns ?? [];
+  return (data?.rows ?? []).map((row: any) =>
+    Array.isArray(row)
+      ? Object.fromEntries(columns.map((column, index) => [column, row[index]]))
+      : row,
+  );
+}
+
+function assertSucceeded(response: any, action: string): void {
+  if (response?.success === false || payload(response)?.success === false) {
+    throw new Error(`${action} failed: ${payload(response)?.error ?? response?.error ?? "unknown error"}`);
+  }
+}
+
+function configRows(response: any): any[] {
+  return payload(response)?.configs ?? [];
+}
+
+/**
+ * True only when the global script `name` is byte-identical to what the seeder
+ * shipped.
+ *
+ * The rich gather runs under the Lead identity, granted by the definition-hash
+ * trust gate on this node — but `script_run` resolves a nested helper by NAME
+ * against the mutable catalog, and the seeders deliberately preserve
+ * user-modified scripts. Without this check a customized `compound-insights`
+ * row would execute inside the trust that gate granted to THIS script.
+ *
+ * `scripts.contentHash` and the recorded seed hash are the same SHA-256 of the
+ * source (see the scripts seeder), so equality is the pristine test. Fails
+ * CLOSED: an unreadable or unrecorded provenance skips the helper.
+ */
+async function isPristineSeededScript(ctx: any, name: string): Promise<boolean> {
+  try {
+    const response = await ctx.swarm.db_query({
+      sql: `SELECT s.contentHash AS liveHash, ss.seededHash AS seededHash
+              FROM scripts s
+              LEFT JOIN seed_state ss ON ss.kind = 'script' AND ss.key = s.name
+             WHERE s.name = ? AND s.scope = 'global'`,
+      params: [name],
+    });
+    assertSucceeded(response, `${name} provenance check`);
+    const row = rowsToObjects(response)[0];
+    const seededHash = row?.seededHash;
+    return (
+      typeof seededHash === "string" && seededHash.length > 0 && row?.liveHash === seededHash
+    );
+  } catch {
+    return false;
+  }
+}
+
+function scriptResult(response: any): any {
+  assertSucceeded(response, "compound-insights");
+  const data = payload(response);
+  if (data?.exitCode !== undefined && data.exitCode !== 0) {
+    throw new Error(`compound-insights exited with code ${data.exitCode}`);
+  }
+  return data?.result ?? data;
+}
+
+function enabledFromConfig(response: any): boolean {
+  assertSucceeded(response, "Dreaming enabled config read");
+  const row = configRows(response).find((config) => config?.key === "DREAMING_ENABLED");
+  if (!row) return true;
+  const normalized = String(row.value).trim().toLowerCase();
+  if (normalized === "true" || normalized === "1") return true;
+  if (normalized === "false" || normalized === "0") return false;
+  console.warn(
+    `DREAMING_ENABLED has invalid boolean value ${JSON.stringify(String(row.value))}; treating it as enabled`,
+  );
+  return true;
+}
+
+function truncate(value: unknown, limit = 6000): string {
+  const text = String(value ?? "");
+  return text.length <= limit ? text : `${text.slice(0, limit)}…`;
+}
+
+function extractProfileEvidence(value: unknown): { excerpt: string; h2Anchors: string[] } {
+  const text = String(value ?? "");
+  return {
+    excerpt: truncate(text, 600),
+    h2Anchors: getH2Anchors(text),
+  };
+}
+
+function slimGatherResult(reason: "disabled" | "no-activity" | "no-lead") {
+  return {
+    enabled: false,
+    hasActivity: false,
+    agents: [],
+    leadAgentId: null,
+    insights: null,
+    blockers: [],
+    reason,
+  };
+}
+
+function pullRequestsFromText(text: string): Array<{ repo: string; number: number }> {
+  const references: Array<{ repo: string; number: number }> = [];
+  const seen = new Set<string>();
+  const patterns = [
+    /github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)/g,
+    /\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)\b/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const repo = match[1];
+      const number = Number(match[2]);
+      if (!repo || !Number.isInteger(number) || number < 1) continue;
+      const key = `${repo}#${number}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      references.push({ repo, number });
+    }
+  }
+  return references;
+}
+
+/** Gather deterministic, swarm-wide inputs for one Dreaming run. */
+export default async function dreamGather(args: any, ctx: any) {
+  const parsed = argsSchema.safeParse(args || {});
+  if (!parsed.success) throw new Error(`invalid args: ${parsed.error.message}`);
+  const days = parsed.data.days ?? 1;
+  const windowModifier = `-${days} days`;
+  const selfWorkflowName = parsed.data.selfWorkflowName ?? "dream";
+
+  const enabledResponse = await ctx.swarm.config_get({ key: "DREAMING_ENABLED" });
+  if (!enabledFromConfig(enabledResponse)) return slimGatherResult("disabled");
+
+  // The gate must measure activity Dreaming did NOT cause, or it becomes self-sustaining:
+  // yesterday's reflection/critique tasks and receipt memory all land inside today's
+  // one-day window, so a quiet swarm would keep fanning out forever.
+  //   - tasks: every task a dream run creates carries that run's workflowRunId, so the
+  //     add-on's whole task output is excluded by joining back to the dream workflow —
+  //     by durable workflow ID when this run's runId is available (a renamed seeded
+  //     workflow keeps its schedule binding and keeps running, so a name-based match
+  //     would silently stop excluding it), by shipped name as the manual-run fallback.
+  //   - memories: dream's writes are NOT attributable at the row level (inject_learning
+  //     stores no provenance) and a receipt memory is written on every run, so counting
+  //     memory writes would re-arm the gate unconditionally. Agents write memories while
+  //     working tasks, so the task counters already carry that signal.
+  const runId = parsed.data.runId;
+  const selfRunsSubquery = runId
+    ? `SELECT r.id FROM workflow_runs r
+       WHERE r.workflowId = (SELECT workflowId FROM workflow_runs WHERE id = ?)`
+    : `SELECT r.id FROM workflow_runs r
+       JOIN workflows w ON w.id = r.workflowId
+       WHERE w.name = ?`;
+  const selfParam = runId ?? selfWorkflowName;
+  const activityResponse = await ctx.swarm.db_query({
+    sql: `SELECT
+            (SELECT count(*) FROM agent_tasks t
+             WHERE t.status = 'completed'
+               AND julianday(t.finishedAt) > julianday('now', ?)
+               AND (t.workflowRunId IS NULL OR t.workflowRunId NOT IN (
+                 ${selfRunsSubquery}))) AS completedTasks,
+            (SELECT count(*) FROM agent_tasks t
+             WHERE t.status = 'failed'
+               AND julianday(t.lastUpdatedAt) > julianday('now', ?)
+               AND (t.workflowRunId IS NULL OR t.workflowRunId NOT IN (
+                 ${selfRunsSubquery}))) AS failedTasks,
+            (SELECT count(*) FROM agent_tasks t
+             WHERE t.status = 'in_progress'
+               AND julianday(t.lastUpdatedAt) < julianday('now', '-2 hours')
+               AND (t.workflowRunId IS NULL OR t.workflowRunId NOT IN (
+                 ${selfRunsSubquery}))) AS stuckTasks`,
+    params: [windowModifier, selfParam, windowModifier, selfParam, selfParam],
+  });
+  assertSucceeded(activityResponse, "Dreaming activity query");
+  const activity = rowsToObjects(activityResponse)[0] ?? {};
+  // A stale in_progress task is the ONLY signal on an otherwise silent day, and
+  // it is exactly what the retired daily-blocker-digest existed to report — now
+  // absorbed into this add-on. Counting only completed/failed would short-circuit
+  // to "no-activity" and the blocker query that finds stuck work would never run.
+  // Predicate mirrors the blockers query below so the gate and the list agree.
+  const activityCounts = {
+    completedTasks: Number(activity.completedTasks) || 0,
+    failedTasks: Number(activity.failedTasks) || 0,
+    stuckTasks: Number(activity.stuckTasks) || 0,
+  };
+  if (!Object.values(activityCounts).some((count) => count > 0)) {
+    return slimGatherResult("no-activity");
+  }
+
+  const rosterResponse = await ctx.swarm.db_query({
+    sql: `SELECT id, name, isLead, status, role,
+                 soulMd, identityMd, claudeMd, toolsMd, heartbeatMd
+          FROM agents
+          WHERE status IN ('idle', 'busy')
+          ORDER BY isLead DESC, name ASC, id ASC`,
+  });
+  assertSucceeded(rosterResponse, "Dreaming roster query");
+  const roster = rowsToObjects(rosterResponse);
+  const leads = roster.filter((agent) => Boolean(agent.isLead));
+  if (leads.length === 0) return slimGatherResult("no-lead");
+  const lead = leads[0]!;
+  if (leads.length > 1) {
+    console.warn(
+      `Dreaming found ${leads.length} live Lead agents; using ${String(lead.id)} by roster ordering`,
+    );
+  }
+  const agents = roster.map((agent) => ({ id: String(agent.id), name: String(agent.name) }));
+  // Flat id list for dream-apply's roster guard (workflow args interpolate it whole).
+  const agentIds = agents.map((agent) => agent.id);
+  if (parsed.data.preflightOnly) {
+    return {
+      enabled: true,
+      hasActivity: true,
+      agents,
+      agentIds,
+      leadAgentId: String(lead.id),
+      insights: null,
+      blockers: [],
+      reason: "ready",
+    };
+  }
+
+  // Checked BEFORE the fan-out: a non-pristine helper must never be dispatched
+  // at all, not merely have its result discarded.
+  const compoundPristine = await isPristineSeededScript(ctx, "compound-insights");
+
+  const [
+    insightsResponse,
+    blockersResponse,
+    awaitingReplyResponse,
+    skillsResponse,
+    cursorResponse,
+  ] =
+    await Promise.all([
+      compoundPristine
+        ? ctx.swarm.script_run({
+            name: "compound-insights",
+            scope: "global",
+            intent: "Dreaming daily gather",
+            args: { days, publishPage: false },
+          })
+        : Promise.resolve(null),
+      ctx.swarm.db_query({
+        sql: `SELECT t.id, t.agentId, t.status, substr(t.task, 1, 240) AS task,
+                     substr(t.failureReason, 1, 240) AS failureReason, t.createdAt, t.lastUpdatedAt
+              FROM agent_tasks t
+              WHERE ((t.status = 'in_progress'
+                      AND julianday(t.lastUpdatedAt) < julianday('now', '-2 hours'))
+                 OR (t.status = 'failed'
+                     AND julianday(t.lastUpdatedAt) > julianday('now', ?)))
+                AND (t.workflowRunId IS NULL OR t.workflowRunId NOT IN (
+                  ${selfRunsSubquery}))
+              ORDER BY t.lastUpdatedAt ASC
+              LIMIT 50`,
+        params: [windowModifier, selfParam],
+      }),
+      ctx.swarm.db_query({
+        sql: `SELECT id, agentId, substr(task, 1, 240) AS task, createdAt
+              FROM agent_tasks
+              WHERE slackReplySent = 1
+                AND status = 'completed'
+                AND requestedByUserId IS NOT NULL
+                AND julianday(createdAt) > julianday('now', ?)
+              ORDER BY createdAt DESC
+              LIMIT 20`,
+        params: [windowModifier],
+      }),
+      ctx.swarm.skill_list({ scope: "swarm" }),
+      ctx.swarm.kv_getOrNull({ key: "rotation-cursor", namespace: "dreaming" }),
+    ]);
+
+  for (const [response, action] of [
+    [blockersResponse, "Dreaming blocker query"],
+    [awaitingReplyResponse, "Dreaming awaiting-reply query"],
+    [skillsResponse, "Dreaming skill catalog read"],
+  ] as const) {
+    assertSucceeded(response, action);
+  }
+
+  // Projected, not raw: skill-list returns every column but `content`, and since
+  // the baked-skills→DB migration the swarm catalog is ~40 rows — the raw shape
+  // would spend most of the lane's prompt on timestamps and hashes. `systemDefault`
+  // stays because it is what tells the lane a skill cannot be edited.
+  const skills = (payload(skillsResponse)?.skills ?? []).map((skill: any) => ({
+    id: skill?.id,
+    name: skill?.name,
+    description: skill?.description,
+    systemDefault: skill?.systemDefault === true || skill?.systemDefault === 1,
+  }));
+  // kv_getOrNull returns its value directly, unlike tool responses unwrapped by payload().
+  const cursor = Number(cursorResponse?.value ?? 0) || 0;
+  const profileEvidence = roster.map((agent) => ({
+    agentId: String(agent.id),
+    agentName: String(agent.name),
+    files: {
+      SOUL: extractProfileEvidence(agent.soulMd),
+      IDENTITY: extractProfileEvidence(agent.identityMd),
+      CLAUDE: extractProfileEvidence(agent.claudeMd),
+      TOOLS: extractProfileEvidence(agent.toolsMd),
+      HEARTBEAT: extractProfileEvidence(agent.heartbeatMd),
+    },
+  }));
+  const heartbeatClaims = roster
+    .filter((agent) => String(agent.heartbeatMd ?? "").trim().length > 0)
+    .map((agent) => ({
+      agentId: String(agent.id),
+      agentName: String(agent.name),
+      text: truncate(agent.heartbeatMd),
+    }));
+  const stuckOrFailedTasks = rowsToObjects(blockersResponse);
+  const awaitingUserReply = rowsToObjects(awaitingReplyResponse);
+  const prReferences = pullRequestsFromText(
+    [
+      ...heartbeatClaims.map((claim) => claim.text),
+      ...stuckOrFailedTasks.flatMap((task) => [String(task.task ?? ""), String(task.failureReason ?? "")]),
+    ].join("\n"),
+  );
+  const rotationTarget = prReferences.length > 0 ? prReferences[cursor % prReferences.length] : null;
+
+  return {
+    enabled: true,
+    hasActivity: true,
+    agents,
+    agentIds,
+    leadAgentId: String(lead.id),
+    insights: {
+      compound: compoundPristine
+        ? scriptResult(insightsResponse)
+        : {
+            skipped: true,
+            reason:
+              "compound-insights is not the seeded script (modified or unrecorded) — not run under the Lead identity",
+          },
+      activity: activityCounts,
+      skills,
+      profileEvidence,
+    },
+    blockers: {
+      heartbeatClaims,
+      stuckOrFailedTasks,
+      awaitingUserReply,
+      rotation: {
+        namespace: "dreaming",
+        key: "rotation-cursor",
+        cursor,
+        target: rotationTarget,
+        available: rotationTarget !== null,
+        snapshotArgs: rotationTarget
+          ? { ...rotationTarget, skipIfMissing: true }
+          : { skipIfMissing: true },
+      },
+    },
+  };
+}

@@ -1,4 +1,5 @@
 import {
+  computeContentHash,
   createWorkflowRun,
   createWorkflowRunStep,
   getCompletedStepNodeIds,
@@ -10,6 +11,7 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
+import { canonicalJson } from "../be/seed/addons";
 import { telemetry } from "../telemetry";
 import type { Workflow, WorkflowDefinition, WorkflowNode } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
@@ -36,6 +38,11 @@ function maxIterations(): number {
 export interface WorkflowExecutionOptions {
   requestedByUserId?: string;
   triggerType?: "schedule" | "manual" | "event" | "api";
+}
+
+/** Hash the semantic workflow definition independently of object key insertion order. */
+export function computeWorkflowDefinitionHash(definition: WorkflowDefinition): string {
+  return computeContentHash(canonicalJson(definition));
 }
 
 /**
@@ -65,6 +72,7 @@ export async function startWorkflowExecution(
   registry: ExecutorRegistry,
   options: WorkflowExecutionOptions = {},
 ): Promise<string> {
+  const workflowDefinitionHash = computeWorkflowDefinitionHash(workflow.definition);
   // Validate trigger data against triggerSchema (before any DB writes)
   if (workflow.triggerSchema) {
     const validationErrors = validateJsonSchema(workflow.triggerSchema, triggerData);
@@ -76,7 +84,12 @@ export async function startWorkflowExecution(
   // Cooldown check
   if (workflow.cooldown && shouldSkipCooldown(workflow.id, workflow.cooldown)) {
     const runId = crypto.randomUUID();
-    createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData });
+    createWorkflowRun({
+      id: runId,
+      workflowId: workflow.id,
+      triggerData,
+      definitionHash: workflowDefinitionHash,
+    });
     updateWorkflowRun(runId, {
       status: "skipped",
       error: "cooldown",
@@ -86,7 +99,12 @@ export async function startWorkflowExecution(
   }
 
   const runId = crypto.randomUUID();
-  createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData });
+  createWorkflowRun({
+    id: runId,
+    workflowId: workflow.id,
+    triggerData,
+    definitionHash: workflowDefinitionHash,
+  });
   telemetry.workflow("started", {
     workflowId: workflow.id,
     nodeCount: workflow.definition.nodes.length,
@@ -168,6 +186,11 @@ export async function walkGraph(
   if (!("run" in ctx)) {
     ctx.run = { id: runId };
   }
+  // Hash the actual in-memory definition once per walk. Trusted add-on nodes
+  // require this and the immutable run-creation hash so neither a modified
+  // resume snapshot nor a later restoration of the DB row can pass alone.
+  const workflowDefinitionHash = computeWorkflowDefinitionHash(def);
+  const workflowRunDefinitionHash = getWorkflowRun(runId)?.definitionHash;
   const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
 
   // Track active edges: "sourceId→targetId" — only edges on actually-taken
@@ -277,7 +300,18 @@ export async function walkGraph(
     // Execute all pending nodes in parallel
     const results = await Promise.all(
       pendingNodes.map((node) =>
-        executeStep(def, runId, ctx, node, registry, workflowId, secretKeys, options).catch(
+        executeStep(
+          def,
+          runId,
+          ctx,
+          node,
+          registry,
+          workflowId,
+          workflowDefinitionHash,
+          workflowRunDefinitionHash,
+          secretKeys,
+          options,
+        ).catch(
           (_err): StepResult => ({
             outcome: "failed",
             successors: [],
@@ -427,6 +461,8 @@ async function executeStep(
   node: WorkflowNode,
   registry: ExecutorRegistry,
   workflowId?: string,
+  workflowDefinitionHash?: string,
+  workflowRunDefinitionHash?: string,
   secretKeys: Set<string> = new Set(),
   options: WorkflowExecutionOptions = {},
 ): Promise<StepResult> {
@@ -518,6 +554,8 @@ async function executeStep(
     stepId,
     nodeId: node.id,
     workflowId: workflowId || "",
+    workflowDefinitionHash,
+    workflowRunDefinitionHash,
     dryRun: false,
     requestedByUserId: options.requestedByUserId,
     inputCtx: interpolationCtx,

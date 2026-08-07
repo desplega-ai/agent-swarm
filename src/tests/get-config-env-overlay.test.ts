@@ -1,0 +1,120 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { overlayOperatorEnvValue, overlayOperatorEnvValues } from "../be/swarm-config-guard";
+
+type Entry = {
+  id: string;
+  scope: string;
+  scopeId: string | null;
+  key: string;
+  value: string;
+  isSecret: boolean;
+  envPath: string | null;
+  description: string | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+  encrypted: boolean;
+};
+
+function row(overrides: Partial<Entry> = {}): Entry {
+  return {
+    id: "row-1",
+    scope: "global",
+    scopeId: null,
+    key: "DREAMING_ENABLED",
+    value: "true",
+    isSecret: false,
+    envPath: null,
+    description: null,
+    createdAt: "",
+    lastUpdatedAt: "",
+    encrypted: false,
+    ...overrides,
+  };
+}
+
+const ENV_KEYS = ["DREAMING_ENABLED", "API_KEY"] as const;
+const saved: Record<string, string | undefined> = {};
+for (const key of ENV_KEYS) saved[key] = process.env[key];
+
+afterEach(() => {
+  for (const key of ENV_KEYS) {
+    if (saved[key] === undefined) delete process.env[key];
+    else process.env[key] = saved[key];
+  }
+});
+
+describe("get-config operator env overlay", () => {
+  test("an env-only kill switch is visible without a stored row", () => {
+    process.env.DREAMING_ENABLED = "false";
+    const result = overlayOperatorEnvValue<Entry>([], "DREAMING_ENABLED");
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      key: "DREAMING_ENABLED",
+      scope: "global",
+      value: "false",
+      isSecret: false,
+    });
+  });
+
+  test("a stored row that lost to env at boot reports the env value the server obeys", () => {
+    process.env.DREAMING_ENABLED = "false";
+    const result = overlayOperatorEnvValue([row({ value: "true" })], "DREAMING_ENABLED");
+    expect(result).toHaveLength(1);
+    expect(result[0]?.value).toBe("false");
+    expect(result[0]?.description).toContain("stale until reload");
+  });
+
+  test("a stored row matching env passes through untouched", () => {
+    process.env.DREAMING_ENABLED = "true";
+    const stored = row({ value: "true" });
+    expect(overlayOperatorEnvValue([stored], "DREAMING_ENABLED")).toEqual([stored]);
+  });
+
+  test("without the env var the rows are returned as-is", () => {
+    delete process.env.DREAMING_ENABLED;
+    expect(overlayOperatorEnvValue<Entry>([], "DREAMING_ENABLED")).toEqual([]);
+  });
+
+  test("non-catalog keys never resolve from env — no credential exposure path", () => {
+    process.env.API_KEY = "super-secret";
+    expect(overlayOperatorEnvValue<Entry>([], "API_KEY")).toEqual([]);
+  });
+
+  test("a scoped row wins over env — the overlay never inverts repo > agent > global", () => {
+    // getResolvedConfig already collapses to ONE row per key, so an agent- or
+    // repo-scoped row here means it beat global. Consumers apply the returned
+    // rows in array order (fetchResolvedEnv assigns each into env, last write
+    // wins), so appending a synthetic global row would silently clobber the
+    // more specific value for keys like SCRIPTS_ONLY_MCP or HARNESS_PROVIDER.
+    process.env.DREAMING_ENABLED = "false";
+    for (const scope of ["agent", "repo"]) {
+      const scoped = row({ id: `${scope}-row`, scope, scopeId: "target-1", value: "true" });
+      const result = overlayOperatorEnvValue([scoped], "DREAMING_ENABLED");
+      expect(result).toEqual([scoped]);
+      expect(result.filter((c) => c.key === "DREAMING_ENABLED")).toHaveLength(1);
+    }
+    // The all-keys path (REST route) must hold the same line. Assert on this
+    // key's rows only: the all-keys overlay legitimately synthesizes entries for
+    // every OTHER validated operator key that happens to be in the environment,
+    // and the full-suite process has several set.
+    const scoped = row({ id: "agent-row", scope: "agent", scopeId: "agent-1", value: "true" });
+    expect(overlayOperatorEnvValues([scoped]).filter((c) => c.key === "DREAMING_ENABLED")).toEqual([
+      scoped,
+    ]);
+  });
+
+  test("the all-keys overlay (REST /api/config/resolved path) surfaces env-only operator values", () => {
+    // Scripts' ctx.swarm.config_get hits the REST route, which returns ALL
+    // resolved configs and lets the SDK filter client-side — so the env overlay
+    // must synthesize entries without a key filter, and still never leak
+    // non-catalog env vars.
+    process.env.DREAMING_ENABLED = "false";
+    process.env.API_KEY = "super-secret";
+    const result = overlayOperatorEnvValues<Entry>([row({ key: "OTHER", value: "x" })]);
+    const dreaming = result.find((c) => c.key === "DREAMING_ENABLED");
+    expect(dreaming?.value).toBe("false");
+    expect(dreaming?.scope).toBe("global");
+    expect(result.find((c) => c.key === "API_KEY")).toBeUndefined();
+    expect(result.find((c) => c.key === "OTHER")?.value).toBe("x");
+  });
+});

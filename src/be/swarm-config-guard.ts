@@ -126,7 +126,12 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     if (value === "sdk" || value === "bearer") return null;
     return "Invalid BEDROCK_AUTH_MODE value (must be one of: sdk, bearer)";
   },
+  DREAMING_SLACK_CHANNEL: (value) => {
+    if (typeof value === "string" && /^[CG][A-Z0-9]{8,}$/.test(value)) return null;
+    return "Invalid DREAMING_SLACK_CHANNEL value (must be a Slack channel ID)";
+  },
   ...booleanValidators([
+    "DREAMING_ENABLED",
     "STEERING_ENABLED",
     "MEMORY_HYBRID_SEARCH",
     "MEMORY_GRAPH_EXPANSION",
@@ -189,4 +194,83 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
 export function validateConfigValue(key: string, value: unknown): string | null {
   const validator = VALIDATED_KEYS[key.toUpperCase()];
   return validator ? validator(value) : null;
+}
+
+/**
+ * Whether a key is a catalog-validated operator setting (feature flag, enum,
+ * threshold). These are non-secret by construction — secrets and credentials
+ * are rejected from the catalog — so they are the only keys config reads may
+ * resolve from the server's process.env when no swarm_config row exists.
+ */
+export function isOperatorConfigKey(key: string): boolean {
+  return key.toUpperCase() in VALIDATED_KEYS;
+}
+
+/**
+ * The server's process.env is the effective source for operator settings:
+ * swarm_config rows are materialized into it at boot (env wins) and on reload
+ * (stored wins), but an env-only value never gets a row — so a rows-only read
+ * would miss e.g. an emergency `DREAMING_ENABLED=false` set in the deployment
+ * environment. Overlay env for catalog-validated operator keys only; those are
+ * non-secret by construction, so this can never expose credentials.
+ */
+export function overlayOperatorEnvValue<
+  T extends { key: string; scope: string; value: string; description: string | null },
+>(configs: T[], key: string): T[] {
+  const envValue = process.env[key];
+  if (!isOperatorConfigKey(key) || envValue === undefined || envValue === "") {
+    return configs;
+  }
+  // A repo- or agent-scoped row already won this key in getResolvedConfig, and
+  // the server's process.env is global by nature. Consumers apply the returned
+  // rows in array order (`fetchResolvedEnv` in src/commands/runner.ts assigns
+  // each into env, last write wins), so appending a synthetic global row here
+  // would clobber the specific value and invert repo > agent > global.
+  const rows = configs.filter((c) => c.key === key);
+  if (rows.some((c) => c.scope !== "global")) return configs;
+  const stored = rows.find((c) => c.scope === "global");
+  if (!stored) {
+    const synthetic = {
+      id: `env:${key}`,
+      scope: "global",
+      scopeId: null,
+      key,
+      value: envValue,
+      isSecret: false,
+      envPath: null,
+      description: "Resolved from the server environment (no stored row)",
+      createdAt: "",
+      lastUpdatedAt: "",
+      encrypted: false,
+    } as unknown as T;
+    return [...configs, synthetic];
+  }
+  if (stored.value === envValue) return configs;
+  // A stored row that lost to env at boot (override=false) is stale until the
+  // next reload — the env value is what the server obeys.
+  return configs.map((c) =>
+    c === stored
+      ? {
+          ...c,
+          value: envValue,
+          description: "Resolved from the server environment (stored row is stale until reload)",
+        }
+      : c,
+  );
+}
+
+/**
+ * Overlay ALL catalog-validated operator keys present in the server environment.
+ * Used by the un-key-filtered read paths (the `/api/config/resolved` REST route
+ * the script SDK's `ctx.swarm.config_get` actually calls — scripts never go
+ * through the MCP tool), so an env-only kill switch reaches scripts too.
+ */
+export function overlayOperatorEnvValues<
+  T extends { key: string; scope: string; value: string; description: string | null },
+>(configs: T[]): T[] {
+  let out = configs;
+  for (const key of Object.keys(VALIDATED_KEYS)) {
+    out = overlayOperatorEnvValue(out, key);
+  }
+  return out;
 }

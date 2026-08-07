@@ -1,0 +1,5 @@
+{
+  "title": "Add-ons",
+  "description": "Bundled capabilities that seed themselves at boot",
+  "pages": ["index", "dreaming"]
+}
