@@ -11,7 +11,7 @@ description: Keep your docs fresh automatically, generate release notes from rea
     description:
       "How to keep a docs site, CHANGELOG, and release-notes blog post in lockstep with real commits, and generate release videos with Remotion and browser-automation captures.",
     step: [
-      { "@type": "HowToStep", name: "Detect change", text: "Daily check: did any PRs merge in the last 24h? If not, no-op." },
+      { "@type": "HowToStep", name: "Detect change", text: "Daily check: are there commits on main after the latest published release tag? If not, no-op." },
       { "@type": "HowToStep", name: "Update docs", text: "If main is missing a release tag, cut it first; then update docs, CHANGELOG, timestamps, and (when code shipped) open the daily version-bump PR." },
       { "@type": "HowToStep", name: "Release notes", text: "Weekly: generate MDX release notes for the docs site and a release-notes blog post for the marketing site." },
       { "@type": "HowToStep", name: "Release video", text: "On demand: qa-use captures the real product flow; Remotion renders the polish (titles, transitions, music bed)." }
@@ -22,7 +22,7 @@ description: Keep your docs fresh automatically, generate release notes from rea
 Keep your docs fresh automatically. Generate release notes from real commits. Produce release videos with [Remotion](https://www.remotion.dev/) + browser-automation captures, on the cadence you choose.
 
 <Mermaid chart={`flowchart LR
-  C["Cron: daily"] --> Q{"PRs merged<br/>in last 24h?"}
+  C["Cron: daily"] --> Q{"Commits after latest<br/>released tag?"}
   Q -- no --> NO["No-op (skip)"]
   Q -- yes --> UD["Update docs +<br/>CHANGELOG + bump PR"]
   UD --> CI["Wait for required<br/>CI checks to pass"]
@@ -33,7 +33,7 @@ Keep your docs fresh automatically. Generate release notes from real commits. Pr
 
 ## What it does
 
-- **Daily** — first checks whether the version already on `main` is missing a GitHub release and cuts it if needed. Then it checks whether anything shipped in the last 24h. If yes: update the docs site, CHANGELOG, "last updated" timestamps, derive the semver bump from merged conventional commits, and open the daily release PR. The bumped GitHub release is cut by the **next** daily run after that PR lands on `main`. **If nothing shipped, no-op.**
+- **Daily** — first checks whether the version already on `main` is missing a GitHub release and cuts it if needed. Then it compares `main` with the latest published release tag. If that range has commits: update the docs site, CHANGELOG, "last updated" timestamps, derive the semver bump from conventional commits in that exact range, and open the daily release PR. The bumped GitHub release is cut by the **next** daily run after that PR lands on `main`. **If the range is empty, no-op.**
 - **Weekly** — produce release-notes MDX (docs site) and a release-notes blog post (marketing site) from real commit history, with significance evaluation so trivial commits don't headline.
 - **On-demand** — generate release videos: [Remotion](https://www.remotion.dev/) renders the polish (titles, transitions, music bed, brand colors); [qa-use](https://github.com/desplega-ai/qa-use) / [browser-use](https://github.com/browser-use/browser-use) captures the real product flow.
 
@@ -63,7 +63,7 @@ Keep your docs fresh automatically. Generate release notes from real commits. Pr
 
 ## Workflows / Schedules
 
-- **`daily-docs-update`** — daily. First cuts the GitHub release for the version already on `main` if that tag is still missing. Then checks whether any PRs merged in the last 24h. **No-op if none.** Otherwise updates docs + CHANGELOG + timestamps, derives the bump type from merged conventional commits, opens the daily release PR, posts the bump rationale, enables merge automation when available, and waits for required CI to go green. See the [No-op pattern](/docs/playbooks/patterns/no-op-workflows).
+- **`daily-docs-update`** — daily. First cuts the GitHub release for the version already on `main` if that tag is still missing. Then checks `latest-release-tag..origin/main`. **No-op if that range is empty.** Otherwise updates docs + CHANGELOG + timestamps, derives the bump type from conventional commits in the range, opens the daily release PR, posts the bump rationale, enables merge automation when available, and waits for required CI to go green. See the [No-op pattern](/docs/playbooks/patterns/no-op-workflows).
 - **`docs-site-releases`** — weekly. Generates MDX release notes for the docs site: pulls commits, evaluates significance, plans, writes MDX, validates, opens a PR.
 - **`weekly-new-releases`** — weekly. Release-notes **blog post** for the marketing site (product repos only, not internal infra).
 

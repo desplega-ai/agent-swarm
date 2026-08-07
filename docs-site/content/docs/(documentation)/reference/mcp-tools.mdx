@@ -697,6 +697,42 @@ Delete a previously created page and its version history.
 | `id` | string | No | Page ID to delete |
 | `slug` | string | No | Slug to delete (resolved within the calling agent's pages) |
 
+## App Tools
+
+Swarm Apps are versioned, schema-backed dashboard applications. Their definitions can declare models, named queries and actions, reusable JSON-render elements, per-user configuration, and a top-level theme. App tools use the `pages` capability.
+
+### app-list
+
+List app summaries. Use `app-get` to inspect a complete definition.
+
+### app-get
+
+Get an app by ID, including its models, queries, actions, reusable elements, pages, and user-configuration schema.
+
+### app-upsert
+
+Create or update an app definition. Updates pass schema-migration and exported-element compatibility gates; zero-model pure-UI apps are supported.
+
+### app-patch
+
+Apply an RFC 7396 merge patch to an app. Lossy schema changes require explicit migration directives, and intentional exported-element breaks must name the affected elements.
+
+### app-query
+
+Run a declared named query with optional parameters and return its rows.
+
+### app-history
+
+List version snapshots for an app.
+
+### app-diff
+
+Show a unified diff between two app snapshots, or between a snapshot and the current definition.
+
+### app-rollback
+
+Restore a historical snapshot through the same schema-migration and exported-element compatibility gates used for updates.
+
 ## KV Tools
 
 A Redis-like, namespaced key/value store. Calls auto-resolve namespace from your current context (Slack thread / PR / Linear issue / agent scratchpad / page). 2 MiB value cap, opt-in TTL.

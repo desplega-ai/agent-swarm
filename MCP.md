@@ -120,6 +120,14 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [skill-sync-remote](#skill-sync-remote)
   - [skill-publish](#skill-publish)
 - [Pages Tools](#pages-tools)
+  - [app-get](#app-get)
+  - [app-history](#app-history)
+  - [app-diff](#app-diff)
+  - [app-list](#app-list)
+  - [app-patch](#app-patch)
+  - [app-query](#app-query)
+  - [app-rollback](#app-rollback)
+  - [app-upsert](#app-upsert)
   - [create_page](#create_page)
   - [delete-page](#delete-page)
 - [Metrics Tools](#metrics-tools)
@@ -1132,7 +1140,7 @@ Capability: `workflows` (enabled by default)
 
 **Create Workflow**
 
-Create a new automation workflow. Key concepts: - Nodes are linked via 'next' (string or port-based record). - CROSS-NODE DATA: To use output from an upstream node, you MUST declare an 'inputs' mapping on the downstream node. Example: inputs: { "cityData": "generate-city" } → then use {{cityData.taskOutput.field}} in config templates. Without 'inputs', only 'trigger' and workflow-level 'input' are available for interpolation. - STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different. - Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. - TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. Supported keywords: type, required, properties, enum, const, items (recursive into arrays). Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored. - WEBHOOK VERIFICATION: Webhook triggers use hmacSecret for all verification formats. Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, or { format: 'token-equality', header }. Example: { type: 'webhook', hmacSecret: 'secret.SUPERAGENT_WEBHOOK_SECRET', verification: { format: 'timestamped-hmac-sha256', header: 'X-Superagent-Signature', toleranceSeconds: 300 } }. - WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.
+Create a new automation workflow. Key concepts: - Nodes are linked via 'next' (string or port-based record). - CROSS-NODE DATA: To use output from an upstream node, you MUST declare an 'inputs' mapping on the downstream node. Example: inputs: { "cityData": "generate-city" } → then use {{cityData.taskOutput.field}} in config templates. Without 'inputs', only 'trigger' and workflow-level 'input' are available for interpolation. - STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different. - Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. - FOREACH NODE: type 'foreach' fans out one agent-task per item. Config: { over: <array or exact {{input}} token>, itemKey: <property name>, body: { type: 'agent-task', config: {...} } }. The body config is interpolated once per item with {{item.*}} and {{index}}. Child steps use synthetic IDs '<foreachNodeId>#<itemKey>'; the parent waits for every child and exposes one aggregate result to successors. concurrency is not supported in v1; use definition-level onNodeFailure: 'continue' to aggregate failed children. - TRIGGER SCHEMA: Optional 'triggerSchema' is a JSON-Schema object that validates incoming trigger payloads. Supported keywords: type, required, properties, enum, const, items (recursive into arrays). Other JSON-Schema keywords (oneOf/anyOf/$ref/pattern/format/additionalProperties) are silently ignored. - WEBHOOK VERIFICATION: Webhook triggers use hmacSecret for all verification formats. Omit verification for legacy HMAC-SHA256 over the raw body with fallback header scanning; or set verification to { format: 'hmac-sha256', header }, { format: 'timestamped-hmac-sha256', header, toleranceSeconds? }, or { format: 'token-equality', header }. Example: { type: 'webhook', hmacSecret: 'secret.SUPERAGENT_WEBHOOK_SECRET', verification: { format: 'timestamped-hmac-sha256', header: 'X-Superagent-Signature', toleranceSeconds: 300 } }. - WAIT NODE: type 'wait' pauses a workflow for a duration or until a named workflowEventBus event arrives. See runbooks/workflows.md#wait-nodes for config shapes, ordering caveats, and built-in event names.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1446,6 +1454,102 @@ Publish a personal skill to swarm scope. Creates an approval task for the lead a
 *Pages capability - DB-backed lightweight artifacts (HTML / JSON specs).*
 
 Capability: `pages` (enabled by default)
+
+### app-get
+
+**Get an app**
+
+Get an app by ID, including its models, named queries, actions, and json-render pages definition.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | App ID to retrieve. |
+
+### app-history
+
+**App history**
+
+List prior app definition snapshots with a compact digest of each version.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | App ID whose history to inspect. |
+| `limit` | `number` | No | - | Maximum snapshots to return. |
+
+### app-diff
+
+**App definition diff**
+
+Show a unified diff between two app definition snapshots, or a snapshot and CURRENT.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | App ID to compare. |
+| `from` | `number` | No | - | Older snapshot version. Defaults to newest snapshot. |
+| `to` | `number` | No | - | Newer snapshot version. Defaults to CURRENT. |
+
+### app-list
+
+**List apps**
+
+List app summaries without their definitions. Use app-get to inspect one app in full.
+
+*No parameters*
+
+### app-patch
+
+**Patch an app**
+
+Partially update an app, including zero-model pure-UI apps. userConfig defines versioned field schema while per-user values live outside definitions, survive rollback, and never need migration directives; userConfig.<field> entries are atomic. Pages may bind a declared field read-only at exactly /user/<field>; pure and bound reusable elements must receive that value through a prop. Reusable elements are private by default: pure elements read declared props, allow $item/$index inside repeats, may expose one leaf ElementSlot, and cannot invoke actions; bound elements may use the defining app's queries/actions, while exported bound elements cannot navigate. Prop kinds include enum with a required non-empty enum values array. Pages or elements reuse them with literal ElementRef targets, and cross-app refs require export: true. RFC 7396 merge-patch applies with this element rule: a patch value containing ONLY the elements key merges node-by-node; any other key present (mode/root/props/export) makes it a full element replace — restate every field you want kept. Page elements/params, actions, model columns, and userConfig fields are atomic; null deletes. Breaking a referenced export is blocked and names consumers unless forceElementBreak explicitly names it.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | App ID to patch. |
+| `name` | `string` | No | - | Replacement human-readable app name. |
+| `description` | `string` | No | - | Replacement description. Pass null to clear it; omit to keep it. |
+| `definition` | `object` | No | - | Definition merge patch. Objects merge recursively; arrays and scalars replace; null deletes. For elements.<name>, a value containing ONLY the elements key merges node-by-node; any mode/root/props/export key makes it a full replace, so restate every field to keep. Page-element, param, action, and column entries replace atomically. |
+| `migration` | `unknown` | No | - | Explicit per-column directives for lossy schema changes (set, from/map/else, coerce/else, or purge). |
+| `forceElementBreak` | `unknown` | No | - | Exported element names whose known consumers may be broken by this patch. Use only to abandon those consumers explicitly. |
+
+### app-query
+
+**Run an app query**
+
+Run one declared named app query with optional $param values and return its rows.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | App ID containing the named query. |
+| `query` | `string` | Yes | - | Declared query name. |
+| `params` | `object` | No | - | Values for any $param filters declared by the named query. |
+
+### app-rollback
+
+**Rollback an app**
+
+Restore a historical app snapshot through the schema migration and exported-element compatibility gates. Lossy row restores require migration directives; intentional consumer breaks require forceElementBreak.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | App ID to restore. |
+| `version` | `number` | Yes | - | Snapshot version to restore. |
+| `migration` | `unknown` | No | - | Explicit per-column directives for a lossy restore (set, from/map/else, coerce/else, or purge). |
+| `forceElementBreak` | `unknown` | No | - | Exported element names whose consumers may be broken by this restore. |
+
+### app-upsert
+
+**Create or update an app**
+
+Stores a schema-backed app definition with models, queries/actions, pages, reusable elements, optional userConfig fields, and an optional top-level theme (a dashboard preset slug for the app's canvas — hive (stock; omit to inherit the viewer's theme), meadow, iris, rose, cobalt, ember, carbon, plus the classic presets github, vscode, material, solarized, tokyo, monokai, gruvbox; viewers can override it per-user; unknown slugs degrade to the viewer's dashboard theme), then returns its dashboard URL. userConfig is versioned schema only; each user's values are stored separately, survive rollback, and schema changes are always compatible. Pages may bind a declared field read-only at exactly /user/<field>; pure and bound reusable elements must receive that value through a prop. Elements are private by default: pure elements read declared props, allow $item/$index inside repeats, may expose one leaf ElementSlot, and cannot invoke actions; bound elements may use the defining app's queries/actions, while exported bound elements cannot navigate. Prop kinds include enum with a required non-empty enum values array. Pages or elements reuse them with literal ElementRef targets, and cross-app refs require export: true. Zero-model pure-UI apps are valid. Pass appId to update; breaking a referenced export is blocked by the compatibility gate unless forceElementBreak explicitly names it.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | Yes | - | Human-readable app name. |
+| `description` | `string` | No | - | Optional short app description. |
+| `definition` | `unknown` | Yes | - | App models, reusable pure/bound elements, named queries/actions, and json-render pages. |
+| `appId` | `string` | No | - | Existing app ID to update. |
+| `migration` | `unknown` | No | - | Explicit per-column directives for an update's lossy schema changes. Requires appId. |
+| `forceElementBreak` | `unknown` | No | - | Exported element names whose known consumers may be broken by this update. Requires appId and should only be used to abandon those consumers explicitly. |
 
 ### create_page
 

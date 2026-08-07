@@ -13,17 +13,18 @@ A workflow consists of:
 - **Executors** — Class-based step implementations with Zod-typed config and output schemas
 - **Triggers** — Entry points: webhook (HMAC-SHA256, timestamped HMAC, shared token), schedule (ref), or manual
 - **Checkpoint durability** — Atomic DB write after every step; resume from last checkpoint on crash
-- **Fan-out / convergence** — Parallel execution via array `next` with automatic convergence gating
+- **Fan-out / convergence** — Parallel execution via array `next`, or item-driven agent-task fan-out via `foreach`, with automatic convergence gating
 
 ### Executor Types
 
-The engine includes 11 built-in executor types:
+The engine includes 12 built-in executor types:
 
 | Executor | Description |
 |----------|-------------|
 | `script` | Run a shell script or JavaScript expression |
 | `swarm-script` | Run a reusable TypeScript script from the swarm catalog with optional `args`, `scope`, `pinHash`, and a configurable `timeoutMs` wall-clock budget |
 | `agent-task` | Create and delegate a task to a swarm agent |
+| `foreach` | Fan out one agent task per array item, wait for every child, and emit one aggregate result |
 | `raw-llm` | Call an LLM directly with a prompt template |
 | `vcs` | Version control operations (create PR, merge, etc.) |
 | `property-match` | Route based on matching properties in step input |
@@ -38,6 +39,27 @@ Each executor has typed config and output schemas available via `GET /api/execut
 `swarm-script` is the durable, reusable counterpart to inline `script` nodes. In workflow definitions it accepts `scriptName`, optional `scope` (`agent` or `global`), optional `pinHash`, JSON `args`, and `timeoutMs`. The timeout defaults to `30000` ms, accepts integers from `1000` through `300000` (5 minutes), and raises the script runtime's wall-clock budget for I/O-bound work while still respecting the separate 60-second CPU-time ceiling.
 
 For `config.args`, values written as an **exact single token** such as `{{input.payload}}` preserve the resolved JSON type, so objects, arrays, numbers, and booleans reach the script as native values. If you wrap a token with surrounding text, such as `"prefix-{{input.id}}"`, interpolation falls back to string output. Raw-token resolution is scoped to the node's local interpolation context, including any explicit `inputs` mapping on that node.
+
+### Foreach fan-out
+
+A `foreach` node resolves `config.over` to an array, creates one `agent-task` child for each item, waits for all children to finish, and exposes an aggregate result to its successor. Use an exact interpolation token for `over` so the value remains an array; `itemKey` must identify a unique, non-empty string property on every item.
+
+```yaml
+- id: review-by-agent
+  type: foreach
+  inputs: { agents: "discover.result.agents" }
+  config:
+    over: "{{agents}}"
+    itemKey: id
+    body:
+      type: agent-task
+      config:
+        agentId: "{{item.id}}"
+        template: "Review the change as {{item.name}} (index {{index}})"
+  next: summarize
+```
+
+In v1, `body.type` is limited to `agent-task`, all children fan out together, and `concurrency` is rejected. Child steps use synthetic IDs such as `review-by-agent#agent-id`. The default `onNodeFailure: "fail"` stops the run on a failed child; `"continue"` lets the remaining children finish and records failed entries in the aggregate alongside `okCount` and `failedCount`.
 
 ## Defining a Workflow
 

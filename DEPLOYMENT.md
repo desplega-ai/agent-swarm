@@ -126,7 +126,7 @@ swarm_content_strategist → /workspace/personal   → Content strategist's priv
 
 **How it works:**
 
-- **`swarm_api`** — The most critical volume. Contains the SQLite database with all tasks, agents, schedules, and configuration. **Back this up regularly.** Losing this volume means losing all swarm state.
+- **`swarm_api`** — The most critical volume. Contains the SQLite database with all tasks, agents, schedules, and configuration, plus auto-generated secrets such as `.page-session-secret`. **Back this up regularly.** Losing this volume means losing swarm state and invalidates existing authenticated page sessions.
 - **`swarm_logs`** — Shared by all agent containers. Each agent writes session logs here. Useful for debugging but not critical — can be recreated.
 - **`swarm_shared`** — A workspace visible to all agents. Each agent creates subdirectories under `/workspace/shared/{thoughts,memory,downloads,misc}/$AGENT_ID`. Agents can read each other's files but conventionally only write to their own subdirectory.
 - **`swarm_<agent>`** (personal volumes) — Each agent gets an isolated workspace at `/workspace/personal` for its own files. Not visible to other agents.
@@ -134,9 +134,9 @@ swarm_content_strategist → /workspace/personal   → Content strategist's priv
 **Backup:**
 
 ```bash
-# Back up the API database
+# Back up the API database and persisted page-session secret
 docker run --rm -v swarm_api:/app -v $(pwd):/backup alpine \
-  cp /app/agent-swarm-db.sqlite /backup/agent-swarm-db-backup.sqlite
+  sh -c 'cp /app/agent-swarm-db.sqlite /backup/agent-swarm-db-backup.sqlite && if [ -f /app/.page-session-secret ]; then cp /app/.page-session-secret /backup/page-session-secret.backup; fi'
 ```
 
 ### Adding More Workers
@@ -483,6 +483,8 @@ When a worker starts, it:
 | `ENV` | Environment mode (`development` adds prefix to Slack agent names) | - |
 | `SCHEDULER_INTERVAL_MS` | Polling interval for scheduled tasks | `10000` |
 | `DATABASE_PATH` | SQLite database file path | `./agent-swarm-db.sqlite` |
+| `PAGE_SESSION_SECRET` | HMAC secret for authenticated page-session cookies; never falls back to `API_KEY` | Persisted in `<data-dir>/.page-session-secret` when unset |
+| `PAGE_SESSION_SECRET_FILE` | Absolute path to a file containing the page-session secret (Docker/k8s secret mount) | - |
 | `OPENAI_API_KEY` | OpenAI key for memory embeddings (optional) | - |
 | `CAPABILITIES` | Comma-separated capability flags gating which MCP tool groups the server registers | `core,task-pool,scripts,config,mcp,profiles,scheduling,memory,workflows,pages,metrics,kv,slack,tracker,skills,repo` |
 

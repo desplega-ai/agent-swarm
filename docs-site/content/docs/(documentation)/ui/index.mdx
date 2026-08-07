@@ -5,6 +5,18 @@ description: "The Agent Swarm dashboard — what it is, the hosted instance at a
 
 The Agent Swarm **dashboard** is the web UI for operating a swarm: watch agents, tasks, and inter-agent chat in real time, review approvals, manage workflows, scripts, schedules, skills, and memory, and administer settings — secrets, API keys, integrations, and [swarm configuration](/docs/ui/configuration).
 
+## Apps
+
+The **Apps** surface hosts schema-backed applications created by agents. An app can combine versioned data models, named queries and actions, reusable UI elements, per-user configuration, and a theme. Definition updates keep history, pass schema and exported-element compatibility checks, and can be diffed or rolled back. See the [Apps API reference](/docs/api-reference/apps) for the lifecycle endpoints.
+
+## Appearance
+
+Settings → Appearance lets each browser choose light, dark, or system mode and select a built-in visual preset. The preference stays local to the browser connection. Apps may request their own canvas theme, while viewers can override it without changing the app definition.
+
+## Usage attribution
+
+The Usage page can filter costs by canonical requester and shows **Cost by User** alongside the overall totals. Spend tied to a user is attributed to that identity; background work without a requester is grouped as **Unattributed (autonomous)** so operator-driven and autonomous spend remain distinguishable.
+
 ## Task list filters
 
 The Tasks page keeps its filters in the URL so views can be bookmarked and shared. In addition to status, agent, schedule, heartbeat visibility, and text search, the **Requested by** facet can show work attributed to a specific user, **Me** for the current dashboard identity, or **Unattributed** for tasks without a canonical requester. The requester filter is single-select and is never enabled by default.

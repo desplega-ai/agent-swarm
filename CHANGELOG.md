@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.129.0] - 2026-08-07
+
+### Added
+- **Swarm Apps provide versioned, RBAC-aware app lifecycles** (#1066) — reusable UI elements, schema migrations and rollback/history, named queries/actions, and per-user configuration are available through the API, MCP, scripts, and dashboard.
+- **Workflow `foreach` nodes fan out agent-task children and rejoin deterministically** (#1093) — bounded iterations, retries, failure policies, and nested run visualization support parallel workflow work.
+- **Swarm scripts receive generated per-app TypeScript APIs** (#1130) — registered apps contribute typed clients and declarations during script authoring and type checking.
+- **Usage reporting includes per-user cost attribution** (#1115) — the Usage page and backing APIs break spend down by requester.
+- **Agent Swarm publishes a host-agnostic MCP Registry entry** (#1135) — release-triggered metadata covers npm and self-hosted streamable-HTTP deployments.
+- **The dashboard supports parametric themes and a unified motion and chrome layer** (#1123).
+
+### Changed
+- **Bundled skills now seed from canonical database-backed templates** (#1083, #1106), with vendored ai-toolbox content and single-source generated `SKILL.md` artifacts.
+- **Worker dependencies refresh agent-fs to 0.12.2 and context-mode to 1.0.169** (#1108, #1109), including the Helm agent-fs image default.
+
+### Fixed
+- **Script and webhook execution is hardened against injection, SSRF, and fail-open authentication** (#1107, #1112, #1138), including sandboxed subprocesses and inert Bun argument handling.
+- **Page sessions, proxy paths, and ownership checks enforce stronger security boundaries** (#1113).
+- **Session cost computation is TTL-aware and per-model, with harness dual-write and correct multi-turn/provider accounting** (#1134, #1136).
+- **Requester attribution, session-summary sourcing, and profile edits survive sync and restart paths correctly** (#1116, #1131, #1132, #1137).
+- **GitHub review replies require the configured bot identity** (#1133), and Codex credential/bootstrap reload paths preserve valid standalone and pooled credentials (#1114).
+- **Agent-fs attachments preserve scoped IDs and safe, correctly encoded filenames** (#1118, #1126).
+- **Slack accepted-message, persona, steering reactions, and terminal task rendering are consistent** (#1103, #1111, #1121, #1128), while incomplete approval responses are rejected (#1119).
+
 ## [1.128.0] - 2026-08-05
 
 ### Added
