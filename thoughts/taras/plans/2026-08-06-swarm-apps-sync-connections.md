@@ -3,7 +3,7 @@ date: 2026-08-06T00:00:00+02:00
 author: claude
 topic: "Swarm Apps — sync sources + connections phase (re-add on main, productionized)"
 tags: [plan, swarm-apps, sync, connections, script-connections, schema-change]
-status: in-progress
+status: completed
 branch: t/des-768-apps-sync-connections
 last_updated: 2026-08-06
 last_updated_by: claude

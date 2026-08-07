@@ -239,7 +239,8 @@ Freshness renders with the existing column kinds — no special components. Give
         "root": { "type": "Container", "props": {}, "children": ["refreshBtn", "issuesTable"] },
         "refreshBtn": {
           "type": "Button",
-          "props": { "label": "Refresh", "actions": [{ "action": "app.action", "params": { "name": "refresh" } }] }
+          "props": { "label": "Refresh" },
+          "on": { "press": [{ "action": "app.action", "params": { "name": "refresh" } }] }
         },
         "issuesTable": {
           "type": "Table",
