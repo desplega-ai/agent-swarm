@@ -208,8 +208,8 @@ describe("recomputeCost: pi", () => {
         },
       ],
     });
-    // deepseek/deepseek-v4-flash: $0.09 in / $0.18 out per 1M
-    expect(result.costUsd).toBeCloseTo((1000 * 0.09 + 500 * 0.18) / 1e6, 12);
+    // deepseek/deepseek-v4-flash: $0.0882 in / $0.1764 out per 1M
+    expect(result.costUsd).toBeCloseTo((1000 * 0.0882 + 500 * 0.1764) / 1e6, 12);
   });
 });
 

@@ -7,12 +7,12 @@ describe("lookupModelCost", () => {
     const m = await lookupModelCost("pi", "openrouter/deepseek/deepseek-v4-flash");
     expect(m).not.toBeNull();
     expect(m?.id).toBe("deepseek/deepseek-v4-flash");
-    expect(m?.inputPerM).toBe(0.09);
+    expect(m?.inputPerM).toBe(0.0882);
   });
 
   test("opencode: bare openrouter id resolves directly", async () => {
     const m = await lookupModelCost("opencode", "deepseek/deepseek-v4-flash");
-    expect(m?.inputPerM).toBe(0.09);
+    expect(m?.inputPerM).toBe(0.0882);
   });
 
   test("claude: date-suffixed id resolves via date-strip", async () => {
