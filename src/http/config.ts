@@ -17,11 +17,12 @@ import {
   validateConfigValue,
 } from "../be/swarm-config-guard";
 import { can, isRbacEnabled, type PermissionVerb } from "../rbac";
+import { SwarmConfigSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 const MAX_ENV_PRESENCE_KEYS = 200;
 const SECRETS_FORCE_MASK_NOTE =
@@ -119,7 +120,13 @@ const getResolvedConfigRoute = route({
     includeSecrets: z.enum(["true", "false"]).optional(),
   }),
   responses: {
-    200: { description: "Resolved config entries" },
+    200: {
+      description: "Resolved config entries",
+      schema: z.object({
+        configs: z.array(SwarmConfigSchema),
+        message: z.string().optional(),
+      }),
+    },
   },
 });
 
@@ -134,7 +141,10 @@ const envPresence = route({
     keys: z.string().min(1),
   }),
   responses: {
-    200: { description: "Map of key -> boolean (true iff set in process.env)" },
+    200: {
+      description: "Map of key -> boolean (true iff set in process.env)",
+      schema: z.object({ presence: z.record(z.string(), z.boolean()) }),
+    },
     400: { description: "Validation error" },
   },
 });
@@ -148,7 +158,15 @@ const reloadConfigRoute = route({
   tags: ["Config"],
   body: z.object({}).optional(),
   responses: {
-    200: { description: "Reload result" },
+    200: {
+      description: "Reload result",
+      schema: z.object({
+        success: z.literal(true),
+        configsLoaded: z.number(),
+        keysUpdated: z.array(z.string()),
+        integrationsReinitialized: z.array(z.string()),
+      }),
+    },
     500: { description: "Reload failed" },
   },
 });
@@ -164,7 +182,10 @@ const getConfigById = route({
     includeSecrets: z.enum(["true", "false"]).optional(),
   }),
   responses: {
-    200: { description: "Config entry" },
+    200: {
+      description: "Config entry",
+      schema: SwarmConfigSchema.extend({ message: z.string().optional() }),
+    },
     404: { description: "Config not found" },
   },
 });
@@ -181,7 +202,13 @@ const listConfig = route({
     includeSecrets: z.enum(["true", "false"]).optional(),
   }),
   responses: {
-    200: { description: "List of config entries" },
+    200: {
+      description: "List of config entries",
+      schema: z.object({
+        configs: z.array(SwarmConfigSchema),
+        message: z.string().optional(),
+      }),
+    },
   },
 });
 
@@ -203,7 +230,7 @@ const upsertConfig = route({
     description: z.string().nullish(),
   }),
   responses: {
-    200: { description: "Config entry upserted" },
+    200: { description: "Config entry upserted", schema: SwarmConfigSchema },
     400: { description: "Validation error" },
   },
 });
@@ -218,7 +245,10 @@ const deleteConfig = route({
   rbac: { permission: "config.delete.any" },
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Config deleted" },
+    200: {
+      description: "Config deleted",
+      schema: z.object({ success: z.literal(true) }),
+    },
     404: { description: "Config not found" },
   },
 });
@@ -247,7 +277,7 @@ export async function handleConfig(
         }
       }
     }
-    json(res, {
+    getResolvedConfigRoute.respond(res, 200, {
       configs: result,
       ...(secretsNote ? { message: `Found ${result.length} config(s).${secretsNote}` } : {}),
     });
@@ -269,7 +299,7 @@ export async function handleConfig(
     for (const key of keys) {
       presence[key] = process.env[key] !== undefined && process.env[key] !== "";
     }
-    json(res, { presence });
+    envPresence.respond(res, 200, { presence });
     return true;
   }
 
@@ -279,7 +309,7 @@ export async function handleConfig(
       console.log(
         `[reload-config] Loaded ${result.configsLoaded} config(s), re-initialized: ${result.integrationsReinitialized.join(", ") || "none"}`,
       );
-      json(res, { success: true, ...result });
+      reloadConfigRoute.respond(res, 200, { success: true, ...result });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       console.error("[reload-config] Failed:", message);
@@ -302,7 +332,7 @@ export async function handleConfig(
     if (effectiveIncludeSecrets && singleResult.isSecret && singleResult.value) {
       registerVolatileSecret(singleResult.value, `config:${singleResult.key}`);
     }
-    json(res, {
+    getConfigById.respond(res, 200, {
       ...singleResult,
       ...(secretsNote ? { message: `Found 1 config(s).${secretsNote}` } : {}),
     });
@@ -328,7 +358,7 @@ export async function handleConfig(
         }
       }
     }
-    json(res, {
+    listConfig.respond(res, 200, {
       configs: listResult,
       ...(secretsNote ? { message: `Found ${listResult.length} config(s).${secretsNote}` } : {}),
     });
@@ -380,8 +410,8 @@ export async function handleConfig(
       if (scope === "global") {
         scheduleIntegrationsReload();
       }
-      const result = includeSecrets || !config.isSecret ? config : maskSecrets([config])[0];
-      json(res, result);
+      const result = includeSecrets || !config.isSecret ? config : maskSecrets([config])[0]!;
+      upsertConfig.respond(res, 200, result);
     } catch (_error) {
       jsonError(res, "Failed to upsert config", 500);
     }
@@ -405,7 +435,7 @@ export async function handleConfig(
     if (existing.scope === "global") {
       scheduleIntegrationsReload();
     }
-    json(res, { success: true });
+    deleteConfig.respond(res, 200, { success: true });
     return true;
   }
 

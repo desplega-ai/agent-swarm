@@ -14,6 +14,28 @@ import { completeGenericOAuthCallback } from "../oauth-callback";
 import { route } from "../route-def";
 import { deriveApiBaseUrl, parseQueryParams } from "../utils";
 
+// ─── Schemas ─────────────────────────────────────────────────────────────────
+
+/** Shape returned by `buildLinearStatusPayload` — shared by /status and /refresh. */
+const LinearStatusSchema = z.object({
+  provider: z.literal("linear"),
+  connected: z.boolean(),
+  tokenExpiry: z.string().nullable(),
+  scope: z.string().nullable(),
+  webhookUrl: z.string(),
+  redirectUri: z.string(),
+});
+
+/** The two `body` shapes `handleLinearWebhook` (../../linear/webhook.ts) sends for its 200 code. */
+const LinearWebhookAcceptedSchema = z.object({
+  status: z.enum(["duplicate", "accepted"]),
+});
+
+const LinearDisconnectSchema = z.object({
+  disconnected: z.literal(true),
+  revoked: z.boolean(),
+});
+
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
 const linearAuthorize = route({
@@ -42,7 +64,11 @@ const linearCallback = route({
     state: z.string(),
   }),
   responses: {
-    200: { description: "OAuth complete" },
+    200: {
+      description: "OAuth complete",
+      unstructured:
+        "HTML success page (sendAuthorizedHtml) sent by completeGenericOAuthCallback in ../oauth-callback.ts — shape not owned by this file",
+    },
     400: { description: "Invalid state or code" },
     500: { description: "Token exchange failed" },
   },
@@ -55,7 +81,7 @@ const linearStatus = route({
   summary: "Linear connection status, token expiry, workspace info, expected webhook URL",
   tags: ["Trackers"],
   responses: {
-    200: { description: "Connection status" },
+    200: { description: "Connection status", schema: LinearStatusSchema },
     503: { description: "Linear integration not configured" },
   },
 });
@@ -68,7 +94,10 @@ const linearRefresh = route({
     "Force a Linear OAuth token refresh and return the updated status payload. Useful when an agent observes an expired token and wants to recover without restarting the server or re-running OAuth.",
   tags: ["Trackers"],
   responses: {
-    200: { description: "Token refreshed; returns same shape as /status" },
+    200: {
+      description: "Token refreshed; returns same shape as /status",
+      schema: LinearStatusSchema,
+    },
     409: { description: "Linear not connected (no refresh token stored)" },
     500: { description: "Refresh failed" },
     503: { description: "Linear integration not configured" },
@@ -83,7 +112,7 @@ const linearWebhook = route({
   tags: ["Trackers"],
   auth: { apiKey: false },
   responses: {
-    200: { description: "Event accepted" },
+    200: { description: "Event accepted", schema: LinearWebhookAcceptedSchema },
     401: { description: "Invalid signature" },
     503: { description: "Linear integration not configured" },
   },
@@ -99,14 +128,14 @@ const linearDisconnect = route({
   summary: "Fully disconnect Linear: revoke OAuth grant + drop tokens",
   tags: ["Trackers"],
   responses: {
-    200: { description: "Disconnected" },
+    200: { description: "Disconnected", schema: LinearDisconnectSchema },
     503: { description: "Linear not configured" },
   },
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function buildLinearStatusPayload(req: IncomingMessage): Record<string, unknown> {
+function buildLinearStatusPayload(req: IncomingMessage): z.infer<typeof LinearStatusSchema> {
   const tokens = getOAuthTokens("linear");
   const baseUrl = deriveApiBaseUrl(req);
 
@@ -180,8 +209,7 @@ export async function handleLinearTracker(
       return true;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(buildLinearStatusPayload(req)));
+    linearStatus.respond(res, 200, buildLinearStatusPayload(req));
     return true;
   }
 
@@ -217,8 +245,7 @@ export async function handleLinearTracker(
       return true;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(buildLinearStatusPayload(req)));
+    linearRefresh.respond(res, 200, buildLinearStatusPayload(req));
     return true;
   }
 
@@ -239,6 +266,14 @@ export async function handleLinearTracker(
     };
 
     const result = await handleLinearWebhook(rawBody, headers);
+    // handleLinearWebhook's return type is `{ status: number; body: unknown }` (it
+    // can send 503/401/200 — all declared on this route); narrow to the literal
+    // 200 code to use the typed egress for the one 2xx case, keep the raw
+    // passthrough (same status/body/header as before) for 401/503.
+    if (result.status === 200) {
+      linearWebhook.respond(res, 200, result.body as z.infer<typeof LinearWebhookAcceptedSchema>);
+      return true;
+    }
     res.writeHead(result.status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(result.body));
     return true;
@@ -262,8 +297,7 @@ export async function handleLinearTracker(
 
     console.log(`[Linear] Disconnected: revoke=${revoked}, tokens cleared`);
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ disconnected: true, revoked }));
+    linearDisconnect.respond(res, 200, { disconnected: true, revoked });
     return true;
   }
 

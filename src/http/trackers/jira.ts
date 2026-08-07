@@ -19,6 +19,61 @@ import { deriveApiBaseUrl, parseQueryParams } from "../utils";
 const MANUAL_WEBHOOK_INSTRUCTIONS =
   "See docs-site/.../guides/jira-integration.mdx for manual webhook registration steps.";
 
+// ─── Response Schemas ────────────────────────────────────────────────────────
+
+const JiraWebhookIdEntrySchema = z.object({
+  id: z.number().int(),
+  expiresAt: z.string(),
+  jql: z.string(),
+});
+
+/** Shape returned by both GET /status and POST /refresh (buildJiraStatusPayload). */
+const JiraStatusPayloadSchema = z.object({
+  provider: z.literal("jira"),
+  connected: z.boolean(),
+  cloudId: z.string().nullable(),
+  siteUrl: z.string().nullable(),
+  tokenExpiresAt: z.string().nullable(),
+  scope: z.string().nullable(),
+  hasManageWebhookScope: z.boolean(),
+  webhookTokenConfigured: z.boolean(),
+  webhookUrl: z.string(),
+  redirectUri: z.string(),
+  webhookIds: z.array(JiraWebhookIdEntrySchema),
+  // Only present when the OAuth grant lacks `manage:jira-webhook` scope.
+  manualWebhookInstructions: z.string().optional(),
+});
+
+type JiraStatusPayload = z.infer<typeof JiraStatusPayloadSchema>;
+
+/** Body shape of handleJiraWebhook's WebhookResult when status === 200. */
+const JiraWebhookEventResultSchema = z.union([
+  z.object({ status: z.literal("accepted") }),
+  z.object({ status: z.literal("duplicate") }),
+  z.object({ status: z.literal("ignored"), reason: z.literal("invalid-json") }),
+]);
+
+type JiraWebhookEventResult = z.infer<typeof JiraWebhookEventResultSchema>;
+
+const JiraWebhookRegisteredSchema = z.object({
+  webhookId: z.number().int(),
+  expiresAt: z.string(),
+  jql: z.string(),
+});
+
+const JiraWebhookDeletedSchema = z.object({
+  deleted: z.literal(true),
+  webhookId: z.number().int(),
+});
+
+const JiraDisconnectResultSchema = z.object({
+  disconnected: z.literal(true),
+  webhooksDeleted: z.number().int().nonnegative(),
+  webhooksTotal: z.number().int().nonnegative(),
+  webhookFailures: z.array(z.object({ id: z.number().int(), error: z.string() })),
+  revokeNote: z.string(),
+});
+
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
 const jiraAuthorize = route({
@@ -47,7 +102,11 @@ const jiraCallback = route({
     state: z.string(),
   }),
   responses: {
-    200: { description: "OAuth complete" },
+    200: {
+      description: "OAuth complete",
+      unstructured:
+        "Delegates to completeGenericOAuthCallback (src/http/oauth-callback.ts), which sends an HTML success page or a redirect on success — never a fixed JSON shape",
+    },
     400: { description: "Invalid state or code" },
     500: { description: "Token exchange or accessible-resources fetch failed" },
   },
@@ -61,7 +120,7 @@ const jiraStatus = route({
     "Jira connection status, cloudId/siteUrl, token expiry, expected webhook URL, scope/token-config flags",
   tags: ["Trackers"],
   responses: {
-    200: { description: "Connection status" },
+    200: { description: "Connection status", schema: JiraStatusPayloadSchema },
     503: { description: "Jira integration not configured" },
   },
 });
@@ -74,7 +133,10 @@ const jiraRefresh = route({
     "Force a Jira OAuth token refresh and return the updated status payload. Useful when an agent observes an expired token via tracker-status / db-query and wants to recover without restarting the server or re-running 3LO.",
   tags: ["Trackers"],
   responses: {
-    200: { description: "Token refreshed; returns same shape as /status" },
+    200: {
+      description: "Token refreshed; returns same shape as /status",
+      schema: JiraStatusPayloadSchema,
+    },
     409: { description: "Jira not connected (no refresh token stored)" },
     500: { description: "Refresh failed (e.g. revoked grant, network error)" },
     503: { description: "Jira integration not configured" },
@@ -91,7 +153,7 @@ const jiraWebhook = route({
   auth: { apiKey: false },
   params: z.object({ token: z.string() }),
   responses: {
-    200: { description: "Event accepted" },
+    200: { description: "Event accepted", schema: JiraWebhookEventResultSchema },
     401: { description: "Invalid URL token" },
     503: { description: "Jira webhook handler not configured" },
   },
@@ -110,7 +172,7 @@ const jiraWebhookRegister = route({
     jqlFilter: z.string().min(1),
   }),
   responses: {
-    200: { description: "Webhook registered" },
+    200: { description: "Webhook registered", schema: JiraWebhookRegisteredSchema },
     400: { description: "Invalid jqlFilter" },
     503: { description: "Jira not connected or JIRA_WEBHOOK_TOKEN missing" },
   },
@@ -128,7 +190,7 @@ const jiraWebhookDelete = route({
     id: z.coerce.number().int().positive(),
   }),
   responses: {
-    200: { description: "Webhook deleted" },
+    200: { description: "Webhook deleted", schema: JiraWebhookDeletedSchema },
     400: { description: "Invalid webhook id" },
     503: { description: "Jira not connected" },
   },
@@ -145,7 +207,7 @@ const jiraDisconnect = route({
   summary: "Fully disconnect Jira: delete all webhooks, drop tokens, clear metadata",
   tags: ["Trackers"],
   responses: {
-    200: { description: "Disconnected" },
+    200: { description: "Disconnected", schema: JiraDisconnectResultSchema },
     503: { description: "Jira not configured" },
   },
 });
@@ -166,7 +228,7 @@ function getRedirectUri(req: IncomingMessage): string {
   return `${deriveApiBaseUrl(req)}/api/trackers/jira/callback`;
 }
 
-function buildJiraStatusPayload(req: IncomingMessage): Record<string, unknown> {
+function buildJiraStatusPayload(req: IncomingMessage): JiraStatusPayload {
   const tokens = getOAuthTokens("jira");
   const meta = getJiraMetadata();
   const scope = tokens?.scope ?? null;
@@ -174,7 +236,7 @@ function buildJiraStatusPayload(req: IncomingMessage): Record<string, unknown> {
   const scopeList = scope ? scope.split(/[\s,]+/).filter(Boolean) : [];
   const hasManageWebhookScope = scopeList.includes("manage:jira-webhook");
 
-  const status: Record<string, unknown> = {
+  const status: JiraStatusPayload = {
     provider: "jira",
     connected: !!tokens,
     cloudId: meta.cloudId ?? null,
@@ -258,8 +320,7 @@ export async function handleJiraTracker(
       return true;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(buildJiraStatusPayload(req)));
+    jiraStatus.respond(res, 200, buildJiraStatusPayload(req));
     return true;
   }
 
@@ -296,8 +357,7 @@ export async function handleJiraTracker(
       return true;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(buildJiraStatusPayload(req)));
+    jiraRefresh.respond(res, 200, buildJiraStatusPayload(req));
     return true;
   }
 
@@ -332,6 +392,11 @@ export async function handleJiraTracker(
       return true;
     }
 
+    if (result.status === 200) {
+      jiraWebhook.respond(res, 200, result.body as JiraWebhookEventResult);
+      return true;
+    }
+
     res.writeHead(result.status, { "Content-Type": "application/json" });
     res.end(typeof result.body === "string" ? result.body : JSON.stringify(result.body));
     return true;
@@ -356,8 +421,7 @@ export async function handleJiraTracker(
 
     try {
       const result = await registerJiraWebhook(parsed.body.jqlFilter);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(result));
+      jiraWebhookRegister.respond(res, 200, result);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[Jira] Webhook register failed:", message);
@@ -383,8 +447,7 @@ export async function handleJiraTracker(
 
     try {
       await deleteJiraWebhook(parsed.params.id);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ deleted: true, webhookId: parsed.params.id }));
+      jiraWebhookDelete.respond(res, 200, { deleted: true, webhookId: parsed.params.id });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[Jira] Webhook delete failed (id=${parsed.params.id}):`, message);
@@ -425,19 +488,16 @@ export async function handleJiraTracker(
       `[Jira] Disconnected: ${webhooksDeleted}/${ids.length} webhooks deleted, tokens cleared, metadata reset`,
     );
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        disconnected: true,
-        webhooksDeleted,
-        webhooksTotal: ids.length,
-        webhookFailures,
-        // Atlassian 3LO has no token revocation endpoint — surface this so
-        // the UI can prompt the user to revoke the grant manually if desired.
-        revokeNote:
-          "Atlassian OAuth grants must be revoked manually at https://id.atlassian.com/manage/connected-apps if you want to fully sever the consent.",
-      }),
-    );
+    jiraDisconnect.respond(res, 200, {
+      disconnected: true,
+      webhooksDeleted,
+      webhooksTotal: ids.length,
+      webhookFailures,
+      // Atlassian 3LO has no token revocation endpoint — surface this so
+      // the UI can prompt the user to revoke the grant manually if desired.
+      revokeNote:
+        "Atlassian OAuth grants must be revoked manually at https://id.atlassian.com/manage/connected-apps if you want to fully sever the consent.",
+    });
     return true;
   }
 

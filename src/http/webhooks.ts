@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
 import type { AgentMailWebhookPayload } from "../agentmail";
 import {
   handleMessageReceived,
@@ -57,6 +58,16 @@ import { route } from "./route-def";
 
 // ─── Route Definitions (documentation only — webhooks handle their own body parsing) ─
 
+/**
+ * Shared shape returned by the GitHub/GitLab dispatch handlers in
+ * ../github/handlers.ts and ../gitlab/handlers.ts — `{ created: boolean;
+ * taskId?: string }`, echoed back verbatim as the webhook ack body.
+ */
+const WebhookDispatchResultSchema = z.object({
+  created: z.boolean(),
+  taskId: z.string().optional(),
+});
+
 const githubWebhook = route({
   method: "post",
   path: "/api/github/webhook",
@@ -65,7 +76,10 @@ const githubWebhook = route({
   tags: ["Webhooks"],
   auth: { apiKey: false },
   responses: {
-    200: { description: "Event processed" },
+    200: {
+      description: "Event processed",
+      schema: z.union([z.object({ message: z.literal("pong") }), WebhookDispatchResultSchema]),
+    },
     401: { description: "Invalid signature" },
     503: { description: "GitHub integration not configured" },
   },
@@ -79,7 +93,7 @@ const gitlabWebhook = route({
   tags: ["Webhooks"],
   auth: { apiKey: false },
   responses: {
-    200: { description: "Event processed" },
+    200: { description: "Event processed", schema: WebhookDispatchResultSchema },
     401: { description: "Invalid token" },
     503: { description: "GitLab integration not configured" },
   },
@@ -93,7 +107,7 @@ const agentmailWebhook = route({
   tags: ["Webhooks"],
   auth: { apiKey: false },
   responses: {
-    200: { description: "Event received" },
+    200: { description: "Event received", schema: z.object({ received: z.literal(true) }) },
     401: { description: "Invalid signature" },
     503: { description: "AgentMail integration not configured" },
   },
@@ -107,7 +121,13 @@ const kapsoWebhook = route({
   tags: ["Webhooks"],
   auth: { apiKey: false },
   responses: {
-    200: { description: "Event received" },
+    200: {
+      description: "Event received",
+      schema: z.object({
+        received: z.literal(true),
+        routing: z.enum(["skip", "duplicate", "workflow", "task", "no_mapping", "error"]),
+      }),
+    },
     401: { description: "Invalid signature" },
     503: { description: "Kapso integration not configured" },
   },
@@ -213,8 +233,7 @@ export async function handleWebhooks(
 
     if (eventType === "ping") {
       console.log("[GitHub] Received ping event - webhook configured successfully");
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ message: "pong" }));
+      githubWebhook.respond(res, 200, { message: "pong" });
       return true;
     }
 
@@ -309,8 +328,7 @@ export async function handleWebhooks(
         }
       }
 
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(result));
+      githubWebhook.respond(res, 200, result);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       console.error(`[GitHub] Error handling ${eventType} event: ${errorMessage}`);
@@ -425,8 +443,7 @@ export async function handleWebhooks(
         }
       }
 
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(result));
+      gitlabWebhook.respond(res, 200, result);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       console.error(`[GitLab] Error handling ${objectKind} event: ${errorMessage}`);
@@ -471,8 +488,7 @@ export async function handleWebhooks(
 
     // Return 200 immediately — Svix best practice to avoid retries.
     // Processing happens asynchronously below; dedup is handled in handlers.ts.
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ received: true }));
+    agentmailWebhook.respond(res, 200, { received: true });
 
     const payload = verified as AgentMailWebhookPayload;
 
@@ -602,8 +618,7 @@ export async function handleWebhooks(
           console.log(`[Kapso] Skipping event: ${routing.reason}`);
           break;
       }
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ received: true, routing: routing.kind }));
+      kapsoWebhook.respond(res, 200, { received: true, routing: routing.kind });
     } catch (err) {
       // Never fail the delivery on a downstream dispatch error — we already
       // verified + deduped. Log and ack so Kapso doesn't hammer retries.
@@ -613,8 +628,7 @@ export async function handleWebhooks(
       } else {
         console.error(`[Kapso] Error handling inbound event: ${errorMessage}`);
       }
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ received: true, routing: "error" }));
+      kapsoWebhook.respond(res, 200, { received: true, routing: "error" });
     }
     return true;
   }

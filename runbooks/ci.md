@@ -56,6 +56,7 @@ bash scripts/check-api-key-boundary.sh
 bash scripts/check-rbac-boundary.sh
 bash scripts/check-audit-columns.sh
 bun run check:rbac-coverage
+bun run check:openapi-response-coverage
 bun run check:dep-graph
 
 # Drift checks (run if you touched the relevant files)
@@ -85,6 +86,7 @@ docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worke
 5. **Raw `matchRoute()`.** Use the `route()` factory in `src/http/route-def.ts`.
 6. **RBAC boundary violation.** An inline `isLead` authorization conditional in `src/tools/` or `src/http/` (DES-445). Authorization decisions must go through `can()` from `src/rbac/` (pattern: `src/tools/kv/kv-write-auth.ts`). Genuinely non-authz uses of `isLead` go in `ALLOWED_FILES` in `scripts/check-rbac-boundary.sh` with a reason.
 7. **RBAC coverage failure.** You added an MCP tool file or a non-GET route without an explicit RBAC decision (DES-445). Tools: reach `can()` or add the file to `UNGATED_TOOL_FILES` in `scripts/check-rbac-coverage.ts` with a reason. Routes: put `rbac: { permission: "<verb>" }` or `rbac: { ungated: "<reason>" }` on the `route()` def. Stale allowlist/backlog entries also fail — delete them when a surface gains a gate.
+7b. **OpenAPI response-coverage failure.** A `route()` def has a 2xx response (other than bodiless 204/205) with neither `schema: <zod>` nor `unstructured: "<reason>"` (`scripts/check-openapi-response-coverage.ts`). Declare the body shape and send it via the handle's typed `respond(res, code, data)`, or opt out with a real non-JSON reason (SSE/binary/redirect/proxy). The backlog file `scripts/.openapi-response-backlog` is empty and shrink-only — do not add to it.
 8. **`tsc --noEmit` passed locally but `tsc -b` failed in ui.** The build-mode check catches project-reference issues `--noEmit` misses. Use `tsc -b` locally.
 9. **Docker build cache mismatch.** Local Docker pulled a cached layer that CI doesn't have. Run `docker build --no-cache -f Dockerfile.worker .` if a clean local build is suspicious.
 10. **Audit-column failure.** You added a migration creating a table without `created_by`/`updated_by` (`scripts/check-audit-columns.sh`). Add the columns, or register the table in `.non-audit-tables` with a comment naming where attribution actually lives.

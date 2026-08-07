@@ -17,14 +17,16 @@ import {
   type Metric,
   MetricDefinitionSchema,
   type MetricParam,
+  MetricSchema,
   type MetricSummary,
   type MetricVariable,
   MetricVersionSchema,
   type MetricWidget,
+  MetricWidgetSchema,
 } from "../types";
 import { assertSelectOnlyQuery, executeReadOnlyQuery } from "./db-query";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 const DEFAULT_METRIC_MAX_ROWS = 100;
 const HARD_METRIC_MAX_ROWS = 500;
@@ -192,6 +194,18 @@ const metricDefinitionBody = z.object({
   definition: MetricDefinitionSchema,
 });
 
+// `{ id, version }` shape sent by both create (always version 1) and update
+// (the next edit counter) — see `metricEditCounter` below.
+const metricIdVersionSchema = z.object({
+  id: z.string(),
+  version: z.number().int().min(1),
+});
+
+// `MetricSummary` (see ../types) is `Omit<Metric, "definition">` — the "slim"
+// list projection returned by `listMetricsByAgent`/`listAllMetrics` when
+// `fields=slim`.
+const metricSummarySchema = MetricSchema.omit({ definition: true });
+
 const createMetricRoute = route({
   method: "post",
   path: "/api/metrics/definitions",
@@ -200,7 +214,7 @@ const createMetricRoute = route({
   tags: ["Metrics"],
   body: metricDefinitionBody,
   responses: {
-    201: { description: "Metric created" },
+    201: { description: "Metric created", schema: metricIdVersionSchema },
     400: { description: "Invalid metric definition" },
     409: { description: "Slug already exists for this agent" },
   },
@@ -219,7 +233,15 @@ const listMetricsRoute = route({
     fields: z.enum(["full", "slim"]).optional(),
   }),
   responses: {
-    200: { description: "Metric definitions" },
+    200: {
+      description: "Metric definitions",
+      schema: z.object({
+        metrics: z.array(z.union([MetricSchema, metricSummarySchema])),
+        total: z.number(),
+        limit: z.number(),
+        offset: z.number(),
+      }),
+    },
   },
 });
 
@@ -231,7 +253,7 @@ const getMetricRoute = route({
   tags: ["Metrics"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Metric definition" },
+    200: { description: "Metric definition", schema: MetricSchema },
     404: { description: "Metric not found" },
   },
 });
@@ -245,7 +267,7 @@ const updateMetricRoute = route({
   params: z.object({ id: z.string() }),
   body: metricDefinitionBody.partial(),
   responses: {
-    200: { description: "Metric updated" },
+    200: { description: "Metric updated", schema: metricIdVersionSchema },
     404: { description: "Metric not found" },
   },
 });
@@ -263,6 +285,32 @@ const deleteMetricRoute = route({
   },
 });
 
+// Wire shape of a single widget's query result inside a `run` response — see
+// `runMetricWidget` below. `rows` is re-keyed from column-array form to
+// column-name-keyed objects, so each row's field set is query-dependent.
+const metricRunWidgetResultSchema = z.object({
+  columns: z.array(z.string()),
+  rows: z.array(z.record(z.string(), z.unknown())),
+  elapsed: z.number(),
+  total: z.number(),
+  truncated: z.boolean(),
+  maxRows: z.number(),
+});
+
+// Full `runMetric()` response — see that function below.
+const metricRunResultSchema = z.object({
+  metric: MetricSchema,
+  variables: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
+  widgets: z.array(
+    z.object({
+      widget: MetricWidgetSchema,
+      result: metricRunWidgetResultSchema,
+    }),
+  ),
+  // Kept as the first widget result for older callers during the PR cycle.
+  result: metricRunWidgetResultSchema.optional(),
+});
+
 const runMetricRoute = route({
   method: "post",
   path: "/api/metrics/definitions/{id}/run",
@@ -272,7 +320,7 @@ const runMetricRoute = route({
   params: z.object({ id: z.string() }),
   body: MetricRunBodySchema,
   responses: {
-    200: { description: "Metric result" },
+    200: { description: "Metric result", schema: metricRunResultSchema },
     400: { description: "Invalid or disallowed query" },
     404: { description: "Metric not found" },
   },
@@ -286,7 +334,10 @@ const listMetricVersionsRoute = route({
   tags: ["Metrics"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Metric version list" },
+    200: {
+      description: "Metric version list",
+      schema: z.object({ versions: z.array(MetricVersionSchema) }),
+    },
     404: { description: "Metric not found" },
   },
 });
@@ -299,9 +350,16 @@ const getMetricVersionRoute = route({
   tags: ["Metrics"],
   params: z.object({ id: z.string(), version: z.coerce.number().int().min(1) }),
   responses: {
-    200: { description: "Metric version" },
+    200: { description: "Metric version", schema: MetricVersionSchema },
     404: { description: "Metric or version not found" },
   },
+});
+
+// z.toJSONSchema() output is always a JSON object at the root (draft-7 for an
+// object-typed zod schema); nested shape is JSON-Schema-generic, not modeled
+// field-by-field here.
+const metricJsonSchemaResponseSchema = z.object({
+  schema: z.record(z.string(), z.unknown()),
 });
 
 const metricSchemaRoute = route({
@@ -311,7 +369,7 @@ const metricSchemaRoute = route({
   summary: "Get the metric definition JSON Schema",
   tags: ["Metrics"],
   responses: {
-    200: { description: "Metric definition JSON Schema" },
+    200: { description: "Metric definition JSON Schema", schema: metricJsonSchemaResponseSchema },
   },
 });
 
@@ -328,7 +386,9 @@ export async function handleMetrics(
   myAgentId: string | undefined,
 ): Promise<boolean> {
   if (metricSchemaRoute.match(req.method, pathSegments)) {
-    json(res, { schema: z.toJSONSchema(MetricDefinitionSchema, { target: "draft-7" }) });
+    metricSchemaRoute.respond(res, 200, {
+      schema: z.toJSONSchema(MetricDefinitionSchema, { target: "draft-7" }),
+    });
     return true;
   }
 
@@ -347,7 +407,7 @@ export async function handleMetrics(
         description: parsed.body.description ?? undefined,
         definition,
       });
-      json(res, { id: metric.id, version: 1 }, 201);
+      createMetricRoute.respond(res, 201, { id: metric.id, version: 1 });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("UNIQUE")) {
@@ -379,7 +439,7 @@ export async function handleMetrics(
         : listAllMetrics(limit, offset, { slim: true });
       total = countAllMetrics();
     }
-    json(res, { metrics, total, limit, offset });
+    listMetricsRoute.respond(res, 200, { metrics, total, limit, offset });
     return true;
   }
 
@@ -393,7 +453,7 @@ export async function handleMetrics(
       return true;
     }
     try {
-      json(res, runMetric(metric, parsed.body?.variables ?? {}));
+      runMetricRoute.respond(res, 200, runMetric(metric, parsed.body?.variables ?? {}));
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err));
     }
@@ -414,7 +474,7 @@ export async function handleMetrics(
       res.end();
       return true;
     }
-    json(res, MetricVersionSchema.parse(version));
+    getMetricVersionRoute.respond(res, 200, MetricVersionSchema.parse(version));
     return true;
   }
 
@@ -426,7 +486,7 @@ export async function handleMetrics(
       res.end();
       return true;
     }
-    json(res, { versions: getMetricVersions(parsed.params.id) });
+    listMetricVersionsRoute.respond(res, 200, { versions: getMetricVersions(parsed.params.id) });
     return true;
   }
 
@@ -439,7 +499,7 @@ export async function handleMetrics(
       res.end();
       return true;
     }
-    json(res, metric);
+    getMetricRoute.respond(res, 200, metric);
     return true;
   }
 
@@ -472,7 +532,10 @@ export async function handleMetrics(
         res.end();
         return true;
       }
-      json(res, { id: updated.id, version: metricEditCounter(updated.id) });
+      updateMetricRoute.respond(res, 200, {
+        id: updated.id,
+        version: metricEditCounter(updated.id),
+      });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err));
     }

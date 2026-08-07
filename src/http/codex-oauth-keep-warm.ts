@@ -23,12 +23,13 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
 import { getKv } from "../be/db";
 import { deriveCodexKeySuffix } from "../providers/codex-oauth/auth-json.js";
 import { getValidCodexOAuth, loadAllCodexOAuthSlots } from "../providers/codex-oauth/storage.js";
 import { getApiKey } from "../utils/api-key";
 import { route } from "./route-def";
-import { deriveApiBaseUrl, json } from "./utils";
+import { deriveApiBaseUrl } from "./utils";
 
 /** ~weekly refresh cadence, comfortably inside OpenAI's ~8-day staleness window given the 10-day TTL. */
 const KEEP_WARM_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -42,6 +43,20 @@ type SlotOutcome =
   | { slot: number; outcome: "no-credentials" }
   | { slot: number; keySuffix: string; outcome: "failed"; reason: string };
 
+/** Mirrors the `SlotOutcome` union above — split so each branch has a single discriminant literal. */
+const slotOutcomeSchema = z.discriminatedUnion("outcome", [
+  z.object({ slot: z.number(), keySuffix: z.string(), outcome: z.literal("warm") }),
+  z.object({ slot: z.number(), keySuffix: z.string(), outcome: z.literal("refreshed") }),
+  z.object({ slot: z.number(), keySuffix: z.string(), outcome: z.literal("skipped-benched") }),
+  z.object({ slot: z.number(), outcome: z.literal("no-credentials") }),
+  z.object({
+    slot: z.number(),
+    keySuffix: z.string(),
+    outcome: z.literal("failed"),
+    reason: z.string(),
+  }),
+]);
+
 const keepWarmRoute = route({
   method: "post",
   path: "/api/oauth/keep-warm/codex",
@@ -51,7 +66,10 @@ const keepWarmRoute = route({
     "Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots already benched by codex-auth-expiry-watch.",
   tags: ["OAuth"],
   responses: {
-    200: { description: "Per-slot keep-warm outcomes" },
+    200: {
+      description: "Per-slot keep-warm outcomes",
+      schema: z.object({ results: z.array(slotOutcomeSchema) }),
+    },
   },
 });
 
@@ -102,6 +120,6 @@ export async function handleCodexOAuthKeepWarm(
     await new Promise((resolve) => setTimeout(resolve, 100 + Math.random() * 200));
   }
 
-  json(res, { results });
+  keepWarmRoute.respond(res, 200, { results });
   return true;
 }

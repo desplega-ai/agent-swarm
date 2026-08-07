@@ -1070,6 +1070,74 @@
           "createdAt"
         ]
       },
+      "SwarmConfig": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "agent",
+              "repo"
+            ]
+          },
+          "scopeId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "value": {
+            "type": "string"
+          },
+          "isSecret": {
+            "type": "boolean"
+          },
+          "envPath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "lastUpdatedAt": {
+            "type": "string"
+          },
+          "encrypted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "scope",
+          "scopeId",
+          "key",
+          "value",
+          "isSecret",
+          "envPath",
+          "description",
+          "createdAt",
+          "lastUpdatedAt",
+          "encrypted"
+        ]
+      },
       "ContextSnapshot": {
         "type": "object",
         "properties": {
@@ -1908,6 +1976,93 @@
         },
         "required": [
           "key"
+        ]
+      },
+      "Metric": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/MetricDefinition"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "agentId",
+          "slug",
+          "title",
+          "definition",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "MetricVersion": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "metricId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/MetricSnapshot"
+          },
+          "changedByAgentId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "metricId",
+          "version",
+          "snapshot",
+          "createdAt"
+        ]
+      },
+      "MetricSnapshot": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/MetricDefinition"
+          }
+        },
+        "required": [
+          "title",
+          "definition"
         ]
       },
       "Page": {
@@ -3043,6 +3198,303 @@
           "createdAt"
         ]
       },
+      "McpServer": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "swarm",
+              "agent"
+            ]
+          },
+          "ownerAgentId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "stdio",
+              "http",
+              "sse"
+            ]
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "args": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "headers": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "envConfigKeys": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "headerConfigKeys": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "extraAuthorizeParams": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "authMethod": {
+            "type": "string",
+            "enum": [
+              "static",
+              "oauth",
+              "auto"
+            ],
+            "default": "static"
+          },
+          "isEnabled": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "number"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "lastUpdatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "scope",
+          "ownerAgentId",
+          "transport",
+          "command",
+          "args",
+          "url",
+          "headers",
+          "envConfigKeys",
+          "headerConfigKeys",
+          "extraAuthorizeParams",
+          "isEnabled",
+          "version",
+          "createdAt",
+          "lastUpdatedAt"
+        ]
+      },
+      "AgentMcpServer": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "mcpServerId": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "installedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "agentId",
+          "mcpServerId",
+          "isActive",
+          "installedAt"
+        ]
+      },
+      "AgentLog": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "eventType": {
+            "type": "string",
+            "enum": [
+              "agent_joined",
+              "agent_status_change",
+              "agent_left",
+              "task_created",
+              "task_status_change",
+              "task_progress",
+              "task_steering",
+              "task_offered",
+              "task_accepted",
+              "task_rejected",
+              "task_claimed",
+              "task_claim_rejected_affinity",
+              "task_released",
+              "channel_message",
+              "service_registered",
+              "service_unregistered",
+              "service_status_change",
+              "budget.upserted",
+              "budget.deleted",
+              "pricing.inserted",
+              "pricing.deleted",
+              "pricing.refresh",
+              "pricing.refresh.failed",
+              "task_superseded"
+            ]
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "oldValue": {
+            "type": "string"
+          },
+          "newValue": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "eventType",
+          "createdAt"
+        ]
+      },
+      "Service": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 3000
+          },
+          "description": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "healthCheckPath": {
+            "type": "string",
+            "default": "/health"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "starting",
+              "healthy",
+              "unhealthy",
+              "stopped"
+            ],
+            "default": "starting"
+          },
+          "script": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "interpreter": {
+            "type": "string"
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {},
+            "default": {}
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUpdatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "agentId",
+          "name",
+          "script",
+          "createdAt",
+          "lastUpdatedAt"
+        ]
+      },
       "SteerResult": {
         "type": "object",
         "properties": {
@@ -3173,68 +3625,6 @@
           "status",
           "source",
           "createdByKind",
-          "createdAt"
-        ]
-      },
-      "AgentLog": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "eventType": {
-            "type": "string",
-            "enum": [
-              "agent_joined",
-              "agent_status_change",
-              "agent_left",
-              "task_created",
-              "task_status_change",
-              "task_progress",
-              "task_steering",
-              "task_offered",
-              "task_accepted",
-              "task_rejected",
-              "task_claimed",
-              "task_claim_rejected_affinity",
-              "task_released",
-              "channel_message",
-              "service_registered",
-              "service_unregistered",
-              "service_status_change",
-              "budget.upserted",
-              "budget.deleted",
-              "pricing.inserted",
-              "pricing.deleted",
-              "pricing.refresh",
-              "pricing.refresh.failed",
-              "task_superseded"
-            ]
-          },
-          "agentId": {
-            "type": "string"
-          },
-          "taskId": {
-            "type": "string"
-          },
-          "oldValue": {
-            "type": "string"
-          },
-          "newValue": {
-            "type": "string"
-          },
-          "metadata": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "eventType",
           "createdAt"
         ]
       },
@@ -11121,7 +11511,136 @@
         ],
         "responses": {
           "200": {
-            "description": "Per-slot keep-warm outcomes"
+            "description": "Per-slot keep-warm outcomes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "slot": {
+                                "type": "number"
+                              },
+                              "keySuffix": {
+                                "type": "string"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "warm"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "slot",
+                              "keySuffix",
+                              "outcome"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "slot": {
+                                "type": "number"
+                              },
+                              "keySuffix": {
+                                "type": "string"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "refreshed"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "slot",
+                              "keySuffix",
+                              "outcome"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "slot": {
+                                "type": "number"
+                              },
+                              "keySuffix": {
+                                "type": "string"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "skipped-benched"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "slot",
+                              "keySuffix",
+                              "outcome"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "slot": {
+                                "type": "number"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "no-credentials"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "slot",
+                              "outcome"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "slot": {
+                                "type": "number"
+                              },
+                              "keySuffix": {
+                                "type": "string"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "failed"
+                                ]
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "slot",
+                              "keySuffix",
+                              "outcome",
+                              "reason"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "results"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -11169,7 +11688,28 @@
         ],
         "responses": {
           "200": {
-            "description": "Resolved config entries"
+            "description": "Resolved config entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "configs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SwarmConfig"
+                      }
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "configs"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -11198,7 +11738,25 @@
         ],
         "responses": {
           "200": {
-            "description": "Map of key -> boolean (true iff set in process.env)"
+            "description": "Map of key -> boolean (true iff set in process.env)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "presence": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "required": [
+                    "presence"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Validation error",
@@ -11236,7 +11794,43 @@
         },
         "responses": {
           "200": {
-            "description": "Reload result"
+            "description": "Reload result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "configsLoaded": {
+                      "type": "number"
+                    },
+                    "keysUpdated": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "integrationsReinitialized": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "configsLoaded",
+                    "keysUpdated",
+                    "integrationsReinitialized"
+                  ]
+                }
+              }
+            }
           },
           "500": {
             "description": "Reload failed",
@@ -11286,7 +11880,26 @@
         ],
         "responses": {
           "200": {
-            "description": "Config entry"
+            "description": "Config entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SwarmConfig"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "404": {
             "description": "Config not found",
@@ -11322,7 +11935,25 @@
         ],
         "responses": {
           "200": {
-            "description": "Config deleted"
+            "description": "Config deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                }
+              }
+            }
           },
           "404": {
             "description": "Config not found",
@@ -11380,7 +12011,28 @@
         ],
         "responses": {
           "200": {
-            "description": "List of config entries"
+            "description": "List of config entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "configs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SwarmConfig"
+                      }
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "configs"
+                  ]
+                }
+              }
+            }
           }
         }
       },
@@ -11445,7 +12097,14 @@
         },
         "responses": {
           "200": {
-            "description": "Config entry upserted"
+            "description": "Config entry upserted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwarmConfig"
+                }
+              }
+            }
           },
           "400": {
             "description": "Validation error",
@@ -11837,7 +12496,29 @@
         },
         "responses": {
           "200": {
-            "description": "Usage recorded"
+            "description": "Usage recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Validation error",
@@ -11914,7 +12595,29 @@
         },
         "responses": {
           "200": {
-            "description": "Key marked as rate-limited"
+            "description": "Key marked as rate-limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Validation error",
@@ -12018,7 +12721,29 @@
         },
         "responses": {
           "200": {
-            "description": "Rate-limit window telemetry recorded"
+            "description": "Rate-limit window telemetry recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Validation error",
@@ -12091,7 +12816,36 @@
         ],
         "responses": {
           "200": {
-            "description": "List of available key indices"
+            "description": "List of available key indices",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "availableIndices": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    },
+                    "totalKeys": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "availableIndices",
+                    "totalKeys"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Validation error",
@@ -12155,7 +12909,147 @@
         ],
         "responses": {
           "200": {
-            "description": "List of key status records"
+            "description": "List of key status records",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "keyType": {
+                            "type": "string"
+                          },
+                          "keySuffix": {
+                            "type": "string"
+                          },
+                          "keyIndex": {
+                            "type": "integer"
+                          },
+                          "scope": {
+                            "type": "string"
+                          },
+                          "scopeId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "rateLimitedUntil": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "lastUsedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "lastRateLimitAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "totalUsageCount": {
+                            "type": "integer"
+                          },
+                          "rateLimitCount": {
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "provider": {
+                            "type": "string"
+                          },
+                          "rateLimitWindows": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string"
+                                },
+                                "utilization": {
+                                  "type": "number"
+                                },
+                                "resetsAt": {
+                                  "type": "number"
+                                },
+                                "isUsingOverage": {
+                                  "type": "boolean"
+                                },
+                                "surpassedThreshold": {
+                                  "type": "number"
+                                },
+                                "lastSeenAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              },
+                              "required": [
+                                "status",
+                                "lastSeenAt"
+                              ]
+                            }
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "keyType",
+                          "keySuffix",
+                          "keyIndex",
+                          "scope",
+                          "scopeId",
+                          "status",
+                          "rateLimitedUntil",
+                          "lastUsedAt",
+                          "lastRateLimitAt",
+                          "totalUsageCount",
+                          "rateLimitCount",
+                          "name",
+                          "provider",
+                          "rateLimitWindows",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "keys"
+                  ]
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized",
@@ -12193,7 +13087,64 @@
         ],
         "responses": {
           "200": {
-            "description": "Per-key cost aggregation"
+            "description": "Per-key cost aggregation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "costs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "keyType": {
+                            "type": "string"
+                          },
+                          "keySuffix": {
+                            "type": "string"
+                          },
+                          "totalCost": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "totalInputTokens": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "totalOutputTokens": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "taskCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "keyType",
+                          "keySuffix",
+                          "totalCost",
+                          "totalInputTokens",
+                          "totalOutputTokens",
+                          "taskCount"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "costs"
+                  ]
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized",
@@ -12259,7 +13210,40 @@
         },
         "responses": {
           "200": {
-            "description": "Name updated"
+            "description": "Name updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "keyType": {
+                      "type": "string"
+                    },
+                    "keySuffix": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "keyType",
+                    "keySuffix",
+                    "name"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Validation error",
@@ -12336,7 +13320,33 @@
         },
         "responses": {
           "200": {
-            "description": "Rate limit cleared (or key was not rate-limited)"
+            "description": "Rate limit cleared (or key was not rate-limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "cleared": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "cleared",
+                    "message"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Validation error",
@@ -14100,7 +15110,61 @@
         },
         "responses": {
           "200": {
-            "description": "Connection result — `{ ok: true, agentName, model }` on success or `{ ok: false, error }` on any failure (missing config, Anthropic API error). Always 200 OK."
+            "description": "Connection result — `{ ok: true, agentName, model }` on success or `{ ok: false, error }` on any failure (missing config, Anthropic API error). Always 200 OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
+                        },
+                        "agentName": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "model": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "ok",
+                        "agentName",
+                        "model"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean",
+                          "enum": [
+                            false
+                          ]
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "ok",
+                        "error"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -14118,7 +15182,26 @@
         ],
         "responses": {
           "200": {
-            "description": "Server-derived MCP user config. `mcpBaseUrl` is the API server base URL and `mcpUserUrl` appends `/mcp-user`."
+            "description": "Server-derived MCP user config. `mcpBaseUrl` is the API server base URL and `mcpUserUrl` appends `/mcp-user`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mcpBaseUrl": {
+                      "type": "string"
+                    },
+                    "mcpUserUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "mcpBaseUrl",
+                    "mcpUserUrl"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -16723,7 +17806,27 @@
         },
         "responses": {
           "201": {
-            "description": "Metric created"
+            "description": "Metric created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "version"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid metric definition",
@@ -16804,7 +17907,75 @@
         ],
         "responses": {
           "200": {
-            "description": "Metric definitions"
+            "description": "Metric definitions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "metrics": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/components/schemas/Metric"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "agentId": {
+                                "type": "string"
+                              },
+                              "slug": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "createdAt": {
+                                "type": "string"
+                              },
+                              "updatedAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "agentId",
+                              "slug",
+                              "title",
+                              "createdAt",
+                              "updatedAt"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "total": {
+                      "type": "number"
+                    },
+                    "limit": {
+                      "type": "number"
+                    },
+                    "offset": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "metrics",
+                    "total",
+                    "limit",
+                    "offset"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -16832,7 +18003,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Metric definition"
+            "description": "Metric definition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Metric"
+                }
+              }
+            }
           },
           "404": {
             "description": "Metric not found",
@@ -16896,7 +18074,27 @@
         },
         "responses": {
           "200": {
-            "description": "Metric updated"
+            "description": "Metric updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "version"
+                  ]
+                }
+              }
+            }
           },
           "404": {
             "description": "Metric not found",
@@ -17000,7 +18198,134 @@
         },
         "responses": {
           "200": {
-            "description": "Metric result"
+            "description": "Metric result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "metric": {
+                      "$ref": "#/components/schemas/Metric"
+                    },
+                    "variables": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "widgets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "widget": {
+                            "$ref": "#/components/schemas/MetricWidget"
+                          },
+                          "result": {
+                            "type": "object",
+                            "properties": {
+                              "columns": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "rows": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                }
+                              },
+                              "elapsed": {
+                                "type": "number"
+                              },
+                              "total": {
+                                "type": "number"
+                              },
+                              "truncated": {
+                                "type": "boolean"
+                              },
+                              "maxRows": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "columns",
+                              "rows",
+                              "elapsed",
+                              "total",
+                              "truncated",
+                              "maxRows"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "widget",
+                          "result"
+                        ]
+                      }
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "columns": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "rows": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          }
+                        },
+                        "elapsed": {
+                          "type": "number"
+                        },
+                        "total": {
+                          "type": "number"
+                        },
+                        "truncated": {
+                          "type": "boolean"
+                        },
+                        "maxRows": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "columns",
+                        "rows",
+                        "elapsed",
+                        "total",
+                        "truncated",
+                        "maxRows"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "metric",
+                    "variables",
+                    "widgets"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid or disallowed query",
@@ -17048,7 +18373,25 @@
         ],
         "responses": {
           "200": {
-            "description": "Metric version list"
+            "description": "Metric version list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "versions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MetricVersion"
+                      }
+                    }
+                  },
+                  "required": [
+                    "versions"
+                  ]
+                }
+              }
+            }
           },
           "404": {
             "description": "Metric not found",
@@ -17095,7 +18438,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Metric version"
+            "description": "Metric version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricVersion"
+                }
+              }
+            }
           },
           "404": {
             "description": "Metric or version not found",
@@ -17123,7 +18473,23 @@
         ],
         "responses": {
           "200": {
-            "description": "Metric definition JSON Schema"
+            "description": "Metric definition JSON Schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "schema"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -17294,7 +18660,22 @@
         },
         "responses": {
           "200": {
-            "description": "Lock acquired; returns the owner token"
+            "description": "Lock acquired; returns the owner token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "owner": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "owner"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Validation error",
@@ -17397,7 +18778,94 @@
         ],
         "responses": {
           "200": {
-            "description": "OAuth metadata or { requiresOAuth: false }"
+            "description": "OAuth metadata or { requiresOAuth: false }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "requiresOAuth": {
+                          "type": "boolean",
+                          "enum": [
+                            false
+                          ]
+                        }
+                      },
+                      "required": [
+                        "requiresOAuth"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "resourceUrl": {
+                          "type": "string"
+                        },
+                        "authorizationServerIssuer": {
+                          "type": "string"
+                        },
+                        "authorizeUrl": {
+                          "type": "string"
+                        },
+                        "tokenUrl": {
+                          "type": "string"
+                        },
+                        "revocationUrl": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "registrationEndpoint": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "scopes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "requiresOAuth": {
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
+                        },
+                        "dcrSupported": {
+                          "type": "boolean"
+                        },
+                        "bearerMethodsSupported": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "resourceUrl",
+                        "authorizationServerIssuer",
+                        "authorizeUrl",
+                        "tokenUrl",
+                        "revocationUrl",
+                        "registrationEndpoint",
+                        "scopes",
+                        "requiresOAuth",
+                        "dcrSupported",
+                        "bearerMethodsSupported"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "MCP has no URL / invalid transport",
@@ -17453,7 +18921,121 @@
         ],
         "responses": {
           "200": {
-            "description": "Token status (never includes the token value itself)"
+            "description": "Token status (never includes the token value itself)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mcpServerId": {
+                      "type": "string"
+                    },
+                    "authMethod": {
+                      "type": "string",
+                      "enum": [
+                        "static",
+                        "oauth",
+                        "auto"
+                      ]
+                    },
+                    "connected": {
+                      "type": "boolean"
+                    },
+                    "token": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "connected",
+                            "expired",
+                            "error",
+                            "revoked"
+                          ]
+                        },
+                        "tokenType": {
+                          "type": "string"
+                        },
+                        "expiresAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "scope": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lastErrorMessage": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lastRefreshedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "authorizationServerIssuer": {
+                          "type": "string"
+                        },
+                        "resourceUrl": {
+                          "type": "string"
+                        },
+                        "clientSource": {
+                          "type": "string",
+                          "enum": [
+                            "dcr",
+                            "manual",
+                            "preregistered"
+                          ]
+                        },
+                        "hasRefreshToken": {
+                          "type": "boolean"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "status",
+                        "tokenType",
+                        "expiresAt",
+                        "scope",
+                        "lastErrorMessage",
+                        "lastRefreshedAt",
+                        "authorizationServerIssuer",
+                        "resourceUrl",
+                        "clientSource",
+                        "hasRefreshToken",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "mcpServerId",
+                    "authMethod",
+                    "connected",
+                    "token"
+                  ]
+                }
+              }
+            }
           },
           "404": {
             "description": "MCP server not found",
@@ -17587,7 +19169,22 @@
         ],
         "responses": {
           "200": {
-            "description": "{ providerUrl: string }"
+            "description": "{ providerUrl: string }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "providerUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "providerUrl"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "MCP has no URL / does not require OAuth",
@@ -17706,7 +19303,39 @@
         },
         "responses": {
           "200": {
-            "description": "Refreshed token"
+            "description": "Refreshed token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "expiresAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "scope": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "expiresAt",
+                    "scope"
+                  ]
+                }
+              }
+            }
           },
           "404": {
             "description": "No token for this MCP server",
@@ -17762,7 +19391,25 @@
         ],
         "responses": {
           "200": {
-            "description": "Token revoked/deleted"
+            "description": "Token revoked/deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
           },
           "404": {
             "description": "No token for this MCP server",
@@ -17843,7 +19490,25 @@
         },
         "responses": {
           "200": {
-            "description": "Pending client stored. Call /authorize to start the flow."
+            "description": "Pending client stored. Call /authorize to start the flow.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Bad input",
@@ -17963,7 +19628,22 @@
         ],
         "responses": {
           "200": {
-            "description": "{ redirectUri: string }"
+            "description": "{ redirectUri: string }",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "redirectUri": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "redirectUri"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -33102,7 +34782,29 @@
         ],
         "responses": {
           "200": {
-            "description": "MCP server list"
+            "description": "MCP server list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "servers": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/McpServer"
+                      }
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "servers",
+                    "total"
+                  ]
+                }
+              }
+            }
           }
         }
       },
@@ -33172,7 +34874,22 @@
         },
         "responses": {
           "201": {
-            "description": "MCP server created"
+            "description": "MCP server created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "server": {
+                      "$ref": "#/components/schemas/McpServer"
+                    }
+                  },
+                  "required": [
+                    "server"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Validation error",
@@ -33210,7 +34927,14 @@
         ],
         "responses": {
           "200": {
-            "description": "MCP server details"
+            "description": "MCP server details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServer"
+                }
+              }
+            }
           },
           "404": {
             "description": "MCP server not found",
@@ -33256,7 +34980,22 @@
         },
         "responses": {
           "200": {
-            "description": "MCP server updated"
+            "description": "MCP server updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "server": {
+                      "$ref": "#/components/schemas/McpServer"
+                    }
+                  },
+                  "required": [
+                    "server"
+                  ]
+                }
+              }
+            }
           },
           "404": {
             "description": "MCP server not found",
@@ -33292,7 +35031,26 @@
         ],
         "responses": {
           "200": {
-            "description": "MCP server deleted"
+            "description": "MCP server deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "deletedScriptConnectionCount": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "deletedScriptConnectionCount"
+                  ]
+                }
+              }
+            }
           },
           "404": {
             "description": "MCP server not found",
@@ -33347,7 +35105,22 @@
         },
         "responses": {
           "200": {
-            "description": "MCP server installed"
+            "description": "MCP server installed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agentMcpServer": {
+                      "$ref": "#/components/schemas/AgentMcpServer"
+                    }
+                  },
+                  "required": [
+                    "agentMcpServer"
+                  ]
+                }
+              }
+            }
           },
           "404": {
             "description": "MCP server not found",
@@ -33393,7 +35166,22 @@
         ],
         "responses": {
           "200": {
-            "description": "MCP server uninstalled"
+            "description": "MCP server uninstalled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -33429,7 +35217,66 @@
         ],
         "responses": {
           "200": {
-            "description": "Agent MCP servers list"
+            "description": "Agent MCP servers list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "servers": {
+                      "type": "array",
+                      "items": {
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/McpServer"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "isActive": {
+                                "type": "boolean"
+                              },
+                              "installedAt": {
+                                "type": "string"
+                              },
+                              "resolvedEnv": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
+                              },
+                              "resolvedHeaders": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
+                              },
+                              "authError": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "isActive",
+                              "installedAt"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "servers",
+                    "total"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -33466,7 +35313,25 @@
         ],
         "responses": {
           "200": {
-            "description": "Agent logs"
+            "description": "Agent logs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgentLog"
+                      }
+                    }
+                  },
+                  "required": [
+                    "logs"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -33484,7 +35349,114 @@
         ],
         "responses": {
           "200": {
-            "description": "Agent and task statistics"
+            "description": "Agent and task statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agents": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "idle": {
+                          "type": "number"
+                        },
+                        "busy": {
+                          "type": "number"
+                        },
+                        "offline": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "idle",
+                        "busy",
+                        "offline"
+                      ]
+                    },
+                    "tasks": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "unassigned": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "offered": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "reviewing": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "pending": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "in_progress": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "paused": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "completed": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "failed": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "unassigned",
+                        "offered",
+                        "reviewing",
+                        "pending",
+                        "in_progress",
+                        "paused",
+                        "completed",
+                        "failed"
+                      ]
+                    },
+                    "steeringEnabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "agents",
+                    "tasks",
+                    "steeringEnabled"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -33503,7 +35475,108 @@
         ],
         "responses": {
           "200": {
-            "description": "Swarm metrics counts"
+            "description": "Swarm metrics counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tasks": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "by_status": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "by_status"
+                      ]
+                    },
+                    "agents": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "by_status": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "by_status"
+                      ]
+                    },
+                    "workflows": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "enabled": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "enabled"
+                      ]
+                    },
+                    "pages": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "total"
+                      ]
+                    },
+                    "sessions": {
+                      "type": "object",
+                      "properties": {
+                        "active": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "active"
+                      ]
+                    },
+                    "skills": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "total"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tasks",
+                    "agents",
+                    "workflows",
+                    "pages",
+                    "sessions",
+                    "skills"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -33547,7 +35620,25 @@
         ],
         "responses": {
           "200": {
-            "description": "Service list"
+            "description": "Service list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "services": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Service"
+                      }
+                    }
+                  },
+                  "required": [
+                    "services"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -33641,7 +35732,170 @@
         ],
         "responses": {
           "200": {
-            "description": "Scheduled tasks list"
+            "description": "Scheduled tasks list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "scheduledTasks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "key": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 255,
+                            "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 100
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "cronExpression": {
+                            "type": "string"
+                          },
+                          "intervalMs": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0
+                          },
+                          "taskTemplate": {
+                            "type": "string"
+                          },
+                          "taskType": {
+                            "type": "string",
+                            "maxLength": 50
+                          },
+                          "tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "default": []
+                          },
+                          "priority": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100,
+                            "default": 50
+                          },
+                          "targetAgentId": {
+                            "type": "string"
+                          },
+                          "enabled": {
+                            "type": "boolean",
+                            "default": true
+                          },
+                          "lastRunAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "nextRunAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "createdByAgentId": {
+                            "type": "string"
+                          },
+                          "timezone": {
+                            "type": "string",
+                            "default": "UTC"
+                          },
+                          "consecutiveErrors": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 0
+                          },
+                          "lastErrorAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "lastErrorMessage": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "modelTier": {
+                            "type": "string",
+                            "enum": [
+                              "smol",
+                              "regular",
+                              "smart",
+                              "ultra"
+                            ]
+                          },
+                          "scheduleType": {
+                            "type": "string",
+                            "enum": [
+                              "recurring",
+                              "one_time"
+                            ],
+                            "default": "recurring"
+                          },
+                          "targetType": {
+                            "type": "string",
+                            "enum": [
+                              "agent-task",
+                              "workflow",
+                              "script"
+                            ],
+                            "default": "agent-task"
+                          },
+                          "workflowId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "scriptName": {
+                            "type": "string"
+                          },
+                          "scriptArgs": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "createdBy": {
+                            "type": "string"
+                          },
+                          "updatedBy": {
+                            "type": "string"
+                          },
+                          "favorite": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "key",
+                          "name",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "scheduledTasks"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -33659,7 +35913,155 @@
         ],
         "responses": {
           "200": {
-            "description": "Concurrent context data"
+            "description": "Concurrent context data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "processingInboxMessages": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "content": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "slackChannelId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "slackThreadTs": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "content",
+                          "source",
+                          "slackChannelId",
+                          "slackThreadTs",
+                          "createdAt"
+                        ]
+                      }
+                    },
+                    "recentTaskDelegations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "task": {
+                            "type": "string"
+                          },
+                          "agentId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "agentName": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "creatorAgentId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "task",
+                          "agentId",
+                          "agentName",
+                          "creatorAgentId",
+                          "status",
+                          "createdAt"
+                        ]
+                      }
+                    },
+                    "activeSwarmTasks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "task": {
+                            "type": "string"
+                          },
+                          "agentId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "agentName": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "progress": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "task",
+                          "agentId",
+                          "agentName",
+                          "status",
+                          "createdAt",
+                          "progress"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "processingInboxMessages",
+                    "recentTaskDelegations",
+                    "activeSwarmTasks"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -36226,7 +38628,99 @@
         ],
         "responses": {
           "200": {
-            "description": "Connection status"
+            "description": "Connection status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "enum": [
+                        "jira"
+                      ]
+                    },
+                    "connected": {
+                      "type": "boolean"
+                    },
+                    "cloudId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "siteUrl": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "tokenExpiresAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "scope": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "hasManageWebhookScope": {
+                      "type": "boolean"
+                    },
+                    "webhookTokenConfigured": {
+                      "type": "boolean"
+                    },
+                    "webhookUrl": {
+                      "type": "string"
+                    },
+                    "redirectUri": {
+                      "type": "string"
+                    },
+                    "webhookIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "expiresAt": {
+                            "type": "string"
+                          },
+                          "jql": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "expiresAt",
+                          "jql"
+                        ]
+                      }
+                    },
+                    "manualWebhookInstructions": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "provider",
+                    "connected",
+                    "cloudId",
+                    "siteUrl",
+                    "tokenExpiresAt",
+                    "scope",
+                    "hasManageWebhookScope",
+                    "webhookTokenConfigured",
+                    "webhookUrl",
+                    "redirectUri",
+                    "webhookIds"
+                  ]
+                }
+              }
+            }
           },
           "503": {
             "description": "Jira integration not configured",
@@ -36254,7 +38748,99 @@
         ],
         "responses": {
           "200": {
-            "description": "Token refreshed; returns same shape as /status"
+            "description": "Token refreshed; returns same shape as /status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "enum": [
+                        "jira"
+                      ]
+                    },
+                    "connected": {
+                      "type": "boolean"
+                    },
+                    "cloudId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "siteUrl": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "tokenExpiresAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "scope": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "hasManageWebhookScope": {
+                      "type": "boolean"
+                    },
+                    "webhookTokenConfigured": {
+                      "type": "boolean"
+                    },
+                    "webhookUrl": {
+                      "type": "string"
+                    },
+                    "redirectUri": {
+                      "type": "string"
+                    },
+                    "webhookIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "expiresAt": {
+                            "type": "string"
+                          },
+                          "jql": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "expiresAt",
+                          "jql"
+                        ]
+                      }
+                    },
+                    "manualWebhookInstructions": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "provider",
+                    "connected",
+                    "cloudId",
+                    "siteUrl",
+                    "tokenExpiresAt",
+                    "scope",
+                    "hasManageWebhookScope",
+                    "webhookTokenConfigured",
+                    "webhookUrl",
+                    "redirectUri",
+                    "webhookIds"
+                  ]
+                }
+              }
+            }
           },
           "409": {
             "description": "Jira not connected (no refresh token stored)",
@@ -36307,7 +38893,64 @@
         ],
         "responses": {
           "200": {
-            "description": "Event accepted"
+            "description": "Event accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "accepted"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "duplicate"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "ignored"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "invalid-json"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
           },
           "401": {
             "description": "Invalid URL token",
@@ -36363,7 +39006,30 @@
         },
         "responses": {
           "200": {
-            "description": "Webhook registered"
+            "description": "Webhook registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "webhookId": {
+                      "type": "integer"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    },
+                    "jql": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "webhookId",
+                    "expiresAt",
+                    "jql"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid jqlFilter",
@@ -36412,7 +39078,29 @@
         ],
         "responses": {
           "200": {
-            "description": "Webhook deleted"
+            "description": "Webhook deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "webhookId": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "deleted",
+                    "webhookId"
+                  ]
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid webhook id",
@@ -36450,7 +39138,58 @@
         ],
         "responses": {
           "200": {
-            "description": "Disconnected"
+            "description": "Disconnected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "disconnected": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "webhooksDeleted": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "webhooksTotal": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "webhookFailures": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "error"
+                        ]
+                      }
+                    },
+                    "revokeNote": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "disconnected",
+                    "webhooksDeleted",
+                    "webhooksTotal",
+                    "webhookFailures",
+                    "revokeNote"
+                  ]
+                }
+              }
+            }
           },
           "503": {
             "description": "Jira not configured",
@@ -36562,7 +39301,51 @@
         ],
         "responses": {
           "200": {
-            "description": "Connection status"
+            "description": "Connection status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "enum": [
+                        "linear"
+                      ]
+                    },
+                    "connected": {
+                      "type": "boolean"
+                    },
+                    "tokenExpiry": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "scope": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "webhookUrl": {
+                      "type": "string"
+                    },
+                    "redirectUri": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "provider",
+                    "connected",
+                    "tokenExpiry",
+                    "scope",
+                    "webhookUrl",
+                    "redirectUri"
+                  ]
+                }
+              }
+            }
           },
           "503": {
             "description": "Linear integration not configured",
@@ -36590,7 +39373,51 @@
         ],
         "responses": {
           "200": {
-            "description": "Token refreshed; returns same shape as /status"
+            "description": "Token refreshed; returns same shape as /status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "enum": [
+                        "linear"
+                      ]
+                    },
+                    "connected": {
+                      "type": "boolean"
+                    },
+                    "tokenExpiry": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "scope": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "webhookUrl": {
+                      "type": "string"
+                    },
+                    "redirectUri": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "provider",
+                    "connected",
+                    "tokenExpiry",
+                    "scope",
+                    "webhookUrl",
+                    "redirectUri"
+                  ]
+                }
+              }
+            }
           },
           "409": {
             "description": "Linear not connected (no refresh token stored)",
@@ -36633,7 +39460,26 @@
         ],
         "responses": {
           "200": {
-            "description": "Event accepted"
+            "description": "Event accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "duplicate",
+                        "accepted"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
           },
           "401": {
             "description": "Invalid signature",
@@ -36671,7 +39517,29 @@
         ],
         "responses": {
           "200": {
-            "description": "Disconnected"
+            "description": "Disconnected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "disconnected": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "revoked": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "disconnected",
+                    "revoked"
+                  ]
+                }
+              }
+            }
           },
           "503": {
             "description": "Linear not configured",
@@ -38841,7 +41709,43 @@
         ],
         "responses": {
           "200": {
-            "description": "Event processed"
+            "description": "Event processed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "enum": [
+                            "pong"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "created": {
+                          "type": "boolean"
+                        },
+                        "taskId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "created"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
           },
           "401": {
             "description": "Invalid signature",
@@ -38874,7 +41778,25 @@
         ],
         "responses": {
           "200": {
-            "description": "Event processed"
+            "description": "Event processed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "created": {
+                      "type": "boolean"
+                    },
+                    "taskId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "created"
+                  ]
+                }
+              }
+            }
           },
           "401": {
             "description": "Invalid token",
@@ -38907,7 +41829,25 @@
         ],
         "responses": {
           "200": {
-            "description": "Event received"
+            "description": "Event received",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "received": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "received"
+                  ]
+                }
+              }
+            }
           },
           "401": {
             "description": "Invalid signature",
@@ -38940,7 +41880,37 @@
         ],
         "responses": {
           "200": {
-            "description": "Event received"
+            "description": "Event received",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "received": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "routing": {
+                      "type": "string",
+                      "enum": [
+                        "skip",
+                        "duplicate",
+                        "workflow",
+                        "task",
+                        "no_mapping",
+                        "error"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "received",
+                    "routing"
+                  ]
+                }
+              }
+            }
           },
           "401": {
             "description": "Invalid signature",

@@ -17,7 +17,7 @@ import { getPublicMcpBaseUrl } from "@/utils/constants";
 import { registerVolatileSecret, scrubSecrets } from "@/utils/secret-scrubber";
 import { completeMcpOAuthCallback } from "./mcp-oauth";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 // ─── The single static callback + redirect-uri display ───────────────────────
 
@@ -41,7 +41,10 @@ const callbackRoute = route({
     error_description: z.string().optional(),
   }),
   responses: {
-    200: { description: "OAuth authorization completed" },
+    200: {
+      description: "OAuth authorization completed",
+      unstructured: "HTML success page (sendAuthorizedHtml) — not JSON",
+    },
     302: { description: "Redirect back to the final destination" },
     400: { description: "Missing or invalid OAuth callback parameters" },
     404: { description: "OAuth app not configured" },
@@ -57,7 +60,10 @@ const redirectUriRoute = route({
   summary: "The static OAuth callback URL to register with providers (pre-creation display)",
   tags: ["OAuth"],
   responses: {
-    200: { description: "{ redirectUri: string }" },
+    200: {
+      description: "{ redirectUri: string }",
+      schema: z.object({ redirectUri: z.string() }),
+    },
   },
 });
 
@@ -280,7 +286,7 @@ export async function handleOAuthCallback(
   queryParams: URLSearchParams,
 ): Promise<boolean> {
   if (redirectUriRoute.match(req.method, pathSegments)) {
-    json(res, { redirectUri: staticOAuthCallbackUri() });
+    redirectUriRoute.respond(res, 200, { redirectUri: staticOAuthCallbackUri() });
     return true;
   }
 
