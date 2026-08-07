@@ -293,20 +293,17 @@
             "type": "string"
           },
           "mentionMessageId": {
-            "type": "string",
-            "format": "uuid"
+            "type": "string"
           },
           "mentionChannelId": {
-            "type": "string",
-            "format": "uuid"
+            "type": "string"
           },
           "dir": {
             "type": "string",
             "minLength": 1
           },
           "parentTaskId": {
-            "type": "string",
-            "format": "uuid"
+            "type": "string"
           },
           "claudeSessionId": {
             "type": "string"
@@ -335,8 +332,7 @@
             ]
           },
           "scheduleId": {
-            "type": "string",
-            "format": "uuid"
+            "type": "string"
           },
           "workflowRunId": {
             "type": [
@@ -31622,12 +31618,10 @@
                                     "format": "date-time"
                                   },
                                   "parentTaskId": {
-                                    "type": "string",
-                                    "format": "uuid"
+                                    "type": "string"
                                   },
                                   "scheduleId": {
-                                    "type": "string",
-                                    "format": "uuid"
+                                    "type": "string"
                                   },
                                   "model": {
                                     "type": "string"
@@ -36668,12 +36662,10 @@
                                 "format": "date-time"
                               },
                               "parentTaskId": {
-                                "type": "string",
-                                "format": "uuid"
+                                "type": "string"
                               },
                               "scheduleId": {
-                                "type": "string",
-                                "format": "uuid"
+                                "type": "string"
                               },
                               "model": {
                                 "type": "string"

@@ -538,15 +538,21 @@ export const AgentTaskSchema = z
     agentmailMessageId: z.string().optional(),
     agentmailThreadId: z.string().optional(),
 
-    // Mention-to-task metadata (optional)
-    mentionMessageId: z.uuid().optional(),
-    mentionChannelId: z.uuid().optional(),
+    // Mention-to-task metadata (optional). Plain strings, not z.uuid():
+    // Slack channel/message IDs (e.g. "C0AR967K0KZ") are not UUIDs — a uuid
+    // pin here makes response validation reject honest Slack-originated rows
+    // (same trap as the MCP tool output schemas, see get-task-details).
+    mentionMessageId: z.string().optional(),
+    mentionChannelId: z.string().optional(),
 
-    // Working directory (optional — must be an absolute path for the agent process)
-    dir: z.string().min(1).startsWith("/").optional(),
+    // Working directory (optional — SHOULD be an absolute path, but the
+    // create-task body accepts any string and the DB stores it verbatim, so
+    // the row contract cannot pin the format (see dependsOn note above).
+    dir: z.string().min(1).optional(),
 
-    // Session attachment (optional)
-    parentTaskId: z.uuid().optional(),
+    // Session attachment (optional). z.string(), not z.uuid(): accepted
+    // verbatim from the create-task body (see dependsOn note above).
+    parentTaskId: z.string().optional(),
     claudeSessionId: z.string().optional(),
 
     // Model selection (optional — provider-specific; can be "opus", "gpt-4o",
@@ -557,8 +563,9 @@ export const AgentTaskSchema = z
     modelTier: ModelTierSchema.optional(),
     effort: ReasoningEffortSchema.optional(),
 
-    // Schedule linking (optional — set when task was created by a schedule)
-    scheduleId: z.uuid().optional(),
+    // Schedule linking (optional — set when task was created by a schedule).
+    // z.string(): also reachable verbatim from the create-task query param.
+    scheduleId: z.string().optional(),
 
     // Workflow linking (optional — set when task was created by a workflow)
     workflowRunId: z.string().uuid().nullable().optional(),

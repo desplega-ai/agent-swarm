@@ -12109,9 +12109,7 @@ export interface paths {
                                     offeredTo?: string;
                                     /** Format: date-time */
                                     acceptedAt?: string;
-                                    /** Format: uuid */
                                     parentTaskId?: string;
-                                    /** Format: uuid */
                                     scheduleId?: string;
                                     model?: string;
                                     /** @enum {string} */
@@ -14319,9 +14317,7 @@ export interface paths {
                                 offeredTo?: string;
                                 /** Format: date-time */
                                 acceptedAt?: string;
-                                /** Format: uuid */
                                 parentTaskId?: string;
-                                /** Format: uuid */
                                 scheduleId?: string;
                                 model?: string;
                                 /** @enum {string} */
@@ -18990,12 +18986,9 @@ export interface components {
             agentmailInboxId?: string;
             agentmailMessageId?: string;
             agentmailThreadId?: string;
-            /** Format: uuid */
             mentionMessageId?: string;
-            /** Format: uuid */
             mentionChannelId?: string;
             dir?: string;
-            /** Format: uuid */
             parentTaskId?: string;
             claudeSessionId?: string;
             model?: string;
@@ -19003,7 +18996,6 @@ export interface components {
             modelTier?: "smol" | "regular" | "smart" | "ultra";
             /** @enum {string} */
             effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
-            /** Format: uuid */
             scheduleId?: string;
             /** Format: uuid */
             workflowRunId?: string | null;
