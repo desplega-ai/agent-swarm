@@ -4,7 +4,7 @@ import { listScriptConnections } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import { type AgentTask, AgentTaskStatusSchema } from "../types";
-import { scrubObject } from "../utils/secret-scrubber";
+import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import {
   type AppValidationIssue,
   type ColumnDef,
@@ -17,7 +17,7 @@ import {
   type AppRow,
   appsNamespace,
   createAppRowUnlocked,
-  listAppRows,
+  listAllAppRowsForMigrationUnlocked,
   patchAppRowUnlocked,
   withMutationLock,
 } from "./row-store";
@@ -193,8 +193,9 @@ function scriptFailure(output: {
   const base = output.runtimeError
     ? `${output.runtimeError.name}: ${output.runtimeError.message}`
     : (output.error ?? `script exited with code ${output.exitCode}`);
-  // stderr is a prime secret carrier; the whole result is scrubbed on the way out.
-  const stderr = output.stderr.trim().slice(0, MAX_ERROR_DETAIL_CHARS);
+  // stderr is a prime secret carrier — scrub BEFORE truncating, or a secret
+  // straddling the cap loses its suffix and defeats exact-value redaction.
+  const stderr = scrubSecrets(output.stderr).trim().slice(0, MAX_ERROR_DETAIL_CHARS);
   return stderr.length > 0 ? `${base} — ${stderr}` : base;
 }
 
@@ -311,7 +312,9 @@ function taskRecord(task: AgentTask): SourceRecord {
     fields: {
       id: task.id,
       status: task.status,
-      prompt: task.task.slice(0, MAX_TASK_PROMPT_CHARS),
+      // Scrub BEFORE truncating: a secret straddling the cap would otherwise
+      // lose its suffix and defeat exact-value redaction downstream.
+      prompt: scrubSecrets(task.task).slice(0, MAX_TASK_PROMPT_CHARS),
       source: task.source,
       agentId: task.agentId,
       tags: task.tags,
@@ -575,7 +578,10 @@ function reconcile(args: {
 
     const mine = new Map<string, AppRow>();
     const unkeyed: AppRow[] = [];
-    for (const row of listAppRows(appId, model)) {
+    // Reconcile holds the mutation lock, so the unbounded pager is safe. The
+    // plain listAppRows cap (100k) would hide rows past it: pulled keys would
+    // duplicate and the hidden rows would never be swept stale.
+    for (const row of listAllAppRowsForMigrationUnlocked(appId, model)) {
       if (row.source !== sourceName) continue;
       const key = row[joinKey];
       if (typeof key === "string") mine.set(key, row);

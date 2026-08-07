@@ -1502,6 +1502,63 @@ describe("secret hygiene and sync status", () => {
       refreshSecretScrubberCache();
     }
   });
+
+  test("a secret straddling the prompt cap is scrubbed before truncation", async () => {
+    const secret = "fixture-secret-value-0123456789";
+    process.env.APPS_SYNC_FIXTURE_TOKEN = secret;
+    refreshSecretScrubberCache();
+    try {
+      // 990 filler chars put the secret across the 1000-char cap: truncating
+      // first would strand an unrecognizable 10-char prefix in the row.
+      getDb().run("DELETE FROM agent_tasks");
+      createTaskExtended("x".repeat(990) + secret, { agentId: OWNER_AGENT_ID });
+      const appId = createSyncApp(
+        appWith({
+          task: {
+            columns: {
+              taskKey: { kind: "string" },
+              prompt: { kind: "string", source: { of: "pool", field: "prompt" } },
+            },
+            sources: { pool: { connector: "swarm-tasks", joinKey: "taskKey", config: {} } },
+          },
+        }),
+      );
+
+      await runAppSync({ appId });
+
+      const prompt = String(rowsOf(appId, "task", "taskKey")[0]?.prompt);
+      expect(prompt).toHaveLength(1000);
+      expect(prompt).toContain("[REDACTED");
+      expect(prompt).not.toContain(secret.slice(0, 12));
+    } finally {
+      delete process.env.APPS_SYNC_FIXTURE_TOKEN;
+      refreshSecretScrubberCache();
+    }
+  });
+
+  test("a secret straddling the stderr cap is scrubbed before truncation", async () => {
+    const secret = "fixture-secret-value-0123456789";
+    process.env.APPS_SYNC_FIXTURE_TOKEN = secret;
+    refreshSecretScrubberCache();
+    try {
+      // 480 filler chars put the secret across the 500-char stderr cap.
+      const script = await fixtureScript("stderr-straddle", []);
+      await script.setSource(
+        `export default async () => { console.error("${"x".repeat(480)}" + ${JSON.stringify(secret)}); process.exit(2); };`,
+      );
+      const appId = createSyncApp(issueDefinition(script.id));
+
+      const result = await runAppSync({ appId });
+
+      expect(result.ok).toBe(false);
+      const error = result.passes[0]?.error ?? "";
+      expect(error).toContain("[REDACTED");
+      expect(error).not.toContain(secret.slice(0, 12));
+    } finally {
+      delete process.env.APPS_SYNC_FIXTURE_TOKEN;
+      refreshSecretScrubberCache();
+    }
+  });
 });
 
 // ─── Phase 5: the three doors ────────────────────────────────────────────────
