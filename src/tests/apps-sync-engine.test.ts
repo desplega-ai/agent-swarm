@@ -41,6 +41,7 @@ import { buildScriptCredentialBindingsWithFailures } from "../be/script-credenti
 import { upsertScriptByName } from "../be/scripts/db";
 import { typecheckScript } from "../be/scripts/typecheck";
 import { SEED_SCRIPTS } from "../be/seed-scripts";
+import appSyncRun from "../be/seed-scripts/catalog/app-sync-run";
 import githubIssuesPull from "../be/seed-scripts/catalog/github-issues-pull";
 import { handleApps } from "../http/apps";
 import { resolveHttpRequestAuth } from "../http/auth";
@@ -1550,6 +1551,35 @@ describe("secret hygiene and sync status", () => {
     expect(getAppSyncStatus(appId, "issue", "gh")).toBeNull();
   });
 
+  test("an obsolete in-flight pass cannot resurrect invalidated status", async () => {
+    const script = await fixtureScript("status-race", [ghRecord(1)]);
+    const appId = createSyncApp(issueDefinition(script.id));
+    await runAppSync({ appId });
+    expect(getAppSyncStatus(appId, "issue", "gh")).not.toBeNull();
+
+    await script.setSource(
+      `export default async () => { await new Promise((resolve) => setTimeout(resolve, 300)); return ${JSON.stringify(
+        [ghRecord(1)],
+      )}; };`,
+    );
+    const inFlight = runAppSync({ appId });
+    // The migration deletes the pair's status while the pull is in the air...
+    const changed = await request<{ app: object }>(`/api/apps/${appId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        definition: issueDefinition(script.id, { args: { repo: "owner/other" } }),
+      }),
+    });
+    expect(changed.status).toBe(200);
+    expect(getAppSyncStatus(appId, "issue", "gh")).toBeNull();
+
+    // ...and the aborted obsolete pass must NOT write it back.
+    const result = await inFlight;
+    expect(result.ok).toBe(false);
+    expect(result.passes[0]?.error).toContain("changed while the pull was running");
+    expect(getAppSyncStatus(appId, "issue", "gh")).toBeNull();
+  });
+
   test("a pulled field carrying a known secret is redacted before it lands in a row", async () => {
     const secret = "fixture-secret-value-0123456789";
     process.env.APPS_SYNC_FIXTURE_TOKEN = secret;
@@ -2291,6 +2321,39 @@ describe("apps-sync catalog registration", () => {
     const source = catalogSource("app-sync-run");
 
     expect(source).toContain("ctx.swarm.app_sync");
+  });
+
+  test("app-sync-run throws when the sync payload reports failure", async () => {
+    // The bridge answers HTTP 200 with a structured error payload; returning
+    // it would exit 0 and the scheduler would record a successful run.
+    const failing = {
+      swarm: {
+        app_sync: async () => ({
+          success: true,
+          status: 200,
+          data: { success: false, ok: false, error: "pass failed: boom" },
+        }),
+      },
+    };
+    await expect(appSyncRun({ appId: "app-1" }, failing)).rejects.toThrow("pass failed: boom");
+  });
+
+  test("app-sync-run returns the payload when the sync succeeded", async () => {
+    const okCtx = {
+      swarm: {
+        app_sync: async () => ({
+          success: true,
+          status: 200,
+          data: { success: true, ok: true, passes: [] },
+        }),
+      },
+    };
+    const result = (await appSyncRun({ appId: "app-1" }, okCtx)) as { success: boolean };
+    expect(result.success).toBe(true);
+  });
+
+  test("app-sync-run rejects invalid args without calling the tool", async () => {
+    await expect(appSyncRun({}, { swarm: {} })).rejects.toThrow("invalid args");
   });
 });
 

@@ -753,9 +753,20 @@ async function executePass(args: {
     invokedBy: args.invokedBy,
   });
 
+  // Set once the pair resolves. finish() skips the status write when the live
+  // definition no longer matches this pass's snapshot: an obsolete pass must
+  // not resurrect status a migration just invalidated, nor seed an orphan key
+  // for a pair that changed or vanished while it was in flight.
+  let plannedFingerprint: string | null = null;
+
   const finish = (result: SyncPassResult): SyncPassResult => {
     const scrubbed = scrubObject({ ...result, warnings, durationMs: Date.now() - startedMs });
-    writeSyncStatus(args.appId, scrubbed, lastStartedAt);
+    const current = resolvePair(args.appId, args.model, args.sourceName);
+    const stillCurrent =
+      plannedFingerprint !== null &&
+      current !== null &&
+      pairFingerprint(current.model, args.sourceName, current.source) === plannedFingerprint;
+    if (stillCurrent) writeSyncStatus(args.appId, scrubbed, lastStartedAt);
     return scrubbed;
   };
 
@@ -785,6 +796,7 @@ async function executePass(args: {
     // while fingerprinting the fresh resolve would let drifted data commit.
     const source = planned.source;
     const fingerprint = pairFingerprint(planned.model, args.sourceName, source);
+    plannedFingerprint = fingerprint;
 
     // Pull OUTSIDE the lock; reconcile inside it. Pulled values persist into
     // rows any app.use principal can later read, so secrets are redacted here
